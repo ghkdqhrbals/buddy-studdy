@@ -49,6 +49,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 3. Record detail shows question, answer, feedback, explanation, and grading state.
 4. Ungraded records can still be answered from detail.
 5. Individual records can be deleted.
+6. Before sign-in, the tab previews the shape and value of accumulated learning records, then offers a simple bottom-aligned `로그인` action instead of presenting a blocking login wall.
 
 ### Statistics
 
@@ -57,6 +58,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 3. Topic range estimates combine difficulty level and score into a 1-10 ability range.
 4. Topic browser supports search, sort, pagination, selected topic detail, and trend chart.
 5. Similar topic aliases are visible in the selected topic detail when multiple labels were merged.
+6. Before sign-in, the tab uses a subdued sample summary to explain topic progress and keeps the login invitation as a consistent bottom action.
 
 ### Settings
 

@@ -890,13 +890,17 @@ final class ArchitecturePolicyTests: XCTestCase {
             content.contains("MobileRootLargeTitle(page.title(strings: strings))"),
             "Protected mobile gates should render the tab title instead of replacing the screen chrome with a login prompt."
         )
-        XCTAssertFalse(
+        XCTAssertTrue(
             content.contains("MobileProtectedLoginPreview"),
-            "Protected mobile gates should not render fake previews; they should use concise copy and a login action."
+            "Protected mobile gates should preview the value of records and statistics before presenting the login action."
         )
         XCTAssertTrue(
-            content.contains("MobileInlineLoginButtonLabel(title: page.loginActionTitle(strings: strings))"),
-            "Protected mobile gates should use a subdued inline login action."
+            content.contains("MobileProtectedLoginFooter"),
+            "Protected mobile gates should keep the login invitation in a dedicated bottom action region."
+        )
+        XCTAssertTrue(
+            content.contains("MobilePrimaryLoginButtonLabel(title: page.loginActionTitle(strings: strings))"),
+            "Protected mobile gates should use a clear primary login button without outcome-gated wording."
         )
         XCTAssertTrue(
             content.contains(".navigationDestination(isPresented: $isRecordsLoginPagePresented)"),

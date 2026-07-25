@@ -168,15 +168,11 @@ private struct MobileProtectedLoginGate: View {
                 .padding(.top, 6)
                 .padding(.bottom, 8)
 
-            ScrollView {
-                MobileProtectedLoginPrompt(
-                    page: page,
-                    strings: strings,
-                    onLogin: onLogin
-                )
-                .padding(.top, 12)
-                .padding(.bottom, 24)
-            }
+            MobileProtectedLoginPrompt(
+                page: page,
+                strings: strings,
+                onLogin: onLogin
+            )
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -225,6 +221,50 @@ private enum MobileProtectedLoginPage {
             return strings.statisticsLoginAction
         }
     }
+
+    func previewTitle(strings: AppStrings) -> String {
+        switch self {
+        case .myStudy:
+            return HomeFeedScope.my.title(strings: strings)
+        case .records:
+            return strings.recordsGuestPreviewTitle
+        case .statistics:
+            return strings.statisticsGuestPreviewTitle
+        }
+    }
+
+    func previewSubtitle(strings: AppStrings) -> String {
+        switch self {
+        case .myStudy:
+            return strings.myStudyLoginBenefit
+        case .records:
+            return strings.recordsGuestPreviewSubtitle
+        case .statistics:
+            return strings.statisticsGuestPreviewSubtitle
+        }
+    }
+
+    func loginFooterTitle(strings: AppStrings) -> String {
+        switch self {
+        case .myStudy:
+            return strings.myStudyLoginBenefit
+        case .records:
+            return strings.recordsGuestLoginTitle
+        case .statistics:
+            return strings.statisticsGuestLoginTitle
+        }
+    }
+
+    func loginFooterSubtitle(strings: AppStrings) -> String {
+        switch self {
+        case .myStudy:
+            return strings.myStudyLoginBenefit
+        case .records:
+            return strings.recordsGuestLoginSubtitle
+        case .statistics:
+            return strings.statisticsGuestLoginSubtitle
+        }
+    }
 }
 
 private struct MobileProtectedLoginPrompt: View {
@@ -232,18 +272,315 @@ private struct MobileProtectedLoginPrompt: View {
     var strings: AppStrings
     var onLogin: () -> Void
 
+    @ViewBuilder
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(page.benefitText(strings: strings))
-                .font(.subheadline)
+        switch page {
+        case .myStudy:
+            VStack(alignment: .leading, spacing: 16) {
+                Text(page.benefitText(strings: strings))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button(action: onLogin) {
+                    MobileInlineLoginButtonLabel(title: page.loginActionTitle(strings: strings))
+                }
+                .buttonStyle(.plain)
+            }
+        case .records, .statistics:
+            MobileProtectedLoginExperience(
+                page: page,
+                strings: strings,
+                onLogin: onLogin
+            )
+        }
+    }
+}
+
+private struct MobileProtectedLoginExperience: View {
+    var page: MobileProtectedLoginPage
+    var strings: AppStrings
+    var onLogin: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                MobileProtectedLoginPreview(page: page, strings: strings)
+                    .padding(.top, 16)
+                    .padding(.bottom, 24)
+            }
+            .scrollIndicators(.hidden)
+
+            MobileProtectedLoginFooter(
+                page: page,
+                strings: strings,
+                onLogin: onLogin
+            )
+            .padding(.bottom, 12)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+}
+
+private struct MobileProtectedLoginPreview: View {
+    var page: MobileProtectedLoginPage
+    var strings: AppStrings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(page.previewTitle(strings: strings))
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.primary)
+
+                Text(page.previewSubtitle(strings: strings))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            MobileGuestWeeklySummary(page: page, strings: strings)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text(page == .records ? strings.guestRecentRecords : strings.guestTopicProgress)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                if page == .records {
+                    MobileGuestRecordPreview(strings: strings)
+                } else {
+                    MobileGuestStatisticsPreview(strings: strings)
+                }
+            }
+        }
+        .frame(maxWidth: 620, alignment: .leading)
+    }
+}
+
+private struct MobileGuestWeeklySummary: View {
+    var page: MobileProtectedLoginPage
+    var strings: AppStrings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(strings.guestWeeklySummary)
+                .font(.subheadline.weight(.semibold))
+
+            HStack(alignment: .bottom, spacing: 0) {
+                MobileGuestMetric(
+                    title: strings.guestStudyDays,
+                    value: "4",
+                    suffix: strings.language == .korean ? "일" : ""
+                )
+
+                Divider()
+                    .frame(height: 44)
+
+                MobileGuestMetric(
+                    title: page == .statistics ? strings.guestTopicCount : strings.guestActivities,
+                    value: page == .statistics ? "3" : "12",
+                    suffix: page == .statistics && strings.language == .korean ? "개" : strings.language == .korean ? "회" : ""
+                )
+
+                Divider()
+                    .frame(height: 44)
+
+                MobileGuestMetric(
+                    title: strings.guestAverageScore,
+                    value: "80",
+                    suffix: strings.language == .korean ? "점" : ""
+                )
+            }
+
+            HStack(alignment: .bottom, spacing: 12) {
+                ForEach(Array([0.72, 0.88, 0.64, 1.0, 0.28, 0.18, 0.12].enumerated()), id: \.offset) { index, value in
+                    VStack(spacing: 7) {
+                        Capsule()
+                            .fill(index < 4 ? Color.green.opacity(0.82) : Color.secondary.opacity(0.14))
+                            .frame(height: 7 + (30 * value))
+
+                        Text(weekdayLabel(at: index))
+                            .font(.caption2)
+                            .foregroundStyle(index == 3 ? Color.primary : Color.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .bottom)
+                }
+            }
+            .frame(height: 54, alignment: .bottom)
+        }
+        .padding(18)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func weekdayLabel(at index: Int) -> String {
+        let korean = ["월", "화", "수", "목", "금", "토", "일"]
+        let english = ["M", "T", "W", "T", "F", "S", "S"]
+        return strings.language == .korean ? korean[index] : english[index]
+    }
+}
+
+private struct MobileGuestMetric: View {
+    var title: String
+    var value: String
+    var suffix: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.caption)
                 .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(1)
+
+            HStack(alignment: .firstTextBaseline, spacing: 1) {
+                Text(value)
+                    .font(.title2.weight(.semibold))
+                if !suffix.isEmpty {
+                    Text(suffix)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+    }
+}
+
+private struct MobileGuestRecordPreview: View {
+    var strings: AppStrings
+
+    private var rows: [(topic: String, question: String, score: Int)] {
+        [
+            (strings.guestPreviewRecordTopicOne, strings.guestPreviewRecordQuestionOne, 92),
+            (strings.guestPreviewRecordTopicTwo, strings.guestPreviewRecordQuestionTwo, 78),
+            (strings.guestPreviewRecordTopicThree, strings.guestPreviewRecordQuestionThree, 88)
+        ]
+    }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text(row.topic)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Text(row.question)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Text("\(row.score)/100")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.green)
+                }
+                .padding(14)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .opacity([0.82, 0.56, 0.34][index])
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct MobileGuestStatisticsPreview: View {
+    var strings: AppStrings
+
+    private var rows: [(topic: String, progress: String, value: Double)] {
+        [
+            (strings.guestPreviewRecordTopicOne, strings.guestPreviewProgressOne, 0.86),
+            (strings.guestPreviewRecordTopicTwo, strings.guestPreviewProgressTwo, 0.64),
+            (strings.guestPreviewRecordTopicThree, strings.guestPreviewProgressThree, 0.76)
+        ]
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(row.topic)
+                            .font(.subheadline.weight(.semibold))
+
+                        Spacer(minLength: 12)
+
+                        Text(row.progress)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ProgressView(value: row.value)
+                        .tint(.green)
+                }
+                .padding(.vertical, 14)
+
+                if index < rows.count - 1 {
+                    Divider()
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .opacity(0.78)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct MobileProtectedLoginFooter: View {
+    var page: MobileProtectedLoginPage
+    var strings: AppStrings
+    var onLogin: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Divider()
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(page.loginFooterTitle(strings: strings))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Text(page.loginFooterSubtitle(strings: strings))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             Button(action: onLogin) {
-                MobileInlineLoginButtonLabel(title: page.loginActionTitle(strings: strings))
+                MobilePrimaryLoginButtonLabel(title: page.loginActionTitle(strings: strings))
             }
             .buttonStyle(.plain)
         }
+        .frame(maxWidth: 620, alignment: .leading)
+        .background(Color(.systemBackground))
+    }
+}
+
+private struct MobilePrimaryLoginButtonLabel: View {
+    var title: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Spacer()
+
+            Text(title)
+                .font(.headline.weight(.semibold))
+
+            Spacer()
+
+            Image(systemName: "arrow.right")
+                .font(.subheadline.weight(.semibold))
+        }
+        .foregroundStyle(Color(.systemBackground))
+        .padding(.horizontal, 18)
+        .frame(maxWidth: .infinity, minHeight: 50)
+        .background(Color.primary, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
     }
 }
 

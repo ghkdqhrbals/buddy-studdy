@@ -1499,19 +1499,78 @@ struct AppStrings {
     }
     var recordsLoginBenefit: String {
         text(
-            "로그인하면 학습 기록을 기기 간에 이어서 확인할 수 있습니다.",
-            "Sign in to keep your study records available across devices."
+            "학습할수록 나만의 기록이 차곡차곡 쌓입니다.",
+            "Your personal record grows with every study session."
         )
     }
     var statisticsLoginBenefit: String {
         text(
-            "로그인하면 주제별 정답률과 난이도 변화를 확인할 수 있습니다.",
-            "Sign in to see topic accuracy and difficulty trends."
+            "주제별 변화와 학습 흐름을 한눈에 확인할 수 있습니다.",
+            "See topic progress and learning patterns at a glance."
         )
     }
     var myStudyLoginAction: String { text("로그인", "Sign In") }
-    var recordsLoginAction: String { text("로그인하고 기록 보기", "Sign in to view records") }
-    var statisticsLoginAction: String { text("로그인하고 통계 보기", "Sign in to view stats") }
+    var recordsLoginAction: String { text("로그인", "Sign In") }
+    var statisticsLoginAction: String { text("로그인", "Sign In") }
+    var recordsGuestPreviewTitle: String { text("꾸준히 쌓이는 학습 기록", "A learning record that grows with you") }
+    var recordsGuestPreviewSubtitle: String {
+        text(
+            "공부할수록 지난 질문과 답변을 더 자세히 돌아볼 수 있어요.",
+            "The more you study, the more of your questions and answers you can revisit."
+        )
+    }
+    var statisticsGuestPreviewTitle: String { text("성장을 한눈에", "See your growth at a glance") }
+    var statisticsGuestPreviewSubtitle: String {
+        text(
+            "정답률과 난이도 변화를 주제별로 차분하게 보여드려요.",
+            "Follow accuracy and difficulty changes for each topic."
+        )
+    }
+    var guestWeeklySummary: String { text("이번 주 요약", "This week") }
+    var guestStudyDays: String { text("학습일", "Study days") }
+    var guestActivities: String { text("총 활동", "Activities") }
+    var guestAverageScore: String { text("평균 점수", "Average") }
+    var guestTopicCount: String { text("학습 주제", "Topics") }
+    var guestRecentRecords: String { text("최근 기록 미리보기", "Recent record preview") }
+    var guestTopicProgress: String { text("주제별 성장 미리보기", "Topic progress preview") }
+    var guestPreviewRecordTopicOne: String { "Redis Streams" }
+    var guestPreviewRecordTopicTwo: String { text("시스템 설계", "System Design") }
+    var guestPreviewRecordTopicThree: String { "SwiftUI" }
+    var guestPreviewRecordQuestionOne: String {
+        text(
+            "Redis Streams의 운영 trade-off를 설명해보세요.",
+            "Explain one operational trade-off of Redis Streams."
+        )
+    }
+    var guestPreviewRecordQuestionTwo: String {
+        text(
+            "확장 가능한 시스템의 병목을 찾아보세요.",
+            "Identify a bottleneck in a scalable system."
+        )
+    }
+    var guestPreviewRecordQuestionThree: String {
+        text(
+            "SwiftUI 상태 흐름을 정리해보세요.",
+            "Summarize state flow in SwiftUI."
+        )
+    }
+    var guestPreviewProgressOne: String { text("안정적으로 향상 중", "Improving steadily") }
+    var guestPreviewProgressTwo: String { text("조금 더 연습하면 좋아요", "A little more practice") }
+    var guestPreviewProgressThree: String { text("꾸준히 유지 중", "Holding steady") }
+    var recordsGuestLoginTitle: String { text("계정으로 기록을 안전하게 이어가세요", "Keep your records safe with an account") }
+    var recordsGuestLoginSubtitle: String {
+        text(
+            "여러 기기에서도 이어서 학습하고 모든 기록을 보관할 수 있어요.",
+            "Continue on any device and keep your full learning history."
+        )
+    }
+    var statisticsGuestLoginTitle: String { text("나만의 학습 흐름을 이어가세요", "Keep your learning progress with you") }
+    var statisticsGuestLoginSubtitle: String {
+        text(
+            "로그인하면 주제별 변화와 학습 통계를 안전하게 보관해요.",
+            "Sign in to safely keep topic progress and learning statistics."
+        )
+    }
     var loading: String { text("불러오는 중", "Loading") }
     var retry: String { text("다시 시도", "Retry") }
     func monthlyQuotaExceededMessage(serverMessage: String, resetAt: Date) -> String {

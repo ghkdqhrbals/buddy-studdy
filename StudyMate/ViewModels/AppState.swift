@@ -597,6 +597,28 @@ final class AppState: ObservableObject {
 
     func normalizeSelectedTabForMobile() {
         logAuthTrace("mobile_normalize_tab_start", reason: "normalizeSelectedTabForMobile")
+        #if DEBUG
+        if selectedTab == .study,
+           let debugInitialTab = ProcessInfo.processInfo.environment["BUDDYSTUDY_DEBUG_INITIAL_TAB"] {
+            switch debugInitialTab.lowercased() {
+            case "records":
+                selectedTab = .records
+            case "statistics", "stats":
+                selectedTab = .statistics
+            case "settings":
+                selectedTab = .settings
+            default:
+                selectedTab = .home
+            }
+            homeStudyRoute = nil
+            logAuthTrace(
+                "mobile_normalize_tab_debug_override",
+                reason: "normalizeSelectedTabForMobile",
+                extra: ["debugInitialTab=\(debugInitialTab)"]
+            )
+            return
+        }
+        #endif
         if selectedTab == .study {
             selectedTab = .home
         }
