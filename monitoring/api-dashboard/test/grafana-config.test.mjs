@@ -102,7 +102,7 @@ test("server runtime dashboard emits bounded Loki metric series", async () => {
   }
 
   for (const expression of unwrappedExpressions) {
-    assert.match(expression, /^last_over_time\(/);
+    assert.match(expression, /^(?:last_over_time|max\(last_over_time|min\(last_over_time)\(/);
     assert.match(expression, /\| drop runtime \|/);
     assert.match(expression, /\| json \w+="\w+" \| unwrap \w+/);
     assert.doesNotMatch(expression, /\| json \| unwrap/);

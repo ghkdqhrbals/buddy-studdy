@@ -588,12 +588,12 @@
       },
       "targets": [
         {
-          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json availableProcessors=\"availableProcessors\" | unwrap availableProcessors | __error__=\"\" [1m])",
+          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json availableProcessors=\"availableProcessors\" | unwrap availableProcessors | __error__=\"\" [1m]))",
           "legendFormat": "CPU cores",
           "refId": "A"
         },
         {
-          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json hostMemoryTotalBytes=\"hostMemoryTotalBytes\" | unwrap hostMemoryTotalBytes | __error__=\"\" [1m])",
+          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json hostMemoryTotalBytes=\"hostMemoryTotalBytes\" | unwrap hostMemoryTotalBytes | __error__=\"\" [1m]))",
           "legendFormat": "memory maximum",
           "refId": "B"
         }
@@ -650,17 +650,17 @@
       },
       "targets": [
         {
-          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json hostMemoryUsedBytes=\"hostMemoryUsedBytes\" | unwrap hostMemoryUsedBytes | __error__=\"\" [1m])",
+          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json hostMemoryUsedBytes=\"hostMemoryUsedBytes\" | unwrap hostMemoryUsedBytes | __error__=\"\" [1m]))",
           "legendFormat": "used",
           "refId": "A"
         },
         {
-          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json hostMemoryAvailableBytes=\"hostMemoryAvailableBytes\" | unwrap hostMemoryAvailableBytes | __error__=\"\" [1m])",
+          "expr": "min(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json hostMemoryAvailableBytes=\"hostMemoryAvailableBytes\" | unwrap hostMemoryAvailableBytes | __error__=\"\" [1m]))",
           "legendFormat": "available",
           "refId": "B"
         },
         {
-          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json hostMemoryTotalBytes=\"hostMemoryTotalBytes\" | unwrap hostMemoryTotalBytes | __error__=\"\" [1m])",
+          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json hostMemoryTotalBytes=\"hostMemoryTotalBytes\" | unwrap hostMemoryTotalBytes | __error__=\"\" [1m]))",
           "legendFormat": "maximum",
           "refId": "C"
         }
