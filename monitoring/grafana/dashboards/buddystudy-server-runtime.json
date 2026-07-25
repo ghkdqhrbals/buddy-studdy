@@ -569,7 +569,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 24,
+        "w": 12,
         "x": 0,
         "y": 26
       },
@@ -608,6 +608,11 @@
           "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolPending=\"dbPoolPending\" | unwrap dbPoolPending | __error__=\"\" [1m])",
           "legendFormat": "pending",
           "refId": "D"
+        },
+        {
+          "expr": "last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolMaxAllocated=\"dbPoolMaxAllocated\" | unwrap dbPoolMaxAllocated | __error__=\"\" [1m])",
+          "legendFormat": "pool max",
+          "refId": "E"
         }
       ],
       "title": "R2DBC connection pool",
@@ -615,12 +620,138 @@
       "description": "Application-observed database connection allocation, acquisition, idle capacity, and pending demand."
     },
     {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "description": "PostgreSQL container CPU utilization sampled with Docker stats every 30 seconds.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "red",
+            "mode": "fixedColor"
+          },
+          "custom": {
+            "axisLabel": "CPU",
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "min": 0,
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "last_over_time({container=\"buddystudy-db-metrics\"} |= \"database_runtime \" | pattern \"<_> database_runtime <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json databaseCpuPercent=\"databaseCpuPercent\" | unwrap databaseCpuPercent | __error__=\"\" [1m])",
+          "legendFormat": "PostgreSQL CPU",
+          "refId": "A"
+        }
+      ],
+      "title": "PostgreSQL CPU",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "buddystudy-loki"
+      },
+      "description": "PostgreSQL pg_stat_activity usage compared with the live max_connections setting.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "connections",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "last_over_time({container=\"buddystudy-db-metrics\"} |= \"database_runtime \" | pattern \"<_> database_runtime <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json databaseConnections=\"databaseConnections\" | unwrap databaseConnections | __error__=\"\" [1m])",
+          "legendFormat": "total connections",
+          "refId": "A"
+        },
+        {
+          "expr": "last_over_time({container=\"buddystudy-db-metrics\"} |= \"database_runtime \" | pattern \"<_> database_runtime <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json databaseActiveConnections=\"databaseActiveConnections\" | unwrap databaseActiveConnections | __error__=\"\" [1m])",
+          "legendFormat": "active connections",
+          "refId": "B"
+        },
+        {
+          "expr": "last_over_time({container=\"buddystudy-db-metrics\"} |= \"database_runtime \" | pattern \"<_> database_runtime <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json databaseMaxConnections=\"databaseMaxConnections\" | unwrap databaseMaxConnections | __error__=\"\" [1m])",
+          "legendFormat": "max_connections",
+          "refId": "C"
+        }
+      ],
+      "title": "PostgreSQL connections",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 34
+        "y": 42
       },
       "id": 102,
       "panels": [],
@@ -658,7 +789,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 35
+        "y": 43
       },
       "id": 11,
       "options": {
@@ -716,7 +847,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 35
+        "y": 43
       },
       "id": 12,
       "options": {
@@ -762,5 +893,5 @@
   "timezone": "browser",
   "title": "BuddyStudy Server Dashboard",
   "uid": "buddystudy-server-runtime",
-  "version": 5
+  "version": 6
 }

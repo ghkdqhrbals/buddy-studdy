@@ -7,7 +7,7 @@ one workflow run just because they share a host.
 
 | Module | Workflow | Trigger | Runner | Owns |
 | --- | --- | --- | --- | --- |
-| Backend API | `Deploy BuddyStudy Backend` | `backend-image-published`, manual | EC2 self-hosted | Backend app rollout, backend env, backend nginx route |
+| Backend API | `Deploy BuddyStudy Backend` | `backend-image-published`, manual | EC2 self-hosted | Backend app rollout, backend env, backend nginx route, log-only PostgreSQL runtime observer |
 | Admin frontend | `Deploy BuddyStudy Admin Frontend` | `admin-frontend-image-published`, manual | EC2 self-hosted | Admin frontend container only |
 | Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, Server Dashboard, TestZone UI, Grafana, Loki, monitoring auth and access audit |
 | Monitoring routing | `Deploy BuddyStudy Monitoring Routes on MacBook Air` | manual | MacBook Air self-hosted | Routingflare routes for the monitoring UI and Grafana |
@@ -58,6 +58,11 @@ deployment.
   `password`, `jdbcUrl`, and `r2dbcUrl`; the deploy workflow reads both JDBC
   and R2DBC settings from that secret. A legacy host password file is migrated
   into the secret once and is not the continuing configuration source.
+- The backend deploy runs `buddystudy-db-metrics`, a port-free Docker CLI
+  observer that logs PostgreSQL container CPU, total/active connections, and
+  the live `max_connections` setting every 30 seconds. Promtail forwards these
+  `database_runtime` records to Loki. The observer receives no database
+  password and is not a Prometheus/exporter service.
 - Admin frontend UI changes: build admin frontend image, then run admin frontend
   deploy.
 - Grafana/Loki/API Logs/TestZone UI changes: run the monitoring deploy.

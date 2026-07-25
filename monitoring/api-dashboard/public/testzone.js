@@ -48,6 +48,11 @@ const state = {
   },
   runSeriesId: null,
   chartResizeTimer: null,
+  editorHistory: [],
+  editorHistoryIndex: -1,
+  editorHistoryApplying: false,
+  editorHistoryLastInputAt: 0,
+  editorHistoryLastInputType: "",
 };
 
 const elementIds = [
@@ -295,6 +300,7 @@ function loadScriptIntoEditor() {
   if (state.creatingScript) {
     elements.scriptNameInput.value = "untitled.js";
     elements.scriptEditor.value = "";
+    resetEditorHistory();
     state.dirty = true;
     renderDirtyState();
     syncEditorMetrics();
@@ -307,6 +313,7 @@ function loadScriptIntoEditor() {
   const selected = script();
   elements.scriptNameInput.value = selected?.name || "";
   elements.scriptEditor.value = selected?.code || "";
+  resetEditorHistory();
   state.dirty = false;
   renderDirtyState();
   syncEditorMetrics();
@@ -350,6 +357,68 @@ function markDirty() {
   if (!state.creatingScript) {
     state.lintTimer = window.setTimeout(() => void validateCurrentScript(true), 700);
   }
+}
+
+function editorSnapshot() {
+  return {
+    value: elements.scriptEditor.value,
+    selectionStart: elements.scriptEditor.selectionStart,
+    selectionEnd: elements.scriptEditor.selectionEnd,
+  };
+}
+
+function resetEditorHistory() {
+  state.editorHistory = [editorSnapshot()];
+  state.editorHistoryIndex = 0;
+  state.editorHistoryApplying = false;
+  state.editorHistoryLastInputAt = 0;
+  state.editorHistoryLastInputType = "";
+}
+
+function recordEditorHistory(inputType = "") {
+  if (state.editorHistoryApplying) return;
+  const snapshot = editorSnapshot();
+  const current = state.editorHistory[state.editorHistoryIndex];
+  if (
+    current
+    && current.value === snapshot.value
+    && current.selectionStart === snapshot.selectionStart
+    && current.selectionEnd === snapshot.selectionEnd
+  ) return;
+
+  const timestamp = Date.now();
+  const coalescible = ["insertText", "deleteContentBackward", "deleteContentForward"];
+  const shouldCoalesce = coalescible.includes(inputType)
+    && inputType === state.editorHistoryLastInputType
+    && timestamp - state.editorHistoryLastInputAt < 700
+    && state.editorHistoryIndex === state.editorHistory.length - 1
+    && state.editorHistoryIndex > 0;
+
+  if (shouldCoalesce) {
+    state.editorHistory[state.editorHistoryIndex] = snapshot;
+  } else {
+    state.editorHistory = state.editorHistory.slice(0, state.editorHistoryIndex + 1);
+    state.editorHistory.push(snapshot);
+    if (state.editorHistory.length > 100) state.editorHistory.shift();
+    state.editorHistoryIndex = state.editorHistory.length - 1;
+  }
+  state.editorHistoryLastInputAt = timestamp;
+  state.editorHistoryLastInputType = inputType;
+}
+
+function restoreEditorHistory(direction) {
+  const nextIndex = state.editorHistoryIndex + direction;
+  const snapshot = state.editorHistory[nextIndex];
+  if (!snapshot) return;
+  state.editorHistoryApplying = true;
+  state.editorHistoryIndex = nextIndex;
+  elements.scriptEditor.value = snapshot.value;
+  elements.scriptEditor.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd);
+  state.editorHistoryApplying = false;
+  state.editorHistoryLastInputAt = 0;
+  state.editorHistoryLastInputType = "";
+  markDirty();
+  syncEditorMetrics();
 }
 
 function syncEditorMetrics() {
@@ -1842,6 +1911,18 @@ function closeDialog(button) {
 }
 
 function handleEditorKeydown(event) {
+  const commandKey = event.metaKey || event.ctrlKey;
+  const key = event.key.toLowerCase();
+  if (commandKey && key === "z" && event.target === elements.scriptEditor) {
+    event.preventDefault();
+    restoreEditorHistory(event.shiftKey ? 1 : -1);
+    return;
+  }
+  if (commandKey && key === "y" && event.target === elements.scriptEditor) {
+    event.preventDefault();
+    restoreEditorHistory(1);
+    return;
+  }
   if (event.key === "Tab" && event.target === elements.scriptEditor) {
     event.preventDefault();
     elements.scriptEditor.setRangeText(
@@ -1850,10 +1931,11 @@ function handleEditorKeydown(event) {
       elements.scriptEditor.selectionEnd,
       "end",
     );
+    recordEditorHistory();
     markDirty();
     syncEditorMetrics();
   }
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+  if (commandKey && key === "s") {
     event.preventDefault();
     if (!elements.saveScriptButton.disabled) void saveScript();
   }
@@ -1930,7 +2012,8 @@ function bindEvents() {
     renderScripts();
   });
   elements.newScriptButton.addEventListener("click", beginNewScript);
-  elements.scriptEditor.addEventListener("input", () => {
+  elements.scriptEditor.addEventListener("input", (event) => {
+    recordEditorHistory(event.inputType);
     markDirty();
     syncEditorMetrics();
   });

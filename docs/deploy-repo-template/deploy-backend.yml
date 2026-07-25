@@ -195,6 +195,7 @@ jobs:
           docker pull postgres:16-alpine
           docker pull certbot/certbot:v2.11.0
           docker pull grafana/promtail:3.3.2
+          docker pull docker:27-cli
 
           wait_for_container_running() {
             local container_name="$1"
@@ -315,6 +316,29 @@ jobs:
             fi
             sleep 2
           done
+
+          docker rm -f buddystudy-db-metrics >/dev/null 2>&1 || true
+          if [ -n "${REMOTE_LOKI_PUSH_URL}" ]; then
+            mkdir -p monitoring
+            SOURCE_SHA="${{ github.event.client_payload.sha || 'main' }}"
+            curl -fsSL \
+              "https://raw.githubusercontent.com/ghkdqhrbals/buddy-studdy/${SOURCE_SHA}/monitoring/scripts/database-runtime-collector.sh" \
+              -o monitoring/database-runtime-collector.sh
+            chmod 700 monitoring/database-runtime-collector.sh
+            docker run -d \
+              --name buddystudy-db-metrics \
+              --restart unless-stopped \
+              --read-only \
+              --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+              -e POSTGRES_DB="${POSTGRES_DB}" \
+              -e POSTGRES_USER="${POSTGRES_USER}" \
+              -e POSTGRES_CONTAINER=buddystudy-db \
+              -e DATABASE_METRICS_INTERVAL_SECONDS=30 \
+              -v /var/run/docker.sock:/var/run/docker.sock:ro \
+              -v "$PWD/monitoring/database-runtime-collector.sh:/collector.sh:ro" \
+              docker:27-cli \
+              sh /collector.sh
+          fi
 
           BLUE_SLOT="buddystudy-backend-a"
           GREEN_SLOT="buddystudy-backend-b"

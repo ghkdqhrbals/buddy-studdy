@@ -19,6 +19,14 @@ const deployTemplatePath = path.resolve(
   testDirectory,
   "../../../docs/deploy-repo-template/deploy-macbookair-monitoring.yml",
 );
+const backendDeployTemplatePath = path.resolve(
+  testDirectory,
+  "../../../docs/deploy-repo-template/deploy-backend.yml",
+);
+const databaseCollectorPath = path.resolve(
+  testDirectory,
+  "../../scripts/database-runtime-collector.sh",
+);
 
 test("Grafana Live accepts only the public Grafana origin", async () => {
   const [compose, deployTemplate] = await Promise.all([
@@ -120,6 +128,8 @@ test("server runtime dashboard separates server, database, and Redis signals", a
     "Root disk",
     "Network counters",
     "R2DBC connection pool",
+    "PostgreSQL CPU",
+    "PostgreSQL connections",
     "Redis activity",
     "Redis failures",
   ]) {
@@ -134,8 +144,37 @@ test("server runtime dashboard separates server, database, and Redis signals", a
   assert.match(panels.get("API RPS by endpoint")?.targets[0].expr ?? "", /sum by \(method, path\)/);
   assert.equal(panels.get("API RPS by endpoint")?.targets[0].legendFormat, "{{method}} {{path}}");
   assert.equal(panels.get("R2DBC connection pool")?.gridPos.y, 26);
+  assert.match(
+    panels.get("R2DBC connection pool")?.targets.at(-1)?.expr ?? "",
+    /dbPoolMaxAllocated/,
+  );
+  assert.match(
+    panels.get("PostgreSQL CPU")?.targets[0].expr ?? "",
+    /databaseCpuPercent/,
+  );
+  assert.match(
+    panels.get("PostgreSQL connections")?.targets[2].expr ?? "",
+    /databaseMaxConnections/,
+  );
   assert.match(panels.get("Redis activity")?.targets[0].expr ?? "", /redis_/);
   assert.match(panels.get("Redis failures")?.targets[0].expr ?? "", /failed\|retry_scheduled/);
+});
+
+test("backend deploy starts a log-only PostgreSQL runtime collector", async () => {
+  const [deployTemplate, collector] = await Promise.all([
+    fs.readFile(backendDeployTemplatePath, "utf8"),
+    fs.readFile(databaseCollectorPath, "utf8"),
+  ]);
+
+  assert.match(deployTemplate, /docker pull docker:27-cli/);
+  assert.match(deployTemplate, /--name buddystudy-db-metrics/);
+  assert.match(deployTemplate, /database-runtime-collector\.sh:\/collector\.sh:ro/);
+  assert.match(deployTemplate, /DATABASE_METRICS_INTERVAL_SECONDS=30/);
+  assert.match(collector, /docker stats --no-stream/);
+  assert.match(collector, /current_setting\('max_connections'\)/);
+  assert.match(collector, /databaseCpuPercent/);
+  assert.match(collector, /databaseMaxConnections/);
+  assert.doesNotMatch(collector, /POSTGRES_PASSWORD/);
 });
 
 test("TestZone dashboard separates server, database, and Redis runtime signals", async () => {

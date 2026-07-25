@@ -188,11 +188,22 @@ test("new projects stay empty and the plus button opens an unsaved blank script"
 
 test("file names update immediately and save shortcuts work across the editor toolbar", () => {
   assert.match(javascript, /document\.querySelector\("\.editor-pane"\)\.addEventListener\("keydown",\s*handleEditorKeydown\)/);
-  assert.match(javascript, /\(event\.metaKey \|\| event\.ctrlKey\) && event\.key\.toLowerCase\(\) === "s"/);
+  assert.match(javascript, /const commandKey = event\.metaKey \|\| event\.ctrlKey/);
+  assert.match(javascript, /commandKey && key === "s"/);
   assert.match(javascript, /if \(!elements\.saveScriptButton\.disabled\) void saveScript\(\)/);
   assert.match(javascript, /elements\.scriptNameInput\.addEventListener\("input",[\s\S]+?renderEditorFileName\(\)/);
   assert.match(javascript, /detail\.textContent = "Unsaved"/);
   assert.doesNotMatch(javascript, /elements\.scriptEditor\.addEventListener\("keydown",\s*handleEditorKeydown\)/);
+});
+
+test("script editor supports undo and redo with control or command shortcuts", () => {
+  assert.match(javascript, /function resetEditorHistory\(\)/);
+  assert.match(javascript, /function recordEditorHistory\(inputType = ""\)/);
+  assert.match(javascript, /function restoreEditorHistory\(direction\)/);
+  assert.match(javascript, /commandKey && key === "z"/);
+  assert.match(javascript, /restoreEditorHistory\(event\.shiftKey \? 1 : -1\)/);
+  assert.match(javascript, /commandKey && key === "y"/);
+  assert.match(javascript, /recordEditorHistory\(event\.inputType\)/);
 });
 
 test("save failures stay visible beside the editor and clear only after a successful save", () => {
