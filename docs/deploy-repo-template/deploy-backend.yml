@@ -317,29 +317,6 @@ jobs:
             sleep 2
           done
 
-          docker rm -f buddystudy-db-metrics >/dev/null 2>&1 || true
-          if [ -n "${REMOTE_LOKI_PUSH_URL}" ]; then
-            mkdir -p monitoring
-            SOURCE_SHA="${{ github.event.client_payload.sha || 'main' }}"
-            curl -fsSL \
-              "https://raw.githubusercontent.com/ghkdqhrbals/buddy-studdy/${SOURCE_SHA}/monitoring/scripts/database-runtime-collector.sh" \
-              -o monitoring/database-runtime-collector.sh
-            chmod 700 monitoring/database-runtime-collector.sh
-            docker run -d \
-              --name buddystudy-db-metrics \
-              --restart unless-stopped \
-              --read-only \
-              --tmpfs /tmp:rw,noexec,nosuid,size=16m \
-              -e POSTGRES_DB="${POSTGRES_DB}" \
-              -e POSTGRES_USER="${POSTGRES_USER}" \
-              -e POSTGRES_CONTAINER=buddystudy-db \
-              -e DATABASE_METRICS_INTERVAL_SECONDS=30 \
-              -v /var/run/docker.sock:/var/run/docker.sock:ro \
-              -v "$PWD/monitoring/database-runtime-collector.sh:/collector.sh:ro" \
-              docker:27-cli \
-              sh /collector.sh
-          fi
-
           BLUE_SLOT="buddystudy-backend-a"
           GREEN_SLOT="buddystudy-backend-b"
           LEGACY_SLOT="buddystudy-backend"
@@ -619,6 +596,60 @@ jobs:
             docker rm "${OLD_SLOT}" >/dev/null 2>&1 || true
           fi
           docker image prune -f
+
+      - name: Deploy PostgreSQL runtime observer
+        env:
+          REMOTE_LOKI_PUSH_URL: ${{ vars.REMOTE_LOKI_PUSH_URL || '' }}
+        run: |
+          set -euo pipefail
+
+          docker rm -f buddystudy-db-metrics >/dev/null 2>&1 || true
+          if [ -z "${REMOTE_LOKI_PUSH_URL}" ]; then
+            echo "REMOTE_LOKI_PUSH_URL is empty; PostgreSQL runtime observer is disabled."
+            exit 0
+          fi
+
+          DEPLOY_ROOT="/opt/buddystudy-backend"
+          if [ ! -d "${DEPLOY_ROOT}" ]; then
+            DEPLOY_ROOT="${HOME}/buddystudy-backend"
+          fi
+          cd "${DEPLOY_ROOT}"
+          mkdir -p monitoring
+
+          SOURCE_SHA="${{ github.event.client_payload.sha || 'main' }}"
+          curl -fsSL \
+            "https://raw.githubusercontent.com/ghkdqhrbals/buddy-studdy/${SOURCE_SHA}/monitoring/scripts/database-runtime-collector.sh" \
+            -o monitoring/database-runtime-collector.sh
+          chmod 700 monitoring/database-runtime-collector.sh
+
+          POSTGRES_DB="$(
+            docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' buddystudy-db \
+              | sed -n 's/^POSTGRES_DB=//p' \
+              | head -n 1
+          )"
+          POSTGRES_USER="$(
+            docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' buddystudy-db \
+              | sed -n 's/^POSTGRES_USER=//p' \
+              | head -n 1
+          )"
+          if [ -z "${POSTGRES_DB}" ] || [ -z "${POSTGRES_USER}" ]; then
+            echo "Could not resolve PostgreSQL database/user from the running container." >&2
+            exit 1
+          fi
+
+          docker run -d \
+            --name buddystudy-db-metrics \
+            --restart unless-stopped \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+            -e POSTGRES_DB="${POSTGRES_DB}" \
+            -e POSTGRES_USER="${POSTGRES_USER}" \
+            -e POSTGRES_CONTAINER=buddystudy-db \
+            -e DATABASE_METRICS_INTERVAL_SECONDS=30 \
+            -v /var/run/docker.sock:/var/run/docker.sock:ro \
+            -v "$PWD/monitoring/database-runtime-collector.sh:/collector.sh:ro" \
+            docker:27-cli \
+            sh /collector.sh
 
       - name: Summary
         if: always()
