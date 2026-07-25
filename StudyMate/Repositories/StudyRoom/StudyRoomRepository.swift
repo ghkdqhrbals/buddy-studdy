@@ -17,6 +17,18 @@ protocol StudyRoomRepository {
         sortOrder: Int
     ) async throws -> BackendStudyRoom
 
+    func suggestStudyTopics(
+        registration: RemotePushRegistration,
+        parentStudyID: Int,
+        count: Int
+    ) async throws -> [String]
+
+    func updateStudyTopicActivation(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        active: Bool
+    ) async throws -> BackendStudyRoom
+
     func updateStudy(
         registration: RemotePushRegistration,
         studyID: Int,

@@ -17,6 +17,7 @@ class StudyEntity(
     var difficultyLevel: Int = 5,
     var intervalMinutes: Int = 15,
     var enabled: Boolean = true,
+    var activeForQuestions: Boolean = true,
     var notificationSound: String? = null,
     var customPrompt: String = "",
     var openaiModel: String = "gpt-5.4",

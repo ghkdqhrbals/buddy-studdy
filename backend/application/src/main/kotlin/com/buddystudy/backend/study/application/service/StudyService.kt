@@ -67,14 +67,23 @@ class StudyService(
         val studyDeferred = async { studies.findByIdAndUserId(studyId, principal.userId) }
         val userDeferred = async { users.findById(principal.userId) }
 
-        val study = studyDeferred.await()
+        val requestedStudy = studyDeferred.await()
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
+        val userStudies = studies.findAllByUserId(principal.userId)
+        val rootStudy = StudyTreeSelector.rootFor(requestedStudy, userStudies)
         val user = userDeferred.await()
         val appLanguage = user?.appLanguage ?: "ko"
 
-        val pendingCountDeferred = async { questions.countPendingForStudy(study.id) }
-        val recentQuestionsDeferred = async { recentQuestions(principal, study) }
-        val room = StudyRoom.of(study.toStudyRoomSchedule(appLanguage), pendingCountDeferred.await())
+        val pendingCountDeferred = async { questions.countPendingForStudy(rootStudy.id) }
+        val recentQuestionsDeferred = async { recentQuestions(principal, rootStudy.id, requestedStudy.topic) }
+        val room = StudyRoom.of(
+            requestedStudy.toStudyRoomSchedule(
+                appLanguage = appLanguage,
+                questionStudyId = rootStudy.id,
+                questionSettings = rootStudy,
+            ),
+            pendingCountDeferred.await(),
+        )
         try {
             room.canCreateQuestion(properties.scheduler.maxPendingPerStudy)
         } catch (error: StudyRoomPendingLimitExceeded) {
@@ -83,21 +92,25 @@ class StudyService(
         val questionKey = questionKeys.resolveForQuestionGeneration(user)
         try {
             val recentEmbeddingsDeferred = async {
-                questionEmbeddings.findRecentByStudyIdAndTopic(study.id, study.topic, RECENT_EMBEDDING_LIMIT)
+                questionEmbeddings.findRecentByStudyIdAndTopic(rootStudy.id, requestedStudy.topic, RECENT_EMBEDDING_LIMIT)
             }
             val coverageSelectionDeferred = async {
-                selectCoverage(questionKey.apiKey, study, room.difficultyLevel)
+                selectCoverage(
+                    apiKey = questionKey.apiKey,
+                    topicStudy = requestedStudy,
+                    questionSettings = rootStudy,
+                )
             }
             val generatedQuestionDeferred = async {
                 val coverageSelection = coverageSelectionDeferred.await()
                 generateDistinctQuestion(
                     apiKey = questionKey.apiKey,
-                    model = study.openaiModel.ifBlank { properties.openai.model },
+                    model = room.openaiModel.ifBlank { properties.openai.model },
                     topic = room.topic,
                     level = room.difficultyLevel,
                     language = room.appLanguage,
                     customPrompt = room.customPrompt,
-                    studyId = study.id,
+                    studyId = requestedStudy.id,
                     userId = principal.userId,
                     recentQuestions = recentQuestionsDeferred.await(),
                     recentEmbeddings = recentEmbeddingsDeferred.await(),
@@ -118,7 +131,7 @@ class StudyService(
                     coverage = coverageSelection,
                     questionKey = questionKey,
                     question = question,
-                    notification = { saved -> saved.toQuestionNotification(study, appLanguage) },
+                    notification = { saved -> saved.toQuestionNotification(rootStudy, appLanguage) },
                     now = now,
                 )
                 saved
@@ -214,9 +227,9 @@ class StudyService(
 
     private suspend fun openAIModelFor(study: StudyEntity?): String = study?.openaiModel?.takeIf { it.isNotBlank() } ?: properties.openai.model
 
-    private suspend fun recentQuestions(principal: Principal, study: StudyEntity): List<String> {
-        val sameStudy = questions.findRecentQuestionTextsByStudyIdAndTopic(study.id, study.topic, PageRequest.of(0, 30))
-        val sameTopic = questions.findRecentQuestionTextsByUserIdAndTopic(principal.userId, study.topic, PageRequest.of(0, 30))
+    private suspend fun recentQuestions(principal: Principal, rootStudyId: Long, topic: String): List<String> {
+        val sameStudy = questions.findRecentQuestionTextsByStudyIdAndTopic(rootStudyId, topic, PageRequest.of(0, 30))
+        val sameTopic = questions.findRecentQuestionTextsByUserIdAndTopic(principal.userId, topic, PageRequest.of(0, 30))
         return (sameStudy + sameTopic)
             .map { it.trim() }
             .filter { it.isNotBlank() }
@@ -278,14 +291,18 @@ class StudyService(
         error("unreachable")
     }
 
-    private suspend fun selectCoverage(apiKey: String, study: StudyEntity, level: Int): QuestionCoverageSelection? {
-        questionCoverage.selectNext(study.id)?.let { return it }
+    private suspend fun selectCoverage(
+        apiKey: String,
+        topicStudy: StudyEntity,
+        questionSettings: StudyEntity,
+    ): QuestionCoverageSelection? {
+        questionCoverage.selectNext(topicStudy.id)?.let { return it }
         val blueprint = openAI.generateQuestionCoverageBlueprint(
             apiKey = apiKey,
-            model = study.openaiModel.ifBlank { properties.openai.model },
-            topic = study.topic,
-            level = level,
-            customPrompt = study.customPrompt,
+            model = questionSettings.openaiModel.ifBlank { properties.openai.model },
+            topic = topicStudy.topic,
+            level = topicStudy.difficultyLevel,
+            customPrompt = questionSettings.customPrompt,
         ).map { concept ->
             QuestionCoveragePort.CoverageConceptBlueprint(
                 key = concept.key,
@@ -294,8 +311,12 @@ class StudyService(
                 children = concept.children.toCoverageBlueprints(),
             )
         }
-        questionCoverage.ensureCoverage(study.id, study.topic, blueprint.ifEmpty { defaultCoverageBlueprint(study.topic) })
-        return questionCoverage.selectNext(study.id)
+        questionCoverage.ensureCoverage(
+            topicStudy.id,
+            topicStudy.topic,
+            blueprint.ifEmpty { defaultCoverageBlueprint(topicStudy.topic) },
+        )
+        return questionCoverage.selectNext(topicStudy.id)
     }
 
     private suspend fun List<QuestionEntity>.toRecordResponses(): List<StudyRecordResponse> {
@@ -363,9 +384,9 @@ internal fun QuestionEntity.toQuestionNotification(study: StudyEntity, appLangua
         metadataJson = studyNotificationMapper.writeValueAsString(
             QuestionNotificationMetadata(
                 recordId = id,
-                studyId = study.id,
-                topic = study.topic,
-                difficultyLevel = study.difficultyLevel,
+                studyId = checkNotNull(studyId) { "Question notification requires a study id." },
+                topic = topic,
+                difficultyLevel = difficultyLevel,
                 language = appLanguage,
                 sound = study.notificationSound,
                 intervalMinutes = study.intervalMinutes,

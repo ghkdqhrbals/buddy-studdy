@@ -13,15 +13,19 @@ import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.study.domain.entity.StudyEntity
 
-internal fun StudyEntity.toStudyRoomSchedule(appLanguage: String) = StudyRoomSchedule(
-    id = id,
+internal fun StudyEntity.toStudyRoomSchedule(
+    appLanguage: String,
+    questionStudyId: Long = id,
+    questionSettings: StudyEntity = this,
+) = StudyRoomSchedule(
+    id = questionStudyId,
     deviceId = deviceId,
     userId = userId,
     topic = topic,
     difficultyLevel = difficultyLevel,
-    openaiModel = openaiModel,
+    openaiModel = questionSettings.openaiModel,
     appLanguage = appLanguage,
-    customPrompt = customPrompt,
+    customPrompt = questionSettings.customPrompt,
 )
 
 internal fun StudyRoomQuestionDraft.toQuestionEntity() = QuestionEntity(

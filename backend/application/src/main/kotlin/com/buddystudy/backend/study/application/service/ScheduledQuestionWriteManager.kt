@@ -28,7 +28,8 @@ class ScheduledQuestionWriteManager(
 ) {
     @Transactional
     suspend fun complete(
-        study: StudyEntity,
+        scheduleStudy: StudyEntity,
+        topicStudy: StudyEntity,
         generated: GeneratedQuestionWithEmbedding,
         coverage: QuestionCoverageSelection?,
         questionKey: OpenAIQuestionKey,
@@ -36,24 +37,42 @@ class ScheduledQuestionWriteManager(
         now: Instant,
     ): QuestionEntity {
         val saved = questions.save(
-            study.toScheduledQuestion(generated.generated.question, generated.generated.hint, appLanguage, now)
+            scheduleStudy.toScheduledQuestion(
+                topicStudy = topicStudy,
+                question = generated.generated.question,
+                hint = generated.generated.hint,
+                appLanguage = appLanguage,
+                now = now,
+            )
                 .applyCoverage(coverage),
         )
         questionStats.save(QuestionStatsEntity(questionId = saved.id, updatedAt = now))
         coverage?.let { questionCoverage.markAsked(it, now) }
         questionEmbeddings.save(
             questionId = saved.id,
-            userId = study.userId,
-            studyId = study.id,
-            topic = study.topic,
+            userId = scheduleStudy.userId,
+            studyId = scheduleStudy.id,
+            topic = topicStudy.topic,
             question = saved.question,
             embedding = generated.embedding,
         )
         questionKeys.markQuestionCreated(questionKey, now)
+        scheduleStudy.markScheduleCompleted(now)
+        if (scheduleStudy.id == topicStudy.id) {
+            studies.save(scheduleStudy)
+        } else {
+            topicStudy.markTopicSelected(now)
+            studies.save(topicStudy)
+            studies.save(scheduleStudy)
+        }
+        notifications.publish(saved.toQuestionNotification(scheduleStudy, appLanguage))
+        return saved
+    }
+
+    @Transactional
+    suspend fun deferUntilNextInterval(study: StudyEntity, now: Instant) {
         study.markScheduleCompleted(now)
         studies.save(study)
-        notifications.publish(saved.toQuestionNotification(study, appLanguage))
-        return saved
     }
 
     @Transactional
@@ -71,6 +90,7 @@ class ScheduledQuestionWriteManager(
 }
 
 private fun StudyEntity.toScheduledQuestion(
+    topicStudy: StudyEntity,
     question: String,
     hint: String?,
     appLanguage: String,
@@ -82,9 +102,9 @@ private fun StudyEntity.toScheduledQuestion(
         studyId = id,
         question = question,
         hint = hint,
-        topic = topic,
+        topic = topicStudy.topic,
         language = appLanguage,
-        difficultyLevel = difficultyLevel,
+        difficultyLevel = topicStudy.difficultyLevel,
         scheduledFor = nextDueAt ?: now,
         sentAt = now,
         status = "ungraded",
@@ -98,6 +118,12 @@ internal fun StudyEntity.markScheduleFailed(error: String, retryAt: Instant, now
     nextDueAt = retryAt
     scheduleClaimedUntil = null
     lastError = error
+    updatedAt = now
+}
+
+private fun StudyEntity.markTopicSelected(now: Instant) {
+    lastSentAt = now
+    lastError = null
     updatedAt = now
 }
 

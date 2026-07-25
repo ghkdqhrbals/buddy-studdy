@@ -6,6 +6,7 @@ import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystudy.backend.study.application.port.outbound.OpenAIPort
+import com.buddystudy.backend.study.application.port.outbound.StudyTopicSuggestionPort
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
@@ -14,7 +15,7 @@ import org.springframework.stereotype.Component
 class SystemOpenAIClient(
     private val executor: OpenAIRequestExecutor,
     private val properties: BuddyStudyProperties,
-) : OpenAIPort {
+) : OpenAIPort, StudyTopicSuggestionPort {
     suspend fun validate() {
         validate(systemApiKey())
     }
@@ -71,6 +72,23 @@ class SystemOpenAIClient(
 
     override suspend fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer =
         executor.grade(systemApiKey(), model, question, answer, topic, level, language)
+
+    override suspend fun suggestTopics(
+        rootTopic: String,
+        parentTopic: String,
+        existingTopics: Collection<String>,
+        language: String,
+        count: Int,
+    ): List<String> =
+        executor.suggestStudyTopics(
+            apiKey = systemApiKey(),
+            model = properties.openai.model,
+            rootTopic = rootTopic,
+            parentTopic = parentTopic,
+            existingTopics = existingTopics,
+            language = language,
+            count = count,
+        )
 
     private fun systemApiKey(): String =
         properties.openai.apiKey.takeIf { it.isNotBlank() }

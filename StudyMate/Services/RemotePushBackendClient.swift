@@ -296,6 +296,18 @@ protocol RemotePushBackendClientProtocol {
         sortOrder: Int
     ) async throws -> BackendStudyRoom
 
+    func suggestStudyTopics(
+        registration: RemotePushRegistration,
+        parentStudyID: Int,
+        count: Int
+    ) async throws -> [String]
+
+    func updateStudyTopicActivation(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        active: Bool
+    ) async throws -> BackendStudyRoom
+
     func updateStudy(
         registration: RemotePushRegistration,
         studyID: Int,
@@ -728,6 +740,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             difficultyLevel: category.difficulty.level,
             intervalMinutes: settings.sanitizedIntervalMinutes,
             enabled: true,
+            activeForQuestions: true,
             notificationSound: settings.notificationSound.backendSoundName,
             customPrompt: category.normalizedCustomPrompt,
             openAIModel: category.sanitizedOpenAIModel,
@@ -743,6 +756,41 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(body)
 
+        let data = try await perform(request)
+        return try decoder.decode(BackendStudyRoom.self, from: data)
+    }
+
+    func suggestStudyTopics(
+        registration: RemotePushRegistration,
+        parentStudyID: Int,
+        count: Int = 4
+    ) async throws -> [String] {
+        var components = URLComponents(
+            url: endpoint("api", "v1", "studies", String(parentStudyID), "topic-suggestions"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [URLQueryItem(name: "count", value: "\(count)")]
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+        var request = authenticatedRequest(registration: registration, url: url)
+        request.httpMethod = "POST"
+        let data = try await perform(request)
+        return try decoder.decode(StudyTopicSuggestionsResponse.self, from: data).suggestions
+    }
+
+    func updateStudyTopicActivation(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        active: Bool
+    ) async throws -> BackendStudyRoom {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "studies", String(studyID), "question-activation")
+        )
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(StudyTopicActivationRequest(active: active))
         let data = try await perform(request)
         return try decoder.decode(BackendStudyRoom.self, from: data)
     }
@@ -1701,6 +1749,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var difficultyLevel: Int
         var intervalMinutes: Int
         var enabled: Bool
+        var activeForQuestions: Bool
         var notificationSound: String?
         var customPrompt: String
         var openAIModel: String
@@ -1713,6 +1762,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             case difficultyLevel
             case intervalMinutes
             case enabled
+            case activeForQuestions
             case notificationSound
             case customPrompt
             case openAIModel = "openaiModel"
@@ -1724,6 +1774,10 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     private struct AnswerRequest: Encodable {
         var answer: String
+    }
+
+    private struct StudyTopicActivationRequest: Encodable {
+        var active: Bool
     }
 
     private struct GoogleLoginRequest: Encodable {
@@ -1830,6 +1884,11 @@ struct BackendStudyPage: Decodable, Equatable {
     }
 }
 
+private struct StudyTopicSuggestionsResponse: Decodable {
+    var parentStudyId: Int
+    var suggestions: [String]
+}
+
 struct BackendStudyRoom: Decodable, Equatable, Identifiable {
     var id: Int
     var topic: String
@@ -1838,6 +1897,7 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
     var difficultyLevel: Int
     var intervalMinutes: Int
     var enabled: Bool
+    var activeForQuestions: Bool
     var notificationSound: String?
     var customPrompt: String
     var openAIModel: String
@@ -1857,6 +1917,7 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
         difficultyLevel: Int,
         intervalMinutes: Int,
         enabled: Bool,
+        activeForQuestions: Bool = true,
         notificationSound: String?,
         customPrompt: String,
         openAIModel: String,
@@ -1875,6 +1936,7 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
         self.difficultyLevel = difficultyLevel
         self.intervalMinutes = intervalMinutes
         self.enabled = enabled
+        self.activeForQuestions = activeForQuestions
         self.notificationSound = notificationSound
         self.customPrompt = customPrompt
         self.openAIModel = openAIModel
@@ -1895,6 +1957,7 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
         case difficultyLevel
         case intervalMinutes
         case enabled
+        case activeForQuestions
         case notificationSound
         case customPrompt
         case openAIModel = "openaiModel"
@@ -1916,6 +1979,7 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
         difficultyLevel = try container.decode(Int.self, forKey: .difficultyLevel)
         intervalMinutes = try container.decode(Int.self, forKey: .intervalMinutes)
         enabled = try container.decode(Bool.self, forKey: .enabled)
+        activeForQuestions = try container.decodeIfPresent(Bool.self, forKey: .activeForQuestions) ?? true
         notificationSound = try container.decodeIfPresent(String.self, forKey: .notificationSound)
         customPrompt = try container.decode(String.self, forKey: .customPrompt)
         openAIModel = try container.decode(String.self, forKey: .openAIModel)

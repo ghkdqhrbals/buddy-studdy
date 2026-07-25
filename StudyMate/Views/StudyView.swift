@@ -87,7 +87,7 @@ struct StudyView: View {
             draftAnswer = appState.answerDraft(for: selectedStudyRecord)
         }
         .task(id: preferredCategoryID) {
-            async let roomPreparation: Void = appState.prepareStudyRoom(categoryID: preferredCategoryID)
+            async let roomPreparation: Void = appState.prepareStudyRoom(categoryID: questionHostCategoryID)
             async let quotaRefresh: Void = appState.refreshQuestionQuota()
             _ = await (roomPreparation, quotaRefresh)
         }
@@ -118,7 +118,16 @@ struct StudyView: View {
     }
 
     private var selectedStudyRecord: StudyRecord? {
-        appState.backendStudyRoom(categoryID: preferredCategoryID)?.pendingQuestion
+        appState.backendStudyRoom(categoryID: questionHostCategoryID)?.pendingQuestion
+    }
+
+    private var questionHostCategoryID: String? {
+        guard let preferredCategoryID,
+              let studyID = Int(preferredCategoryID),
+              let root = appState.rootStudyRoom(for: studyID) else {
+            return preferredCategoryID
+        }
+        return String(root.id)
     }
 
     private var selectedDifficulty: Difficulty {
@@ -258,7 +267,8 @@ struct StudyView: View {
     }
 
     private var hasReachedPendingQuestionLimit: Bool {
-        appState.hasReachedPendingQuestionLimit(for: selectedCategory)
+        let hostCategory = questionHostCategoryID.flatMap { appState.settings.category(for: $0) }
+        return appState.hasReachedPendingQuestionLimit(for: hostCategory ?? selectedCategory)
     }
 
     private func questionQuotaView(_ quota: BackendQuestionQuota, strings: AppStrings) -> some View {

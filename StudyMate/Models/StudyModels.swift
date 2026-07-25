@@ -1622,6 +1622,21 @@ struct AppStrings {
     }
     var studyTree: String { text("학습 트리", "Study Tree") }
     var addSubstudy: String { text("하위 학습 추가", "Add Sub-study") }
+    var recommendSubstudy: String { text("AI 추천 주제", "AI topic suggestions") }
+    var recommendSubstudyDescription: String {
+        text("선택한 주제에서 다음에 학습할 내용을 추천합니다.", "Get focused next topics based on the selected node.")
+    }
+    var refreshRecommendations: String { text("다시 추천", "Refresh suggestions") }
+    var addTopicManually: String { text("직접 추가", "Add manually") }
+    var recommendedTopicsEmpty: String {
+        text("새 추천을 만들지 못했습니다. 다시 시도하거나 직접 추가해 주세요.", "No new suggestions were available. Retry or add one manually.")
+    }
+    var questionTopicActive: String { text("질문 대상", "Question topic") }
+    var questionTopicInactive: String { text("질문 대상 아님", "Not in rotation") }
+    var questionRotationHelp: String {
+        text("선택한 주제들은 예약 질문마다 순서대로 사용됩니다.", "Selected topics rotate across scheduled questions.")
+    }
+    var duplicateStudyTopic: String { text("이미 트리에 있는 주제입니다.", "This topic already exists in the tree.") }
     var deleteStudy: String { text("학습 삭제", "Delete Study") }
     var openQuestions: String { text("질문 열기", "Open Questions") }
     var treeVertical: String { text("세로", "Vertical") }

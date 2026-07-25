@@ -101,6 +101,18 @@ class StudyRepository(
         return template.selectPage(query, Query.query(criteria), StudyEntity::class.java, pageable)
     }
 
+    override suspend fun findAllByUserId(userId: Long): List<StudyEntity> =
+        template.select(
+            Query.query(Criteria.where("user_id").`is`(userId)).sort(
+                Sort.by(
+                    Sort.Order.asc("parent_study_id").nullsFirst(),
+                    Sort.Order.asc("sort_order"),
+                    Sort.Order.asc("id"),
+                ),
+            ),
+            StudyEntity::class.java,
+        ).collectList().awaitSingle()
+
     override suspend fun findByUserIdAndQuery(userId: Long, query: String, pageable: Pageable): Page<StudyEntity> {
         val pattern = "%${query.lowercase()}%"
         val search = Criteria.where("topic").like(pattern).ignoreCase(true)
@@ -117,7 +129,8 @@ class StudyRepository(
         val ids = template.databaseClient.sql(
             """
             select id from studies
-            where enabled = true and next_due_at is not null and next_due_at <= :now
+            where parent_study_id is null
+              and enabled = true and next_due_at is not null and next_due_at <= :now
               and (schedule_claimed_until is null or schedule_claimed_until <= :now)
             order by next_due_at asc, id asc
             limit :limit for update skip locked

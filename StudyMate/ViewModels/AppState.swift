@@ -3571,7 +3571,7 @@ final class AppState: ObservableObject {
         }
         statusMessage = nil
         Task { [weak self] in
-            await self?.createBackendStudyIfPossible(nextCategory, settings: nextSettings)
+            _ = await self?.createBackendStudyIfPossible(nextCategory, settings: nextSettings)
         }
     }
 
@@ -3634,18 +3634,19 @@ final class AppState: ObservableObject {
 
     func updateStudyTreeCategory(
         roomID: Int,
-        title: String,
-        difficulty: Difficulty,
-        customPrompt: String,
-        openAIModel: String
+        difficulty: Difficulty
     ) {
+        guard let room = backendStudyRoom(id: roomID) else {
+            return
+        }
+        let questionSettings = rootStudyRoom(for: roomID) ?? room
         let updatedCategory = StudyCategory(
             id: String(roomID),
-            title: title,
+            title: room.topic,
             difficulty: difficulty,
-            customPrompt: customPrompt,
-            openAIModel: openAIModel,
-            createdAt: backendStudyRoom(id: roomID)?.createdAt ?? appClock.now
+            customPrompt: questionSettings.customPrompt,
+            openAIModel: questionSettings.openAIModel,
+            createdAt: room.createdAt
         )
         updateStudyCategory(
             id: updatedCategory.id,
@@ -3715,16 +3716,23 @@ final class AppState: ObservableObject {
         homeStudyRoute = HomeStudyRoute(categoryID: categoryID, showsTree: true)
     }
 
+    @discardableResult
     func addChildStudyCategory(
         _ title: String,
         parentStudyID: Int,
         difficulty: Difficulty,
         customPrompt: String,
         openAIModel: String
-    ) {
+    ) async -> Bool {
         let raw = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else {
-            return
+            return false
+        }
+        let topicKey = Self.normalizedCategoryText(for: raw)
+        guard !backendStudyRooms.contains(where: {
+            Self.normalizedCategoryText(for: $0.topic) == topicKey
+        }) else {
+            return false
         }
 
         let category = StudyCategory(
@@ -3735,14 +3743,12 @@ final class AppState: ObservableObject {
         )
         let sortOrder = childStudyRooms(parentStudyID: parentStudyID).count
         let currentSettings = settings
-        Task { [weak self] in
-            await self?.createBackendStudyIfPossible(
-                category,
-                settings: currentSettings,
-                parentStudyID: parentStudyID,
-                sortOrder: sortOrder
-            )
-        }
+        return await createBackendStudyIfPossible(
+            category,
+            settings: currentSettings,
+            parentStudyID: parentStudyID,
+            sortOrder: sortOrder
+        )
     }
 
     func prepareStudyRoom(categoryID: String?) async {
@@ -3782,6 +3788,87 @@ final class AppState: ObservableObject {
                 }
                 return $0.sortOrder < $1.sortOrder
             }
+    }
+
+    func rootStudyRoom(for studyID: Int) -> BackendStudyRoom? {
+        let roomsByID = Dictionary(uniqueKeysWithValues: backendStudyRooms.map { ($0.id, $0) })
+        guard var current = roomsByID[studyID] else {
+            return nil
+        }
+        var visited = Set<Int>()
+        while let parentID = current.parentStudyId,
+              visited.insert(current.id).inserted,
+              let parent = roomsByID[parentID] {
+            current = parent
+        }
+        return current
+    }
+
+    func suggestChildStudyTopics(parentStudyID: Int) async -> [String] {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "suggest-study-topics") else {
+            return []
+        }
+        do {
+            let suggestions = try await studyRoomUseCase.suggestStudyTopics(
+                registration: registration,
+                parentStudyID: parentStudyID,
+                count: 4
+            )
+            log(.info, "학습 트리 주제를 추천했습니다. parentStudyID=\(parentStudyID), count=\(suggestions.count)")
+            return suggestions
+        } catch {
+            if handleAppError(
+                error,
+                fallback: "",
+                target: .none,
+                protectedPage: .myStudies,
+                termsRetry: nil
+            ) {
+                return []
+            }
+            log(.warning, "학습 트리 주제 추천 실패: parentStudyID=\(parentStudyID), error=\(error.localizedDescription)")
+            return []
+        }
+    }
+
+    func setStudyTopicActive(studyID: Int, active: Bool) {
+        guard let current = backendStudyRoom(id: studyID) else {
+            return
+        }
+        var optimistic = current
+        optimistic.activeForQuestions = active
+        studyRoomState.upsertStudy(optimistic)
+
+        Task { [weak self] in
+            guard let self,
+                  let registration = await backendRegistrationForOpenAIRequests(reason: "study-topic-activation") else {
+                self?.studyRoomState.upsertStudy(current)
+                return
+            }
+            do {
+                let saved = try await studyRoomUseCase.updateStudyTopicActivation(
+                    registration: registration,
+                    studyID: studyID,
+                    active: active
+                )
+                studyRoomState.upsertStudy(saved)
+                log(.info, "학습 트리 질문 대상을 변경했습니다. studyID=\(studyID), active=\(active)")
+            } catch {
+                studyRoomState.upsertStudy(current)
+                if handleAppError(
+                    error,
+                    fallback: "",
+                    target: .none,
+                    protectedPage: .myStudies,
+                    termsRetry: { [weak self] in
+                        self?.setStudyTopicActive(studyID: studyID, active: active)
+                    }
+                ) {
+                    return
+                }
+                log(.warning, "학습 트리 질문 대상 변경 실패: studyID=\(studyID), error=\(error.localizedDescription)")
+            }
+        }
     }
 
     func studyCategory(for room: BackendStudyRoom) -> StudyCategory {
@@ -4445,7 +4532,7 @@ final class AppState: ObservableObject {
                 localStudyRecordUseCase.appendQuestionToHistory(record.question)
                 localStudyRecordUseCase.replaceRecords(mergeBackendRecord(record, into: studyRecords))
                 reloadStudyRecordsFromStore()
-                studyRoomState.setPendingQuestion(record, forStudyID: studyID)
+                studyRoomState.setPendingQuestion(record, forStudyID: record.studyID ?? studyID)
 
                 let shouldActivateQuestion = !hasActiveUngradedCurrentQuestion
                 if shouldActivateQuestion {
@@ -6031,15 +6118,16 @@ final class AppState: ObservableObject {
         }
     }
 
+    @discardableResult
     private func createBackendStudyIfPossible(
         _ category: StudyCategory,
         settings: StudySettings,
         parentStudyID: Int? = nil,
         sortOrder: Int = 0
-    ) async {
+    ) async -> Bool {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "create-study") else {
             log(.warning, "백엔드 등록이 없어 학습 추가 동기화를 건너뛰었습니다. topic=\(category.normalizedTitle)")
-            return
+            return false
         }
 
         do {
@@ -6052,6 +6140,7 @@ final class AppState: ObservableObject {
             )
             log(.info, "백엔드 학습을 추가했습니다. id=\(room.id), topic=\(room.topic)")
             await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+            return true
         } catch {
             if handleAppError(
                 error,
@@ -6059,7 +6148,7 @@ final class AppState: ObservableObject {
                 target: .none,
                 protectedPage: .myStudies,
                 termsRetry: { [weak self] in
-                    await self?.createBackendStudyIfPossible(
+                    _ = await self?.createBackendStudyIfPossible(
                         category,
                         settings: settings,
                         parentStudyID: parentStudyID,
@@ -6067,9 +6156,10 @@ final class AppState: ObservableObject {
                     )
                 }
             ) {
-                return
+                return false
             }
             log(.warning, "백엔드 학습 추가 실패: \(error.localizedDescription)")
+            return false
         }
     }
 

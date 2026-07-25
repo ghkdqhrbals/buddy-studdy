@@ -130,21 +130,26 @@ class StudySyncServiceTest {
     }
 
     @Test
-    fun `same child topic can exist below different parents`(): Unit = runBlocking {
+    fun `same normalized topic is rejected across the study tree`() {
         studies.rows += study(id = 11, topic = "Redis")
         studies.rows += study(id = 12, topic = "Kafka")
 
-        val redisStream = service.createStudy(
-            principal,
-            CreateStudyCommand(topic = "Streams", parentStudyId = 11),
-        )
-        val kafkaStream = service.createStudy(
-            principal,
-            CreateStudyCommand(topic = "Streams", parentStudyId = 12),
-        )
+        runBlocking {
+            service.createStudy(
+                principal,
+                CreateStudyCommand(topic = "Redis Streams", parentStudyId = 11),
+            )
+        }
 
-        assertThat(redisStream.id).isNotEqualTo(kafkaStream.id)
-        assertThat(studies.rows.count { it.topic == "Streams" }).isEqualTo(2)
+        assertThatThrownBy {
+            runBlocking {
+                service.createStudy(
+                    principal,
+                    CreateStudyCommand(topic = "  redis   streams ", parentStudyId = 12),
+                )
+            }
+        }.isInstanceOf(ApiException::class.java)
+        assertThat(studies.rows.count { it.topic == "Redis Streams" }).isEqualTo(1)
     }
 
     @Test

@@ -9,6 +9,7 @@ import com.buddystudy.backend.stats.application.model.StatsResponse
 import com.buddystudy.backend.study.adapter.inbound.web.dto.AnswerRequest
 import com.buddystudy.backend.study.adapter.inbound.web.dto.CreateStudyRequest
 import com.buddystudy.backend.study.adapter.inbound.web.dto.RecordPublicityRequest
+import com.buddystudy.backend.study.adapter.inbound.web.dto.StudyTopicActivationRequest
 import com.buddystudy.backend.study.application.model.RecordsPageResponse
 import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.StudyRecordResponse
@@ -100,6 +101,24 @@ class StudyController(
         @PathVariable studyId: Long,
         authentication: Authentication,
     ): ResponseEntity<Unit> = study.deleteStudy(studyId, authentication)
+
+    @Operation(summary = "Recommend child study topics", description = "Uses the system tutor model to recommend non-duplicate child topics for the selected tree node.")
+    @PostMapping("/studies/{studyId}/topic-suggestions")
+    @RequirePermission(Permissions.STUDY_CREATE)
+    suspend fun suggestStudyTopics(
+        @PathVariable studyId: Long,
+        @RequestParam(defaultValue = "4") count: Int,
+        authentication: Authentication,
+    ) = study.suggestStudyTopics(studyId, count, authentication)
+
+    @Operation(summary = "Activate or deactivate a tree topic", description = "Controls whether this node participates in scheduled round-robin question generation.")
+    @PatchMapping("/studies/{studyId}/question-activation")
+    @RequirePermission(Permissions.STUDY_UPDATE)
+    suspend fun updateStudyTopicActivation(
+        @PathVariable studyId: Long,
+        @RequestBody body: StudyTopicActivationRequest,
+        authentication: Authentication,
+    ) = study.updateStudyTopicActivation(studyId, body, authentication)
 
     @Operation(
         summary = "List my graded records",

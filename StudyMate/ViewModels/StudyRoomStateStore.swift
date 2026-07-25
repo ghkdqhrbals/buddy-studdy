@@ -79,6 +79,14 @@ struct StudyRoomStateStore {
         rooms.removeAll { $0.id == studyID }
     }
 
+    mutating func upsertStudy(_ study: BackendStudyRoom) {
+        if let index = rooms.firstIndex(where: { $0.id == study.id }) {
+            rooms[index] = study
+        } else {
+            rooms.append(study)
+        }
+    }
+
     mutating func applyAnsweredRecord(_ record: StudyRecord) {
         rooms = rooms.map { room in
             guard room.pendingQuestion?.id == record.id else {

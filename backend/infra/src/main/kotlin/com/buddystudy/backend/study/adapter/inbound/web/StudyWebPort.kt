@@ -3,6 +3,7 @@ package com.buddystudy.backend.study.adapter.inbound.web
 import com.buddystudy.backend.study.adapter.inbound.web.dto.AnswerRequest
 import com.buddystudy.backend.study.adapter.inbound.web.dto.CreateStudyRequest
 import com.buddystudy.backend.study.adapter.inbound.web.dto.RecordPublicityRequest
+import com.buddystudy.backend.study.adapter.inbound.web.dto.StudyTopicActivationRequest
 import com.buddystudy.backend.stats.application.model.StatsQuery
 import com.buddystudy.backend.stats.application.model.StatsActivityResponse
 import com.buddystudy.backend.stats.application.model.StatsResponse
@@ -11,6 +12,7 @@ import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.StudyRecordResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
 import com.buddystudy.backend.study.application.model.QuestionQuotaResponse
+import com.buddystudy.backend.study.application.model.StudyTopicSuggestionsResponse
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
 import java.time.Instant
@@ -31,4 +33,10 @@ interface StudyWebPort {
     suspend fun questionQuota(authentication: Authentication): QuestionQuotaResponse
     suspend fun createStudy(body: CreateStudyRequest, authentication: Authentication): StudyRoomResponse
     suspend fun deleteStudy(studyId: Long, authentication: Authentication): ResponseEntity<Unit>
+    suspend fun suggestStudyTopics(studyId: Long, count: Int, authentication: Authentication): StudyTopicSuggestionsResponse
+    suspend fun updateStudyTopicActivation(
+        studyId: Long,
+        body: StudyTopicActivationRequest,
+        authentication: Authentication,
+    ): StudyRoomResponse
 }

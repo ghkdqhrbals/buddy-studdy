@@ -63,7 +63,12 @@ class StudySyncService(
             studies.findByIdAndUserId(parentId, principal.userId)
                 ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Parent study not found.")
         }
-        val study = studies.findByUserIdAndParentStudyIdAndTopic(principal.userId, parentStudy?.id, topic)
+        val duplicate = studies.findAllByUserId(principal.userId)
+            .firstOrNull { it.topic.normalizedStudyTopicKey() == topic.normalizedStudyTopicKey() }
+        if (duplicate != null && duplicate.parentStudyId != parentStudy?.id) {
+            throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR, "A study topic with the same name already exists.")
+        }
+        val study = duplicate
             ?: StudyEntity(
                 deviceId = principal.deviceId,
                 userId = principal.userId,
@@ -80,6 +85,7 @@ class StudySyncService(
         study.deviceId = principal.deviceId
         study.parentStudyId = parentStudy?.id
         study.sortOrder = command.sortOrder.coerceAtLeast(0)
+        study.activeForQuestions = command.activeForQuestions
         study.apply(
             StudyRoomSettings.of(study.toStudyRoomSettingsState()).configure(
                 StudyRoomSettingsCommand(
@@ -133,15 +139,17 @@ class StudySyncService(
         }
     }
 
-    private suspend fun StudyEntity.toStudyRoomResponse(
-        pendingQuestion: QuestionEntity? = null,
-        statsByQuestionId: Map<Long, QuestionStatsEntity> = emptyMap(),
-    ): StudyRoomResponse {
-        val pending = pendingQuestion?.let { question ->
-            question.toStudyRecord(statsByQuestionId[question.id]).toProjection().toRecordResponse()
-        }
+}
 
-        return StudyRoomResponse(
+internal suspend fun StudyEntity.toStudyRoomResponse(
+    pendingQuestion: QuestionEntity? = null,
+    statsByQuestionId: Map<Long, QuestionStatsEntity> = emptyMap(),
+): StudyRoomResponse {
+    val pending = pendingQuestion?.let { question ->
+        question.toStudyRecord(statsByQuestionId[question.id]).toProjection().toRecordResponse()
+    }
+
+    return StudyRoomResponse(
         id = id,
         parentStudyId = parentStudyId,
         sortOrder = sortOrder,
@@ -149,6 +157,7 @@ class StudySyncService(
         difficultyLevel = difficultyLevel,
         intervalMinutes = intervalMinutes,
         enabled = enabled,
+        activeForQuestions = activeForQuestions,
         notificationSound = notificationSound,
         customPrompt = customPrompt,
         openaiModel = openaiModel,
@@ -159,58 +168,42 @@ class StudySyncService(
         pendingQuestion = pending,
         createdAt = createdAt,
         updatedAt = updatedAt,
-        )
-    }
-
-    private suspend fun StudyEntity.toStudyRoomSettingsState() = StudyRoomSettingsState(
-        openaiApiKeyCipher = null,
-        nextDueAt = nextDueAt,
-    )
-
-    private suspend fun StudyEntity.apply(update: StudyRoomSettingsUpdate) {
-        difficultyLevel = update.difficultyLevel
-        intervalMinutes = update.intervalMinutes
-        enabled = update.enabled
-        notificationSound = update.notificationSound
-        customPrompt = update.customPrompt
-        openaiModel = update.openaiModel
-        maxHistoryCount = update.maxHistoryCount
-        updatedAt = update.updatedAt
-    }
-
-    private suspend fun StudyEntity.reschedule(now: Instant) {
-        nextDueAt = if (enabled) now.plusSeconds(intervalMinutes.toLong() * 60) else null
-        updatedAt = now
-    }
-
-    private suspend fun StudyEntity.shouldReschedule(
-        isNewStudy: Boolean,
-        previousEnabled: Boolean,
-        previousIntervalMinutes: Int,
-        previousNextDueAt: Instant?,
-    ): Boolean =
-        isNewStudy ||
-            previousEnabled != enabled ||
-            previousIntervalMinutes != intervalMinutes ||
-            (enabled && previousNextDueAt == null)
-
-    private suspend fun QuestionEntity.toStudyRecord(stats: QuestionStatsEntity? = null) = StudyRecord.of(
-        StudyRecordState(
-            id = id,
-            question = question,
-            hint = hint,
-            createdAt = createdAt,
-            answer = answer,
-            score = score,
-            correct = correct,
-            feedback = feedback,
-            explanation = explanation,
-            topic = topic,
-            difficultyLevel = difficultyLevel,
-            answeredAt = answeredAt,
-            publicQuestion = publicQuestion,
-            studyId = studyId,
-        ),
-        stats?.let { StudyRecordStats(it.likeCount, it.commentCount, it.viewCount) },
     )
 }
+
+private suspend fun StudyEntity.toStudyRoomSettingsState() = StudyRoomSettingsState(
+    openaiApiKeyCipher = null,
+    nextDueAt = nextDueAt,
+)
+
+private suspend fun StudyEntity.apply(update: StudyRoomSettingsUpdate) {
+    difficultyLevel = update.difficultyLevel
+    intervalMinutes = update.intervalMinutes
+    enabled = update.enabled
+    notificationSound = update.notificationSound
+    customPrompt = update.customPrompt
+    openaiModel = update.openaiModel
+    maxHistoryCount = update.maxHistoryCount
+    updatedAt = update.updatedAt
+}
+
+private suspend fun StudyEntity.reschedule(now: Instant) {
+    nextDueAt = if (enabled && parentStudyId == null) now.plusSeconds(intervalMinutes.toLong() * 60) else null
+    updatedAt = now
+}
+
+private suspend fun StudyEntity.shouldReschedule(
+    isNewStudy: Boolean,
+    previousEnabled: Boolean,
+    previousIntervalMinutes: Int,
+    previousNextDueAt: Instant?,
+): Boolean =
+    isNewStudy ||
+        previousEnabled != enabled ||
+        previousIntervalMinutes != intervalMinutes ||
+        (enabled && previousNextDueAt == null)
+
+internal fun String.normalizedStudyTopicKey(): String =
+    trim()
+        .lowercase()
+        .replace(Regex("\\s+"), " ")

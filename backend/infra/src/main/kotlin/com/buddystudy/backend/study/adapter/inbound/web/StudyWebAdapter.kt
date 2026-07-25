@@ -6,10 +6,13 @@ import com.buddystudy.backend.stats.application.port.inbound.GetStudyStatsUseCas
 import com.buddystudy.backend.study.adapter.inbound.web.dto.AnswerRequest
 import com.buddystudy.backend.study.adapter.inbound.web.dto.CreateStudyRequest
 import com.buddystudy.backend.study.adapter.inbound.web.dto.RecordPublicityRequest
+import com.buddystudy.backend.study.adapter.inbound.web.dto.StudyTopicActivationRequest
 import com.buddystudy.backend.study.application.port.inbound.BrowseRecordsUseCase
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.StudySyncUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudyUseCase
+import com.buddystudy.backend.study.application.port.inbound.StudyTreeUseCase
+import com.buddystudy.backend.study.application.port.inbound.UpdateStudyTopicActivationCommand
 import com.buddystudy.backend.study.application.port.inbound.QuestionQuotaUseCase
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
@@ -24,6 +27,7 @@ class StudyWebAdapter(
     private val recordsUseCase: BrowseRecordsUseCase,
     private val statsUseCase: GetStudyStatsUseCase,
     private val studySyncUseCase: StudySyncUseCase,
+    private val studyTreeUseCase: StudyTreeUseCase,
     private val questionQuotaUseCase: QuestionQuotaUseCase,
 ) : StudyWebPort {
     override suspend fun study(limit: Int, offset: Int, query: String?, authentication: Authentication) =
@@ -76,6 +80,7 @@ class StudyWebAdapter(
                 difficultyLevel = body.difficultyLevel,
                 intervalMinutes = body.intervalMinutes,
                 enabled = body.enabled,
+                activeForQuestions = body.activeForQuestions,
                 notificationSound = body.notificationSound,
                 customPrompt = body.customPrompt,
                 openaiModel = body.openaiModel,
@@ -87,6 +92,23 @@ class StudyWebAdapter(
         studySyncUseCase.deleteStudy(authentication.principalOrThrow(), studyId)
         return ResponseEntity.noContent().build()
     }
+
+    override suspend fun suggestStudyTopics(studyId: Long, count: Int, authentication: Authentication) =
+        studyTreeUseCase.suggestTopics(
+            principal = authentication.principalOrThrow(),
+            parentStudyId = studyId,
+            count = safeLimit(count, 8),
+        )
+
+    override suspend fun updateStudyTopicActivation(
+        studyId: Long,
+        body: StudyTopicActivationRequest,
+        authentication: Authentication,
+    ) = studyTreeUseCase.updateTopicActivation(
+        principal = authentication.principalOrThrow(),
+        studyId = studyId,
+        command = UpdateStudyTopicActivationCommand(body.active),
+    )
 
     private fun safeLimit(value: Int, max: Int) = min(max(1, value), max)
 }

@@ -5,6 +5,7 @@ import com.buddystudy.backend.study.application.model.RecordsPageResponse
 import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.StudyRecordResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
+import com.buddystudy.backend.study.application.model.StudyTopicSuggestionsResponse
 
 interface StudyUseCase {
     suspend fun createQuestion(principal: Principal, studyId: Long): StudyRecordResponse
@@ -24,6 +25,20 @@ interface StudySyncUseCase {
     suspend fun study(principal: Principal, limit: Int, offset: Int, query: String? = null): StudyPageResponse
     suspend fun createStudy(principal: Principal, command: CreateStudyCommand): StudyRoomResponse
     suspend fun deleteStudy(principal: Principal, studyId: Long)
+}
+
+interface StudyTreeUseCase {
+    suspend fun suggestTopics(
+        principal: Principal,
+        parentStudyId: Long,
+        count: Int,
+    ): StudyTopicSuggestionsResponse
+
+    suspend fun updateTopicActivation(
+        principal: Principal,
+        studyId: Long,
+        command: UpdateStudyTopicActivationCommand,
+    ): StudyRoomResponse
 }
 
 interface RunQuestionScheduleUseCase {

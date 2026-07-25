@@ -38,6 +38,30 @@ struct StudyRoomUseCase {
         )
     }
 
+    func suggestStudyTopics(
+        registration: RemotePushRegistration,
+        parentStudyID: Int,
+        count: Int = 4
+    ) async throws -> [String] {
+        try await repository.suggestStudyTopics(
+            registration: registration,
+            parentStudyID: parentStudyID,
+            count: count
+        )
+    }
+
+    func updateStudyTopicActivation(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        active: Bool
+    ) async throws -> BackendStudyRoom {
+        try await repository.updateStudyTopicActivation(
+            registration: registration,
+            studyID: studyID,
+            active: active
+        )
+    }
+
     func updateStudy(
         registration: RemotePushRegistration,
         studyID: Int,

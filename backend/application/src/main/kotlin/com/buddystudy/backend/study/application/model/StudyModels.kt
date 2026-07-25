@@ -36,6 +36,7 @@ data class StudyRoomResponse(
     val difficultyLevel: Int,
     val intervalMinutes: Int,
     val enabled: Boolean,
+    val activeForQuestions: Boolean,
     val notificationSound: String?,
     val customPrompt: String,
     val openaiModel: String,
@@ -46,6 +47,11 @@ data class StudyRoomResponse(
     val pendingQuestion: StudyRecordResponse?,
     val createdAt: Instant,
     val updatedAt: Instant,
+)
+
+data class StudyTopicSuggestionsResponse(
+    val parentStudyId: Long,
+    val suggestions: List<String>,
 )
 
 data class StudyPageResponse(

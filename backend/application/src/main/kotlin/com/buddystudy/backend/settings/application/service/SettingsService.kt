@@ -154,7 +154,7 @@ class SettingsService(
     }
 
     private suspend fun StudyEntity.reschedule(now: Instant) {
-        nextDueAt = if (enabled) now.plusSeconds(intervalMinutes.toLong() * 60) else null
+        nextDueAt = if (enabled && parentStudyId == null) now.plusSeconds(intervalMinutes.toLong() * 60) else null
         updatedAt = now
     }
 

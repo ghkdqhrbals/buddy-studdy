@@ -2357,6 +2357,12 @@ private struct MobileStudyTreeView: View {
                                 room: placement.room,
                                 strings: strings,
                                 onAddChild: { childParent = placement.room },
+                                onToggleActive: {
+                                    appState.setStudyTopicActive(
+                                        studyID: placement.room.id,
+                                        active: !placement.room.activeForQuestions
+                                    )
+                                },
                                 onEdit: { editingRoom = placement.room }
                             )
                             .position(placement.center)
@@ -2374,38 +2380,28 @@ private struct MobileStudyTreeView: View {
         .navigationTitle(strings.studyTree)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $childParent) { parent in
-            StudyCategoryEditorSheet(category: nil, strings: strings, onDelete: nil) {
-                title,
-                difficulty,
-                prompt,
-                model in
-                appState.addChildStudyCategory(
+            StudyTopicAddSheet(parent: parent, strings: strings) { title, difficulty in
+                await appState.addChildStudyCategory(
                     title,
                     parentStudyID: parent.id,
                     difficulty: difficulty,
-                    customPrompt: prompt,
-                    openAIModel: model
+                    customPrompt: StudySettings.defaultCustomPrompt,
+                    openAIModel: parent.openAIModel
                 )
             }
+            .environmentObject(appState)
         }
         .sheet(item: $editingRoom) { room in
-            StudyCategoryEditorSheet(
-                category: appState.studyCategory(for: room),
+            StudyTopicLevelSheet(
+                room: room,
                 strings: strings,
                 onDelete: {
                     appState.deleteStudyCategory(id: String(room.id))
                 }
-            ) {
-                title,
-                difficulty,
-                prompt,
-                model in
+            ) { difficulty in
                 appState.updateStudyTreeCategory(
                     roomID: room.id,
-                    title: title,
-                    difficulty: difficulty,
-                    customPrompt: prompt,
-                    openAIModel: model
+                    difficulty: difficulty
                 )
             }
         }
@@ -2419,6 +2415,7 @@ private struct StudyTreeNode: View {
     var room: BackendStudyRoom
     var strings: AppStrings
     var onAddChild: () -> Void
+    var onToggleActive: () -> Void
     var onEdit: () -> Void
 
     private var levelColor: Color {
@@ -2435,47 +2432,70 @@ private struct StudyTreeNode: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            NavigationLink {
-                StudyView(preferredCategoryID: String(room.id))
-                    .padding(.horizontal, 16)
-                    .mobileTabTitle(room.topic)
-            } label: {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text(room.topic)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+        NavigationLink {
+            StudyView(preferredCategoryID: String(room.id))
+                .padding(.horizontal, 16)
+                .mobileTabTitle(room.topic)
+        } label: {
+            VStack(alignment: .leading, spacing: 7) {
+                Text(room.topic)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
 
+                HStack(spacing: 5) {
                     Text(Difficulty(level: room.difficultyLevel).displayName(language: strings.language))
-                        .font(.caption2.weight(.medium))
                         .foregroundStyle(levelColor)
+                    Circle()
+                        .fill(room.activeForQuestions ? Color.accentColor : Color.secondary.opacity(0.35))
+                        .frame(width: 5, height: 5)
+                    Text(room.activeForQuestions ? strings.questionTopicActive : strings.questionTopicInactive)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                .padding(.horizontal, 12)
-                .frame(
-                    width: StudyTreeLayoutSnapshot.nodeSize.width,
-                    height: StudyTreeLayoutSnapshot.nodeSize.height,
-                    alignment: .leading
-                )
-                .background(Color(.secondarySystemBackground))
-                .overlay(alignment: .leading) {
-                    Rectangle()
-                        .fill(levelColor.opacity(0.72))
-                        .frame(width: 4)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(levelColor.opacity(0.2), lineWidth: 1)
-                }
+                .font(.caption2.weight(.medium))
+            }
+            .padding(.horizontal, 12)
+            .frame(
+                width: StudyTreeLayoutSnapshot.nodeSize.width,
+                height: StudyTreeLayoutSnapshot.nodeSize.height,
+                alignment: .leading
+            )
+            .background(Color(.secondarySystemBackground))
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(levelColor.opacity(0.72))
+                    .frame(width: 4)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(levelColor.opacity(0.2), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button(strings.editStudyCategory, action: onEdit)
+            Button(strings.addSubstudy, action: onAddChild)
+            Button(
+                room.activeForQuestions ? strings.questionTopicInactive : strings.questionTopicActive,
+                action: onToggleActive
+            )
+        }
+        .overlay(alignment: .topLeading) {
+            Button(action: onToggleActive) {
+                Image(systemName: room.activeForQuestions ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(room.activeForQuestions ? Color.accentColor : Color.secondary)
+                    .frame(width: 30, height: 30)
+                    .background(Color(.systemBackground), in: Circle())
             }
             .buttonStyle(.plain)
-            .contextMenu {
-                Button(strings.editStudyCategory, action: onEdit)
-                Button(strings.addSubstudy, action: onAddChild)
-            }
-
+            .accessibilityLabel(room.activeForQuestions ? strings.questionTopicActive : strings.questionTopicInactive)
+            .offset(x: -10, y: -10)
+        }
+        .overlay(alignment: .topTrailing) {
             Button(action: onAddChild) {
                 Image(systemName: "plus")
                     .font(.caption.weight(.bold))
@@ -2490,6 +2510,263 @@ private struct StudyTreeNode: View {
             width: StudyTreeLayoutSnapshot.nodeSize.width,
             height: StudyTreeLayoutSnapshot.nodeSize.height
         )
+    }
+}
+
+private struct StudyTopicAddSheet: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+
+    var parent: BackendStudyRoom
+    var strings: AppStrings
+    var onAdd: (String, Difficulty) async -> Bool
+
+    @State private var suggestions: [String] = []
+    @State private var difficultyLevel: Double
+    @State private var manualTopic = ""
+    @State private var showsManualEntry = false
+    @State private var isLoading = true
+    @State private var isSaving = false
+    @State private var inlineMessage: String?
+
+    init(
+        parent: BackendStudyRoom,
+        strings: AppStrings,
+        onAdd: @escaping (String, Difficulty) async -> Bool
+    ) {
+        self.parent = parent
+        self.strings = strings
+        self.onAdd = onAdd
+        _difficultyLevel = State(initialValue: Double(parent.difficultyLevel))
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(parent.topic)
+                            .font(.headline)
+                        Text(strings.recommendSubstudyDescription)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                Section(strings.difficulty) {
+                    HStack {
+                        Text(Difficulty(level: resolvedDifficulty).displayName(language: strings.language))
+                            .fontWeight(.semibold)
+                        Spacer()
+                        Text("\(resolvedDifficulty)")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $difficultyLevel, in: 1...10, step: 1)
+                }
+
+                Section(strings.recommendSubstudy) {
+                    if isLoading {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text(strings.loading)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if suggestions.isEmpty {
+                        Text(strings.recommendedTopicsEmpty)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        ForEach(suggestions, id: \.self) { topic in
+                            Button {
+                                add(topic)
+                            } label: {
+                                HStack {
+                                    Text(topic)
+                                        .foregroundStyle(.primary)
+                                        .multilineTextAlignment(.leading)
+                                    Spacer()
+                                    Image(systemName: "plus.circle")
+                                        .foregroundStyle(Color.accentColor)
+                                }
+                            }
+                            .disabled(isSaving)
+                        }
+                    }
+
+                    Button(strings.refreshRecommendations) {
+                        Task { await loadSuggestions() }
+                    }
+                    .disabled(isLoading || isSaving)
+                }
+
+                Section {
+                    DisclosureGroup(strings.addTopicManually, isExpanded: $showsManualEntry) {
+                        TextField(strings.studyTopic, text: $manualTopic)
+                            .textInputAutocapitalization(.sentences)
+                        Button(strings.addSubstudy) {
+                            add(manualTopic)
+                        }
+                        .disabled(manualTopic.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
+                    }
+                }
+
+                if let inlineMessage {
+                    Section {
+                        Text(inlineMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                Section {
+                    Text(strings.questionRotationHelp)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle(strings.addSubstudy)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(strings.cancel) {
+                        dismiss()
+                    }
+                }
+            }
+            .task {
+                await loadSuggestions()
+            }
+            .interactiveDismissDisabled(isSaving)
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private var resolvedDifficulty: Int {
+        min(max(Int(difficultyLevel.rounded()), 1), 10)
+    }
+
+    private func loadSuggestions() async {
+        isLoading = true
+        inlineMessage = nil
+        suggestions = await appState.suggestChildStudyTopics(parentStudyID: parent.id)
+        isLoading = false
+    }
+
+    private func add(_ rawTopic: String) {
+        let topic = rawTopic.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !topic.isEmpty else {
+            return
+        }
+        let normalized = topic.lowercased().filter { !$0.isWhitespace }
+        let alreadyExists = appState.backendStudyRooms.contains {
+            $0.topic.trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+                .filter { !$0.isWhitespace } == normalized
+        }
+        guard !alreadyExists else {
+            inlineMessage = strings.duplicateStudyTopic
+            return
+        }
+
+        isSaving = true
+        inlineMessage = nil
+        Task {
+            let saved = await onAdd(topic, Difficulty(level: resolvedDifficulty))
+            isSaving = false
+            if saved {
+                dismiss()
+            } else {
+                inlineMessage = strings.duplicateStudyTopic
+            }
+        }
+    }
+}
+
+private struct StudyTopicLevelSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var room: BackendStudyRoom
+    var strings: AppStrings
+    var onDelete: () -> Void
+    var onSave: (Difficulty) -> Void
+
+    @State private var difficultyLevel: Double
+    @State private var showsDeleteConfirmation = false
+
+    init(
+        room: BackendStudyRoom,
+        strings: AppStrings,
+        onDelete: @escaping () -> Void,
+        onSave: @escaping (Difficulty) -> Void
+    ) {
+        self.room = room
+        self.strings = strings
+        self.onDelete = onDelete
+        self.onSave = onSave
+        _difficultyLevel = State(initialValue: Double(room.difficultyLevel))
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text(room.topic)
+                        .font(.headline)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(strings.difficulty)
+                            Spacer()
+                            Text(Difficulty(level: resolvedDifficulty).displayName(language: strings.language))
+                                .fontWeight(.semibold)
+                        }
+                        Slider(value: $difficultyLevel, in: 1...10, step: 1)
+                    }
+                }
+
+                Section {
+                    Text(strings.questionRotationHelp)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section {
+                    Button(strings.deleteStudy, role: .destructive) {
+                        showsDeleteConfirmation = true
+                    }
+                }
+            }
+            .navigationTitle(strings.editStudyCategory)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(strings.cancel) {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(strings.save) {
+                        onSave(Difficulty(level: resolvedDifficulty))
+                        dismiss()
+                    }
+                }
+            }
+            .confirmationDialog(strings.deleteStudy, isPresented: $showsDeleteConfirmation) {
+                Button(strings.deleteStudy, role: .destructive) {
+                    onDelete()
+                    dismiss()
+                }
+                Button(strings.cancel, role: .cancel) {}
+            }
+        }
+    }
+
+    private var resolvedDifficulty: Int {
+        min(max(Int(difficultyLevel.rounded()), 1), 10)
     }
 }
 

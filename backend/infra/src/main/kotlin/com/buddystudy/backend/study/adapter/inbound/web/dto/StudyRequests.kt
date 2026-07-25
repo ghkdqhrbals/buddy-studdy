@@ -11,6 +11,7 @@ data class CreateStudyRequest(
     @field:Min(1) @field:Max(10) var difficultyLevel: Int = 5,
     @field:Min(1) @field:Max(1440) var intervalMinutes: Int = 15,
     var enabled: Boolean = true,
+    var activeForQuestions: Boolean = true,
     var notificationSound: String? = null,
     var customPrompt: String = "",
     var openaiModel: String = "gpt-5.4",
@@ -19,3 +20,4 @@ data class CreateStudyRequest(
 
 data class AnswerRequest(var answer: String = "")
 data class RecordPublicityRequest(var isPublic: Boolean = true)
+data class StudyTopicActivationRequest(var active: Boolean = true)

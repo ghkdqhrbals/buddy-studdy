@@ -96,6 +96,37 @@ class OpenAIRequestExecutor(
         return parseQuestionCoverageConcepts(text)
     }
 
+    fun suggestStudyTopics(
+        apiKey: String,
+        model: String,
+        rootTopic: String,
+        parentTopic: String,
+        existingTopics: Collection<String>,
+        language: String,
+        count: Int,
+    ): List<String> {
+        val outputLanguage = if (language.lowercase().startsWith("en")) "English" else "Korean"
+        val prompt = """
+            Recommend distinct child study topics for a learning tree.
+            Root topic: $rootTopic
+            Parent topic: $parentTopic
+            Existing topics that must not be repeated: ${existingTopics.joinToString(", ")}
+            Output language: $outputLanguage
+            Return exactly ${count.coerceIn(1, 8)} concise, concrete topics.
+            Do not repeat, rename, pluralize, or closely paraphrase an existing topic.
+            Return JSON only:
+            {"topics":["topic 1","topic 2"]}
+        """.trimIndent()
+        val response = chatModel(apiKey, model, json = true).call(
+            Prompt(UserMessage(prompt), options(apiKey, model, json = true)),
+        )
+        val text = response.result?.output?.text ?: "{}"
+        val parsed: Map<String, Any?> = mapper.readValue(text.ifBlank { "{}" })
+        return (parsed["topics"] as? List<*>)
+            .orEmpty()
+            .mapNotNull { it?.toString()?.trim()?.takeIf(String::isNotEmpty) }
+    }
+
     fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer {
         val prompt = """
             Grade this answer consistently from 0 to 100.

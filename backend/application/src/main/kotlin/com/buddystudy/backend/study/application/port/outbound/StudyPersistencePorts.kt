@@ -17,8 +17,20 @@ interface StudyPort {
     suspend fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity?
     suspend fun findByUserIdAndTopics(userId: Long, topics: Collection<String>): List<StudyEntity>
     suspend fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity>
+    suspend fun findAllByUserId(userId: Long): List<StudyEntity> =
+        findByUserId(userId, Pageable.unpaged()).content
     suspend fun findByUserIdAndQuery(userId: Long, query: String, pageable: Pageable): Page<StudyEntity>
     suspend fun claimDue(now: Instant, limit: Int): List<StudyEntity>
+}
+
+interface StudyTopicSuggestionPort {
+    suspend fun suggestTopics(
+        rootTopic: String,
+        parentTopic: String,
+        existingTopics: Collection<String>,
+        language: String,
+        count: Int,
+    ): List<String>
 }
 
 interface QuestionPort {

@@ -64,6 +64,7 @@ class ScheduledQuestionService(
         if (!properties.scheduler.enabled) return
         val now = Instant.now()
         val usersById = mutableMapOf<Long, UserEntity?>()
+        val studiesByUserId = mutableMapOf<Long, List<StudyEntity>>()
         val recentQuestionsByStudyTopic = mutableMapOf<StudyTopicKey, List<String>>()
         val recentEmbeddingsByStudyTopic = mutableMapOf<StudyTopicKey, List<QuestionEmbeddingCandidate>>()
         val batchSize = properties.scheduler.batchSize.coerceAtLeast(1)
@@ -72,11 +73,27 @@ class ScheduledQuestionService(
             val dueStudies = studies.claimDue(now, batchSize)
             if (dueStudies.isEmpty()) break
             val pendingCounts = pendingCounts(dueStudies.map { it.id })
-            dueStudies.forEach { study ->
+            dueStudies.forEach { scheduleStudy ->
+                val userStudies = studiesByUserId[scheduleStudy.userId]
+                    ?: studies.findAllByUserId(scheduleStudy.userId).also {
+                        studiesByUserId[scheduleStudy.userId] = it
+                    }
+                val topicStudy = StudyTreeSelector.nextActiveTopic(scheduleStudy, userStudies)
+                if (topicStudy == null) {
+                    writer.deferUntilNextInterval(scheduleStudy, now)
+                    log.info(
+                        "scheduled_question_skipped_no_active_topic deviceId={} userId={} rootStudyId={}",
+                        scheduleStudy.deviceId,
+                        scheduleStudy.userId,
+                        scheduleStudy.id,
+                    )
+                    return@forEach
+                }
                 creator.createIfReady(
-                    study = study,
+                    scheduleStudy = scheduleStudy,
+                    topicStudy = topicStudy,
                     now = now,
-                    pending = pendingCounts[study.id] ?: 0L,
+                    pending = pendingCounts[scheduleStudy.id] ?: 0L,
                     usersById = usersById,
                     recentQuestionsByStudyTopic = recentQuestionsByStudyTopic,
                     recentEmbeddingsByStudyTopic = recentEmbeddingsByStudyTopic,
@@ -110,7 +127,8 @@ class ScheduledQuestionCreator(
     private val log: Logger,
 ) {
     suspend fun createIfReady(
-        study: StudyEntity,
+        scheduleStudy: StudyEntity,
+        topicStudy: StudyEntity,
         now: Instant,
         pending: Long,
         usersById: MutableMap<Long, UserEntity?>,
@@ -119,7 +137,7 @@ class ScheduledQuestionCreator(
     ) {
         var questionKey: OpenAIQuestionKey? = null
         try {
-            val userId = study.userId
+            val userId = scheduleStudy.userId
             val user = if (usersById.containsKey(userId)) {
                 usersById[userId]
             } else {
@@ -128,46 +146,68 @@ class ScheduledQuestionCreator(
             val appLanguage = user?.appLanguage ?: "ko"
             if (pending >= properties.scheduler.maxPendingPerStudy) {
                 writer.fail(
-                    study = study,
+                    study = scheduleStudy,
                     questionKey = null,
                     error = "Pending question limit reached ($pending).",
                     retryAt = backoffPolicy.pendingLimitNextDueAt(now),
                     now = now,
                 )
-                log.info("scheduled_question_skipped_pending deviceId={} userId={} studyId={} topic={} pending={}", study.deviceId, userId, study.id, study.topic, pending)
+                log.info(
+                    "scheduled_question_skipped_pending deviceId={} userId={} rootStudyId={} topicStudyId={} topic={} pending={}",
+                    scheduleStudy.deviceId,
+                    userId,
+                    scheduleStudy.id,
+                    topicStudy.id,
+                    topicStudy.topic,
+                    pending,
+                )
                 return
             }
             val resolvedQuestionKey = questionKeys.resolveForQuestionGeneration(user)
             questionKey = resolvedQuestionKey
-            val studyTopicKey = StudyTopicKey(study.id, userId, study.topic.normalizedTopicKey())
+            val studyTopicKey = StudyTopicKey(scheduleStudy.id, userId, topicStudy.topic.normalizedTopicKey())
             val recent = recentQuestionsByStudyTopic[studyTopicKey]
-                ?: recentQuestions(userId, study).also { recentQuestionsByStudyTopic[studyTopicKey] = it }
+                ?: recentQuestions(userId, scheduleStudy.id, topicStudy.topic)
+                    .also { recentQuestionsByStudyTopic[studyTopicKey] = it }
             val recentEmbeddings = recentEmbeddingsByStudyTopic[studyTopicKey]
-                ?: questionEmbeddings.findRecentByStudyIdAndTopic(study.id, study.topic, RECENT_EMBEDDING_LIMIT)
+                ?: questionEmbeddings.findRecentByStudyIdAndTopic(scheduleStudy.id, topicStudy.topic, RECENT_EMBEDDING_LIMIT)
                     .also { recentEmbeddingsByStudyTopic[studyTopicKey] = it }
-            val coverageSelection = selectCoverage(resolvedQuestionKey.apiKey, study)
+            val coverageSelection = selectCoverage(
+                apiKey = resolvedQuestionKey.apiKey,
+                topicStudy = topicStudy,
+                questionSettings = scheduleStudy,
+            )
             val generated = generateDistinctQuestion(
                 apiKey = resolvedQuestionKey.apiKey,
-                model = study.openaiModel,
-                topic = study.topic,
-                level = study.difficultyLevel,
+                model = scheduleStudy.openaiModel.ifBlank { properties.openai.model },
+                topic = topicStudy.topic,
+                level = topicStudy.difficultyLevel,
                 language = appLanguage,
-                customPrompt = study.customPrompt,
-                studyId = study.id,
+                customPrompt = scheduleStudy.customPrompt,
+                studyId = topicStudy.id,
                 userId = userId,
                 recentQuestions = recent,
                 recentEmbeddings = recentEmbeddings,
                 coverageSelection = coverageSelection,
             )
             val saved = writer.complete(
-                study = study,
+                scheduleStudy = scheduleStudy,
+                topicStudy = topicStudy,
                 generated = generated,
                 coverage = coverageSelection,
                 questionKey = resolvedQuestionKey,
                 appLanguage = appLanguage,
                 now = now,
             )
-            log.info("scheduled_question_created deviceId={} userId={} studyId={} topic={} questionId={} notification=true", study.deviceId, userId, study.id, study.topic, saved.id)
+            log.info(
+                "scheduled_question_created deviceId={} userId={} rootStudyId={} topicStudyId={} topic={} questionId={} notification=true",
+                scheduleStudy.deviceId,
+                userId,
+                scheduleStudy.id,
+                topicStudy.id,
+                topicStudy.topic,
+                saved.id,
+            )
         } catch (error: Exception) {
             val retryAt = if (error is ApiException && error.code == ApiErrorCode.OPENAI_API_KEY_MISSING) {
                 backoffPolicy.missingApiKeyNextDueAt(now)
@@ -175,19 +215,27 @@ class ScheduledQuestionCreator(
                 backoffPolicy.failureNextDueAt(now)
             }
             writer.fail(
-                study = study,
+                study = scheduleStudy,
                 questionKey = questionKey,
                 error = error.message ?: error.javaClass.simpleName,
                 retryAt = retryAt,
                 now = now,
             )
-            log.warn("scheduled_question_failed deviceId={} userId={} studyId={} topic={} error={}", study.deviceId, study.userId, study.id, study.topic, error.message)
+            log.warn(
+                "scheduled_question_failed deviceId={} userId={} rootStudyId={} topicStudyId={} topic={} error={}",
+                scheduleStudy.deviceId,
+                scheduleStudy.userId,
+                scheduleStudy.id,
+                topicStudy.id,
+                topicStudy.topic,
+                error.message,
+            )
         }
     }
 
-    private suspend fun recentQuestions(userId: Long, study: StudyEntity): List<String> {
-        val sameStudy = questions.findRecentQuestionTextsByStudyIdAndTopic(study.id, study.topic, PageRequest.of(0, 30))
-        val sameTopic = questions.findRecentQuestionTextsByUserIdAndTopic(userId, study.topic, PageRequest.of(0, 30))
+    private suspend fun recentQuestions(userId: Long, rootStudyId: Long, topic: String): List<String> {
+        val sameStudy = questions.findRecentQuestionTextsByStudyIdAndTopic(rootStudyId, topic, PageRequest.of(0, 30))
+        val sameTopic = questions.findRecentQuestionTextsByUserIdAndTopic(userId, topic, PageRequest.of(0, 30))
         return (sameStudy + sameTopic)
             .map { it.trim() }
             .filter { it.isNotBlank() }
@@ -250,14 +298,18 @@ class ScheduledQuestionCreator(
         error("unreachable")
     }
 
-    private suspend fun selectCoverage(apiKey: String, study: StudyEntity): QuestionCoverageSelection? {
-        questionCoverage.selectNext(study.id)?.let { return it }
+    private suspend fun selectCoverage(
+        apiKey: String,
+        topicStudy: StudyEntity,
+        questionSettings: StudyEntity,
+    ): QuestionCoverageSelection? {
+        questionCoverage.selectNext(topicStudy.id)?.let { return it }
         val blueprint = openAI.generateQuestionCoverageBlueprint(
             apiKey = apiKey,
-            model = study.openaiModel.ifBlank { properties.openai.model },
-            topic = study.topic,
-            level = study.difficultyLevel,
-            customPrompt = study.customPrompt,
+            model = questionSettings.openaiModel.ifBlank { properties.openai.model },
+            topic = topicStudy.topic,
+            level = topicStudy.difficultyLevel,
+            customPrompt = questionSettings.customPrompt,
         ).map { concept ->
             QuestionCoveragePort.CoverageConceptBlueprint(
                 key = concept.key,
@@ -266,8 +318,12 @@ class ScheduledQuestionCreator(
                 children = concept.children.toCoverageBlueprints(),
             )
         }
-        questionCoverage.ensureCoverage(study.id, study.topic, blueprint.ifEmpty { defaultCoverageBlueprint(study.topic) })
-        return questionCoverage.selectNext(study.id)
+        questionCoverage.ensureCoverage(
+            topicStudy.id,
+            topicStudy.topic,
+            blueprint.ifEmpty { defaultCoverageBlueprint(topicStudy.topic) },
+        )
+        return questionCoverage.selectNext(topicStudy.id)
     }
 
 }
