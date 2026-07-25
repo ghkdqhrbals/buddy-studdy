@@ -8,7 +8,6 @@ one workflow run just because they share a host.
 | Module | Workflow | Trigger | Runner | Owns |
 | --- | --- | --- | --- | --- |
 | Backend API | `Deploy BuddyStudy Backend` | `backend-image-published`, manual | EC2 self-hosted | Backend app rollout, backend env, backend nginx route, log-only MySQL runtime observer |
-| Redis Stream Coordinator | Separate coordinator deployment | coordinator release only | Coordinator owner | Coordinator container and Redis persistence/runtime |
 | Admin frontend | `Deploy BuddyStudy Admin Frontend` | `admin-frontend-image-published`, manual | EC2 self-hosted | Admin frontend container only |
 | Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, Server Dashboard, TestZone UI, Grafana, Loki, monitoring auth and access audit |
 | Monitoring routing | `Deploy BuddyStudy Monitoring Routes on MacBook Air` | manual | MacBook Air self-hosted | Routingflare routes for the monitoring UI and Grafana |
@@ -40,9 +39,9 @@ deployment.
   deployed by the monitoring workflow. TestZone's execution service and
   InfluxDB are deployed by the TestZone workflow. Backend deploys must not
   recreate any of them.
-- The Redis Stream Coordinator and its Redis runtime are separately managed.
-  Backend deployment verifies that the existing coordinator is running and
-  joins the shared Docker networks, but never pulls, replaces, or restarts it.
+- Backend deployment has no Redis Stream Coordinator runtime dependency and
+  must not provision coordinator containers, networks, routes, secrets, or
+  readiness settings.
 - Runtime health checks are not GitHub Actions deploy gates. GitHub Actions may
   validate deploy mechanics such as image pull, container process survival, and
   nginx syntax only.

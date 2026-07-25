@@ -23,7 +23,6 @@ jobs:
     env:
       IMAGE_REF: ${{ github.event.client_payload.image || inputs.image }}
       BACKEND_DOMAIN: api.ghkdqhrbals.org
-      COORDINATOR_DOMAIN: coordinator.ghkdqhrbals.org
 
     steps:
       - name: Validate input
@@ -48,7 +47,6 @@ jobs:
           APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
           APNS_BUNDLE_ID: ${{ secrets.APNS_BUNDLE_ID }}
           APNS_ENV: ${{ secrets.APNS_ENV }}
-          REDIS_STREAM_COORDINATOR_PASSWORD: ${{ secrets.REDIS_STREAM_COORDINATOR_PASSWORD }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           MONITORING_ENVIRONMENT_NAME: ${{ vars.MONITORING_ENVIRONMENT_NAME || 'production' }}
           MONITORING_SERVICE_NAME: ${{ vars.MONITORING_SERVICE_NAME || 'BuddyStudy backend' }}
@@ -59,10 +57,6 @@ jobs:
           MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES: ${{ vars.MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES || '15' }}
           MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES: ${{ vars.MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES || '15' }}
           MONITORING_SCHEDULER_MONITORED_JOBS: ${{ vars.MONITORING_SCHEDULER_MONITORED_JOBS || 'question-schedule,question-push-outbox-dispatch,user-stats-refresh,admin-analytics-recent,admin-analytics-correction' }}
-          REACTION_STREAM_COORDINATOR_BASE_URL: ${{ vars.REACTION_STREAM_COORDINATOR_BASE_URL || 'http://rsc-coordinator:8080' }}
-          MONITORING_COORDINATOR_READINESS_ENABLED: ${{ vars.MONITORING_COORDINATOR_READINESS_ENABLED || 'true' }}
-          MONITORING_COORDINATOR_BASE_URL: ${{ vars.MONITORING_COORDINATOR_BASE_URL || 'http://rsc-coordinator:8080' }}
-          MONITORING_COORDINATOR_TIMEOUT_MS: ${{ vars.MONITORING_COORDINATOR_TIMEOUT_MS || '3000' }}
           REMOTE_LOKI_PUSH_URL: ${{ vars.REMOTE_LOKI_PUSH_URL || '' }}
           REMOTE_LOKI_BASIC_AUTH_USER: ${{ secrets.REMOTE_LOKI_BASIC_AUTH_USER || '' }}
           REMOTE_LOKI_BASIC_AUTH_PASSWORD: ${{ secrets.REMOTE_LOKI_BASIC_AUTH_PASSWORD || '' }}
@@ -167,7 +161,6 @@ jobs:
           APNS_ENV=${APNS_ENV}
           AWS_SECRET_ID=${APP_SECRET_ID}
           AWS_REGION=ap-northeast-2
-          REDIS_STREAM_COORDINATOR_PASSWORD=${REDIS_STREAM_COORDINATOR_PASSWORD}
           SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
           MONITORING_ENVIRONMENT_NAME=${MONITORING_ENVIRONMENT_NAME}
           MONITORING_SERVICE_NAME=${MONITORING_SERVICE_NAME}
@@ -178,10 +171,6 @@ jobs:
           MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES=${MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES}
           MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES=${MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES}
           MONITORING_SCHEDULER_MONITORED_JOBS=${MONITORING_SCHEDULER_MONITORED_JOBS}
-          REACTION_STREAM_COORDINATOR_BASE_URL=${REACTION_STREAM_COORDINATOR_BASE_URL}
-          MONITORING_COORDINATOR_READINESS_ENABLED=${MONITORING_COORDINATOR_READINESS_ENABLED}
-          MONITORING_COORDINATOR_BASE_URL=${MONITORING_COORDINATOR_BASE_URL}
-          MONITORING_COORDINATOR_TIMEOUT_MS=${MONITORING_COORDINATOR_TIMEOUT_MS}
           PROFILE_PHOTO_PUBLIC_BASE_URL=https://${BACKEND_DOMAIN}
           ENV
           chmod 600 .env
@@ -222,11 +211,8 @@ jobs:
           }
 
           docker network create buddystudy-net >/dev/null 2>&1 || true
-          docker network create redis-stream-coordinator-net >/dev/null 2>&1 || true
           docker volume create buddystudy-mysql-data >/dev/null
           docker volume create buddystudy-profile-photos >/dev/null
-
-          docker rm -f rsc-prometheus redis-exporter-6379 redis-exporter-6380 redis-exporter-6381 >/dev/null 2>&1 || true
 
           mkdir -p promtail
           if [ -n "${REMOTE_LOKI_PUSH_URL}" ]; then
@@ -262,7 +248,7 @@ jobs:
                 - source_labels: ['__meta_docker_container_log_stream']
                   target_label: stream
                 - source_labels: ['__meta_docker_container_name']
-                  regex: '/(buddystudy-.*|rsc-.*)'
+                  regex: '/(buddystudy-.*)'
                   action: keep
               pipeline_stages:
                 - static_labels:
@@ -281,13 +267,6 @@ jobs:
           else
             docker rm -f buddystudy-promtail >/dev/null 2>&1 || true
           fi
-
-          if ! docker inspect -f '{{.State.Running}}' rsc-coordinator 2>/dev/null | grep -qx true; then
-            echo "The separately managed rsc-coordinator container is not running." >&2
-            exit 1
-          fi
-          docker network connect redis-stream-coordinator-net rsc-coordinator >/dev/null 2>&1 || true
-          docker network connect buddystudy-net rsc-coordinator >/dev/null 2>&1 || true
 
           docker rm -f buddystudy-caddy >/dev/null 2>&1 || true
           if docker inspect buddystudy-db >/dev/null 2>&1; then
@@ -360,10 +339,6 @@ jobs:
             -v buddystudy-profile-photos:/app/profile-photos \
             "${IMAGE_REF}"
 
-          if docker network inspect redis-stream-coordinator-net >/dev/null 2>&1; then
-            docker network connect redis-stream-coordinator-net "${NEW_SLOT}" >/dev/null 2>&1 || true
-          fi
-
           if ! wait_for_container_running "${NEW_SLOT}" "New backend slot ${NEW_SLOT}"; then
             docker rm -f "${NEW_SLOT}" >/dev/null 2>&1 || true
             exit 1
@@ -405,64 +380,6 @@ jobs:
             SSL_CERTIFICATE_KEY="/etc/nginx/certs/server.key"
           fi
 
-          COORDINATOR_SSL_CERTIFICATE="/etc/letsencrypt/live/${COORDINATOR_DOMAIN}/fullchain.pem"
-          COORDINATOR_SSL_CERTIFICATE_KEY="/etc/letsencrypt/live/${COORDINATOR_DOMAIN}/privkey.pem"
-          if ! test -s "letsencrypt/live/${COORDINATOR_DOMAIN}/fullchain.pem"; then
-            if ! docker run --rm \
-              -p 80:80 \
-              -v "$PWD/letsencrypt:/etc/letsencrypt" \
-              certbot/certbot:v2.11.0 certonly \
-              --standalone \
-              --preferred-challenges http-01 \
-              -d "${COORDINATOR_DOMAIN}" \
-              --agree-tos \
-              --non-interactive \
-              --register-unsafely-without-email; then
-              echo "Let's Encrypt certificate issuance failed for ${COORDINATOR_DOMAIN}. Falling back to a temporary self-signed certificate." >&2
-            fi
-          fi
-
-          if ! test -s "letsencrypt/live/${COORDINATOR_DOMAIN}/fullchain.pem"; then
-            openssl req -x509 -nodes -newkey rsa:2048 -days 30 \
-              -keyout nginx/certs/coordinator.key \
-              -out nginx/certs/coordinator.crt \
-              -subj "/CN=${COORDINATOR_DOMAIN}" \
-              -addext "subjectAltName=DNS:${COORDINATOR_DOMAIN}"
-            chmod 600 nginx/certs/coordinator.key
-            COORDINATOR_SSL_CERTIFICATE="/etc/nginx/certs/coordinator.crt"
-            COORDINATOR_SSL_CERTIFICATE_KEY="/etc/nginx/certs/coordinator.key"
-          fi
-
-          COORDINATOR_DOMAIN="coordinator.ghkdqhrbals.org"
-          COORDINATOR_SERVER_BLOCK=""
-          if test -s "letsencrypt/live/${COORDINATOR_DOMAIN}/fullchain.pem" \
-            && test -s "letsencrypt/live/${COORDINATOR_DOMAIN}/privkey.pem"; then
-            COORDINATOR_SERVER_BLOCK="$(cat <<COORDINATOR_NGINX
-
-            server {
-              listen 443 ssl;
-              http2 on;
-              server_name ${COORDINATOR_DOMAIN};
-
-              ssl_certificate /etc/letsencrypt/live/${COORDINATOR_DOMAIN}/fullchain.pem;
-              ssl_certificate_key /etc/letsencrypt/live/${COORDINATOR_DOMAIN}/privkey.pem;
-
-              client_max_body_size 1m;
-
-              location / {
-                set \$rsc_coordinator http://rsc-coordinator:8080;
-                proxy_pass \$rsc_coordinator;
-                proxy_http_version 1.1;
-                proxy_set_header Host \$host;
-                proxy_set_header X-Real-IP \$remote_addr;
-                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                proxy_set_header X-Forwarded-Proto https;
-              }
-            }
-          COORDINATOR_NGINX
-          )"
-          fi
-
           write_nginx_config() {
             local backend_slot="$1"
             cat > nginx/nginx.conf <<NGINX
@@ -496,26 +413,6 @@ jobs:
                 proxy_set_header X-Forwarded-Proto https;
               }
 
-              location /coord/ {
-                set \$rsc_coordinator http://rsc-coordinator:8080;
-                proxy_pass \$rsc_coordinator;
-                proxy_http_version 1.1;
-                proxy_set_header Host \$host;
-                proxy_set_header X-Real-IP \$remote_addr;
-                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                proxy_set_header X-Forwarded-Proto https;
-              }
-
-              location /actuator/ {
-                set \$rsc_coordinator http://rsc-coordinator:8080;
-                proxy_pass \$rsc_coordinator;
-                proxy_http_version 1.1;
-                proxy_set_header Host \$host;
-                proxy_set_header X-Real-IP \$remote_addr;
-                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                proxy_set_header X-Forwarded-Proto https;
-              }
-
               location / {
                 set \$backend http://${backend_slot}:8080;
                 proxy_pass \$backend;
@@ -527,41 +424,6 @@ jobs:
               }
             }
 
-            server {
-              listen 443 ssl;
-              http2 on;
-              server_name ${COORDINATOR_DOMAIN};
-
-              ssl_certificate ${COORDINATOR_SSL_CERTIFICATE};
-              ssl_certificate_key ${COORDINATOR_SSL_CERTIFICATE_KEY};
-
-              client_max_body_size 1m;
-
-              location /coord/ {
-                set \$rsc_coordinator http://rsc-coordinator:8080;
-                proxy_pass \$rsc_coordinator;
-                proxy_http_version 1.1;
-                proxy_set_header Host \$host;
-                proxy_set_header X-Real-IP \$remote_addr;
-                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                proxy_set_header X-Forwarded-Proto https;
-              }
-
-              location /actuator/ {
-                set \$rsc_coordinator http://rsc-coordinator:8080;
-                proxy_pass \$rsc_coordinator;
-                proxy_http_version 1.1;
-                proxy_set_header Host \$host;
-                proxy_set_header X-Real-IP \$remote_addr;
-                proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                proxy_set_header X-Forwarded-Proto https;
-              }
-
-              location / {
-                return 404;
-              }
-            }
-          ${COORDINATOR_SERVER_BLOCK}
           }
           NGINX
           }
@@ -584,10 +446,6 @@ jobs:
               -v "$PWD/letsencrypt:/etc/letsencrypt:ro" \
               nginx:1.27-alpine
           fi
-          if docker network inspect redis-stream-coordinator-net >/dev/null 2>&1; then
-            docker network connect redis-stream-coordinator-net buddystudy-nginx >/dev/null 2>&1 || true
-          fi
-
           if ! wait_for_container_running "${NEW_SLOT}" "Backend container ${NEW_SLOT}"; then
             docker logs buddystudy-nginx || true
             if [ -n "${OLD_SLOT}" ]; then
@@ -671,7 +529,6 @@ jobs:
             echo ""
             echo "- Target: \`ec2\`"
             echo "- Image: \`${IMAGE_REF}\`"
-            echo "- Coordinator: \`existing separately managed runtime\`"
             echo "- Result: \`${{ job.status }}\`"
           } >> "${GITHUB_STEP_SUMMARY}"
 
