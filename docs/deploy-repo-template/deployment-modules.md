@@ -66,7 +66,12 @@ deployment.
   pushed.
   Grafana persists writable runtime state in the `buddystudy-grafana-data`
   Docker volume; dashboards and provisioning files remain read-only bind
-  mounts from the monitoring release. Every monitoring deploy synchronizes the
+  mounts from the monitoring release. Dashboard JSON files are replaced
+  atomically and do not restart Grafana, Loki, or either gateway. The workflow
+  compares service configuration before deployment and recreates only the
+  service whose Loki, Grafana provisioning, Promtail, or nginx configuration
+  actually changed. This prevents routine dashboard releases from producing
+  transient Grafana query 502 responses. Every monitoring deploy synchronizes the
   persisted `admin` account password with `GRAFANA_ADMIN_PASSWORD`; changing
   the GitHub Actions secret therefore also changes the existing Grafana
   account instead of affecting only first initialization. The deploy records a

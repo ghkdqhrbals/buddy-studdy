@@ -46,6 +46,28 @@ test("Grafana gateway restores the public origin consumed by Routingflare", asyn
   assert.doesNotMatch(gateway, /proxy_set_header X-Forwarded-Proto \$scheme;/);
 });
 
+test("monitoring deploy keeps unchanged Grafana and Loki containers running", async () => {
+  const deployTemplate = await fs.readFile(deployTemplatePath, "utf8");
+
+  assert.match(deployTemplate, /loki_config_changed=false/);
+  assert.match(deployTemplate, /grafana_config_changed=false/);
+  assert.match(deployTemplate, /container_running\(\)/);
+  assert.match(
+    deployTemplate,
+    /if ! container_running buddystudy-loki \|\| \[ "\$\{loki_config_changed\}" = "true" \]/,
+  );
+  assert.match(
+    deployTemplate,
+    /if ! container_running buddystudy-grafana \|\| \[ "\$\{grafana_config_changed\}" = "true" \]/,
+  );
+  assert.match(deployTemplate, /dashboard_temp="\$\{dashboard_target\}\.tmp"/);
+  assert.match(deployTemplate, /mv -f "\$\{dashboard_temp\}" "\$\{dashboard_target\}"/);
+  assert.doesNotMatch(
+    deployTemplate,
+    /docker rm -f \\\n\s+buddystudy-api-dashboard \\\n\s+buddystudy-monitoring-promtail \\\n\s+buddystudy-grafana-gateway \\\n\s+buddystudy-loki \\\n\s+buddystudy-grafana/,
+  );
+});
+
 test("server runtime dashboard emits bounded Loki metric series", async () => {
   const dashboard = JSON.parse(
     await fs.readFile(serverRuntimeDashboardPath, "utf8"),

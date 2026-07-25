@@ -16,12 +16,19 @@ jobs:
     timeout-minutes: 15
     env:
       MONITORING_ROOT: ${{ vars.MACBOOKAIR_MONITORING_ROOT || '$HOME/buddystudy/monitoring' }}
-      MONITORING_SOURCE_BASE: https://raw.githubusercontent.com/ghkdqhrbals/buddy-studdy/${{ github.event.client_payload.sha || 'main' }}/monitoring
+      MONITORING_SOURCE_DIR: ${{ github.workspace }}/buddy-studdy-source/monitoring
       API_DASHBOARD_PORT: ${{ vars.API_DASHBOARD_PORT || '3000' }}
       GRAFANA_PORT: ${{ vars.GRAFANA_PORT || '3001' }}
       LOKI_PORT: ${{ vars.LOKI_PORT || '3100' }}
 
     steps:
+      - name: Checkout BuddyStudy monitoring config
+        uses: actions/checkout@v4
+        with:
+          repository: ghkdqhrbals/buddy-studdy
+          ref: ${{ github.event.client_payload.sha || 'main' }}
+          path: buddy-studdy-source
+
       - name: Deploy monitoring module
         env:
           GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
@@ -64,51 +71,76 @@ jobs:
             "${monitoring_root}/promtail/data" \
             "${monitoring_root}/gateway"
 
-          curl -fsSL \
-            "${MONITORING_SOURCE_BASE}/grafana/provisioning/datasources/loki.yml" \
-            -o "${monitoring_root}/grafana/provisioning/datasources/loki.yml"
-          curl -fsSL \
-            "${MONITORING_SOURCE_BASE}/grafana/provisioning/datasources/testzone-influx.yml" \
-            -o "${monitoring_root}/grafana/provisioning/datasources/testzone-influx.yml"
-          curl -fsSL \
-            "${MONITORING_SOURCE_BASE}/grafana/provisioning/dashboards/dashboards.yml" \
-            -o "${monitoring_root}/grafana/provisioning/dashboards/dashboards.yml"
-          curl -fsSL \
-            "${MONITORING_SOURCE_BASE}/grafana/dashboards/buddystudy-logs.json" \
-            -o "${monitoring_root}/grafana/dashboards/buddystudy-logs.json"
-          curl -fsSL \
-            "${MONITORING_SOURCE_BASE}/grafana/dashboards/buddystudy-api-performance.json" \
-            -o "${monitoring_root}/grafana/dashboards/buddystudy-api-performance.json"
-          curl -fsSL \
-            "${MONITORING_SOURCE_BASE}/grafana/dashboards/buddystudy-server-runtime.json" \
-            -o "${monitoring_root}/grafana/dashboards/buddystudy-server-runtime.json"
-          curl -fsSL \
-            "${MONITORING_SOURCE_BASE}/grafana/dashboards/buddystudy-testzone.json" \
-            -o "${monitoring_root}/grafana/dashboards/buddystudy-testzone.json"
-          curl -fsSL \
-            "${MONITORING_SOURCE_BASE}/loki/config/loki.yml" \
-            -o "${monitoring_root}/loki/config/loki.yml"
-          for file in \
-            index.html app.js logs.js shell.js nav-bootstrap.js \
-            audit.html audit.js audit-model.js \
-            settings.html settings.js \
-            performance.html performance.js \
-            system.html system.js metrics.js \
-            testzone.html testzone.css testzone.js testzone-model.js testzone-data.json \
-            styles.css; do
-            curl -fsSL \
-              "${MONITORING_SOURCE_BASE}/api-dashboard/public/${file}" \
-              -o "${monitoring_root}/api-dashboard/public/${file}"
+          file_differs() {
+            [ ! -f "$2" ] || ! cmp -s "$1" "$2"
+          }
+
+          loki_config_changed=false
+          grafana_config_changed=false
+          grafana_gateway_config_changed=false
+          api_dashboard_config_changed=false
+          promtail_config_changed=false
+
+          if file_differs \
+            "${MONITORING_SOURCE_DIR}/loki/config/loki.yml" \
+            "${monitoring_root}/loki/config/loki.yml"; then
+            loki_config_changed=true
+          fi
+          if file_differs \
+              "${MONITORING_SOURCE_DIR}/grafana/provisioning/datasources/loki.yml" \
+              "${monitoring_root}/grafana/provisioning/datasources/loki.yml" \
+            || file_differs \
+              "${MONITORING_SOURCE_DIR}/grafana/provisioning/datasources/testzone-influx.yml" \
+              "${monitoring_root}/grafana/provisioning/datasources/testzone-influx.yml" \
+            || file_differs \
+              "${MONITORING_SOURCE_DIR}/grafana/provisioning/dashboards/dashboards.yml" \
+              "${monitoring_root}/grafana/provisioning/dashboards/dashboards.yml"; then
+            grafana_config_changed=true
+          fi
+          if file_differs \
+            "${MONITORING_SOURCE_DIR}/grafana-gateway/nginx.conf" \
+            "${monitoring_root}/gateway/grafana-nginx.conf"; then
+            grafana_gateway_config_changed=true
+          fi
+          if file_differs \
+            "${MONITORING_SOURCE_DIR}/api-dashboard/nginx.conf" \
+            "${monitoring_root}/api-dashboard/nginx.conf"; then
+            api_dashboard_config_changed=true
+          fi
+          if file_differs \
+            "${MONITORING_SOURCE_DIR}/promtail/config/promtail.yml" \
+            "${monitoring_root}/promtail/config/promtail.yml"; then
+            promtail_config_changed=true
+          fi
+
+          find "${monitoring_root}/grafana/provisioning/datasources" -maxdepth 1 -type f -name '*.yml' -delete
+          cp "${MONITORING_SOURCE_DIR}/grafana/provisioning/datasources/"*.yml \
+            "${monitoring_root}/grafana/provisioning/datasources/"
+          cp "${MONITORING_SOURCE_DIR}/grafana/provisioning/dashboards/dashboards.yml" \
+            "${monitoring_root}/grafana/provisioning/dashboards/dashboards.yml"
+          for source_dashboard in "${MONITORING_SOURCE_DIR}/grafana/dashboards/"*.json; do
+            dashboard_name="$(basename "${source_dashboard}")"
+            dashboard_target="${monitoring_root}/grafana/dashboards/${dashboard_name}"
+            dashboard_temp="${dashboard_target}.tmp"
+            cp "${source_dashboard}" "${dashboard_temp}"
+            mv -f "${dashboard_temp}" "${dashboard_target}"
           done
-          curl -fsSL \
-            "${MONITORING_SOURCE_BASE}/api-dashboard/nginx.conf" \
-            -o "${monitoring_root}/api-dashboard/nginx.conf"
-          curl -fsSL \
-            "${MONITORING_SOURCE_BASE}/promtail/config/promtail.yml" \
-            -o "${monitoring_root}/promtail/config/promtail.yml"
-          curl -fsSL \
-            "${MONITORING_SOURCE_BASE}/grafana-gateway/nginx.conf" \
-            -o "${monitoring_root}/gateway/grafana-nginx.conf"
+          for deployed_dashboard in "${monitoring_root}/grafana/dashboards/"*.json; do
+            dashboard_name="$(basename "${deployed_dashboard}")"
+            if [ ! -f "${MONITORING_SOURCE_DIR}/grafana/dashboards/${dashboard_name}" ]; then
+              rm -f "${deployed_dashboard}"
+            fi
+          done
+          cp "${MONITORING_SOURCE_DIR}/loki/config/loki.yml" \
+            "${monitoring_root}/loki/config/loki.yml"
+          cp -R "${MONITORING_SOURCE_DIR}/api-dashboard/public/." \
+            "${monitoring_root}/api-dashboard/public/"
+          cp "${MONITORING_SOURCE_DIR}/api-dashboard/nginx.conf" \
+            "${monitoring_root}/api-dashboard/nginx.conf"
+          cp "${MONITORING_SOURCE_DIR}/promtail/config/promtail.yml" \
+            "${monitoring_root}/promtail/config/promtail.yml"
+          cp "${MONITORING_SOURCE_DIR}/grafana-gateway/nginx.conf" \
+            "${monitoring_root}/gateway/grafana-nginx.conf"
 
           grep -q 'X-Forwarded-Proto \$public_forwarded_proto' \
             "${monitoring_root}/api-dashboard/nginx.conf"
@@ -163,41 +195,44 @@ jobs:
             nginx:1.27-alpine \
             sh -c 'chown -R 472:0 /var/lib/grafana && if [ -f /var/lib/grafana/grafana.db ]; then chmod 0640 /var/lib/grafana/grafana.db; fi'
 
-          docker rm -f \
-            buddystudy-api-dashboard \
-            buddystudy-monitoring-promtail \
-            buddystudy-grafana-gateway \
-            buddystudy-loki \
-            buddystudy-grafana >/dev/null 2>&1 || true
+          container_running() {
+            [ "$(docker inspect --format '{{.State.Running}}' "$1" 2>/dev/null || true)" = "true" ]
+          }
 
-          docker run -d \
-            --name buddystudy-loki \
-            --network buddystudy-monitoring \
-            --restart unless-stopped \
-            -p "127.0.0.1:${LOKI_PORT}:3100" \
-            -v "${monitoring_root}/loki/data:/loki" \
-            -v "${monitoring_root}/loki/config/loki.yml:/etc/loki/local-config.yaml:ro" \
-            grafana/loki:3.3.2 \
-            -config.file=/etc/loki/local-config.yaml
+          if ! container_running buddystudy-loki || [ "${loki_config_changed}" = "true" ]; then
+            docker rm -f buddystudy-loki >/dev/null 2>&1 || true
+            docker run -d \
+              --name buddystudy-loki \
+              --network buddystudy-monitoring \
+              --restart unless-stopped \
+              -p "127.0.0.1:${LOKI_PORT}:3100" \
+              -v "${monitoring_root}/loki/data:/loki" \
+              -v "${monitoring_root}/loki/config/loki.yml:/etc/loki/local-config.yaml:ro" \
+              grafana/loki:3.3.2 \
+              -config.file=/etc/loki/local-config.yaml
+          fi
 
-          docker run -d \
-            --name buddystudy-grafana \
-            --network buddystudy-monitoring \
-            --restart unless-stopped \
-            -e GF_SECURITY_ADMIN_USER=admin \
-            -e GF_SECURITY_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD}" \
-            -e GF_USERS_ALLOW_SIGN_UP=false \
-            -e GF_AUTH_ANONYMOUS_ENABLED=false \
-            -e GF_SERVER_ROOT_URL=https://grafana.lowfidev.cloud/ \
-            -e GF_SERVER_SERVE_FROM_SUB_PATH=false \
-            -e GF_LIVE_ALLOWED_ORIGINS=https://grafana.lowfidev.cloud \
-            -e TESTZONE_INFLUX_TOKEN="${TESTZONE_INFLUX_TOKEN}" \
-            -e TESTZONE_INFLUX_ORG="${TESTZONE_INFLUX_ORG}" \
-            -e TESTZONE_INFLUX_BUCKET="${TESTZONE_INFLUX_BUCKET}" \
-            -v "${grafana_volume}:/var/lib/grafana" \
-            -v "${monitoring_root}/grafana/provisioning:/etc/grafana/provisioning:ro" \
-            -v "${monitoring_root}/grafana/dashboards:/var/lib/grafana/dashboards:ro" \
-            grafana/grafana:12.3.0
+          if ! container_running buddystudy-grafana || [ "${grafana_config_changed}" = "true" ]; then
+            docker rm -f buddystudy-grafana >/dev/null 2>&1 || true
+            docker run -d \
+              --name buddystudy-grafana \
+              --network buddystudy-monitoring \
+              --restart unless-stopped \
+              -e GF_SECURITY_ADMIN_USER=admin \
+              -e GF_SECURITY_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD}" \
+              -e GF_USERS_ALLOW_SIGN_UP=false \
+              -e GF_AUTH_ANONYMOUS_ENABLED=false \
+              -e GF_SERVER_ROOT_URL=https://grafana.lowfidev.cloud/ \
+              -e GF_SERVER_SERVE_FROM_SUB_PATH=false \
+              -e GF_LIVE_ALLOWED_ORIGINS=https://grafana.lowfidev.cloud \
+              -e TESTZONE_INFLUX_TOKEN="${TESTZONE_INFLUX_TOKEN}" \
+              -e TESTZONE_INFLUX_ORG="${TESTZONE_INFLUX_ORG}" \
+              -e TESTZONE_INFLUX_BUCKET="${TESTZONE_INFLUX_BUCKET}" \
+              -v "${grafana_volume}:/var/lib/grafana" \
+              -v "${monitoring_root}/grafana/provisioning:/etc/grafana/provisioning:ro" \
+              -v "${monitoring_root}/grafana/dashboards:/var/lib/grafana/dashboards:ro" \
+              grafana/grafana:12.3.0
+          fi
 
           grafana_password_reset=false
           for attempt in $(seq 1 15); do
@@ -215,35 +250,47 @@ jobs:
             exit 1
           fi
 
-          docker run -d \
-            --name buddystudy-grafana-gateway \
-            --network buddystudy-monitoring \
-            --restart unless-stopped \
-            -p "127.0.0.1:${GRAFANA_PORT}:80" \
-            -v "${monitoring_root}/gateway/grafana-nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
-            nginx:1.27-alpine
+          if ! container_running buddystudy-grafana-gateway \
+            || [ "${grafana_gateway_config_changed}" = "true" ]; then
+            docker rm -f buddystudy-grafana-gateway >/dev/null 2>&1 || true
+            docker run -d \
+              --name buddystudy-grafana-gateway \
+              --network buddystudy-monitoring \
+              --restart unless-stopped \
+              -p "127.0.0.1:${GRAFANA_PORT}:80" \
+              -v "${monitoring_root}/gateway/grafana-nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+              nginx:1.27-alpine
+          fi
 
-          docker run -d \
-            --name buddystudy-api-dashboard \
-            --network buddystudy-monitoring \
-            --restart unless-stopped \
-            -p "127.0.0.1:${API_DASHBOARD_PORT}:80" \
-            -e API_DASHBOARD_BASIC_AUTH_HTPASSWD="${API_DASHBOARD_BASIC_AUTH_HTPASSWD}" \
-            -v "${monitoring_root}/api-dashboard/public:/usr/share/nginx/html:ro" \
-            -v "${monitoring_root}/api-dashboard/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
-            -v "${monitoring_root}/api-dashboard/logs:/var/log/nginx" \
-            nginx:1.27-alpine \
-            /bin/sh -c 'printf "%s\n" "$API_DASHBOARD_BASIC_AUTH_HTPASSWD" > /etc/nginx/.htpasswd && nginx -g "daemon off;"'
+          if ! container_running buddystudy-api-dashboard \
+            || [ "${api_dashboard_config_changed}" = "true" ]; then
+            docker rm -f buddystudy-api-dashboard >/dev/null 2>&1 || true
+            docker run -d \
+              --name buddystudy-api-dashboard \
+              --network buddystudy-monitoring \
+              --restart unless-stopped \
+              -p "127.0.0.1:${API_DASHBOARD_PORT}:80" \
+              -e API_DASHBOARD_BASIC_AUTH_HTPASSWD="${API_DASHBOARD_BASIC_AUTH_HTPASSWD}" \
+              -v "${monitoring_root}/api-dashboard/public:/usr/share/nginx/html:ro" \
+              -v "${monitoring_root}/api-dashboard/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+              -v "${monitoring_root}/api-dashboard/logs:/var/log/nginx" \
+              nginx:1.27-alpine \
+              /bin/sh -c 'printf "%s\n" "$API_DASHBOARD_BASIC_AUTH_HTPASSWD" > /etc/nginx/.htpasswd && nginx -g "daemon off;"'
+          fi
 
-          docker run -d \
-            --name buddystudy-monitoring-promtail \
-            --network buddystudy-monitoring \
-            --restart unless-stopped \
-            -v "${monitoring_root}/api-dashboard/logs:/var/log/monitoring:ro" \
-            -v "${monitoring_root}/promtail/config/promtail.yml:/etc/promtail/config.yml:ro" \
-            -v "${monitoring_root}/promtail/data:/var/lib/promtail" \
-            grafana/promtail:3.3.2 \
-            -config.file=/etc/promtail/config.yml
+          if ! container_running buddystudy-monitoring-promtail \
+            || [ "${promtail_config_changed}" = "true" ]; then
+            docker rm -f buddystudy-monitoring-promtail >/dev/null 2>&1 || true
+            docker run -d \
+              --name buddystudy-monitoring-promtail \
+              --network buddystudy-monitoring \
+              --restart unless-stopped \
+              -v "${monitoring_root}/api-dashboard/logs:/var/log/monitoring:ro" \
+              -v "${monitoring_root}/promtail/config/promtail.yml:/etc/promtail/config.yml:ro" \
+              -v "${monitoring_root}/promtail/data:/var/lib/promtail" \
+              grafana/promtail:3.3.2 \
+              -config.file=/etc/promtail/config.yml
+          fi
 
           sleep 2
           echo "Grafana startup log:"
@@ -256,6 +303,7 @@ jobs:
           docker logs --tail 80 buddystudy-monitoring-promtail || true
 
           echo "MacBook Air monitoring module is running."
+          echo "Restarted components: loki=${loki_config_changed}, grafana=${grafana_config_changed}, grafana_gateway=${grafana_gateway_config_changed}, api_dashboard=${api_dashboard_config_changed}, promtail=${promtail_config_changed}"
           echo "API Logs: http://127.0.0.1:${API_DASHBOARD_PORT}"
           echo "TestZone: http://127.0.0.1:${API_DASHBOARD_PORT}/testzone.html"
           echo "Grafana: http://127.0.0.1:${GRAFANA_PORT}/"
