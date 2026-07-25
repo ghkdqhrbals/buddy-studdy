@@ -2288,10 +2288,21 @@ private struct StudyTreeLayoutSnapshot {
     }
 }
 
+private enum StudyTopicAddMode: String {
+    case recommendation
+    case manual
+}
+
+private struct StudyTopicAddRequest: Identifiable {
+    let id = UUID()
+    var parent: BackendStudyRoom
+    var mode: StudyTopicAddMode
+}
+
 private struct MobileStudyTreeView: View {
     @EnvironmentObject private var appState: AppState
     @State private var direction: StudyTreeDirection = .vertical
-    @State private var childParent: BackendStudyRoom?
+    @State private var addRequest: StudyTopicAddRequest?
     @State private var editingRoom: BackendStudyRoom?
 
     var rootStudyID: Int
@@ -2356,7 +2367,18 @@ private struct MobileStudyTreeView: View {
                             StudyTreeNode(
                                 room: placement.room,
                                 strings: strings,
-                                onAddChild: { childParent = placement.room },
+                                onAddRecommendedChild: {
+                                    addRequest = StudyTopicAddRequest(
+                                        parent: placement.room,
+                                        mode: .recommendation
+                                    )
+                                },
+                                onAddManualChild: {
+                                    addRequest = StudyTopicAddRequest(
+                                        parent: placement.room,
+                                        mode: .manual
+                                    )
+                                },
                                 onToggleActive: {
                                     appState.setStudyTopicActive(
                                         studyID: placement.room.id,
@@ -2379,14 +2401,18 @@ private struct MobileStudyTreeView: View {
         .background(Color(.systemBackground))
         .navigationTitle(strings.studyTree)
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $childParent) { parent in
-            StudyTopicAddSheet(parent: parent, strings: strings) { title, difficulty in
+        .sheet(item: $addRequest) { request in
+            StudyTopicAddSheet(
+                parent: request.parent,
+                strings: strings,
+                initialMode: request.mode
+            ) { title, difficulty in
                 await appState.addChildStudyCategory(
                     title,
-                    parentStudyID: parent.id,
+                    parentStudyID: request.parent.id,
                     difficulty: difficulty,
                     customPrompt: StudySettings.defaultCustomPrompt,
-                    openAIModel: parent.openAIModel
+                    openAIModel: request.parent.openAIModel
                 )
             }
             .environmentObject(appState)
@@ -2414,7 +2440,8 @@ private struct MobileStudyTreeView: View {
 private struct StudyTreeNode: View {
     var room: BackendStudyRoom
     var strings: AppStrings
-    var onAddChild: () -> Void
+    var onAddRecommendedChild: () -> Void
+    var onAddManualChild: () -> Void
     var onToggleActive: () -> Void
     var onEdit: () -> Void
 
@@ -2477,7 +2504,8 @@ private struct StudyTreeNode: View {
         .buttonStyle(.plain)
         .contextMenu {
             Button(strings.editStudyCategory, action: onEdit)
-            Button(strings.addSubstudy, action: onAddChild)
+            Button(strings.recommendSubstudy, action: onAddRecommendedChild)
+            Button(strings.addTopicManually, action: onAddManualChild)
             Button(
                 room.activeForQuestions ? strings.questionTopicInactive : strings.questionTopicActive,
                 action: onToggleActive
@@ -2496,13 +2524,19 @@ private struct StudyTreeNode: View {
             .offset(x: -10, y: -10)
         }
         .overlay(alignment: .topTrailing) {
-            Button(action: onAddChild) {
+            Menu {
+                Button(action: onAddRecommendedChild) {
+                    Label(strings.recommendSubstudy, systemImage: "sparkles")
+                }
+                Button(action: onAddManualChild) {
+                    Label(strings.addTopicManually, systemImage: "square.and.pencil")
+                }
+            } label: {
                 Image(systemName: "plus")
                     .font(.caption.weight(.bold))
                     .frame(width: 28, height: 28)
                     .background(Color(.systemBackground), in: Circle())
             }
-            .buttonStyle(.plain)
             .accessibilityLabel(strings.addSubstudy)
             .offset(x: 10, y: -10)
         }
@@ -2519,12 +2553,14 @@ private struct StudyTopicAddSheet: View {
 
     var parent: BackendStudyRoom
     var strings: AppStrings
+    var initialMode: StudyTopicAddMode
     var onAdd: (String, Difficulty) async -> Bool
 
     @State private var suggestions: [String] = []
     @State private var difficultyLevel: Double
     @State private var manualTopic = ""
-    @State private var showsManualEntry = false
+    @State private var mode: StudyTopicAddMode
+    @State private var selectedSuggestion: String?
     @State private var isLoading = true
     @State private var isSaving = false
     @State private var inlineMessage: String?
@@ -2532,104 +2568,95 @@ private struct StudyTopicAddSheet: View {
     init(
         parent: BackendStudyRoom,
         strings: AppStrings,
+        initialMode: StudyTopicAddMode,
         onAdd: @escaping (String, Difficulty) async -> Bool
     ) {
         self.parent = parent
         self.strings = strings
+        self.initialMode = initialMode
         self.onAdd = onAdd
         _difficultyLevel = State(initialValue: Double(parent.difficultyLevel))
+        _mode = State(initialValue: initialMode)
     }
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(parent.topic)
-                            .font(.headline)
-                        Text(strings.recommendSubstudyDescription)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 4)
+            VStack(spacing: 18) {
+                VStack(spacing: 4) {
+                    Text(strings.addSubstudy)
+                        .font(.headline)
+                    Text(parent.topic)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
 
-                Section(strings.difficulty) {
+                Picker("", selection: $mode) {
+                    Text(strings.recommendSubstudy).tag(StudyTopicAddMode.recommendation)
+                    Text(strings.addTopicManually).tag(StudyTopicAddMode.manual)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
+                Group {
+                    if mode == .recommendation {
+                        recommendationPicker
+                    } else {
+                        TextField(strings.studyTopic, text: $manualTopic)
+                            .textInputAutocapitalization(.sentences)
+                            .submitLabel(.done)
+                            .padding(.horizontal, 12)
+                            .frame(height: 48)
+                            .background(Color(.secondarySystemBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                            }
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 112, alignment: .top)
+
+                VStack(spacing: 8) {
                     HStack {
-                        Text(Difficulty(level: resolvedDifficulty).displayName(language: strings.language))
-                            .fontWeight(.semibold)
+                        Text(strings.difficulty)
+                            .font(.subheadline.weight(.semibold))
                         Spacer()
-                        Text("\(resolvedDifficulty)")
+                        Text("\(resolvedDifficulty) · \(Difficulty(level: resolvedDifficulty).displayName(language: strings.language))")
+                            .font(.subheadline)
                             .monospacedDigit()
                             .foregroundStyle(.secondary)
                     }
                     Slider(value: $difficultyLevel, in: 1...10, step: 1)
                 }
 
-                Section(strings.recommendSubstudy) {
-                    if isLoading {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                            Text(strings.loading)
-                                .foregroundStyle(.secondary)
-                        }
-                    } else if suggestions.isEmpty {
-                        Text(strings.recommendedTopicsEmpty)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } else {
-                        ForEach(suggestions, id: \.self) { topic in
-                            Button {
-                                add(topic)
-                            } label: {
-                                HStack {
-                                    Text(topic)
-                                        .foregroundStyle(.primary)
-                                        .multilineTextAlignment(.leading)
-                                    Spacer()
-                                    Image(systemName: "plus.circle")
-                                        .foregroundStyle(Color.accentColor)
-                                }
-                            }
-                            .disabled(isSaving)
-                        }
-                    }
-
-                    Button(strings.refreshRecommendations) {
-                        Task { await loadSuggestions() }
-                    }
-                    .disabled(isLoading || isSaving)
-                }
-
-                Section {
-                    DisclosureGroup(strings.addTopicManually, isExpanded: $showsManualEntry) {
-                        TextField(strings.studyTopic, text: $manualTopic)
-                            .textInputAutocapitalization(.sentences)
-                        Button(strings.addSubstudy) {
-                            add(manualTopic)
-                        }
-                        .disabled(manualTopic.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
-                    }
-                }
-
                 if let inlineMessage {
-                    Section {
-                        Text(inlineMessage)
-                            .font(.footnote)
-                            .foregroundStyle(.red)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    Text(inlineMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Section {
-                    Text(strings.questionRotationHelp)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                Button {
+                    add(selectedTopic)
+                } label: {
+                    HStack(spacing: 8) {
+                        if isSaving {
+                            ProgressView()
+                                .tint(.white)
+                        }
+                        Text(strings.addSubstudy)
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
                 }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.roundedRectangle(radius: 8))
+                .disabled(selectedTopic.isEmpty || isSaving)
             }
-            .navigationTitle(strings.addSubstudy)
-            .navigationBarTitleDisplayMode(.inline)
+            .padding(20)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(strings.cancel) {
@@ -2638,21 +2665,122 @@ private struct StudyTopicAddSheet: View {
                 }
             }
             .task {
-                await loadSuggestions()
+                if initialMode == .recommendation {
+                    await loadSuggestions()
+                } else {
+                    isLoading = false
+                }
+            }
+            .onChange(of: mode) { _, newMode in
+                guard newMode == .recommendation, suggestions.isEmpty, !isLoading else {
+                    return
+                }
+                Task { await loadSuggestions() }
             }
             .interactiveDismissDisabled(isSaving)
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.height(430), .large])
     }
 
     private var resolvedDifficulty: Int {
         min(max(Int(difficultyLevel.rounded()), 1), 10)
     }
 
+    private var selectedTopic: String {
+        switch mode {
+        case .recommendation:
+            return selectedSuggestion ?? ""
+        case .manual:
+            return manualTopic.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    @ViewBuilder
+    private var recommendationPicker: some View {
+        if isLoading {
+            ProgressView()
+                .frame(maxWidth: .infinity, minHeight: 100)
+        } else if suggestions.isEmpty {
+            VStack(spacing: 10) {
+                Text(strings.recommendedTopicsEmpty)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button(strings.retry) {
+                    Task { await loadSuggestions() }
+                }
+                .buttonStyle(.bordered)
+            }
+            .frame(maxWidth: .infinity, minHeight: 100)
+        } else {
+            VStack(spacing: 8) {
+                HStack {
+                    Text(strings.recommendSubstudy)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        Task { await loadSuggestions() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(strings.refreshRecommendations)
+                    .disabled(isLoading || isSaving)
+                }
+
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: 8),
+                        GridItem(.flexible(), spacing: 8)
+                    ],
+                    spacing: 8
+                ) {
+                    ForEach(suggestions.prefix(4), id: \.self) { topic in
+                        let isSelected = selectedSuggestion == topic
+                        Button {
+                            selectedSuggestion = topic
+                            inlineMessage = nil
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(topic)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.leading)
+                                Spacer(minLength: 2)
+                                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                            }
+                            .padding(.horizontal, 10)
+                            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                            .background(
+                                isSelected
+                                    ? Color.accentColor.opacity(0.08)
+                                    : Color(.secondarySystemBackground)
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(
+                                        isSelected ? Color.accentColor : Color.secondary.opacity(0.18),
+                                        lineWidth: 1
+                                    )
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
     private func loadSuggestions() async {
         isLoading = true
         inlineMessage = nil
         suggestions = await appState.suggestChildStudyTopics(parentStudyID: parent.id)
+        selectedSuggestion = suggestions.first
         isLoading = false
     }
 
@@ -2680,7 +2808,7 @@ private struct StudyTopicAddSheet: View {
             if saved {
                 dismiss()
             } else {
-                inlineMessage = strings.duplicateStudyTopic
+                inlineMessage = strings.addStudyTopicFailed
             }
         }
     }

@@ -1637,6 +1637,7 @@ struct AppStrings {
         text("선택한 주제들은 예약 질문마다 순서대로 사용됩니다.", "Selected topics rotate across scheduled questions.")
     }
     var duplicateStudyTopic: String { text("이미 트리에 있는 주제입니다.", "This topic already exists in the tree.") }
+    var addStudyTopicFailed: String { text("하위 학습을 추가하지 못했습니다.", "Could not add the sub-study.") }
     var deleteStudy: String { text("학습 삭제", "Delete Study") }
     var openQuestions: String { text("질문 열기", "Open Questions") }
     var treeVertical: String { text("세로", "Vertical") }
