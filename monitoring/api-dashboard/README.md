@@ -22,10 +22,15 @@ The browser can:
 
 - create, edit, validate, and delete k6 JavaScript files
 - start, cancel, and delete executions
-- compare request rate and errors separately from median, p90, and p95 latency
-- inspect average, minimum, median, maximum, p90, and p95 response-time values
+- compare per-second HTTP success/error counts, average/p90/p95 latency, and
+  RPS/average latency/error count
+- inspect TPS, mean time to first byte (MTTFB), mean total HTTP time (MTT),
+  HTTP success/error counts, and average/minimum/median/maximum/p90/p95 latency
 - deploy, restart, and delete fixed-catalog PostgreSQL and Redis test
   components
+- add validated key-value environment settings to test components and inspect
+  container CPU/memory plus PostgreSQL connection/cache and Redis
+  client/throughput/cache metrics
 - open an execution in Grafana using its `run_id`
 
 Tests can be started only with `Run` in the saved script editor. The Overview
@@ -52,6 +57,9 @@ Limits are enforced by the TestZone API:
 
 The old `testzone-data.json` exporter is retained only for historical result
 archives. The live page does not read it.
+
+Metric semantics and component collection behavior are documented in
+`docs/observability/testzone-load-metrics.md`.
 
 ## Verification
 

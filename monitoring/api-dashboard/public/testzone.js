@@ -38,7 +38,7 @@ const state = {
   lintTimer: null,
   componentId: null,
   runCharts: {
-    detail: { traffic: null, latency: null },
+    detail: { outcome: null, latency: null, composite: null },
   },
   runChartRanges: {
     detail: null,
@@ -56,7 +56,8 @@ const elementIds = [
   "runNextPageButton", "runPageJumpDialog", "runPageJumpForm",
   "runPageJumpTitle", "runPageJumpSelect",
   "runDetail", "runDetailTitle", "runDetailMeta", "runDetailTarget", "runDetailConfig",
-  "runDetailScriptButton", "runDetailStatus", "runDetailTrafficChart", "runDetailLatencyChart",
+  "runDetailScriptButton", "runDetailStatus", "runDetailOutcomeChart", "runDetailLatencyChart",
+  "runDetailCompositeChart", "detailTps", "detailMttfb", "detailMtt", "detailSuccess", "detailErrors",
   "detailAverage", "detailMinimum", "detailMedian", "detailMaximum", "detailP90", "detailP95",
   "runDetailChartEmpty", "runLogTail", "rerunSelectedRunButton", "closeRunDetailButton",
   "scriptList", "newScriptButton", "scriptNameInput", "scriptEditor", "scriptHighlight",
@@ -526,6 +527,12 @@ async function loadRuns() {
 
 function runMetric(run, key) {
   if (run.summary?.[key] !== null && run.summary?.[key] !== undefined) return run.summary[key];
+  if (["successCount", "errorCount"].includes(key) && run.summary?.requests !== null && run.summary?.requests !== undefined) {
+    const errors = Math.round(Number(run.summary.requests) * Number(run.summary.errorRate || 0));
+    return key === "errorCount" ? errors : Math.max(0, Number(run.summary.requests) - errors);
+  }
+  if (key === "tps") return run.summary?.requestRate ?? run.live?.tps ?? run.live?.requestRate;
+  if (key === "mttMs") return run.summary?.averageMs ?? run.live?.mttMs ?? run.live?.averageMs;
   const map = {
     requestRate: "requestRate",
     averageMs: "averageMs",
@@ -535,8 +542,18 @@ function runMetric(run, key) {
     p90Ms: "p90Ms",
     p95Ms: "p95Ms",
     errorRate: "errorRate",
+    tps: "tps",
+    mttMs: "mttMs",
+    mttfbMs: "mttfbMs",
+    successCount: "successCount",
+    errorCount: "errorCount",
   };
   return run.live?.[map[key]];
+}
+
+function formatCount(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.round(number).toLocaleString() : "-";
 }
 
 function renderLatencySummary(run, targets) {
@@ -729,6 +746,11 @@ function renderSelectedRun() {
     p90Ms: elements.detailP90,
     p95Ms: elements.detailP95,
   });
+  elements.detailTps.textContent = formatRate(runMetric(run, "tps") ?? runMetric(run, "requestRate"));
+  elements.detailMttfb.textContent = formatMilliseconds(runMetric(run, "mttfbMs"));
+  elements.detailMtt.textContent = formatMilliseconds(runMetric(run, "mttMs") ?? runMetric(run, "averageMs"));
+  elements.detailSuccess.textContent = formatCount(runMetric(run, "successCount"));
+  elements.detailErrors.textContent = formatCount(runMetric(run, "errorCount"));
   elements.runLogTail.textContent = (run.logTail || []).join("\n") || "No k6 log output.";
   drawRunChart();
 }
@@ -819,18 +841,29 @@ function runChartData() {
     return Number.isFinite(number) ? number : null;
   };
   const timestamps = points.map((point) => new Date(point.timestamp).getTime() / 1000);
+  const requestCount = (point) => metric(point, "requestRate", "tps") ?? 0;
+  const errorCount = (point) => metric(point, "errorCount")
+    ?? requestCount(point) * (metric(point, "errorRate") ?? 0);
+  const successCount = (point) => metric(point, "successCount")
+    ?? Math.max(0, requestCount(point) - errorCount(point));
   return {
     timestamps,
-    traffic: [
+    outcome: [
       timestamps,
-      points.map((point) => metric(point, "requestRate") ?? 0),
-      points.map((point) => (metric(point, "errorRate") ?? 0) * 100),
+      points.map(successCount),
+      points.map(errorCount),
     ],
     latency: [
       timestamps,
-      points.map((point) => metric(point, "medianMs", "p50Ms")),
+      points.map((point) => metric(point, "averageMs", "mttMs")),
       points.map((point) => metric(point, "p90Ms")),
       points.map((point) => metric(point, "p95Ms")),
+    ],
+    composite: [
+      timestamps,
+      points.map(requestCount),
+      points.map((point) => metric(point, "averageMs", "mttMs")),
+      points.map(errorCount),
     ],
   };
 }
@@ -1035,7 +1068,7 @@ function baseRunChartOptions(width, host, scope, range) {
   };
 }
 
-function trafficChartOptions(width, host, scope, range) {
+function outcomeChartOptions(width, host, scope, range) {
   return {
     ...baseRunChartOptions(width, host, scope, range),
     series: [
@@ -1044,20 +1077,20 @@ function trafficChartOptions(width, host, scope, range) {
         value: (_plot, value) => chartTime(value),
       },
       {
-        label: "RPS",
+        label: "HTTP success",
         scale: "rps",
-        stroke: "#2166d1",
+        stroke: "#16835f",
         width: 2.5,
         points: { show: false },
-        value: (_plot, value) => value === null ? "-" : formatRate(value),
+        value: (_plot, value) => value === null ? "-" : `${Math.round(value).toLocaleString()} /s`,
       },
       {
-        label: "Error",
-        scale: "error",
+        label: "HTTP errors",
+        scale: "rps",
         stroke: "#c63a3a",
         width: 2,
         points: { show: false },
-        value: (_plot, value) => value === null ? "-" : `${Number(value).toFixed(2)}%`,
+        value: (_plot, value) => value === null ? "-" : `${Math.round(value).toLocaleString()} /s`,
       },
     ],
     axes: [
@@ -1071,16 +1104,9 @@ function trafficChartOptions(width, host, scope, range) {
       {
         scale: "rps",
         side: 3,
-        label: "RPS",
-        stroke: "#2166d1",
+        label: "Requests / sec",
+        stroke: "#16835f",
         grid: { stroke: "#e4e9ef", width: 1 },
-      },
-      {
-        scale: "error",
-        side: 1,
-        label: "Error (%)",
-        stroke: "#c63a3a",
-        grid: { show: false },
       },
     ],
   };
@@ -1100,7 +1126,7 @@ function latencyChartOptions(width, host, scope, range) {
         value: (_plot, value) => chartTime(value),
       },
       {
-        label: "Median",
+        label: "Average",
         scale: "latency",
         stroke: "#2166d1",
         width: 2,
@@ -1143,8 +1169,70 @@ function latencyChartOptions(width, host, scope, range) {
   };
 }
 
+function compositeChartOptions(width, host, scope, range) {
+  const options = baseRunChartOptions(width, host, scope, range);
+  options.scales = {
+    x: options.scales.x,
+    throughput: { auto: true, range: positiveScaleRange },
+    latency: { auto: true, range: positiveScaleRange },
+  };
+  return {
+    ...options,
+    series: [
+      { label: "Time", value: (_plot, value) => chartTime(value) },
+      {
+        label: "RPS",
+        scale: "throughput",
+        stroke: "#2166d1",
+        width: 2.5,
+        points: { show: false },
+        value: (_plot, value) => value === null ? "-" : formatRate(value),
+      },
+      {
+        label: "Average latency",
+        scale: "latency",
+        stroke: "#8a5bc7",
+        width: 2,
+        points: { show: false },
+        value: (_plot, value) => value === null ? "-" : formatMilliseconds(value),
+      },
+      {
+        label: "HTTP errors",
+        scale: "throughput",
+        stroke: "#c63a3a",
+        width: 2,
+        points: { show: false },
+        value: (_plot, value) => value === null ? "-" : `${Math.round(value).toLocaleString()} /s`,
+      },
+    ],
+    axes: [
+      {
+        scale: "x",
+        stroke: "#64748b",
+        grid: { stroke: "#e4e9ef", width: 1 },
+        ticks: { stroke: "#cbd5e1", width: 1 },
+        values: (_plot, values) => values.map(chartTime),
+      },
+      {
+        scale: "throughput",
+        side: 3,
+        label: "Requests / sec",
+        stroke: "#2166d1",
+        grid: { stroke: "#e4e9ef", width: 1 },
+      },
+      {
+        scale: "latency",
+        side: 1,
+        label: "Latency (ms)",
+        stroke: "#8a5bc7",
+        grid: { show: false },
+      },
+    ],
+  };
+}
+
 function disposeRunCharts(scope) {
-  for (const kind of ["traffic", "latency"]) {
+  for (const kind of ["outcome", "latency", "composite"]) {
     state.runCharts[scope][kind]?.destroy();
     state.runCharts[scope][kind] = null;
   }
@@ -1169,9 +1257,10 @@ function renderRunCharts(scope, hosts, emptyState) {
   }
   if (!hasPoints) return;
   if (!window.uPlot) {
-    hosts.traffic.hidden = false;
-    hosts.traffic.textContent = "Chart library unavailable.";
+    hosts.outcome.hidden = false;
+    hosts.outcome.textContent = "Chart library unavailable.";
     hosts.latency.hidden = true;
+    hosts.composite.hidden = true;
     return;
   }
   const data = runChartData();
@@ -1180,30 +1269,37 @@ function renderRunCharts(scope, hosts, emptyState) {
   for (const host of Object.values(hosts)) {
     host.classList.toggle("is-pannable", data.timestamps.length > RUN_CHART_VISIBLE_SAMPLES);
   }
-  state.runCharts[scope].traffic = new window.uPlot(
-    trafficChartOptions(runChartWidth(hosts.traffic), hosts.traffic, scope, range),
-    data.traffic,
-    hosts.traffic,
+  state.runCharts[scope].outcome = new window.uPlot(
+    outcomeChartOptions(runChartWidth(hosts.outcome), hosts.outcome, scope, range),
+    data.outcome,
+    hosts.outcome,
   );
   state.runCharts[scope].latency = new window.uPlot(
     latencyChartOptions(runChartWidth(hosts.latency), hosts.latency, scope, range),
     data.latency,
     hosts.latency,
   );
+  state.runCharts[scope].composite = new window.uPlot(
+    compositeChartOptions(runChartWidth(hosts.composite), hosts.composite, scope, range),
+    data.composite,
+    hosts.composite,
+  );
 }
 
 function drawRunChart() {
   renderRunCharts("detail", {
-    traffic: elements.runDetailTrafficChart,
+    outcome: elements.runDetailOutcomeChart,
     latency: elements.runDetailLatencyChart,
+    composite: elements.runDetailCompositeChart,
   }, elements.runDetailChartEmpty);
 }
 
 function resizeRunCharts() {
   for (const [scope, hosts] of Object.entries({
     detail: {
-      traffic: elements.runDetailTrafficChart,
+      outcome: elements.runDetailOutcomeChart,
       latency: elements.runDetailLatencyChart,
+      composite: elements.runDetailCompositeChart,
     },
   })) {
     for (const [kind, host] of Object.entries(hosts)) {
@@ -1305,6 +1401,26 @@ function renderComponents() {
     const values = [
       ["CPU", component.metrics ? `${component.metrics.cpuPercent.toFixed(1)}%` : "-"],
       ["Memory", component.metrics ? `${component.metrics.memoryUsedMb.toFixed(0)} / ${component.metrics.memoryLimitMb.toFixed(0)} MB` : "-"],
+      ...(component.id === "postgres" ? [
+        ["Connections", component.metrics?.maxConnections
+          ? `${component.metrics.connections} / ${component.metrics.maxConnections} (${component.metrics.activeConnections} active)`
+          : "-"],
+        ["DB size", component.metrics?.databaseSizeBytes
+          ? `${(component.metrics.databaseSizeBytes / 1_048_576).toFixed(1)} MB`
+          : "-"],
+        ["Cache hit", component.metrics
+          ? `${(Number(component.metrics.cacheHitRatio || 0) * 100).toFixed(1)}%`
+          : "-"],
+      ] : [
+        ["Redis memory", component.metrics?.redisUsedMemoryBytes
+          ? `${(component.metrics.redisUsedMemoryBytes / 1_048_576).toFixed(1)} MB`
+          : "-"],
+        ["Clients", component.metrics ? String(component.metrics.connectedClients ?? 0) : "-"],
+        ["Operations", component.metrics ? `${component.metrics.operationsPerSecond ?? 0} /s` : "-"],
+        ["Cache hit", component.metrics
+          ? `${(Number(component.metrics.cacheHitRatio || 0) * 100).toFixed(1)}%`
+          : "-"],
+      ]),
       ["Host port", String(component.config.hostPort)],
       ["Resources", `${component.config.cpus} CPU · ${component.config.memoryMb} MB`],
     ];
@@ -1389,6 +1505,57 @@ function configField(name, label, value, options = null) {
   return wrapper;
 }
 
+function environmentRow(key = "", value = "") {
+  const row = document.createElement("div");
+  row.className = "environment-row";
+  const keyInput = document.createElement("input");
+  keyInput.className = "environment-key";
+  keyInput.placeholder = "KEY";
+  keyInput.value = key;
+  keyInput.setAttribute("aria-label", "Environment variable key");
+  const valueInput = document.createElement("input");
+  valueInput.className = "environment-value";
+  valueInput.placeholder = "Value";
+  valueInput.value = value;
+  valueInput.setAttribute("aria-label", `${key || "Environment variable"} value`);
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "icon-button danger";
+  remove.textContent = "×";
+  remove.title = "Remove variable";
+  remove.addEventListener("click", () => row.remove());
+  row.append(keyInput, valueInput, remove);
+  return row;
+}
+
+function environmentEditor(values = {}) {
+  const section = document.createElement("section");
+  section.className = "environment-editor";
+  const heading = document.createElement("div");
+  const copy = document.createElement("div");
+  const title = document.createElement("strong");
+  title.textContent = "Environment variables";
+  const description = document.createElement("span");
+  description.textContent = "Container key-value settings. Restart applies saved values.";
+  copy.append(title, description);
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "button button-secondary";
+  add.textContent = "Add";
+  const rows = document.createElement("div");
+  rows.className = "environment-rows";
+  const entries = Object.entries(values);
+  rows.append(...(entries.length ? entries : [["", ""]]).map(([key, value]) => environmentRow(key, value)));
+  add.addEventListener("click", () => {
+    const row = environmentRow();
+    rows.append(row);
+    row.querySelector(".environment-key").focus();
+  });
+  heading.append(copy, add);
+  section.append(heading, rows);
+  return section;
+}
+
 function openComponentConfig(id) {
   const component = state.components.find((entry) => entry.id === id);
   if (!component) return;
@@ -1412,6 +1579,7 @@ function openComponentConfig(id) {
       configField("evictionPolicy", "Eviction policy", config.evictionPolicy, ["allkeys-lru", "allkeys-lfu", "volatile-lru", "noeviction"]),
     );
   }
+  fields.push(environmentEditor(config.environment || {}));
   elements.componentConfigFields.replaceChildren(...fields);
   elements.componentConfigDialog.showModal();
 }
@@ -1422,6 +1590,14 @@ async function saveComponentConfig(event) {
   for (const key of ["hostPort", "cpus", "memoryMb", "maxMemoryMb"]) {
     if (values[key] !== undefined) values[key] = Number(values[key]);
   }
+  values.environment = Object.fromEntries(
+    [...elements.componentConfigFields.querySelectorAll(".environment-row")]
+      .map((row) => [
+        row.querySelector(".environment-key").value.trim(),
+        row.querySelector(".environment-value").value,
+      ])
+      .filter(([key]) => key),
+  );
   try {
     await api(`/components/${state.componentId}/config`, {
       method: "PUT",

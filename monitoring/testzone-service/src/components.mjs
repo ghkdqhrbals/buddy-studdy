@@ -20,6 +20,9 @@ export const COMPONENT_CATALOG = [
       hostPort: 35432,
       cpus: 1,
       memoryMb: 512,
+      environment: {
+        POSTGRES_MAX_CONNECTIONS: "100",
+      },
     },
   },
   {
@@ -33,6 +36,7 @@ export const COMPONENT_CATALOG = [
       memoryMb: 256,
       maxMemoryMb: 192,
       evictionPolicy: "allkeys-lru",
+      environment: {},
     },
   },
 ];
@@ -42,6 +46,12 @@ const IMAGE_TAGS = {
   redis: new Set(["7.4-alpine", "8-alpine"]),
 };
 const REDIS_POLICIES = new Set(["allkeys-lru", "allkeys-lfu", "volatile-lru", "noeviction"]);
+const ENVIRONMENT_KEY = /^[A-Z_][A-Z0-9_]{0,127}$/;
+const RESERVED_ENVIRONMENT_KEYS = new Set([
+  "POSTGRES_DB",
+  "POSTGRES_USER",
+  "POSTGRES_PASSWORD",
+]);
 
 function definition(id) {
   const component = COMPONENT_CATALOG.find((entry) => entry.id === id);
@@ -91,6 +101,61 @@ function parseStats(raw) {
   }
 }
 
+function environment(input) {
+  if (input === undefined) return undefined;
+  if (!input || Array.isArray(input) || typeof input !== "object") {
+    throw new ValidationError("Environment variables must be a key-value object.");
+  }
+  const entries = Object.entries(input);
+  if (entries.length > 50) throw new ValidationError("At most 50 environment variables are allowed.");
+  return Object.fromEntries(entries.map(([key, value]) => {
+    const normalizedKey = String(key).trim().toUpperCase();
+    if (!ENVIRONMENT_KEY.test(normalizedKey)) {
+      throw new ValidationError(`Invalid environment variable key: ${key}`);
+    }
+    if (RESERVED_ENVIRONMENT_KEYS.has(normalizedKey)) {
+      throw new ValidationError(`${normalizedKey} is managed by TestZone.`);
+    }
+    const normalizedValue = String(value ?? "");
+    if (normalizedValue.length > 4_096) {
+      throw new ValidationError(`${normalizedKey} exceeds 4096 characters.`);
+    }
+    return [normalizedKey, normalizedValue];
+  }));
+}
+
+function parsePostgresMetrics(raw) {
+  const values = String(raw || "").trim().split("|");
+  if (values.length < 5) return {};
+  return {
+    connections: Number(values[0]) || 0,
+    maxConnections: Number(values[1]) || 0,
+    activeConnections: Number(values[2]) || 0,
+    databaseSizeBytes: Number(values[3]) || 0,
+    cacheHitRatio: Number(values[4]) || 0,
+  };
+}
+
+function parseRedisMetrics(raw) {
+  const values = Object.fromEntries(String(raw || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#") && line.includes(":"))
+    .map((line) => {
+      const index = line.indexOf(":");
+      return [line.slice(0, index), line.slice(index + 1)];
+    }));
+  const hits = Number(values.keyspace_hits) || 0;
+  const misses = Number(values.keyspace_misses) || 0;
+  return {
+    redisUsedMemoryBytes: Number(values.used_memory) || 0,
+    redisMaxMemoryBytes: Number(values.maxmemory) || 0,
+    connectedClients: Number(values.connected_clients) || 0,
+    operationsPerSecond: Number(values.instantaneous_ops_per_sec) || 0,
+    cacheHitRatio: hits + misses > 0 ? hits / (hits + misses) : 0,
+  };
+}
+
 export class ComponentManager {
   constructor(options = {}) {
     this.exec = options.exec || exec;
@@ -127,7 +192,22 @@ export class ComponentManager {
     } else {
       let changed = false;
       for (const component of COMPONENT_CATALOG) {
-        if (this.state.components?.[component.id]) continue;
+        if (this.state.components?.[component.id]) {
+          const current = this.state.components[component.id].config || {};
+          const merged = {
+            ...structuredClone(component.defaultConfig),
+            ...current,
+            environment: {
+              ...component.defaultConfig.environment,
+              ...(current.environment || {}),
+            },
+          };
+          if (JSON.stringify(current) !== JSON.stringify(merged)) {
+            this.state.components[component.id].config = merged;
+            changed = true;
+          }
+          continue;
+        }
         this.state.components ||= {};
         this.state.components[component.id] = {
           config: structuredClone(component.defaultConfig),
@@ -184,7 +264,7 @@ export class ComponentManager {
     return `redis://:[configured-password]@${this.name(id)}:6379/0`;
   }
 
-  async inspect(id) {
+  async inspect(id, state = null) {
     let status = "not-deployed";
     let detail = "";
     let startedAt = null;
@@ -212,6 +292,35 @@ export class ComponentManager {
     } catch {
       // Container state remains usable even if Docker statistics are unavailable.
     }
+    if (metrics && state) {
+      try {
+        if (id === "postgres") {
+          const { stdout } = await this.exec("docker", [
+            "exec",
+            "-e", `PGPASSWORD=${state.password}`,
+            this.name(id),
+            "psql",
+            "-U", state.config.username,
+            "-d", state.config.database,
+            "-Atc",
+            `select (select count(*) from pg_stat_activity), current_setting('max_connections'), (select count(*) from pg_stat_activity where state = 'active'), pg_database_size(current_database()), coalesce((select sum(blks_hit)::float / nullif(sum(blks_hit) + sum(blks_read), 0) from pg_stat_database), 0);`,
+          ]);
+          Object.assign(metrics, parsePostgresMetrics(stdout));
+        } else {
+          const { stdout } = await this.exec("docker", [
+            "exec",
+            this.name(id),
+            "redis-cli",
+            "--no-auth-warning",
+            "-a", state.password,
+            "INFO",
+          ]);
+          Object.assign(metrics, parseRedisMetrics(stdout));
+        }
+      } catch {
+        // Container CPU and memory remain available when native statistics are unavailable.
+      }
+    }
     return { status, detail, startedAt, metrics };
   }
 
@@ -220,7 +329,7 @@ export class ComponentManager {
     const results = [];
     for (const component of COMPONENT_CATALOG) {
       const state = this.state.components[component.id];
-      const runtime = await this.inspect(component.id);
+      const runtime = await this.inspect(component.id, state);
       results.push({
         id: component.id,
         name: component.name,
@@ -268,7 +377,15 @@ export class ComponentManager {
     if (input.hostPort !== undefined) next.hostPort = boundedNumber(input.hostPort, "Host port", 1024, 65535);
     if (input.cpus !== undefined) next.cpus = boundedNumber(input.cpus, "CPU limit", 0.1, 8);
     if (input.memoryMb !== undefined) next.memoryMb = boundedNumber(input.memoryMb, "Memory limit", 64, 8192);
+    const nextEnvironment = environment(input.environment);
+    if (nextEnvironment !== undefined) next.environment = nextEnvironment;
     if (id === "postgres") {
+      if (next.environment.POSTGRES_MAX_CONNECTIONS !== undefined) {
+        const maxConnections = Number(next.environment.POSTGRES_MAX_CONNECTIONS);
+        if (!Number.isInteger(maxConnections) || maxConnections < 10 || maxConnections > 10_000) {
+          throw new ValidationError("POSTGRES_MAX_CONNECTIONS must be an integer between 10 and 10000.");
+        }
+      }
       if (input.database !== undefined) next.database = identifier(input.database, "Database");
       if (input.username !== undefined) next.username = identifier(input.username, "Username");
     } else {
@@ -299,6 +416,9 @@ export class ComponentManager {
       "--memory", `${config.memoryMb}m`,
       "-p", `127.0.0.1:${config.hostPort}:${component.containerPort}`,
     ];
+    for (const [key, value] of Object.entries(config.environment || {})) {
+      args.push("-e", `${key}=${value}`);
+    }
     if (id === "postgres") {
       args.push(
         "-e", `POSTGRES_DB=${config.database}`,
@@ -307,6 +427,10 @@ export class ComponentManager {
         "-v", `${this.volume(id)}:/var/lib/postgresql/data`,
         this.image(id, config),
       );
+      const maxConnections = Number(config.environment?.POSTGRES_MAX_CONNECTIONS);
+      if (Number.isInteger(maxConnections) && maxConnections >= 10 && maxConnections <= 10_000) {
+        args.push("postgres", "-c", `max_connections=${maxConnections}`);
+      }
     } else {
       args.push(
         "-v", `${this.volume(id)}:/data`,

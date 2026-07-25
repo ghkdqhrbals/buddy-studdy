@@ -65,12 +65,14 @@ test("run detail charts use vendored uPlot with cursor tooltips", () => {
   assert.match(chartCode, /setCursor:/);
   assert.match(chartCode, /legend:\s*\{\s*show:\s*false/);
   assert.match(chartCode, /label:\s*"RPS"/);
-  assert.match(chartCode, /label:\s*"Median"/);
+  assert.match(chartCode, /label:\s*"Average"/);
   assert.match(chartCode, /label:\s*"p90"/);
   assert.match(chartCode, /label:\s*"p95"/);
-  assert.match(chartCode, /label:\s*"Error"/);
-  assert.match(html, /id="runDetailTrafficChart"/);
+  assert.match(chartCode, /label:\s*"HTTP success"/);
+  assert.match(chartCode, /label:\s*"HTTP errors"/);
+  assert.match(html, /id="runDetailOutcomeChart"/);
   assert.match(html, /id="runDetailLatencyChart"/);
+  assert.match(html, /id="runDetailCompositeChart"/);
   assert.doesNotMatch(html, /id="runTrafficChart"|id="runLatencyChart"/);
   assert.doesNotMatch(chartCode, /VUs|point\.vus/);
 });
@@ -89,13 +91,17 @@ test("run charts cap their content width and support horizontal drag inspection"
 
 test("selected history run renders its time-series inside the detail panel", () => {
   const detail = html.match(/<section id="runDetail"[\s\S]+?<\/section>\s*<\/section>/)?.[0] ?? "";
-  assert.match(detail, /id="runDetailTrafficChart"/);
+  assert.match(detail, /id="runDetailOutcomeChart"/);
   assert.match(detail, /id="runDetailLatencyChart"/);
+  assert.match(detail, /id="runDetailCompositeChart"/);
+  assert.match(detail, /id="detailTps"/);
+  assert.match(detail, /id="detailMttfb"/);
+  assert.match(detail, /id="detailMtt"/);
   assert.match(detail, /id="runDetailChartEmpty"/);
   assert.match(css, /\.run-detail-timeline/);
   assert.match(
     javascript,
-    /renderRunCharts\("detail",\s*\{[\s\S]+?traffic:\s*elements\.runDetailTrafficChart,[\s\S]+?latency:\s*elements\.runDetailLatencyChart/,
+    /renderRunCharts\("detail",\s*\{[\s\S]+?outcome:\s*elements\.runDetailOutcomeChart,[\s\S]+?latency:\s*elements\.runDetailLatencyChart,[\s\S]+?composite:\s*elements\.runDetailCompositeChart/,
   );
   assert.doesNotMatch(detail, /runDetailChartTooltip/);
 });

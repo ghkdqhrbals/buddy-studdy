@@ -7,6 +7,7 @@ const TRACKED_K6_METRICS = new Set([
   "dropped_iterations",
   "http_req_duration",
   "http_req_failed",
+  "http_req_waiting",
   "http_reqs",
   "iterations",
   "vus",
@@ -52,11 +53,21 @@ export function summarizeK6(summary = {}) {
   const iterations = values("iterations");
   const duration = values("http_req_duration");
   const failures = values("http_req_failed");
+  const waiting = values("http_req_waiting");
   const checks = values("checks");
   const vus = values("vus_max");
   const dropped = values("dropped_iterations");
+  const requestCount = requests.count ?? null;
+  const errorRate = failures.rate ?? failures.value ?? null;
+  const errorCount = requestCount !== null && errorRate !== null
+    ? Math.round(requestCount * errorRate)
+    : null;
+  const successCount = requestCount !== null && errorCount !== null
+    ? Math.max(0, requestCount - errorCount)
+    : null;
   return {
     requestRate: requests.rate ?? null,
+    tps: requests.rate ?? null,
     iterationRate: iterations.rate ?? null,
     averageMs: duration.avg ?? null,
     minimumMs: duration.min ?? null,
@@ -66,10 +77,14 @@ export function summarizeK6(summary = {}) {
     p90Ms: duration["p(90)"] ?? null,
     p95Ms: duration["p(95)"] ?? null,
     p99Ms: duration["p(99)"] ?? null,
-    errorRate: failures.rate ?? failures.value ?? null,
+    mttMs: duration.avg ?? null,
+    mttfbMs: waiting.avg ?? null,
+    errorRate,
+    successCount,
+    errorCount,
     checkRate: checks.rate ?? checks.value ?? null,
     maxVus: vus.max ?? vus.value ?? null,
-    requests: requests.count ?? null,
+    requests: requestCount,
     iterations: iterations.count ?? null,
     droppedIterations: dropped.count ?? 0,
   };
@@ -78,6 +93,9 @@ export function summarizeK6(summary = {}) {
 function aggregateValue(metric, values) {
   if (!values.length) return null;
   if (metric === "http_req_duration") return percentile(values, 0.95);
+  if (metric === "http_req_waiting") {
+    return values.reduce((sum, value) => sum + value, 0) / values.length;
+  }
   if (metric === "http_req_failed" || metric === "checks") {
     return values.reduce((sum, value) => sum + value, 0) / values.length;
   }
@@ -141,12 +159,17 @@ export class InfluxWriter {
         profile: run.profile,
       }, {
         requestRate: snapshot.requestRate,
+        tps: snapshot.tps,
+        successCount: snapshot.successCount,
+        errorCount: snapshot.errorCount,
         averageMs: snapshot.averageMs,
         minimumMs: snapshot.minimumMs,
         medianMs: snapshot.medianMs,
         maximumMs: snapshot.maximumMs,
         p90Ms: snapshot.p90Ms,
         p95Ms: snapshot.p95Ms,
+        mttMs: snapshot.mttMs,
+        mttfbMs: snapshot.mttfbMs,
         errorRate: snapshot.errorRate,
         vus: snapshot.vus,
         droppedIterations: snapshot.droppedIterations,
@@ -171,6 +194,15 @@ export class InfluxWriter {
         processes: component.metrics?.processes,
         networkIO: component.metrics?.networkIO,
         blockIO: component.metrics?.blockIO,
+        connections: component.metrics?.connections,
+        maxConnections: component.metrics?.maxConnections,
+        activeConnections: component.metrics?.activeConnections,
+        databaseSizeBytes: component.metrics?.databaseSizeBytes,
+        cacheHitRatio: component.metrics?.cacheHitRatio,
+        redisUsedMemoryBytes: component.metrics?.redisUsedMemoryBytes,
+        redisMaxMemoryBytes: component.metrics?.redisMaxMemoryBytes,
+        connectedClients: component.metrics?.connectedClients,
+        operationsPerSecond: component.metrics?.operationsPerSecond,
       },
       timestampMs,
     )));

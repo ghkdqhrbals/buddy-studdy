@@ -20,6 +20,8 @@ test("k6 point stream is aggregated into one live sample per second", () => {
     point("http_req_duration", 400, "2026-07-24T03:11:11.800Z"),
     point("http_req_failed", 0, "2026-07-24T03:11:11.200Z"),
     point("http_req_failed", 1, "2026-07-24T03:11:11.800Z"),
+    point("http_req_waiting", 80, "2026-07-24T03:11:11.200Z"),
+    point("http_req_waiting", 320, "2026-07-24T03:11:11.800Z"),
     point("vus", 1000, "2026-07-24T03:11:11.800Z"),
   ];
 
@@ -27,6 +29,9 @@ test("k6 point stream is aggregated into one live sample per second", () => {
   const sample = summarizeLiveBucket(bucket);
 
   assert.equal(sample.requestRate, 2);
+  assert.equal(sample.tps, 2);
+  assert.equal(sample.successCount, 1);
+  assert.equal(sample.errorCount, 1);
   assert.equal(sample.averageMs, 250);
   assert.equal(sample.minimumMs, 100);
   assert.equal(sample.medianMs, 100);
@@ -34,6 +39,8 @@ test("k6 point stream is aggregated into one live sample per second", () => {
   assert.equal(sample.p90Ms, 400);
   assert.equal(sample.p95Ms, 400);
   assert.equal(sample.errorRate, 0.5);
+  assert.equal(sample.mttMs, 250);
+  assert.equal(sample.mttfbMs, 200);
   assert.equal(sample.vus, 1000);
 });
 

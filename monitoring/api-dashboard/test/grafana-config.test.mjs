@@ -101,9 +101,16 @@ test("TestZone dashboard separates server, database, and Redis runtime signals",
   const templateNames = dashboard.templating.list.map((template) => template.name);
 
   assert.deepEqual(rows, ["Server", "Database", "Redis"]);
+  assert.match(panels.get("HTTP success and errors per second")?.targets[0].query ?? "", /successCount/);
+  assert.match(panels.get("HTTP success and errors per second")?.targets[1].query ?? "", /errorCount/);
+  assert.match(panels.get("Response time avg \/ p90 \/ p95")?.targets[0].query ?? "", /averageMs/);
+  assert.match(panels.get("RPS \/ average latency \/ error count")?.targets[0].query ?? "", /requestRate/);
+  assert.match(panels.get("RPS \/ average latency \/ error count")?.targets[2].query ?? "", /errorCount/);
   assert.match(panels.get("PostgreSQL CPU")?.targets[0].query ?? "", /r\.component == "postgres"/);
   assert.match(panels.get("PostgreSQL memory")?.targets[0].query ?? "", /r\.component == "postgres"/);
+  assert.match(panels.get("PostgreSQL connections")?.targets[2].query ?? "", /maxConnections/);
   assert.match(panels.get("Redis CPU")?.targets[0].query ?? "", /r\.component == "redis"/);
   assert.match(panels.get("Redis memory")?.targets[0].query ?? "", /r\.component == "redis"/);
+  assert.match(panels.get("Redis activity")?.targets[0].query ?? "", /operationsPerSecond/);
   assert.ok(!templateNames.includes("component"));
 });

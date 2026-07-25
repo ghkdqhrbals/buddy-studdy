@@ -79,15 +79,15 @@
       },
       "targets": [
         {
-          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_k6_metric\" and r.metric == \"http_reqs\" and r.run_id == \"${run_id}\")\n  |> aggregateWindow(every: 1s, fn: sum, createEmpty: true)\n  |> fill(value: 0.0)\n  |> set(key: \"_field\", value: \"request_rate\")",
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_live\" and r._field == \"successCount\" and r.run_id == \"${run_id}\")\n  |> set(key: \"_field\", value: \"HTTP success\")",
           "refId": "A"
         },
         {
-          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_live\" and r._field == \"requestRate\" and r.run_id == \"${run_id}\")",
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_live\" and r._field == \"errorCount\" and r.run_id == \"${run_id}\")\n  |> set(key: \"_field\", value: \"HTTP errors\")",
           "refId": "B"
         }
       ],
-      "title": "Request rate",
+      "title": "HTTP success and errors per second",
       "type": "timeseries"
     },
     {
@@ -137,7 +137,7 @@
       },
       "targets": [
         {
-          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_live\" and r._field == \"medianMs\" and r.run_id == \"${run_id}\")\n  |> set(key: \"_field\", value: \"median\")",
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_live\" and r._field == \"averageMs\" and r.run_id == \"${run_id}\")\n  |> set(key: \"_field\", value: \"average\")",
           "refId": "A"
         },
         {
@@ -149,7 +149,7 @@
           "refId": "C"
         }
       ],
-      "title": "Latency percentiles",
+      "title": "Response time avg / p90 / p95",
       "type": "timeseries"
     },
     {
@@ -160,34 +160,41 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
           },
           "custom": {
-            "axisLabel": "failure rate",
+            "axisLabel": "requests / second",
             "drawStyle": "line",
             "fillOpacity": 15,
             "lineWidth": 2,
             "showPoints": "never",
             "spanNulls": true
           },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Average latency"
+            },
+            "properties": [
               {
-                "color": "green",
-                "value": null
+                "id": "unit",
+                "value": "ms"
               },
               {
-                "color": "red",
-                "value": 0.01
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "latency"
               }
             ]
-          },
-          "min": 0,
-          "max": 1,
-          "unit": "percentunit"
-        },
-        "overrides": []
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
@@ -212,15 +219,19 @@
       },
       "targets": [
         {
-          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_k6_metric\" and r.metric == \"http_req_failed\" and r.run_id == \"${run_id}\")\n  |> aggregateWindow(every: 10s, fn: mean, createEmpty: false)\n  |> set(key: \"_field\", value: \"error_rate\")",
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_live\" and r._field == \"requestRate\" and r.run_id == \"${run_id}\")\n  |> set(key: \"_field\", value: \"RPS\")",
           "refId": "A"
         },
         {
-          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_live\" and r._field == \"errorRate\" and r.run_id == \"${run_id}\")",
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_live\" and r._field == \"averageMs\" and r.run_id == \"${run_id}\")\n  |> set(key: \"_field\", value: \"Average latency\")",
           "refId": "B"
+        },
+        {
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_run_live\" and r._field == \"errorCount\" and r.run_id == \"${run_id}\")\n  |> set(key: \"_field\", value: \"HTTP errors\")",
+          "refId": "C"
         }
       ],
-      "title": "Error rate",
+      "title": "RPS / average latency / error count",
       "type": "timeseries"
     },
     {
@@ -479,12 +490,76 @@
       "description": "PostgreSQL container memory usage sampled during TestZone runs."
     },
     {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "buddystudy-testzone-influx"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "connections",
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"connections\" and r.component == \"postgres\")\n  |> set(key: \"_field\", value: \"Total\")",
+          "refId": "A"
+        },
+        {
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"activeConnections\" and r.component == \"postgres\")\n  |> set(key: \"_field\", value: \"Active\")",
+          "refId": "B"
+        },
+        {
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"maxConnections\" and r.component == \"postgres\")\n  |> set(key: \"_field\", value: \"Maximum\")",
+          "refId": "C"
+        }
+      ],
+      "title": "PostgreSQL connections",
+      "type": "timeseries",
+      "description": "Total, active, and configured maximum PostgreSQL connections."
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 32
+        "y": 40
       },
       "id": 102,
       "panels": [],
@@ -519,7 +594,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 33
+        "y": 41
       },
       "id": 8,
       "options": {
@@ -574,7 +649,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 33
+        "y": 41
       },
       "id": 9,
       "options": {
@@ -600,6 +675,91 @@
       "title": "Redis memory",
       "type": "timeseries",
       "description": "Redis container memory usage sampled during TestZone runs."
+    },
+    {
+      "datasource": {
+        "type": "influxdb",
+        "uid": "buddystudy-testzone-influx"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "activity",
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Cache hit ratio"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "cache hit ratio"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 49
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"operationsPerSecond\" and r.component == \"redis\")\n  |> set(key: \"_field\", value: \"Operations / second\")",
+          "refId": "A"
+        },
+        {
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"connectedClients\" and r.component == \"redis\")\n  |> set(key: \"_field\", value: \"Connected clients\")",
+          "refId": "B"
+        },
+        {
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"cacheHitRatio\" and r.component == \"redis\")\n  |> set(key: \"_field\", value: \"Cache hit ratio\")",
+          "refId": "C"
+        }
+      ],
+      "title": "Redis activity",
+      "type": "timeseries",
+      "description": "Redis operations, connected clients, and keyspace cache hit ratio."
     }
   ],
   "refresh": "5s",

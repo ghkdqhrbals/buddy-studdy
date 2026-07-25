@@ -385,6 +385,7 @@ export async function createTestZoneServer(dependencies = {}) {
     ? setInterval(() => void sampleComponents(), componentSampleIntervalMs)
     : null;
   componentSampleTimer?.unref();
+  if (componentSampleIntervalMs > 0) void sampleComponents();
   server.on("close", () => {
     if (componentSampleTimer) clearInterval(componentSampleTimer);
   });

@@ -5,6 +5,7 @@ const TRACKED_METRICS = new Set([
   "dropped_iterations",
   "http_req_duration",
   "http_req_failed",
+  "http_req_waiting",
   "http_reqs",
   "vus",
   "vus_max",
@@ -16,20 +17,27 @@ function emptyBucket(timestamp) {
     requests: 0,
     durations: [],
     failures: [],
+    waiting: [],
     vus: [],
     droppedIterations: 0,
   };
 }
 
 export function summarizeLiveBucket(bucket) {
-  const failures = bucket.failures.length
-    ? bucket.failures.reduce((sum, value) => sum + value, 0) / bucket.failures.length
-    : 0;
+  const errorCount = bucket.failures.reduce((sum, value) => sum + value, 0);
+  const successCount = Math.max(0, bucket.requests - errorCount);
+  const failures = bucket.requests ? errorCount / bucket.requests : 0;
   const latency = summarizeLatencySamples(bucket.durations);
+  const waiting = summarizeLatencySamples(bucket.waiting);
   return {
     timestamp: new Date(bucket.timestamp).toISOString(),
     requestRate: bucket.requests,
+    tps: bucket.requests,
+    successCount,
+    errorCount,
     ...latency,
+    mttMs: latency.averageMs,
+    mttfbMs: waiting.averageMs,
     errorRate: failures,
     vus: bucket.vus.length ? Math.max(...bucket.vus) : 0,
     droppedIterations: bucket.droppedIterations,
@@ -54,6 +62,7 @@ export function consumeK6Lines(lines, buckets = new Map()) {
     if (metric === "http_reqs") bucket.requests += value;
     if (metric === "http_req_duration") bucket.durations.push(value);
     if (metric === "http_req_failed") bucket.failures.push(value);
+    if (metric === "http_req_waiting") bucket.waiting.push(value);
     if (metric === "vus" || metric === "vus_max") bucket.vus.push(value);
     if (metric === "dropped_iterations") bucket.droppedIterations += value;
     buckets.set(timestamp, bucket);

@@ -31,6 +31,7 @@ test("summarizeK6 extracts stable report fields", () => {
         },
       },
       http_req_failed: { values: { rate: 0.01 } },
+      http_req_waiting: { values: { avg: 11 } },
       vus_max: { values: { max: 100 } },
     },
   });
@@ -42,6 +43,11 @@ test("summarizeK6 extracts stable report fields", () => {
   assert.equal(summary.p90Ms, 20);
   assert.equal(summary.p95Ms, 30);
   assert.equal(summary.errorRate, 0.01);
+  assert.equal(summary.tps, 123.4);
+  assert.equal(summary.mttMs, 14);
+  assert.equal(summary.mttfbMs, 11);
+  assert.equal(summary.successCount, 990);
+  assert.equal(summary.errorCount, 10);
   assert.equal(summary.maxVus, 100);
 });
 
@@ -59,6 +65,7 @@ test("summarizeK6 reads the flat k6 0.54 summary export", () => {
         "p(95)": 18.1,
       },
       http_req_failed: { value: 0 },
+      http_req_waiting: { avg: 12.4 },
       checks: { value: 1 },
       vus_max: { value: 1, max: 1 },
     },
@@ -73,6 +80,9 @@ test("summarizeK6 reads the flat k6 0.54 summary export", () => {
   assert.equal(summary.p90Ms, 17.1);
   assert.equal(summary.p95Ms, 18.1);
   assert.equal(summary.errorRate, 0);
+  assert.equal(summary.successCount, 51);
+  assert.equal(summary.errorCount, 0);
+  assert.equal(summary.mttfbMs, 12.4);
   assert.equal(summary.checkRate, 1);
   assert.equal(summary.maxVus, 1);
 });
@@ -201,6 +211,11 @@ test("InfluxWriter stores disposable component resource samples", async () => {
       processes: 9,
       networkIO: "4MB / 2MB",
       blockIO: "1MB / 3MB",
+      connections: 12,
+      maxConnections: 100,
+      activeConnections: 3,
+      databaseSizeBytes: 1048576,
+      cacheHitRatio: 0.99,
     },
   }], 1_000);
 
@@ -208,4 +223,7 @@ test("InfluxWriter stores disposable component resource samples", async () => {
   assert.match(writes[0], /cpuPercent=13.5/);
   assert.match(writes[0], /memoryUsedMb=128/);
   assert.match(writes[0], /processes=9/);
+  assert.match(writes[0], /connections=12/);
+  assert.match(writes[0], /maxConnections=100/);
+  assert.match(writes[0], /cacheHitRatio=0.99/);
 });
