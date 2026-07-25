@@ -216,6 +216,15 @@ test("save failures stay visible beside the editor and clear only after a succes
   assert.match(javascript, /state\.dirty\s*=\s*false;[\s\S]+?clearEditorProblem\(\);[\s\S]+?"Saved"/);
 });
 
+test("stale automatic validation cannot overwrite a newer save result", () => {
+  assert.match(javascript, /function cancelPendingValidation\(\)/);
+  assert.match(javascript, /function validationIsCurrent\(snapshot\)/);
+  assert.match(javascript, /async function saveScript\(\)[\s\S]+?cancelPendingValidation\(\)/);
+  assert.match(javascript, /requestId:\s*\+\+state\.validationRequestId/);
+  assert.match(javascript, /if \(!validationIsCurrent\(snapshot\)\) return false;/);
+  assert.match(javascript, /if \(quiet\) return false;[\s\S]+?title:\s*"Validation unavailable"/);
+});
+
 test("history is the overview and run details appear only after selecting a row", () => {
   assert.doesNotMatch(html, /id="overviewRunButton"|>New run</i);
   assert.match(html, /data-tab="overview"[^>]+>History</);

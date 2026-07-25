@@ -39,6 +39,8 @@ const state = {
   componentPollTimer: null,
   activeTab: "overview",
   lintTimer: null,
+  editorRevision: 0,
+  validationRequestId: 0,
   componentId: null,
   runCharts: {
     detail: { outcome: null, latency: null },
@@ -297,6 +299,8 @@ function renderScripts() {
 }
 
 function loadScriptIntoEditor() {
+  cancelPendingValidation();
+  state.editorRevision += 1;
   if (state.creatingScript) {
     elements.scriptNameInput.value = "untitled.js";
     elements.scriptEditor.value = "";
@@ -350,13 +354,27 @@ function renderEditorFileName() {
 
 function markDirty() {
   if (!script() && !state.creatingScript) return;
+  cancelPendingValidation();
+  state.editorRevision += 1;
   state.dirty = true;
   renderDirtyState();
   setFeedback(elements.editorFeedback, "Unsaved");
-  window.clearTimeout(state.lintTimer);
   if (!state.creatingScript) {
     state.lintTimer = window.setTimeout(() => void validateCurrentScript(true), 700);
   }
+}
+
+function cancelPendingValidation() {
+  window.clearTimeout(state.lintTimer);
+  state.lintTimer = null;
+  state.validationRequestId += 1;
+}
+
+function validationIsCurrent(snapshot) {
+  return snapshot.requestId === state.validationRequestId
+    && snapshot.revision === state.editorRevision
+    && snapshot.scriptId === state.scriptId
+    && snapshot.code === elements.scriptEditor.value;
 }
 
 function editorSnapshot() {
@@ -475,6 +493,7 @@ function renderDiagnostics(
 async function saveScript() {
   const selected = script();
   if (!selected && !state.creatingScript) return false;
+  cancelPendingValidation();
   setButtonBusy(elements.saveScriptButton, true, "Saving");
   try {
     if (state.creatingScript) {
@@ -518,26 +537,47 @@ async function saveScript() {
 async function validateCurrentScript(quiet = false) {
   const selected = script();
   if (!selected) return false;
+  state.lintTimer = null;
+  const snapshot = {
+    requestId: ++state.validationRequestId,
+    revision: state.editorRevision,
+    scriptId: selected.id,
+    code: elements.scriptEditor.value,
+  };
   if (!quiet) setButtonBusy(elements.validateScriptButton, true, "Checking");
   try {
     const validation = (await api(`/scripts/${selected.id}/validate`, {
       method: "POST",
       body: JSON.stringify({
-        code: elements.scriptEditor.value,
+        code: snapshot.code,
       }),
     })).validation;
+    if (!validationIsCurrent(snapshot)) return false;
     clearEditorProblem();
     setFeedback(elements.editorFeedback, `Valid · ${validation.bytes.toLocaleString()} bytes`, "success");
     if (!quiet) toast("Script validation passed.");
     return true;
   } catch (error) {
-    renderDiagnostics(error.details || [], {
+    if (!validationIsCurrent(snapshot)) return false;
+    const diagnostics = error.details || [];
+    if (!diagnostics.length) {
+      if (quiet) return false;
+      renderDiagnostics([{ message: error.message }], {
+        title: "Validation unavailable",
+        message: "The validation service could not be reached. Your changes are still in the editor.",
+        focus: true,
+      });
+      setFeedback(elements.editorFeedback, "Validation unavailable", "error");
+      toast(error.message, "error");
+      return false;
+    }
+    renderDiagnostics(diagnostics, {
       title: "Validation failed",
       message: "The script cannot run until these problems are fixed.",
       focus: !quiet,
     });
     setFeedback(elements.editorFeedback, "Validation failed", "error");
-    if (!quiet) toast((error.details || []).map(diagnosticMessage).join(" ") || error.message, "error");
+    if (!quiet) toast(diagnostics.map(diagnosticMessage).join(" "), "error");
     return false;
   } finally {
     if (!quiet) setButtonBusy(elements.validateScriptButton, false);
