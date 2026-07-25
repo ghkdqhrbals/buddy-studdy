@@ -11,6 +11,10 @@ const serverRuntimeDashboardPath = path.resolve(
   testDirectory,
   "../../grafana/dashboards/buddystudy-server-runtime.json",
 );
+const grafanaDashboardDirectory = path.resolve(
+  testDirectory,
+  "../../grafana/dashboards",
+);
 const testzoneDashboardPath = path.resolve(
   testDirectory,
   "../../grafana/dashboards/buddystudy-testzone.json",
@@ -102,6 +106,36 @@ test("server runtime dashboard emits bounded Loki metric series", async () => {
     assert.match(expression, /\| drop runtime \|/);
     assert.match(expression, /\| json \w+="\w+" \| unwrap \w+/);
     assert.doesNotMatch(expression, /\| json \| unwrap/);
+  }
+});
+
+test("Grafana dashboards use supported fixed color field configuration", async () => {
+  const dashboardFiles = (await fs.readdir(grafanaDashboardDirectory))
+    .filter((fileName) => fileName.endsWith(".json"));
+
+  for (const fileName of dashboardFiles) {
+    const dashboard = JSON.parse(
+      await fs.readFile(path.join(grafanaDashboardDirectory, fileName), "utf8"),
+    );
+    const panels = dashboard.panels ?? [];
+
+    for (const panel of panels) {
+      const color = panel.fieldConfig?.defaults?.color;
+      if (!color) continue;
+
+      assert.notEqual(
+        color.mode,
+        "fixedColor",
+        `${fileName} panel "${panel.title}" uses an unsupported color mode`,
+      );
+      if (color.fixedColor) {
+        assert.equal(
+          color.mode,
+          "fixed",
+          `${fileName} panel "${panel.title}" must pair fixedColor with mode=fixed`,
+        );
+      }
+    }
   }
 });
 

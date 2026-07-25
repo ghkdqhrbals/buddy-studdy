@@ -629,7 +629,7 @@
         "defaults": {
           "color": {
             "fixedColor": "red",
-            "mode": "fixedColor"
+            "mode": "fixed"
           },
           "custom": {
             "axisLabel": "CPU",
@@ -768,7 +768,7 @@
         "defaults": {
           "color": {
             "fixedColor": "green",
-            "mode": "fixedColor"
+            "mode": "fixed"
           },
           "custom": {
             "axisLabel": "operations / sec",
@@ -826,7 +826,7 @@
         "defaults": {
           "color": {
             "fixedColor": "red",
-            "mode": "fixedColor"
+            "mode": "fixed"
           },
           "custom": {
             "axisLabel": "operations / sec",
