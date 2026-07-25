@@ -877,7 +877,6 @@ async function selectRun(id) {
   state.runSeriesId = null;
   renderRuns();
   await loadSelectedRunSeries();
-  elements.runDetail.scrollIntoView({ block: "start" });
 }
 
 async function loadSelectedRunSeries() {

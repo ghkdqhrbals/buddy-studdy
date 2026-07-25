@@ -209,6 +209,7 @@ test("history is the overview and run details appear only after selecting a row"
   assert.match(javascript, /state\.selectedRunId\s*=\s*null;/);
   assert.match(javascript, /elements\.runDetail\.hidden\s*=\s*!run/);
   assert.match(javascript, /row\.addEventListener\("click",\s*\(\)\s*=>\s*void selectRun\(run\.id\)\)/);
+  assert.doesNotMatch(javascript, /elements\.runDetail\.scrollIntoView/);
   assert.match(javascript, /renderScenarioPlan\(run\)/);
   assert.match(javascript, /renderScenarioSummary\(run\)/);
 });
