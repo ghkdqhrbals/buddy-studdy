@@ -91,7 +91,7 @@ export function parseRelatedLog(value) {
     nanoseconds,
     time: formatKstFromNs(nanoseconds),
     level: extractLevel(line),
-    message: compactLogLine(line),
+    summary: summarizeRelatedLog(line),
     rawLine: line,
   };
 }
@@ -144,6 +144,44 @@ function compactLogLine(line) {
   }
   const firstLine = line.split("\n")[0];
   return firstLine.replace(/\s+/g, " ").trim();
+}
+
+function summarizeRelatedLog(line) {
+  const exchangeIndex = line.indexOf(API_EXCHANGE_MARKER);
+  if (exchangeIndex >= 0) {
+    try {
+      const payload = JSON.parse(line.slice(exchangeIndex + API_EXCHANGE_MARKER.length).trim());
+      const request = normalizeRequest(payload);
+      const response = normalizeResponse(payload);
+      return [
+        "API exchange",
+        request.method,
+        request.path,
+        `status ${response.status ?? "-"}`,
+        durationLabel(response.durationMs),
+      ].filter(Boolean).join(" · ");
+    } catch {
+      return "API exchange";
+    }
+  }
+
+  const errorIndex = line.indexOf(API_ERROR_MARKER);
+  if (errorIndex >= 0) {
+    const summary = line.slice(errorIndex + API_ERROR_MARKER.length).split("\n")[0];
+    const fields = Object.fromEntries(
+      [...summary.matchAll(/(\w+)=((?:(?!\s\w+=).)+)/g)].map((match) => [match[1], match[2].trim()]),
+    );
+    return [
+      "API error",
+      fields.method,
+      fields.path,
+      fields.code,
+      fields.status ? `status ${fields.status}` : "",
+    ].filter(Boolean).join(" · ");
+  }
+
+  const logger = line.match(/\]\s+([\w.$]+)\s+:\s/)?.[1];
+  return logger ? `Application log · ${logger}` : "Application log";
 }
 
 function normalizeRequest(payload) {

@@ -43,13 +43,16 @@ state.
 
 ## Component configuration
 
-The Components tab accepts up to 50 key-value environment settings per
-component. Keys are normalized to uppercase and values are stored in the
-TestZone data directory with file mode `0600`. PostgreSQL database, username,
-and password variables remain TestZone-managed to prevent credentials and
-connection metadata from diverging.
+The PostgreSQL component exposes the operational settings that materially
+affect load tests as first-class fields: max connections, shared buffers, work
+memory, maintenance work memory, effective cache size, and statement timeout.
+TestZone validates these values against safe bounds and the selected container
+memory before saving them. They are applied as PostgreSQL server parameters
+when the component is restarted.
 
-`POSTGRES_MAX_CONNECTIONS` is supported as an environment setting and is also
-applied to the PostgreSQL server command at restart. Configuration changes take
-effect when the component is restarted; resetting additionally deletes its
-persistent volume.
+The Components tab also accepts up to 50 extra key-value environment settings
+per component. Keys are normalized to uppercase and values are stored in the
+TestZone data directory with file mode `0600`. PostgreSQL database, username,
+password, and first-class server settings remain TestZone-managed to prevent
+credentials and runtime parameters from diverging. Resetting additionally
+deletes the component's persistent volume.

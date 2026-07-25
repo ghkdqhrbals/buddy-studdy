@@ -77,8 +77,13 @@ test("ComponentManager persists private credentials and configurable resource li
     hostPort: 45432,
     cpus: 2,
     memoryMb: 1024,
+    maxConnections: 250,
+    sharedBuffersMb: 256,
+    workMemMb: 8,
+    maintenanceWorkMemMb: 128,
+    effectiveCacheSizeMb: 768,
+    statementTimeoutMs: 5_000,
     environment: {
-      POSTGRES_MAX_CONNECTIONS: "250",
       LOG_STATEMENT: "none",
     },
   });
@@ -96,16 +101,16 @@ test("ComponentManager persists private credentials and configurable resource li
   assert.deepEqual(await second.credentials("postgres"), postgres);
   const listed = await second.list();
   assert.equal(listed.find((entry) => entry.id === "postgres").config.memoryMb, 1024);
-  assert.deepEqual(listed.find((entry) => entry.id === "postgres").config.environment, {
-    POSTGRES_MAX_CONNECTIONS: "250",
-    LOG_STATEMENT: "none",
-  });
+  const savedPostgres = listed.find((entry) => entry.id === "postgres").config;
+  assert.equal(savedPostgres.maxConnections, 250);
+  assert.equal(savedPostgres.sharedBuffersMb, 256);
+  assert.deepEqual(savedPostgres.environment, { LOG_STATEMENT: "none" });
   assert.equal(listed.some((entry) => entry.id === "kafka"), false);
   const mode = (await fs.stat(path.join(dataDir, "components.json"))).mode & 0o777;
   assert.equal(mode, 0o600);
 });
 
-test("ComponentManager passes key-value environment and PostgreSQL max connections to Docker", async () => {
+test("ComponentManager passes key-value environment and PostgreSQL server parameters to Docker", async () => {
   const commands = [];
   let deployed = false;
   const exec = async (command, args) => {
@@ -120,17 +125,27 @@ test("ComponentManager passes key-value environment and PostgreSQL max connectio
   };
   const manager = new ComponentManager({ exec, password: "secret" });
   await manager.updateConfig("postgres", {
+    memoryMb: 1024,
+    maxConnections: 250,
+    sharedBuffersMb: 256,
+    workMemMb: 8,
+    maintenanceWorkMemMb: 128,
+    effectiveCacheSizeMb: 768,
+    statementTimeoutMs: 5_000,
     environment: {
-      POSTGRES_MAX_CONNECTIONS: "250",
       PGOPTIONS: "-c statement_timeout=5000",
     },
   });
 
   await manager.deploy("postgres");
   const run = commands.find((entry) => entry[0] === "docker" && entry[1] === "run");
-  assert.ok(run.includes("POSTGRES_MAX_CONNECTIONS=250"));
   assert.ok(run.includes("PGOPTIONS=-c statement_timeout=5000"));
-  assert.deepEqual(run.slice(-3), ["postgres", "-c", "max_connections=250"]);
+  assert.ok(run.includes("max_connections=250"));
+  assert.ok(run.includes("shared_buffers=256MB"));
+  assert.ok(run.includes("work_mem=8MB"));
+  assert.ok(run.includes("maintenance_work_mem=128MB"));
+  assert.ok(run.includes("effective_cache_size=768MB"));
+  assert.ok(run.includes("statement_timeout=5000"));
 });
 
 test("ComponentManager rejects managed and invalid environment variables", async () => {
@@ -145,6 +160,10 @@ test("ComponentManager rejects managed and invalid environment variables", async
   );
   await assert.rejects(
     manager.updateConfig("postgres", { environment: { POSTGRES_MAX_CONNECTIONS: "five" } }),
-    /integer between 10 and 10000/,
+    /managed by TestZone/,
+  );
+  await assert.rejects(
+    manager.updateConfig("postgres", { maxConnections: 5 }),
+    /between 10 and 10000/,
   );
 });

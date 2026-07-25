@@ -319,6 +319,12 @@ Response:
 }
 ```
 
+`PATCH /api/v1/profile` also accepts `avatarImageBase64` and
+`avatarImageContentType` (`image/jpeg`, `image/png`, or `image/webp`) for a
+profile photo up to 512 KB. Send an empty `avatarImageBase64` to remove the
+photo. The returned `avatarUrl` is a public, read-only
+`GET /api/v1/profile/photo/{userId}` URL.
+
 Profile endpoints:
 
 ```http

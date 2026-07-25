@@ -20,6 +20,7 @@ struct CommunityQuestionTopMeta: View {
                     HomeProfileAvatar(
                         symbolName: author.avatarSymbolName,
                         displayName: author.displayName,
+                        imageURL: author.avatarURL,
                         colorSeed: author.avatarColorSeed,
                         size: 20
                     )

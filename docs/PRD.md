@@ -81,7 +81,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 
 1. Community questions are available only after Google Login.
 2. A signed-in user can maintain a public profile with display name and a short bio.
-3. Public community questions include the author's public profile so users can understand who shared the question.
+3. Public community questions include the author's display name and optional uploaded profile photo so users can understand who shared the question.
 4. Question-publicity defaults to private for non-signed-in users.
 5. Users can report public questions. Reports are persisted by the backend and may be forwarded to the operator email when SMTP is configured.
 

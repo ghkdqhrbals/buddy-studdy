@@ -384,6 +384,11 @@ protocol RemotePushBackendClientProtocol {
         avatarConfig: [String: String]?
     ) async throws -> CommunityUserProfile
 
+    func updateProfilePhoto(
+        registration: RemotePushRegistration,
+        imageData: Data?
+    ) async throws -> CommunityUserProfile
+
     func withdrawMyProfile(registration: RemotePushRegistration) async throws -> RemotePushRegistration
 
     func reportCommunityQuestion(
@@ -1138,6 +1143,32 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return try decoder.decode(CommunityUserProfile.self, from: data)
     }
 
+    func updateProfilePhoto(
+        registration: RemotePushRegistration,
+        imageData: Data?
+    ) async throws -> CommunityUserProfile {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "profile")
+        )
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(
+            ProfileUpdateRequest(
+                displayName: nil,
+                bio: nil,
+                avatarSymbolName: nil,
+                avatarColorSeed: nil,
+                avatarMode: nil,
+                avatarConfig: nil,
+                avatarImageBase64: imageData?.base64EncodedString() ?? "",
+                avatarImageContentType: imageData == nil ? nil : "image/jpeg"
+            )
+        )
+        let data = try await perform(request)
+        return try decoder.decode(CommunityUserProfile.self, from: data)
+    }
+
     func withdrawMyProfile(registration: RemotePushRegistration) async throws -> RemotePushRegistration {
         var request = authenticatedRequest(
             registration: registration,
@@ -1693,6 +1724,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var avatarColorSeed: String?
         var avatarMode: String?
         var avatarConfig: [String: String]?
+        var avatarImageBase64: String? = nil
+        var avatarImageContentType: String? = nil
     }
 
     private struct AvatarUpdateRequest: Encodable {

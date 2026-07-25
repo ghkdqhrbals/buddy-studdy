@@ -45,7 +45,8 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `OPENAPI_ACCESS_TOKEN`: required when API docs are enabled on production hosts.
 - `GOOGLE_IOS_CLIENT_ID`: Google OAuth iOS client ID. Required for community Google Login.
 - `REPORT_EMAIL_TO`: destination Gmail address for community question reports.
-- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`: optional SMTP settings. When omitted, reports are stored in the database only and email signup codes cannot be sent.
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`: Google SMTP settings. `SMTP_HOST` defaults to `smtp.gmail.com` and `SMTP_PORT` defaults to `587`; store the Gmail address and Google app password as `SMTP_USERNAME` and `SMTP_PASSWORD` in the active AWS Secrets Manager application secret. When credentials are omitted, reports are stored in the database only and email signup codes cannot be sent.
+- `PROFILE_PHOTO_DIRECTORY`, `PROFILE_PHOTO_PUBLIC_BASE_URL`: profile photo storage directory and public backend origin. Production mounts the persistent `buddystudy-profile-photos` volume at `/app/profile-photos`.
 - `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_SSL`: Redis settings used by Redis Streams and email verification sessions.
 - `EMAIL_VERIFICATION_TTL_SECONDS`: signup code TTL. Production default is `180`.
 - `AWS_SECRET_ID`, `AWS_REGION`: optional AWS Secrets Manager config import. The default secret name is `buddystudy/dev` for the `dev` profile and `buddystudy/prod` for the `prod` profile. Store keys using the same names as environment placeholders, for example `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, `BACKEND_MASTER_KEY`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `SMTP_HOST`, `SMTP_USERNAME`, and `SMTP_PASSWORD`.

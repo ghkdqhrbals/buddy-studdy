@@ -1863,6 +1863,12 @@ function openComponentConfig(id) {
     fields.push(
       configField("database", "Database", config.database),
       configField("username", "Username", config.username),
+      configField("maxConnections", "Max connections", config.maxConnections),
+      configField("sharedBuffersMb", "Shared buffers (MB)", config.sharedBuffersMb),
+      configField("workMemMb", "Work memory per operation (MB)", config.workMemMb),
+      configField("maintenanceWorkMemMb", "Maintenance work memory (MB)", config.maintenanceWorkMemMb),
+      configField("effectiveCacheSizeMb", "Effective cache size (MB)", config.effectiveCacheSizeMb),
+      configField("statementTimeoutMs", "Statement timeout (ms, 0 = disabled)", config.statementTimeoutMs),
     );
   } else {
     fields.push(
@@ -1878,7 +1884,18 @@ function openComponentConfig(id) {
 async function saveComponentConfig(event) {
   event.preventDefault();
   const values = Object.fromEntries(new FormData(elements.componentConfigForm));
-  for (const key of ["hostPort", "cpus", "memoryMb", "maxMemoryMb"]) {
+  for (const key of [
+    "hostPort",
+    "cpus",
+    "memoryMb",
+    "maxMemoryMb",
+    "maxConnections",
+    "sharedBuffersMb",
+    "workMemMb",
+    "maintenanceWorkMemMb",
+    "effectiveCacheSizeMb",
+    "statementTimeoutMs",
+  ]) {
     if (values[key] !== undefined) values[key] = Number(values[key]);
   }
   values.environment = Object.fromEntries(

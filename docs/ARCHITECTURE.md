@@ -136,7 +136,7 @@ User answer
 - Access tokens carry both `user_id` and `device_id`; protected API calls resolve the current principal from those claims and the stored user-device mapping.
 - Google Login links a verified Google subject to the registered device through `users` and `devices.user_id`.
 - User status is one of `ANONYMOUS`, `ACTIVE`, or `WITHDRAWN`. Account deletion immediately removes the active profile, sign-in mappings, public questions, and related study records, then reconnects the current device to an anonymous user.
-- Public question rows can expose only the author's public profile fields: display name and bio. Profile photo changes are not exposed in the current iOS app.
+- Public question rows can expose only the author's public profile fields: display name, bio, and optional profile photo URL. Uploaded photos live in the backend's persistent profile-photo volume and are served through the public read-only photo endpoint.
 - Question publicity defaults to private unless the signed-in user enables public sharing.
 - Reports are stored in PostgreSQL and can optionally be emailed to the operator Gmail through SMTP settings.
 

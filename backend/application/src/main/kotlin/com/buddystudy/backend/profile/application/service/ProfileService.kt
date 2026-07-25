@@ -22,11 +22,15 @@ import com.buddystudy.backend.profile.application.port.inbound.AvatarUpdateComma
 import com.buddystudy.backend.profile.application.port.inbound.ProfileUpdateCommand
 import com.buddystudy.backend.profile.application.port.inbound.ProfileUseCase
 import com.buddystudy.backend.profile.application.port.outbound.AvatarCatalogPort
+import com.buddystudy.backend.profile.application.port.outbound.ProfilePhotoStoragePort
+import com.buddystudy.backend.profile.application.port.outbound.StoredProfilePhoto
+import com.buddystudy.backend.profile.application.port.outbound.UnavailableProfilePhotoStoragePort
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
+import java.util.Base64
 
 @Service
 class ProfileService(
@@ -37,6 +41,7 @@ class ProfileService(
     private val tokenService: TokenProvider,
     private val accountDeletion: AccountDeletionPort,
     private val avatarCatalog: AvatarCatalogPort,
+    private val profilePhotos: ProfilePhotoStoragePort = UnavailableProfilePhotoStoragePort,
 ) : ProfileUseCase {
     private val log = LoggerFactory.getLogger(ProfileService::class.java)
 
@@ -98,6 +103,31 @@ class ProfileService(
             user.avatarConfig = validated.toAvatarConfigJson()
             validated["base"]?.let { user.avatarSymbolName = baseSymbolName(it) }
         }
+        command.avatarImageBase64?.let { encodedImage ->
+            if (encodedImage.isBlank()) {
+                profilePhotos.delete(user.id)
+                user.avatarUrl = null
+                user.avatarMode = NO_AVATAR_MODE
+                user.avatarConfig = null
+            } else {
+                val contentType = command.avatarImageContentType
+                    ?.trim()
+                    ?.lowercase()
+                    ?.takeIf { it in supportedPhotoContentTypes }
+                    ?: throw validation("Profile photo must be a JPEG, PNG, or WebP image.")
+                val bytes = try {
+                    Base64.getDecoder().decode(encodedImage)
+                } catch (_: IllegalArgumentException) {
+                    throw validation("Profile photo data is not valid base64.")
+                }
+                if (bytes.isEmpty() || bytes.size > MAX_PROFILE_PHOTO_BYTES) {
+                    throw validation("Profile photo must be between 1 byte and 512 KB.")
+                }
+                user.avatarUrl = profilePhotos.save(user.id, contentType, bytes)
+                user.avatarMode = PHOTO_AVATAR_MODE
+                user.avatarConfig = null
+            }
+        }
         user.updatedAt = Instant.now()
         val saved = users.save(user)
         log.info(
@@ -109,12 +139,18 @@ class ProfileService(
         return saved.toProfile()
     }
 
+    @Transactional(readOnly = true)
+    override suspend fun profilePhoto(userId: Long): StoredProfilePhoto =
+        profilePhotos.load(userId)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Profile photo not found.")
+
     @Transactional
     override suspend fun withdrawProfile(principal: Principal): AccessTokenResponse {
         if (principal.anonymous) {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_ACCESS_TOKEN_REQUIRED, "Account deletion requires an active login.")
         }
         val now = Instant.now()
+        profilePhotos.delete(principal.userId)
         accountDeletion.deleteAccountData(principal.userId, principal.deviceId, now)
         val device = sessions.device(principal.deviceId)
         val anonymousUser = sessions.ensureAnonymousUser(device)
@@ -185,6 +221,10 @@ class ProfileService(
 
     companion object {
         private const val BUILDER_AVATAR_MODE = "BUILDER"
+        private const val PHOTO_AVATAR_MODE = "PHOTO"
+        private const val NO_AVATAR_MODE = "NONE"
+        private const val MAX_PROFILE_PHOTO_BYTES = 512 * 1024
+        private val supportedPhotoContentTypes = setOf("image/jpeg", "image/png", "image/webp")
 
         val defaultAvatarConfig: Map<String, String> = mapOf(
             "base" to "base-cat",

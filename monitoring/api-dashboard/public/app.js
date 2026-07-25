@@ -383,7 +383,7 @@ function relatedLogsPanel(logs) {
     <li class="log-line ${log.level.toLowerCase()}">
       <time>${escapeHtml(log.time)}</time>
       <span>${escapeHtml(log.level)}</span>
-      <code>${escapeHtml(log.message)}</code>
+      <code>${escapeHtml(log.summary)}</code>
     </li>
   `).join("");
   return `

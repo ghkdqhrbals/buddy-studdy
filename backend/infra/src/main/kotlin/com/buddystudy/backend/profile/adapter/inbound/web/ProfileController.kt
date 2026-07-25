@@ -10,14 +10,19 @@ import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.tags.Tag
+import org.springframework.http.CacheControl
+import org.springframework.http.MediaType
+import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
 import org.springframework.stereotype.Component
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
+import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import java.time.Duration
 
 @RestController
 @RequestMapping("/api/v1")
@@ -47,6 +52,16 @@ class ProfileController(
     suspend fun updateAvatar(@RequestBody body: AvatarUpdateRequest, authentication: Authentication) =
         profiles.updateAvatar(body, authentication)
 
+    @Operation(summary = "Fetch profile photo", description = "Returns a user's public profile photo.")
+    @GetMapping("/profile/photo/{userId}")
+    suspend fun profilePhoto(@PathVariable userId: Long): ResponseEntity<ByteArray> {
+        val photo = profiles.profilePhoto(userId)
+        return ResponseEntity.ok()
+            .contentType(MediaType.parseMediaType(photo.contentType))
+            .cacheControl(CacheControl.maxAge(Duration.ofDays(30)).cachePublic())
+            .body(photo.bytes)
+    }
+
     @Operation(summary = "Delete my account", description = "Deletes the active member account and reconnects the current device as anonymous.")
     @DeleteMapping("/profile")
     suspend fun withdrawProfile(authentication: Authentication) = profiles.withdrawProfile(authentication)
@@ -57,6 +72,7 @@ interface ProfileWebPort {
     suspend fun avatarCatalog(authentication: Authentication): Any
     suspend fun updateAvatar(body: AvatarUpdateRequest, authentication: Authentication): Any
     suspend fun updateProfile(body: ProfileUpdateRequest, authentication: Authentication): Any
+    suspend fun profilePhoto(userId: Long): com.buddystudy.backend.profile.application.port.outbound.StoredProfilePhoto
     suspend fun withdrawProfile(authentication: Authentication): Any
 }
 
@@ -75,6 +91,8 @@ class ProfileWebAdapter(
     override suspend fun updateProfile(body: ProfileUpdateRequest, authentication: Authentication) =
         profiles.updateProfile(authentication.principalOrThrow(), body.toCommand())
 
+    override suspend fun profilePhoto(userId: Long) = profiles.profilePhoto(userId)
+
     override suspend fun withdrawProfile(authentication: Authentication) =
         profiles.withdrawProfile(authentication.principalOrThrow())
 }
@@ -86,6 +104,8 @@ private fun ProfileUpdateRequest.toCommand() = ProfileUpdateCommand(
     avatarColorSeed = avatarColorSeed,
     avatarMode = avatarMode,
     avatarConfig = avatarConfig,
+    avatarImageBase64 = avatarImageBase64,
+    avatarImageContentType = avatarImageContentType,
 )
 
 private fun AvatarUpdateRequest.toCommand() = AvatarUpdateCommand(

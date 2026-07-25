@@ -57,6 +57,11 @@ protocol CommunityRepository {
         avatarConfig: [String: String]?
     ) async throws -> CommunityUserProfile
 
+    func updateProfilePhoto(
+        registration: RemotePushRegistration,
+        imageData: Data?
+    ) async throws -> CommunityUserProfile
+
     func withdrawMyProfile(registration: RemotePushRegistration) async throws -> RemotePushRegistration
 
     func reportQuestion(

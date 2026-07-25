@@ -204,6 +204,9 @@ test("backend deploy starts a log-only PostgreSQL runtime collector", async () =
   assert.match(deployTemplate, /--name buddystudy-db-metrics/);
   assert.match(deployTemplate, /database-runtime-collector\.sh:\/collector\.sh:ro/);
   assert.match(deployTemplate, /DATABASE_METRICS_INTERVAL_SECONDS=30/);
+  assert.match(deployTemplate, /PROFILE_PHOTO_PUBLIC_BASE_URL=https:\/\/\$\{BACKEND_DOMAIN\}/);
+  assert.match(deployTemplate, /docker volume create buddystudy-profile-photos/);
+  assert.match(deployTemplate, /buddystudy-profile-photos:\/app\/profile-photos/);
   assert.match(collector, /docker stats --no-stream/);
   assert.match(collector, /current_setting\('max_connections'\)/);
   assert.match(collector, /databaseCpuPercent/);

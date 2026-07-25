@@ -20,9 +20,13 @@ export const COMPONENT_CATALOG = [
       hostPort: 35432,
       cpus: 1,
       memoryMb: 512,
-      environment: {
-        POSTGRES_MAX_CONNECTIONS: "100",
-      },
+      maxConnections: 100,
+      sharedBuffersMb: 128,
+      workMemMb: 4,
+      maintenanceWorkMemMb: 64,
+      effectiveCacheSizeMb: 384,
+      statementTimeoutMs: 30_000,
+      environment: {},
     },
   },
   {
@@ -51,6 +55,7 @@ const RESERVED_ENVIRONMENT_KEYS = new Set([
   "POSTGRES_DB",
   "POSTGRES_USER",
   "POSTGRES_PASSWORD",
+  "POSTGRES_MAX_CONNECTIONS",
 ]);
 
 function definition(id) {
@@ -63,6 +68,14 @@ function boundedNumber(value, name, minimum, maximum) {
   const number = Number(value);
   if (!Number.isFinite(number) || number < minimum || number > maximum) {
     throw new ValidationError(`${name} must be between ${minimum} and ${maximum}.`);
+  }
+  return number;
+}
+
+function boundedInteger(value, name, minimum, maximum) {
+  const number = boundedNumber(value, name, minimum, maximum);
+  if (!Number.isInteger(number)) {
+    throw new ValidationError(`${name} must be an integer between ${minimum} and ${maximum}.`);
   }
   return number;
 }
@@ -194,6 +207,9 @@ export class ComponentManager {
       for (const component of COMPONENT_CATALOG) {
         if (this.state.components?.[component.id]) {
           const current = this.state.components[component.id].config || {};
+          const legacyMaxConnections = component.id === "postgres"
+            ? Number(current.environment?.POSTGRES_MAX_CONNECTIONS)
+            : null;
           const merged = {
             ...structuredClone(component.defaultConfig),
             ...current,
@@ -202,6 +218,15 @@ export class ComponentManager {
               ...(current.environment || {}),
             },
           };
+          if (component.id === "postgres") {
+            if (current.maxConnections === undefined
+              && Number.isInteger(legacyMaxConnections)
+              && legacyMaxConnections >= 10
+              && legacyMaxConnections <= 10_000) {
+              merged.maxConnections = legacyMaxConnections;
+            }
+            delete merged.environment.POSTGRES_MAX_CONNECTIONS;
+          }
           if (JSON.stringify(current) !== JSON.stringify(merged)) {
             this.state.components[component.id].config = merged;
             changed = true;
@@ -380,14 +405,35 @@ export class ComponentManager {
     const nextEnvironment = environment(input.environment);
     if (nextEnvironment !== undefined) next.environment = nextEnvironment;
     if (id === "postgres") {
-      if (next.environment.POSTGRES_MAX_CONNECTIONS !== undefined) {
-        const maxConnections = Number(next.environment.POSTGRES_MAX_CONNECTIONS);
-        if (!Number.isInteger(maxConnections) || maxConnections < 10 || maxConnections > 10_000) {
-          throw new ValidationError("POSTGRES_MAX_CONNECTIONS must be an integer between 10 and 10000.");
-        }
-      }
       if (input.database !== undefined) next.database = identifier(input.database, "Database");
       if (input.username !== undefined) next.username = identifier(input.username, "Username");
+      if (input.maxConnections !== undefined) {
+        next.maxConnections = boundedInteger(input.maxConnections, "Max connections", 10, 10_000);
+      }
+      if (input.sharedBuffersMb !== undefined) {
+        next.sharedBuffersMb = boundedInteger(input.sharedBuffersMb, "Shared buffers", 16, 6144);
+      }
+      if (input.workMemMb !== undefined) {
+        next.workMemMb = boundedInteger(input.workMemMb, "Work memory", 1, 1024);
+      }
+      if (input.maintenanceWorkMemMb !== undefined) {
+        next.maintenanceWorkMemMb = boundedInteger(input.maintenanceWorkMemMb, "Maintenance work memory", 16, 4096);
+      }
+      if (input.effectiveCacheSizeMb !== undefined) {
+        next.effectiveCacheSizeMb = boundedInteger(input.effectiveCacheSizeMb, "Effective cache size", 32, 8192);
+      }
+      if (input.statementTimeoutMs !== undefined) {
+        next.statementTimeoutMs = boundedInteger(input.statementTimeoutMs, "Statement timeout", 0, 3_600_000);
+      }
+      if (next.sharedBuffersMb >= next.memoryMb) {
+        throw new ValidationError("Shared buffers must be lower than the container memory limit.");
+      }
+      if (next.maintenanceWorkMemMb >= next.memoryMb) {
+        throw new ValidationError("Maintenance work memory must be lower than the container memory limit.");
+      }
+      if (next.effectiveCacheSizeMb > next.memoryMb) {
+        throw new ValidationError("Effective cache size must not exceed the container memory limit.");
+      }
     } else {
       if (input.maxMemoryMb !== undefined) next.maxMemoryMb = boundedNumber(input.maxMemoryMb, "Redis max memory", 32, 4096);
       if (next.maxMemoryMb >= next.memoryMb) {
@@ -427,10 +473,15 @@ export class ComponentManager {
         "-v", `${this.volume(id)}:/var/lib/postgresql/data`,
         this.image(id, config),
       );
-      const maxConnections = Number(config.environment?.POSTGRES_MAX_CONNECTIONS);
-      if (Number.isInteger(maxConnections) && maxConnections >= 10 && maxConnections <= 10_000) {
-        args.push("postgres", "-c", `max_connections=${maxConnections}`);
-      }
+      args.push(
+        "postgres",
+        "-c", `max_connections=${config.maxConnections}`,
+        "-c", `shared_buffers=${config.sharedBuffersMb}MB`,
+        "-c", `work_mem=${config.workMemMb}MB`,
+        "-c", `maintenance_work_mem=${config.maintenanceWorkMemMb}MB`,
+        "-c", `effective_cache_size=${config.effectiveCacheSizeMb}MB`,
+        "-c", `statement_timeout=${config.statementTimeoutMs}`,
+      );
     } else {
       args.push(
         "-v", `${this.volume(id)}:/data`,

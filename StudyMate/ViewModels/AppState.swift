@@ -2893,6 +2893,32 @@ final class AppState: ObservableObject {
         )
     }
 
+    func updateCommunityProfilePhoto(_ imageData: Data?) async {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-profile-photo") else {
+            return
+        }
+        isUpdatingCommunityProfile = true
+        await actionRunner.run(
+            operation: {
+                try await communityUseCase.updateProfilePhoto(
+                    registration: registration,
+                    imageData: imageData
+                )
+            },
+            onSuccess: { profile in
+                updateProfileAvatarImageData(imageData)
+                applyCommunityProfile(profile)
+            },
+            onFailure: { error in
+                handleCommunityError(error)
+                log(.warning, "프로필 사진 저장 실패: \(error.localizedDescription)")
+            },
+            onCompletion: {
+                isUpdatingCommunityProfile = false
+            }
+        )
+    }
+
     private func applyLocalCommunityProfileDraft(
         displayName: String,
         avatarSymbolName: String?,

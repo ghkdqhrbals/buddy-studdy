@@ -118,6 +118,16 @@ struct CommunityUseCase {
         )
     }
 
+    func updateProfilePhoto(
+        registration: RemotePushRegistration,
+        imageData: Data?
+    ) async throws -> CommunityUserProfile {
+        try await repository.updateProfilePhoto(
+            registration: registration,
+            imageData: imageData
+        )
+    }
+
     func withdrawMyProfile(registration: RemotePushRegistration) async throws -> RemotePushRegistration {
         try await repository.withdrawMyProfile(registration: registration)
     }

@@ -46,7 +46,7 @@ spring:
       ssl:
         enabled: ${REDIS_SSL:false}
   mail:
-    host: ${email.google.smtpHost:${SMTP_HOST:}}
+    host: ${email.google.smtpHost:${SMTP_HOST:smtp.gmail.com}}
     port: ${email.google.smtpPort:${SMTP_PORT:587}}
     username: ${email.google.smtpUsername:${SMTP_USERNAME:}}
     password: ${email.google.smtpPassword:${SMTP_PASSWORD:}}
@@ -56,6 +56,10 @@ spring:
           auth: true
           starttls:
             enable: true
+            required: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
 
 management:
   endpoints:
@@ -93,6 +97,9 @@ buddystudy:
   email:
     verification-ttl-seconds: ${EMAIL_VERIFICATION_TTL_SECONDS:180}
     from: ${email.google.smtpFrom:${SMTP_FROM:${email.google.smtpUsername:${SMTP_USERNAME:}}}}
+  profile-photo:
+    directory: ${PROFILE_PHOTO_DIRECTORY:/app/profile-photos}
+    public-base-url: ${PROFILE_PHOTO_PUBLIC_BASE_URL:https://api.ghkdqhrbals.org}
   openapi:
     enabled: ${ENABLE_OPENAPI_DOCS:false}
     access-token: ${OPENAPI_ACCESS_TOKEN:}

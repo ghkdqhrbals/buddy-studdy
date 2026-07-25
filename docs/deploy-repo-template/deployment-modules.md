@@ -63,6 +63,9 @@ deployment.
   the live `max_connections` setting every 30 seconds. Promtail forwards these
   `database_runtime` records to Loki. The observer receives no database
   password and is not a Prometheus/exporter service.
+- The backend deploy owns the persistent `buddystudy-profile-photos` volume.
+  Both blue/green backend slots mount it so user-uploaded profile photos remain
+  available across rollouts.
 - Admin frontend UI changes: build admin frontend image, then run admin frontend
   deploy.
 - Grafana/Loki/API Logs/TestZone UI changes: run the monitoring deploy.

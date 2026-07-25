@@ -6,6 +6,7 @@ import {
   lokiMetricTimestampToMs,
   parseApiError,
   parseApiExchange,
+  parseRelatedLog,
   percentile,
 } from "../public/logs.js";
 
@@ -65,6 +66,21 @@ test("parseApiError keeps stack trace when present", () => {
   assert.equal(parsed.status, 500);
   assert.match(parsed.stack, /jakarta\.servlet\.ServletException/);
   assert.match(parsed.stack, /DispatcherServlet/);
+});
+
+test("related logs expose a concise summary instead of the full log line", () => {
+  const requestId = "7dc19fed-31b7-43cd-be6d-b37862cf01c0";
+  const line = [
+    `2026-07-05T15:12:28.927Z ERROR [${requestId}] 1 --- [buddystudy-backend]`,
+    `c.b.ErrorHandler : api_error requestId=${requestId} clientIp=182.228.212.11 method=POST path=/api/v1/auth/email/code status=503 code=EMAIL_DELIVERY_FAILED message=Email sender is not configured.`,
+  ].join(" ");
+
+  const parsed = parseRelatedLog(["1783255799514000000", line]);
+
+  assert.equal(parsed.summary, "API error · POST · /api/v1/auth/email/code · EMAIL_DELIVERY_FAILED · status 503");
+  assert.equal(parsed.summary.includes(requestId), false);
+  assert.equal(parsed.summary.includes("Email sender is not configured"), false);
+  assert.equal(parsed.rawLine, line);
 });
 
 test("duration and percentile helpers are stable", () => {

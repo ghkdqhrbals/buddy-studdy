@@ -18,11 +18,14 @@ import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.auth.application.service.AccountSessionManager
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.profile.application.port.outbound.AvatarCatalogPort
+import com.buddystudy.backend.profile.application.port.outbound.ProfilePhotoStoragePort
+import com.buddystudy.backend.profile.application.port.outbound.StoredProfilePhoto
 import com.buddystudy.backend.profile.application.service.ProfileService
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.Optional
+import java.util.Base64
 
 class ProfileServiceAccountDeletionTest {
     private val users = InMemoryUserPort()
@@ -31,6 +34,7 @@ class ProfileServiceAccountDeletionTest {
     private val roles = InMemoryRoleAssignmentPort()
     private val deletion = CapturingAccountDeletionPort(users, userDevices, devices)
     private val avatars = InMemoryAvatarCatalogPort()
+    private val photos = InMemoryProfilePhotoStoragePort()
     private val properties = BuddyStudyProperties().apply {
         auth.jwtSecret = "test-jwt-secret"
     }
@@ -42,6 +46,7 @@ class ProfileServiceAccountDeletionTest {
         tokenService = TokenProvider(properties),
         accountDeletion = deletion,
         avatarCatalog = avatars,
+        profilePhotos = photos,
     )
 
     @Test
@@ -79,6 +84,32 @@ class ProfileServiceAccountDeletionTest {
         assertThat(response.avatarSymbolName).isEqualTo("pixel-cat-geek")
         assertThat(response.avatarColorSeed).isEqualTo("avatar-color-teal")
         assertThat(users.findById(activeUser.id)!!.avatarSymbolName).isEqualTo("pixel-cat-geek")
+    }
+
+    @Test
+    fun `update profile stores and serves a user photo without a generated avatar`(): Unit = runBlocking {
+        val activeUser = users.save(
+            UserEntity(
+                provider = "GOOGLE",
+                providerId = "photo-user",
+                email = "photo@example.com",
+                status = "ACTIVE",
+                displayName = "Photo User",
+            )
+        )
+        val bytes = "jpeg-bytes".toByteArray()
+
+        val response = service.updateProfile(
+            Principal(activeUser.id, "dev-photo", 1, false, "ACTIVE"),
+            com.buddystudy.backend.profile.application.port.inbound.ProfileUpdateCommand(
+                avatarImageBase64 = Base64.getEncoder().encodeToString(bytes),
+                avatarImageContentType = "image/jpeg",
+            ),
+        )
+
+        assertThat(response.avatarUrl).contains("/api/v1/profile/photo/${activeUser.id}")
+        assertThat(response.avatarMode).isEqualTo("PHOTO")
+        assertThat(service.profilePhoto(activeUser.id).bytes).isEqualTo(bytes)
     }
 
     @Test
@@ -273,5 +304,20 @@ class ProfileServiceAccountDeletionTest {
 
         override suspend fun activeItemsByKeys(keys: Collection<String>): List<AvatarItemEntity> =
             items.filter { it.key in keys }
+    }
+
+    private class InMemoryProfilePhotoStoragePort : ProfilePhotoStoragePort {
+        private val photos = mutableMapOf<Long, StoredProfilePhoto>()
+
+        override suspend fun save(userId: Long, contentType: String, bytes: ByteArray): String {
+            photos[userId] = StoredProfilePhoto(contentType, bytes)
+            return "https://api.example.com/api/v1/profile/photo/$userId?v=1"
+        }
+
+        override suspend fun load(userId: Long): StoredProfilePhoto? = photos[userId]
+
+        override suspend fun delete(userId: Long) {
+            photos.remove(userId)
+        }
     }
 }

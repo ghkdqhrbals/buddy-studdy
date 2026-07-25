@@ -178,6 +178,7 @@ jobs:
           MONITORING_COORDINATOR_READINESS_ENABLED=${MONITORING_COORDINATOR_READINESS_ENABLED}
           MONITORING_COORDINATOR_BASE_URL=${MONITORING_COORDINATOR_BASE_URL}
           MONITORING_COORDINATOR_TIMEOUT_MS=${MONITORING_COORDINATOR_TIMEOUT_MS}
+          PROFILE_PHOTO_PUBLIC_BASE_URL=https://${BACKEND_DOMAIN}
           ENV
           chmod 600 .env
 
@@ -219,6 +220,7 @@ jobs:
           docker network create buddystudy-net >/dev/null 2>&1 || true
           docker network create redis-stream-coordinator-net >/dev/null 2>&1 || true
           docker volume create buddystudy-postgres-data >/dev/null
+          docker volume create buddystudy-profile-photos >/dev/null
 
           docker rm -f rsc-prometheus redis-exporter-6379 redis-exporter-6380 redis-exporter-6381 >/dev/null 2>&1 || true
 
@@ -348,6 +350,7 @@ jobs:
             --network buddystudy-net \
             --restart unless-stopped \
             --env-file .env \
+            -v buddystudy-profile-photos:/app/profile-photos \
             "${IMAGE_REF}"
 
           if docker network inspect redis-stream-coordinator-net >/dev/null 2>&1; then

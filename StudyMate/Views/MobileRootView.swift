@@ -1,5 +1,6 @@
 import SwiftUI
 #if os(iOS)
+import PhotosUI
 import SafariServices
 import UIKit
 #endif
@@ -1056,7 +1057,8 @@ private struct MobileHomeView: View {
         return HomeProfileAvatar(
             symbolName: appState.profileAvatarSymbolName,
             displayName: appState.communityProfile?.displayName,
-            imageData: nil,
+            imageData: appState.profileAvatarImageData,
+            imageURL: appState.communityProfile?.avatarURL,
             colorSeed: signedInProfileColorSeed,
             usesNeutralColor: signedInProfileColorSeed == nil,
             size: 34
@@ -1079,7 +1081,8 @@ private struct MobileHomeView: View {
             HomeProfileAvatar(
                 symbolName: appState.profileAvatarSymbolName,
                 displayName: appState.communityProfile?.displayName,
-                imageData: nil,
+                imageData: appState.profileAvatarImageData,
+                imageURL: appState.communityProfile?.avatarURL,
                 colorSeed: signedInProfileColorSeed,
                 usesNeutralColor: signedInProfileColorSeed == nil,
                 size: 34
@@ -1710,6 +1713,7 @@ struct HomeProfileAvatar: View {
     var symbolName: String
     var displayName: String?
     var imageData: Data? = nil
+    var imageURL: URL? = nil
     var colorSeed: String? = "profile"
     var usesNeutralColor: Bool = false
     var size: CGFloat = 34
@@ -1720,16 +1724,42 @@ struct HomeProfileAvatar: View {
         Circle()
             .fill(Color.secondary.opacity(0.10))
             .overlay {
-                Image(BuddyStudyAvatar.assetName)
-                    .resizable()
-                    .interpolation(.none)
-                    .antialiased(false)
-                    .scaledToFit()
-                    .padding(size * 0.06)
+                avatarContent
             }
         .frame(width: size, height: size)
         .clipShape(Circle())
         .contentShape(Circle())
+    }
+
+    @ViewBuilder
+    private var avatarContent: some View {
+        #if os(iOS)
+        if let imageData, let image = UIImage(data: imageData) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+        } else if let imageURL {
+            AsyncImage(url: imageURL) { phase in
+                if let image = phase.image {
+                    image.resizable().scaledToFill()
+                } else {
+                    profilePlaceholder
+                }
+            }
+        } else {
+            profilePlaceholder
+        }
+        #else
+        profilePlaceholder
+        #endif
+    }
+
+    private var profilePlaceholder: some View {
+        Image(systemName: "person.fill")
+            .resizable()
+            .scaledToFit()
+            .padding(size * 0.27)
+            .foregroundStyle(Color.secondary)
     }
 }
 
@@ -2874,6 +2904,11 @@ private struct MobileProfileSettingsSheet: View {
     @State private var isLoadingProfileDraft = false
     @State private var wasSignedInWhenOpened = false
     @State private var legalWebRoute: MobileLegalWebRoute?
+    @State private var draftProfilePhotoData: Data?
+    @State private var hasProfilePhotoChanges = false
+    #if os(iOS)
+    @State private var profilePhotoItem: PhotosPickerItem?
+    #endif
 
     private var strings: AppStrings {
         appState.strings
@@ -2894,6 +2929,7 @@ private struct MobileProfileSettingsSheet: View {
 
         return trimmedProfileDisplayName != currentDisplayName
             || allowPublicQuestionsAccess != currentPublicQuestions
+            || hasProfilePhotoChanges
     }
 
     private var canSaveProfile: Bool {
@@ -2986,12 +3022,44 @@ private struct MobileProfileSettingsSheet: View {
                             HomeProfileAvatar(
                                 symbolName: BuddyStudyAvatar.symbolName,
                                 displayName: profileDisplayName,
-                                imageData: nil,
+                                imageData: draftProfilePhotoData,
+                                imageURL: hasProfilePhotoChanges ? nil : appState.communityProfile?.avatarURL,
                                 colorSeed: nil,
                                 usesNeutralColor: appState.communityProfile == nil,
                                 size: 94
                             )
                             .padding(.top, 4)
+
+                            #if os(iOS)
+                            HStack(spacing: 10) {
+                                PhotosPicker(selection: $profilePhotoItem, matching: .images) {
+                                    Label(strings.chooseProfilePhoto, systemImage: "photo.on.rectangle")
+                                }
+                                .buttonStyle(.bordered)
+
+                                if draftProfilePhotoData != nil || appState.communityProfile?.avatarURL != nil {
+                                    Button(role: .destructive) {
+                                        draftProfilePhotoData = nil
+                                        profilePhotoItem = nil
+                                        hasProfilePhotoChanges = true
+                                    } label: {
+                                        Text(strings.removeProfilePhoto)
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+                            .onChange(of: profilePhotoItem) { _, item in
+                                guard let item else { return }
+                                Task {
+                                    guard let data = try? await item.loadTransferable(type: Data.self),
+                                          let normalized = normalizedProfilePhoto(data) else {
+                                        return
+                                    }
+                                    draftProfilePhotoData = normalized
+                                    hasProfilePhotoChanges = true
+                                }
+                            }
+                            #endif
 
                             TextField(strings.profileDisplayName, text: $profileDisplayName)
                                 .font(.title2.weight(.bold))
@@ -3117,6 +3185,11 @@ private struct MobileProfileSettingsSheet: View {
                             await appState.updateCommunityProfile(
                                 displayName: trimmedProfileDisplayName
                             )
+                            #if os(iOS)
+                            if hasProfilePhotoChanges {
+                                await appState.updateCommunityProfilePhoto(draftProfilePhotoData)
+                            }
+                            #endif
                             dismiss()
                         }
                     } label: {
@@ -3199,7 +3272,35 @@ private struct MobileProfileSettingsSheet: View {
     private func resetDraftProfile() {
         profileDisplayName = appState.communityProfile?.displayName ?? ""
         allowPublicQuestionsAccess = appState.communityProfile?.pageAccess.publicQuestions ?? true
+        draftProfilePhotoData = appState.profileAvatarImageData
+        hasProfilePhotoChanges = false
+        #if os(iOS)
+        profilePhotoItem = nil
+        #endif
     }
+
+    #if os(iOS)
+    private func normalizedProfilePhoto(_ data: Data) -> Data? {
+        guard let source = UIImage(data: data) else { return nil }
+        let maximumSide: CGFloat = 640
+        let scale = min(1, maximumSide / max(source.size.width, source.size.height))
+        let targetSize = CGSize(
+            width: max(1, floor(source.size.width * scale)),
+            height: max(1, floor(source.size.height * scale))
+        )
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        let resized = renderer.image { _ in
+            source.draw(in: CGRect(origin: .zero, size: targetSize))
+        }
+        var quality: CGFloat = 0.78
+        var encoded = resized.jpegData(compressionQuality: quality)
+        while let data = encoded, data.count > 500 * 1024, quality > 0.32 {
+            quality -= 0.1
+            encoded = resized.jpegData(compressionQuality: quality)
+        }
+        return encoded.flatMap { $0.count <= 512 * 1024 ? $0 : nil }
+    }
+    #endif
 
     private func profileConfirmationTitle(strings: AppStrings) -> String {
         guard appState.isCommunitySessionActive else {
@@ -4467,6 +4568,7 @@ struct CommunityQuestionDetailView: View {
                 HomeProfileAvatar(
                     symbolName: author.avatarSymbolName,
                     displayName: author.displayName,
+                    imageURL: author.avatarURL,
                     colorSeed: author.avatarColorSeed,
                     size: 34
                 )
@@ -4720,6 +4822,7 @@ private struct CommunityCommentRow: View {
             HomeProfileAvatar(
                 symbolName: comment.author.avatarSymbolName,
                 displayName: comment.author.displayName,
+                imageURL: comment.author.avatarURL,
                 colorSeed: comment.author.avatarColorSeed,
                 size: 30
             )
@@ -4796,6 +4899,7 @@ private struct CommunityAnswerMessage: View {
                     HomeProfileAvatar(
                         symbolName: author.avatarSymbolName,
                         displayName: author.displayName,
+                        imageURL: author.avatarURL,
                         colorSeed: author.avatarColorSeed,
                         size: 34
                     )
