@@ -82,7 +82,7 @@ struct StatisticsView: View {
             .padding(.bottom, 10)
 
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
+                LazyVStack(alignment: .leading, spacing: 16) {
                     if count > 0, let statsErrorMessage = appState.backendStatsErrorMessage {
                         Text(statsErrorMessage)
                             .font(.caption2)
@@ -113,6 +113,10 @@ struct StatisticsView: View {
                             strings: strings
                         )
 
+                        Text(strings.topicGrowthOverview)
+                            .font(.title3.weight(.bold))
+                            .padding(.top, 4)
+
                         TopicBrowserSection(
                             stats: pagedTopicStats,
                             currentPage: boundedTopicPage,
@@ -129,6 +133,7 @@ struct StatisticsView: View {
                         )
                     }
                 }
+                .padding(.top, 8)
                 .padding(.trailing, 8)
                 .padding(.bottom, 24)
             }
@@ -905,18 +910,26 @@ private struct StatsOverviewSection: View {
     var body: some View {
         let achievements = StatsAchievementSnapshot(activity: activity, topics: topics, selectedYear: selectedYear, strings: strings)
 
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 8) {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .top, spacing: 0) {
                 StatsAchievementCard(
                     title: strings.studyStreak,
                     value: achievements.streakValue,
                     caption: achievements.streakCaption
                 )
+
+                Divider()
+                    .frame(height: 58)
+
                 StatsAchievementCard(
                     title: strings.topicGrowth,
                     value: achievements.growthValue,
                     caption: achievements.growthCaption
                 )
+
+                Divider()
+                    .frame(height: 58)
+
                 StatsAchievementCard(
                     title: achievements.periodTitle,
                     value: achievements.monthValue,
@@ -924,9 +937,13 @@ private struct StatsOverviewSection: View {
                 )
             }
 
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .firstTextBaseline) {
+                    Text(strings.learningActivity)
+                        .font(.subheadline.weight(.semibold))
+
                     Spacer()
+
                     Text(String(selectedYear))
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
@@ -946,9 +963,9 @@ private struct StatsOverviewSection: View {
                 }
             }
         }
-        .padding(14)
+        .padding(20)
         .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 }
 
@@ -958,27 +975,25 @@ private struct StatsAchievementCard: View {
     var caption: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.caption.weight(.semibold))
+                .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
 
             Text(value)
-                .font(.system(size: 24, weight: .bold, design: .rounded))
+                .font(.system(size: 30, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .lineLimit(1)
 
             Text(caption)
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
+                .lineLimit(2)
                 .minimumScaleFactor(0.8)
         }
-        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.primary.opacity(0.035))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 10)
     }
 }
 
@@ -1322,10 +1337,10 @@ private struct StatsYearGrass: View {
         }
     }
 
-    private static let cellSize: CGFloat = 9
+    private static let cellSize: CGFloat = 11
     private static let cellSpacing: CGFloat = 3
-    private static let monthLabelHeight: CGFloat = 10
-    private static let weekdayLabelWidth: CGFloat = 16
+    private static let monthLabelHeight: CGFloat = 12
+    private static let weekdayLabelWidth: CGFloat = 18
     private static let weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"]
     private static var weekCalendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
@@ -1388,7 +1403,7 @@ private struct TopicBrowserSection: View {
                 )
                 .frame(maxWidth: .infinity, minHeight: 180)
             } else {
-                VStack(spacing: 8) {
+                VStack(spacing: 12) {
                     ForEach(stats) { stat in
                         TopicStatRow(stat: stat, strings: strings)
                     }
@@ -1431,7 +1446,7 @@ private struct TopicStatRow: View {
     var strings: AppStrings
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(stat.topic)
@@ -1441,6 +1456,8 @@ private struct TopicStatRow: View {
 
                     HStack(spacing: 8) {
                         Text("\(strings.level) \(stat.levelRange.compactRangeText)")
+                        Text("·")
+                        Text("\(strings.averageScoreShort) \(stat.average)")
                         Text("·")
                         Text(stat.latestDate, formatter: Self.dateFormatter)
                     }
@@ -1465,13 +1482,13 @@ private struct TopicStatRow: View {
 
             CompactLevelRangeBar(range: stat.levelRange)
         }
-        .padding(14)
-        .background(Color.secondary.opacity(0.052))
+        .padding(18)
+        .background(Color(.secondarySystemBackground))
         .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color.secondary.opacity(0.08), lineWidth: 1)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private static let dateFormatter: DateFormatter = {
@@ -1490,12 +1507,12 @@ private struct CompactLevelRangeBar: View {
                 HStack(spacing: 2) {
                     ForEach(Difficulty.allCases) { difficulty in
                         Capsule()
-                            .fill(difficulty == range.level ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.14))
+                            .fill(difficulty == range.level ? Color.green.opacity(0.20) : Color.secondary.opacity(0.14))
                     }
                 }
 
                 Capsule()
-                    .fill(Color.accentColor.opacity(0.82))
+                    .fill(Color.green.opacity(0.82))
                     .frame(width: max(4, proxy.size.width * (range.upperBound - range.lowerBound)))
                     .offset(x: proxy.size.width * range.lowerBound)
             }

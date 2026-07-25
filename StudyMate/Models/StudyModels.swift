@@ -1504,9 +1504,9 @@ struct AppStrings {
             "Set the difficulty and question style for each topic, then keep everything in one place."
         )
     }
-    var myStudyGuestTopicOne: String { text("실전 중심 · 레벨 6", "Practice focused · Level 6") }
-    var myStudyGuestTopicTwo: String { text("설계 토론 · 레벨 7", "Design discussion · Level 7") }
-    var myStudyGuestTopicThree: String { text("짧은 복습 · 레벨 5", "Quick review · Level 5") }
+    var myStudyGuestTopicOne: String { text("아키텍처 연습 · 레벨 6", "Architecture practice · Level 6") }
+    var myStudyGuestTopicTwo: String { text("메시징 시스템 · 레벨 7", "Messaging systems · Level 7") }
+    var myStudyGuestTopicThree: String { text("서비스 경계 · 레벨 7", "Service boundaries · Level 7") }
     var myStudyGuestLoginTitle: String { text("첫 학습 주제를 만들어보세요", "Create your first study topic") }
     var myStudyGuestLoginSubtitle: String {
         text(
@@ -1548,27 +1548,35 @@ struct AppStrings {
     var guestActivities: String { text("총 활동", "Activities") }
     var guestAverageScore: String { text("평균 점수", "Average") }
     var guestTopicCount: String { text("학습 주제", "Topics") }
+    var learningActivity: String { text("학습 활동", "Learning activity") }
+    var recentLearningRecords: String { text("최근 학습 기록", "Recent learning records") }
+    var topicGrowthOverview: String { text("주제별 성장", "Growth by topic") }
+    var learningRhythmSettings: String { text("학습 리듬", "Learning rhythm") }
+    var appEnvironmentSettings: String { text("앱 환경", "App preferences") }
+    var dataSyncSettings: String { text("데이터 동기화", "Data sync") }
+    var enabledStatus: String { text("켜짐", "On") }
+    var disabledStatus: String { text("꺼짐", "Off") }
     var guestRecentRecords: String { text("최근 기록 미리보기", "Recent record preview") }
     var guestTopicProgress: String { text("주제별 성장 미리보기", "Topic progress preview") }
-    var guestPreviewRecordTopicOne: String { "Redis Streams" }
-    var guestPreviewRecordTopicTwo: String { text("시스템 설계", "System Design") }
-    var guestPreviewRecordTopicThree: String { "SwiftUI" }
+    var guestPreviewRecordTopicOne: String { text("시스템 설계", "System Design") }
+    var guestPreviewRecordTopicTwo: String { "Kafka" }
+    var guestPreviewRecordTopicThree: String { "Microservice Architecture" }
     var guestPreviewRecordQuestionOne: String {
-        text(
-            "Redis Streams의 운영 trade-off를 설명해보세요.",
-            "Explain one operational trade-off of Redis Streams."
-        )
-    }
-    var guestPreviewRecordQuestionTwo: String {
         text(
             "확장 가능한 시스템의 병목을 찾아보세요.",
             "Identify a bottleneck in a scalable system."
         )
     }
+    var guestPreviewRecordQuestionTwo: String {
+        text(
+            "Kafka 파티션과 컨슈머 그룹의 관계를 설명해보세요.",
+            "Explain how Kafka partitions relate to consumer groups."
+        )
+    }
     var guestPreviewRecordQuestionThree: String {
         text(
-            "SwiftUI 상태 흐름을 정리해보세요.",
-            "Summarize state flow in SwiftUI."
+            "서비스 경계와 데이터 소유권을 어떻게 나눌지 설명해보세요.",
+            "Explain how you would divide service boundaries and data ownership."
         )
     }
     var guestPreviewProgressOne: String { text("안정적으로 향상 중", "Improving steadily") }

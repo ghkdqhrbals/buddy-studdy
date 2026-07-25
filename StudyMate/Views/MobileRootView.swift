@@ -499,9 +499,9 @@ private struct MobileMyStudyLoginExperience: View {
 
     private var topics: [(title: String, detail: String, icon: String)] {
         [
-            (strings.guestPreviewRecordTopicOne, strings.myStudyGuestTopicOne, "arrow.triangle.branch"),
-            (strings.guestPreviewRecordTopicTwo, strings.myStudyGuestTopicTwo, "square.stack.3d.up"),
-            (strings.guestPreviewRecordTopicThree, strings.myStudyGuestTopicThree, "swift")
+            (strings.guestPreviewRecordTopicOne, strings.myStudyGuestTopicOne, "square.stack.3d.up"),
+            (strings.guestPreviewRecordTopicTwo, strings.myStudyGuestTopicTwo, "arrow.left.arrow.right"),
+            (strings.guestPreviewRecordTopicThree, strings.myStudyGuestTopicThree, "network")
         ]
     }
 
@@ -1427,6 +1427,9 @@ private struct MobileHomeView: View {
 
                 ForEach(filteredStudyCategories) { category in
                     myStudyCategoryRow(category)
+                        .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                 }
                 .onMove { offsets, destination in
                     guard trimmedHomeStudySearchText.isEmpty else {
@@ -4606,14 +4609,20 @@ private struct MobileHomeCategoryRow: View {
     var strings: AppStrings
 
     var body: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 14) {
+            Image(systemName: categoryIcon)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.green)
+                .frame(width: 42, height: 42)
+                .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 4) {
                 Text(category.title)
                     .lineLimit(1)
-                    .fontWeight(.regular)
+                    .font(.body.weight(.semibold))
 
                 Text(category.difficulty.displayName(language: strings.language))
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
@@ -4635,9 +4644,28 @@ private struct MobileHomeCategoryRow: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 7)
-        .frame(minHeight: 46)
-        .contentShape(Rectangle())
+        .padding(14)
+        .frame(minHeight: 70)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.primary.opacity(0.04), lineWidth: 1)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var categoryIcon: String {
+        let normalized = category.title.lowercased()
+        if normalized.contains("kafka") {
+            return "arrow.left.arrow.right"
+        }
+        if normalized.contains("microservice") || normalized.contains("마이크로서비스") {
+            return "network"
+        }
+        if normalized.contains("system") || normalized.contains("시스템") || normalized.contains("architecture") {
+            return "square.stack.3d.up"
+        }
+        return "book.closed.fill"
     }
 }
 
@@ -5428,59 +5456,112 @@ private struct MobileSettingsView: View {
     var body: some View {
         let strings = appState.settingsEditorStrings
 
-        VStack(spacing: 0) {
-            Form {
-                Section(strings.studySettings) {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 18) {
+                MobileSettingsCard(
+                    title: strings.learningRhythmSettings,
+                    systemImage: "timer"
+                ) {
                     Stepper(
-                        strings.questionInterval(minutes: appState.draftSettings.sanitizedIntervalMinutes),
                         value: $appState.draftSettings.intervalMinutes,
                         in: 1...240
-                    )
-
+                    ) {
+                        MobileSettingsRow(
+                            systemImage: "clock.arrow.2.circlepath",
+                            title: strings.studySettings,
+                            value: strings.questionInterval(minutes: appState.draftSettings.sanitizedIntervalMinutes)
+                        )
+                    }
                 }
 
-                Section(strings.generalSettings) {
-                    Picker(
-                        strings.appLanguage,
-                        selection: Binding(
-                            get: { appState.draftSettings.appLanguage },
-                            set: { appState.updateDraftAppLanguage($0) }
-                        )
-                    ) {
+                MobileSettingsCard(
+                    title: strings.appEnvironmentSettings,
+                    systemImage: "slider.horizontal.3"
+                ) {
+                    Menu {
                         ForEach(AppLanguage.allCases) { language in
-                            Text(language.displayName).tag(language)
+                            Button {
+                                appState.updateDraftAppLanguage(language)
+                            } label: {
+                                if appState.draftSettings.appLanguage == language {
+                                    Label(language.displayName, systemImage: "checkmark")
+                                } else {
+                                    Text(language.displayName)
+                                }
+                            }
                         }
+                    } label: {
+                        MobileSettingsRow(
+                            systemImage: "globe",
+                            title: strings.appLanguage,
+                            value: appState.draftSettings.appLanguage.displayName
+                        )
                     }
+                    .buttonStyle(.plain)
+
+                    Divider()
+                        .padding(.leading, 48)
 
                     Button {
                         appState.openSystemNotificationSettings()
                     } label: {
-                        Label(strings.openNotificationSettings, systemImage: "bell.badge")
-                    }
-
-                    Picker(
-                        strings.notificationSound,
-                        selection: Binding(
-                            get: { appState.draftSettings.notificationSound },
-                            set: { appState.setDraftNotificationSound($0) }
+                        MobileSettingsRow(
+                            systemImage: "bell.badge",
+                            title: strings.notifications,
+                            value: strings.openNotificationSettings,
+                            showsChevron: true
                         )
-                    ) {
-                        ForEach(NotificationSoundOption.allCases) { sound in
-                            Text(sound.displayName(language: appState.draftSettings.appLanguage)).tag(sound)
-                        }
                     }
+                    .buttonStyle(.plain)
+
+                    Divider()
+                        .padding(.leading, 48)
+
+                    Menu {
+                        ForEach(NotificationSoundOption.allCases) { sound in
+                            Button {
+                                appState.setDraftNotificationSound(sound)
+                            } label: {
+                                if appState.draftSettings.notificationSound == sound {
+                                    Label(
+                                        sound.displayName(language: appState.draftSettings.appLanguage),
+                                        systemImage: "checkmark"
+                                    )
+                                } else {
+                                    Text(sound.displayName(language: appState.draftSettings.appLanguage))
+                                }
+                            }
+                        }
+                    } label: {
+                        MobileSettingsRow(
+                            systemImage: "speaker.wave.2.fill",
+                            title: strings.notificationSound,
+                            value: appState.draftSettings.notificationSound.displayName(language: appState.draftSettings.appLanguage)
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
 
-                Section(strings.developerOptions) {
-                    Toggle(
-                        strings.debuggingMode,
-                        isOn: Binding(
+                MobileSettingsCard(
+                    title: strings.developerOptions,
+                    systemImage: "hammer"
+                ) {
+                    Toggle(isOn: Binding(
                             get: { appState.isDebuggingEnabled },
                             set: { appState.setDebuggingEnabled($0) }
+                        )) {
+                        MobileSettingsRow(
+                            systemImage: "ladybug.fill",
+                            title: strings.debuggingMode,
+                            value: appState.isDebuggingEnabled ? strings.enabledStatus : strings.disabledStatus
                         )
-                    )
+                    }
+                    .tint(.green)
 
                     if appState.isDebuggingEnabled {
+                        Divider()
+                            .padding(.leading, 48)
+
                         VStack(alignment: .leading, spacing: 6) {
                             TextField(
                                 strings.debugBackendBaseURL,
@@ -5502,29 +5583,53 @@ private struct MobileSettingsView: View {
                             Text(strings.debugBackendBaseURLHelp)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
+                                    .fixedSize(horizontal: false, vertical: true)
                         }
+                        .padding(.leading, 48)
                     }
                 }
-            }
 
-            HStack(spacing: 14) {
-                Link(strings.feedbackLink, destination: Self.feedbackURL)
-
-                Text("·")
-                    .foregroundStyle(.tertiary)
-
-                Link(destination: Self.kofiTipURL) {
-                    Label(strings.tipMe, systemImage: "heart.fill")
-                        .labelStyle(.titleAndIcon)
+                MobileSettingsCard(
+                    title: strings.dataSyncSettings,
+                    systemImage: "icloud"
+                ) {
+                    Toggle(
+                        isOn: Binding(
+                            get: { appState.isCloudSyncEnabled },
+                            set: { appState.setCloudSyncEnabled($0) }
+                        )
+                    ) {
+                        MobileSettingsRow(
+                            systemImage: "icloud.fill",
+                            title: strings.iCloudSync,
+                            value: appState.isCloudSyncEnabled ? strings.iCloudSyncOn : strings.iCloudSyncOff
+                        )
+                    }
+                    .tint(.green)
                 }
-                .accessibilityLabel(strings.supportDeveloper)
-            }
+
+                HStack(spacing: 14) {
+                    Link(strings.feedbackLink, destination: Self.feedbackURL)
+
+                    Text("·")
+                        .foregroundStyle(.tertiary)
+
+                    Link(destination: Self.kofiTipURL) {
+                        Label(strings.tipMe, systemImage: "heart.fill")
+                            .labelStyle(.titleAndIcon)
+                    }
+                    .accessibilityLabel(strings.supportDeveloper)
+                }
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .padding(.top, 8)
-                .padding(.bottom, 10)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 80)
         }
+        .background(Color(.systemBackground))
         .keyboardDoneToolbar(strings.done)
         .navigationTitle(strings.tabSettings)
         #if os(iOS)
@@ -5575,6 +5680,73 @@ private struct MobileSettingsView: View {
         }
         .buttonStyle(.plain)
         .disabled(appState.isValidatingAPIKey)
+    }
+}
+
+private struct MobileSettingsCard<Content: View>: View {
+    var title: String
+    var systemImage: String
+    @ViewBuilder var content: Content
+
+    init(
+        title: String,
+        systemImage: String,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.systemImage = systemImage
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(title, systemImage: systemImage)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 12) {
+                content
+            }
+        }
+        .padding(18)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+}
+
+private struct MobileSettingsRow: View {
+    var systemImage: String
+    var title: String
+    var value: String
+    var showsChevron = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.green)
+                .frame(width: 34, height: 34)
+                .background(Color.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Text(value)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 8)
+
+            if showsChevron {
+                Image(systemName: "arrow.up.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .contentShape(Rectangle())
     }
 }
 

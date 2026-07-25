@@ -57,6 +57,44 @@ struct HistoryView: View {
         visibleRecords.count < filteredRecords.count
     }
 
+    private var weeklyRecords: [StudyRecord] {
+        guard let interval = Self.weekCalendar.dateInterval(of: .weekOfYear, for: Date()) else {
+            return []
+        }
+        return appState.studyRecords.filter { record in
+            guard record.gradingResult != nil else {
+                return false
+            }
+            return interval.contains(sortDate(for: record))
+        }
+    }
+
+    private var weeklyStudyDays: Int {
+        Set(weeklyRecords.map { Self.weekCalendar.startOfDay(for: sortDate(for: $0)) }).count
+    }
+
+    private var weeklyAverageScore: Int {
+        let scores = weeklyRecords.compactMap(\.gradingResult?.score)
+        guard !scores.isEmpty else {
+            return 0
+        }
+        return Int((Double(scores.reduce(0, +)) / Double(scores.count)).rounded())
+    }
+
+    private var weeklyActivityCounts: [Int] {
+        guard let interval = Self.weekCalendar.dateInterval(of: .weekOfYear, for: Date()) else {
+            return Array(repeating: 0, count: 7)
+        }
+        return weeklyRecords.reduce(into: Array(repeating: 0, count: 7)) { counts, record in
+            let day = Self.weekCalendar.startOfDay(for: sortDate(for: record))
+            let offset = Self.weekCalendar.dateComponents([.day], from: interval.start, to: day).day ?? 0
+            guard counts.indices.contains(offset) else {
+                return
+            }
+            counts[offset] += 1
+        }
+    }
+
     private func resetVisibleCount() {
         visibleCount = min(pageSize, max(filteredRecords.count, 0))
     }
@@ -90,7 +128,7 @@ struct HistoryView: View {
                 .padding(.bottom, 8)
 
             ScrollView {
-                LazyVStack(spacing: 8) {
+                LazyVStack(spacing: 12) {
                     if orderedRecords.isEmpty {
                         ContentUnavailableView(
                             strings.noRecords,
@@ -99,11 +137,28 @@ struct HistoryView: View {
                         )
                         .frame(maxWidth: .infinity, minHeight: 360)
                     } else {
-                        Text(strings.filteredRecordCount(displayedVisibleRecords.count, total: displayedRecords.count))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if !isRecordSearchActive {
+                            HistoryWeeklySummaryCard(
+                                studyDays: weeklyStudyDays,
+                                activityCount: weeklyRecords.count,
+                                averageScore: weeklyAverageScore,
+                                dailyCounts: weeklyActivityCounts,
+                                strings: strings
+                            )
+                            .padding(.bottom, 8)
+                        }
+
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(strings.recentLearningRecords)
+                                .font(.title3.weight(.bold))
+
+                            Spacer()
+
+                            Text(strings.filteredRecordCount(displayedVisibleRecords.count, total: displayedRecords.count))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
 
                         if displayedRecords.isEmpty {
                             ContentUnavailableView(
@@ -160,6 +215,7 @@ struct HistoryView: View {
                         }
                     }
                 }
+                .padding(.top, 8)
             }
             .frame(maxHeight: .infinity)
             .refreshable {
@@ -494,6 +550,14 @@ struct HistoryView: View {
             }
         }
     }
+
+    private static var weekCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = Locale.current
+        calendar.timeZone = .current
+        calendar.firstWeekday = 2
+        return calendar
+    }
 }
 
 private struct RecordSettingsSheet: View {
@@ -580,11 +644,7 @@ private struct HistoryRow: View {
     var isSelected: Bool
 
     var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.75) : Color.clear)
-                .frame(width: 4, height: 42)
-
+        HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .firstTextBaseline) {
                     HStack(spacing: 6) {
@@ -614,8 +674,7 @@ private struct HistoryRow: View {
 
                     if let result = record.gradingResult {
                         Text("\(result.score)/100")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
+                            .font(.title3.weight(.bold))
                             .foregroundStyle(scoreColor(result.score))
                             .lineLimit(1)
                     } else {
@@ -627,7 +686,7 @@ private struct HistoryRow: View {
                 }
 
                 Text(record.question.question)
-                    .font(.body)
+                    .font(.body.weight(.medium))
                     .lineLimit(2)
 
                 RecordStatsMeta(record: record)
@@ -637,17 +696,16 @@ private struct HistoryRow: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 13)
-        .padding(.horizontal, 14)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             isSelected ? Color.green.opacity(0.10) : Color(.secondarySystemBackground)
         )
         .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(isSelected ? Color.green.opacity(0.34) : Color.primary.opacity(0.04), lineWidth: 1)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .textSelection(.disabled)
     }
 
@@ -668,6 +726,116 @@ private struct HistoryRow: View {
         formatter.timeStyle = .short
         return formatter
     }()
+
+}
+
+private struct HistoryWeeklySummaryCard: View {
+    var studyDays: Int
+    var activityCount: Int
+    var averageScore: Int
+    var dailyCounts: [Int]
+    var strings: AppStrings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text(strings.guestWeeklySummary)
+                .font(.title3.weight(.bold))
+
+            HStack(alignment: .bottom, spacing: 0) {
+                HistoryWeeklyMetric(
+                    title: strings.guestStudyDays,
+                    value: "\(studyDays)",
+                    suffix: strings.language == .korean ? "일" : ""
+                )
+
+                Divider()
+                    .frame(height: 52)
+
+                HistoryWeeklyMetric(
+                    title: strings.guestActivities,
+                    value: "\(activityCount)",
+                    suffix: strings.language == .korean ? "회" : ""
+                )
+
+                Divider()
+                    .frame(height: 52)
+
+                HistoryWeeklyMetric(
+                    title: strings.guestAverageScore,
+                    value: "\(averageScore)",
+                    suffix: strings.language == .korean ? "점" : ""
+                )
+            }
+
+            HStack(alignment: .bottom, spacing: 12) {
+                ForEach(Array(dailyCounts.enumerated()), id: \.offset) { index, count in
+                    VStack(spacing: 8) {
+                        Capsule()
+                            .fill(count > 0 ? Color.green.opacity(0.82) : Color.secondary.opacity(0.13))
+                            .frame(height: barHeight(for: count))
+
+                        Text(weekdayLabel(at: index))
+                            .font(.caption)
+                            .foregroundStyle(isToday(index: index) ? Color.primary : Color.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .bottom)
+                }
+            }
+            .frame(height: 72, alignment: .bottom)
+        }
+        .padding(20)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func barHeight(for count: Int) -> CGFloat {
+        let maximum = max(dailyCounts.max() ?? 0, 1)
+        guard count > 0 else {
+            return 8
+        }
+        return 14 + (CGFloat(count) / CGFloat(maximum) * 34)
+    }
+
+    private func weekdayLabel(at index: Int) -> String {
+        let korean = ["월", "화", "수", "목", "금", "토", "일"]
+        let english = ["M", "T", "W", "T", "F", "S", "S"]
+        return strings.language == .korean ? korean[index] : english[index]
+    }
+
+    private func isToday(index: Int) -> Bool {
+        let weekday = Calendar.current.component(.weekday, from: Date())
+        let mondayBasedIndex = (weekday + 5) % 7
+        return mondayBasedIndex == index
+    }
+}
+
+private struct HistoryWeeklyMetric: View {
+    var title: String
+    var value: String
+    var suffix: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(value)
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+
+                if !suffix.isEmpty {
+                    Text(suffix)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+    }
 }
 
 private struct RecordStatsMeta: View {
