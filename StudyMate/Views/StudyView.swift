@@ -21,10 +21,6 @@ struct StudyView: View {
                     strings: strings
                 )
 
-                if let quota = appState.questionQuota {
-                    questionQuotaView(quota, strings: strings)
-                }
-
                 if let notice = appState.questionQuotaNotice {
                     questionQuotaNoticeView(notice, strings: strings)
                 }
@@ -269,31 +265,6 @@ struct StudyView: View {
     private var hasReachedPendingQuestionLimit: Bool {
         let hostCategory = questionHostCategoryID.flatMap { appState.settings.category(for: $0) }
         return appState.hasReachedPendingQuestionLimit(for: hostCategory ?? selectedCategory)
-    }
-
-    private func questionQuotaView(_ quota: BackendQuestionQuota, strings: AppStrings) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Text(strings.monthlyQuestionQuota)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(strings.monthlyQuotaUsage(remaining: quota.remainingCount, limit: quota.monthlyLimit))
-                    .font(.caption.weight(.semibold))
-                    .monospacedDigit()
-            }
-
-            ProgressView(
-                value: Double(quota.usedCount),
-                total: Double(max(quota.monthlyLimit, 1))
-            )
-            .tint(quota.remainingCount > 0 ? .accentColor : .orange)
-
-            Text(strings.monthlyQuotaReset(quota.resetAt))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.vertical, 4)
     }
 
     private func questionQuotaNoticeView(_ message: String, strings: AppStrings) -> some View {

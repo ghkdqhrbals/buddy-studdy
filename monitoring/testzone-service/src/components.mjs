@@ -10,22 +10,21 @@ const NETWORK = "buddystudy-testzone";
 
 export const COMPONENT_CATALOG = [
   {
-    id: "postgres",
-    name: "PostgreSQL",
-    containerPort: 5432,
+    id: "mysql",
+    name: "MySQL",
+    containerPort: 3306,
     defaultConfig: {
-      imageTag: "16-alpine",
+      imageTag: "8.4",
       database: "testzone",
       username: "testzone",
-      hostPort: 35432,
+      hostPort: 33306,
       cpus: 1,
       memoryMb: 512,
       maxConnections: 100,
-      sharedBuffersMb: 128,
-      workMemMb: 4,
-      maintenanceWorkMemMb: 64,
-      effectiveCacheSizeMb: 384,
-      statementTimeoutMs: 30_000,
+      innodbBufferPoolMb: 256,
+      tmpTableSizeMb: 32,
+      maxHeapTableSizeMb: 32,
+      waitTimeoutSeconds: 28_800,
       environment: {},
     },
   },
@@ -46,16 +45,16 @@ export const COMPONENT_CATALOG = [
 ];
 
 const IMAGE_TAGS = {
-  postgres: new Set(["16-alpine", "17-alpine"]),
+  mysql: new Set(["8.0", "8.4"]),
   redis: new Set(["7.4-alpine", "8-alpine"]),
 };
 const REDIS_POLICIES = new Set(["allkeys-lru", "allkeys-lfu", "volatile-lru", "noeviction"]);
 const ENVIRONMENT_KEY = /^[A-Z_][A-Z0-9_]{0,127}$/;
 const RESERVED_ENVIRONMENT_KEYS = new Set([
-  "POSTGRES_DB",
-  "POSTGRES_USER",
-  "POSTGRES_PASSWORD",
-  "POSTGRES_MAX_CONNECTIONS",
+  "MYSQL_DATABASE",
+  "MYSQL_USER",
+  "MYSQL_PASSWORD",
+  "MYSQL_ROOT_PASSWORD",
 ]);
 
 function definition(id) {
@@ -137,15 +136,15 @@ function environment(input) {
   }));
 }
 
-function parsePostgresMetrics(raw) {
-  const values = String(raw || "").trim().split("|");
+function parseMysqlMetrics(raw) {
+  const values = String(raw || "").trim().split(/\s+/);
   if (values.length < 5) return {};
   return {
     connections: Number(values[0]) || 0,
     maxConnections: Number(values[1]) || 0,
     activeConnections: Number(values[2]) || 0,
     databaseSizeBytes: Number(values[3]) || 0,
-    cacheHitRatio: Number(values[4]) || 0,
+    cacheHitRatio: Math.max(0, Math.min(1, Number(values[4]) || 0)),
   };
 }
 
@@ -195,7 +194,7 @@ export class ComponentManager {
           component.id,
           {
             config: structuredClone(component.defaultConfig),
-            password: component.id === "postgres"
+            password: component.id === "mysql"
               ? this.initialPassword
               : crypto.randomBytes(24).toString("base64url"),
           },
@@ -204,11 +203,25 @@ export class ComponentManager {
       await this.persist();
     } else {
       let changed = false;
+      if (this.state.components?.postgres && !this.state.components.mysql) {
+        const legacy = this.state.components.postgres;
+        this.state.components.mysql = {
+          config: {
+            ...structuredClone(definition("mysql").defaultConfig),
+            cpus: legacy.config?.cpus ?? 1,
+            memoryMb: legacy.config?.memoryMb ?? 512,
+            environment: {},
+          },
+          password: legacy.password || this.initialPassword,
+        };
+        delete this.state.components.postgres;
+        changed = true;
+      }
       for (const component of COMPONENT_CATALOG) {
         if (this.state.components?.[component.id]) {
           const current = this.state.components[component.id].config || {};
-          const legacyMaxConnections = component.id === "postgres"
-            ? Number(current.environment?.POSTGRES_MAX_CONNECTIONS)
+          const legacyMaxConnections = component.id === "mysql"
+            ? Number(current.environment?.MYSQL_MAX_CONNECTIONS)
             : null;
           const merged = {
             ...structuredClone(component.defaultConfig),
@@ -218,14 +231,14 @@ export class ComponentManager {
               ...(current.environment || {}),
             },
           };
-          if (component.id === "postgres") {
+          if (component.id === "mysql") {
             if (current.maxConnections === undefined
               && Number.isInteger(legacyMaxConnections)
               && legacyMaxConnections >= 10
               && legacyMaxConnections <= 10_000) {
               merged.maxConnections = legacyMaxConnections;
             }
-            delete merged.environment.POSTGRES_MAX_CONNECTIONS;
+            delete merged.environment.MYSQL_MAX_CONNECTIONS;
           }
           if (JSON.stringify(current) !== JSON.stringify(merged)) {
             this.state.components[component.id].config = merged;
@@ -236,7 +249,7 @@ export class ComponentManager {
         this.state.components ||= {};
         this.state.components[component.id] = {
           config: structuredClone(component.defaultConfig),
-          password: component.id === "postgres"
+          password: component.id === "mysql"
             ? this.initialPassword
             : crypto.randomBytes(24).toString("base64url"),
         };
@@ -263,8 +276,8 @@ export class ComponentManager {
   }
 
   image(id, config) {
-    return id === "postgres"
-      ? `postgres:${config.imageTag}`
+    return id === "mysql"
+      ? `mysql:${config.imageTag}`
       : `redis:${config.imageTag}`;
   }
 
@@ -283,8 +296,8 @@ export class ComponentManager {
   }
 
   publicEndpoint(id, config) {
-    if (id === "postgres") {
-      return `postgresql://${config.username}:[configured-password]@${this.name(id)}:5432/${config.database}`;
+    if (id === "mysql") {
+      return `mysql://${config.username}:[configured-password]@${this.name(id)}:3306/${config.database}`;
     }
     return `redis://:[configured-password]@${this.name(id)}:6379/0`;
   }
@@ -319,18 +332,20 @@ export class ComponentManager {
     }
     if (metrics && state) {
       try {
-        if (id === "postgres") {
+        if (id === "mysql") {
           const { stdout } = await this.exec("docker", [
             "exec",
-            "-e", `PGPASSWORD=${state.password}`,
             this.name(id),
-            "psql",
-            "-U", state.config.username,
-            "-d", state.config.database,
-            "-Atc",
-            `select (select count(*) from pg_stat_activity), current_setting('max_connections'), (select count(*) from pg_stat_activity where state = 'active'), pg_database_size(current_database()), coalesce((select sum(blks_hit)::float / nullif(sum(blks_hit) + sum(blks_read), 0) from pg_stat_database), 0);`,
+            "mysql",
+            "--batch",
+            "--skip-column-names",
+            `--user=${state.config.username}`,
+            `--password=${state.password}`,
+            state.config.database,
+            "--execute",
+            `select (select count(*) from information_schema.processlist), @@global.max_connections, (select count(*) from information_schema.processlist where command <> 'Sleep'), coalesce((select sum(data_length + index_length) from information_schema.tables where table_schema = database()), 0), coalesce((select 1 - reads.variable_value / nullif(requests.variable_value, 0) from performance_schema.global_status reads join performance_schema.global_status requests where reads.variable_name = 'Innodb_buffer_pool_reads' and requests.variable_name = 'Innodb_buffer_pool_read_requests'), 0);`,
           ]);
-          Object.assign(metrics, parsePostgresMetrics(stdout));
+          Object.assign(metrics, parseMysqlMetrics(stdout));
         } else {
           const { stdout } = await this.exec("docker", [
             "exec",
@@ -360,8 +375,8 @@ export class ComponentManager {
         name: component.name,
         image: this.image(component.id, state.config),
         endpoint: this.publicEndpoint(component.id, state.config),
-        hostEndpoint: component.id === "postgres"
-          ? `postgresql://${state.config.username}:[configured-password]@127.0.0.1:${state.config.hostPort}/${state.config.database}`
+        hostEndpoint: component.id === "mysql"
+          ? `mysql://${state.config.username}:[configured-password]@127.0.0.1:${state.config.hostPort}/${state.config.database}`
           : `redis://:[configured-password]@127.0.0.1:${state.config.hostPort}/0`,
         config: structuredClone(state.config),
         ...runtime,
@@ -373,13 +388,13 @@ export class ComponentManager {
   async credentials(id) {
     const state = await this.componentState(id);
     const config = state.config;
-    if (id === "postgres") {
+    if (id === "mysql") {
       return {
         username: config.username,
         password: state.password,
         database: config.database,
-        internalUrl: `postgresql://${config.username}:${state.password}@${this.name(id)}:5432/${config.database}`,
-        hostUrl: `postgresql://${config.username}:${state.password}@127.0.0.1:${config.hostPort}/${config.database}`,
+        internalUrl: `mysql://${config.username}:${state.password}@${this.name(id)}:3306/${config.database}`,
+        hostUrl: `mysql://${config.username}:${state.password}@127.0.0.1:${config.hostPort}/${config.database}`,
       };
     }
     return {
@@ -404,35 +419,26 @@ export class ComponentManager {
     if (input.memoryMb !== undefined) next.memoryMb = boundedNumber(input.memoryMb, "Memory limit", 64, 8192);
     const nextEnvironment = environment(input.environment);
     if (nextEnvironment !== undefined) next.environment = nextEnvironment;
-    if (id === "postgres") {
+    if (id === "mysql") {
       if (input.database !== undefined) next.database = identifier(input.database, "Database");
       if (input.username !== undefined) next.username = identifier(input.username, "Username");
       if (input.maxConnections !== undefined) {
         next.maxConnections = boundedInteger(input.maxConnections, "Max connections", 10, 10_000);
       }
-      if (input.sharedBuffersMb !== undefined) {
-        next.sharedBuffersMb = boundedInteger(input.sharedBuffersMb, "Shared buffers", 16, 6144);
+      if (input.innodbBufferPoolMb !== undefined) {
+        next.innodbBufferPoolMb = boundedInteger(input.innodbBufferPoolMb, "InnoDB buffer pool", 32, 6144);
       }
-      if (input.workMemMb !== undefined) {
-        next.workMemMb = boundedInteger(input.workMemMb, "Work memory", 1, 1024);
+      if (input.tmpTableSizeMb !== undefined) {
+        next.tmpTableSizeMb = boundedInteger(input.tmpTableSizeMb, "Temporary table size", 1, 1024);
       }
-      if (input.maintenanceWorkMemMb !== undefined) {
-        next.maintenanceWorkMemMb = boundedInteger(input.maintenanceWorkMemMb, "Maintenance work memory", 16, 4096);
+      if (input.maxHeapTableSizeMb !== undefined) {
+        next.maxHeapTableSizeMb = boundedInteger(input.maxHeapTableSizeMb, "Maximum heap table size", 1, 1024);
       }
-      if (input.effectiveCacheSizeMb !== undefined) {
-        next.effectiveCacheSizeMb = boundedInteger(input.effectiveCacheSizeMb, "Effective cache size", 32, 8192);
+      if (input.waitTimeoutSeconds !== undefined) {
+        next.waitTimeoutSeconds = boundedInteger(input.waitTimeoutSeconds, "Wait timeout", 1, 604_800);
       }
-      if (input.statementTimeoutMs !== undefined) {
-        next.statementTimeoutMs = boundedInteger(input.statementTimeoutMs, "Statement timeout", 0, 3_600_000);
-      }
-      if (next.sharedBuffersMb >= next.memoryMb) {
-        throw new ValidationError("Shared buffers must be lower than the container memory limit.");
-      }
-      if (next.maintenanceWorkMemMb >= next.memoryMb) {
-        throw new ValidationError("Maintenance work memory must be lower than the container memory limit.");
-      }
-      if (next.effectiveCacheSizeMb > next.memoryMb) {
-        throw new ValidationError("Effective cache size must not exceed the container memory limit.");
+      if (next.innodbBufferPoolMb >= next.memoryMb) {
+        throw new ValidationError("InnoDB buffer pool must be lower than the container memory limit.");
       }
     } else {
       if (input.maxMemoryMb !== undefined) next.maxMemoryMb = boundedNumber(input.maxMemoryMb, "Redis max memory", 32, 4096);
@@ -465,22 +471,19 @@ export class ComponentManager {
     for (const [key, value] of Object.entries(config.environment || {})) {
       args.push("-e", `${key}=${value}`);
     }
-    if (id === "postgres") {
+    if (id === "mysql") {
       args.push(
-        "-e", `POSTGRES_DB=${config.database}`,
-        "-e", `POSTGRES_USER=${config.username}`,
-        "-e", `POSTGRES_PASSWORD=${state.password}`,
-        "-v", `${this.volume(id)}:/var/lib/postgresql/data`,
+        "-e", `MYSQL_DATABASE=${config.database}`,
+        "-e", `MYSQL_USER=${config.username}`,
+        "-e", `MYSQL_PASSWORD=${state.password}`,
+        "-e", `MYSQL_ROOT_PASSWORD=${state.password}`,
+        "-v", `${this.volume(id)}:/var/lib/mysql`,
         this.image(id, config),
-      );
-      args.push(
-        "postgres",
-        "-c", `max_connections=${config.maxConnections}`,
-        "-c", `shared_buffers=${config.sharedBuffersMb}MB`,
-        "-c", `work_mem=${config.workMemMb}MB`,
-        "-c", `maintenance_work_mem=${config.maintenanceWorkMemMb}MB`,
-        "-c", `effective_cache_size=${config.effectiveCacheSizeMb}MB`,
-        "-c", `statement_timeout=${config.statementTimeoutMs}`,
+        `--max-connections=${config.maxConnections}`,
+        `--innodb-buffer-pool-size=${config.innodbBufferPoolMb}M`,
+        `--tmp-table-size=${config.tmpTableSizeMb}M`,
+        `--max-heap-table-size=${config.maxHeapTableSizeMb}M`,
+        `--wait-timeout=${config.waitTimeoutSeconds}`,
       );
     } else {
       args.push(

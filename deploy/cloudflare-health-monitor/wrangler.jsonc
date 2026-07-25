@@ -11,11 +11,6 @@
     "enabled": true,
     "head_sampling_rate": 1
   },
-  "triggers": {
-    "crons": [
-      "*/5 * * * *"
-    ]
-  },
   "vars": {
     "HEALTHCHECK_URL": "https://api.ghkdqhrbals.org/api/v1/health/readiness",
     "SERVICE_NAME": "BuddyStudy backend",
@@ -25,6 +20,7 @@
     "STATUS_STALE_AFTER_SECONDS": "180",
     "HEALTHCHECK_TIMEOUT_MS": "3000",
     "SLACK_TIMEOUT_MS": "3000",
+    "SCHEDULED_CHECKS_ENABLED": "false",
     "OBSERVABILITY_URL": "https://grafana.ghkdqhrbals.org"
   },
   "kv_namespaces": [

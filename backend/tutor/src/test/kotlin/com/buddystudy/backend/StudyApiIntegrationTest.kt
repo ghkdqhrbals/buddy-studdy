@@ -333,7 +333,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         activateRegisteredUser(deviceId)
 
         val created = postJson(
-            "/api/v1/study",
+            "/api/v1/studies",
             """
             {
               "topic": "Kotlin Architecture",
@@ -355,7 +355,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(created["pendingQuestion"].isNull).isTrue()
 
         val updated = postJson(
-            "/api/v1/study",
+            "/api/v1/studies",
             """
             {
               "topic": "Kotlin Architecture",
@@ -377,21 +377,43 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(updated["customPrompt"].asText()).isEqualTo("Focus on production scale-in and scale-out tradeoffs.")
         assertThat(updated.has("isQuestionPublic")).isFalse()
 
+        val child = postJson(
+            "/api/v1/studies/${created["id"].asLong()}/topics",
+            """
+            {
+              "topic": "Kotlin Coroutines",
+              "difficultyLevel": 6,
+              "sortOrder": 1,
+              "activeForQuestions": true
+            }
+            """.trimIndent(),
+            accessToken,
+            deviceId,
+            clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+
+        assertThat(child["parentStudyId"].asLong()).isEqualTo(created["id"].asLong())
+        assertThat(child["topic"].asText()).isEqualTo("Kotlin Coroutines")
+        assertThat(child["enabled"].asBoolean()).isFalse()
+        assertThat(child["activeForQuestions"].asBoolean()).isTrue()
+        assertThat(questions.countPendingForStudy(created["id"].asLong())).isZero()
+
         val studyPage = getJson("/api/v1/studies?limit=100&offset=0", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
-        assertThat(studyPage["studies"]).hasSize(1)
-        assertThat(studyPage["studies"][0]["id"].asLong()).isEqualTo(created["id"].asLong())
+        assertThat(studyPage["studies"]).hasSize(2)
+        assertThat(studyPage["studies"].map { it["id"].asLong() })
+            .containsExactlyInAnyOrder(created["id"].asLong(), child["id"].asLong())
 
         val question = postJson(
-            "/api/v1/studies/${created["id"].asLong()}/questions",
+            "/api/v1/studies/${child["id"].asLong()}/questions",
             "",
             accessToken,
             deviceId,
             clientSecret,
         ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
-        assertThat(question["topic"].asText()).isEqualTo("Kotlin Architecture")
-        assertThat(question["question"]["question"].asText()).isEqualTo("Generated question for Kotlin Architecture")
+        assertThat(question["topic"].asText()).isEqualTo("Kotlin Coroutines")
+        assertThat(question["question"]["question"].asText()).isEqualTo("Generated question for Kotlin Coroutines")
 
         val pendingQuestionCount = questions.countPendingForStudy(created["id"].asLong())
         assertThat(pendingQuestionCount).isEqualTo(1)

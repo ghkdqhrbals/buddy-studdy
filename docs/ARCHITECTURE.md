@@ -86,6 +86,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - Uses `sort_order` plus `id` for stable sibling ordering. A self-referencing foreign key cascades subtree deletion at the study layer, while question soft deletion resolves the same subtree with a recursive CTE before deleting the studies.
   - Keeps study identity on record responses so the iOS cache can remove only records owned by a deleted subtree, even when two branches use the same topic label.
   - Root studies own schedule state and question-generation settings. Descendants own topic, difficulty, ordering, and `active_for_questions`; scheduled claims never target descendants directly.
+  - Keeps three write boundaries explicit: `POST /api/v1/studies` creates a root, `POST /api/v1/studies/{parentStudyId}/topics` creates a descendant without generating a question or consuming quota, and `POST /api/v1/studies/{topicId}/questions` generates a question.
   - Selects the next active node from the complete root subtree by oldest `last_sent_at`, with never-selected nodes first and stable `sort_order`/`id` tie-breaking. This supports deterministic round-robin delivery across any number of active nodes.
   - Stores both manual and scheduled questions with the root study ID while copying the selected node's topic and difficulty into the question. Inactive nodes remain available for manual generation.
   - `POST /api/v1/studies/{id}/topic-suggestions` requests unique GPT suggestions for a parent node, and `PATCH /api/v1/studies/{id}/question-activation` changes only rotation participation.
@@ -128,11 +129,15 @@ User answer
 My Studies root
 -> GET /api/v1/studies
 -> app builds parentStudyId adjacency map
--> recursive tree layout renders one branch at a time
+-> recursive tree layout renders circular nodes with restrained level colors
+-> the user can switch orientation, pinch or button zoom, drag nodes, and reset saved positions
 -> selecting a node opens the root-owned question page with that node as the manual topic
 -> plus opens GPT recommendations first, with manual entry as an explicit alternative
--> adding a child sends parentStudyId, sortOrder, topic, level, and initial question activation
+-> adding a root calls POST /api/v1/studies
+-> adding a child calls POST /api/v1/studies/{parentStudyId}/topics with sortOrder, topic, level, and initial question activation
+-> child creation cannot call OpenAI and cannot reserve monthly question quota
 -> node activation controls scheduled round-robin participation without disabling manual generation
+-> tree options support multi-select activation, pause, and subtree deletion
 -> deleting a node soft-deletes questions for the resolved subtree, then cascades the study subtree
 ```
 
@@ -148,12 +153,21 @@ Root schedule becomes due
 ```
 
 ```text
-Question page appears or quota-related request fails
+Profile > Usage appears or a quota-related request fails
 -> GET /api/v1/questions/quota
 -> active membership tier + optional user override determine monthlyLimit
 -> monthly usage determines remainingCount
--> app renders remaining/monthly/reset without exposing the internal plan
+-> app renders remaining/monthly/reset only in the Usage category without exposing the internal plan
 -> QUOTA_EXCEEDED routes through the shared app error policy and shows reset time inline
+```
+
+```text
+Public community feed
+-> GET /api/v1/public/questions
+-> app maps server questions into typed MobileHomeFeedItem values
+-> locally scheduled placement may insert non-question items such as feedback prompts
+-> feedback prompt opens a dedicated form
+-> POST /api/v1/feedback stores an APP_FEEDBACK report without requiring a question row
 ```
 
 ## Sync Model

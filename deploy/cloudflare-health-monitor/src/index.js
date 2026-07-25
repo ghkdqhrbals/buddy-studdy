@@ -43,6 +43,15 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
+    if (String(env.SCHEDULED_CHECKS_ENABLED || "true").trim().toLowerCase() === "false") {
+      console.log(
+        JSON.stringify({
+          message: "health_monitor_scheduled_check_disabled",
+          owner: "grafana-alerting",
+        }),
+      );
+      return;
+    }
     ctx.waitUntil(runHealthCheckSafely(env, event.scheduledTime));
   },
 };

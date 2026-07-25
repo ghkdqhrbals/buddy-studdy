@@ -207,7 +207,7 @@ Only one scheduler leader is active during overlap windows. MySQL advisory lock 
 
 The workflow uses Let's Encrypt with the `tls-alpn-01` challenge, so only port `443` needs to be public. If certificate issuance fails, a temporary self-signed certificate keeps the service reachable for debugging.
 
-GitHub Actions must not call backend `/health` or readiness endpoints, must not inspect Docker `Health.Status`, must not use indirect container health gates such as `docker compose up --wait` or `docker compose wait`, and must not call the Health Monitor Worker `/check` endpoint. Runtime server-down alerts are handled by the Cloudflare Worker in `deploy/cloudflare-health-monitor`, which checks the public readiness endpoint from Cloudflare Cron and sends Slack alerts.
+GitHub Actions must not call backend `/health` or readiness endpoints, must not inspect Docker `Health.Status`, must not use indirect container health gates such as `docker compose up --wait` or `docker compose wait`, and must not call the Health Monitor Worker `/check` endpoint. Runtime server-down alerts are handled by Grafana alerting. The Cloudflare Worker remains available for explicit diagnostics, but its production Cron check is disabled.
 
 Backend scheduler failure alerts are separate from server-down alerts. Set the
 deploy repository secret `SLACK_WEBHOOK_URL` when the backend should send Slack
@@ -221,9 +221,11 @@ defaults to `300`. The template also passes `MONITORING_SLACK_TIMEOUT_MS`,
 `MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES`,
 `MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES`, and
 `MONITORING_SCHEDULER_MONITORED_JOBS` into the backend so Docker deployments
-use the same scheduler readiness policy as Kubernetes. The Cloudflare Worker uses
-`HEALTH_MONITOR_SLACK_WEBHOOK_URL` and remains the only runtime server-down
-checker.
+use the same scheduler readiness policy as Kubernetes. Only frequent jobs belong
+in this 15-minute readiness list. Daily correction jobs are monitored through
+their failed-run alerts and must not make readiness stale between scheduled runs.
+Grafana alerting owns continuous server-down detection. The Cloudflare Worker
+scheduled check is disabled in production to avoid periodic KV writes.
 
 `api.ghkdqhrbals.org` must resolve to the EC2 host for trusted certificate issuance.
 

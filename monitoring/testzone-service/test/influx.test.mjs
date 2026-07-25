@@ -206,8 +206,8 @@ test("InfluxWriter stores disposable component resource samples", async () => {
   );
 
   await writer.writeComponentSnapshots([{
-    id: "postgres",
-    image: "postgres:17-alpine",
+    id: "mysql",
+    image: "mysql:8.4",
     status: "running",
     metrics: {
       cpuPercent: 13.5,
@@ -225,7 +225,7 @@ test("InfluxWriter stores disposable component resource samples", async () => {
     },
   }], 1_000);
 
-  assert.match(writes[0], /^testzone_component_runtime,component=postgres/);
+  assert.match(writes[0], /^testzone_component_runtime,component=mysql/);
   assert.match(writes[0], /cpuPercent=13.5/);
   assert.match(writes[0], /memoryUsedMb=128/);
   assert.match(writes[0], /processes=9/);

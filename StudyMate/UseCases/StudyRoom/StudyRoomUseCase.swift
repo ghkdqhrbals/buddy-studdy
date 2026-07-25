@@ -25,16 +25,30 @@ struct StudyRoomUseCase {
     func createStudy(
         registration: RemotePushRegistration,
         category: StudyCategory,
-        settings: StudySettings,
-        parentStudyID: Int? = nil,
-        sortOrder: Int = 0
+        settings: StudySettings
     ) async throws -> BackendStudyRoom {
         try await repository.createStudy(
             registration: registration,
             category: category,
-            settings: settings,
+            settings: settings
+        )
+    }
+
+    func createStudyTopic(
+        registration: RemotePushRegistration,
+        parentStudyID: Int,
+        topic: String,
+        difficulty: Difficulty,
+        sortOrder: Int,
+        activeForQuestions: Bool = true
+    ) async throws -> BackendStudyRoom {
+        try await repository.createStudyTopic(
+            registration: registration,
             parentStudyID: parentStudyID,
-            sortOrder: sortOrder
+            topic: topic,
+            difficulty: difficulty,
+            sortOrder: sortOrder,
+            activeForQuestions: activeForQuestions
         )
     }
 

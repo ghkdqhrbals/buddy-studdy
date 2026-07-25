@@ -1,5 +1,10 @@
 import Foundation
 
+struct StudyTreeNodeOffset: Codable, Equatable {
+    var x: CGFloat
+    var y: CGFloat
+}
+
 private extension Collection {
     subscript(safe index: Index) -> Element? {
         indices.contains(index) ? self[index] : nil
@@ -1621,6 +1626,14 @@ struct AppStrings {
         )
     }
     var studyTree: String { text("학습 트리", "Study Tree") }
+    var selectTopics: String { text("주제 선택", "Select topics") }
+    var resetTreeLayout: String { text("트리 배치 초기화", "Reset tree layout") }
+    var enableQuestions: String { text("질문 받기", "Include") }
+    var disableQuestions: String { text("질문 멈추기", "Pause") }
+    var deleteSelectedTopics: String { text("선택한 주제를 삭제할까요?", "Delete selected topics?") }
+    func selectedTopicCount(_ count: Int) -> String {
+        text("\(count)개 선택", "\(count) selected")
+    }
     var addSubstudy: String { text("하위 학습 추가", "Add Sub-study") }
     var recommendSubstudy: String { text("AI 추천 주제", "AI topic suggestions") }
     var recommendSubstudyDescription: String {
@@ -2142,6 +2155,7 @@ struct AppStrings {
     var termsAndConsents: String { text("약관 및 수신 동의", "Terms and Consents") }
     var operatingTerms: String { text("운영 약관", "Terms") }
     var notificationSettings: String { text("알림 설정", "Notification Settings") }
+    var usage: String { text("사용량", "Usage") }
     var appVersion: String { text("버전", "Version") }
     var requiredTermsBadge: String { text("필수", "Required") }
     var optionalTermsBadge: String { text("선택", "Optional") }
@@ -2335,6 +2349,20 @@ struct AppStrings {
     var hint: String { text("힌트", "Hint") }
     var feedback: String { text("피드백", "Feedback") }
     var feedbackLink: String { text("피드백 보내기", "Send feedback") }
+    var feedbackPromptTitle: String { text("BuddyStudy를 더 좋게 만들어 주세요", "Help improve BuddyStudy") }
+    var feedbackPromptBody: String {
+        text("불편했던 점이나 필요한 기능을 짧게 알려주세요.", "Tell us briefly what felt difficult or what you need.")
+    }
+    var feedbackCategory: String { text("분류", "Category") }
+    var feedbackCategoryGeneral: String { text("일반", "General") }
+    var feedbackCategoryBug: String { text("오류", "Bug") }
+    var feedbackCategoryFeature: String { text("기능 제안", "Feature request") }
+    var feedbackMessage: String { text("내용", "Message") }
+    var feedbackMessagePlaceholder: String {
+        text("어떤 점을 개선하면 좋을지 알려주세요.", "Describe what we can improve.")
+    }
+    var feedbackSubmit: String { text("보내기", "Send") }
+    var feedbackSubmitted: String { text("피드백을 보냈습니다.", "Feedback sent.") }
     var tipMe: String { text("응원하기", "Tip Me") }
     var supportDeveloper: String { text("개발자 응원", "Support developer") }
     var explanation: String { text("해설", "Explanation") }

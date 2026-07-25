@@ -8,7 +8,6 @@ test("health monitor config accepts required production shape", () => {
 
 test("health monitor config rejects missing runtime essentials", () => {
   const config = validConfig();
-  config.triggers.crons = ["* * * * *"];
   config.kv_namespaces[0].id = "replace-with-kv-namespace-id";
   config.vars.HEALTHCHECK_URL = "http://api.lowfidev.cloud/api/v1/health/readiness";
   config.vars.SERVICE_NAME = "";
@@ -21,7 +20,6 @@ test("health monitor config rejects missing runtime essentials", () => {
 
   const errors = validateConfig(config).join("\n");
 
-  assert.match(errors, /5-minute cron/);
   assert.match(errors, /KV namespace/);
   assert.match(errors, /HTTPS URL/);
   assert.match(errors, /SERVICE_NAME/);
@@ -33,9 +31,17 @@ test("health monitor config rejects missing runtime essentials", () => {
   assert.match(errors, /SLACK_TIMEOUT_MS/);
 });
 
-test("health monitor config rejects duplicate cron triggers", () => {
+test("health monitor config rejects cron triggers when scheduled checks are disabled", () => {
   const config = validConfig();
-  config.triggers.crons = ["* * * * *", "*/5 * * * *"];
+  config.triggers = { crons: ["*/5 * * * *"] };
+
+  assert.match(validateConfig(config).join("\n"), /Cron triggers must be absent/);
+});
+
+test("health monitor config requires the exact cron when scheduled checks are enabled", () => {
+  const config = validConfig();
+  config.vars.SCHEDULED_CHECKS_ENABLED = "true";
+  config.triggers = { crons: ["* * * * *"] };
 
   assert.match(validateConfig(config).join("\n"), /exactly one 5-minute cron/);
 });
@@ -114,17 +120,18 @@ test("health monitor config keeps Slack timeout limit aligned with runtime clamp
   assert.match(validateConfig(config).join("\n"), /SLACK_TIMEOUT_MS must be between 1000 and 15000/);
 });
 
-test("health monitor config allows cron-only worker without a public entrypoint", () => {
+test("health monitor config allows a dormant worker without a public entrypoint", () => {
   const config = validConfig();
   config.workers_dev = false;
 
   assert.deepEqual(validateConfig(config), []);
 });
 
-test("health monitor config requires an execution entrypoint", () => {
+test("health monitor config requires an execution entrypoint when scheduled checks are enabled", () => {
   const config = validConfig();
   config.workers_dev = false;
-  config.triggers.crons = [];
+  config.vars.SCHEDULED_CHECKS_ENABLED = "true";
+  config.triggers = { crons: [] };
 
   assert.match(validateConfig(config).join("\n"), /workers_dev, routes, or a Cron Trigger/);
 });
@@ -155,12 +162,11 @@ function validConfig() {
   return {
     name: "buddystudy-health-monitor",
     main: "src/index.js",
-    workers_dev: true,
+    workers_dev: false,
     observability: {
       enabled: true,
       head_sampling_rate: 1,
     },
-    triggers: { crons: ["*/5 * * * *"] },
     vars: {
       HEALTHCHECK_URL: "https://api.ghkdqhrbals.org/api/v1/health/readiness",
       SERVICE_NAME: "BuddyStudy backend",
@@ -170,6 +176,7 @@ function validConfig() {
       STATUS_STALE_AFTER_SECONDS: "180",
       HEALTHCHECK_TIMEOUT_MS: "3000",
       SLACK_TIMEOUT_MS: "3000",
+      SCHEDULED_CHECKS_ENABLED: "false",
     },
     kv_namespaces: [{ binding: "HEALTH_MONITOR_STATE", id: "kv-id" }],
   };

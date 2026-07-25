@@ -7,7 +7,9 @@ import com.buddystudy.backend.common.adapter.inbound.web.principalOrThrow
 import com.buddystudy.backend.community.application.port.inbound.CommunityUseCase
 import com.buddystudy.backend.community.adapter.inbound.web.dto.CommunityCommentRequest
 import com.buddystudy.backend.community.adapter.inbound.web.dto.ReportQuestionRequest
+import com.buddystudy.backend.community.adapter.inbound.web.dto.SubmitFeedbackRequest
 import com.buddystudy.backend.community.application.port.inbound.ReportQuestionCommand
+import com.buddystudy.backend.community.application.port.inbound.SubmitFeedbackCommand
 import com.buddystudy.backend.community.application.model.ReportQuestionResponse
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
@@ -22,6 +24,7 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
@@ -118,6 +121,14 @@ class CommunityController(
         @RequestBody body: ReportQuestionRequest,
         authentication: Authentication,
     ): ReportQuestionResponse = community.reportQuestion(id, body, authentication)
+
+    @Operation(summary = "Submit app feedback", description = "Stores product feedback from either a member or a registered device.")
+    @PostMapping("/feedback")
+    suspend fun submitFeedback(
+        @RequestBody body: SubmitFeedbackRequest,
+        @RequestHeader("X-Device-Id", required = false) deviceId: String?,
+        authentication: Authentication?,
+    ): ReportQuestionResponse = community.submitFeedback(body, deviceId, authentication)
 }
 
 @RestController
@@ -155,6 +166,7 @@ interface CommunityWebPort {
     suspend fun createComment(id: Long, body: CommunityCommentRequest, authentication: Authentication): Any
     suspend fun deleteComment(id: Long, commentId: Long, authentication: Authentication): Any
     suspend fun reportQuestion(id: Long, body: ReportQuestionRequest, authentication: Authentication): ReportQuestionResponse
+    suspend fun submitFeedback(body: SubmitFeedbackRequest, deviceId: String?, authentication: Authentication?): ReportQuestionResponse
 }
 
 @Component
@@ -185,6 +197,19 @@ class CommunityWebAdapter(
 
     override suspend fun reportQuestion(id: Long, body: ReportQuestionRequest, authentication: Authentication): ReportQuestionResponse {
         community.reportQuestion(authentication.principalOrThrow(), id, body.toCommand())
+        return ReportQuestionResponse()
+    }
+
+    override suspend fun submitFeedback(
+        body: SubmitFeedbackRequest,
+        deviceId: String?,
+        authentication: Authentication?,
+    ): ReportQuestionResponse {
+        community.submitFeedback(
+            authentication.optionalPrincipal(),
+            deviceId,
+            SubmitFeedbackCommand(body.category, body.message),
+        )
         return ReportQuestionResponse()
     }
 

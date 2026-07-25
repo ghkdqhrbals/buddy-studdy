@@ -169,13 +169,12 @@ test("workspace manages projects and components expose restart without apply", (
   assert.doesNotMatch(javascript, /Use Apply/);
 });
 
-test("PostgreSQL components expose important runtime parameters as first-class settings", () => {
+test("MySQL components expose important runtime parameters as first-class settings", () => {
   assert.match(javascript, /configField\("maxConnections",\s*"Max connections"/);
-  assert.match(javascript, /configField\("sharedBuffersMb",\s*"Shared buffers \(MB\)"/);
-  assert.match(javascript, /configField\("workMemMb",\s*"Work memory per operation \(MB\)"/);
-  assert.match(javascript, /configField\("maintenanceWorkMemMb",\s*"Maintenance work memory \(MB\)"/);
-  assert.match(javascript, /configField\("effectiveCacheSizeMb",\s*"Effective cache size \(MB\)"/);
-  assert.match(javascript, /configField\("statementTimeoutMs",\s*"Statement timeout \(ms, 0 = disabled\)"/);
+  assert.match(javascript, /configField\("innodbBufferPoolMb",\s*"InnoDB buffer pool \(MB\)"/);
+  assert.match(javascript, /configField\("tmpTableSizeMb",\s*"Temporary table size \(MB\)"/);
+  assert.match(javascript, /configField\("maxHeapTableSizeMb",\s*"Maximum heap table size \(MB\)"/);
+  assert.match(javascript, /configField\("waitTimeoutSeconds",\s*"Idle connection timeout \(seconds\)"/);
 });
 
 test("new projects stay empty and the plus button opens an unsaved blank script", () => {

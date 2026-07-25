@@ -669,6 +669,37 @@ test("scheduled check catches unexpected monitor failures", async () => {
   assert.equal(slackRequests[0].text, ":warning: BuddyStudy backend health monitor error");
 });
 
+test("scheduled checks can be disabled without health requests or KV writes", async () => {
+  let healthRequests = 0;
+  let stateWrites = 0;
+  const environment = manualEnv({
+    healthResponse: async () => {
+      healthRequests += 1;
+      return new Response("ok");
+    },
+  });
+  environment.SCHEDULED_CHECKS_ENABLED = "false";
+  environment.HEALTH_MONITOR_STATE = {
+    async get() {
+      throw new Error("disabled scheduler must not read KV");
+    },
+    async put() {
+      stateWrites += 1;
+    },
+  };
+  const waitUntilPromises = [];
+
+  await worker.scheduled(
+    { scheduledTime: Date.parse("2026-07-03T00:00:00.000Z") },
+    environment,
+    { waitUntil: (promise) => waitUntilPromises.push(promise) },
+  );
+
+  assert.equal(waitUntilPromises.length, 0);
+  assert.equal(healthRequests, 0);
+  assert.equal(stateWrites, 0);
+});
+
 test("scheduled check sends slack alert when backend fetch fails twice", async () => {
   const slackRequests = [];
   const environment = manualEnv({

@@ -46,7 +46,9 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 9. Adding a tree node opens GPT topic recommendations by default. The user can select a recommendation or switch to manual topic entry, and duplicate normalized topic names are rejected across the user's studies.
 10. Any number of tree nodes can participate in scheduled questions. The backend rotates through active nodes by least-recent selection, while an inactive node can still be opened for explicit manual question generation.
 11. Generated questions are stored under the root study and retain the selected node's topic and difficulty. Level is communicated with restrained color instead of decorative icons.
-12. The app shows the current monthly question allowance, remaining count, and exact reset time. When the allowance is exhausted, question creation is blocked with a localized inline explanation.
+12. Tree nodes are circular. The tree supports vertical/horizontal layout, pinch and button zoom, draggable saved positions, layout reset, and multi-select activation, pause, and deletion.
+13. Root creation, descendant topic creation, and question generation are separate API/client methods. Creating a root or descendant never consumes monthly question allowance.
+14. The Profile > Usage page shows the current monthly question allowance, remaining count, and exact reset time. When the allowance is exhausted, question creation is blocked with a localized inline explanation.
 
 ### Records
 
@@ -69,7 +71,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 
 ### Settings
 
-1. Study settings appear first.
+1. Profile settings are a category hub, not one long form. Profile, Usage, Notifications, and Terms each open a dedicated page.
 2. OpenAI API key and model are managed separately from study settings, but OpenAI requests are performed only by the backend.
 3. Notification permission opens system settings; no in-app test notification button is shown.
 4. Question visibility is explicit and defaults to private.
@@ -101,6 +103,8 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 3. Public community questions include the author's display name and a simple in-app pixel avatar. User-uploaded profile photos are not supported.
 4. Question-publicity defaults to private for non-signed-in users.
 5. Users can report public questions. Reports are persisted by the backend and may be forwarded to the operator email when SMTP is configured.
+6. The feed is modeled as typed content rather than question-only rows, so feedback prompts and future operational content can be inserted without pretending to be questions.
+7. Feedback opens a dedicated compact form and is stored independently from question reports.
 
 ## Non-Goals
 

@@ -250,9 +250,9 @@ test("TestZone dashboard separates server, database, and Redis runtime signals",
   assert.match(panels.get("Response time avg \/ p90 \/ p95")?.targets[0].query ?? "", /averageMs/);
   assert.match(panels.get("RPS \/ average latency \/ error count")?.targets[0].query ?? "", /requestRate/);
   assert.match(panels.get("RPS \/ average latency \/ error count")?.targets[2].query ?? "", /errorCount/);
-  assert.match(panels.get("PostgreSQL CPU")?.targets[0].query ?? "", /r\.component == "postgres"/);
-  assert.match(panels.get("PostgreSQL memory")?.targets[0].query ?? "", /r\.component == "postgres"/);
-  assert.match(panels.get("PostgreSQL connections")?.targets[2].query ?? "", /maxConnections/);
+  assert.match(panels.get("MySQL CPU")?.targets[0].query ?? "", /r\.component == "mysql"/);
+  assert.match(panels.get("MySQL memory")?.targets[0].query ?? "", /r\.component == "mysql"/);
+  assert.match(panels.get("MySQL connections")?.targets[2].query ?? "", /maxConnections/);
   assert.match(panels.get("Redis CPU")?.targets[0].query ?? "", /r\.component == "redis"/);
   assert.match(panels.get("Redis memory")?.targets[0].query ?? "", /r\.component == "redis"/);
   assert.match(panels.get("Redis activity")?.targets[0].query ?? "", /operationsPerSecond/);

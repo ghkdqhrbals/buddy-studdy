@@ -56,7 +56,7 @@ jobs:
           MONITORING_SCHEDULER_READINESS_ENABLED: ${{ vars.MONITORING_SCHEDULER_READINESS_ENABLED || 'true' }}
           MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES: ${{ vars.MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES || '15' }}
           MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES: ${{ vars.MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES || '15' }}
-          MONITORING_SCHEDULER_MONITORED_JOBS: ${{ vars.MONITORING_SCHEDULER_MONITORED_JOBS || 'question-schedule,question-push-outbox-dispatch,user-stats-refresh,admin-analytics-recent,admin-analytics-correction' }}
+          MONITORING_SCHEDULER_MONITORED_JOBS: ${{ vars.MONITORING_SCHEDULER_MONITORED_JOBS || 'question-schedule,question-push-outbox-dispatch,user-stats-refresh,admin-analytics-recent' }}
           REMOTE_LOKI_PUSH_URL: ${{ vars.REMOTE_LOKI_PUSH_URL || '' }}
           REMOTE_LOKI_BASIC_AUTH_USER: ${{ secrets.REMOTE_LOKI_BASIC_AUTH_USER || '' }}
           REMOTE_LOKI_BASIC_AUTH_PASSWORD: ${{ secrets.REMOTE_LOKI_BASIC_AUTH_PASSWORD || '' }}
@@ -99,6 +99,18 @@ jobs:
           if [ -z "${OPENAI_API_KEY}" ]; then
             echo "Missing OPENAI_API_KEY in AWS Secrets Manager secret: ${APP_SECRET_ID}" >&2
             exit 1
+          fi
+          REDIS_PASSWORD="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("REDIS_PASSWORD") or "")')"
+          if [ -z "${REDIS_PASSWORD}" ]; then
+            REDIS_PASSWORD="$(openssl rand -hex 32)"
+            APP_SECRET_JSON="$(
+              SECRET_JSON="${APP_SECRET_JSON}" REDIS_PASSWORD="${REDIS_PASSWORD}" python3 -c \
+                'import json, os; secret=json.loads(os.environ["SECRET_JSON"]); secret["REDIS_PASSWORD"]=os.environ["REDIS_PASSWORD"]; print(json.dumps(secret))'
+            )"
+            aws secretsmanager put-secret-value \
+              --region ap-northeast-2 \
+              --secret-id "${APP_SECRET_ID}" \
+              --secret-string "${APP_SECRET_JSON}" >/dev/null
           fi
 
           if [ -z "${MYSQL_SECRET_JSON}" ]; then
@@ -148,6 +160,10 @@ jobs:
           R2DBC_DATABASE_URL=${R2DBC_DATABASE_URL}
           R2DBC_DATABASE_USERNAME=${MYSQL_USER}
           R2DBC_DATABASE_PASSWORD=${MYSQL_PASSWORD}
+          REDIS_HOST=buddystudy-redis
+          REDIS_PORT=6379
+          REDIS_PASSWORD=${REDIS_PASSWORD}
+          REDIS_SSL=false
           SCHEDULER_ENABLED=true
           SCHEDULER_POLL_MS=30000
           OPENAI_API_KEY=${OPENAI_API_KEY}
@@ -184,10 +200,16 @@ jobs:
           ENV
           chmod 600 db.env
 
+          cat > redis.env <<ENV
+          REDIS_PASSWORD=${REDIS_PASSWORD}
+          ENV
+          chmod 600 redis.env
+
           echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
           docker pull "${IMAGE_REF}"
           docker pull nginx:1.27-alpine
           docker pull mysql:8.4
+          docker pull redis:7.4-alpine
           docker pull certbot/certbot:v2.11.0
           docker pull grafana/promtail:3.3.2
           docker pull docker:27-cli
@@ -213,6 +235,7 @@ jobs:
 
           docker network create buddystudy-net >/dev/null 2>&1 || true
           docker volume create buddystudy-mysql-data >/dev/null
+          docker volume create buddystudy-redis-data >/dev/null
           docker volume create buddystudy-profile-photos >/dev/null
 
           mkdir -p promtail
@@ -307,6 +330,23 @@ jobs:
             fi
             sleep 2
           done
+
+          docker rm -f buddystudy-redis >/dev/null 2>&1 || true
+          docker run -d \
+            --name buddystudy-redis \
+            --network buddystudy-net \
+            --restart unless-stopped \
+            --env-file redis.env \
+            -v buddystudy-redis-data:/data \
+            redis:7.4-alpine \
+            sh -c 'exec redis-server --requirepass "$REDIS_PASSWORD" --appendonly yes --appendfsync everysec --save 900 1 --save 300 10 --save 60 10000'
+
+          sleep 2
+          if [ "$(docker inspect -f '{{.State.Running}}' buddystudy-redis 2>/dev/null || true)" != "true" ]; then
+            echo "Redis process exited during deployment." >&2
+            docker logs buddystudy-redis || true
+            exit 1
+          fi
 
           BLUE_SLOT="buddystudy-backend-a"
           GREEN_SLOT="buddystudy-backend-b"

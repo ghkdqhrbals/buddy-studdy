@@ -291,9 +291,16 @@ protocol RemotePushBackendClientProtocol {
     func createStudy(
         registration: RemotePushRegistration,
         category: StudyCategory,
-        settings: StudySettings,
-        parentStudyID: Int?,
-        sortOrder: Int
+        settings: StudySettings
+    ) async throws -> BackendStudyRoom
+
+    func createStudyTopic(
+        registration: RemotePushRegistration,
+        parentStudyID: Int,
+        topic: String,
+        difficulty: Difficulty,
+        sortOrder: Int,
+        activeForQuestions: Bool
     ) async throws -> BackendStudyRoom
 
     func suggestStudyTopics(
@@ -415,6 +422,12 @@ protocol RemotePushBackendClientProtocol {
         registration: RemotePushRegistration,
         questionID: String,
         reason: String,
+        message: String
+    ) async throws
+
+    func submitAppFeedback(
+        registration: RemotePushRegistration,
+        category: String,
         message: String
     ) async throws
 
@@ -731,26 +744,47 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func createStudy(
         registration: RemotePushRegistration,
         category: StudyCategory,
-        settings: StudySettings,
-        parentStudyID: Int? = nil,
-        sortOrder: Int = 0
+        settings: StudySettings
     ) async throws -> BackendStudyRoom {
         let body = CreateStudyRequest(
             topic: category.normalizedTitle,
             difficultyLevel: category.difficulty.level,
             intervalMinutes: settings.sanitizedIntervalMinutes,
             enabled: true,
-            activeForQuestions: true,
             notificationSound: settings.notificationSound.backendSoundName,
             customPrompt: category.normalizedCustomPrompt,
             openAIModel: category.sanitizedOpenAIModel,
-            maxHistoryCount: settings.sanitizedMaxHistoryCount,
-            parentStudyId: parentStudyID,
+            maxHistoryCount: settings.sanitizedMaxHistoryCount
+        )
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "studies")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(body)
+
+        let data = try await perform(request)
+        return try decoder.decode(BackendStudyRoom.self, from: data)
+    }
+
+    func createStudyTopic(
+        registration: RemotePushRegistration,
+        parentStudyID: Int,
+        topic: String,
+        difficulty: Difficulty,
+        sortOrder: Int,
+        activeForQuestions: Bool = true
+    ) async throws -> BackendStudyRoom {
+        let body = CreateStudyTopicRequest(
+            topic: topic.trimmingCharacters(in: .whitespacesAndNewlines),
+            difficultyLevel: difficulty.level,
+            activeForQuestions: activeForQuestions,
             sortOrder: sortOrder
         )
         var request = authenticatedRequest(
             registration: registration,
-            url: endpoint("api", "v1", "study")
+            url: endpoint("api", "v1", "studies", String(parentStudyID), "topics")
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -1274,6 +1308,23 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         _ = try await perform(request)
     }
 
+    func submitAppFeedback(
+        registration: RemotePushRegistration,
+        category: String,
+        message: String
+    ) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "feedback")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(
+            SubmitFeedbackRequest(category: category, message: message)
+        )
+        _ = try await perform(request)
+    }
+
     func setCommunityQuestionLike(
         registration: RemotePushRegistration,
         questionID: String,
@@ -1749,27 +1800,28 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var difficultyLevel: Int
         var intervalMinutes: Int
         var enabled: Bool
-        var activeForQuestions: Bool
         var notificationSound: String?
         var customPrompt: String
         var openAIModel: String
         var maxHistoryCount: Int
-        var parentStudyId: Int?
-        var sortOrder: Int
 
         enum CodingKeys: String, CodingKey {
             case topic
             case difficultyLevel
             case intervalMinutes
             case enabled
-            case activeForQuestions
             case notificationSound
             case customPrompt
             case openAIModel = "openaiModel"
             case maxHistoryCount
-            case parentStudyId
-            case sortOrder
         }
+    }
+
+    private struct CreateStudyTopicRequest: Encodable {
+        var topic: String
+        var difficultyLevel: Int
+        var activeForQuestions: Bool
+        var sortOrder: Int
     }
 
     private struct AnswerRequest: Encodable {
@@ -1826,6 +1878,11 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     private struct ReportQuestionRequest: Encodable {
         var reason: String
+        var message: String
+    }
+
+    private struct SubmitFeedbackRequest: Encodable {
+        var category: String
         var message: String
     }
 

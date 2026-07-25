@@ -278,13 +278,12 @@ test("deploy repo docs prohibit Actions runtime and container health checks", ()
   assert.match(readme, /must not call the Health Monitor Worker `\/check` endpoint/i);
 });
 
-test("deploy repo docs explain coordinator readiness wiring", () => {
+test("deploy repo docs explain Grafana-owned outage alerting", () => {
   const readme = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/README.md"), "utf8");
 
-  assert.match(readme, /internal Redis Stream Coordinator/i);
-  assert.match(readme, /`REACTION_STREAM_COORDINATOR_BASE_URL`/);
-  assert.match(readme, /`MONITORING_COORDINATOR_READINESS_ENABLED=true`/);
-  assert.match(readme, /`http:\/\/rsc-coordinator:8080`/);
+  assert.match(readme, /Grafana alerting owns continuous server-down detection/i);
+  assert.match(readme, /Cloudflare Worker[\s\S]*scheduled check is disabled/i);
+  assert.doesNotMatch(readme, /internal Redis Stream Coordinator/i);
 });
 
 test("deploy repo monitoring template remains PLG only", () => {
@@ -661,12 +660,12 @@ test("kubernetes backend probes use dependency readiness while external monitor 
   assert.match(workerConfig, /api\.ghkdqhrbals\.org\/api\/v1\/health\/readiness/);
 });
 
-test("kubernetes backend config monitors every managed scheduler job", () => {
+test("scheduler readiness monitors frequent jobs and excludes daily correction", () => {
   const applicationConfig = fs.readFileSync(path.join(repoRoot, "backend/tutor/src/main/resources/application.yml"), "utf8");
   const backendConfig = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/config/backend-config.yaml"), "utf8");
   const combinedManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/deploy.yaml"), "utf8");
   const deployTemplate = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"), "utf8");
-  const requiredJobs = managedJobNames();
+  const requiredJobs = managedJobNames().filter((jobName) => jobName !== "admin-analytics-correction");
 
   assert.ok(requiredJobs.length > 0, "expected at least one ManagedJob implementation");
   for (const jobName of requiredJobs) {
@@ -675,6 +674,10 @@ test("kubernetes backend config monitors every managed scheduler job", () => {
     assert.match(combinedManifest, new RegExp(`MONITORING_SCHEDULER_MONITORED_JOBS:.*${jobName}`));
     assert.match(deployTemplate, new RegExp(`MONITORING_SCHEDULER_MONITORED_JOBS:.*${jobName}`));
     assert.match(deployTemplate, new RegExp(`MONITORING_SCHEDULER_MONITORED_JOBS=\\$\\{MONITORING_SCHEDULER_MONITORED_JOBS\\}`));
+  }
+  for (const config of [applicationConfig, backendConfig, combinedManifest, deployTemplate]) {
+    const readinessLine = config.split("\n").find((line) => line.includes("MONITORING_SCHEDULER_MONITORED_JOBS") || line.includes("scheduler-monitored-jobs"));
+    assert.doesNotMatch(readinessLine ?? "", /admin-analytics-correction/);
   }
 });
 
@@ -705,7 +708,7 @@ test("kubernetes backend config does not depend on an undeployed stream coordina
   }
 });
 
-test("backend scheduler readiness defaults and seed migrations cover every managed scheduler job", () => {
+test("backend scheduler seeds every job but readiness defaults include only frequent jobs", () => {
   const appProperties = fs.readFileSync(
     path.join(repoRoot, "backend/application/src/main/kotlin/com/buddystudy/backend/config/AppProperties.kt"),
     "utf8",
@@ -717,11 +720,20 @@ test("backend scheduler readiness defaults and seed migrations cover every manag
     .map((entry) => fs.readFileSync(path.join(repoRoot, "backend/tutor/src/main/resources/db/migration-mysql", entry), "utf8"))
     .join("\n");
 
-  for (const jobName of managedJobNames()) {
+  const managedJobs = managedJobNames();
+  const readinessJobs = managedJobs.filter((jobName) => jobName !== "admin-analytics-correction");
+  for (const jobName of readinessJobs) {
     assert.match(appProperties, new RegExp(`"${jobName}"`), `AppProperties default must monitor ${jobName}`);
     assert.match(applicationConfig, new RegExp(`scheduler-monitored-jobs:.*${jobName}`), `application.yml default must monitor ${jobName}`);
+  }
+  for (const jobName of managedJobs) {
     assert.match(migrations, new RegExp(`'${jobName}'`), `Flyway scheduler seed must include ${jobName}`);
   }
+  assert.doesNotMatch(appProperties, /schedulerMonitoredJobs:[\s\S]*"admin-analytics-correction"/);
+  assert.doesNotMatch(
+    applicationConfig.split("\n").find((line) => line.includes("scheduler-monitored-jobs")) ?? "",
+    /admin-analytics-correction/,
+  );
 });
 
 test("kubernetes production apply path does not include placeholder backend secret", () => {
@@ -896,8 +908,7 @@ test("health monitor workflow validates every required GitHub secret by reposito
 test("health monitor workflow summary documents status without manual health checks", () => {
   const workflow = fs.readFileSync(path.join(repoRoot, ".github/workflows/health-monitor.yml"), "utf8");
 
-  assert.match(workflow, /Cron-only/);
-  assert.match(workflow, /Public entrypoint: disabled/);
+  assert.match(workflow, /Public entrypoint and Cron trigger: disabled/);
   assert.doesNotMatch(workflow, /GET \\`\/\\`/);
   assert.doesNotMatch(workflow, /POST \\`\/check\\`/);
 });
@@ -919,7 +930,7 @@ test("health monitor docs keep manual checks out of GitHub Actions", () => {
   const readme = fs.readFileSync(path.join(repoRoot, "deploy/cloudflare-health-monitor/README.md"), "utf8");
 
   assert.match(readme, /Do not run this from GitHub Actions/);
-  assert.match(readme, /runtime health checks and Slack alerts are owned by Cloudflare Cron/);
+  assert.match(readme, /runtime health checks and Slack alerts are owned by Grafana/);
 });
 
 test("health monitor docs distinguish GitHub secret storage from Worker secret sync", () => {
@@ -1230,8 +1241,8 @@ test("health monitor docs include post deploy verification without Actions check
   const readme = fs.readFileSync(path.join(repoRoot, "deploy/cloudflare-health-monitor/README.md"), "utf8");
 
   assert.match(readme, /## Post-deploy Verification/);
-  assert.match(readme, /Confirm Cloudflare Cron is enabled/);
-  assert.match(readme, /health_monitor_checked/);
+  assert.match(readme, /Confirm no Cron trigger or public route is attached/);
+  assert.match(readme, /Grafana alert history/);
   assert.match(readme, /npm run manual:check/);
   assert.match(readme, /ALLOW_DOWN=true/);
   assert.match(readme, /If a public route is intentionally added later/);
@@ -1240,7 +1251,7 @@ test("health monitor docs include post deploy verification without Actions check
 test("health monitor docs describe manual check HTTP status contract", () => {
   const readme = fs.readFileSync(path.join(repoRoot, "deploy/cloudflare-health-monitor/README.md"), "utf8");
 
-  assert.match(readme, /`POST \/check` uses the same state transition and Slack alert path as the cron/);
+  assert.match(readme, /`POST \/check` uses the retained state-transition and Slack-alert code path/);
   assert.match(readme, /returns `200` only when the checked state is `up` or `degraded`/);
   assert.match(readme, /returns\s+`503`\s+for `down`, `stale`, `config_error`, or `monitor_error`/);
 });
@@ -1251,9 +1262,9 @@ test("health monitor docs describe readiness response contract and stale status 
   assert.match(readme, /non-JSON/i);
   assert.match(readme, /ok:true/);
   assert.match(readme, /STATUS_STALE_AFTER_SECONDS/);
-  assert.match(readme, /Worker Cron itself stops running/i);
-  assert.match(readme, /reports the stored state as `stale`/i);
-  assert.match(readme, /Cloudflare Worker\s+observability/i);
+  assert.match(readme, /production Worker has no Cron trigger/i);
+  assert.match(readme, /no scheduled Workers KV reads or writes/i);
+  assert.match(readme, /Grafana alert history/i);
 });
 
 test("backend API docs do not describe admin scheduler as deployment smoke health check", () => {

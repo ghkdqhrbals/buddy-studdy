@@ -28,6 +28,7 @@ import com.buddystudy.community.domain.PublicQuestionAuthorProjection
 import com.buddystudy.community.domain.PublicQuestionState
 import com.buddystudy.community.domain.PublicQuestionStats
 import com.buddystudy.backend.community.application.port.inbound.ReportQuestionCommand
+import com.buddystudy.backend.community.application.port.inbound.SubmitFeedbackCommand
 import com.buddystudy.backend.profile.application.model.UserProfileResponse
 import com.buddystudy.backend.profile.application.model.toProfile
 import com.buddystudy.backend.community.application.model.toResponse
@@ -179,6 +180,26 @@ class CommunityService(
                 reporterUserId = principal.userId,
                 reason = command.reason,
                 message = command.message,
+            )
+        )
+    }
+
+    @Transactional
+    override suspend fun submitFeedback(principal: Principal?, deviceId: String?, command: SubmitFeedbackCommand) {
+        val normalizedMessage = command.message.trim()
+        if (normalizedMessage.length !in 2..1000) {
+            throw ApiException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.VALIDATION_ERROR,
+                "Feedback must contain between 2 and 1000 characters.",
+            )
+        }
+        reports.save(
+            ReportEntity(
+                reporterDeviceId = principal?.deviceId ?: deviceId?.trim()?.takeIf { it.isNotEmpty() },
+                reporterUserId = principal?.userId,
+                reason = "APP_FEEDBACK:${command.category.trim().uppercase().take(40).ifBlank { "GENERAL" }}",
+                message = normalizedMessage,
             )
         )
     }

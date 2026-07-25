@@ -34,6 +34,7 @@ final class SettingsStore {
         static let deletedStudyRecordMarkers = "deletedStudyRecordMarkers"
         static let studyRecordsClearedAt = "studyRecordsClearedAt"
         static let remotePushRegistration = "remotePushRegistration"
+        static let studyTreeNodeOffsetsPrefix = "studyTreeNodeOffsets"
     }
 
     private let defaults: UserDefaults
@@ -48,6 +49,25 @@ final class SettingsStore {
         encoder.dateEncodingStrategy = .iso8601
         decoder.dateDecodingStrategy = .iso8601
         migrateLegacyStudyRecordsIfNeeded()
+    }
+
+    func loadStudyTreeNodeOffsets(rootStudyID: Int) -> [Int: StudyTreeNodeOffset] {
+        guard let data = defaults.data(forKey: studyTreeNodeOffsetsKey(rootStudyID)),
+              let offsets = try? decoder.decode([Int: StudyTreeNodeOffset].self, from: data) else {
+            return [:]
+        }
+        return offsets
+    }
+
+    func saveStudyTreeNodeOffsets(_ offsets: [Int: StudyTreeNodeOffset], rootStudyID: Int) {
+        guard let data = try? encoder.encode(offsets) else {
+            return
+        }
+        defaults.set(data, forKey: studyTreeNodeOffsetsKey(rootStudyID))
+    }
+
+    private func studyTreeNodeOffsetsKey(_ rootStudyID: Int) -> String {
+        "\(Keys.studyTreeNodeOffsetsPrefix).\(rootStudyID)"
     }
 
     func loadSettings() -> StudySettings {

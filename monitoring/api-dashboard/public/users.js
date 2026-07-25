@@ -1,9 +1,11 @@
 const API_ROOT = "/backend/api/v1/admin";
 const TOKEN_KEY = "buddystudy.monitoring.admin.token";
+const TOKEN_EXPIRY_KEY = "buddystudy.monitoring.admin.expires-at";
 const PAGE_SIZE = 20;
 
 const state = {
   token: window.sessionStorage.getItem(TOKEN_KEY) || "",
+  expiresAt: window.sessionStorage.getItem(TOKEN_EXPIRY_KEY) || "",
   query: "",
   offset: 0,
   totalCount: 0,
@@ -31,6 +33,12 @@ const elements = {
 };
 
 async function adminFetch(path, options = {}) {
+  if (!state.token || (state.expiresAt && Date.parse(state.expiresAt) <= Date.now())) {
+    logout("로그인이 만료되었습니다. 다시 로그인해 주세요.");
+    const error = new Error("로그인이 만료되었습니다. 다시 로그인해 주세요.");
+    error.status = 401;
+    throw error;
+  }
   const response = await fetch(`${API_ROOT}${path}`, {
     ...options,
     headers: {
@@ -201,7 +209,7 @@ async function loadUsers() {
     elements.userStatus.textContent = "Ready";
     elements.userStatus.dataset.tone = "ready";
   } catch (error) {
-    if (error.status === 401) logout();
+    if (error.status === 401) logout("로그인이 만료되었습니다. 다시 로그인해 주세요.");
     elements.userStatus.textContent = error.message;
     elements.userStatus.dataset.tone = "error";
   }
@@ -213,11 +221,17 @@ async function loadWorkspace() {
   await loadUsers();
 }
 
-function logout() {
+function logout(message = "") {
   state.token = "";
+  state.expiresAt = "";
   window.sessionStorage.removeItem(TOKEN_KEY);
+  window.sessionStorage.removeItem(TOKEN_EXPIRY_KEY);
   setAuthenticated(false);
   elements.password.value = "";
+  if (message) {
+    elements.loginStatus.textContent = message;
+    elements.loginStatus.dataset.tone = "error";
+  }
 }
 
 elements.loginForm.addEventListener("submit", async (event) => {
@@ -230,9 +244,12 @@ elements.loginForm.addEventListener("submit", async (event) => {
       body: JSON.stringify({ username: elements.username.value, password: elements.password.value }),
     });
     const body = await response.json().catch(() => null);
-    if (!response.ok || !body?.token) throw new Error(body?.error?.message || "Sign in failed");
-    state.token = body.token;
+    const token = body?.adminToken || body?.token;
+    if (!response.ok || !token) throw new Error(body?.error?.message || "Sign in failed");
+    state.token = token;
+    state.expiresAt = body.expiresAt || "";
     window.sessionStorage.setItem(TOKEN_KEY, state.token);
+    if (state.expiresAt) window.sessionStorage.setItem(TOKEN_EXPIRY_KEY, state.expiresAt);
     setAuthenticated(true);
     await loadWorkspace();
   } catch (error) {
@@ -241,7 +258,7 @@ elements.loginForm.addEventListener("submit", async (event) => {
   }
 });
 
-elements.logout.addEventListener("click", logout);
+elements.logout.addEventListener("click", () => logout());
 elements.searchButton.addEventListener("click", () => {
   state.query = elements.search.value.trim();
   state.offset = 0;
@@ -261,11 +278,15 @@ elements.next.addEventListener("click", () => {
   loadUsers();
 });
 
-setAuthenticated(Boolean(state.token));
+if (state.expiresAt && Date.parse(state.expiresAt) <= Date.now()) {
+  logout("로그인이 만료되었습니다. 다시 로그인해 주세요.");
+} else {
+  setAuthenticated(Boolean(state.token));
+}
 if (state.token) {
   loadWorkspace().catch((error) => {
     elements.userStatus.textContent = error.message;
     elements.userStatus.dataset.tone = "error";
-    if (error.status === 401) logout();
+    if (error.status === 401) logout("로그인이 만료되었습니다. 다시 로그인해 주세요.");
   });
 }

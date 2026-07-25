@@ -66,6 +66,12 @@ protocol CommunityRepository {
         message: String
     ) async throws
 
+    func submitFeedback(
+        registration: RemotePushRegistration,
+        category: String,
+        message: String
+    ) async throws
+
     func setQuestionLike(
         registration: RemotePushRegistration,
         questionID: String,

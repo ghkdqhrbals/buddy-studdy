@@ -40,10 +40,10 @@ The browser can:
   KPIs and time-series between all scenarios and one scenario
 - inspect TPS, mean time to first byte (MTTFB), mean total HTTP time (MTT),
   HTTP success/error counts, and average/minimum/median/maximum/p90/p95 latency
-- deploy, restart, and delete fixed-catalog PostgreSQL and Redis test
+- deploy, restart, and delete fixed-catalog MySQL and Redis test
   components
 - add validated key-value environment settings to test components and inspect
-  container CPU/memory plus PostgreSQL connection/cache and Redis
+  container CPU/memory plus MySQL connection/cache and Redis
   client/throughput/cache metrics
 - open an execution in Grafana using its `run_id`
 

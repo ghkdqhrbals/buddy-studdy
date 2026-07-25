@@ -987,6 +987,20 @@ private struct NotificationForwardRoute: Identifiable, Hashable {
     var route: AppRoute
 }
 
+private enum MobileHomeFeedItem: Identifiable {
+    case question(CommunityQuestion)
+    case feedbackPrompt
+
+    var id: String {
+        switch self {
+        case .question(let question):
+            return "question-\(question.id)"
+        case .feedbackPrompt:
+            return "feedback-prompt"
+        }
+    }
+}
+
 private struct MobileHomeView: View {
     @EnvironmentObject private var appState: AppState
     @State private var selectedHomeScope: HomeFeedScope = .all
@@ -999,6 +1013,7 @@ private struct MobileHomeView: View {
     @State private var isHomeLoginPagePresented = false
     @State private var isShowingNotifications = false
     @State private var isShowingProfileSettings = false
+    @State private var isShowingFeedback = false
     @State private var isShowingEmailSignIn = false
     @State private var isSearchVisible = false
     @State private var homeStudySearchText = ""
@@ -1055,6 +1070,15 @@ private struct MobileHomeView: View {
         }
     }
 
+    private var communityFeedItems: [MobileHomeFeedItem] {
+        var items = appState.communityQuestions.map(MobileHomeFeedItem.question)
+        guard items.count >= 4 else {
+            return items
+        }
+        items.insert(.feedbackPrompt, at: 4)
+        return items
+    }
+
     private var isRefreshingSelectedHomeScope: Bool {
         refreshingHomeScope == selectedHomeScope && homeRefreshTask != nil
     }
@@ -1104,6 +1128,9 @@ private struct MobileHomeView: View {
         .navigationDestination(isPresented: $isHomeLoginPagePresented) {
             MobileLoginPage()
                 .padding(.horizontal, 16)
+        }
+        .navigationDestination(isPresented: $isShowingFeedback) {
+            MobileFeedbackView()
         }
         .toolbar {
             #if os(iOS)
@@ -1375,13 +1402,6 @@ private struct MobileHomeView: View {
 
     private var myStudySection: some View {
         Section {
-            if let quota = appState.questionQuota {
-                MobileHomeQuestionQuotaSummary(quota: quota, strings: strings)
-                    .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 8, trailing: 0))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-            }
-
             if filteredStudyCategories.isEmpty {
                 if isRefreshingMyStudyContent {
                     MobileHomeRefreshIndicator()
@@ -1421,40 +1441,6 @@ private struct MobileHomeView: View {
                     appState.moveStudyCategories(from: offsets, to: destination)
                 }
             }
-        }
-    }
-
-    private struct MobileHomeQuestionQuotaSummary: View {
-        var quota: BackendQuestionQuota
-        var strings: AppStrings
-
-        var body: some View {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(quota.remainingCount == 0 ? strings.monthlyQuotaReached : strings.monthlyQuestionQuota)
-                        .font(.subheadline.weight(.semibold))
-
-                    Spacer(minLength: 12)
-
-                    Text(strings.monthlyQuotaUsage(remaining: quota.remainingCount, limit: quota.monthlyLimit))
-                        .font(.caption.weight(.semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(quota.remainingCount == 0 ? Color.orange : Color.secondary)
-                }
-
-                ProgressView(
-                    value: Double(quota.usedCount),
-                    total: Double(max(quota.monthlyLimit, 1))
-                )
-                .tint(quota.remainingCount == 0 ? .orange : .accentColor)
-
-                Text(strings.monthlyQuotaReset(quota.resetAt))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 14)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
     }
 
@@ -1509,8 +1495,8 @@ private struct MobileHomeView: View {
                         .listRowSeparator(.hidden)
                 }
 
-                ForEach(appState.communityQuestions) { question in
-                    communityQuestionRow(question)
+                ForEach(communityFeedItems) { item in
+                    communityFeedRow(item)
                 }
 
                 if appState.isLoadingCommunityQuestions &&
@@ -1525,6 +1511,22 @@ private struct MobileHomeView: View {
                     .padding(.vertical, 6)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func communityFeedRow(_ item: MobileHomeFeedItem) -> some View {
+        switch item {
+        case .question(let question):
+            communityQuestionRow(question)
+        case .feedbackPrompt:
+            Button {
+                isShowingFeedback = true
+            } label: {
+                MobileFeedbackPromptRow(strings: strings)
+            }
+            .buttonStyle(.plain)
+            .listRowSeparator(.hidden)
         }
     }
 
@@ -2164,16 +2166,18 @@ private struct StudyTreePlacement: Identifiable {
 }
 
 private struct StudyTreeEdge: Identifiable {
+    var parentID: Int
+    var childID: Int
     var parent: CGPoint
     var child: CGPoint
     var id = UUID()
 }
 
 private struct StudyTreeLayoutSnapshot {
-    static let nodeSize = CGSize(width: 148, height: 78)
+    static let nodeSize = CGSize(width: 112, height: 112)
     private static let margin: CGFloat = 44
-    private static let siblingSpacing: CGFloat = 34
-    private static let levelSpacing: CGFloat = 86
+    private static let siblingSpacing: CGFloat = 42
+    private static let levelSpacing: CGFloat = 74
 
     var placements: [StudyTreePlacement]
     var edges: [StudyTreeEdge]
@@ -2240,6 +2244,8 @@ private struct StudyTreeLayoutSnapshot {
                     return nil
                 }
                 return StudyTreeEdge(
+                    parentID: parentID,
+                    childID: child.id,
                     parent: renderedCenter(parentPoint),
                     child: renderedCenter(childPoint)
                 )
@@ -2304,6 +2310,14 @@ private struct MobileStudyTreeView: View {
     @State private var direction: StudyTreeDirection = .vertical
     @State private var addRequest: StudyTopicAddRequest?
     @State private var editingRoom: BackendStudyRoom?
+    @State private var selectedRoomID: Int?
+    @State private var selectedRoomIDs = Set<Int>()
+    @State private var nodeOffsets: [Int: CGSize] = [:]
+    @State private var dragStartOffsets: [Int: CGSize] = [:]
+    @State private var zoomScale: CGFloat = 1
+    @State private var zoomStartScale: CGFloat = 1
+    @State private var isSelectionMode = false
+    @State private var showsDeleteConfirmation = false
 
     var rootStudyID: Int
 
@@ -2328,69 +2342,143 @@ private struct MobileStudyTreeView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("", selection: $direction) {
-                Text(strings.treeVertical).tag(StudyTreeDirection.vertical)
-                Text(strings.treeHorizontal).tag(StudyTreeDirection.horizontal)
+            HStack(spacing: 10) {
+                if isSelectionMode {
+                    Text(strings.selectedTopicCount(selectedRoomIDs.count))
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button(strings.done) {
+                        endSelection()
+                    }
+                } else {
+                    Picker("", selection: $direction) {
+                        Text(strings.treeVertical).tag(StudyTreeDirection.vertical)
+                        Text(strings.treeHorizontal).tag(StudyTreeDirection.horizontal)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(maxWidth: 220)
+
+                    Spacer()
+
+                    Button {
+                        changeZoom(by: -0.15)
+                    } label: {
+                        Image(systemName: "minus.magnifyingglass")
+                    }
+                    .disabled(zoomScale <= 0.6)
+
+                    Button {
+                        changeZoom(by: 0.15)
+                    } label: {
+                        Image(systemName: "plus.magnifyingglass")
+                    }
+                    .disabled(zoomScale >= 1.8)
+
+                    Menu {
+                        Button {
+                            isSelectionMode = true
+                        } label: {
+                            Label(strings.selectTopics, systemImage: "checkmark.circle")
+                        }
+                        Button {
+                            withAnimation(.snappy) {
+                                nodeOffsets = [:]
+                                zoomScale = 1
+                                zoomStartScale = 1
+                            }
+                            saveNodeOffsets()
+                        } label: {
+                            Label(strings.resetTreeLayout, systemImage: "arrow.counterclockwise")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .frame(width: 30, height: 30)
+                    }
+                }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 260)
-            .padding(.vertical, 12)
+            .buttonStyle(.plain)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(Color(.secondarySystemBackground))
 
             if let snapshot {
-                ScrollView([.horizontal, .vertical]) {
-                    ZStack(alignment: .topLeading) {
-                        Canvas { context, _ in
-                            for edge in snapshot.edges {
-                                var path = Path()
-                                path.move(to: edge.parent)
-                                if direction == .vertical {
-                                    let midpoint = (edge.parent.y + edge.child.y) / 2
-                                    path.addCurve(
-                                        to: edge.child,
-                                        control1: CGPoint(x: edge.parent.x, y: midpoint),
-                                        control2: CGPoint(x: edge.child.x, y: midpoint)
-                                    )
-                                } else {
-                                    let midpoint = (edge.parent.x + edge.child.x) / 2
-                                    path.addCurve(
-                                        to: edge.child,
-                                        control1: CGPoint(x: midpoint, y: edge.parent.y),
-                                        control2: CGPoint(x: midpoint, y: edge.child.y)
-                                    )
+                ZStack(alignment: .bottom) {
+                    ScrollView([.horizontal, .vertical]) {
+                        ZStack(alignment: .topLeading) {
+                            Canvas { context, _ in
+                                for edge in snapshot.edges {
+                                    let parent = edge.parent.adding(nodeOffsets[edge.parentID] ?? .zero)
+                                    let child = edge.child.adding(nodeOffsets[edge.childID] ?? .zero)
+                                    var path = Path()
+                                    path.move(to: parent)
+                                    if direction == .vertical {
+                                        let midpoint = (parent.y + child.y) / 2
+                                        path.addCurve(
+                                            to: child,
+                                            control1: CGPoint(x: parent.x, y: midpoint),
+                                            control2: CGPoint(x: child.x, y: midpoint)
+                                        )
+                                    } else {
+                                        let midpoint = (parent.x + child.x) / 2
+                                        path.addCurve(
+                                            to: child,
+                                            control1: CGPoint(x: midpoint, y: parent.y),
+                                            control2: CGPoint(x: midpoint, y: child.y)
+                                        )
+                                    }
+                                    context.stroke(path, with: .color(Color.secondary.opacity(0.32)), lineWidth: 1.5)
                                 }
-                                context.stroke(path, with: .color(Color.secondary.opacity(0.4)), lineWidth: 1.5)
+                            }
+
+                            ForEach(snapshot.placements) { placement in
+                                StudyTreeNode(
+                                    room: placement.room,
+                                    strings: strings,
+                                    isSelectionMode: isSelectionMode,
+                                    isSelected: selectedRoomIDs.contains(placement.room.id),
+                                    onOpen: { selectedRoomID = placement.room.id },
+                                    onSelect: { toggleSelection(placement.room.id) },
+                                    onAddRecommendedChild: {
+                                        addRequest = StudyTopicAddRequest(
+                                            parent: placement.room,
+                                            mode: .recommendation
+                                        )
+                                    },
+                                    onAddManualChild: {
+                                        addRequest = StudyTopicAddRequest(
+                                            parent: placement.room,
+                                            mode: .manual
+                                        )
+                                    },
+                                    onToggleActive: {
+                                        appState.setStudyTopicActive(
+                                            studyID: placement.room.id,
+                                            active: !placement.room.activeForQuestions
+                                        )
+                                    },
+                                    onEdit: { editingRoom = placement.room }
+                                )
+                                .position(placement.center)
+                                .offset(nodeOffsets[placement.room.id] ?? .zero)
+                                .simultaneousGesture(nodeDragGesture(for: placement.room.id))
                             }
                         }
-
-                        ForEach(snapshot.placements) { placement in
-                            StudyTreeNode(
-                                room: placement.room,
-                                strings: strings,
-                                onAddRecommendedChild: {
-                                    addRequest = StudyTopicAddRequest(
-                                        parent: placement.room,
-                                        mode: .recommendation
-                                    )
-                                },
-                                onAddManualChild: {
-                                    addRequest = StudyTopicAddRequest(
-                                        parent: placement.room,
-                                        mode: .manual
-                                    )
-                                },
-                                onToggleActive: {
-                                    appState.setStudyTopicActive(
-                                        studyID: placement.room.id,
-                                        active: !placement.room.activeForQuestions
-                                    )
-                                },
-                                onEdit: { editingRoom = placement.room }
-                            )
-                            .position(placement.center)
-                        }
+                        .frame(width: snapshot.size.width, height: snapshot.size.height)
+                        .scaleEffect(zoomScale, anchor: .topLeading)
+                        .frame(
+                            width: snapshot.size.width * zoomScale,
+                            height: snapshot.size.height * zoomScale,
+                            alignment: .topLeading
+                        )
                     }
-                    .frame(width: snapshot.size.width, height: snapshot.size.height)
+                    .simultaneousGesture(zoomGesture)
+
+                    if isSelectionMode {
+                        selectionBar
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 12)
+                    }
                 }
             } else {
                 Text(strings.loading)
@@ -2401,6 +2489,13 @@ private struct MobileStudyTreeView: View {
         .background(Color(.systemBackground))
         .navigationTitle(strings.studyTree)
         .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(item: $selectedRoomID) { roomID in
+            if let room = appState.backendStudyRoom(id: roomID) {
+                StudyView(preferredCategoryID: String(room.id))
+                    .padding(.horizontal, 16)
+                    .mobileTabTitle(room.topic)
+            }
+        }
         .sheet(item: $addRequest) { request in
             StudyTopicAddSheet(
                 parent: request.parent,
@@ -2432,14 +2527,118 @@ private struct MobileStudyTreeView: View {
             }
         }
         .task {
+            loadNodeOffsets()
             await appState.refreshVisibleData()
         }
+        .confirmationDialog(
+            strings.deleteSelectedTopics,
+            isPresented: $showsDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(strings.deleteNotification, role: .destructive) {
+                appState.deleteStudyCategories(ids: selectedRoomIDs)
+                endSelection()
+            }
+            Button(strings.cancel, role: .cancel) {}
+        }
+    }
+
+    private var selectionBar: some View {
+        HStack(spacing: 0) {
+            Button {
+                appState.setStudyTopicsActive(studyIDs: selectedRoomIDs, active: true)
+                endSelection()
+            } label: {
+                Label(strings.enableQuestions, systemImage: "checkmark.circle")
+                    .frame(maxWidth: .infinity)
+            }
+            Button {
+                appState.setStudyTopicsActive(studyIDs: selectedRoomIDs, active: false)
+                endSelection()
+            } label: {
+                Label(strings.disableQuestions, systemImage: "pause.circle")
+                    .frame(maxWidth: .infinity)
+            }
+            Button(role: .destructive) {
+                showsDeleteConfirmation = true
+            } label: {
+                Image(systemName: "trash")
+                    .frame(width: 52)
+            }
+        }
+        .font(.subheadline.weight(.semibold))
+        .padding(.vertical, 12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+        }
+        .disabled(selectedRoomIDs.isEmpty)
+    }
+
+    private var zoomGesture: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                zoomScale = min(max(zoomStartScale * value.magnification, 0.6), 1.8)
+            }
+            .onEnded { _ in
+                zoomStartScale = zoomScale
+            }
+    }
+
+    private func nodeDragGesture(for roomID: Int) -> some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { value in
+                guard !isSelectionMode else { return }
+                let initial = dragStartOffsets[roomID] ?? nodeOffsets[roomID] ?? .zero
+                dragStartOffsets[roomID] = initial
+                nodeOffsets[roomID] = CGSize(
+                    width: initial.width + value.translation.width / zoomScale,
+                    height: initial.height + value.translation.height / zoomScale
+                )
+            }
+            .onEnded { _ in
+                dragStartOffsets[roomID] = nil
+                saveNodeOffsets()
+            }
+    }
+
+    private func changeZoom(by delta: CGFloat) {
+        withAnimation(.snappy) {
+            zoomScale = min(max(zoomScale + delta, 0.6), 1.8)
+            zoomStartScale = zoomScale
+        }
+    }
+
+    private func toggleSelection(_ roomID: Int) {
+        if selectedRoomIDs.contains(roomID) {
+            selectedRoomIDs.remove(roomID)
+        } else {
+            selectedRoomIDs.insert(roomID)
+        }
+    }
+
+    private func endSelection() {
+        isSelectionMode = false
+        selectedRoomIDs = []
+    }
+
+    private func loadNodeOffsets() {
+        nodeOffsets = appState.loadStudyTreeNodeOffsets(rootStudyID: rootStudyID)
+    }
+
+    private func saveNodeOffsets() {
+        appState.saveStudyTreeNodeOffsets(nodeOffsets, rootStudyID: rootStudyID)
     }
 }
 
 private struct StudyTreeNode: View {
     var room: BackendStudyRoom
     var strings: AppStrings
+    var isSelectionMode: Bool
+    var isSelected: Bool
+    var onOpen: () -> Void
+    var onSelect: () -> Void
     var onAddRecommendedChild: () -> Void
     var onAddManualChild: () -> Void
     var onToggleActive: () -> Void
@@ -2459,46 +2658,34 @@ private struct StudyTreeNode: View {
     }
 
     var body: some View {
-        NavigationLink {
-            StudyView(preferredCategoryID: String(room.id))
-                .padding(.horizontal, 16)
-                .mobileTabTitle(room.topic)
+        Button {
+            isSelectionMode ? onSelect() : onOpen()
         } label: {
-            VStack(alignment: .leading, spacing: 7) {
+            VStack(spacing: 5) {
                 Text(room.topic)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.center)
 
-                HStack(spacing: 5) {
-                    Text(Difficulty(level: room.difficultyLevel).displayName(language: strings.language))
-                        .foregroundStyle(levelColor)
-                    Circle()
-                        .fill(room.activeForQuestions ? Color.accentColor : Color.secondary.opacity(0.35))
-                        .frame(width: 5, height: 5)
-                    Text(room.activeForQuestions ? strings.questionTopicActive : strings.questionTopicInactive)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                .font(.caption2.weight(.medium))
+                Text("Lv \(room.difficultyLevel)")
+                    .font(.caption2.weight(.bold))
+                    .monospacedDigit()
+                    .foregroundStyle(levelColor)
             }
-            .padding(.horizontal, 12)
+            .padding(12)
             .frame(
                 width: StudyTreeLayoutSnapshot.nodeSize.width,
                 height: StudyTreeLayoutSnapshot.nodeSize.height,
-                alignment: .leading
+                alignment: .center
             )
-            .background(Color(.secondarySystemBackground))
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(levelColor.opacity(0.72))
-                    .frame(width: 4)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(levelColor.opacity(0.1), in: Circle())
             .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(levelColor.opacity(0.2), lineWidth: 1)
+                Circle()
+                    .stroke(
+                        isSelected ? Color.accentColor : levelColor.opacity(0.42),
+                        lineWidth: isSelected ? 3 : 1.5
+                    )
             }
         }
         .buttonStyle(.plain)
@@ -2512,38 +2699,49 @@ private struct StudyTreeNode: View {
             )
         }
         .overlay(alignment: .topLeading) {
-            Button(action: onToggleActive) {
-                Image(systemName: room.activeForQuestions ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(room.activeForQuestions ? Color.accentColor : Color.secondary)
-                    .frame(width: 30, height: 30)
+            if isSelectionMode {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 21, weight: .semibold))
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                     .background(Color(.systemBackground), in: Circle())
+                    .offset(x: -3, y: -3)
+            } else {
+                Circle()
+                    .fill(room.activeForQuestions ? Color.accentColor : Color.secondary.opacity(0.3))
+                    .frame(width: 10, height: 10)
+                    .background(Color(.systemBackground), in: Circle())
+                    .offset(x: 3, y: 3)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(room.activeForQuestions ? strings.questionTopicActive : strings.questionTopicInactive)
-            .offset(x: -10, y: -10)
         }
         .overlay(alignment: .topTrailing) {
-            Menu {
-                Button(action: onAddRecommendedChild) {
-                    Label(strings.recommendSubstudy, systemImage: "sparkles")
+            if !isSelectionMode {
+                Menu {
+                    Button(action: onAddRecommendedChild) {
+                        Label(strings.recommendSubstudy, systemImage: "sparkles")
+                    }
+                    Button(action: onAddManualChild) {
+                        Label(strings.addTopicManually, systemImage: "square.and.pencil")
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.caption.weight(.bold))
+                        .frame(width: 28, height: 28)
+                        .background(Color(.systemBackground), in: Circle())
                 }
-                Button(action: onAddManualChild) {
-                    Label(strings.addTopicManually, systemImage: "square.and.pencil")
-                }
-            } label: {
-                Image(systemName: "plus")
-                    .font(.caption.weight(.bold))
-                    .frame(width: 28, height: 28)
-                    .background(Color(.systemBackground), in: Circle())
+                .accessibilityLabel(strings.addSubstudy)
+                .offset(x: 4, y: -4)
             }
-            .accessibilityLabel(strings.addSubstudy)
-            .offset(x: 10, y: -10)
         }
         .frame(
             width: StudyTreeLayoutSnapshot.nodeSize.width,
             height: StudyTreeLayoutSnapshot.nodeSize.height
         )
+    }
+}
+
+private extension CGPoint {
+    func adding(_ offset: CGSize) -> CGPoint {
+        CGPoint(x: x + offset.width, y: y + offset.height)
     }
 }
 
@@ -2602,17 +2800,42 @@ private struct StudyTopicAddSheet: View {
                     if mode == .recommendation {
                         recommendationPicker
                     } else {
-                        TextField(strings.studyTopic, text: $manualTopic)
-                            .textInputAutocapitalization(.sentences)
-                            .submitLabel(.done)
-                            .padding(.horizontal, 12)
-                            .frame(height: 48)
-                            .background(Color(.secondarySystemBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                        HStack(spacing: 8) {
+                            TextField(strings.studyTopic, text: $manualTopic)
+                                .textInputAutocapitalization(.sentences)
+                                .submitLabel(.done)
+                                .onSubmit {
+                                    guard !selectedTopic.isEmpty, !isSaving else { return }
+                                    add(selectedTopic)
+                                }
+
+                            Button {
+                                add(selectedTopic)
+                            } label: {
+                                if isSaving {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .frame(width: 34, height: 34)
+                                } else {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 15, weight: .bold))
+                                        .foregroundStyle(.white)
+                                        .frame(width: 34, height: 34)
+                                        .background(Color.accentColor, in: Circle())
+                                }
                             }
+                            .buttonStyle(.plain)
+                            .disabled(selectedTopic.isEmpty || isSaving)
+                            .accessibilityLabel(strings.addSubstudy)
+                        }
+                        .padding(.leading, 14)
+                        .padding(.trailing, 7)
+                        .frame(height: 50)
+                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, minHeight: 112, alignment: .top)
@@ -2638,23 +2861,25 @@ private struct StudyTopicAddSheet: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Button {
-                    add(selectedTopic)
-                } label: {
-                    HStack(spacing: 8) {
-                        if isSaving {
-                            ProgressView()
-                                .tint(.white)
+                if mode == .recommendation {
+                    Button {
+                        add(selectedTopic)
+                    } label: {
+                        HStack(spacing: 8) {
+                            if isSaving {
+                                ProgressView()
+                                    .tint(.white)
+                            }
+                            Text(strings.addSubstudy)
+                                .fontWeight(.semibold)
                         }
-                        Text(strings.addSubstudy)
-                            .fontWeight(.semibold)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
                     }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 48)
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.roundedRectangle(radius: 8))
+                    .disabled(selectedTopic.isEmpty || isSaving)
                 }
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.roundedRectangle(radius: 8))
-                .disabled(selectedTopic.isEmpty || isSaving)
             }
             .padding(20)
             .toolbar {
@@ -4108,6 +4333,179 @@ extension Color {
 private struct MobileProfileSettingsSheet: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
+
+    private var strings: AppStrings {
+        appState.strings
+    }
+
+    private var appVersionText: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        let parts = [version, build.map { "(\($0))" }]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+        return parts.isEmpty ? "-" : parts.joined(separator: " ")
+    }
+
+    var body: some View {
+        NavigationStack {
+            if appState.isCommunitySessionActive {
+                List {
+                    Section {
+                        NavigationLink {
+                            MobileProfileEditorView()
+                        } label: {
+                            profileDestinationLabel(
+                                title: strings.profile,
+                                subtitle: appState.communityProfile?.displayName,
+                                systemImage: "person.crop.circle"
+                            )
+                        }
+
+                        NavigationLink {
+                            MobileQuestionUsageView()
+                        } label: {
+                            profileDestinationLabel(
+                                title: strings.usage,
+                                subtitle: nil,
+                                systemImage: "chart.bar"
+                            )
+                        }
+                    }
+
+                    Section {
+                        NavigationLink {
+                            MobileNotificationSettingsView()
+                        } label: {
+                            profileDestinationLabel(
+                                title: strings.notificationSettings,
+                                subtitle: nil,
+                                systemImage: "bell"
+                            )
+                        }
+
+                        NavigationLink {
+                            MobileTermsSettingsView()
+                        } label: {
+                            profileDestinationLabel(
+                                title: strings.operatingTerms,
+                                subtitle: nil,
+                                systemImage: "doc.text"
+                            )
+                        }
+                    }
+
+                    Section {
+                        HStack {
+                            Text(strings.appVersion)
+                            Spacer()
+                            Text(appVersionText)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .navigationTitle(strings.profile)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(strings.done) {
+                            dismiss()
+                        }
+                    }
+                }
+                .task {
+                    await appState.loadCommunityProfile()
+                }
+            } else {
+                MobileProfileEditorView()
+            }
+        }
+    }
+
+    private func profileDestinationLabel(
+        title: String,
+        subtitle: String?,
+        systemImage: String
+    ) -> some View {
+        HStack(spacing: 13) {
+            Image(systemName: systemImage)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .foregroundStyle(.primary)
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(.vertical, 3)
+    }
+}
+
+private struct MobileQuestionUsageView: View {
+    @EnvironmentObject private var appState: AppState
+
+    private var strings: AppStrings {
+        appState.strings
+    }
+
+    var body: some View {
+        List {
+            Section {
+                if let quota = appState.questionQuota {
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(strings.monthlyQuestionQuota)
+                                .font(.headline)
+
+                            Spacer(minLength: 12)
+
+                            Text(strings.monthlyQuotaUsage(
+                                remaining: quota.remainingCount,
+                                limit: quota.monthlyLimit
+                            ))
+                            .font(.subheadline.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(quota.remainingCount == 0 ? Color.orange : Color.secondary)
+                        }
+
+                        ProgressView(
+                            value: Double(quota.usedCount),
+                            total: Double(max(quota.monthlyLimit, 1))
+                        )
+                        .tint(quota.remainingCount == 0 ? .orange : .accentColor)
+
+                        Text(strings.monthlyQuotaReset(quota.resetAt))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 6)
+                } else {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text(strings.loading)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .navigationTitle(strings.usage)
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await appState.refreshQuestionQuota()
+        }
+    }
+}
+
+private struct MobileProfileEditorView: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
     @State private var profileDisplayName = ""
     @State private var draftAvatarSymbolName = BuddyStudyAvatar.symbolName
     @State private var draftAvatarColorSeed = "avatar-color-sage"
@@ -4115,7 +4513,6 @@ private struct MobileProfileSettingsSheet: View {
     @State private var isShowingEmailSignIn = false
     @State private var isLoadingProfileDraft = false
     @State private var wasSignedInWhenOpened = false
-    @State private var legalWebRoute: MobileLegalWebRoute?
 
     private var strings: AppStrings {
         appState.strings
@@ -4168,27 +4565,10 @@ private struct MobileProfileSettingsSheet: View {
         }
     }
 
-    private var appVersionText: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-
-        switch (version?.isEmpty == false ? version : nil, build?.isEmpty == false ? build : nil) {
-        case let (.some(version), .some(build)):
-            return "\(version) (\(build))"
-        case let (.some(version), .none):
-            return version
-        case let (.none, .some(build)):
-            return build
-        case (.none, .none):
-            return "-"
-        }
-    }
-
     var body: some View {
         let strings = appState.strings
 
-        NavigationStack {
-            Form {
+        Form {
                 if appState.isCommunitySessionActive, appState.communityProfile == nil {
                     Section {
                         VStack(spacing: 14) {
@@ -4280,41 +4660,6 @@ private struct MobileProfileSettingsSheet: View {
                         Toggle(strings.publicQuestionsPage, isOn: $allowPublicQuestionsAccess)
                     } footer: {
                         Text(strings.publicQuestionsPageHelp)
-                    }
-
-                    Section {
-                        NavigationLink {
-                            MobileTermsSettingsView()
-                        } label: {
-                            Text(strings.operatingTerms)
-                        }
-
-                        Button {
-                            legalWebRoute = MobileLegalWebRoute(url: AppLegalLinks.privacyPolicyURL(language: appState.settings.appLanguage))
-                        } label: {
-                            HStack {
-                                Text(strings.privacyPolicy)
-                                    .foregroundStyle(.primary)
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.footnote.weight(.semibold))
-                                    .foregroundStyle(.tertiary)
-                            }
-                        }
-                        .buttonStyle(.plain)
-
-                        NavigationLink {
-                            MobileNotificationSettingsView()
-                        } label: {
-                            Text(strings.notificationSettings)
-                        }
-
-                        HStack {
-                            Text(strings.appVersion)
-                            Spacer()
-                            Text(appVersionText)
-                                .foregroundStyle(.secondary)
-                        }
                     }
 
                     Section {
@@ -4438,16 +4783,6 @@ private struct MobileProfileSettingsSheet: View {
                 }
                 .environmentObject(appState)
             }
-            .sheet(item: $legalWebRoute) { route in
-                #if os(iOS)
-                MobileLegalWebView(url: route.url)
-                    .ignoresSafeArea()
-                #else
-                Link(route.url.absoluteString, destination: route.url)
-                    .padding()
-                #endif
-            }
-        }
     }
 
     private func resetDraftProfile() {
@@ -5527,6 +5862,132 @@ private struct StudyCategoryEditorSheet: View {
 
     private var resolvedDifficultyLevel: Int {
         min(max(Int(difficultyLevel.rounded()), 1), 10)
+    }
+}
+
+private struct MobileFeedbackPromptRow: View {
+    var strings: AppStrings
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "text.bubble")
+                .font(.title3.weight(.medium))
+                .foregroundStyle(.tint)
+                .frame(width: 34, height: 34)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(strings.feedbackPromptTitle)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Text(strings.feedbackPromptBody)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 8)
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 14)
+        .contentShape(Rectangle())
+    }
+}
+
+private enum MobileFeedbackCategory: String, CaseIterable, Identifiable {
+    case general = "GENERAL"
+    case bug = "BUG"
+    case feature = "FEATURE"
+
+    var id: String { rawValue }
+
+    func title(strings: AppStrings) -> String {
+        switch self {
+        case .general:
+            return strings.feedbackCategoryGeneral
+        case .bug:
+            return strings.feedbackCategoryBug
+        case .feature:
+            return strings.feedbackCategoryFeature
+        }
+    }
+}
+
+private struct MobileFeedbackView: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    @State private var category: MobileFeedbackCategory = .general
+    @State private var message = ""
+    @State private var isSubmitting = false
+
+    private var strings: AppStrings { appState.strings }
+    private var normalizedMessage: String {
+        message.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        Form {
+            Section(strings.feedbackCategory) {
+                Picker(strings.feedbackCategory, selection: $category) {
+                    ForEach(MobileFeedbackCategory.allCases) { category in
+                        Text(category.title(strings: strings)).tag(category)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
+            Section(strings.feedbackMessage) {
+                ZStack(alignment: .topLeading) {
+                    if normalizedMessage.isEmpty {
+                        Text(strings.feedbackMessagePlaceholder)
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 8)
+                            .allowsHitTesting(false)
+                    }
+                    TextEditor(text: $message)
+                        .frame(minHeight: 180)
+                }
+            }
+        }
+        .navigationTitle(strings.feedback)
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    submit()
+                } label: {
+                    if isSubmitting {
+                        ProgressView()
+                    } else {
+                        Text(strings.feedbackSubmit)
+                    }
+                }
+                .disabled(isSubmitting || normalizedMessage.count < 2)
+            }
+        }
+    }
+
+    private func submit() {
+        let submittedMessage = normalizedMessage
+        guard submittedMessage.count >= 2 else {
+            return
+        }
+        isSubmitting = true
+        Task {
+            let submitted = await appState.submitAppFeedback(
+                category: category.rawValue,
+                message: submittedMessage
+            )
+            isSubmitting = false
+            if submitted {
+                dismiss()
+            }
+        }
     }
 }
 

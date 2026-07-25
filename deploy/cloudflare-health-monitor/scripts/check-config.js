@@ -16,20 +16,27 @@ export function validateConfig(config, options = {}) {
   if (config.main !== "src/index.js") {
     errors.push("Worker main must be src/index.js.");
   }
-  if (!hasPublicEntrypoint(config) && !hasCronTrigger(config)) {
-    errors.push("Health monitor Worker must expose workers_dev, routes, or a Cron Trigger.");
-  }
+  const scheduledChecksEnabled = config.vars?.SCHEDULED_CHECKS_ENABLED !== "false";
   if (config.observability?.enabled !== true) {
-    errors.push("Health monitor Worker observability must be enabled so Cron checks and Slack alert failures are logged.");
+    errors.push("Health monitor Worker observability must be enabled so operator checks and failures are logged.");
   }
   if (config.observability?.head_sampling_rate !== 1) {
-    errors.push("Health monitor Worker observability sampling must be 1 so every Cron check and Slack alert failure is logged.");
+    errors.push("Health monitor Worker observability sampling must be 1 so every operator check and failure is logged.");
   }
   const crons = config.triggers?.crons;
-  if (!Array.isArray(crons) || crons.length === 0) {
-    errors.push("At least one Cloudflare Cron Trigger must be configured.");
-  } else if (crons.length !== 1 || crons[0] !== "*/5 * * * *") {
-    errors.push("Health monitor must configure exactly one 5-minute cron `*/5 * * * *` to stay within Workers KV free write limits without duplicate checks.");
+  if (!scheduledChecksEnabled) {
+    if (Array.isArray(crons) && crons.length > 0) {
+      errors.push("Cloudflare Cron triggers must be absent when scheduled checks are disabled.");
+    }
+  } else {
+    if (!hasPublicEntrypoint(config) && !hasCronTrigger(config)) {
+      errors.push("Health monitor Worker must expose workers_dev, routes, or a Cron Trigger.");
+    }
+    if (!Array.isArray(crons) || crons.length === 0) {
+      errors.push("At least one Cloudflare Cron Trigger must be configured when scheduled checks are enabled.");
+    } else if (crons.length !== 1 || crons[0] !== "*/5 * * * *") {
+      errors.push("Health monitor must configure exactly one 5-minute cron `*/5 * * * *` when scheduled checks are enabled.");
+    }
   }
 
   const namespace = config.kv_namespaces?.find((item) => item.binding === "HEALTH_MONITOR_STATE");

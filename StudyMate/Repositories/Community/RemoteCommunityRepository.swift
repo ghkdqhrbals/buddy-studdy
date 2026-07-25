@@ -136,6 +136,18 @@ struct RemoteCommunityRepository: CommunityRepository {
         )
     }
 
+    func submitFeedback(
+        registration: RemotePushRegistration,
+        category: String,
+        message: String
+    ) async throws {
+        try await backendClient.submitAppFeedback(
+            registration: registration,
+            category: category,
+            message: message
+        )
+    }
+
     func setQuestionLike(
         registration: RemotePushRegistration,
         questionID: String,

@@ -12,7 +12,9 @@ Read these first:
 ## Working Rules
 
 - Preserve user drafts. New scheduled, pushed, or synced questions must not replace the active ungraded answer page.
-- Keep settings compact. Study settings should stay first; iCloud sync should stay a one-line bottom control.
+- Keep settings compact. Profile, usage, notifications, and terms are separate category destinations; do not rebuild one long profile form.
+- Treat root-study creation, descendant-topic creation, and question generation as separate operations. Study/topic creation must never consume question quota.
+- Keep My Studies tree-first: circular nodes, restrained level color, zoom, movable saved positions, and bounded multi-select actions.
 - Keep statistics topic-first. Avoid global average score interpretations that ignore topic and difficulty.
 - Keep logs paginated and dense. Do not render all persisted logs at once.
 - Only the regular OpenAI API key is supported and synced.
@@ -25,7 +27,7 @@ Read these first:
 - Backend Docker images must be built on GitHub-hosted runners and pushed to GHCR. The EC2 self-hosted runner is deploy-only: it may pull GHCR images and run containers, but it must not compile backend code or build Docker images.
 - Deployments must be module-scoped. Backend API, admin frontend, monitoring, health monitor, and infrastructure/routing changes must be represented as separate workflows or separate module-named jobs. Do not combine backend rollout, monitoring/Grafana/Loki rollout, and admin frontend rollout in one deploy job.
 - When changing deployment behavior, update `docs/deploy-repo-template/deployment-modules.md` and the matching deploy workflow template. Backend deploy changes belong in `deploy-backend.yml`; admin frontend changes belong in `deploy-admin-frontend.yml`; API Logs/Grafana/Loki changes belong in `deploy-macbookair-monitoring.yml`.
-- GitHub Actions must not perform runtime health checks or smoke checks against backend, Grafana, local containers, or public health endpoints. This includes indirect container health gates such as `docker compose up --wait` and `docker compose wait`. Runtime monitoring belongs to the Cloudflare Health Monitor Worker and its Cron trigger.
+- GitHub Actions must not perform runtime health checks or smoke checks against backend, Grafana, local containers, or public health endpoints. This includes indirect container health gates such as `docker compose up --wait` and `docker compose wait`. Runtime outage monitoring belongs to Grafana alerting; the Cloudflare Health Monitor scheduled check stays disabled in production.
 - Production monitoring on the backend host is PLG only: Promtail, Loki, and Grafana. Do not reintroduce Prometheus or Redis exporter containers on the small EC2 host unless explicitly requested.
 - When Slack asks Codex to investigate API logs, use `docs/observability/slack-codex-log-search.md` and the `monitoring/api-dashboard` `codex:log-search` command. Do not add Slack tokens or webhooks to browser-side dashboard code.
 
@@ -41,6 +43,7 @@ Read these first:
 ## Storage
 
 - Use `SettingsStore` for app settings, API keys, logs, draft state, and CloudKit metadata.
+- Persist study-tree node positions through `SettingsStore`; views must not write directly to `UserDefaults`.
 - Use the existing study record store path through `SettingsStore`; do not add parallel record persistence.
 - Records can scale toward 10,000, so UI must paginate or lazily render lists.
 

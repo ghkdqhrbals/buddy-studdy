@@ -1692,7 +1692,7 @@ function renderComponents() {
     const values = [
       ["CPU", component.metrics ? `${component.metrics.cpuPercent.toFixed(1)}%` : "-"],
       ["Memory", component.metrics ? `${component.metrics.memoryUsedMb.toFixed(0)} / ${component.metrics.memoryLimitMb.toFixed(0)} MB` : "-"],
-      ...(component.id === "postgres" ? [
+      ...(component.id === "mysql" ? [
         ["Connections", component.metrics?.maxConnections
           ? `${component.metrics.connections} / ${component.metrics.maxConnections} (${component.metrics.activeConnections} active)`
           : "-"],
@@ -1854,21 +1854,20 @@ function openComponentConfig(id) {
   elements.componentConfigTitle.textContent = `Configure ${component.name}`;
   const config = component.config;
   const fields = [
-    configField("imageTag", "Image version", config.imageTag, id === "postgres" ? ["16-alpine", "17-alpine"] : ["7.4-alpine", "8-alpine"]),
+    configField("imageTag", "Image version", config.imageTag, id === "mysql" ? ["8.0", "8.4"] : ["7.4-alpine", "8-alpine"]),
     configField("hostPort", "Host port", config.hostPort),
     configField("cpus", "CPU limit", config.cpus),
     configField("memoryMb", "Memory limit (MB)", config.memoryMb),
   ];
-  if (id === "postgres") {
+  if (id === "mysql") {
     fields.push(
       configField("database", "Database", config.database),
       configField("username", "Username", config.username),
       configField("maxConnections", "Max connections", config.maxConnections),
-      configField("sharedBuffersMb", "Shared buffers (MB)", config.sharedBuffersMb),
-      configField("workMemMb", "Work memory per operation (MB)", config.workMemMb),
-      configField("maintenanceWorkMemMb", "Maintenance work memory (MB)", config.maintenanceWorkMemMb),
-      configField("effectiveCacheSizeMb", "Effective cache size (MB)", config.effectiveCacheSizeMb),
-      configField("statementTimeoutMs", "Statement timeout (ms, 0 = disabled)", config.statementTimeoutMs),
+      configField("innodbBufferPoolMb", "InnoDB buffer pool (MB)", config.innodbBufferPoolMb),
+      configField("tmpTableSizeMb", "Temporary table size (MB)", config.tmpTableSizeMb),
+      configField("maxHeapTableSizeMb", "Maximum heap table size (MB)", config.maxHeapTableSizeMb),
+      configField("waitTimeoutSeconds", "Idle connection timeout (seconds)", config.waitTimeoutSeconds),
     );
   } else {
     fields.push(
@@ -1890,11 +1889,10 @@ async function saveComponentConfig(event) {
     "memoryMb",
     "maxMemoryMb",
     "maxConnections",
-    "sharedBuffersMb",
-    "workMemMb",
-    "maintenanceWorkMemMb",
-    "effectiveCacheSizeMb",
-    "statementTimeoutMs",
+    "innodbBufferPoolMb",
+    "tmpTableSizeMb",
+    "maxHeapTableSizeMb",
+    "waitTimeoutSeconds",
   ]) {
     if (values[key] !== undefined) values[key] = Number(values[key]);
   }
@@ -1912,7 +1910,7 @@ async function saveComponentConfig(event) {
       body: JSON.stringify(values),
     });
     elements.componentConfigDialog.close();
-    toast("Parameters saved. Use Restart to recreate the container with these settings. Reset is required to replace PostgreSQL data.");
+    toast("Parameters saved. Use Restart to recreate the container with these settings. Reset is required to replace MySQL data.");
     await loadComponents();
   } catch (error) {
     toast(error.message, "error");

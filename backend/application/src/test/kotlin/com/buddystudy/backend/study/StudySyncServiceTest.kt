@@ -5,6 +5,7 @@ import kotlinx.coroutines.runBlocking
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
+import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
@@ -113,11 +114,11 @@ class StudySyncServiceTest {
     fun `child studies keep their parent and sibling order`(): Unit = runBlocking {
         studies.rows += study(id = 11, topic = "Redis")
 
-        val response = service.createStudy(
+        val response = service.createStudyTopic(
             principal,
-            CreateStudyCommand(
+            parentStudyId = 11,
+            CreateStudyTopicCommand(
                 topic = "Streams",
-                parentStudyId = 11,
                 sortOrder = 3,
                 difficultyLevel = 7,
             ),
@@ -126,6 +127,8 @@ class StudySyncServiceTest {
         assertThat(response.parentStudyId).isEqualTo(11)
         assertThat(response.sortOrder).isEqualTo(3)
         assertThat(response.difficultyLevel).isEqualTo(7)
+        assertThat(response.enabled).isFalse()
+        assertThat(response.nextDueAt).isNull()
         assertThat(studies.rows.last().parentStudyId).isEqualTo(11)
     }
 
@@ -135,17 +138,19 @@ class StudySyncServiceTest {
         studies.rows += study(id = 12, topic = "Kafka")
 
         runBlocking {
-            service.createStudy(
+            service.createStudyTopic(
                 principal,
-                CreateStudyCommand(topic = "Redis Streams", parentStudyId = 11),
+                parentStudyId = 11,
+                CreateStudyTopicCommand(topic = "Redis Streams"),
             )
         }
 
         assertThatThrownBy {
             runBlocking {
-                service.createStudy(
+                service.createStudyTopic(
                     principal,
-                    CreateStudyCommand(topic = "  redis   streams ", parentStudyId = 12),
+                    parentStudyId = 12,
+                    CreateStudyTopicCommand(topic = "  redis   streams "),
                 )
             }
         }.isInstanceOf(ApiException::class.java)
@@ -158,9 +163,10 @@ class StudySyncServiceTest {
 
         assertThatThrownBy {
             runBlocking {
-                service.createStudy(
+                service.createStudyTopic(
                     principal,
-                    CreateStudyCommand(topic = "Streams", parentStudyId = 11),
+                    parentStudyId = 11,
+                    CreateStudyTopicCommand(topic = "Streams"),
                 )
             }
         }.isInstanceOf(ApiException::class.java)

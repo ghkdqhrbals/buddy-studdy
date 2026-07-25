@@ -6,15 +6,17 @@ MacBook Air/Kubernetes host and sends Slack alerts when the backend is down.
 It replaces GitHub Actions health checks. GitHub Actions is not used for
 runtime monitoring.
 
+Production sets `SCHEDULED_CHECKS_ENABLED=false` and has no Cron trigger.
+Grafana alerting owns continuous outage detection, so the Worker performs no
+scheduled backend requests and no scheduled Workers KV reads or writes. The
+manual-check implementation remains available if an authenticated operator
+route is intentionally added later.
+
 ## Behavior
 
-- Runs every five minutes with exactly one Cloudflare Cron Trigger, preventing
-  duplicate checks and keeping Workers KV writes under the free daily limit.
-- Runs as a Cron-only Worker by default. `workers_dev` is disabled so the
-  monitor does not expose a public workers.dev route.
-- Cloudflare still requires the account-level workers.dev subdomain to be
-  initialized once before Cron schedules can be registered. This does not make
-  the monitor public when `workers_dev` is false.
+- No Cron trigger or public route is configured in production.
+- The scheduled handler also exits immediately while scheduled checks are
+  disabled, providing defense in depth if a trigger is accidentally added.
 - Checks `HEALTHCHECK_URL`.
 - Requires `HEALTHCHECK_URL` to use `/api/v1/health/readiness` at runtime, so
   scheduler freshness cannot be bypassed by accidentally using lightweight
@@ -108,7 +110,7 @@ npm run worker:status
 ```
 
 This is a post-deploy operator check. It does not call the backend health
-endpoint and does not replace Cloudflare Cron runtime monitoring.
+endpoint and does not replace Grafana runtime monitoring.
 
 Deploy:
 
@@ -117,8 +119,8 @@ npm run deploy
 ```
 
 Or deploy from GitHub Actions with **Deploy Health Monitor Worker**. That
-workflow only tests and deploys this Worker. It does not perform runtime health
-checks. Runtime checks still run from the Cloudflare Cron Trigger.
+workflow only tests and deploys this dormant Worker configuration. It does not
+perform runtime health checks; Grafana owns outage detection and alerts.
 
 If readiness is blocked on Cloudflare setup values, authenticate Wrangler and
 run the bootstrap helper:
@@ -166,8 +168,8 @@ To wait for the dispatched deployment result in the same terminal, add
 CLOUDFLARE_API_TOKEN=<token> npm run bootstrap:cloudflare -- --set-github-secrets --dispatch-workflow --watch-workflow
 ```
 
-This watches the deploy workflow status only. Runtime server-down checks still
-run from Cloudflare Cron after deployment.
+This watches the deploy workflow status only. Runtime server-down checks and
+alerts run in Grafana.
 
 Required GitHub Actions secrets for that deployment workflow:
 
@@ -207,7 +209,7 @@ The workflow syncs `HEALTH_MONITOR_SLACK_WEBHOOK_URL` and
 `HEALTH_MONITOR_MANUAL_CHECK_TOKEN` into Cloudflare Worker secrets as
 `SLACK_WEBHOOK_URL` and `MANUAL_CHECK_TOKEN`.
 It does not call the deployed Worker for health checks. Runtime checks are
-owned by Cloudflare Cron.
+owned by Grafana alerting.
 
 Slack setup is complete only after the Worker secret sync has run. Adding
 `HEALTH_MONITOR_SLACK_WEBHOOK_URL` to GitHub Actions secrets stores the webhook
@@ -228,7 +230,7 @@ health checker:
    npm run worker:status
    ```
 
-2. Confirm Cloudflare Cron is enabled in the Cloudflare dashboard for
+2. Confirm no Cron trigger or public route is attached to
    `buddystudy-health-monitor`.
 3. If a public route is intentionally added later, run one explicit operator
    check:
@@ -241,16 +243,14 @@ health checker:
 
 4. If the backend is intentionally down while validating the alert path, run
    the same command with `ALLOW_DOWN=true`. The command should still reach the
-   Worker and print the monitor state, while Slack delivery follows the same
-   transition path as the Cron Trigger.
-5. Use Cloudflare Worker observability logs to confirm `health_monitor_checked`
-   events are being written after the Cron Trigger runs.
+   Worker and print the monitor state.
+5. Use Grafana alert history to verify runtime outage detection.
 
 ## Manual Operator Check
 
-The default production configuration is Cron-only and has no public
-`workers.dev` URL. If a route or custom domain is intentionally added later, an
-operator can trigger one immediate check without waiting for the cron:
+The default production configuration is dormant and has neither a Cron trigger
+nor a public `workers.dev` URL. If a route or custom domain is intentionally
+added later, an operator can trigger one immediate check:
 
 ```sh
 HEALTH_MONITOR_URL=https://<worker-host> \
@@ -258,7 +258,7 @@ MANUAL_CHECK_TOKEN=<MANUAL_CHECK_TOKEN> \
 npm run manual:check
 ```
 
-`POST /check` uses the same state transition and Slack alert path as the cron.
+`POST /check` uses the retained state-transition and Slack-alert code path.
 It returns `200` only when the checked state is `up` or `degraded`, and returns
 `503` for `down`, `stale`, `config_error`, or `monitor_error` states so operator
 tools can fail fast from the HTTP status alone. If `MANUAL_CHECK_TOKEN` is not
@@ -267,7 +267,7 @@ If the backend is intentionally down during the manual check, set
 `ALLOW_DOWN=true` to verify the Worker path without failing the command.
 
 Do not run this from GitHub Actions. GitHub Actions deploys the Worker only;
-runtime health checks and Slack alerts are owned by Cloudflare Cron.
+runtime health checks and Slack alerts are owned by Grafana.
 
 ## Configuration
 
@@ -284,13 +284,7 @@ Default vars in `wrangler.jsonc`:
 - `OBSERVABILITY_URL`: optional HTTPS Grafana/Loki entrypoint linked from
   Slack alerts
 
-With the required single 5-minute cron and threshold `2`, a real outage usually alerts
-after about 5-10 minutes while still filtering out a single transient failure.
-
-If the Worker Cron itself stops running, the Worker cannot send a new Slack
-alert because the monitor execution path is no longer being invoked. In that
-case `GET /` reports the stored state as `stale` after
-`STATUS_STALE_AFTER_SECONDS`; use that status page and Cloudflare Worker
-observability to diagnose monitor execution issues.
+The production Worker has no Cron trigger. Grafana evaluation intervals,
+pending duration, and notification policies define outage alert timing.
 
 Use Cloudflare Worker vars/secrets for environment-specific overrides.

@@ -8,6 +8,7 @@ import com.buddystudy.backend.stats.application.model.StatsActivityResponse
 import com.buddystudy.backend.stats.application.model.StatsResponse
 import com.buddystudy.backend.study.adapter.inbound.web.dto.AnswerRequest
 import com.buddystudy.backend.study.adapter.inbound.web.dto.CreateStudyRequest
+import com.buddystudy.backend.study.adapter.inbound.web.dto.CreateStudyTopicRequest
 import com.buddystudy.backend.study.adapter.inbound.web.dto.RecordPublicityRequest
 import com.buddystudy.backend.study.adapter.inbound.web.dto.StudyTopicActivationRequest
 import com.buddystudy.backend.study.application.model.RecordsPageResponse
@@ -81,12 +82,31 @@ class StudyController(
         ApiResponse(responseCode = "400", description = "Invalid study request."),
         ApiResponse(responseCode = "401", description = "Authentication required."),
     )
-    @PostMapping("/study")
+    @PostMapping("/studies", "/study")
     @RequirePermission(Permissions.STUDY_CREATE)
     suspend fun createStudy(
         @Valid @RequestBody body: CreateStudyRequest,
         authentication: Authentication,
     ): StudyRoomResponse = study.createStudy(body, authentication)
+
+    @Operation(
+        summary = "Create a child study topic",
+        description = "Adds a topic under an existing study tree node. This operation never creates a question and never consumes monthly question quota.",
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Study topic created."),
+        ApiResponse(responseCode = "400", description = "Invalid topic request."),
+        ApiResponse(responseCode = "401", description = "Authentication required."),
+        ApiResponse(responseCode = "404", description = "Parent study not found."),
+        ApiResponse(responseCode = "409", description = "Duplicate topic."),
+    )
+    @PostMapping("/studies/{parentStudyId}/topics")
+    @RequirePermission(Permissions.STUDY_CREATE)
+    suspend fun createStudyTopic(
+        @PathVariable parentStudyId: Long,
+        @Valid @RequestBody body: CreateStudyTopicRequest,
+        authentication: Authentication,
+    ): StudyRoomResponse = study.createStudyTopic(parentStudyId, body, authentication)
 
     @Operation(summary = "Delete a study", description = "Deletes one study room owned by the authenticated user and removes its related questions from active records/search.")
     @ApiResponses(

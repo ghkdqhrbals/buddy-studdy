@@ -6,7 +6,10 @@ import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
 import com.buddystudy.backend.study.application.model.toRecordResponse
+import com.buddystudy.backend.auth.application.permission.Permissions
+import com.buddystudy.backend.auth.application.permission.RequirePermission
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
+import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
 import com.buddystudy.backend.study.application.port.inbound.StudySyncUseCase
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
@@ -52,24 +55,69 @@ class StudySyncService(
     }
 
     @Transactional
+    @RequirePermission(Permissions.STUDY_CREATE)
     override suspend fun createStudy(principal: Principal, command: CreateStudyCommand): StudyRoomResponse {
+        return saveStudy(
+            principal = principal,
+            command = command,
+            parentStudy = null,
+            sortOrder = 0,
+            activeForQuestions = true,
+            scheduleEnabled = command.enabled,
+        )
+    }
+
+    @Transactional
+    @RequirePermission(Permissions.STUDY_CREATE)
+    override suspend fun createStudyTopic(
+        principal: Principal,
+        parentStudyId: Long,
+        command: CreateStudyTopicCommand,
+    ): StudyRoomResponse {
+        val parentStudy = studies.findByIdAndUserId(parentStudyId, principal.userId)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Parent study not found.")
+        val allStudies = studies.findAllByUserId(principal.userId)
+        val rootStudy = StudyTreeSelector.rootFor(parentStudy, allStudies)
+
+        return saveStudy(
+            principal = principal,
+            command = CreateStudyCommand(
+                topic = command.topic,
+                difficultyLevel = command.difficultyLevel,
+                intervalMinutes = rootStudy.intervalMinutes,
+                enabled = false,
+                notificationSound = rootStudy.notificationSound,
+                customPrompt = rootStudy.customPrompt,
+                openaiModel = rootStudy.openaiModel,
+                maxHistoryCount = rootStudy.maxHistoryCount,
+            ),
+            parentStudy = parentStudy,
+            sortOrder = command.sortOrder,
+            activeForQuestions = command.activeForQuestions,
+            scheduleEnabled = false,
+        )
+    }
+
+    private suspend fun saveStudy(
+        principal: Principal,
+        command: CreateStudyCommand,
+        parentStudy: StudyEntity?,
+        sortOrder: Int,
+        activeForQuestions: Boolean,
+        scheduleEnabled: Boolean,
+    ): StudyRoomResponse {
         val topic = command.topic.trim()
         if (topic.isEmpty()) {
             throw ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.VALIDATION_ERROR, "Study topic is required.")
         }
 
         val now = Instant.now()
-        val parentStudy = command.parentStudyId?.let { parentId ->
-            studies.findByIdAndUserId(parentId, principal.userId)
-                ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Parent study not found.")
-        }
         val duplicate = studies.findAllByUserId(principal.userId)
             .firstOrNull { it.topic.normalizedStudyTopicKey() == topic.normalizedStudyTopicKey() }
-        if (duplicate != null && duplicate.parentStudyId != parentStudy?.id) {
+        if (duplicate != null && (parentStudy != null || duplicate.parentStudyId != null)) {
             throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR, "A study topic with the same name already exists.")
         }
-        val study = duplicate
-            ?: StudyEntity(
+        val study = duplicate ?: StudyEntity(
                 deviceId = principal.deviceId,
                 userId = principal.userId,
                 parentStudyId = parentStudy?.id,
@@ -84,14 +132,14 @@ class StudySyncService(
         study.topic = topic
         study.deviceId = principal.deviceId
         study.parentStudyId = parentStudy?.id
-        study.sortOrder = command.sortOrder.coerceAtLeast(0)
-        study.activeForQuestions = command.activeForQuestions
+        study.sortOrder = sortOrder.coerceAtLeast(0)
+        study.activeForQuestions = activeForQuestions
         study.apply(
             StudyRoomSettings.of(study.toStudyRoomSettingsState()).configure(
                 StudyRoomSettingsCommand(
                     difficultyLevel = command.difficultyLevel.coerceIn(1, 10),
                     intervalMinutes = command.intervalMinutes.coerceIn(1, 1440),
-                    enabled = command.enabled,
+                    enabled = scheduleEnabled,
                     notificationSound = command.notificationSound,
                     customPrompt = command.customPrompt,
                     openaiModel = command.openaiModel.ifBlank { study.openaiModel.ifBlank { "gpt-5.4" } },
@@ -102,9 +150,19 @@ class StudySyncService(
                 now = now,
             )
         )
+        if (parentStudy != null) {
+            study.nextDueAt = null
+            study.scheduleClaimedUntil = null
+        }
 
         var saved = studies.save(study)
-        if (saved.shouldReschedule(isNewStudy, previousEnabled, previousIntervalMinutes, previousNextDueAt)) {
+        if (parentStudy == null && saved.shouldReschedule(
+                isNewStudy,
+                previousEnabled,
+                previousIntervalMinutes,
+                previousNextDueAt,
+            )
+        ) {
             saved.reschedule(now)
             saved = studies.save(saved)
         }

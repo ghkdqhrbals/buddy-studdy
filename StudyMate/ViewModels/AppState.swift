@@ -479,6 +479,7 @@ final class AppState: ObservableObject {
     @Published var pageAccessPrompt: PageAccessPrompt?
     @Published private(set) var backendPermissionEvaluations = BackendPermissionEvaluations(permissions: [])
 
+    private let settingsStore: SettingsStore
     private let appLogUseCase: AppLogUseCase
     private let storedBackendIdentityUseCase: StoredBackendIdentityUseCase
     private let communityProfileCacheUseCase: CommunityProfileCacheUseCase
@@ -1179,6 +1180,7 @@ final class AppState: ObservableObject {
         let loadedIsDebuggingEnabled = loadedDeveloperSettings.isDebuggingEnabled
         let loadedDebugBackendBaseURL = appUseCasesProvider.normalizedDebugBackendBaseURL(loadedDeveloperSettings.debugBackendBaseURL)
 
+        self.settingsStore = settingsStore
         self.appLogUseCase = localUseCases.appLog
         self.storedBackendIdentityUseCase = localUseCases.storedBackendIdentity
         self.communityProfileCacheUseCase = localUseCases.communityProfileCache
@@ -3134,6 +3136,33 @@ final class AppState: ObservableObject {
         )
     }
 
+    func submitAppFeedback(category: String, message: String) async -> Bool {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "app-feedback") else {
+            clearCommunityErrorForMissingRegistration(reason: "app-feedback")
+            return false
+        }
+
+        var submitted = false
+        await actionRunner.runVoid(
+            operation: {
+                try await communityUseCase.submitFeedback(
+                    registration: registration,
+                    category: category,
+                    message: message
+                )
+            },
+            onSuccess: {
+                submitted = true
+                statusMessage = strings.feedbackSubmitted
+            },
+            onFailure: { error in
+                handleCommunityError(error)
+                log(.warning, "앱 피드백 제출 실패: \(error.localizedDescription)")
+            }
+        )
+        return submitted
+    }
+
     func setCommunityQuestionLike(_ question: CommunityQuestion, isLiked: Bool) async -> CommunityLikeState? {
         guard isCommunitySessionActive else {
             return nil
@@ -3742,12 +3771,12 @@ final class AppState: ObservableObject {
             openAIModel: openAIModel
         )
         let sortOrder = childStudyRooms(parentStudyID: parentStudyID).count
-        let currentSettings = settings
-        return await createBackendStudyIfPossible(
-            category,
-            settings: currentSettings,
+        return await createBackendStudyTopicIfPossible(
+            topic: category.normalizedTitle,
+            difficulty: category.difficulty,
             parentStudyID: parentStudyID,
-            sortOrder: sortOrder
+            sortOrder: sortOrder,
+            activeForQuestions: true
         )
     }
 
@@ -3869,6 +3898,35 @@ final class AppState: ObservableObject {
                 log(.warning, "학습 트리 질문 대상 변경 실패: studyID=\(studyID), error=\(error.localizedDescription)")
             }
         }
+    }
+
+    func setStudyTopicsActive(studyIDs: Set<Int>, active: Bool) {
+        for studyID in studyIDs.sorted() {
+            setStudyTopicActive(studyID: studyID, active: active)
+        }
+    }
+
+    func deleteStudyCategories(ids: Set<Int>) {
+        let idStrings = Set(ids.map(String.init))
+        let offsets = IndexSet(
+            studyCategoriesForDisplay.enumerated().compactMap { index, category in
+                idStrings.contains(category.id) ? index : nil
+            }
+        )
+        deleteStudyCategories(at: offsets)
+    }
+
+    func loadStudyTreeNodeOffsets(rootStudyID: Int) -> [Int: CGSize] {
+        settingsStore.loadStudyTreeNodeOffsets(rootStudyID: rootStudyID).mapValues {
+            CGSize(width: $0.x, height: $0.y)
+        }
+    }
+
+    func saveStudyTreeNodeOffsets(_ offsets: [Int: CGSize], rootStudyID: Int) {
+        settingsStore.saveStudyTreeNodeOffsets(
+            offsets.mapValues { StudyTreeNodeOffset(x: $0.width, y: $0.height) },
+            rootStudyID: rootStudyID
+        )
     }
 
     func studyCategory(for room: BackendStudyRoom) -> StudyCategory {
@@ -6121,9 +6179,7 @@ final class AppState: ObservableObject {
     @discardableResult
     private func createBackendStudyIfPossible(
         _ category: StudyCategory,
-        settings: StudySettings,
-        parentStudyID: Int? = nil,
-        sortOrder: Int = 0
+        settings: StudySettings
     ) async -> Bool {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "create-study") else {
             log(.warning, "백엔드 등록이 없어 학습 추가 동기화를 건너뛰었습니다. topic=\(category.normalizedTitle)")
@@ -6134,9 +6190,7 @@ final class AppState: ObservableObject {
             let room = try await studyRoomUseCase.createStudy(
                 registration: registration,
                 category: category,
-                settings: settings,
-                parentStudyID: parentStudyID,
-                sortOrder: sortOrder
+                settings: settings
             )
             log(.info, "백엔드 학습을 추가했습니다. id=\(room.id), topic=\(room.topic)")
             await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
@@ -6150,15 +6204,64 @@ final class AppState: ObservableObject {
                 termsRetry: { [weak self] in
                     _ = await self?.createBackendStudyIfPossible(
                         category,
-                        settings: settings,
-                        parentStudyID: parentStudyID,
-                        sortOrder: sortOrder
+                        settings: settings
                     )
                 }
             ) {
                 return false
             }
             log(.warning, "백엔드 학습 추가 실패: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    @discardableResult
+    private func createBackendStudyTopicIfPossible(
+        topic: String,
+        difficulty: Difficulty,
+        parentStudyID: Int,
+        sortOrder: Int,
+        activeForQuestions: Bool
+    ) async -> Bool {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "create-study-topic") else {
+            log(.warning, "백엔드 등록이 없어 하위 학습 주제 추가를 건너뛰었습니다. topic=\(topic)")
+            return false
+        }
+
+        do {
+            let room = try await studyRoomUseCase.createStudyTopic(
+                registration: registration,
+                parentStudyID: parentStudyID,
+                topic: topic,
+                difficulty: difficulty,
+                sortOrder: sortOrder,
+                activeForQuestions: activeForQuestions
+            )
+            log(
+                .info,
+                "백엔드 하위 학습 주제를 추가했습니다. id=\(room.id), parentStudyId=\(parentStudyID), topic=\(room.topic)"
+            )
+            await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+            return true
+        } catch {
+            if handleAppError(
+                error,
+                fallback: "",
+                target: .none,
+                protectedPage: .myStudies,
+                termsRetry: { [weak self] in
+                    _ = await self?.createBackendStudyTopicIfPossible(
+                        topic: topic,
+                        difficulty: difficulty,
+                        parentStudyID: parentStudyID,
+                        sortOrder: sortOrder,
+                        activeForQuestions: activeForQuestions
+                    )
+                }
+            ) {
+                return false
+            }
+            log(.warning, "백엔드 하위 학습 주제 추가 실패: \(error.localizedDescription)")
             return false
         }
     }

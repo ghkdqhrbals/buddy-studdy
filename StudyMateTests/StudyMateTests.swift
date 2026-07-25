@@ -38,6 +38,26 @@ final class StudyMateTests: XCTestCase {
         XCTAssertFalse(store.loadHasCompletedOnboarding())
     }
 
+    func testStudyTreeNodeOffsetsPersistPerRootStudy() {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        store.saveStudyTreeNodeOffsets(
+            [11: StudyTreeNodeOffset(x: 24, y: -18)],
+            rootStudyID: 7
+        )
+
+        XCTAssertEqual(
+            store.loadStudyTreeNodeOffsets(rootStudyID: 7),
+            [11: StudyTreeNodeOffset(x: 24, y: -18)]
+        )
+        XCTAssertTrue(store.loadStudyTreeNodeOffsets(rootStudyID: 8).isEmpty)
+    }
+
     func testExistingSettingsSkipOnboardingByDefault() {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -4767,9 +4787,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     func createStudy(
         registration: RemotePushRegistration,
         category: StudyCategory,
-        settings: StudySettings,
-        parentStudyID: Int?,
-        sortOrder: Int
+        settings: StudySettings
     ) async throws -> BackendStudyRoom {
         createdStudyTopics.append(category.normalizedTitle)
         callEvents.append("createStudy:\(category.normalizedTitle)")
@@ -4777,8 +4795,8 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         return BackendStudyRoom(
             id: createdStudyTopics.count,
             topic: category.normalizedTitle,
-            parentStudyId: parentStudyID,
-            sortOrder: sortOrder,
+            parentStudyId: nil,
+            sortOrder: 0,
             difficultyLevel: category.difficulty.level,
             intervalMinutes: settings.sanitizedIntervalMinutes,
             enabled: true,
@@ -4786,6 +4804,39 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
             customPrompt: category.normalizedCustomPrompt,
             openAIModel: category.sanitizedOpenAIModel,
             maxHistoryCount: settings.sanitizedMaxHistoryCount,
+            nextDueAt: nil,
+            lastSentAt: nil,
+            lastError: nil,
+            pendingQuestion: nil,
+            createdAt: now,
+            updatedAt: now
+        )
+    }
+
+    func createStudyTopic(
+        registration: RemotePushRegistration,
+        parentStudyID: Int,
+        topic: String,
+        difficulty: Difficulty,
+        sortOrder: Int,
+        activeForQuestions: Bool
+    ) async throws -> BackendStudyRoom {
+        createdStudyTopics.append(topic)
+        callEvents.append("createStudyTopic:\(parentStudyID):\(topic)")
+        let now = Date()
+        return BackendStudyRoom(
+            id: createdStudyTopics.count,
+            topic: topic,
+            parentStudyId: parentStudyID,
+            sortOrder: sortOrder,
+            difficultyLevel: difficulty.level,
+            intervalMinutes: 60,
+            enabled: false,
+            activeForQuestions: activeForQuestions,
+            notificationSound: nil,
+            customPrompt: "",
+            openAIModel: "gpt-5.4",
+            maxHistoryCount: 100,
             nextDueAt: nil,
             lastSentAt: nil,
             lastError: nil,
@@ -5102,6 +5153,12 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     ) async throws {
         reportedQuestionIDs.append(questionID)
     }
+
+    func submitAppFeedback(
+        registration: RemotePushRegistration,
+        category: String,
+        message: String
+    ) async throws {}
 
     func setCommunityQuestionLike(
         registration: RemotePushRegistration,

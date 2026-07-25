@@ -2,6 +2,7 @@ package com.buddystudy.backend.study.adapter.inbound.web
 
 import com.buddystudy.backend.study.adapter.inbound.web.dto.AnswerRequest
 import com.buddystudy.backend.study.adapter.inbound.web.dto.CreateStudyRequest
+import com.buddystudy.backend.study.adapter.inbound.web.dto.CreateStudyTopicRequest
 import com.buddystudy.backend.study.adapter.inbound.web.dto.RecordPublicityRequest
 import com.buddystudy.backend.study.adapter.inbound.web.dto.StudyTopicActivationRequest
 import com.buddystudy.backend.stats.application.model.StatsQuery
@@ -32,6 +33,11 @@ interface StudyWebPort {
     suspend fun createQuestion(studyId: Long, authentication: Authentication): StudyRecordResponse
     suspend fun questionQuota(authentication: Authentication): QuestionQuotaResponse
     suspend fun createStudy(body: CreateStudyRequest, authentication: Authentication): StudyRoomResponse
+    suspend fun createStudyTopic(
+        parentStudyId: Long,
+        body: CreateStudyTopicRequest,
+        authentication: Authentication,
+    ): StudyRoomResponse
     suspend fun deleteStudy(studyId: Long, authentication: Authentication): ResponseEntity<Unit>
     suspend fun suggestStudyTopics(studyId: Long, count: Int, authentication: Authentication): StudyTopicSuggestionsResponse
     suspend fun updateStudyTopicActivation(

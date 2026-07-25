@@ -74,27 +74,26 @@ test("ComponentManager persists private credentials and configurable resource li
   const first = await new ComponentManager({
     dataDir,
     exec,
-    password: "postgres-password",
+    password: "mysql-password",
   }).init();
 
-  await first.updateConfig("postgres", {
-    imageTag: "17-alpine",
+  await first.updateConfig("mysql", {
+    imageTag: "8.4",
     database: "load_zone",
     username: "load_user",
-    hostPort: 45432,
+    hostPort: 43306,
     cpus: 2,
     memoryMb: 1024,
     maxConnections: 250,
-    sharedBuffersMb: 256,
-    workMemMb: 8,
-    maintenanceWorkMemMb: 128,
-    effectiveCacheSizeMb: 768,
-    statementTimeoutMs: 5_000,
+    innodbBufferPoolMb: 256,
+    tmpTableSizeMb: 32,
+    maxHeapTableSizeMb: 32,
+    waitTimeoutSeconds: 5_000,
     environment: {
-      LOG_STATEMENT: "none",
+      TZ: "UTC",
     },
   });
-  const postgres = await first.credentials("postgres");
+  const mysql = await first.credentials("mysql");
   const redis = await first.credentials("redis");
   const second = await new ComponentManager({
     dataDir,
@@ -102,22 +101,22 @@ test("ComponentManager persists private credentials and configurable resource li
     password: "ignored-after-initialization",
   }).init();
 
-  assert.equal(postgres.password, "postgres-password");
-  assert.equal(postgres.internalUrl, "postgresql://load_user:postgres-password@buddystudy-testzone-postgres:5432/load_zone");
+  assert.equal(mysql.password, "mysql-password");
+  assert.equal(mysql.internalUrl, "mysql://load_user:mysql-password@buddystudy-testzone-mysql:3306/load_zone");
   assert.match(redis.internalUrl, /^redis:\/\/:[^@]+@buddystudy-testzone-redis:6379\/0$/);
-  assert.deepEqual(await second.credentials("postgres"), postgres);
+  assert.deepEqual(await second.credentials("mysql"), mysql);
   const listed = await second.list();
-  assert.equal(listed.find((entry) => entry.id === "postgres").config.memoryMb, 1024);
-  const savedPostgres = listed.find((entry) => entry.id === "postgres").config;
-  assert.equal(savedPostgres.maxConnections, 250);
-  assert.equal(savedPostgres.sharedBuffersMb, 256);
-  assert.deepEqual(savedPostgres.environment, { LOG_STATEMENT: "none" });
+  assert.equal(listed.find((entry) => entry.id === "mysql").config.memoryMb, 1024);
+  const savedMysql = listed.find((entry) => entry.id === "mysql").config;
+  assert.equal(savedMysql.maxConnections, 250);
+  assert.equal(savedMysql.innodbBufferPoolMb, 256);
+  assert.deepEqual(savedMysql.environment, { TZ: "UTC" });
   assert.equal(listed.some((entry) => entry.id === "kafka"), false);
   const mode = (await fs.stat(path.join(dataDir, "components.json"))).mode & 0o777;
   assert.equal(mode, 0o600);
 });
 
-test("ComponentManager passes key-value environment and PostgreSQL server parameters to Docker", async () => {
+test("ComponentManager passes key-value environment and MySQL server parameters to Docker", async () => {
   const commands = [];
   let deployed = false;
   const exec = async (command, args) => {
@@ -131,28 +130,26 @@ test("ComponentManager passes key-value environment and PostgreSQL server parame
     return { stdout: "" };
   };
   const manager = new ComponentManager({ exec, password: "secret" });
-  await manager.updateConfig("postgres", {
+  await manager.updateConfig("mysql", {
     memoryMb: 1024,
     maxConnections: 250,
-    sharedBuffersMb: 256,
-    workMemMb: 8,
-    maintenanceWorkMemMb: 128,
-    effectiveCacheSizeMb: 768,
-    statementTimeoutMs: 5_000,
+    innodbBufferPoolMb: 256,
+    tmpTableSizeMb: 32,
+    maxHeapTableSizeMb: 32,
+    waitTimeoutSeconds: 5_000,
     environment: {
-      PGOPTIONS: "-c statement_timeout=5000",
+      TZ: "UTC",
     },
   });
 
-  await manager.deploy("postgres");
+  await manager.deploy("mysql");
   const run = commands.find((entry) => entry[0] === "docker" && entry[1] === "run");
-  assert.ok(run.includes("PGOPTIONS=-c statement_timeout=5000"));
-  assert.ok(run.includes("max_connections=250"));
-  assert.ok(run.includes("shared_buffers=256MB"));
-  assert.ok(run.includes("work_mem=8MB"));
-  assert.ok(run.includes("maintenance_work_mem=128MB"));
-  assert.ok(run.includes("effective_cache_size=768MB"));
-  assert.ok(run.includes("statement_timeout=5000"));
+  assert.ok(run.includes("TZ=UTC"));
+  assert.ok(run.includes("--max-connections=250"));
+  assert.ok(run.includes("--innodb-buffer-pool-size=256M"));
+  assert.ok(run.includes("--tmp-table-size=32M"));
+  assert.ok(run.includes("--max-heap-table-size=32M"));
+  assert.ok(run.includes("--wait-timeout=5000"));
 });
 
 test("ComponentManager rejects managed and invalid environment variables", async () => {
@@ -162,15 +159,15 @@ test("ComponentManager rejects managed and invalid environment variables", async
   });
 
   await assert.rejects(
-    manager.updateConfig("postgres", { environment: { POSTGRES_PASSWORD: "override" } }),
+    manager.updateConfig("mysql", { environment: { MYSQL_PASSWORD: "override" } }),
     /managed by TestZone/,
   );
   await assert.rejects(
-    manager.updateConfig("postgres", { environment: { POSTGRES_MAX_CONNECTIONS: "five" } }),
-    /managed by TestZone/,
+    manager.updateConfig("mysql", { environment: { "INVALID-KEY": "five" } }),
+    /Invalid environment variable key/,
   );
   await assert.rejects(
-    manager.updateConfig("postgres", { maxConnections: 5 }),
+    manager.updateConfig("mysql", { maxConnections: 5 }),
     /between 10 and 10000/,
   );
 });

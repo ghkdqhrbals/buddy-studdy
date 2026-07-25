@@ -426,13 +426,13 @@
       },
       "targets": [
         {
-          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"cpuPercent\" and r.component == \"postgres\")\n  |> aggregateWindow(every: 5s, fn: mean, createEmpty: false)",
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"cpuPercent\" and r.component == \"mysql\")\n  |> aggregateWindow(every: 5s, fn: mean, createEmpty: false)",
           "refId": "A"
         }
       ],
-      "title": "PostgreSQL CPU",
+      "title": "MySQL CPU",
       "type": "timeseries",
-      "description": "PostgreSQL container CPU utilization sampled during TestZone runs."
+      "description": "MySQL container CPU utilization sampled during TestZone runs."
     },
     {
       "datasource": {
@@ -481,13 +481,13 @@
       },
       "targets": [
         {
-          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"memoryUsedMb\" and r.component == \"postgres\")\n  |> aggregateWindow(every: 5s, fn: mean, createEmpty: false)",
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"memoryUsedMb\" and r.component == \"mysql\")\n  |> aggregateWindow(every: 5s, fn: mean, createEmpty: false)",
           "refId": "A"
         }
       ],
-      "title": "PostgreSQL memory",
+      "title": "MySQL memory",
       "type": "timeseries",
-      "description": "PostgreSQL container memory usage sampled during TestZone runs."
+      "description": "MySQL container memory usage sampled during TestZone runs."
     },
     {
       "datasource": {
@@ -537,21 +537,21 @@
       },
       "targets": [
         {
-          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"connections\" and r.component == \"postgres\")\n  |> set(key: \"_field\", value: \"Total\")",
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"connections\" and r.component == \"mysql\")\n  |> set(key: \"_field\", value: \"Total\")",
           "refId": "A"
         },
         {
-          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"activeConnections\" and r.component == \"postgres\")\n  |> set(key: \"_field\", value: \"Active\")",
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"activeConnections\" and r.component == \"mysql\")\n  |> set(key: \"_field\", value: \"Active\")",
           "refId": "B"
         },
         {
-          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"maxConnections\" and r.component == \"postgres\")\n  |> set(key: \"_field\", value: \"Maximum\")",
+          "query": "from(bucket: \"${TESTZONE_INFLUX_BUCKET}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"testzone_component_runtime\" and r._field == \"maxConnections\" and r.component == \"mysql\")\n  |> set(key: \"_field\", value: \"Maximum\")",
           "refId": "C"
         }
       ],
-      "title": "PostgreSQL connections",
+      "title": "MySQL connections",
       "type": "timeseries",
-      "description": "Total, active, and configured maximum PostgreSQL connections."
+      "description": "Total, active, and configured maximum MySQL connections."
     },
     {
       "collapsed": false,

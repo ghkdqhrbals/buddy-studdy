@@ -5,10 +5,12 @@ import com.buddystudy.backend.stats.application.model.StatsQuery
 import com.buddystudy.backend.stats.application.port.inbound.GetStudyStatsUseCase
 import com.buddystudy.backend.study.adapter.inbound.web.dto.AnswerRequest
 import com.buddystudy.backend.study.adapter.inbound.web.dto.CreateStudyRequest
+import com.buddystudy.backend.study.adapter.inbound.web.dto.CreateStudyTopicRequest
 import com.buddystudy.backend.study.adapter.inbound.web.dto.RecordPublicityRequest
 import com.buddystudy.backend.study.adapter.inbound.web.dto.StudyTopicActivationRequest
 import com.buddystudy.backend.study.application.port.inbound.BrowseRecordsUseCase
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
+import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
 import com.buddystudy.backend.study.application.port.inbound.StudySyncUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudyUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudyTreeUseCase
@@ -75,18 +77,30 @@ class StudyWebAdapter(
             authentication.principalOrThrow(),
             CreateStudyCommand(
                 topic = body.topic,
-                parentStudyId = body.parentStudyId,
-                sortOrder = body.sortOrder,
                 difficultyLevel = body.difficultyLevel,
                 intervalMinutes = body.intervalMinutes,
                 enabled = body.enabled,
-                activeForQuestions = body.activeForQuestions,
                 notificationSound = body.notificationSound,
                 customPrompt = body.customPrompt,
                 openaiModel = body.openaiModel,
                 maxHistoryCount = body.maxHistoryCount,
             ),
         )
+
+    override suspend fun createStudyTopic(
+        parentStudyId: Long,
+        body: CreateStudyTopicRequest,
+        authentication: Authentication,
+    ) = studySyncUseCase.createStudyTopic(
+        principal = authentication.principalOrThrow(),
+        parentStudyId = parentStudyId,
+        command = CreateStudyTopicCommand(
+            topic = body.topic,
+            sortOrder = body.sortOrder,
+            difficultyLevel = body.difficultyLevel,
+            activeForQuestions = body.activeForQuestions,
+        ),
+    )
 
     override suspend fun deleteStudy(studyId: Long, authentication: Authentication): ResponseEntity<Unit> {
         studySyncUseCase.deleteStudy(authentication.principalOrThrow(), studyId)

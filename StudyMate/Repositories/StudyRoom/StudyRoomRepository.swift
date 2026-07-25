@@ -12,9 +12,16 @@ protocol StudyRoomRepository {
     func createStudy(
         registration: RemotePushRegistration,
         category: StudyCategory,
-        settings: StudySettings,
-        parentStudyID: Int?,
-        sortOrder: Int
+        settings: StudySettings
+    ) async throws -> BackendStudyRoom
+
+    func createStudyTopic(
+        registration: RemotePushRegistration,
+        parentStudyID: Int,
+        topic: String,
+        difficulty: Difficulty,
+        sortOrder: Int,
+        activeForQuestions: Bool
     ) async throws -> BackendStudyRoom
 
     func suggestStudyTopics(

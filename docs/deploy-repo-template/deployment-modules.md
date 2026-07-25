@@ -13,7 +13,7 @@ one workflow run just because they share a host.
 | Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, Server Dashboard, TestZone UI, Grafana, Loki, monitoring auth and access audit |
 | Monitoring routing | `Deploy BuddyStudy Monitoring Routes on MacBook Air` | manual | MacBook Air self-hosted | Routingflare routes for the monitoring UI and Grafana |
 | TestZone execution | `Deploy BuddyStudy TestZone on MacBook Air` | `testzone-image-published`, manual | MacBook Air self-hosted | k6 runner, script/project/run storage, InfluxDB, approved disposable test components |
-| Health monitor | Cloudflare Worker workflow | manual or source workflow | GitHub-hosted | Cloudflare Cron readiness checks and Slack alerts |
+| Health monitor | Cloudflare Worker workflow | manual or source workflow | GitHub-hosted | Explicit diagnostic endpoint only; production scheduled checks are disabled |
 
 Explicit release tags provide a CLI-independent deployment entry point:
 
@@ -43,6 +43,13 @@ deployment.
 - Backend deployment has no Redis Stream Coordinator runtime dependency and
   must not provision coordinator containers, networks, routes, secrets, or
   readiness settings.
+- Backend deployment owns one private Redis runtime with AOF `everysec`, RDB
+  snapshots, a retained Docker volume, and a password stored in AWS Secrets
+  Manager. Redis starts before the backend; Actions verifies only process
+  survival while application readiness and Grafana verify runtime behavior.
+- Scheduler readiness includes only jobs expected to succeed within the
+  readiness freshness window. Daily correction jobs remain visible in run
+  history and failure alerts but must not make a 15-minute readiness check stale.
 - Runtime health checks are not GitHub Actions deploy gates. GitHub Actions may
   validate deploy mechanics such as image pull, container process survival, and
   nginx syntax only.
@@ -147,6 +154,8 @@ deployment.
   prevents both post-deploy 502 responses and requests alternating between
   current and obsolete ingress configurations.
 - Cloudflare Health Monitor changes: deploy the Cloudflare Worker only.
+  `SCHEDULED_CHECKS_ENABLED=false` is the production default; Grafana owns
+  continuous outage alerting so Cron cannot consume Workers KV writes.
 - Portfolio runtime or hostname changes: run
   `portfolio-site/scripts/setup-routingflare.sh` on the owning Mac. The
   production process is supervised by `launchd`, and Routingflare maps

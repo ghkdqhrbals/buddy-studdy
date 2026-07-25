@@ -136,6 +136,18 @@ struct CommunityUseCase {
         )
     }
 
+    func submitFeedback(
+        registration: RemotePushRegistration,
+        category: String,
+        message: String
+    ) async throws {
+        try await repository.submitFeedback(
+            registration: registration,
+            category: category,
+            message: message
+        )
+    }
+
     func setQuestionLike(
         registration: RemotePushRegistration,
         questionID: String,

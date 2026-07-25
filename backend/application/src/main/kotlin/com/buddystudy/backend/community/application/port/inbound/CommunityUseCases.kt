@@ -17,4 +17,5 @@ interface CommunityUseCase {
     suspend fun createComment(principal: Principal, id: Long, body: String): CommunityCommentResponse
     suspend fun deleteComment(principal: Principal, id: Long, commentId: Long): CommunityCommentDeleteResponse
     suspend fun reportQuestion(principal: Principal, id: Long, command: ReportQuestionCommand)
+    suspend fun submitFeedback(principal: Principal?, deviceId: String?, command: SubmitFeedbackCommand)
 }
