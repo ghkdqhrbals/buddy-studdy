@@ -861,7 +861,7 @@ final class AppState: ObservableObject {
             clearErrorMessage(target)
             pageAccessPrompt = nil
             pendingTermsRequirementRetry = termsRetry
-            isRequiredTermsGatePresented = true
+            presentRequiredTermsGate()
             Task { [weak self] in
                 await self?.refreshPermissionEvaluations(reason: "terms-required")
             }
@@ -884,6 +884,19 @@ final class AppState: ObservableObject {
         }
 
         return false
+    }
+
+    private func presentRequiredTermsGate() {
+        guard isRequiredTermsGatePresented else {
+            isRequiredTermsGatePresented = true
+            return
+        }
+
+        isRequiredTermsGatePresented = false
+        Task { [weak self] in
+            await Task.yield()
+            self?.isRequiredTermsGatePresented = true
+        }
     }
 
     private func applyErrorMessage(_ message: String, target: AppErrorMessageTarget) {
@@ -5839,6 +5852,17 @@ final class AppState: ObservableObject {
             log(.info, "백엔드 학습을 추가했습니다. id=\(room.id), topic=\(room.topic)")
             await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
         } catch {
+            if handleAppError(
+                error,
+                fallback: "",
+                target: .none,
+                protectedPage: .myStudies,
+                termsRetry: { [weak self] in
+                    await self?.createBackendStudyIfPossible(category, settings: settings)
+                }
+            ) {
+                return
+            }
             log(.warning, "백엔드 학습 추가 실패: \(error.localizedDescription)")
         }
     }

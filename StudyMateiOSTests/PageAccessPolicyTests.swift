@@ -57,4 +57,22 @@ final class PageAccessPolicyTests: XCTestCase {
         XCTAssertFalse(resolution.requiresLogin)
         XCTAssertNil(resolution.featureMessage)
     }
+
+    func testTermsAgreementBackendErrorStillRoutesWhenOptionalPayloadCannotDecode() {
+        let payload = """
+        {
+          "error": {
+            "errorCode": "TERMS_AGREEMENT_REQUIRED",
+            "requiredTerms": [{"unexpected": true}]
+          }
+        }
+        """
+        let error = RemotePushBackendError.httpStatus(403, payload, nil)
+
+        let resolution = AppErrorHandlingPolicy.resolve(error, fallback: "")
+
+        XCTAssertTrue(resolution.requiresTermsAgreement)
+        XCTAssertFalse(resolution.requiresLogin)
+        XCTAssertNil(resolution.featureMessage)
+    }
 }

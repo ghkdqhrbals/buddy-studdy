@@ -2645,10 +2645,10 @@ struct BackendAPIError: Decodable, Equatable {
         message = try container.decodeIfPresent(String.self, forKey: .message) ?? description ?? ""
         requestID = try container.decodeIfPresent(String.self, forKey: .requestID)
         status = try container.decodeIfPresent(Int.self, forKey: .status)
-        requiredPermissions = try container.decodeIfPresent([String].self, forKey: .requiredPermissions)
-        requiredTerms = try container.decodeIfPresent([BackendTerms].self, forKey: .requiredTerms)
-        requiredActions = try container.decodeIfPresent([String].self, forKey: .requiredActions)
-        metadata = try container.decodeIfPresent(BackendAPIErrorMetadata.self, forKey: .metadata)
+        requiredPermissions = try? container.decodeIfPresent([String].self, forKey: .requiredPermissions)
+        requiredTerms = try? container.decodeIfPresent([BackendTerms].self, forKey: .requiredTerms)
+        requiredActions = try? container.decodeIfPresent([String].self, forKey: .requiredActions)
+        metadata = try? container.decodeIfPresent(BackendAPIErrorMetadata.self, forKey: .metadata)
     }
 }
 

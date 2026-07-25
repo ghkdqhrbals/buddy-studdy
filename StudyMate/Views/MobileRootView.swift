@@ -125,11 +125,11 @@ struct MobileRootView: View {
                     .frame(width: 0, height: 0)
                 }
                 #endif
-                .sheet(isPresented: $appState.isRequiredTermsGatePresented) {
-                    MobileRequiredTermsGateSheet()
-                        .environmentObject(appState)
-                }
             }
+        }
+        .fullScreenCover(isPresented: $appState.isRequiredTermsGatePresented) {
+            MobileRequiredTermsGateSheet()
+                .environmentObject(appState)
         }
     }
 

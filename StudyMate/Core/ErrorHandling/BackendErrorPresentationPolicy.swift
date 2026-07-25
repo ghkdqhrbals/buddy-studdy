@@ -174,13 +174,15 @@ enum BackendErrorPresentationPolicy {
 
     static func requiresTermsAgreement(_ error: RemotePushBackendError) -> Bool {
         switch error {
-        case .httpStatus(_, _, let apiError):
-            guard let apiError else {
-                return false
+        case .httpStatus(_, let body, let apiError):
+            if let apiError {
+                return apiError.code == "TERMS_AGREEMENT_REQUIRED"
+                    || apiError.code == "TERMS_REAGREEMENT_REQUIRED"
+                    || !(apiError.requiredTerms ?? []).isEmpty
             }
-            return apiError.code == "TERMS_AGREEMENT_REQUIRED"
-                || apiError.code == "TERMS_REAGREEMENT_REQUIRED"
-                || !(apiError.requiredTerms ?? []).isEmpty
+            let normalizedBody = body.uppercased()
+            return normalizedBody.contains("TERMS_AGREEMENT_REQUIRED")
+                || normalizedBody.contains("TERMS_REAGREEMENT_REQUIRED")
         case .invalidResponse:
             return false
         }
