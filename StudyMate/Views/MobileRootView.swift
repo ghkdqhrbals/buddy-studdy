@@ -112,12 +112,13 @@ struct MobileRootView: View {
                     .tag(AppTab.statistics)
 
                     NavigationStack {
-                        MobileSettingsView()
+                        MobileNotificationsTab()
                     }
                     .tabItem {
-                        Label(strings.tabSettings, systemImage: "gearshape.fill")
+                        Label(strings.notifications, systemImage: "bell.fill")
                     }
-                    .tag(AppTab.settings)
+                    .badge(appState.notificationUnreadCount)
+                    .tag(AppTab.notifications)
                 }
                 .background(Color(.systemBackground))
                 .onAppear {
@@ -155,6 +156,28 @@ struct MobileRootView: View {
         }
 
         return appState.strings.tabStudy
+    }
+}
+
+private struct MobileNotificationsTab: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var isPresented = true
+    @State private var forwardedRoute: NotificationForwardRoute?
+
+    var body: some View {
+        MobileNotificationsView(
+            isPresented: $isPresented,
+            forwardedRoute: $forwardedRoute
+        )
+        .padding(.horizontal, 16)
+        .mobileTabTitle(appState.strings.notificationInbox)
+        .onChange(of: isPresented) { _, newValue in
+            guard !newValue else {
+                return
+            }
+            isPresented = true
+            appState.setSelectedTab(.home)
+        }
     }
 }
 
@@ -1007,12 +1030,14 @@ private struct MobileHomeView: View {
     @State private var editMode: EditMode = .inactive
     @State private var hasLoadedCommunityQuestions = false
     @State private var editingStudyCategory: StudyCategory?
+    @State private var deletionStudyCategory: StudyCategory?
     @State private var isAddingStudyCategory = false
     @State private var selectedCommunityQuestionRoute: CommunityQuestionRoute?
     @State private var notificationForwardRoute: NotificationForwardRoute?
     @State private var isHomeLoginPagePresented = false
     @State private var isShowingNotifications = false
     @State private var isShowingProfileSettings = false
+    @State private var isShowingSettings = false
     @State private var isShowingFeedback = false
     @State private var isShowingEmailSignIn = false
     @State private var isSearchVisible = false
@@ -1129,6 +1154,9 @@ private struct MobileHomeView: View {
             MobileLoginPage()
                 .padding(.horizontal, 16)
         }
+        .navigationDestination(isPresented: $isShowingSettings) {
+            MobileSettingsView()
+        }
         .navigationDestination(isPresented: $isShowingFeedback) {
             MobileFeedbackView()
         }
@@ -1157,13 +1185,6 @@ private struct MobileHomeView: View {
                     .sharedBackgroundVisibility(.hidden)
                 }
 
-                if !isHomeSearchActive {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        notificationToolbarButton(strings: strings)
-                    }
-                    .sharedBackgroundVisibility(.hidden)
-                }
-
                 ToolbarItem(placement: .topBarTrailing) {
                     homeToolbarSearchControl(strings: strings)
                 }
@@ -1172,12 +1193,6 @@ private struct MobileHomeView: View {
                 if shouldShowHomeAddToolbarButton {
                     ToolbarItem(placement: .topBarTrailing) {
                         homeAddToolbarButton(strings: strings)
-                    }
-                }
-
-                if !isHomeSearchActive {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        notificationToolbarButton(strings: strings)
                     }
                 }
 
@@ -1288,6 +1303,28 @@ private struct MobileHomeView: View {
                 )
             }
         }
+        .confirmationDialog(
+            deletionStudyCategory.map { strings.deleteStudySubtree($0.title) } ?? strings.deleteStudy,
+            isPresented: Binding(
+                get: { deletionStudyCategory != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        deletionStudyCategory = nil
+                    }
+                }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let deletionStudyCategory {
+                Button(strings.deleteStudy, role: .destructive) {
+                    appState.deleteStudyCategory(id: deletionStudyCategory.id)
+                    self.deletionStudyCategory = nil
+                }
+            }
+            Button(strings.cancel, role: .cancel) {
+                deletionStudyCategory = nil
+            }
+        }
         .navigationDestination(item: $selectedCommunityQuestionRoute) { route in
             NotificationCommunityQuestionDestination(questionID: route.id)
         }
@@ -1314,6 +1351,8 @@ private struct MobileHomeView: View {
         switch request.route {
         case .profile:
             isShowingProfileSettings = true
+        case .settings, .settingsOpenAI:
+            isShowingSettings = true
         case .studyList:
             selectedHomeScope = .my
         case .publicQuestions:
@@ -1468,6 +1507,12 @@ private struct MobileHomeView: View {
                     editingStudyCategory = category
                 } label: {
                     Label(strings.edit, systemImage: "pencil")
+                }
+
+                Button(role: .destructive) {
+                    deletionStudyCategory = category
+                } label: {
+                    Label(strings.deleteStudy, systemImage: "trash")
                 }
             }
         }
@@ -1646,8 +1691,6 @@ private struct MobileHomeView: View {
                 .accessibilityLabel(strings.newStudyCategory)
             }
 
-            notificationToolbarButton(strings: strings)
-
             Button {
                 showHomeSearch()
             } label: {
@@ -1677,28 +1720,6 @@ private struct MobileHomeView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(strings.newStudyCategory)
-    }
-
-    private func notificationToolbarButton(strings: AppStrings) -> some View {
-        Button {
-            isShowingNotifications = true
-        } label: {
-            ZStack(alignment: .topTrailing) {
-                MobileToolbarIconButtonLabel(systemName: "bell.fill")
-
-                if appState.notificationUnreadCount > 0 {
-                    Text(appState.notificationUnreadCount > 99 ? "99+" : "\(appState.notificationUnreadCount)")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 5)
-                        .frame(minWidth: 18, minHeight: 18)
-                        .background(Color.red, in: Capsule())
-                        .offset(x: 7, y: -5)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(strings.notificationInbox)
     }
 
     @MainActor
@@ -2430,6 +2451,10 @@ private struct MobileStudyTreeView: View {
                                         StudyTreeNode(
                                             room: placement.room,
                                             strings: strings,
+                                            hasPendingQuestion:
+                                                appState.pendingQuestionCount(
+                                                    categoryID: String(placement.room.id)
+                                                ) > 0,
                                             isSelectionMode: isSelectionMode,
                                             isSelected: selectedRoomIDs.contains(placement.room.id),
                                             onOpen: { selectedRoomID = placement.room.id },
@@ -3266,6 +3291,7 @@ private extension UIView {
 private struct StudyTreeNode: View {
     var room: BackendStudyRoom
     var strings: AppStrings
+    var hasPendingQuestion: Bool
     var isSelectionMode: Bool
     var isSelected: Bool
     var onOpen: () -> Void
@@ -3343,6 +3369,21 @@ private struct StudyTreeNode: View {
             }
         }
         .overlay(alignment: .topTrailing) {
+            if !isSelectionMode, hasPendingQuestion {
+                Text("1")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 22, height: 22)
+                    .background(Color.red, in: Circle())
+                    .overlay {
+                        Circle()
+                            .stroke(Color(.systemBackground), lineWidth: 2)
+                    }
+                    .offset(x: 5, y: -5)
+                    .accessibilityLabel(strings.pendingQuestionCount(1))
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
             if !isSelectionMode {
                 Menu {
                     Button(action: onAddRecommendedChild) {
@@ -3365,7 +3406,7 @@ private struct StudyTreeNode: View {
                         .background(Color(.systemBackground), in: Circle())
                 }
                 .accessibilityLabel(strings.addSubstudy)
-                .offset(x: 4, y: -4)
+                .offset(x: 4, y: 4)
             }
         }
         .frame(
@@ -4976,19 +5017,31 @@ private struct MobileProfileSettingsSheet: View {
 
     var body: some View {
         NavigationStack {
-            if appState.isCommunitySessionActive {
-                List {
-                    Section {
-                        NavigationLink {
-                            MobileProfileEditorView()
-                        } label: {
-                            profileDestinationLabel(
-                                title: strings.profile,
-                                subtitle: appState.communityProfile?.displayName,
-                                systemImage: "person.crop.circle"
-                            )
-                        }
+            List {
+                Section {
+                    NavigationLink {
+                        MobileProfileEditorView()
+                    } label: {
+                        profileDestinationLabel(
+                            title: strings.profile,
+                            subtitle: appState.communityProfile?.displayName,
+                            systemImage: "person.crop.circle"
+                        )
+                    }
 
+                    NavigationLink {
+                        MobileSettingsView()
+                    } label: {
+                        profileDestinationLabel(
+                            title: strings.tabSettings,
+                            subtitle: nil,
+                            systemImage: "gearshape"
+                        )
+                    }
+                }
+
+                if appState.isCommunitySessionActive {
+                    Section {
                         NavigationLink {
                             MobileQuestionUsageView()
                         } label: {
@@ -4999,7 +5052,9 @@ private struct MobileProfileSettingsSheet: View {
                             )
                         }
                     }
+                }
 
+                if appState.isCommunitySessionActive {
                     Section {
                         NavigationLink {
                             MobileNotificationSettingsView()
@@ -5021,30 +5076,30 @@ private struct MobileProfileSettingsSheet: View {
                             )
                         }
                     }
+                }
 
-                    Section {
-                        HStack {
-                            Text(strings.appVersion)
-                            Spacer()
-                            Text(appVersionText)
-                                .foregroundStyle(.secondary)
-                        }
+                Section {
+                    HStack {
+                        Text(strings.appVersion)
+                        Spacer()
+                        Text(appVersionText)
+                            .foregroundStyle(.secondary)
                     }
                 }
-                .navigationTitle(strings.profile)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(strings.done) {
-                            dismiss()
-                        }
+            }
+            .navigationTitle(strings.profile)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(strings.done) {
+                        dismiss()
                     }
                 }
-                .task {
+            }
+            .task {
+                if appState.isCommunitySessionActive {
                     await appState.loadCommunityProfile()
                 }
-            } else {
-                MobileProfileEditorView()
             }
         }
     }
@@ -5136,7 +5191,6 @@ private struct MobileProfileEditorView: View {
     @State private var profileDisplayName = ""
     @State private var draftAvatarSymbolName = BuddyStudyAvatar.symbolName
     @State private var draftAvatarColorSeed = "avatar-color-sage"
-    @State private var allowPublicQuestionsAccess = true
     @State private var isShowingEmailSignIn = false
     @State private var isLoadingProfileDraft = false
     @State private var wasSignedInWhenOpened = false
@@ -5156,14 +5210,12 @@ private struct MobileProfileEditorView: View {
 
         let profile = appState.communityProfile
         let currentDisplayName = profile?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let currentPublicQuestions = profile?.pageAccess.publicQuestions ?? true
         let currentAvatar = ProfileAvatarOption.canonicalName(
             for: profile?.avatarSymbolName ?? appState.profileAvatarSymbolName
         )
         let currentColor = profile?.avatarColorSeed ?? appState.profileAvatarColorSeed
 
         return trimmedProfileDisplayName != currentDisplayName
-            || allowPublicQuestionsAccess != currentPublicQuestions
             || draftAvatarSymbolName != currentAvatar
             || draftAvatarColorSeed != currentColor
     }
@@ -5284,12 +5336,6 @@ private struct MobileProfileEditorView: View {
                     .listRowBackground(Color.clear)
 
                     Section {
-                        Toggle(strings.publicQuestionsPage, isOn: $allowPublicQuestionsAccess)
-                    } footer: {
-                        Text(strings.publicQuestionsPageHelp)
-                    }
-
-                    Section {
                         Button(role: .destructive) {
                             appState.signOutFromCommunity()
                             dismiss()
@@ -5388,7 +5434,6 @@ private struct MobileProfileEditorView: View {
                 }
 
                 profileDisplayName = profile.displayName
-                allowPublicQuestionsAccess = profile.pageAccess.publicQuestions
                 draftAvatarSymbolName = ProfileAvatarOption.canonicalName(for: profile.avatarSymbolName)
                 draftAvatarColorSeed = profile.avatarColorSeed
             }
@@ -5414,7 +5459,6 @@ private struct MobileProfileEditorView: View {
 
     private func resetDraftProfile() {
         profileDisplayName = appState.communityProfile?.displayName ?? ""
-        allowPublicQuestionsAccess = appState.communityProfile?.pageAccess.publicQuestions ?? true
         draftAvatarSymbolName = ProfileAvatarOption.canonicalName(
             for: appState.communityProfile?.avatarSymbolName ?? appState.profileAvatarSymbolName
         )
@@ -6341,11 +6385,6 @@ private struct MobileHomeCategoryRow: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                     .font(.body.weight(.semibold))
-
-                Text(category.difficulty.displayName(language: strings.language))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -7299,6 +7338,39 @@ private struct MobileSettingsView: View {
 
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 18) {
+                if appState.isCommunitySessionActive {
+                    MobileSettingsCard(
+                        title: strings.publicQuestionsPage,
+                        systemImage: "person.2"
+                    ) {
+                        Toggle(
+                            isOn: Binding(
+                                get: {
+                                    appState.communityProfile?.allowPublicQuestions ?? true
+                                },
+                                set: { allowed in
+                                    Task {
+                                        await appState.setPublicQuestionsAllowed(allowed)
+                                    }
+                                }
+                            )
+                        ) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(strings.publicQuestionsPage)
+                                    .font(.body.weight(.medium))
+                                Text(strings.publicQuestionsPageHelp)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .disabled(
+                            appState.communityProfile == nil ||
+                                appState.isUpdatingCommunityProfile
+                        )
+                    }
+                }
+
                 MobileSettingsCard(
                     title: strings.learningRhythmSettings,
                     systemImage: "timer"

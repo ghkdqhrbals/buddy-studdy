@@ -15,6 +15,7 @@ data class UserProfileResponse(
     val avatarColorSeed: String = "avatar-color-mint",
     val avatarMode: String = "BUILDER",
     val avatarConfig: Map<String, String>? = null,
+    val allowPublicQuestions: Boolean = true,
 )
 
 data class AvatarCategoryResponse(

@@ -16,6 +16,7 @@ fun UserEntity.toProfile() = UserProfileResponse(
     avatarColorSeed = avatarColorSeed,
     avatarMode = avatarMode,
     avatarConfig = avatarConfig.toAvatarConfigMap(),
+    allowPublicQuestions = allowPublicQuestions,
 )
 
 fun String?.toAvatarConfigMap(): Map<String, String>? {

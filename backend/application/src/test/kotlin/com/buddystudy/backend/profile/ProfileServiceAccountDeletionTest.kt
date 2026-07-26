@@ -86,6 +86,29 @@ class ProfileServiceAccountDeletionTest {
     }
 
     @Test
+    fun `update profile persists public question visibility preference`(): Unit = runBlocking {
+        val activeUser = users.save(
+            UserEntity(
+                provider = "GOOGLE",
+                providerId = "public-question-preference",
+                status = "ACTIVE",
+                displayName = "Jamma",
+                allowPublicQuestions = true,
+            )
+        )
+
+        val response = service.updateProfile(
+            Principal(activeUser.id, "dev-current", 1, false, "ACTIVE"),
+            com.buddystudy.backend.profile.application.port.inbound.ProfileUpdateCommand(
+                allowPublicQuestions = false,
+            ),
+        )
+
+        assertThat(response.allowPublicQuestions).isFalse()
+        assertThat(users.findById(activeUser.id)!!.allowPublicQuestions).isFalse()
+    }
+
+    @Test
     fun `switching to a pixel avatar removes the legacy profile photo`(): Unit = runBlocking {
         val activeUser = users.save(
             UserEntity(

@@ -58,7 +58,7 @@ enum PageAccessPolicy {
             return .records
         case .statistics:
             return .statistics
-        case .home, .settings:
+        case .home, .settings, .notifications:
             return nil
         }
     }

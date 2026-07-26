@@ -58,6 +58,7 @@ final class AppState: ObservableObject {
     @Published var apiKey: String = ""
     @Published var draftAPIKey: String = ""
     @Published var isGeneratingQuestion = false
+    @Published private(set) var generatingQuestionCategoryID: String?
     @Published var isGradingAnswer = false
     @Published var isRunning: Bool
     @Published private var recordsState = RecordsStateStore()
@@ -581,9 +582,9 @@ final class AppState: ObservableObject {
 
     var mobileVisibleTab: AppTab {
         switch selectedTab {
-        case .home, .records, .statistics, .settings:
+        case .home, .records, .statistics, .notifications:
             return selectedTab
-        case .study:
+        case .study, .settings:
             return .home
         }
     }
@@ -620,8 +621,8 @@ final class AppState: ObservableObject {
                 selectedTab = .records
             case "statistics", "stats":
                 selectedTab = .statistics
-            case "settings":
-                selectedTab = .settings
+            case "notifications":
+                selectedTab = .notifications
             default:
                 selectedTab = .home
             }
@@ -721,7 +722,8 @@ final class AppState: ObservableObject {
             setSelectedTab(.statistics)
             return mobileVisibleTab == .statistics
         case .settings, .settingsOpenAI:
-            setSelectedTab(.settings)
+            selectedTab = .home
+            homeStudyRoute = nil
             appRouteRequest = AppRouteRequest(route: route)
             return true
         case .profile, .publicQuestion:
@@ -819,7 +821,7 @@ final class AppState: ObservableObject {
             #else
             return nil
             #endif
-        case .home, .settings:
+        case .home, .settings, .notifications:
             return nil
         }
     }
@@ -2945,7 +2947,8 @@ final class AppState: ObservableObject {
         avatarSymbolName: String? = nil,
         avatarColorSeed: String? = nil,
         avatarMode: String? = nil,
-        avatarConfig: [String: String]? = nil
+        avatarConfig: [String: String]? = nil,
+        allowPublicQuestions: Bool? = nil
     ) async {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-profile-update") else {
             return
@@ -2955,7 +2958,8 @@ final class AppState: ObservableObject {
             avatarSymbolName: avatarSymbolName,
             avatarColorSeed: avatarColorSeed,
             avatarMode: avatarMode,
-            avatarConfig: avatarConfig
+            avatarConfig: avatarConfig,
+            allowPublicQuestions: allowPublicQuestions
         )
         isUpdatingCommunityProfile = true
 
@@ -2968,7 +2972,8 @@ final class AppState: ObservableObject {
                     avatarSymbolName: avatarSymbolName,
                     avatarColorSeed: avatarColorSeed,
                     avatarMode: avatarMode,
-                    avatarConfig: avatarConfig
+                    avatarConfig: avatarConfig,
+                    allowPublicQuestions: allowPublicQuestions
                 )
             },
             onSuccess: { profile in
@@ -2990,7 +2995,8 @@ final class AppState: ObservableObject {
         avatarSymbolName: String?,
         avatarColorSeed: String?,
         avatarMode: String?,
-        avatarConfig: [String: String]?
+        avatarConfig: [String: String]?,
+        allowPublicQuestions: Bool?
     ) {
         let trimmedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedAvatarSymbolName = avatarSymbolName?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3032,6 +3038,7 @@ final class AppState: ObservableObject {
                 avatarColorSeed: nextAvatarColorSeed,
                 avatarMode: avatarMode ?? profile.avatarMode,
                 avatarConfig: avatarConfig ?? profile.avatarConfig,
+                allowPublicQuestions: allowPublicQuestions ?? profile.allowPublicQuestions,
                 pageAccess: profile.pageAccess
             )
         }
@@ -3046,6 +3053,22 @@ final class AppState: ObservableObject {
                 "avatarConfigSlots=\((avatarConfig ?? [:]).keys.sorted().joined(separator: ","))",
             ],
             deduplicate: false
+        )
+    }
+
+    func setPublicQuestionsAllowed(_ allowed: Bool) async {
+        guard let profile = communityProfile else {
+            return
+        }
+
+        await updateCommunityProfile(
+            displayName: profile.displayName,
+            bio: profile.bio,
+            avatarSymbolName: profile.avatarSymbolName,
+            avatarColorSeed: profile.avatarColorSeed,
+            avatarMode: profile.avatarMode,
+            avatarConfig: profile.avatarConfig,
+            allowPublicQuestions: allowed
         )
     }
 
@@ -4634,9 +4657,12 @@ final class AppState: ObservableObject {
             return
         }
 
+        let resolvedCategoryID = studyCategoryID ?? settings.selectedStudyCategoryID
+        generatingQuestionCategoryID = resolvedCategoryID
         isGeneratingQuestion = true
         defer {
             isGeneratingQuestion = false
+            generatingQuestionCategoryID = nil
         }
 
         guard let registration = await backendRegistrationForOpenAIRequests(reason: manual ? "manual-question" : "scheduled-question") else {
@@ -4647,6 +4673,10 @@ final class AppState: ObservableObject {
         }
 
         await generateBackendQuestion(registration: registration, manual: manual, studyCategoryID: studyCategoryID)
+    }
+
+    func isGeneratingQuestion(categoryID: String?) -> Bool {
+        isGeneratingQuestion && generatingQuestionCategoryID == categoryID
     }
 
     private func generateBackendQuestion(registration: RemotePushRegistration, manual: Bool, studyCategoryID: String?) async {

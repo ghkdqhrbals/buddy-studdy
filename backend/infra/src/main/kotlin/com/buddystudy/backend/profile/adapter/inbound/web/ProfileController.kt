@@ -104,6 +104,7 @@ private fun ProfileUpdateRequest.toCommand() = ProfileUpdateCommand(
     avatarColorSeed = avatarColorSeed,
     avatarMode = avatarMode,
     avatarConfig = avatarConfig,
+    allowPublicQuestions = allowPublicQuestions,
 )
 
 private fun AvatarUpdateRequest.toCommand() = AvatarUpdateCommand(

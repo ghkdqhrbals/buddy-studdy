@@ -704,6 +704,7 @@ enum AppTab: Int, Hashable {
     case settings
     case records
     case statistics
+    case notifications
 }
 
 struct HomeStudyRoute: Identifiable, Hashable {
@@ -2516,6 +2517,7 @@ struct AppStrings {
     var current: String { text("현재", "Current") }
     var openPendingQuestion: String { text("답변하기", "Answer") }
     var question: String { text("질문", "Question") }
+    var fetchingQuestion: String { text("질문을 가져오고 있어요…", "Getting your question…") }
     var noQuestion: String { text("질문 없음", "No Question") }
     var noQuestionDescription: String { text("설정을 저장한 뒤 새 질문을 생성하세요.", "Save settings, then create a new question.") }
     var duplicateQuestionSkipped: String {

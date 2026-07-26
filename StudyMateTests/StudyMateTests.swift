@@ -216,6 +216,24 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(notificationsPage.totalCount, 0)
     }
 
+    func testCommunityProfileDecodesPublicQuestionPreference() throws {
+        let payload = Data(
+            """
+            {
+              "id": 4,
+              "displayName": "Jamma",
+              "bio": "",
+              "avatarUrl": null,
+              "allowPublicQuestions": false
+            }
+            """.utf8
+        )
+
+        let profile = try JSONDecoder().decode(CommunityUserProfile.self, from: payload)
+
+        XCTAssertFalse(profile.allowPublicQuestions)
+    }
+
     func testAppErrorHandlingNormalizesDecodingErrorsWithoutPopup() {
         struct RequiredBodyPayload: Decodable {
             let body: String
@@ -5128,7 +5146,8 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         avatarSymbolName: String?,
         avatarColorSeed: String?,
         avatarMode: String?,
-        avatarConfig: [String: String]?
+        avatarConfig: [String: String]?,
+        allowPublicQuestions: Bool?
     ) async throws -> CommunityUserProfile {
         if let displayName {
             updatedProfileDisplayNames.append(displayName)
@@ -5141,7 +5160,8 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
             avatarSymbolName: avatarSymbolName ?? "pixel-buddy",
             avatarColorSeed: avatarColorSeed ?? "avatar-color-mint",
             avatarMode: avatarMode ?? "LEGACY",
-            avatarConfig: avatarConfig
+            avatarConfig: avatarConfig,
+            allowPublicQuestions: allowPublicQuestions ?? true
         )
     }
 

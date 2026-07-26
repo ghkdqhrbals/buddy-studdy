@@ -105,7 +105,8 @@ struct CommunityUseCase {
         avatarSymbolName: String?,
         avatarColorSeed: String?,
         avatarMode: String? = nil,
-        avatarConfig: [String: String]? = nil
+        avatarConfig: [String: String]? = nil,
+        allowPublicQuestions: Bool? = nil
     ) async throws -> CommunityUserProfile {
         try await repository.updateMyProfile(
             registration: registration,
@@ -114,7 +115,8 @@ struct CommunityUseCase {
             avatarSymbolName: avatarSymbolName,
             avatarColorSeed: avatarColorSeed,
             avatarMode: avatarMode,
-            avatarConfig: avatarConfig
+            avatarConfig: avatarConfig,
+            allowPublicQuestions: allowPublicQuestions
         )
     }
 

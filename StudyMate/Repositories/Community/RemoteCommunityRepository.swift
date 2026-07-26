@@ -105,7 +105,8 @@ struct RemoteCommunityRepository: CommunityRepository {
         avatarSymbolName: String?,
         avatarColorSeed: String?,
         avatarMode: String?,
-        avatarConfig: [String: String]?
+        avatarConfig: [String: String]?,
+        allowPublicQuestions: Bool?
     ) async throws -> CommunityUserProfile {
         try await backendClient.updateMyProfile(
             registration: registration,
@@ -114,7 +115,8 @@ struct RemoteCommunityRepository: CommunityRepository {
             avatarSymbolName: avatarSymbolName,
             avatarColorSeed: avatarColorSeed,
             avatarMode: avatarMode,
-            avatarConfig: avatarConfig
+            avatarConfig: avatarConfig,
+            allowPublicQuestions: allowPublicQuestions
         )
     }
 

@@ -49,6 +49,10 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 12. Tree nodes are circular. The tree supports vertical/horizontal layout, pinch and button zoom, draggable saved positions, layout reset, and multi-select activation, pause, and deletion.
 13. Root creation, descendant topic creation, and question generation are separate API/client methods. Creating a root or descendant never consumes monthly question allowance.
 14. The Profile > Usage page shows the current monthly question allowance, remaining count, and exact reset time. When the allowance is exhausted, question creation is blocked with a localized inline explanation.
+15. Root study rows omit level metadata. Level is presented only where it affects a specific tree topic.
+16. A tree node with an unanswered question shows one red badge at its upper-right corner; the node action menu remains separate at the lower-right corner.
+17. Study deletion always requires an explicit destructive confirmation.
+18. Manual question generation immediately shows an inline conversation-style loading message for the selected topic until the request completes.
 
 ### Records
 
@@ -71,12 +75,13 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 
 ### Settings
 
-1. Profile settings are a category hub, not one long form. Profile, Usage, Notifications, and Terms each open a dedicated page.
+1. Profile is a category hub, not one long form. Profile, Settings, Usage, Notifications, and Terms each open a dedicated page.
 2. OpenAI API key and model are managed separately from study settings, but OpenAI requests are performed only by the backend.
 3. Notification permission opens system settings; no in-app test notification button is shown.
-4. Question visibility is explicit and defaults to private.
+4. Public-question visibility is stored as an account preference and is changed from Settings, not from the profile editor.
 5. User-facing debugging logs are not provided.
 6. Decorative setting-row icons are omitted so labels and controls remain the primary scan targets.
+7. The primary iOS tab bar contains Home, Records, Statistics, and Notifications. Settings is reached through Profile.
 
 ### Identity
 

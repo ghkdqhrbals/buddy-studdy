@@ -105,7 +105,10 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - `HistoryView`: record search, pagination, detail, and deletion.
   - `StatisticsView`: topic-level statistics, period filtering, trend charts, and grouped topic stats.
   - `SettingsView`: macOS settings.
-  - `MobileRootView`: iOS tabs, onboarding, and settings.
+- `MobileRootView`: iOS tabs, onboarding, profile category hub, settings, notification inbox, and study-tree interaction.
+  - The primary tab bar exposes Home, Records, Statistics, and Notifications. Settings is a profile-hub destination so account and app preferences share one predictable entry point.
+  - Public-question visibility is persisted through `PATCH /api/v1/profile` as `allowPublicQuestions`; it is independent of protected-page access policy.
+  - Per-topic question generation exposes its category-scoped in-flight state so only the selected study room renders the inline loading message.
 
 ## Data Flow
 

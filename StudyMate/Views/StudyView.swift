@@ -50,9 +50,12 @@ struct StudyView: View {
                                 appState.skipStudyRoomRecord(record)
                             }
                         )
+                    } else if appState.isGeneratingQuestion(categoryID: targetCategoryID) {
+                        questionLoadingMessage(strings: strings)
+                            .frame(maxWidth: .infinity, minHeight: 140)
                     } else {
                         noQuestionView(strings: strings)
-                        .frame(maxWidth: .infinity, minHeight: 140)
+                            .frame(maxWidth: .infinity, minHeight: 140)
                     }
                 }
             }
@@ -109,6 +112,23 @@ struct StudyView: View {
         .onChange(of: appState.pendingQuestionLimitCategoryID) {
             presentPendingLimitNoticeIfNeeded()
         }
+    }
+
+    private func questionLoadingMessage(strings: AppStrings) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            ProgressView()
+                .controlSize(.regular)
+
+            Text(strings.fetchingQuestion)
+                .font(.body.weight(.medium))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 
     private var canSubmitAnswer: Bool {

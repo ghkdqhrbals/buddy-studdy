@@ -414,7 +414,8 @@ protocol RemotePushBackendClientProtocol {
         avatarSymbolName: String?,
         avatarColorSeed: String?,
         avatarMode: String?,
-        avatarConfig: [String: String]?
+        avatarConfig: [String: String]?,
+        allowPublicQuestions: Bool?
     ) async throws -> CommunityUserProfile
 
     func withdrawMyProfile(registration: RemotePushRegistration) async throws -> RemotePushRegistration
@@ -1256,7 +1257,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         avatarSymbolName: String? = nil,
         avatarColorSeed: String? = nil,
         avatarMode: String? = nil,
-        avatarConfig: [String: String]? = nil
+        avatarConfig: [String: String]? = nil,
+        allowPublicQuestions: Bool? = nil
     ) async throws -> CommunityUserProfile {
         var request = authenticatedRequest(
             registration: registration,
@@ -1271,7 +1273,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                 avatarSymbolName: avatarSymbolName,
                 avatarColorSeed: avatarColorSeed,
                 avatarMode: avatarMode,
-                avatarConfig: avatarConfig
+                avatarConfig: avatarConfig,
+                allowPublicQuestions: allowPublicQuestions
             )
         )
         let data = try await perform(request)
@@ -1862,6 +1865,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var avatarColorSeed: String?
         var avatarMode: String?
         var avatarConfig: [String: String]?
+        var allowPublicQuestions: Bool?
     }
 
     private struct AvatarUpdateRequest: Encodable {
@@ -2326,6 +2330,7 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
     var avatarColorSeed: String
     var avatarMode: String
     var avatarConfig: [String: String]?
+    var allowPublicQuestions: Bool = true
     var pageAccess: CommunityPageAccess = .restricted
 
     enum CodingKeys: String, CodingKey {
@@ -2340,6 +2345,7 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
         case avatarColorSeed
         case avatarMode
         case avatarConfig
+        case allowPublicQuestions
         case pageAccess
     }
 
@@ -2355,6 +2361,7 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
         avatarColorSeed: String = "avatar-color-mint",
         avatarMode: String = "LEGACY",
         avatarConfig: [String: String]? = nil,
+        allowPublicQuestions: Bool = true,
         pageAccess: CommunityPageAccess = .restricted
     ) {
         self.id = id
@@ -2368,6 +2375,7 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
         self.avatarColorSeed = avatarColorSeed
         self.avatarMode = avatarMode
         self.avatarConfig = avatarConfig
+        self.allowPublicQuestions = allowPublicQuestions
         self.pageAccess = pageAccess
     }
 
@@ -2385,6 +2393,8 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
         avatarMode = try container.decodeIfPresent(String.self, forKey: .avatarMode) ?? "LEGACY"
         avatarConfig = try container.decodeIfPresent([String: String].self, forKey: .avatarConfig)
         pageAccess = try container.decodeIfPresent(CommunityPageAccess.self, forKey: .pageAccess) ?? .restricted
+        allowPublicQuestions = try container.decodeIfPresent(Bool.self, forKey: .allowPublicQuestions)
+            ?? pageAccess.publicQuestions
     }
 }
 

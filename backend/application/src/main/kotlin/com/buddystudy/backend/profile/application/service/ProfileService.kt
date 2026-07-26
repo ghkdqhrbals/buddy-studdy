@@ -98,6 +98,7 @@ class ProfileService(
         command.bio?.let { user.bio = it.take(500) }
         command.avatarSymbolName?.let { user.avatarSymbolName = it.take(64) }
         command.avatarColorSeed?.let { user.avatarColorSeed = it.take(64) }
+        command.allowPublicQuestions?.let { user.allowPublicQuestions = it }
         command.avatarMode?.let { requestedMode ->
             user.avatarMode = requestedMode.take(32)
             if (!requestedMode.equals(PHOTO_AVATAR_MODE, ignoreCase = true)) {
