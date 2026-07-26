@@ -2517,7 +2517,13 @@ struct AppStrings {
     var current: String { text("현재", "Current") }
     var openPendingQuestion: String { text("답변하기", "Answer") }
     var question: String { text("질문", "Question") }
-    var fetchingQuestion: String { text("질문을 가져오고 있어요…", "Getting your question…") }
+    var fetchingQuestion: String { text("새 질문을 준비하고 있어요", "Preparing a new question") }
+    var fetchingQuestionDescription: String {
+        text(
+            "학습 주제와 난이도에 맞춰 질문을 만들고 있습니다.",
+            "Creating a question for this topic and difficulty."
+        )
+    }
     var noQuestion: String { text("질문 없음", "No Question") }
     var noQuestionDescription: String { text("설정을 저장한 뒤 새 질문을 생성하세요.", "Save settings, then create a new question.") }
     var duplicateQuestionSkipped: String {

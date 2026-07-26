@@ -4699,7 +4699,7 @@ final class AppState: ObservableObject {
         }
 
         errorMessage = nil
-        statusMessage = manual ? "질문을 생성 중입니다." : "예약된 질문을 확인 중입니다."
+        statusMessage = manual ? nil : "예약된 질문을 확인 중입니다."
         log(.info, "백엔드 새 질문 생성을 준비합니다. studyCategoryID=\(studyCategoryID ?? "-")")
 
         await actionRunner.run(

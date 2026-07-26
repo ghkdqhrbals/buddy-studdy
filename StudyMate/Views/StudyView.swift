@@ -52,7 +52,7 @@ struct StudyView: View {
                         )
                     } else if appState.isGeneratingQuestion(categoryID: targetCategoryID) {
                         questionLoadingMessage(strings: strings)
-                            .frame(maxWidth: .infinity, minHeight: 140)
+                            .padding(.top, 4)
                     } else {
                         noQuestionView(strings: strings)
                             .frame(maxWidth: .infinity, minHeight: 140)
@@ -115,20 +115,27 @@ struct StudyView: View {
     }
 
     private func questionLoadingMessage(strings: AppStrings) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            ProgressView()
-                .controlSize(.regular)
+        StudyChatBubble(role: .tutor) {
+            HStack(alignment: .center, spacing: 12) {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(.white)
 
-            Text(strings.fetchingQuestion)
-                .font(.body.weight(.medium))
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(strings.fetchingQuestion)
+                        .font(.body.weight(.semibold))
+
+                    Text(strings.fetchingQuestionDescription)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.82))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(strings.fetchingQuestion). \(strings.fetchingQuestionDescription)")
     }
 
     private var canSubmitAnswer: Bool {
@@ -209,57 +216,17 @@ struct StudyView: View {
         }
     }
 
-    @ViewBuilder
-    private func newQuestionButton(strings: AppStrings, prominent: Bool = false) -> some View {
-        if prominent {
-            Button {
-                requestNewQuestion()
-            } label: {
-                newQuestionButtonLabel(strings: strings)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(appState.isGeneratingQuestion)
-            .opacity(hasReachedPendingQuestionLimit ? 0.55 : 1)
-            .accessibilityHint(hasReachedPendingQuestionLimit ? strings.pendingQuestionLimitMessage : "")
-        } else {
-            Button {
-                requestNewQuestion()
-            } label: {
-                newQuestionButtonLabel(strings: strings)
-            }
-            .buttonStyle(.bordered)
-            .disabled(appState.isGeneratingQuestion)
-            .opacity(hasReachedPendingQuestionLimit ? 0.55 : 1)
-            .accessibilityHint(hasReachedPendingQuestionLimit ? strings.pendingQuestionLimitMessage : "")
-        }
-    }
-
     private func toolbarNewQuestionButton(strings: AppStrings) -> some View {
         Button {
             requestNewQuestion()
         } label: {
-            if appState.isGeneratingQuestion {
-                ProgressView()
-                    .controlSize(.small)
-            } else {
-                Image(systemName: "plus")
-                    .font(.system(size: 17, weight: .semibold))
-            }
+            Image(systemName: "plus")
+                .font(.system(size: 17, weight: .semibold))
         }
         .disabled(appState.isGeneratingQuestion)
-        .opacity(hasReachedPendingQuestionLimit ? 0.55 : 1)
-        .accessibilityLabel(strings.newQuestion)
+        .opacity(appState.isGeneratingQuestion || hasReachedPendingQuestionLimit ? 0.55 : 1)
+        .accessibilityLabel(appState.isGeneratingQuestion ? strings.fetchingQuestion : strings.newQuestion)
         .accessibilityHint(hasReachedPendingQuestionLimit ? strings.pendingQuestionLimitMessage : "")
-    }
-
-    @ViewBuilder
-    private func newQuestionButtonLabel(strings: AppStrings) -> some View {
-        if appState.isGeneratingQuestion {
-            ProgressView()
-                .controlSize(.small)
-        } else {
-            Label(strings.newQuestion, systemImage: "plus.circle")
-        }
     }
 
     private func requestNewQuestion() {
