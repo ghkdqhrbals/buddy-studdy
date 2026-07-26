@@ -127,26 +127,24 @@ final class StudyTreeViewportPersistenceTests: XCTestCase {
 }
 
 final class StudyTreeLayoutPolicyTests: XCTestCase {
-    func testNodeOffsetStaysInsideCanvasAndRecoversInvalidValues() {
-        let baseCenter = CGPoint(x: 100, y: 100)
-        let canvasSize = CGSize(width: 320, height: 320)
-        let nodeSize = CGSize(width: 112, height: 112)
+    func testCanvasExpandsToIncludeMovedNodesAndRecoversInvalidValues() {
+        let baseCenters = [7: CGPoint(x: 100, y: 100)]
 
         XCTAssertEqual(
-            StudyTreeNodeOffsetPolicy.boundedOffset(
-                CGSize(width: 1_000, height: -1_000),
-                baseCenter: baseCenter,
-                canvasSize: canvasSize,
-                nodeSize: nodeSize
+            StudyTreeCanvasPolicy.expandedLayout(
+                baseCenters: baseCenters,
+                nodeOffsets: [7: CGSize(width: 1_000, height: -1_000)],
+                baseCanvasSize: CGSize(width: 320, height: 320),
+                nodeSize: CGSize(width: 112, height: 112)
             ),
-            CGSize(width: 156, height: -36)
+            StudyTreeCanvasLayout(
+                size: CGSize(width: 1_164, height: 1_284),
+                translation: CGSize(width: 0, height: 964)
+            )
         )
         XCTAssertEqual(
-            StudyTreeNodeOffsetPolicy.boundedOffset(
-                CGSize(width: CGFloat.infinity, height: CGFloat.nan),
-                baseCenter: baseCenter,
-                canvasSize: canvasSize,
-                nodeSize: nodeSize
+            StudyTreeCanvasPolicy.sanitizedOffset(
+                CGSize(width: CGFloat.infinity, height: CGFloat.nan)
             ),
             .zero
         )

@@ -17,38 +17,52 @@ struct StudyTreeViewportState: Codable, Equatable {
     )
 }
 
-enum StudyTreeNodeOffsetPolicy {
-    static func boundedOffset(
-        _ proposedOffset: CGSize,
-        baseCenter: CGPoint,
-        canvasSize: CGSize,
+struct StudyTreeCanvasLayout: Equatable {
+    var size: CGSize
+    var translation: CGSize
+}
+
+enum StudyTreeCanvasPolicy {
+    static func sanitizedOffset(_ offset: CGSize) -> CGSize {
+        CGSize(
+            width: offset.width.isFinite ? offset.width : 0,
+            height: offset.height.isFinite ? offset.height : 0
+        )
+    }
+
+    static func expandedLayout(
+        baseCenters: [Int: CGPoint],
+        nodeOffsets: [Int: CGSize],
+        baseCanvasSize: CGSize,
         nodeSize: CGSize,
         padding: CGFloat = 8
-    ) -> CGSize {
-        let safeWidth = max(0, canvasSize.width.isFinite ? canvasSize.width : 0)
-        let safeHeight = max(0, canvasSize.height.isFinite ? canvasSize.height : 0)
-        let horizontalInset = min(
-            safeWidth / 2,
-            max(0, nodeSize.width / 2 + padding)
-        )
-        let verticalInset = min(
-            safeHeight / 2,
-            max(0, nodeSize.height / 2 + padding)
-        )
-        let proposedX = baseCenter.x + (proposedOffset.width.isFinite ? proposedOffset.width : 0)
-        let proposedY = baseCenter.y + (proposedOffset.height.isFinite ? proposedOffset.height : 0)
-        let boundedX = min(
-            max(proposedX, horizontalInset),
-            max(horizontalInset, safeWidth - horizontalInset)
-        )
-        let boundedY = min(
-            max(proposedY, verticalInset),
-            max(verticalInset, safeHeight - verticalInset)
-        )
+    ) -> StudyTreeCanvasLayout {
+        let halfWidth = max(0, nodeSize.width / 2 + padding)
+        let halfHeight = max(0, nodeSize.height / 2 + padding)
+        var minimumX: CGFloat = 0
+        var minimumY: CGFloat = 0
+        var maximumX = max(0, baseCanvasSize.width)
+        var maximumY = max(0, baseCanvasSize.height)
 
-        return CGSize(
-            width: boundedX - baseCenter.x,
-            height: boundedY - baseCenter.y
+        for (roomID, baseCenter) in baseCenters {
+            let offset = sanitizedOffset(nodeOffsets[roomID] ?? .zero)
+            let centerX = baseCenter.x + offset.width
+            let centerY = baseCenter.y + offset.height
+            minimumX = min(minimumX, centerX - halfWidth)
+            minimumY = min(minimumY, centerY - halfHeight)
+            maximumX = max(maximumX, centerX + halfWidth)
+            maximumY = max(maximumY, centerY + halfHeight)
+        }
+
+        return StudyTreeCanvasLayout(
+            size: CGSize(
+                width: maximumX - minimumX,
+                height: maximumY - minimumY
+            ),
+            translation: CGSize(
+                width: -minimumX,
+                height: -minimumY
+            )
         )
     }
 }
