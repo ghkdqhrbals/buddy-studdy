@@ -27,6 +27,7 @@ dependencies {
     api("org.jetbrains.kotlinx:kotlinx-coroutines-core")
 
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
+    implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")

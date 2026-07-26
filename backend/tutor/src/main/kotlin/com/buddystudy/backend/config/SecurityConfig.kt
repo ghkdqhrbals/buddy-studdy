@@ -6,6 +6,7 @@ import com.buddystudy.backend.auth.application.permission.RequirePermission
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystudy.backend.common.adapter.inbound.web.ApiErrorResponseFactory
+import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.common.adapter.inbound.web.ClientIpResolver
 import com.buddystudy.backend.common.adapter.inbound.web.ReactiveRequestDetails
 import com.buddystudy.backend.common.adapter.inbound.web.RequirePermissionAuthorizationManager
@@ -14,9 +15,6 @@ import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.common.application.error.ApiRuntimeException
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
-import com.fasterxml.jackson.module.kotlin.KotlinModule
-import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import org.slf4j.LoggerFactory
 import org.springframework.aop.Advisor
 import org.springframework.aop.support.ComposablePointcut
@@ -67,13 +65,7 @@ class SecurityConfig {
 
     @Bean
     @ConditionalOnMissingBean(ObjectMapper::class)
-    fun objectMapper(): ObjectMapper = ObjectMapper().registerKotlinModule().findAndRegisterModules()
-
-    @Bean
-    fun kotlinJacksonModule(): KotlinModule = KotlinModule.Builder().build()
-
-    @Bean
-    fun javaTimeJacksonModule(): JavaTimeModule = JavaTimeModule()
+    fun objectMapper(): ObjectMapper = JsonMapperProvider.mapper
 
     @Bean
     fun securityWebFilterChain(

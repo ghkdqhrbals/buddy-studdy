@@ -10,8 +10,8 @@ import com.buddystudy.backend.admin.analytics.application.port.outbound.AdminAna
 import com.buddystudy.backend.admin.analytics.application.port.outbound.AdminAnalyticsSourcePort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.config.BuddyStudyProperties
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -42,7 +42,7 @@ class AdminAnalyticsService(
         "quota_used_count",
     )
 
-    private val jwtJson = jacksonObjectMapper()
+    private val jwtJson = JsonMapperProvider.mapper
     private val keyBytes by lazy {
         val seed = properties.auth.jwtSecret.ifBlank { properties.crypto.masterKey.ifBlank { "dev-buddystudy-admin-secret" } }
         MessageDigest.getInstance("SHA-256").digest(seed.toByteArray(StandardCharsets.UTF_8))

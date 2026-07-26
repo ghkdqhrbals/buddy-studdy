@@ -4,6 +4,7 @@ import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumer
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
+import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.config.ApplicationCoroutineScope
 import com.buddystudy.backend.notification.adapter.outbound.stream.NotificationRequestedPayload
@@ -13,7 +14,6 @@ import com.buddystudy.backend.notification.application.port.outbound.Notificatio
 import com.buddystudy.backend.notification.application.service.NotificationSendPolicy
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushPublishPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import org.slf4j.LoggerFactory
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
@@ -225,21 +225,17 @@ private data class NotificationPushMetadata(
     val intervalMinutes: Int? = null,
 ) {
     companion object {
-        private val mapper = jacksonObjectMapper().findAndRegisterModules()
-
         fun from(raw: String?): NotificationPushMetadata =
             raw?.takeIf(String::isNotBlank)?.let {
-                runCatching { mapper.readValue<NotificationPushMetadata>(it) }.getOrNull()
+                runCatching { JsonMapperProvider.mapper.readValue<NotificationPushMetadata>(it) }.getOrNull()
             } ?: NotificationPushMetadata()
     }
 }
 
 internal object NotificationPayloadParser {
-    private val mapper = jacksonObjectMapper().findAndRegisterModules()
-
     fun toCommand(fields: Map<String, String>): NotificationRequestCommand {
         fields["payload"]?.takeIf(String::isNotBlank)?.let {
-            val payload = mapper.readValue<NotificationRequestedPayload>(it)
+            val payload = JsonMapperProvider.mapper.readValue<NotificationRequestedPayload>(it)
             return NotificationRequestCommand(
                 eventId = payload.eventId,
                 userId = payload.userId,

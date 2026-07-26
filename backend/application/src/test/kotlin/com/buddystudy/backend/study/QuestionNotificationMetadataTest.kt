@@ -1,18 +1,16 @@
 package com.buddystudy.backend.study
 
+import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.study.application.service.QuestionNotificationMetadata
 import com.buddystudy.backend.study.application.service.QuestionNotificationSerializationException
 import com.buddystudy.backend.study.application.service.toJson
 import com.buddystudy.backend.study.application.service.translateNotificationMetadataSerializationError
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import kotlin.reflect.jvm.internal.KotlinReflectionInternalError
 
 class QuestionNotificationMetadataTest {
-    private val mapper = jacksonObjectMapper()
-
     @Test
     fun `serializes question notification metadata`() {
         val json = QuestionNotificationMetadata(
@@ -25,7 +23,7 @@ class QuestionNotificationMetadataTest {
             intervalMinutes = 30,
         ).toJson()
 
-        val parsed = mapper.readTree(json)
+        val parsed = JsonMapperProvider.mapper.readTree(json)
         assertThat(parsed["recordId"].asLong()).isEqualTo(101)
         assertThat(parsed["studyId"].asLong()).isEqualTo(19)
         assertThat(parsed["topic"].asText()).isEqualTo("Kotlin")

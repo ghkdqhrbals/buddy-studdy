@@ -6,6 +6,7 @@ import com.buddystudy.backend.auth.application.permission.RequirePermission
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.crypto.KeyCipher
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
@@ -30,7 +31,6 @@ import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
 import com.buddystudy.backend.study.application.prompt.QuestionDiversityPolicy
 import com.buddystudy.backend.study.application.prompt.QuestionCoverageGuide
 import com.buddystudy.backend.study.application.prompt.QuestionPromptProvider
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlin.reflect.jvm.internal.KotlinReflectionInternalError
@@ -370,8 +370,6 @@ private suspend fun String.normalizedQuestionKey(): String =
         .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
         .trim()
 
-internal val studyNotificationMapper = jacksonObjectMapper().findAndRegisterModules()
-
 internal fun QuestionEntity.toQuestionNotification(study: StudyEntity, appLanguage: String): NotificationRequestCommand =
     NotificationRequestCommand(
         eventId = "question-created-$id",
@@ -396,7 +394,7 @@ internal fun QuestionEntity.toQuestionNotification(study: StudyEntity, appLangua
 
 internal fun QuestionNotificationMetadata.toJson(): String =
     translateNotificationMetadataSerializationError {
-        studyNotificationMapper.writeValueAsString(this)
+        JsonMapperProvider.mapper.writeValueAsString(this)
     }
 
 internal fun <T> translateNotificationMetadataSerializationError(block: () -> T): T =

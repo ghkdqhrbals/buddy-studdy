@@ -1,5 +1,6 @@
 package com.buddystudy.backend.common.adapter.inbound.web
 
+import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.reactivestreams.Publisher
 import org.slf4j.LoggerFactory
@@ -25,7 +26,7 @@ import java.util.concurrent.atomic.AtomicLong
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
 class RequestLoggingFilter(
-    objectMapper: ObjectMapper = ObjectMapper().findAndRegisterModules(),
+    objectMapper: ObjectMapper = JsonMapperProvider.mapper,
 ) : WebFilter {
     private val log = LoggerFactory.getLogger(javaClass)
     private val formatter = ApiExchangeLogFormatter(objectMapper)

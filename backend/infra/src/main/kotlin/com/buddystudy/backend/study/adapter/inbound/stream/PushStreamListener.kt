@@ -2,6 +2,7 @@ package com.buddystudy.backend.study.adapter.inbound.stream
 
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumer
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
+import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.config.ApplicationCoroutineScope
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
@@ -15,7 +16,6 @@ import com.buddystudy.backend.study.application.port.outbound.PushMessageType
 import com.buddystudy.backend.study.application.port.outbound.PushNotificationPort
 import com.buddystudy.backend.study.application.port.outbound.PushQuestionMessage
 import com.buddystudy.backend.study.adapter.outbound.stream.QuestionPushRequestedPayload
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import jakarta.annotation.PostConstruct
 import org.slf4j.LoggerFactory
@@ -139,8 +139,6 @@ class PushStreamListener(
 }
 
 internal object PushEventPayloadParser {
-    private val mapper = jacksonObjectMapper().findAndRegisterModules()
-
     fun deviceId(fields: Map<String, String>): String? =
         payload(fields)?.deviceId ?: fields["deviceId"]?.takeIf(String::isNotBlank)
 
@@ -215,7 +213,7 @@ internal object PushEventPayloadParser {
 
     private fun payload(fields: Map<String, String>): QuestionPushRequestedPayload? =
         fields["payload"]?.takeIf(String::isNotBlank)?.let {
-            mapper.readValue<QuestionPushRequestedPayload>(it)
+            JsonMapperProvider.mapper.readValue<QuestionPushRequestedPayload>(it)
         }
 
     private data class QuestionPushMessageFields(

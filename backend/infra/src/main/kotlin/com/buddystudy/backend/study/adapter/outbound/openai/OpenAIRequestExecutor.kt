@@ -1,11 +1,11 @@
 package com.buddystudy.backend.study.adapter.outbound.openai
 
+import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystudy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import org.springframework.ai.chat.messages.SystemMessage
 import org.springframework.ai.chat.messages.UserMessage
@@ -20,7 +20,7 @@ import org.springframework.stereotype.Component
 class OpenAIRequestExecutor(
     private val properties: BuddyStudyProperties,
 ) {
-    private val mapper = jacksonObjectMapper()
+    private val mapper = JsonMapperProvider.mapper
     private val jsonResponseFormat = OpenAiChatModel.ResponseFormat.builder()
         .type(OpenAiChatModel.ResponseFormat.Type.JSON_OBJECT)
         .build()
@@ -175,10 +175,8 @@ class OpenAIRequestExecutor(
     }
 }
 
-private val coverageBlueprintMapper = jacksonObjectMapper()
-
 internal fun parseQuestionCoverageConcepts(text: String): List<OpenAIPort.QuestionCoverageConcept> {
-    val parsed: Map<String, Any?> = coverageBlueprintMapper.readValue(text.ifBlank { "{}" })
+    val parsed: Map<String, Any?> = JsonMapperProvider.mapper.readValue(text.ifBlank { "{}" })
     val concepts = parsed["concepts"] as? List<*> ?: return emptyList()
     return concepts.mapNotNull(::parseQuestionCoverageConcept)
 }

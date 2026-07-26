@@ -1,11 +1,8 @@
 package com.buddystudy.backend.notification.adapter.outbound.stream
 
+import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.fasterxml.jackson.annotation.JsonInclude
-import com.fasterxml.jackson.annotation.JsonInclude.Value
-import com.fasterxml.jackson.databind.SerializationFeature
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import java.util.UUID
 
 data class NotificationRequestedEvent(
@@ -24,6 +21,7 @@ data class NotificationRequestedEvent(
     val eventType: String = "NOTIFICATION_REQUESTED",
 )
 
+@JsonInclude(JsonInclude.Include.NON_NULL)
 data class NotificationRequestedPayload(
     val eventId: String,
     val userId: Long? = null,
@@ -39,16 +37,11 @@ data class NotificationRequestedPayload(
     val shouldPush: Boolean,
 )
 
-private val notificationEventMapper = jacksonObjectMapper()
-    .registerModule(JavaTimeModule())
-    .setDefaultPropertyInclusion(Value.construct(JsonInclude.Include.NON_NULL, JsonInclude.Include.NON_NULL))
-    .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
-
 fun NotificationRequestedEvent.toRedisStreamFields(): Map<String, String> =
     mapOf(
         "eventId" to eventId,
         "eventType" to eventType,
-        "payload" to notificationEventMapper.writeValueAsString(toPayload()),
+        "payload" to JsonMapperProvider.mapper.writeValueAsString(toPayload()),
     )
 
 fun NotificationRequestedEvent.toCommand(): NotificationRequestCommand =
