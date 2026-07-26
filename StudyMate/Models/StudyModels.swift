@@ -30,6 +30,74 @@ enum StudyTreeCanvasPolicy {
         )
     }
 
+    static func offsetsPlacingNewNodesWithoutSameLevelOverlap(
+        newRoomIDs: Set<Int>,
+        baseCenters: [Int: CGPoint],
+        nodeOffsets: [Int: CGSize],
+        nodeSize: CGSize,
+        spacing: CGFloat = 16
+    ) -> [Int: CGSize] {
+        var resolvedOffsets = nodeOffsets.mapValues(sanitizedOffset)
+        let minimumHorizontalDistance = max(0, nodeSize.width + spacing)
+        guard minimumHorizontalDistance > 0, !newRoomIDs.isEmpty else {
+            return resolvedOffsets
+        }
+
+        let orderedNewRoomIDs = newRoomIDs.compactMap { roomID -> (Int, CGPoint)? in
+            guard let center = baseCenters[roomID],
+                  center.x.isFinite,
+                  center.y.isFinite else {
+                return nil
+            }
+            return (roomID, center)
+        }
+        .sorted { lhs, rhs in
+            if lhs.1.y == rhs.1.y {
+                if lhs.1.x == rhs.1.x {
+                    return lhs.0 < rhs.0
+                }
+                return lhs.1.x < rhs.1.x
+            }
+            return lhs.1.y < rhs.1.y
+        }
+
+        var placedNewRoomIDs = Set<Int>()
+        for (roomID, baseCenter) in orderedNewRoomIDs {
+            let initialOffset = resolvedOffsets[roomID] ?? .zero
+            var candidateX = baseCenter.x + initialOffset.width
+            var attempts = 0
+
+            while attempts < baseCenters.count {
+                let occupiedCenters = baseCenters.compactMap { otherRoomID, otherBaseCenter -> CGFloat? in
+                    guard otherRoomID != roomID,
+                          abs(otherBaseCenter.y - baseCenter.y) < 0.5,
+                          !newRoomIDs.contains(otherRoomID) || placedNewRoomIDs.contains(otherRoomID) else {
+                        return nil
+                    }
+                    let otherOffset = resolvedOffsets[otherRoomID] ?? .zero
+                    return otherBaseCenter.x + otherOffset.width
+                }
+                let collisions = occupiedCenters.filter {
+                    abs(candidateX - $0) < minimumHorizontalDistance
+                }
+                guard !collisions.isEmpty else {
+                    break
+                }
+                candidateX = collisions
+                    .map { $0 + minimumHorizontalDistance }
+                    .max() ?? candidateX
+                attempts += 1
+            }
+
+            resolvedOffsets[roomID] = CGSize(
+                width: candidateX - baseCenter.x,
+                height: initialOffset.height
+            )
+            placedNewRoomIDs.insert(roomID)
+        }
+        return resolvedOffsets
+    }
+
     static func expandedLayout(
         baseCenters: [Int: CGPoint],
         nodeOffsets: [Int: CGSize],

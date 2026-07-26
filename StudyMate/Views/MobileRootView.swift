@@ -2505,12 +2505,10 @@ private struct MobileStudyTreeView: View {
                 strings: strings,
                 initialMode: request.mode
             ) { title, difficulty in
-                await appState.addChildStudyCategory(
+                await addChildStudyTopic(
                     title,
-                    parentStudyID: request.parent.id,
                     difficulty: difficulty,
-                    customPrompt: StudySettings.defaultCustomPrompt,
-                    openAIModel: request.parent.openAIModel
+                    parent: request.parent
                 )
             }
             .environmentObject(appState)
@@ -2731,6 +2729,38 @@ private struct MobileStudyTreeView: View {
             active: false
         )
         endSelection()
+    }
+
+    private func addChildStudyTopic(
+        _ title: String,
+        difficulty: Difficulty,
+        parent: BackendStudyRoom
+    ) async -> Bool {
+        let existingRoomIDs = Set(snapshot?.placements.map(\.id) ?? [])
+        let saved = await appState.addChildStudyCategory(
+            title,
+            parentStudyID: parent.id,
+            difficulty: difficulty,
+            customPrompt: StudySettings.defaultCustomPrompt,
+            openAIModel: parent.openAIModel
+        )
+        guard saved, let updatedSnapshot = snapshot else {
+            return saved
+        }
+
+        let updatedRoomIDs = Set(updatedSnapshot.placements.map(\.id))
+        let newRoomIDs = updatedRoomIDs.subtracting(existingRoomIDs)
+        guard !newRoomIDs.isEmpty else {
+            return true
+        }
+        nodeOffsets = StudyTreeCanvasPolicy.offsetsPlacingNewNodesWithoutSameLevelOverlap(
+            newRoomIDs: newRoomIDs,
+            baseCenters: updatedSnapshot.centerByRoomID,
+            nodeOffsets: nodeOffsets,
+            nodeSize: StudyTreeLayoutSnapshot.nodeSize
+        )
+        saveNodeOffsets()
+        return true
     }
 
     private func endSelection() {
@@ -3175,115 +3205,118 @@ private struct StudyTopicAddSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 18) {
-                VStack(spacing: 4) {
-                    Text(strings.addSubstudy)
-                        .font(.headline)
-                    Text(parent.topic)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+            ScrollView {
+                VStack(spacing: 18) {
+                    VStack(spacing: 4) {
+                        Text(strings.addSubstudy)
+                            .font(.headline)
+                        Text(parent.topic)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
 
-                Picker("", selection: $mode) {
-                    Text(strings.recommendSubstudyTab)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                        .tag(StudyTopicAddMode.recommendation)
-                    Text(strings.addTopicManually)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                        .tag(StudyTopicAddMode.manual)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                    Picker("", selection: $mode) {
+                        Text(strings.recommendSubstudyTab)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                            .tag(StudyTopicAddMode.recommendation)
+                        Text(strings.addTopicManually)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                            .tag(StudyTopicAddMode.manual)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
 
-                Group {
-                    if mode == .recommendation {
-                        recommendationPicker
-                    } else {
-                        HStack(spacing: 8) {
-                            TextField(strings.studyTopic, text: $manualTopic)
-                                .textInputAutocapitalization(.sentences)
-                                .submitLabel(.done)
-                                .onSubmit {
-                                    guard !selectedTopic.isEmpty, !isSaving else { return }
+                    Group {
+                        if mode == .recommendation {
+                            recommendationPicker
+                        } else {
+                            HStack(spacing: 8) {
+                                TextField(strings.studyTopic, text: $manualTopic)
+                                    .textInputAutocapitalization(.sentences)
+                                    .submitLabel(.done)
+                                    .onSubmit {
+                                        guard !selectedTopic.isEmpty, !isSaving else { return }
+                                        add(selectedTopic)
+                                    }
+
+                                Button {
                                     add(selectedTopic)
+                                } label: {
+                                    if isSaving {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                            .frame(width: 34, height: 34)
+                                    } else {
+                                        Image(systemName: "plus")
+                                            .font(.system(size: 15, weight: .bold))
+                                            .foregroundStyle(.white)
+                                            .frame(width: 34, height: 34)
+                                            .background(Color.accentColor, in: Circle())
+                                    }
                                 }
+                                .buttonStyle(.plain)
+                                .disabled(selectedTopic.isEmpty || isSaving)
+                                .accessibilityLabel(strings.addSubstudy)
+                            }
+                            .padding(.leading, 14)
+                            .padding(.trailing, 7)
+                            .frame(height: 50)
+                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 112, alignment: .top)
 
-                            Button {
-                                add(selectedTopic)
-                            } label: {
+                    VStack(spacing: 8) {
+                        HStack {
+                            Text(strings.difficulty)
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Text("\(resolvedDifficulty) · \(Difficulty(level: resolvedDifficulty).displayName(language: strings.language))")
+                                .font(.subheadline)
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                        }
+                        Slider(value: $difficultyLevel, in: 1...10, step: 1)
+                    }
+
+                    if let inlineMessage {
+                        Text(inlineMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if mode == .recommendation {
+                        Button {
+                            add(selectedTopic)
+                        } label: {
+                            HStack(spacing: 8) {
                                 if isSaving {
                                     ProgressView()
-                                        .controlSize(.small)
-                                        .frame(width: 34, height: 34)
-                                } else {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 15, weight: .bold))
-                                        .foregroundStyle(.white)
-                                        .frame(width: 34, height: 34)
-                                        .background(Color.accentColor, in: Circle())
+                                        .tint(.white)
                                 }
+                                Text(strings.addSubstudy)
+                                    .fontWeight(.semibold)
                             }
-                            .buttonStyle(.plain)
-                            .disabled(selectedTopic.isEmpty || isSaving)
-                            .accessibilityLabel(strings.addSubstudy)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 48)
                         }
-                        .padding(.leading, 14)
-                        .padding(.trailing, 7)
-                        .frame(height: 50)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
-                        }
+                        .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.roundedRectangle(radius: 8))
+                        .disabled(selectedTopic.isEmpty || isSaving)
                     }
                 }
-                .frame(maxWidth: .infinity, minHeight: 112, alignment: .top)
-
-                VStack(spacing: 8) {
-                    HStack {
-                        Text(strings.difficulty)
-                            .font(.subheadline.weight(.semibold))
-                        Spacer()
-                        Text("\(resolvedDifficulty) · \(Difficulty(level: resolvedDifficulty).displayName(language: strings.language))")
-                            .font(.subheadline)
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                    Slider(value: $difficultyLevel, in: 1...10, step: 1)
-                }
-
-                if let inlineMessage {
-                    Text(inlineMessage)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                if mode == .recommendation {
-                    Button {
-                        add(selectedTopic)
-                    } label: {
-                        HStack(spacing: 8) {
-                            if isSaving {
-                                ProgressView()
-                                    .tint(.white)
-                            }
-                            Text(strings.addSubstudy)
-                                .fontWeight(.semibold)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 48)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.roundedRectangle(radius: 8))
-                    .disabled(selectedTopic.isEmpty || isSaving)
-                }
+                .padding(20)
             }
-            .padding(20)
+            .scrollDismissesKeyboard(.interactively)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(strings.cancel) {
@@ -3306,7 +3339,7 @@ private struct StudyTopicAddSheet: View {
             }
             .interactiveDismissDisabled(isSaving)
         }
-        .presentationDetents([.height(430), .large])
+        .presentationDetents([.height(520), .large])
     }
 
     private var resolvedDifficulty: Int {

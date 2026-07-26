@@ -150,6 +150,25 @@ final class StudyTreeLayoutPolicyTests: XCTestCase {
         )
     }
 
+    func testNewNodesMoveAsideFromExistingNodesAtTheSameLevel() {
+        let baseCenters = [
+            1: CGPoint(x: 100, y: 100),
+            2: CGPoint(x: 254, y: 100),
+            3: CGPoint(x: 408, y: 100),
+            4: CGPoint(x: 408, y: 286)
+        ]
+        let offsets = StudyTreeCanvasPolicy.offsetsPlacingNewNodesWithoutSameLevelOverlap(
+            newRoomIDs: [3, 4],
+            baseCenters: baseCenters,
+            nodeOffsets: [1: CGSize(width: 308, height: 0)],
+            nodeSize: CGSize(width: 112, height: 112)
+        )
+
+        XCTAssertEqual(offsets[3], CGSize(width: 128, height: 0))
+        XCTAssertEqual(offsets[4], .zero)
+        XCTAssertEqual(offsets[1], CGSize(width: 308, height: 0))
+    }
+
     func testInitialZoomFitsEntireCanvasWithoutEnlargingSmallTrees() {
         XCTAssertEqual(
             StudyTreeViewportPolicy.fittedZoomScale(
