@@ -22,6 +22,122 @@ struct StudyTreeCanvasLayout: Equatable {
     var translation: CGSize
 }
 
+struct StudyTreeDirectionalEdgeGeometry: Equatable {
+    var start: CGPoint
+    var end: CGPoint
+    var arrowLeft: CGPoint
+    var arrowRight: CGPoint
+}
+
+enum StudyTreeEdgePolicy {
+    static func directionalGeometry(
+        parent: CGPoint,
+        child: CGPoint,
+        nodeRadius: CGFloat,
+        arrowLength: CGFloat = 10,
+        arrowHalfWidth: CGFloat = 5
+    ) -> StudyTreeDirectionalEdgeGeometry? {
+        let deltaX = child.x - parent.x
+        let deltaY = child.y - parent.y
+        let distance = hypot(deltaX, deltaY)
+        guard distance.isFinite, distance > 0.5 else {
+            return nil
+        }
+
+        let unitX = deltaX / distance
+        let unitY = deltaY / distance
+        let safeArrowLength = max(0, arrowLength)
+        let safeArrowHalfWidth = max(0, arrowHalfWidth)
+        let effectiveRadius = min(
+            max(0, nodeRadius),
+            max(0, (distance - safeArrowLength) / 2)
+        )
+        let start = CGPoint(
+            x: parent.x + unitX * effectiveRadius,
+            y: parent.y + unitY * effectiveRadius
+        )
+        let end = CGPoint(
+            x: child.x - unitX * effectiveRadius,
+            y: child.y - unitY * effectiveRadius
+        )
+        let arrowBase = CGPoint(
+            x: end.x - unitX * safeArrowLength,
+            y: end.y - unitY * safeArrowLength
+        )
+        let perpendicularX = -unitY * safeArrowHalfWidth
+        let perpendicularY = unitX * safeArrowHalfWidth
+
+        return StudyTreeDirectionalEdgeGeometry(
+            start: start,
+            end: end,
+            arrowLeft: CGPoint(
+                x: arrowBase.x + perpendicularX,
+                y: arrowBase.y + perpendicularY
+            ),
+            arrowRight: CGPoint(
+                x: arrowBase.x - perpendicularX,
+                y: arrowBase.y - perpendicularY
+            )
+        )
+    }
+}
+
+enum StudyTreeDeletionPolicy {
+    static func subtreeIDs(
+        rootIDs: Set<Int>,
+        parentByRoomID: [Int: Int]
+    ) -> Set<Int> {
+        guard !rootIDs.isEmpty else {
+            return []
+        }
+        let childrenByParent = Dictionary(grouping: parentByRoomID, by: \.value)
+            .mapValues { entries in entries.map(\.key) }
+        var result = rootIDs
+        var pending = Array(rootIDs)
+        while let parentID = pending.popLast() {
+            for childID in childrenByParent[parentID, default: []]
+            where result.insert(childID).inserted {
+                pending.append(childID)
+            }
+        }
+        return result
+    }
+
+    static func childFirstDeletionOrder(
+        studyIDs: Set<Int>,
+        parentByRoomID: [Int: Int]
+    ) -> [Int] {
+        var depths: [Int: Int] = [:]
+
+        func depth(for roomID: Int, visiting: Set<Int>) -> Int {
+            if let cached = depths[roomID] {
+                return cached
+            }
+            guard let parentID = parentByRoomID[roomID],
+                  studyIDs.contains(parentID),
+                  !visiting.contains(parentID) else {
+                depths[roomID] = 0
+                return 0
+            }
+            let resolvedDepth = depth(
+                for: parentID,
+                visiting: visiting.union([roomID])
+            ) + 1
+            depths[roomID] = resolvedDepth
+            return resolvedDepth
+        }
+
+        return studyIDs.sorted { lhs, rhs in
+            let lhsDepth = depth(for: lhs, visiting: [])
+            let rhsDepth = depth(for: rhs, visiting: [])
+            if lhsDepth == rhsDepth {
+                return lhs < rhs
+            }
+            return lhsDepth > rhsDepth
+        }
+    }
+}
+
 enum StudyTreeCanvasPolicy {
     static func sanitizedOffset(_ offset: CGSize) -> CGSize {
         CGSize(
@@ -1809,6 +1925,12 @@ struct AppStrings {
     var deleteTopics: String { text("주제 삭제", "Delete topics") }
     var resetTreeLayout: String { text("트리 배치 초기화", "Reset tree layout") }
     var deleteSelectedTopics: String { text("선택한 주제를 삭제할까요?", "Delete selected topics?") }
+    func deleteStudySubtree(_ topic: String) -> String {
+        text(
+            "\"\(topic)\" 및 모든 하위 학습을 삭제할까요?",
+            "Delete \"\(topic)\" and all of its sub-studies?"
+        )
+    }
     func selectedTopicCount(_ count: Int) -> String {
         text("\(count)개 선택", "\(count) selected")
     }

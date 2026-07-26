@@ -2320,6 +2320,7 @@ private struct MobileStudyTreeView: View {
     @State private var shouldFitInitialViewport = false
     @State private var selectionMode: StudyTreeSelectionMode?
     @State private var showsDeleteConfirmation = false
+    @State private var deletionCandidate: BackendStudyRoom?
 
     var rootStudyID: Int
 
@@ -2352,9 +2353,10 @@ private struct MobileStudyTreeView: View {
                     Text(strings.selectedTopicCount(selectedRoomIDs.count))
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Button(strings.cancel) {
-                        endSelection()
+                    Button(strings.done) {
+                        completeSelection()
                     }
+                    .disabled(selectionMode == .deletion && selectedRoomIDs.isEmpty)
                 }
                 .buttonStyle(.plain)
                 .padding(.horizontal, 16)
@@ -2382,15 +2384,30 @@ private struct MobileStudyTreeView: View {
                                                 canvasLayout: canvasLayout
                                             )
                                         )
+                                        guard let geometry = StudyTreeEdgePolicy.directionalGeometry(
+                                            parent: parent,
+                                            child: child,
+                                            nodeRadius: StudyTreeLayoutSnapshot.nodeSize.width / 2 + 4
+                                        ) else {
+                                            continue
+                                        }
                                         var path = Path()
-                                        path.move(to: parent)
-                                        let midpoint = (parent.y + child.y) / 2
+                                        path.move(to: geometry.start)
+                                        let midpoint = (geometry.start.y + geometry.end.y) / 2
                                         path.addCurve(
-                                            to: child,
-                                            control1: CGPoint(x: parent.x, y: midpoint),
-                                            control2: CGPoint(x: child.x, y: midpoint)
+                                            to: geometry.end,
+                                            control1: CGPoint(x: geometry.start.x, y: midpoint),
+                                            control2: CGPoint(x: geometry.end.x, y: midpoint)
                                         )
-                                        context.stroke(path, with: .color(Color.secondary.opacity(0.32)), lineWidth: 1.5)
+                                        let edgeColor = Color.secondary.opacity(0.48)
+                                        context.stroke(path, with: .color(edgeColor), lineWidth: 1.7)
+
+                                        var arrow = Path()
+                                        arrow.move(to: geometry.end)
+                                        arrow.addLine(to: geometry.arrowLeft)
+                                        arrow.addLine(to: geometry.arrowRight)
+                                        arrow.closeSubpath()
+                                        context.fill(arrow, with: .color(edgeColor))
                                     }
                                 }
 
@@ -2420,7 +2437,8 @@ private struct MobileStudyTreeView: View {
                                                 active: !placement.room.activeForQuestions
                                             )
                                         },
-                                        onEdit: { editingRoom = placement.room }
+                                        onEdit: { editingRoom = placement.room },
+                                        onDelete: { deletionCandidate = placement.room }
                                     )
                                     .position(placement.center)
                                     .offset(
@@ -2459,11 +2477,6 @@ private struct MobileStudyTreeView: View {
                         }
                         .simultaneousGesture(zoomGesture)
 
-                        if isSelectionMode {
-                            selectionBar
-                                .padding(.horizontal, 16)
-                                .padding(.bottom, 12)
-                        }
                     }
                     .onAppear {
                         updateTreeViewportSize(geometry.size, snapshot: snapshot)
@@ -2547,6 +2560,28 @@ private struct MobileStudyTreeView: View {
             }
             Button(strings.cancel, role: .cancel) {}
         }
+        .confirmationDialog(
+            deletionCandidate.map { strings.deleteStudySubtree($0.topic) } ?? strings.deleteStudy,
+            isPresented: Binding(
+                get: { deletionCandidate != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        deletionCandidate = nil
+                    }
+                }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let deletionCandidate {
+                Button(strings.deleteStudy, role: .destructive) {
+                    appState.deleteStudyCategory(id: String(deletionCandidate.id))
+                    self.deletionCandidate = nil
+                }
+            }
+            Button(strings.cancel, role: .cancel) {
+                deletionCandidate = nil
+            }
+        }
     }
 
     private var treeOptionsMenu: some View {
@@ -2564,17 +2599,8 @@ private struct MobileStudyTreeView: View {
             Button {
                 withAnimation(.snappy) {
                     nodeOffsets = [:]
-                    if let snapshot {
-                        applyFittedViewport(for: snapshot)
-                    } else {
-                        zoomScale = 1
-                        zoomStartScale = 1
-                        zoomStartViewportOffset = .zero
-                        viewportOffset = .zero
-                    }
                 }
                 saveNodeOffsets()
-                saveViewport()
             } label: {
                 Label(strings.resetTreeLayout, systemImage: "arrow.counterclockwise")
             }
@@ -2584,34 +2610,6 @@ private struct MobileStudyTreeView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(strings.more)
-    }
-
-    private var selectionBar: some View {
-        HStack(spacing: 0) {
-            if selectionMode == .activation {
-                Button {
-                    saveTopicActivationSelection()
-                } label: {
-                    Label(strings.save, systemImage: "checkmark.circle")
-                        .frame(maxWidth: .infinity)
-                }
-            } else if selectionMode == .deletion {
-                Button(role: .destructive) {
-                    showsDeleteConfirmation = true
-                } label: {
-                    Label(strings.deleteTopics, systemImage: "trash")
-                        .frame(maxWidth: .infinity)
-                }
-            }
-        }
-        .font(.subheadline.weight(.semibold))
-        .padding(.vertical, 12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
-        }
-        .disabled(selectionMode == .deletion && selectedRoomIDs.isEmpty)
     }
 
     private var zoomGesture: some Gesture {
@@ -2693,6 +2691,17 @@ private struct MobileStudyTreeView: View {
             selectedRoomIDs.remove(roomID)
         } else {
             selectedRoomIDs.insert(roomID)
+        }
+    }
+
+    private func completeSelection() {
+        switch selectionMode {
+        case .activation:
+            saveTopicActivationSelection()
+        case .deletion:
+            showsDeleteConfirmation = true
+        case nil:
+            break
         }
     }
 
@@ -3069,18 +3078,16 @@ private struct StudyTreeNode: View {
     var onAddManualChild: () -> Void
     var onToggleActive: () -> Void
     var onEdit: () -> Void
+    var onDelete: () -> Void
 
-    private var levelColor: Color {
-        switch room.difficultyLevel {
-        case 1...3:
-            return Color.blue
-        case 4...6:
-            return Color.green
-        case 7...8:
-            return Color.orange
-        default:
-            return Color.purple
-        }
+    private var statusBorderColor: Color {
+        room.activeForQuestions ? Color.green : Color.gray.opacity(0.7)
+    }
+
+    private var nodeFillColor: Color {
+        room.parentStudyId == nil
+            ? Color.accentColor.opacity(0.1)
+            : Color(.secondarySystemBackground)
     }
 
     var body: some View {
@@ -3097,7 +3104,10 @@ private struct StudyTreeNode: View {
                 Text("Lv \(room.difficultyLevel)")
                     .font(.caption2.weight(.bold))
                     .monospacedDigit()
-                    .foregroundStyle(levelColor)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color(.tertiarySystemFill), in: Capsule())
             }
             .padding(12)
             .frame(
@@ -3105,13 +3115,17 @@ private struct StudyTreeNode: View {
                 height: StudyTreeLayoutSnapshot.nodeSize.height,
                 alignment: .center
             )
-            .background(levelColor.opacity(0.1), in: Circle())
+            .background(nodeFillColor, in: Circle())
             .overlay {
                 Circle()
-                    .stroke(
-                        isSelected ? Color.accentColor : levelColor.opacity(0.42),
-                        lineWidth: isSelected ? 3 : 1.5
-                    )
+                    .stroke(statusBorderColor, lineWidth: 2.5)
+            }
+            .overlay {
+                if isSelected {
+                    Circle()
+                        .stroke(Color.accentColor, lineWidth: 3)
+                        .padding(-4)
+                }
             }
         }
         .buttonStyle(.plain)
@@ -3123,6 +3137,8 @@ private struct StudyTreeNode: View {
                 room.activeForQuestions ? strings.questionTopicInactive : strings.questionTopicActive,
                 action: onToggleActive
             )
+            Divider()
+            Button(strings.deleteStudy, role: .destructive, action: onDelete)
         }
         .overlay(alignment: .topLeading) {
             if isSelectionMode {
@@ -3131,12 +3147,6 @@ private struct StudyTreeNode: View {
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                     .background(Color(.systemBackground), in: Circle())
                     .offset(x: -3, y: -3)
-            } else {
-                Circle()
-                    .fill(room.activeForQuestions ? Color.accentColor : Color.secondary.opacity(0.3))
-                    .frame(width: 10, height: 10)
-                    .background(Color(.systemBackground), in: Circle())
-                    .offset(x: 3, y: 3)
             }
         }
         .overlay(alignment: .topTrailing) {

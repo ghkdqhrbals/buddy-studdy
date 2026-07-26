@@ -169,6 +169,43 @@ final class StudyTreeLayoutPolicyTests: XCTestCase {
         XCTAssertEqual(offsets[1], CGSize(width: 308, height: 0))
     }
 
+    func testTreeEdgesPointFromParentTowardChild() throws {
+        let geometry = try XCTUnwrap(
+            StudyTreeEdgePolicy.directionalGeometry(
+                parent: CGPoint(x: 100, y: 100),
+                child: CGPoint(x: 100, y: 286),
+                nodeRadius: 60
+            )
+        )
+
+        XCTAssertEqual(geometry.start, CGPoint(x: 100, y: 160))
+        XCTAssertEqual(geometry.end, CGPoint(x: 100, y: 226))
+        XCTAssertEqual(geometry.arrowLeft, CGPoint(x: 95, y: 216))
+        XCTAssertEqual(geometry.arrowRight, CGPoint(x: 105, y: 216))
+    }
+
+    func testStudySubtreeDeletesChildrenBeforeTheirParent() {
+        let parentByRoomID = [
+            2: 1,
+            3: 2,
+            4: 1,
+            9: 8
+        ]
+        let subtree = StudyTreeDeletionPolicy.subtreeIDs(
+            rootIDs: [1],
+            parentByRoomID: parentByRoomID
+        )
+
+        XCTAssertEqual(subtree, [1, 2, 3, 4])
+        XCTAssertEqual(
+            StudyTreeDeletionPolicy.childFirstDeletionOrder(
+                studyIDs: subtree,
+                parentByRoomID: parentByRoomID
+            ),
+            [3, 2, 4, 1]
+        )
+    }
+
     func testInitialZoomFitsEntireCanvasWithoutEnlargingSmallTrees() {
         XCTAssertEqual(
             StudyTreeViewportPolicy.fittedZoomScale(

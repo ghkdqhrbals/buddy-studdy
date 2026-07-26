@@ -4085,6 +4085,10 @@ final class AppState: ObservableObject {
         }
         let rootStudyIDsToDelete = Set(categoriesToDelete.compactMap { backendStudyIDIfLoaded(for: $0) })
         let studyIDsToDelete = backendStudySubtreeIDs(rootIDs: rootStudyIDsToDelete)
+        let studyDeletionOrder = StudyTreeDeletionPolicy.childFirstDeletionOrder(
+            studyIDs: studyIDsToDelete,
+            parentByRoomID: backendStudyParentByRoomID
+        )
         let legacyCategories = categoriesToDelete.filter { backendStudyIDIfLoaded(for: $0) == nil }
         let topicKeysToDelete = Set(legacyCategories.map { Self.normalizedCategoryText(for: $0.title) })
         locallyDeletedStudyIDs.formUnion(studyIDsToDelete)
@@ -4138,6 +4142,7 @@ final class AppState: ObservableObject {
         Task { [weak self] in
             await self?.deleteBackendStudiesIfPossible(
                 knownStudyIDs: studyIDsToDelete,
+                preferredDeletionOrder: studyDeletionOrder,
                 topicKeys: topicKeysToDelete
             )
         }
@@ -4169,30 +4174,24 @@ final class AppState: ObservableObject {
     }
 
     private func backendStudySubtreeIDs(rootIDs: Set<Int>) -> Set<Int> {
-        guard !rootIDs.isEmpty else {
-            return []
-        }
+        StudyTreeDeletionPolicy.subtreeIDs(
+            rootIDs: rootIDs,
+            parentByRoomID: backendStudyParentByRoomID
+        )
+    }
 
-        let childrenByParent = Dictionary(grouping: backendStudyRooms.compactMap { room -> (Int, Int)? in
+    private var backendStudyParentByRoomID: [Int: Int] {
+        Dictionary(uniqueKeysWithValues: backendStudyRooms.compactMap { room -> (Int, Int)? in
             guard let parentID = room.parentStudyId else {
                 return nil
             }
-            return (parentID, room.id)
-        }, by: \.0).mapValues { pairs in
-            pairs.map(\.1)
-        }
-        var result = rootIDs
-        var pending = Array(rootIDs)
-        while let parentID = pending.popLast() {
-            for childID in childrenByParent[parentID, default: []] where result.insert(childID).inserted {
-                pending.append(childID)
-            }
-        }
-        return result
+            return (room.id, parentID)
+        })
     }
 
     private func deleteBackendStudiesIfPossible(
         knownStudyIDs: Set<Int>,
+        preferredDeletionOrder: [Int],
         topicKeys: Set<String>
     ) async {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "delete-study") else {
@@ -4235,8 +4234,11 @@ final class AppState: ObservableObject {
             return
         }
 
+        let remainingStudyIDs = studyIDs.subtracting(preferredDeletionOrder)
+        let deletionOrder = preferredDeletionOrder.filter(studyIDs.contains)
+            + remainingStudyIDs.sorted()
         var deletedStudyIDs = Set<Int>()
-        for studyID in studyIDs.sorted() {
+        for studyID in deletionOrder {
             let didDelete = await actionRunner.runVoid(
                 operation: {
                     try await performWithBackendIdentityRecovery(
