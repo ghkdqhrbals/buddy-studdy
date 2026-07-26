@@ -57,39 +57,54 @@ class LoginService(
 
     @Transactional
     override suspend fun register(command: RegisterDeviceCommand): DeviceRegisterResponse {
-        val deviceId = tokens.create("dev")
+        val installationId = command.installationId.trim()
+        if (installationId.isNotEmpty() && installationId.length !in 32..256) {
+            throw ApiException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.VALIDATION_ERROR,
+                "Installation identifier must be between 32 and 256 characters.",
+            )
+        }
+        val installationKeyHash = installationId.takeIf(String::isNotEmpty)?.let(::sha256)
+        val existingDevice = installationKeyHash?.let { devices.findByInstallationKeyHash(it) }
+        val deviceId = existingDevice?.deviceId ?: tokens.create("dev")
         val secret = tokens.create("sec")
         val now = Instant.now()
-        val user = users.save(
-            UserEntity(
-                provider = "ANONYMOUS",
-                providerId = deviceId,
-                status = "ANONYMOUS",
-                email = "",
-                displayName = "Buddy",
-                avatarColorSeed = "avatar-color-gray",
-                createdAt = now,
-                updatedAt = now,
+        val user = existingDevice?.userId
+            ?.let { users.findById(it) }
+            ?: users.findByProviderAndProviderId("ANONYMOUS", deviceId)
+            ?: users.save(
+                UserEntity(
+                    provider = "ANONYMOUS",
+                    providerId = deviceId,
+                    status = "ANONYMOUS",
+                    email = "",
+                    displayName = "Buddy",
+                    avatarColorSeed = "avatar-color-gray",
+                    createdAt = now,
+                    updatedAt = now,
+                )
             )
-        )
-        val device = devices.save(
-            DeviceEntity(
-                deviceId = deviceId,
-                clientSecretHash = sha256(secret),
-                userId = user.id,
-                apnsToken = command.apnsToken,
-                platform = command.platform,
-                apnsEnvironment = command.apnsEnvironment,
-                language = command.language,
-                timezone = command.timezone,
-                createdAt = now,
-                updatedAt = now,
-                lastSeenAt = now,
-            )
-        )
-        roles.grantRoleIfMissing(user.id, Roles.ANONYMOUS_USER)
-        val session = sessions.saveSession(user.id, device.deviceId, now, null)
-        val token = tokenService.create(user.id, device.deviceId, session.id, true, user.status)
+        val device = existingDevice ?: DeviceEntity(deviceId = deviceId, createdAt = now)
+        device.installationKeyHash = installationKeyHash
+        device.clientSecretHash = sha256(secret)
+        device.userId = user.id
+        device.apnsToken = command.apnsToken
+        device.platform = command.platform
+        device.apnsEnvironment = command.apnsEnvironment
+        device.language = command.language
+        device.timezone = command.timezone
+        device.updatedAt = now
+        device.lastSeenAt = now
+        devices.save(device)
+
+        val anonymous = user.status == "ANONYMOUS"
+        if (anonymous) {
+            roles.grantRoleIfMissing(user.id, Roles.ANONYMOUS_USER)
+        }
+        val sessionExpiresAt = if (anonymous) null else now.plusSeconds(90 * 86_400)
+        val session = sessions.saveSession(user.id, device.deviceId, now, sessionExpiresAt)
+        val token = tokenService.create(user.id, device.deviceId, session.id, anonymous, user.status)
         return DeviceRegisterResponse(device.deviceId, secret, token.first, token.second)
     }
 

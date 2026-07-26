@@ -135,7 +135,7 @@ final class StudyMateTests: XCTestCase {
         XCTAssertNil(loginPresentation.inlineMessage)
         XCTAssertFalse(loginPresentation.shouldShowPopup)
         XCTAssertTrue(loginPresentation.requiresLogin)
-        XCTAssertTrue(loginPresentation.shouldResetBackendIdentity)
+        XCTAssertFalse(loginPresentation.shouldResetBackendIdentity)
 
         let validationError = Self.backendError(
             code: "RECORD_NOT_FOUND",
@@ -288,7 +288,17 @@ final class StudyMateTests: XCTestCase {
         XCTAssertNil(resolution.featureMessage)
         XCTAssertFalse(resolution.shouldShowPopup)
         XCTAssertTrue(resolution.requiresLogin)
-        XCTAssertTrue(resolution.shouldResetBackendIdentity)
+        XCTAssertFalse(resolution.shouldResetBackendIdentity)
+    }
+
+    func testBackendIdentityRecoverySeparatesAccessTokenAndDeviceCredentials() {
+        let accessTokenError = Self.backendError(code: "AUTH_INVALID_ACCESS_TOKEN", status: 401)
+        let deviceCredentialsError = Self.backendError(code: "AUTH_INVALID_DEVICE_CREDENTIALS", status: 401)
+
+        XCTAssertTrue(BackendErrorPresentationPolicy.shouldRefreshBackendAccessToken(after: accessTokenError))
+        XCTAssertFalse(BackendErrorPresentationPolicy.shouldResetBackendIdentity(after: accessTokenError))
+        XCTAssertFalse(BackendErrorPresentationPolicy.shouldRefreshBackendAccessToken(after: deviceCredentialsError))
+        XCTAssertTrue(BackendErrorPresentationPolicy.shouldResetBackendIdentity(after: deviceCredentialsError))
     }
 
     func testBackendAPIErrorUsesDescriptionWhenMessageIsMissing() throws {
@@ -4658,6 +4668,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var bootstrapAccessTokenError: Error?
     var fetchedSettings: BackendStudySettings?
     func registerDevice(
+        installationIdentifier: String,
         apnsToken: String?,
         language: AppLanguage,
         timezone: String,

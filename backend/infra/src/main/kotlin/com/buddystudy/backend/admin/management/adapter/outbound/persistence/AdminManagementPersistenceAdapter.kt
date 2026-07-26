@@ -22,7 +22,12 @@ class AdminManagementPersistenceAdapter(
 ) : AdminManagementPort {
     override suspend fun users(query: String?, limit: Int, offset: Int): AdminUserPageResponse {
         val search = query?.lowercase()?.let { "%$it%" }
-        val where = if (search == null) "" else "where lower(u.email) like :query or lower(u.display_name) like :query or cast(u.id as char) = :exactQuery"
+        val where = buildString {
+            append("where u.status <> 'ANONYMOUS'")
+            if (search != null) {
+                append(" and (lower(u.email) like :query or lower(u.display_name) like :query or cast(u.id as char) = :exactQuery)")
+            }
+        }
         val countSpec = database.sql("select count(*) as total_count from users u $where")
             .bindSearch(search, query)
         val totalCount = countSpec.map { row, _ -> row.long("total_count") }.one().awaitSingle()
@@ -46,6 +51,7 @@ class AdminManagementPersistenceAdapter(
             """
             ${userSelect()}
             where u.id = :userId
+              and u.status <> 'ANONYMOUS'
             """.trimIndent(),
         ).bind("usageMonth", MonthlyQuotaWindow.periodAt(Instant.now()).toString())
             .bind("userId", userId)
@@ -88,7 +94,7 @@ class AdminManagementPersistenceAdapter(
             .bind("tierCode", command.tierCode)
             .map { row, _ -> row.long("count_value") > 0 }
             .one().awaitSingle()
-        val userExists = database.sql("select count(*) as count_value from users where id = :userId")
+        val userExists = database.sql("select count(*) as count_value from users where id = :userId and status <> 'ANONYMOUS'")
             .bind("userId", userId)
             .map { row, _ -> row.long("count_value") > 0 }
             .one().awaitSingle()

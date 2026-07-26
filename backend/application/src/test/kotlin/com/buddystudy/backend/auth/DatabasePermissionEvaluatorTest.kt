@@ -350,6 +350,8 @@ class DatabasePermissionEvaluatorTest {
         var device: DeviceEntity? = DeviceEntity(deviceId = "dev-1", apnsToken = "token")
         override suspend fun save(entity: DeviceEntity): DeviceEntity = entity
         override suspend fun findByDeviceId(deviceId: String): DeviceEntity? = device
+        override suspend fun findByInstallationKeyHash(installationKeyHash: String): DeviceEntity? =
+            device?.takeIf { it.installationKeyHash == installationKeyHash }
         override suspend fun findAllByUserId(userId: Long): List<DeviceEntity> = emptyList()
     }
 

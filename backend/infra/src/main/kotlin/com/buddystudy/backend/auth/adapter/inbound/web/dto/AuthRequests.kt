@@ -3,6 +3,7 @@ package com.buddystudy.backend.auth.adapter.inbound.web.dto
 import jakarta.validation.constraints.Email
 
 data class DeviceRegisterRequest(
+    var installationId: String = "",
     var apnsToken: String = "",
     var platform: String = "ios",
     var apnsEnvironment: String = "production",

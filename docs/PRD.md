@@ -78,6 +78,13 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 5. User-facing debugging logs are not provided.
 6. Decorative setting-row icons are omitted so labels and controls remain the primary scan targets.
 
+### Identity
+
+1. One app installation owns one stable backend device identity.
+2. Repeated registration for the same installation rotates credentials without creating another anonymous user.
+3. Access-token expiry refreshes the token without signing the user out or replacing the device identity.
+4. Administrator user and quota lists contain registered members only; anonymous installation identities are operational device records, not members.
+
 ### Sync And Push
 
 1. Backend sync stores settings, records, answer drafts, generated questions, grading results, and topic statistics in MySQL.

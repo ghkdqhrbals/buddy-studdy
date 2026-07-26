@@ -4,6 +4,8 @@ import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.backend.auth.adapter.outbound.persistence.UserRepository
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.auth.domain.entity.DeviceEntity
+import com.buddystudy.backend.auth.adapter.outbound.persistence.DeviceRepository
 import com.buddystudy.backend.study.adapter.outbound.persistence.StudyQuestionCoveragePersistenceAdapter
 import com.buddystudy.backend.study.adapter.outbound.persistence.StudyRepository
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
@@ -28,6 +30,7 @@ import org.springframework.test.context.TestPropertySource
 )
 class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var users: UserRepository
+    @Autowired lateinit var devices: DeviceRepository
     @Autowired lateinit var studies: StudyRepository
     @Autowired lateinit var questionCoverage: StudyQuestionCoveragePersistenceAdapter
 
@@ -45,6 +48,21 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
 
         assertThat(saved.id).isPositive()
         assertThat(users.findByProviderAndProviderId("EMAIL", "flyway@example.com")?.openaiApiKeyCipher).isEqualTo("cipher")
+    }
+
+    @Test
+    fun `flyway schema supports idempotent installation lookup`(): Unit = runBlocking {
+        val installationKeyHash = "a".repeat(64)
+        devices.save(
+            DeviceEntity(
+                deviceId = "flyway-installation-device",
+                installationKeyHash = installationKeyHash,
+                clientSecretHash = "secret-hash",
+            )
+        )
+
+        assertThat(devices.findByInstallationKeyHash(installationKeyHash)?.deviceId)
+            .isEqualTo("flyway-installation-device")
     }
 
     @Test

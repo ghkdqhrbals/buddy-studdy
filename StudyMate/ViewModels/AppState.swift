@@ -479,7 +479,6 @@ final class AppState: ObservableObject {
     @Published var pageAccessPrompt: PageAccessPrompt?
     @Published private(set) var backendPermissionEvaluations = BackendPermissionEvaluations(permissions: [])
 
-    private let settingsStore: SettingsStore
     private let appLogUseCase: AppLogUseCase
     private let storedBackendIdentityUseCase: StoredBackendIdentityUseCase
     private let communityProfileCacheUseCase: CommunityProfileCacheUseCase
@@ -1180,7 +1179,6 @@ final class AppState: ObservableObject {
         let loadedIsDebuggingEnabled = loadedDeveloperSettings.isDebuggingEnabled
         let loadedDebugBackendBaseURL = appUseCasesProvider.normalizedDebugBackendBaseURL(loadedDeveloperSettings.debugBackendBaseURL)
 
-        self.settingsStore = settingsStore
         self.appLogUseCase = localUseCases.appLog
         self.storedBackendIdentityUseCase = localUseCases.storedBackendIdentity
         self.communityProfileCacheUseCase = localUseCases.communityProfileCache
@@ -3917,24 +3915,24 @@ final class AppState: ObservableObject {
     }
 
     func loadStudyTreeNodeOffsets(rootStudyID: Int) -> [Int: CGSize] {
-        settingsStore.loadStudyTreeNodeOffsets(rootStudyID: rootStudyID).mapValues {
+        localStudySettingsUseCase.loadStudyTreeNodeOffsets(rootStudyID: rootStudyID).mapValues {
             CGSize(width: $0.x, height: $0.y)
         }
     }
 
     func saveStudyTreeNodeOffsets(_ offsets: [Int: CGSize], rootStudyID: Int) {
-        settingsStore.saveStudyTreeNodeOffsets(
+        localStudySettingsUseCase.saveStudyTreeNodeOffsets(
             offsets.mapValues { StudyTreeNodeOffset(x: $0.width, y: $0.height) },
             rootStudyID: rootStudyID
         )
     }
 
     func loadStudyTreeViewport(rootStudyID: Int) -> StudyTreeViewportState {
-        settingsStore.loadStudyTreeViewport(rootStudyID: rootStudyID)
+        localStudySettingsUseCase.loadStudyTreeViewport(rootStudyID: rootStudyID)
     }
 
     func saveStudyTreeViewport(_ viewport: StudyTreeViewportState, rootStudyID: Int) {
-        settingsStore.saveStudyTreeViewport(viewport, rootStudyID: rootStudyID)
+        localStudySettingsUseCase.saveStudyTreeViewport(viewport, rootStudyID: rootStudyID)
     }
 
     func studyCategory(for room: BackendStudyRoom) -> StudyCategory {
@@ -6363,10 +6361,31 @@ final class AppState: ObservableObject {
         do {
             return try await operation(registration)
         } catch {
+            if appErrorHandlingUseCase.shouldRefreshBackendAccessToken(after: error) {
+                logAuthTrace(
+                    "backend_access_token_recovery_start",
+                    reason: reason,
+                    extra: ["error=\(error.localizedDescription)"],
+                    deduplicate: false
+                )
+                var expiredRegistration = registration
+                expiredRegistration.accessToken = nil
+                expiredRegistration.accessTokenExpiresAt = nil
+                storedBackendIdentityUseCase.saveRegistration(expiredRegistration)
+                guard let refreshedRegistration = await registrationWithAccessToken(
+                    expiredRegistration,
+                    reason: "\(reason)-access-token-recovery"
+                ) else {
+                    logAuthTrace("backend_access_token_recovery_failure", reason: reason, deduplicate: false)
+                    throw error
+                }
+                logAuthTrace("backend_access_token_recovery_success", reason: reason, deduplicate: false)
+                return try await operation(refreshedRegistration)
+            }
+
             guard appErrorHandlingUseCase.shouldResetBackendIdentity(after: error) else {
                 throw error
             }
-
             logAuthTrace(
                 "backend_identity_recovery_start",
                 reason: reason,
@@ -6414,6 +6433,7 @@ final class AppState: ObservableObject {
         includeAPIKey: Bool
     ) async throws -> RemotePushRegistration {
         let registration = try await backendIdentityUseCase.registerDevice(
+            installationIdentifier: storedBackendIdentityUseCase.installationIdentifier(),
             apnsToken: apnsToken,
             language: settings.appLanguage,
             timezone: appTimeZoneProvider.currentIdentifier,
@@ -6546,6 +6566,7 @@ final class AppState: ObservableObject {
                 log(.info, "서버 push 백엔드의 iPhone APNs 토큰을 갱신했습니다.")
             } else {
                 registration = try await backendIdentityUseCase.registerDevice(
+                    installationIdentifier: storedBackendIdentityUseCase.installationIdentifier(),
                     apnsToken: token,
                     language: settings.appLanguage,
                     timezone: appTimeZoneProvider.currentIdentifier,

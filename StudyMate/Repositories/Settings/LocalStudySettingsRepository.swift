@@ -13,4 +13,8 @@ protocol LocalStudySettingsRepository {
     func saveAPIKey(_ apiKey: String)
     func saveOpenAIAPIKeyUpdatedAt(_ date: Date?)
     func saveLocalSettingsMutationAt(_ date: Date?)
+    func loadStudyTreeNodeOffsets(rootStudyID: Int) -> [Int: StudyTreeNodeOffset]
+    func saveStudyTreeNodeOffsets(_ offsets: [Int: StudyTreeNodeOffset], rootStudyID: Int)
+    func loadStudyTreeViewport(rootStudyID: Int) -> StudyTreeViewportState
+    func saveStudyTreeViewport(_ viewport: StudyTreeViewportState, rootStudyID: Int)
 }

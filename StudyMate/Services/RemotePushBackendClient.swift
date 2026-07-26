@@ -225,6 +225,7 @@ struct BackendBaseURLConfiguration: Equatable {
 @MainActor
 protocol RemotePushBackendClientProtocol {
     func registerDevice(
+        installationIdentifier: String,
         apnsToken: String?,
         language: AppLanguage,
         timezone: String,
@@ -519,12 +520,14 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     }
 
     func registerDevice(
+        installationIdentifier: String,
         apnsToken: String?,
         language: AppLanguage,
         timezone: String,
         apnsEnvironment: String
     ) async throws -> RemotePushRegistration {
         let requestBody = RegisterDeviceRequest(
+            installationId: installationIdentifier,
             apnsToken: apnsToken ?? "",
             platform: "ios",
             apnsEnvironment: apnsEnvironment,
@@ -1711,6 +1714,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     private static let dateFormatter = ISO8601DateFormatter()
 
     private struct RegisterDeviceRequest: Encodable {
+        var installationId: String
         var apnsToken: String
         var platform: String
         var apnsEnvironment: String

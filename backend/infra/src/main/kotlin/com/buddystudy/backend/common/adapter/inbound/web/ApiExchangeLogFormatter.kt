@@ -120,7 +120,7 @@ internal class ApiExchangeLogFormatter(
 
     private fun redact(value: String): String =
         value.replace(
-            Regex("(?i)(\"(?:openaiApiKey|apiKey|idToken|accessToken|refreshToken|clientSecret|password|verificationCode)\"\\s*:\\s*)\"[^\"]*\""),
+            Regex("(?i)(\"(?:openaiApiKey|apiKey|idToken|accessToken|refreshToken|clientSecret|installationId|password|verificationCode)\"\\s*:\\s*)\"[^\"]*\""),
         ) {
             "${it.groupValues[1]}\"[REDACTED]\""
         }

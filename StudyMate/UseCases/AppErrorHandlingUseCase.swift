@@ -25,6 +25,10 @@ struct AppErrorHandlingUseCase {
         BackendErrorPresentationPolicy.shouldResetBackendIdentity(after: error)
     }
 
+    func shouldRefreshBackendAccessToken(after error: Error) -> Bool {
+        BackendErrorPresentationPolicy.shouldRefreshBackendAccessToken(after: error)
+    }
+
     func diagnosticDescription(for error: Error) -> String {
         BackendErrorPresentationPolicy.diagnosticDescription(for: error)
     }

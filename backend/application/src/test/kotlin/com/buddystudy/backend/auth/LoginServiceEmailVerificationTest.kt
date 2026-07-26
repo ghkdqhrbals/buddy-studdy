@@ -83,6 +83,34 @@ class LoginServiceEmailVerificationTest {
     }
 
     @Test
+    fun `device registration is idempotent for the same installation`(): Unit = runBlocking {
+        val installationId = "installation-id-that-is-stable-for-this-test"
+
+        val first = login.register(
+            RegisterDeviceCommand(
+                installationId = installationId,
+                apnsToken = "first-token",
+                language = "ko",
+            )
+        )
+        val second = login.register(
+            RegisterDeviceCommand(
+                installationId = installationId,
+                apnsToken = "second-token",
+                language = "en",
+            )
+        )
+
+        assertThat(second.deviceId).isEqualTo(first.deviceId)
+        assertThat(second.clientSecret).isNotEqualTo(first.clientSecret)
+        assertThat(devices.count()).isEqualTo(1)
+        assertThat(users.countByProviderAndProviderId("ANONYMOUS", first.deviceId)).isEqualTo(1)
+        assertThat(devices.findByDeviceId(first.deviceId)?.apnsToken).isEqualTo("second-token")
+        assertThat(devices.findByDeviceId(first.deviceId)?.language).isEqualTo("en")
+        assertThat(login.token(second.deviceId, second.clientSecret).accessToken).isNotBlank()
+    }
+
+    @Test
     fun `push token update reuses principal user status`(): Unit = runBlocking {
         val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
         users.findByIdCalls = 0
@@ -318,6 +346,8 @@ class LoginServiceEmailVerificationTest {
         private val devices = linkedMapOf<String, DeviceEntity>()
         private var nextId = 1L
 
+        fun count(): Int = devices.size
+
         override suspend fun save(entity: DeviceEntity): DeviceEntity {
             if (entity.id == 0L) {
                 entity.id = nextId++
@@ -327,6 +357,8 @@ class LoginServiceEmailVerificationTest {
         }
 
         override suspend fun findByDeviceId(deviceId: String): DeviceEntity? = devices[deviceId]
+        override suspend fun findByInstallationKeyHash(installationKeyHash: String): DeviceEntity? =
+            devices.values.firstOrNull { it.installationKeyHash == installationKeyHash }
         override suspend fun findAllByUserId(userId: Long): List<DeviceEntity> =
             devices.values.filter { it.userId == userId }
     }

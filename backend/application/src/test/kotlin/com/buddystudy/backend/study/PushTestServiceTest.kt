@@ -116,6 +116,8 @@ class PushTestServiceTest {
     private class FakeDevicePort(private val device: DeviceEntity? = null) : DevicePort {
         override suspend fun save(entity: DeviceEntity): DeviceEntity = entity
         override suspend fun findByDeviceId(deviceId: String): DeviceEntity? = device?.takeIf { it.deviceId == deviceId }
+        override suspend fun findByInstallationKeyHash(installationKeyHash: String): DeviceEntity? =
+            device?.takeIf { it.installationKeyHash == installationKeyHash }
         override suspend fun findAllByUserId(userId: Long): List<DeviceEntity> =
             device?.takeIf { it.userId == userId }?.let { listOf(it) }.orEmpty()
     }

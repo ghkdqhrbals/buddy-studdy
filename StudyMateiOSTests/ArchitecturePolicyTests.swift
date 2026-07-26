@@ -1273,7 +1273,7 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertFalse(resolution.shouldShowPopup)
         XCTAssertTrue(resolution.requiresLogin)
         XCTAssertTrue(resolution.isPageAccessDenied)
-        XCTAssertTrue(resolution.shouldResetBackendIdentity)
+        XCTAssertFalse(resolution.shouldResetBackendIdentity)
         XCTAssertTrue(resolution.shouldClearFeatureMessage)
     }
 
@@ -1292,7 +1292,7 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertFalse(resolution.shouldShowPopup)
         XCTAssertTrue(resolution.requiresLogin)
         XCTAssertTrue(resolution.isPageAccessDenied)
-        XCTAssertTrue(resolution.shouldResetBackendIdentity)
+        XCTAssertFalse(resolution.shouldResetBackendIdentity)
         XCTAssertTrue(resolution.shouldClearFeatureMessage)
     }
 

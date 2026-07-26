@@ -29,7 +29,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - New or modified async view-model flows should use the common action boundary unless they are pure local state mutations or low-level callback bridges.
   - `ErrorHandling/BackendErrorPresentationPolicy.swift` converts backend error codes into UI presentation, login, page-access, and identity-reset decisions.
   - `ErrorHandling/AppErrorHandlingPolicy.swift` maps backend error presentation into app UI behavior so login/device/token errors do not leak as repeated popups or feature banners.
-  - Backend error parsing accepts both string error identifiers and numeric code ranges; auth-range numeric codes are treated as login/identity errors by policy instead of being surfaced as popups.
+  - Backend error parsing accepts both string error identifiers and numeric code ranges. Access-token expiry refreshes only the access token; only explicit device credential, device mismatch, or device-not-found codes replace the backend device identity.
   - Client-side decoding and cancellation errors are normalized by the same error policy so raw system messages such as missing-key decoding failures do not appear as repeated popups.
   - Protected tab UI must not pre-fetch page access. The app opens the tab and lets the requested backend API return auth, permission, or terms errors through the common error policy.
 
@@ -48,6 +48,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - Local persistence facade.
   - Stores settings, API keys, draft state, backend metadata, and exposes an in-memory record cache for the current session.
   - Caps records at the configured history limit.
+  - Stores backend device registration and a stable installation identifier in the iOS Keychain. The registration request sends the identifier over TLS, request logs redact it, and the backend persists only its SHA-256 hash so repeated registration is idempotent.
 
 - `Services/OpenAIClient.swift`
   - Contains shared prompt/body/parsing helpers only.
@@ -77,6 +78,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - Calls OpenAI for API-key validation, question generation, and answer grading.
   - Stores generated questions in MySQL before sending APNs notifications.
   - Owns Google-linked community profiles, public question browsing metadata, and question reports.
+  - Treats anonymous identities as installation credentials rather than administrator-visible members. Admin user and quota queries exclude `ANONYMOUS` rows.
   - Public question like/comment counts use source-of-truth reaction tables plus a `question_stats` read model; stream hooks are wired through direct Redis Streams.
   - Transactional domain writes append typed events to `redis_event_outbox` in the same R2DBC transaction. A single polling dispatcher claims rows with `FOR UPDATE SKIP LOCKED`, publishes them to Redis Streams, and retries failures with a lease and exponential backoff.
   - Redis delivery is at-least-once. `(event_type, event_id)` is the producer idempotency key, and consumers must keep their existing event-id deduplication because a crash can occur after Redis accepts an event but before the outbox row is marked published.

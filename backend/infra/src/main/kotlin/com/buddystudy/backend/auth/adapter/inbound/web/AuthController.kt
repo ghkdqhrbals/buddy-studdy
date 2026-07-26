@@ -162,6 +162,7 @@ class AuthWebAdapter(
 }
 
 private fun DeviceRegisterRequest.toCommand() = RegisterDeviceCommand(
+    installationId = installationId,
     apnsToken = apnsToken,
     platform = platform,
     apnsEnvironment = apnsEnvironment,

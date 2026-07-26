@@ -17,6 +17,7 @@ interface UserPort {
 interface DevicePort {
     suspend fun save(entity: DeviceEntity): DeviceEntity
     suspend fun findByDeviceId(deviceId: String): DeviceEntity?
+    suspend fun findByInstallationKeyHash(installationKeyHash: String): DeviceEntity?
     suspend fun findAllByUserId(userId: Long): List<DeviceEntity>
 }
 

@@ -1,6 +1,7 @@
 package com.buddystudy.backend.auth.application.port.inbound
 
 data class RegisterDeviceCommand(
+    val installationId: String = "",
     val apnsToken: String = "",
     val platform: String = "ios",
     val apnsEnvironment: String = "production",

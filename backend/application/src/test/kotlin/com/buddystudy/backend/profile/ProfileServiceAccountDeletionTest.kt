@@ -224,6 +224,8 @@ class ProfileServiceAccountDeletionTest {
         }
 
         override suspend fun findByDeviceId(deviceId: String): DeviceEntity? = devices[deviceId]
+        override suspend fun findByInstallationKeyHash(installationKeyHash: String): DeviceEntity? =
+            devices.values.firstOrNull { it.installationKeyHash == installationKeyHash }
 
         override suspend fun findAllByUserId(userId: Long): List<DeviceEntity> =
             devices.values.filter { it.userId == userId }

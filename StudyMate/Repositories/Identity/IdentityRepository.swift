@@ -3,6 +3,7 @@ import Foundation
 @MainActor
 protocol IdentityRepository {
     func registerDevice(
+        installationIdentifier: String,
         apnsToken: String?,
         language: AppLanguage,
         timezone: String,

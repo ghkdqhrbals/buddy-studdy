@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 final class SettingsStore {
     static let maxLogCount = 1000
@@ -34,17 +35,30 @@ final class SettingsStore {
         static let deletedStudyRecordMarkers = "deletedStudyRecordMarkers"
         static let studyRecordsClearedAt = "studyRecordsClearedAt"
         static let remotePushRegistration = "remotePushRegistration"
+        static let backendInstallationIdentifierFallback = "backendInstallationIdentifier"
         static let studyTreeNodeOffsetsPrefix = "studyTreeNodeOffsets"
         static let studyTreeViewportPrefix = "studyTreeViewport"
     }
 
+    private enum KeychainAccount {
+        static let remotePushRegistration = "backend-registration"
+        static let installationIdentifier = "backend-installation-id"
+    }
+
     private let defaults: UserDefaults
     private let recordStore: StudyRecordStorage
+    private let usesSecureBackendIdentityStorage: Bool
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    init(defaults: UserDefaults = .standard, recordDatabaseURL: URL? = nil) {
+    init(
+        defaults: UserDefaults = .standard,
+        recordDatabaseURL: URL? = nil,
+        usesSecureBackendIdentityStorage: Bool? = nil
+    ) {
         self.defaults = defaults
+        self.usesSecureBackendIdentityStorage = usesSecureBackendIdentityStorage
+            ?? (defaults === UserDefaults.standard)
         Self.removeLegacyRecordDatabaseIfNeeded(defaults: defaults, databaseURL: recordDatabaseURL)
         self.recordStore = Self.makeRecordStore(defaults: defaults, databaseURL: recordDatabaseURL)
         encoder.dateEncodingStrategy = .iso8601
@@ -484,22 +498,130 @@ final class SettingsStore {
     }
 
     func loadRemotePushRegistration() -> RemotePushRegistration? {
-        guard let data = defaults.data(forKey: Keys.remotePushRegistration) else {
-            return nil
+        if let data = keychainData(account: KeychainAccount.remotePushRegistration),
+           let registration = try? decoder.decode(RemotePushRegistration.self, from: data) {
+            return registration
         }
 
-        return try? decoder.decode(RemotePushRegistration.self, from: data)
+        guard let legacyData = defaults.data(forKey: Keys.remotePushRegistration),
+              let registration = try? decoder.decode(RemotePushRegistration.self, from: legacyData) else {
+            return nil
+        }
+        if saveKeychainData(legacyData, account: KeychainAccount.remotePushRegistration) {
+            defaults.removeObject(forKey: Keys.remotePushRegistration)
+        }
+        return registration
     }
 
     func saveRemotePushRegistration(_ registration: RemotePushRegistration?) {
         guard let registration else {
+            deleteKeychainData(account: KeychainAccount.remotePushRegistration)
             defaults.removeObject(forKey: Keys.remotePushRegistration)
             return
         }
 
         if let data = try? encoder.encode(registration) {
-            defaults.set(data, forKey: Keys.remotePushRegistration)
+            if saveKeychainData(data, account: KeychainAccount.remotePushRegistration) {
+                defaults.removeObject(forKey: Keys.remotePushRegistration)
+            } else {
+                deleteKeychainData(account: KeychainAccount.remotePushRegistration)
+                defaults.set(data, forKey: Keys.remotePushRegistration)
+            }
         }
+    }
+
+    func loadOrCreateBackendInstallationIdentifier() -> String {
+        if let data = keychainData(account: KeychainAccount.installationIdentifier),
+           let value = String(data: data, encoding: .utf8),
+           value.count >= 32 {
+            return value
+        }
+
+        if let fallback = defaults.string(forKey: Keys.backendInstallationIdentifierFallback),
+           fallback.count >= 32 {
+            if saveKeychainData(Data(fallback.utf8), account: KeychainAccount.installationIdentifier) {
+                defaults.removeObject(forKey: Keys.backendInstallationIdentifierFallback)
+            }
+            return fallback
+        }
+
+        var randomBytes = [UInt8](repeating: 0, count: 32)
+        let identifier: String
+        if SecRandomCopyBytes(kSecRandomDefault, randomBytes.count, &randomBytes) == errSecSuccess {
+            identifier = Data(randomBytes)
+                .base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+                .replacingOccurrences(of: "=", with: "")
+        } else {
+            identifier = "\(UUID().uuidString)\(UUID().uuidString)"
+        }
+
+        if saveKeychainData(Data(identifier.utf8), account: KeychainAccount.installationIdentifier) {
+            defaults.removeObject(forKey: Keys.backendInstallationIdentifierFallback)
+        } else {
+            defaults.set(identifier, forKey: Keys.backendInstallationIdentifierFallback)
+        }
+        return identifier
+    }
+
+    private var backendIdentityKeychainService: String {
+        "\(Bundle.main.bundleIdentifier ?? "io.github.ghkdqhrbals.StudyMate").backend-identity"
+    }
+
+    private func keychainData(account: String) -> Data? {
+        guard usesSecureBackendIdentityStorage else {
+            return nil
+        }
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: backendIdentityKeychainService,
+            kSecAttrAccount: account,
+            kSecReturnData: true,
+            kSecMatchLimit: kSecMatchLimitOne
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else {
+            return nil
+        }
+        return result as? Data
+    }
+
+    @discardableResult
+    private func saveKeychainData(_ data: Data, account: String) -> Bool {
+        guard usesSecureBackendIdentityStorage else {
+            return false
+        }
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: backendIdentityKeychainService,
+            kSecAttrAccount: account
+        ]
+        let update: [CFString: Any] = [kSecValueData: data]
+        let updateStatus = SecItemUpdate(query as CFDictionary, update as CFDictionary)
+        if updateStatus == errSecSuccess {
+            return true
+        }
+        guard updateStatus == errSecItemNotFound else {
+            return false
+        }
+
+        var insert = query
+        insert[kSecValueData] = data
+        insert[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        return SecItemAdd(insert as CFDictionary, nil) == errSecSuccess
+    }
+
+    private func deleteKeychainData(account: String) {
+        guard usesSecureBackendIdentityStorage else {
+            return
+        }
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: backendIdentityKeychainService,
+            kSecAttrAccount: account
+        ]
+        SecItemDelete(query as CFDictionary)
     }
 
     func loadIsDebuggingEnabled() -> Bool {

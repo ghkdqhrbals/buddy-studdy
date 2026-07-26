@@ -119,16 +119,30 @@ enum BackendErrorPresentationPolicy {
         }
 
         switch backendError {
-        case .httpStatus(let status, _, let apiError):
+        case .httpStatus(_, _, let apiError):
             let code = apiError?.code
-            return status == 401
-                || code == "AUTH_ACCESS_TOKEN_REQUIRED"
-                || code == "AUTH_INVALID_ACCESS_TOKEN"
-                || code == "AUTH_DEVICE_CREDENTIALS_REQUIRED"
+            return code == "AUTH_DEVICE_CREDENTIALS_REQUIRED"
                 || code == "AUTH_INVALID_DEVICE_CREDENTIALS"
                 || code == "AUTH_DEVICE_MISMATCH"
                 || code == "DEVICE_NOT_FOUND"
-                || isAuthNumericCode(apiError?.numericCode)
+        case .invalidResponse:
+            return false
+        }
+    }
+
+    static func shouldRefreshBackendAccessToken(after error: Error) -> Bool {
+        guard let backendError = error as? RemotePushBackendError else {
+            return false
+        }
+
+        switch backendError {
+        case .httpStatus(let status, _, let apiError):
+            guard !shouldResetBackendIdentity(after: error) else {
+                return false
+            }
+            return status == 401
+                || apiError?.code == "AUTH_ACCESS_TOKEN_REQUIRED"
+                || apiError?.code == "AUTH_INVALID_ACCESS_TOKEN"
         case .invalidResponse:
             return false
         }

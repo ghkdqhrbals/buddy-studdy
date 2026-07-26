@@ -10,6 +10,7 @@ class DeviceEntity(
     @Id
     var id: Long = 0,
     var deviceId: String = "",
+    var installationKeyHash: String? = null,
     var clientSecretHash: String = "",
     var userId: Long? = null,
     var googleSessionExpiresAt: Instant? = null,
