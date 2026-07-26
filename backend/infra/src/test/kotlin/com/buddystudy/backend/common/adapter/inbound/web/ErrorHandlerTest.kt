@@ -75,6 +75,36 @@ class ErrorHandlerTest {
     }
 
     @Test
+    fun `nested linkage root cause is logged with searchable cause and origin`(output: CapturedOutput) = runBlocking {
+        val exchange = exchange(
+            method = "POST",
+            path = "/api/v1/studies/2/questions",
+            requestId = "req-linkage",
+        )
+        val rootCause = ExceptionInInitializerError("jOOQ SQLDataType initialization failed").apply {
+            stackTrace = arrayOf(StackTraceElement("org.jooq.impl.DSL", "using", "DSL.java", 918))
+        }
+        val error = NoClassDefFoundError("Could not initialize class org.jooq.impl.DefaultDSLContext").apply {
+            initCause(rootCause)
+        }
+        val translated = IllegalStateException("jOOQ runtime initialization failed.", error)
+
+        val response = handler.fallback(translated, exchange)
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR)
+        val json = mapper.valueToTree<com.fasterxml.jackson.databind.JsonNode>(response.body)
+        assertThat(json["error"]["requestId"].asText()).isEqualTo("req-linkage")
+        assertThat(json["error"]["reason"].asText())
+            .contains("IllegalStateException: jOOQ runtime initialization failed.")
+            .contains("ExceptionInInitializerError: jOOQ SQLDataType initialization failed")
+        assertThat(output.all).contains("requestId=req-linkage")
+        assertThat(output.all).contains("path=/api/v1/studies/2/questions")
+        assertThat(output.all).contains("exceptionType=IllegalStateException")
+        assertThat(output.all).contains("rootCauseType=ExceptionInInitializerError")
+        assertThat(output.all).contains("origin=org.jooq.impl.DSL.using(DSL.java:918)")
+    }
+
+    @Test
     fun `api runtime exception response uses request locale and omits reason`(): Unit = runBlocking {
         val exchange = MockServerWebExchange.from(
             MockServerHttpRequest.get("/api/v1/records")
@@ -139,4 +169,5 @@ class ErrorHandlerTest {
             it.attributes[RequestLoggingFilter.REQUEST_ID_ATTRIBUTE] = requestId
         }
     }
+
 }

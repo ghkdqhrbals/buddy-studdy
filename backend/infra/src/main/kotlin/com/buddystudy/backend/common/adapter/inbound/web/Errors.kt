@@ -144,14 +144,22 @@ class ErrorHandler(
 
     @ExceptionHandler(Exception::class)
     fun fallback(error: Exception, exchange: ServerWebExchange): ResponseEntity<ApiErrorEnvelope> {
+        return internalServerError(error, exchange)
+    }
+
+    private fun internalServerError(
+        error: Throwable,
+        exchange: ServerWebExchange,
+    ): ResponseEntity<ApiErrorEnvelope> {
+        val details = error.details()
         val body = errorResponseFactory.envelope(
             ApiErrorCode.INTERNAL_SERVER_ERROR,
             HttpStatus.INTERNAL_SERVER_ERROR,
             exchange,
-            error.toReason(),
+            details.reason,
         )
         log.error(
-            "api_error requestId={} clientIp={} method={} path={} status={} code={} message={}",
+            "api_error requestId={} clientIp={} method={} path={} status={} code={} message={} exceptionType={} exceptionMessage={} rootCauseType={} rootCauseMessage={} origin={}",
             body.error.requestId,
             ClientIpResolver.resolve(exchange.request),
             exchange.request.method,
@@ -159,6 +167,11 @@ class ErrorHandler(
             HttpStatus.INTERNAL_SERVER_ERROR.value(),
             ApiErrorCode.INTERNAL_SERVER_ERROR.name,
             body.error.message,
+            details.exceptionType,
+            details.exceptionMessage,
+            details.rootCauseType,
+            details.rootCauseMessage,
+            details.origin,
             error,
         )
         return json(HttpStatus.INTERNAL_SERVER_ERROR, body)
@@ -169,9 +182,60 @@ class ErrorHandler(
             .contentType(MediaType.APPLICATION_JSON)
             .body(body)
 
-    private fun Exception.toReason(): String {
-        val type = this::class.simpleName ?: javaClass.simpleName
-        val detail = message?.takeIf { it.isNotBlank() }
-        return if (detail == null) type else "$type: $detail"
+    private fun Throwable.details(): ThrowableDetails {
+        val rootCause = rootCause()
+        val exceptionType = typeName()
+        val exceptionMessage = message.toLogValue()
+        val rootCauseType = rootCause.typeName()
+        val rootCauseMessage = rootCause.message.toLogValue()
+        val origin = (rootCause.stackTrace.firstOrNull() ?: stackTrace.firstOrNull())?.toString().toLogValue()
+        val primaryReason = reason(exceptionType, exceptionMessage)
+        val rootReason = reason(rootCauseType, rootCauseMessage)
+        return ThrowableDetails(
+            exceptionType = exceptionType,
+            exceptionMessage = exceptionMessage,
+            rootCauseType = rootCauseType,
+            rootCauseMessage = rootCauseMessage,
+            origin = origin,
+            reason = if (rootCause === this) primaryReason else "$primaryReason; caused by $rootReason",
+        )
+    }
+
+    private fun Throwable.rootCause(): Throwable {
+        var current = this
+        repeat(MAX_CAUSE_DEPTH) {
+            val next = current.cause ?: return current
+            if (next === current) return current
+            current = next
+        }
+        return current
+    }
+
+    private fun Throwable.typeName(): String = this::class.simpleName ?: javaClass.simpleName
+
+    private fun String?.toLogValue(): String =
+        this
+            ?.replace(WHITESPACE, " ")
+            ?.trim()
+            ?.take(MAX_DETAIL_LENGTH)
+            ?.takeIf(String::isNotBlank)
+            ?: "-"
+
+    private fun reason(type: String, detail: String): String =
+        if (detail == "-") type else "$type: $detail"
+
+    private data class ThrowableDetails(
+        val exceptionType: String,
+        val exceptionMessage: String,
+        val rootCauseType: String,
+        val rootCauseMessage: String,
+        val origin: String,
+        val reason: String,
+    )
+
+    private companion object {
+        private const val MAX_CAUSE_DEPTH = 32
+        private const val MAX_DETAIL_LENGTH = 500
+        private val WHITESPACE = Regex("\\s+")
     }
 }

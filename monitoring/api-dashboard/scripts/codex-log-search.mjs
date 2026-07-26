@@ -173,6 +173,12 @@ function renderSlackResponse({ options, range, sort, dashboardUrl, requests, sel
     return `- ${request.time} ${request.method} ${request.path} status=${request.status || "-"} duration=${durationLabel(request.durationMs)} ${tone} requestId=${request.requestId}`;
   });
   const error = detail?.errors?.[0];
+  const errorCause = error?.exceptionType
+    ? `${error.exceptionType}${error.exceptionMessage && error.exceptionMessage !== "-" ? `: ${error.exceptionMessage}` : ""}`
+    : "";
+  const rootCause = error?.rootCauseType && error.rootCauseType !== error.exceptionType
+    ? `${error.rootCauseType}${error.rootCauseMessage && error.rootCauseMessage !== "-" ? `: ${error.rootCauseMessage}` : ""}`
+    : "";
   const connectedLogs = detail?.logs?.filter((log) => log.message !== selected?.rawLine).slice(0, 6) ?? [];
   return [
     "*BuddyStudy API log search*",
@@ -183,6 +189,9 @@ function renderSlackResponse({ options, range, sort, dashboardUrl, requests, sel
     "",
     selected ? `*Selected*: ${selected.method} ${selected.path} status=${selected.status || "-"} duration=${durationLabel(selected.durationMs)} requestId=${selected.requestId}` : "*Selected*: none",
     error ? `*Error*: ${error.code || "-"} ${error.message || ""}` : "*Error*: none",
+    errorCause ? `*Exception*: ${errorCause}` : "",
+    rootCause ? `*Root cause*: ${rootCause}` : "",
+    error?.origin ? `*Origin*: ${error.origin}` : "",
     error?.stack ? `\`\`\`\n${truncate(error.stack, 1800)}\n\`\`\`` : "",
     "*Recent matches*",
     rows.length ? rows.join("\n") : "- no matching api_exchange logs",

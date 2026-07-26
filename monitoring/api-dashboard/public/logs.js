@@ -81,6 +81,11 @@ export function parseApiError(value) {
     status: Number(fields.status ?? 0),
     code: fields.code ?? "",
     message: fields.message ?? "",
+    exceptionType: fields.exceptionType ?? "",
+    exceptionMessage: fields.exceptionMessage ?? "",
+    rootCauseType: fields.rootCauseType ?? "",
+    rootCauseMessage: fields.rootCauseMessage ?? "",
+    origin: fields.origin ?? "",
     stack,
     rawLine: line,
   };

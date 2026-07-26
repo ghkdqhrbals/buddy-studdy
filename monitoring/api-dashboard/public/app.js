@@ -368,12 +368,20 @@ function jsonPanel(title, value) {
 }
 
 function stackPanel(error) {
+  const exception = error.exceptionType
+    ? `${error.exceptionType}${error.exceptionMessage && error.exceptionMessage !== "-" ? `: ${error.exceptionMessage}` : ""}`
+    : error.message || "";
+  const rootCause = error.rootCauseType && error.rootCauseType !== error.exceptionType
+    ? `${error.rootCauseType}${error.rootCauseMessage && error.rootCauseMessage !== "-" ? `: ${error.rootCauseMessage}` : ""}`
+    : "";
   return `
     <article class="stack-panel">
       <div class="stack-heading">
-        <h3>Error Stack Trace</h3>
-        <span>${escapeHtml(error.code || "ERROR")} · ${escapeHtml(error.message || "")}</span>
+        <h3>Error Detail</h3>
+        <span>${escapeHtml(error.code || "ERROR")} · ${escapeHtml(exception)}</span>
       </div>
+      ${rootCause ? `<p><strong>Root cause:</strong> ${escapeHtml(rootCause)}</p>` : ""}
+      ${error.origin ? `<p><strong>Origin:</strong> <code>${escapeHtml(error.origin)}</code></p>` : ""}
       <pre>${escapeHtml(error.stack || error.rawLine)}</pre>
     </article>
   `;

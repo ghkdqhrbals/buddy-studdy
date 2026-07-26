@@ -40,7 +40,10 @@ class JooqR2dbcExecutor(
         }
         val connection = ConnectionFactoryUtils.getConnection(connectionFactory).awaitSingle()
         return try {
-            block(DSL.using(connection, dialect))
+            val dsl = translateJooqLinkageError {
+                DSL.using(connection, dialect)
+            }
+            block(dsl)
         } finally {
             if (!transactionBound) {
                 withContext(NonCancellable) {
@@ -50,3 +53,17 @@ class JooqR2dbcExecutor(
         }
     }
 }
+
+internal fun <T> translateJooqLinkageError(block: () -> T): T =
+    try {
+        block()
+    } catch (error: LinkageError) {
+        throw JooqRuntimeInitializationException(error)
+    }
+
+internal class JooqRuntimeInitializationException(
+    cause: LinkageError,
+) : IllegalStateException(
+    "jOOQ runtime initialization failed (${cause::class.simpleName}: ${cause.message ?: "no detail"}).",
+    cause,
+)
