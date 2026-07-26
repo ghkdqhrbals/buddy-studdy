@@ -11,12 +11,12 @@
   --blue: #2563eb;
   --blue-soft: #eaf1ff;
   --surface: #ffffff;
-  --nav-bg: #334657;
-  --nav-bg-deep: #2d3f4f;
-  --nav-bg-hover: #405568;
-  --nav-border: #4a5d6e;
-  --nav-text: #e6edf3;
-  --nav-muted: #b9c5cf;
+  --nav-bg: #000000;
+  --nav-bg-deep: #000000;
+  --nav-bg-hover: #171717;
+  --nav-border: #262626;
+  --nav-text: #eef4f8;
+  --nav-muted: #bdc9d4;
 }
 
 * { box-sizing: border-box; }

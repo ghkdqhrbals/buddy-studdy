@@ -81,7 +81,7 @@ export function ApiLogsPage() {
       contentSelector=".content-shell"
       removeSelector=".topbar"
       extraSelectors={EMPTY_TEMPLATE_SELECTOR}
-      controllerUrl="/app.js?v=2026072703"
+      controllerUrl="/app.js?v=2026072704"
       className="observe-page"
     >
       <PageHeader
@@ -103,7 +103,7 @@ export function ApiPerformancePage() {
       contentSelector=".content-shell"
       removeSelector=".topbar"
       extraSelectors={EMPTY_TEMPLATE_SELECTOR}
-      controllerUrl="/performance.js?v=2026072703"
+      controllerUrl="/performance.js?v=2026072704"
       className="observe-page"
     >
       <PageHeader
@@ -125,7 +125,7 @@ export function TestZonePage() {
       contentSelector=".testzone-content"
       removeSelector=".testzone-header"
       extraSelectors={TESTZONE_EXTRA_SELECTORS}
-      controllerUrl="/testzone.js?v=2026072703"
+      controllerUrl="/testzone.js?v=2026072704"
       className="testzone-content testzone-react-page"
     >
       <header className="testzone-header">
