@@ -23,10 +23,16 @@ import java.util.Optional
 class SettingsServiceTest {
     private val studies = FakeStudyPort()
     private val users = FakeUserPort()
+    private val properties = BuddyStudyProperties(
+        crypto = BuddyStudyProperties.Crypto(masterKey = "test-master-key"),
+    ).apply {
+        openai.apiKey = "system-api-key"
+    }
     private val service = SettingsService(
         studies = studies,
         users = users,
-        cipher = KeyCipher(BuddyStudyProperties(crypto = BuddyStudyProperties.Crypto(masterKey = "test-master-key"))),
+        cipher = KeyCipher(properties),
+        properties = properties,
     )
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
@@ -130,6 +136,16 @@ class SettingsServiceTest {
         )
 
         assertThat(studies.saved.map { it.topic }).containsExactly("SwiftUI")
+    }
+
+    @Test
+    fun `settings reports the system OpenAI key used for question generation`(): Unit = runBlocking {
+        users.row = UserEntity(id = 7, providerId = "u7", status = "ACTIVE")
+        studies.rows += StudyEntity(id = 11, userId = 7, deviceId = "dev-1", topic = "Kotlin")
+
+        val response = service.settings(principal)
+
+        assertThat(response.openaiKeyConfigured).isTrue()
     }
 
     private class FakeStudyPort : StudyPort {

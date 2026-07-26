@@ -4,9 +4,9 @@ import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumer
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.config.BuddyStudyProperties
-import com.buddystudy.backend.config.ApplicationCoroutineScope
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
+import com.buddystudy.backend.notification.application.port.outbound.NotificationPersistencePort
 import com.buddystudy.backend.study.application.port.outbound.ApnsAlert
 import com.buddystudy.backend.study.application.port.outbound.ApnsAps
 import com.buddystudy.backend.study.application.port.outbound.ApnsQuestionPayload
@@ -24,7 +24,6 @@ import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import java.time.Duration
 import java.time.Instant
-import kotlinx.coroutines.launch
 
 @Component
 @ConditionalOnProperty(prefix = "buddystudy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
@@ -34,11 +33,11 @@ class PushStreamListener(
     private val pushNotifications: PushNotificationPort,
     private val devices: DevicePort,
     private val userDevices: UserDevicePort,
-    private val coroutineScope: ApplicationCoroutineScope,
+    private val notifications: NotificationPersistencePort,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val group = "bs-backend-push"
-    private val consumerName = "push-${java.net.InetAddress.getLocalHost().hostName}"
+    private val consumerName = "buddystudy-push"
     private val eventType = "QUESTION_PUSH_REQUESTED"
 
     @PostConstruct
@@ -54,27 +53,28 @@ class PushStreamListener(
     }
 
     @Scheduled(fixedDelayString = "\${PUSH_CONSUMER_POLL_DELAY_MS:1000}")
-    fun pollPushRequests() {
+    suspend fun pollPushRequests() {
         consumer.poll(properties.streams.key, group, consumerName, 50, Duration.ofMillis(3000)) {
-            coroutineScope.launch { onPushRequested(it) }
+            onPushRequested(it)
         }
     }
 
     suspend fun onPushRequested(message: RedisStreamMessage) {
+        val notificationId = runCatching { PushEventPayloadParser.notificationId(message.fields) }.getOrNull()
         try {
             if (message.fields["eventType"] != eventType) {
                 consumer.acknowledge(message, group)
                 return
             }
-            logger.info("listen!!!!")
             logger.info(
-                " listener={} stream={} redisRecordId={} eventId={} eventType={} recordId={} deviceId={} userId={} fieldKeys={}",
+                "redis_stream_consume_started listener={} stream={} redisRecordId={} eventId={} eventType={} recordId={} notificationId={} deviceId={} userId={} fieldKeys={}",
                 "buddystudy-push-listener",
                 message.streamKey,
                 message.recordId,
                 message.fields["eventId"],
                 message.fields["eventType"],
                 message.fields["recordId"],
+                notificationId,
                 message.fields["deviceId"],
                 message.fields["userId"],
                 message.fields.keys,
@@ -82,6 +82,9 @@ class PushStreamListener(
             val deviceId = PushEventPayloadParser.deviceId(message.fields)
             val userId = PushEventPayloadParser.userId(message.fields)
             if (deviceId != null && userId != null && !userDevices.hasActiveSession(userId, deviceId)) {
+                notificationId?.let {
+                    notifications.markPushFailed(it, "Push target session is inactive.", Instant.now())
+                }
                 logger.info(
                     "redis_stream_consume_skipped_inactive_session listener={} stream={} redisRecordId={} eventId={} recordId={} deviceId={} userId={}",
                     "buddystudy-push-listener",
@@ -104,6 +107,7 @@ class PushStreamListener(
             pushNotifications.sendQuestion(pushMessage)
             val consumedAt = Instant.now()
             val pushAgeMs = pushMessage.createdAt?.let { Duration.between(it, consumedAt).toMillis() }
+            notificationId?.let { notifications.markPushSent(it, consumedAt) }
             consumer.acknowledge(message, group)
             logger.info(
                 "redis_stream_consume_succeeded listener={} stream={} redisRecordId={} eventId={} eventType={} recordId={} deviceId={} userId={} pushProvider={} pushCreatedAt={} consumedAt={} pushAgeMs={}",
@@ -121,6 +125,11 @@ class PushStreamListener(
                 pushAgeMs,
             )
         } catch (error: Exception) {
+            notificationId?.let {
+                runCatching {
+                    notifications.markPushFailed(it, error.message ?: error.javaClass.simpleName, Instant.now())
+                }
+            }
             logger.warn(
                 "redis_stream_consume_failed listener={} stream={} redisRecordId={} eventId={} eventType={} recordId={} deviceId={} userId={} error={}",
                 "buddystudy-push-listener",
@@ -139,6 +148,9 @@ class PushStreamListener(
 }
 
 internal object PushEventPayloadParser {
+    fun notificationId(fields: Map<String, String>): Long? =
+        payload(fields)?.notificationId ?: fields["notificationId"]?.toLongOrNull()
+
     fun deviceId(fields: Map<String, String>): String? =
         payload(fields)?.deviceId ?: fields["deviceId"]?.takeIf(String::isNotBlank)
 

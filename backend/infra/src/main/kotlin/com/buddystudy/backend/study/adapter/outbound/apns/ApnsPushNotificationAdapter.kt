@@ -41,8 +41,7 @@ class ApnsPushNotificationAdapter(
         require(message is ApnsQuestionMessage) { "APNs adapter cannot send ${message.type} messages." }
         val token = message.token.takeIf { it.isNotBlank() }
         if (token == null) {
-            logger.warn("apns_push_skipped_missing_token recordId={}", message.recordId)
-            return
+            throw IllegalArgumentException("APNs token is missing for record ${message.recordId}.")
         }
         val jwt = apnsJwt()
         val request = buildRequest(message, jwt)

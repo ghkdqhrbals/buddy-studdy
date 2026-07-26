@@ -13,6 +13,7 @@ import com.buddystudy.backend.settings.application.port.inbound.SettingsUseCase
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.study.domain.StudyRoomSettings
 import com.buddystudy.study.domain.StudyRoomSettingsCommand
 import com.buddystudy.study.domain.StudyRoomSettingsState
@@ -27,6 +28,7 @@ class SettingsService(
     private val studies: StudyPort,
     private val users: UserPort,
     private val cipher: KeyCipher,
+    private val properties: BuddyStudyProperties,
 ) : SettingsUseCase {
     @Transactional
     override suspend fun upsertSchedule(principal: Principal, command: ScheduleCommand): ScheduleResponse {
@@ -85,7 +87,9 @@ class SettingsService(
     @Transactional(readOnly = true)
     override suspend fun settings(principal: Principal): StudySettingsResponse {
         val user = users.findById(principal.userId)
-        return studies.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId).toSettings(user)
+        return studies.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId)
+            .toSettings(user)
+            .copy(openaiKeyConfigured = properties.openai.apiKey.isNotBlank())
     }
 
     @Transactional(readOnly = true)
@@ -94,6 +98,7 @@ class SettingsService(
         val study = studies.findByIdAndUserId(studyId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study settings are not configured.")
         return study.toSettings(user)
+            .copy(openaiKeyConfigured = properties.openai.apiKey.isNotBlank())
     }
 
     @Transactional

@@ -51,7 +51,7 @@ WebFlux does not make CPU-heavy work faster. It also does not increase MySQL que
 ## Boundaries
 
 - MySQL request-path I/O uses R2DBC.
-- Redis publication and ACK use reactive APIs. Redis Stream `XREAD BLOCK` is deliberately confined to Spring scheduler threads, then coroutine listeners launch suspend handlers.
+- Redis publication and ACK use reactive APIs. Redis Stream `XREAD BLOCK` is isolated on `Dispatchers.IO`; suspended scheduled listeners process each polled batch sequentially so one record is not handled concurrently before acknowledgement.
 - Request and response logging streams bounded payload previews without joining unbounded bodies.
 - Flyway uses JDBC only during startup because migration execution is not request traffic.
 - Google OAuth, LibreTranslate, and Slack use Reactor Netty `WebClient`; APNs uses Java `HttpClient.sendAsync`.

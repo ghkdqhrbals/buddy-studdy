@@ -6,7 +6,6 @@ import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumer
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.config.BuddyStudyProperties
-import com.buddystudy.backend.config.ApplicationCoroutineScope
 import com.buddystudy.backend.notification.adapter.outbound.stream.NotificationRequestedPayload
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.notification.application.port.inbound.ProcessNotificationEventUseCase
@@ -21,7 +20,6 @@ import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import java.time.Duration
 import java.time.Instant
-import kotlinx.coroutines.launch
 
 @Component
 @ConditionalOnProperty(prefix = "buddystudy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
@@ -34,18 +32,17 @@ class NotificationStreamListener(
     private val userDevices: UserDevicePort,
     private val pushPublisher: QuestionPushPublishPort,
     private val sendPolicy: NotificationSendPolicy,
-    private val coroutineScope: ApplicationCoroutineScope,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val stalePushClaimAge = Duration.ofMinutes(5)
     private val group = "bs-backend-notification"
-    private val consumerName = "notification-${java.net.InetAddress.getLocalHost().hostName}"
+    private val consumerName = "buddystudy-notification"
     private val eventType = "NOTIFICATION_REQUESTED"
 
     @Scheduled(fixedDelayString = "\${NOTIFICATION_CONSUMER_POLL_DELAY_MS:1000}")
-    fun pollNotificationRequests() {
+    suspend fun pollNotificationRequests() {
         consumer.poll(properties.streams.key, group, consumerName, 100, Duration.ofMillis(3000)) {
-            coroutineScope.launch { onNotificationRequested(it) }
+            onNotificationRequested(it)
         }
     }
 
@@ -123,17 +120,21 @@ class NotificationStreamListener(
             )
             return
         }
-        val currentSession = command.userId?.let { userDevices.findActiveByUserId(it).firstOrNull() }
-        val targetDeviceId = currentSession?.deviceId ?: command.deviceId
-        val targetDevice = targetDeviceId
-            ?.let { devices.findByDeviceId(it) }
-            ?.takeIf { it.apnsToken.isNotBlank() }
+        val activeSessions = command.userId?.let { userDevices.findActiveByUserId(it) }.orEmpty()
+        val candidateDeviceIds = buildList {
+            addAll(activeSessions.map { it.deviceId })
+            command.deviceId?.let(::add)
+        }.distinct()
+        val targetDevice = candidateDeviceIds.firstNotNullOfOrNull { deviceId ->
+            devices.findByDeviceId(deviceId)?.takeIf { it.apnsToken.isNotBlank() }
+        }
         logger.info(
-            "notification_push_targets_resolved notificationId={} eventId={} userId={} currentDeviceId={} hasApnsToken={}",
+            "notification_push_targets_resolved notificationId={} eventId={} userId={} candidateDeviceIds={} selectedDeviceId={} hasApnsToken={}",
             notificationId,
             command.eventId,
             command.userId,
-            currentSession?.deviceId,
+            candidateDeviceIds,
+            targetDevice?.deviceId,
             targetDevice != null,
         )
         if (targetDevice == null) {
@@ -194,7 +195,6 @@ class NotificationStreamListener(
                 )
                 return
             }
-            notifications.markPushSent(notificationId, Instant.now())
             logger.info(
                 "notification_push_published notificationId={} eventId={} userId={} deviceId={}",
                 notificationId,

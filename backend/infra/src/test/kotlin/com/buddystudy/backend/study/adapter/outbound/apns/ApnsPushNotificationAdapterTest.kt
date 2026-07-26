@@ -8,6 +8,7 @@ import com.buddystudy.backend.study.application.port.outbound.ApnsAps
 import com.buddystudy.backend.study.application.port.outbound.ApnsQuestionMessage
 import com.buddystudy.backend.study.application.port.outbound.ApnsQuestionPayload
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Duration
 
@@ -83,5 +84,28 @@ class ApnsPushNotificationAdapterTest {
         )
 
         assertThat(body).contains(""""notificationId":"99"""")
+    }
+
+    @Test
+    fun `missing APNs token is a delivery failure`(): Unit = runBlocking {
+        val adapter = ApnsPushNotificationAdapter(BuddyStudyProperties())
+        val message = ApnsQuestionMessage(
+            recordId = "10",
+            topic = "Swift",
+            token = "",
+            environment = "sandbox",
+            payload = ApnsQuestionPayload(
+                aps = ApnsAps(
+                    alert = ApnsAlert("BuddyStudy", "Question?"),
+                    sound = "default",
+                ),
+                deepLink = "buddystudy://records/10",
+            ),
+        )
+
+        assertThatThrownBy {
+            runBlocking { adapter.sendQuestion(message) }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("APNs token is missing")
     }
 }

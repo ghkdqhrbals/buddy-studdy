@@ -13,7 +13,9 @@ import org.springframework.data.redis.core.ReactiveStringRedisTemplate
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.stereotype.Component
 import java.time.Duration
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.reactor.awaitSingle
+import kotlinx.coroutines.withContext
 
 data class RedisStreamPublishedMessage(
     val streamKey: String,
@@ -59,17 +61,19 @@ class RedisStreamConsumer(
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    fun poll(
+    suspend fun poll(
         streamKey: String,
         group: String,
         consumer: String,
         count: Long,
         timeout: Duration,
-        handler: (RedisStreamMessage) -> Unit,
+        handler: suspend (RedisStreamMessage) -> Unit,
     ) {
-        ensureGroup(streamKey, group)
-        val records = read(streamKey, group, consumer, count, timeout, ReadOffset.from("0-0")).ifEmpty {
-            read(streamKey, group, consumer, count, timeout, ReadOffset.lastConsumed())
+        val records = withContext(Dispatchers.IO) {
+            ensureGroup(streamKey, group)
+            read(streamKey, group, consumer, count, timeout, ReadOffset.from("0-0")).ifEmpty {
+                read(streamKey, group, consumer, count, timeout, ReadOffset.lastConsumed())
+            }
         }
         records.forEach { record ->
             val message = RedisStreamMessage(

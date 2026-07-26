@@ -67,4 +67,27 @@ class PushEventPayloadParserTest {
         assertThat(apns.payload.aps.alert.body).isEqualTo("Legacy question")
         assertThat(apns.payload.deepLink).isEqualTo("buddystudy://records/10")
     }
+
+    @Test
+    fun `notification id is retained until APNs delivery completes`(): Unit = runBlocking {
+        val fields = mapOf(
+            "payload" to """
+                {
+                  "recordId":10,
+                  "notificationId":99,
+                  "studyId":77,
+                  "deviceId":"device-1",
+                  "userId":11,
+                  "question":"What is SwiftUI?",
+                  "topic":"SwiftUI",
+                  "difficultyLevel":5,
+                  "language":"en",
+                  "intervalMinutes":15,
+                  "createdAt":"2026-06-08T00:00:00Z"
+                }
+            """.trimIndent(),
+        )
+
+        assertThat(PushEventPayloadParser.notificationId(fields)).isEqualTo(99)
+    }
 }

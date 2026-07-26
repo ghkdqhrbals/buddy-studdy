@@ -105,6 +105,8 @@ Push is a separate channel from the inbox.
 - `should_push=false`: only the inbox item is created.
 - `should_push=true`: listener attempts APNs delivery after the inbox item is stored.
 - Push claim uses `push_claimed_at` and permits retry of stale claims after five minutes.
+- A notification is marked sent only after the APNs adapter accepts the request; publishing the intermediate push stream event is not delivery success.
+- Stream consumers use stable names so pending entries remain recoverable across container replacement.
 - If the process crashes after APNs accepts the push but before `push_sent_at` is written, a later retry may send another push. This is the unavoidable tradeoff without APNs-side dedupe acknowledgement.
 - The in-app notification remains exactly one visible item.
 
