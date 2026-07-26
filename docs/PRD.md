@@ -107,7 +107,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 2. Operators can search users by ID, email, or display name. User lists are paginated by default.
 3. Membership tiers define the default monthly question allowance. An operator can assign a tier and optionally set a per-user allowance override.
 4. Payment-plan names and controls remain internal. The consumer app exposes only allowance, remaining count, and reset time.
-5. The administrator console provides searchable Redis Stream topics, cursor-paginated entries, exact entry-ID lookup, consumer-group lag, and redacted message detail.
+5. Monitoring `Manage > Redis Streams` provides searchable Redis Stream topics, cursor-paginated entries, exact entry-ID lookup, consumer-group lag, and redacted message detail.
 
 ### Community
 

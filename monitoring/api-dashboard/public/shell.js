@@ -2,7 +2,7 @@ const NAV_COLLAPSED_KEY = "buddystudy.monitoring.nav.collapsed";
 const NAV_GROUP_KEY = "buddystudy.monitoring.nav.groups";
 const NAV_MODE_KEY = "buddystudy.monitoring.nav.mode";
 const SERVER_DASHBOARD_URL = "https://grafana.lowfidev.cloud/d/buddystudy-server-runtime/buddystudy-server-dashboard?orgId=1&from=now-1h&to=now&timezone=browser&refresh=10s";
-const UI_VERSION = "2026.07.26.1";
+const UI_VERSION = "2026.07.27.1";
 const root = document.documentElement;
 
 const groups = [
@@ -21,6 +21,7 @@ const groups = [
     label: "Manage",
     items: [
       { href: "/users.html", label: "Users & Quotas", icon: "users" },
+      { href: "/streams.html", label: "Redis Streams", icon: "stream" },
     ],
   },
   {
@@ -73,6 +74,14 @@ const iconPaths = {
     '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>',
     '<circle cx="9" cy="7" r="4"/>',
     '<path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  ],
+  stream: [
+    '<path d="M4 6h16"/>',
+    '<path d="M4 12h16"/>',
+    '<path d="M4 18h16"/>',
+    '<circle cx="7" cy="6" r="1.5"/>',
+    '<circle cx="14" cy="12" r="1.5"/>',
+    '<circle cx="10" cy="18" r="1.5"/>',
   ],
   rocket: [
     '<path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/>',

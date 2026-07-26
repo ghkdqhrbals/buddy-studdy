@@ -5,7 +5,6 @@ import { JOB_PAGE_SIZE, sectionPaths, sections } from "./adminConfig";
 import { LoginScreen } from "./LoginScreen";
 import { MetricsDashboard } from "./MetricsDashboard";
 import { OperationsPanel } from "./OperationsPanel";
-import { EventStreamsPanel } from "./EventStreamsPanel";
 import type {
   AdminMetricSeries,
   ScheduledJobRun,
@@ -124,7 +123,7 @@ function sectionHref(
 }
 
 function sectionUsesDateRange(section: SectionKey): boolean {
-  return section !== "operations" && section !== "streams";
+  return section !== "operations";
 }
 
 export function App() {
@@ -141,7 +140,6 @@ export function App() {
   const [highlightRunId, setHighlightRunId] = useState(() => routeState().runId);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [streamRefreshKey, setStreamRefreshKey] = useState(0);
 
   const active = sections.find((section) => section.key === activeSection) ?? sections[0];
   const isAuthenticated = Boolean(token);
@@ -214,9 +212,6 @@ export function App() {
         setJobPage(runs);
         setJobStatuses(statuses);
         setSeries([]);
-      } else if (activeSection === "streams") {
-        setSeries([]);
-        setJobPage(emptyJobPage);
       } else {
         const [metrics, runs] = await Promise.all([
           fetchMetrics(startDate, endDate, active.metrics, handleUnauthorized),
@@ -238,9 +233,7 @@ export function App() {
     setLoading(true);
     setError(null);
     try {
-      if (activeSection === "streams") {
-        setStreamRefreshKey((current) => current + 1);
-      } else if (activeSection === "operations") {
+      if (activeSection === "operations") {
         const [runs, statuses] = await Promise.all([
           fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset, jobNameFilter, highlightRunId),
           fetchJobStatuses(handleUnauthorized).catch(() => jobStatuses),
@@ -355,12 +348,7 @@ export function App() {
       onThemeChange={setTheme}
       showDateRange={sectionUsesDateRange(activeSection)}
     >
-      {activeSection === "streams" ? (
-        <EventStreamsPanel
-          onUnauthorized={handleUnauthorized}
-          refreshKey={streamRefreshKey}
-        />
-      ) : activeSection === "operations" ? (
+      {activeSection === "operations" ? (
         <OperationsPanel
           page={jobPage}
           statuses={jobStatuses.jobs}

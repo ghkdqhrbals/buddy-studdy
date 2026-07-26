@@ -9,9 +9,16 @@ Grafana, and the private TestZone API behind one Basic Auth boundary.
 - `/performance.html`: endpoint latency and throughput grouped by API
 - `/system.html`: application, database, Redis, host, and runtime metrics
 - `/audit.html`: monitoring workspace page, authentication, and action history
+- `/users.html`: authenticated member search, membership tiers, and quota controls
+- `/streams.html`: authenticated Redis Stream search, cursor navigation,
+  consumer lag, exact entry lookup, and redacted message details
 - `/testzone.html`: live k6 script workspace, execution history, disposable
   test components, and Grafana links
 - `/settings.html`: browser-local navigation and access-history preferences
+
+`Users & Quotas` and `Redis Streams` share `admin-session.js` as their only
+backend administrator session and API boundary. The gradual React migration is
+documented in `docs/observability/MONITORING_REACT_MIGRATION.md`.
 
 ## Access Audit
 

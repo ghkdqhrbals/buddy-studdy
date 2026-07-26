@@ -9,7 +9,7 @@ async function text(file) {
 }
 
 test("all monitoring pages load the shared navigation shell", async () => {
-  for (const page of ["index.html", "performance.html", "testzone.html", "audit.html", "settings.html", "users.html"]) {
+  for (const page of ["index.html", "performance.html", "testzone.html", "audit.html", "settings.html", "users.html", "streams.html"]) {
     const html = await text(page);
     assert.match(html, /src="\/shell\.js\?/);
     assert.match(html, /src="\/nav-bootstrap\.js\?/);
@@ -22,6 +22,7 @@ test("all monitoring pages load the shared navigation shell", async () => {
   assert.match(shell, /Access & Audit/);
   assert.match(shell, /Settings/);
   assert.match(shell, /Users & Quotas/);
+  assert.match(shell, /Redis Streams/);
   assert.match(shell, /Load testing/);
   assert.match(shell, /side-nav-footer/);
   assert.match(shell, /NAV_COLLAPSED_KEY/);
@@ -30,6 +31,7 @@ test("all monitoring pages load the shared navigation shell", async () => {
 test("user administration is searchable, paginated, and keeps plans internal", async () => {
   const html = await text("users.html");
   const js = await text("users.js");
+  const adminSession = await text("admin-session.js");
   const css = await text("styles.css");
   assert.match(html, /id="adminUserSearch"/);
   assert.match(html, /id="adminPreviousButton"/);
@@ -37,7 +39,9 @@ test("user administration is searchable, paginated, and keeps plans internal", a
   assert.match(html, /Plan limits/);
   assert.match(js, /const PAGE_SIZE = 20/);
   assert.match(js, /monthlyQuestionLimitOverride/);
-  assert.match(js, /sessionStorage/);
+  assert.match(js, /from "\.\/admin-session\.js"/);
+  assert.match(adminSession, /sessionStorage/);
+  assert.match(adminSession, /Authorization: `Bearer \$\{session\.token\}`/);
   assert.match(js, /function escapeHTML/);
   assert.match(js, /Array\.isArray\(page\.users\)/);
   assert.match(js, /Array\.isArray\(tiers\)/);
@@ -46,6 +50,22 @@ test("user administration is searchable, paginated, and keeps plans internal", a
   assert.match(css, /\.admin-login-form button,[\s\S]+?background:\s*var\(--blue\)/);
   assert.match(css, /\.admin-users-table select:focus[\s\S]+?box-shadow:\s*0 0 0 3px var\(--blue-soft\)/);
   assert.doesNotMatch(html, /payment|billing/i);
+});
+
+test("Redis Stream administration lives in monitoring Manage with bounded cursor navigation", async () => {
+  const html = await text("streams.html");
+  const js = await text("streams.js");
+  const shell = await text("shell.js");
+  assert.match(html, /id="streamTopicQuery"/);
+  assert.match(html, /id="streamEntryId"/);
+  assert.match(html, /id="streamPreviousButton"/);
+  assert.match(html, /id="streamNextButton"/);
+  assert.match(js, /buildStreamEntriesPath/);
+  assert.match(js, /buildStreamEntryPath/);
+  assert.match(js, /cursorStack/);
+  assert.match(js, /JSON\.stringify\(entry\.fields \|\| \{\}, null, 2\)/);
+  assert.match(shell, /id: "manage"[\s\S]+?Redis Streams/);
+  assert.doesNotMatch(js, /innerHTML/);
 });
 
 test("navigation is fixed, collapsible, and keeps its version at the bottom", async () => {

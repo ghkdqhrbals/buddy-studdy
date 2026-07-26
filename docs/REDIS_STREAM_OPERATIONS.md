@@ -101,12 +101,20 @@ and outbox payloads are recursively redacted before leaving the backend.
 Authorization, password, secret, token, private key, and API key fields are
 never returned in plaintext.
 
-## React Frontend
+## Monitoring UI
 
-The administrator frontend is already React 19 with Vite. It is the
-source-of-truth implementation for new operator views, so a separate migration
-is unnecessary. Operational UI work belongs in `admin-frontend`; the legacy
-static monitoring pages must not gain parallel event-stream behavior.
+Redis Stream inspection belongs to the unified monitoring workspace, not the
+standalone analytics administrator frontend.
+
+```text
+https://monitoring.lowfidev.cloud/streams.html
+Navigation: Manage > Redis Streams
+```
+
+The page shares the backend administrator session with `Users & Quotas`, keeps
+credentials in memory during login, and stores only the short-lived bearer
+token in browser session storage. Stream entries use cursor pagination and the
+exact-ID lookup bypasses list pagination for incident investigation.
 
 ## Operational Checks
 

@@ -1,11 +1,13 @@
-const API_ROOT = "/backend/api/v1/admin";
-const TOKEN_KEY = "buddystudy.monitoring.admin.token";
-const TOKEN_EXPIRY_KEY = "buddystudy.monitoring.admin.expires-at";
+import {
+  adminFetch,
+  clearAdminSession,
+  hasValidAdminSession,
+  loginAdmin,
+} from "./admin-session.js";
+
 const PAGE_SIZE = 20;
 
 const state = {
-  token: window.sessionStorage.getItem(TOKEN_KEY) || "",
-  expiresAt: window.sessionStorage.getItem(TOKEN_EXPIRY_KEY) || "",
   query: "",
   offset: 0,
   totalCount: 0,
@@ -31,31 +33,6 @@ const elements = {
   next: document.querySelector("#adminNextButton"),
   pageLabel: document.querySelector("#adminPageLabel"),
 };
-
-async function adminFetch(path, options = {}) {
-  if (!state.token || (state.expiresAt && Date.parse(state.expiresAt) <= Date.now())) {
-    logout("로그인이 만료되었습니다. 다시 로그인해 주세요.");
-    const error = new Error("로그인이 만료되었습니다. 다시 로그인해 주세요.");
-    error.status = 401;
-    throw error;
-  }
-  const response = await fetch(`${API_ROOT}${path}`, {
-    ...options,
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${state.token}`,
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...options.headers,
-    },
-  });
-  const body = response.status === 204 ? null : await response.json().catch(() => null);
-  if (!response.ok) {
-    const error = new Error(body?.error?.message || body?.message || `Request failed (${response.status})`);
-    error.status = response.status;
-    throw error;
-  }
-  return body;
-}
 
 function setAuthenticated(authenticated) {
   elements.loginPanel.hidden = authenticated;
@@ -230,10 +207,7 @@ async function loadWorkspace() {
 }
 
 function logout(message = "") {
-  state.token = "";
-  state.expiresAt = "";
-  window.sessionStorage.removeItem(TOKEN_KEY);
-  window.sessionStorage.removeItem(TOKEN_EXPIRY_KEY);
+  clearAdminSession();
   setAuthenticated(false);
   elements.password.value = "";
   if (message) {
@@ -246,18 +220,7 @@ elements.loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   elements.loginStatus.textContent = "Signing in...";
   try {
-    const response = await fetch(`${API_ROOT}/login`, {
-      method: "POST",
-      headers: { Accept: "application/json", "Content-Type": "application/json" },
-      body: JSON.stringify({ username: elements.username.value, password: elements.password.value }),
-    });
-    const body = await response.json().catch(() => null);
-    const token = body?.adminToken || body?.token;
-    if (!response.ok || !token) throw new Error(body?.error?.message || "Sign in failed");
-    state.token = token;
-    state.expiresAt = body.expiresAt || "";
-    window.sessionStorage.setItem(TOKEN_KEY, state.token);
-    if (state.expiresAt) window.sessionStorage.setItem(TOKEN_EXPIRY_KEY, state.expiresAt);
+    await loginAdmin(elements.username.value, elements.password.value);
     setAuthenticated(true);
     await loadWorkspace();
   } catch (error) {
@@ -286,12 +249,9 @@ elements.next.addEventListener("click", () => {
   loadUsers();
 });
 
-if (state.expiresAt && Date.parse(state.expiresAt) <= Date.now()) {
-  logout("로그인이 만료되었습니다. 다시 로그인해 주세요.");
-} else {
-  setAuthenticated(Boolean(state.token));
-}
-if (state.token) {
+const authenticated = hasValidAdminSession();
+setAuthenticated(authenticated);
+if (authenticated) {
   loadWorkspace().catch((error) => {
     elements.userStatus.textContent = error.message;
     elements.userStatus.dataset.tone = "error";

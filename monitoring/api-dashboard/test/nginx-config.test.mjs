@@ -27,7 +27,7 @@ test("monitoring gateway records a bounded access audit without request bodies",
   assert.match(config, /"event":"monitoring_access"/);
   assert.match(config, /"user":"\$remote_user"/);
   assert.match(config, /access_log \/var\/log\/nginx\/monitoring-access\.log monitoring_access/);
-  assert.match(config, /GET:\/\(index\|performance\|system\|testzone\|audit\|settings\|users\)/);
+  assert.match(config, /GET:\/\(index\|performance\|system\|testzone\|audit\|settings\|users\|streams\)/);
   assert.match(config, /testzone\/api/);
   assert.match(config, /backend\/api/);
   assert.doesNotMatch(auditLogFormat, /requestBody/);

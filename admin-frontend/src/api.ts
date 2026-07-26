@@ -1,12 +1,7 @@
 import type {
   AdminApiError,
-  AdminCursorPage,
   AdminLoginResponse,
   AdminMetricsResponse,
-  AdminPushOutboxEntry,
-  AdminRedisEventOutboxEntry,
-  AdminStreamEntry,
-  AdminStreamTopicSummary,
   ScheduledJobRun,
   ScheduledJobRunsResponse,
   ScheduledJobStatusResponse,
@@ -133,72 +128,4 @@ export function retryJob(jobName: string, runId: number | null, onUnauthorized: 
   }
   const suffix = params.toString() ? `?${params}` : "";
   return request(`/api/v1/admin/jobs/${encodeURIComponent(jobName)}/retry${suffix}`, { method: "POST" }, onUnauthorized);
-}
-
-export function fetchStreamTopics(
-  query: string,
-  onUnauthorized: UnauthorizedHandler,
-): Promise<AdminStreamTopicSummary[]> {
-  const params = new URLSearchParams();
-  if (query.trim()) params.set("query", query.trim());
-  const suffix = params.size ? `?${params}` : "";
-  return request(`/api/v1/admin/event-streams/topics${suffix}`, { method: "GET" }, onUnauthorized);
-}
-
-export function fetchStreamEntries(
-  topic: string,
-  cursor: string | null,
-  limit: number,
-  eventType: string,
-  onUnauthorized: UnauthorizedHandler,
-): Promise<AdminCursorPage<AdminStreamEntry>> {
-  const params = cursorParams(cursor, limit);
-  if (eventType.trim()) params.set("eventType", eventType.trim());
-  return request(
-    `/api/v1/admin/event-streams/topics/${encodeURIComponent(topic)}/entries?${params}`,
-    { method: "GET" },
-    onUnauthorized,
-  );
-}
-
-export function fetchStreamEntry(
-  topic: string,
-  entryId: string,
-  onUnauthorized: UnauthorizedHandler,
-): Promise<AdminStreamEntry> {
-  return request(
-    `/api/v1/admin/event-streams/topics/${encodeURIComponent(topic)}/entries/${encodeURIComponent(entryId.trim())}`,
-    { method: "GET" },
-    onUnauthorized,
-  );
-}
-
-export function fetchEventOutbox(
-  cursor: string | null,
-  limit: number,
-  status: string,
-  eventType: string,
-  onUnauthorized: UnauthorizedHandler,
-): Promise<AdminCursorPage<AdminRedisEventOutboxEntry>> {
-  const params = cursorParams(cursor, limit);
-  if (status.trim()) params.set("status", status.trim());
-  if (eventType.trim()) params.set("eventType", eventType.trim());
-  return request(`/api/v1/admin/event-streams/outboxes/events?${params}`, { method: "GET" }, onUnauthorized);
-}
-
-export function fetchPushOutbox(
-  cursor: string | null,
-  limit: number,
-  status: string,
-  onUnauthorized: UnauthorizedHandler,
-): Promise<AdminCursorPage<AdminPushOutboxEntry>> {
-  const params = cursorParams(cursor, limit);
-  if (status.trim()) params.set("status", status.trim());
-  return request(`/api/v1/admin/event-streams/outboxes/pushes?${params}`, { method: "GET" }, onUnauthorized);
-}
-
-function cursorParams(cursor: string | null, limit: number): URLSearchParams {
-  const params = new URLSearchParams({ limit: String(limit) });
-  if (cursor) params.set("cursor", cursor);
-  return params;
 }
