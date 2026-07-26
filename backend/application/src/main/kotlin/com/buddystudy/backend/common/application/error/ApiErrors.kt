@@ -36,6 +36,12 @@ enum class ApiErrorCode(
     RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, 401, "error.resource.not_found", "Resource was not found."),
 
     VALIDATION_ERROR(HttpStatus.UNPROCESSABLE_ENTITY, 500, "error.validation", "Request validation failed."),
+    STUDY_PENDING_QUESTION_EXISTS(
+        HttpStatus.CONFLICT,
+        501,
+        "error.study.pending_question_exists",
+        "A pending question already exists for this study.",
+    ),
 
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, 900, "error.internal.server_error", "Internal server error."),
     EMAIL_DELIVERY_FAILED(HttpStatus.SERVICE_UNAVAILABLE, 901, "error.email.delivery_failed", "Email delivery failed."),

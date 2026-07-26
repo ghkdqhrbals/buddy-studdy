@@ -197,6 +197,32 @@ class StudyServiceTest {
     }
 
     @Test
+    fun `create question reports a dedicated error when requested topic already has pending question`(): Unit = runBlocking {
+        users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
+        serviceStudies.rows += StudyEntity(
+            id = 92,
+            deviceId = principal.deviceId,
+            userId = principal.userId,
+            topic = "Redis Streams",
+            difficultyLevel = 7,
+            intervalMinutes = 15,
+            openaiModel = "gpt-5.4",
+        )
+        questions.pendingRows += pendingQuestion(id = 902, topic = "Redis Streams").apply {
+            studyId = 92
+        }
+
+        org.assertj.core.api.Assertions.assertThatThrownBy {
+            runBlocking { service.createQuestion(principal, studyId = 92) }
+        }
+            .isInstanceOf(com.buddystudy.backend.common.application.error.ApiException::class.java)
+            .extracting("code")
+            .isEqualTo(ApiErrorCode.STUDY_PENDING_QUESTION_EXISTS)
+
+        assertThat(openAI.generateCalls).isZero()
+    }
+
+    @Test
     fun `create question sends same study and same topic history before openai generation`(): Unit = runBlocking {
         users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         serviceStudies.rows += StudyEntity(

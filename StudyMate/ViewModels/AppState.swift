@@ -84,6 +84,7 @@ final class AppState: ObservableObject {
     @Published var isRequiredTermsGatePresented = false
     @Published private(set) var questionQuota: BackendQuestionQuota?
     @Published private(set) var questionQuotaNotice: String?
+    @Published private(set) var pendingQuestionLimitCategoryID: String?
     @Published private var backendRuntimeState = BackendRuntimeStateStore()
     @Published private var communitySessionState: CommunitySessionStateStore
     @Published private var searchState = SearchStateStore()
@@ -2400,6 +2401,23 @@ final class AppState: ObservableObject {
         log(.warning, "미채점 질문이 \(Self.maxPendingQuestionCount)개라 \(reason)을 건너뛰었습니다.")
     }
 
+    private func showPendingQuestionLimitStatus(reason: String, categoryID: String?) {
+        statusMessage = strings.pendingQuestionLimitTitle
+        errorMessage = nil
+        pendingQuestionLimitCategoryID = categoryID
+        log(
+            .warning,
+            "해당 주제에 미채점 질문이 있어 \(reason)을 건너뛰었습니다. studyCategoryID=\(categoryID ?? "-")"
+        )
+    }
+
+    func clearPendingQuestionLimitNotice(categoryID: String?) {
+        guard pendingQuestionLimitCategoryID == categoryID else {
+            return
+        }
+        pendingQuestionLimitCategoryID = nil
+    }
+
     private func validateAPIKeyOnStartup() async {
         let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "startup-api-validation") else {
@@ -4697,6 +4715,14 @@ final class AppState: ObservableObject {
                     errorMessage = message
                     await refreshQuestionQuota()
                 }
+                if resolution.isPendingQuestionConflict {
+                    await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+                    showPendingQuestionLimitStatus(
+                        reason: "백엔드 질문 생성 충돌",
+                        categoryID: studyCategoryID
+                    )
+                    return
+                }
                 if handleAppError(
                     error,
                     fallback: "",
@@ -4801,7 +4827,7 @@ final class AppState: ObservableObject {
         let targetCategoryID = studyCategoryID ?? settings.selectedStudyCategoryID
         guard !hasReachedPendingQuestionLimit(categoryID: targetCategoryID) else {
             log(.info, "\(reason)을 건너뛰었습니다. 해당 주제에 답변 대기 중인 질문이 있습니다. studyCategoryID=\(targetCategoryID ?? "-")")
-            showPendingQuestionLimitStatus(reason: reason)
+            showPendingQuestionLimitStatus(reason: reason, categoryID: targetCategoryID)
             return false
         }
 

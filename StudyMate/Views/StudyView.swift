@@ -81,6 +81,7 @@ struct StudyView: View {
         }
         .onAppear {
             draftAnswer = appState.answerDraft(for: selectedStudyRecord)
+            presentPendingLimitNoticeIfNeeded()
         }
         .task(id: preferredCategoryID) {
             async let roomPreparation: Void = appState.prepareStudyRoom(categoryID: preferredCategoryID)
@@ -104,6 +105,9 @@ struct StudyView: View {
             if draftAnswer != appState.answerDraft(for: selectedStudyRecord) {
                 draftAnswer = appState.answerDraft(for: selectedStudyRecord)
             }
+        }
+        .onChange(of: appState.pendingQuestionLimitCategoryID) {
+            presentPendingLimitNoticeIfNeeded()
         }
     }
 
@@ -259,6 +263,14 @@ struct StudyView: View {
 
     private var targetCategoryID: String? {
         preferredCategoryID ?? selectedCategory?.id
+    }
+
+    private func presentPendingLimitNoticeIfNeeded() {
+        guard appState.pendingQuestionLimitCategoryID == targetCategoryID else {
+            return
+        }
+        showsPendingLimitHelp = true
+        appState.clearPendingQuestionLimitNotice(categoryID: targetCategoryID)
     }
 
     private func questionQuotaNoticeView(_ message: String, strings: AppStrings) -> some View {

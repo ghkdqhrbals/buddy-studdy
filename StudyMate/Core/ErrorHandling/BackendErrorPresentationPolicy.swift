@@ -9,6 +9,7 @@ struct BackendErrorPresentation: Equatable {
     var requiresEmailVerification: Bool
     var requiresTermsAgreement: Bool
     var isQuotaExceeded: Bool
+    var isPendingQuestionConflict: Bool
     var shouldResetBackendIdentity: Bool
 }
 
@@ -32,6 +33,7 @@ enum BackendErrorPresentationPolicy {
                 requiresEmailVerification: false,
                 requiresTermsAgreement: false,
                 isQuotaExceeded: false,
+                isPendingQuestionConflict: false,
                 shouldResetBackendIdentity: false
             )
         }
@@ -46,6 +48,7 @@ enum BackendErrorPresentationPolicy {
             requiresEmailVerification: false,
             requiresTermsAgreement: false,
             isQuotaExceeded: false,
+            isPendingQuestionConflict: false,
             shouldResetBackendIdentity: false
         )
     }
@@ -71,8 +74,37 @@ enum BackendErrorPresentationPolicy {
             requiresEmailVerification: requiresEmailVerification,
             requiresTermsAgreement: requiresTermsAgreement,
             isQuotaExceeded: error.backendCode == "QUOTA_EXCEEDED",
+            isPendingQuestionConflict: isPendingQuestionConflict(error),
             shouldResetBackendIdentity: shouldResetBackendIdentity
         )
+    }
+
+    static func isPendingQuestionConflict(_ error: Error) -> Bool {
+        guard let backendError = error as? RemotePushBackendError else {
+            return false
+        }
+
+        switch backendError {
+        case .httpStatus(_, let body, let apiError):
+            if apiError?.code == "STUDY_PENDING_QUESTION_EXISTS" {
+                return true
+            }
+
+            guard apiError?.code == "VALIDATION_ERROR" else {
+                return false
+            }
+            let diagnostic = [
+                apiError?.debugDescription,
+                apiError?.description,
+                body
+            ]
+                .compactMap { $0 }
+                .joined(separator: " ")
+                .lowercased()
+            return diagnostic.contains("pending question already exists")
+        case .invalidResponse:
+            return false
+        }
     }
 
     static func isAPIKeyError(_ error: Error) -> Bool {

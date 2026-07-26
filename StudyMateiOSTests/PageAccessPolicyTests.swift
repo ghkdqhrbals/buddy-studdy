@@ -75,6 +75,53 @@ final class PageAccessPolicyTests: XCTestCase {
         XCTAssertFalse(resolution.requiresLogin)
         XCTAssertNil(resolution.featureMessage)
     }
+
+    func testPendingQuestionConflictUsesDedicatedErrorCode() throws {
+        let payload = """
+        {
+          "error": {
+            "errorCode": "STUDY_PENDING_QUESTION_EXISTS",
+            "code": 501,
+            "message": "이 주제에 답변 대기 중인 질문이 있습니다.",
+            "requestId": "request-pending",
+            "status": 409
+          }
+        }
+        """
+        let envelope = try JSONDecoder().decode(
+            BackendAPIErrorResponse.self,
+            from: Data(payload.utf8)
+        )
+        let error = RemotePushBackendError.httpStatus(409, payload, envelope.error)
+
+        let resolution = AppErrorHandlingPolicy.resolve(error, fallback: "")
+
+        XCTAssertTrue(resolution.isPendingQuestionConflict)
+    }
+
+    func testLegacyValidationErrorStillRecognizesPendingQuestionConflict() throws {
+        let payload = """
+        {
+          "error": {
+            "errorCode": "VALIDATION_ERROR",
+            "code": 500,
+            "message": "요청 값이 올바르지 않습니다.",
+            "debugDescription": "A pending question already exists for this study.",
+            "requestId": "request-legacy",
+            "status": 409
+          }
+        }
+        """
+        let envelope = try JSONDecoder().decode(
+            BackendAPIErrorResponse.self,
+            from: Data(payload.utf8)
+        )
+        let error = RemotePushBackendError.httpStatus(409, payload, envelope.error)
+
+        let resolution = AppErrorHandlingPolicy.resolve(error, fallback: "")
+
+        XCTAssertTrue(resolution.isPendingQuestionConflict)
+    }
 }
 
 final class StudyRoomStateStoreTests: XCTestCase {

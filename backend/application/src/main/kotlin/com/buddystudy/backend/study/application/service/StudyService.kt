@@ -88,7 +88,11 @@ class StudyService(
         try {
             room.canCreateQuestion(properties.scheduler.maxPendingPerStudy)
         } catch (error: StudyRoomPendingLimitExceeded) {
-            throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR, "A pending question already exists for this study.")
+            throw ApiException(
+                HttpStatus.CONFLICT,
+                ApiErrorCode.STUDY_PENDING_QUESTION_EXISTS,
+                "A pending question already exists for this study.",
+            )
         }
         val questionKey = questionKeys.resolveForQuestionGeneration(user)
         try {

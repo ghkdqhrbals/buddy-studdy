@@ -8,6 +8,7 @@ struct AppErrorHandlingResolution: Equatable {
     var requiresEmailVerification: Bool
     var requiresTermsAgreement: Bool
     var isQuotaExceeded: Bool
+    var isPendingQuestionConflict: Bool
     var shouldResetBackendIdentity: Bool
     var shouldClearFeatureMessage: Bool
 }
@@ -38,6 +39,7 @@ enum AppErrorHandlingPolicy {
             requiresEmailVerification: presentation.requiresEmailVerification,
             requiresTermsAgreement: presentation.requiresTermsAgreement,
             isQuotaExceeded: presentation.isQuotaExceeded,
+            isPendingQuestionConflict: presentation.isPendingQuestionConflict,
             shouldResetBackendIdentity: presentation.shouldResetBackendIdentity,
             shouldClearFeatureMessage: shouldClearFeatureMessage
         )
