@@ -2464,7 +2464,7 @@ private struct MobileStudyTreeView: View {
                             .frame(
                                 minWidth: geometry.size.width,
                                 minHeight: geometry.size.height,
-                                alignment: .topLeading
+                                alignment: .center
                             )
                             .background {
                                 StudyTreeScrollViewportBridge(
@@ -2617,10 +2617,7 @@ private struct MobileStudyTreeView: View {
                 Label(strings.deleteTopics, systemImage: "trash")
             }
             Button {
-                withAnimation(.snappy) {
-                    nodeOffsets = [:]
-                }
-                saveNodeOffsets()
+                resetTreeLayout()
             } label: {
                 Label(strings.resetTreeLayout, systemImage: "arrow.counterclockwise")
             }
@@ -2804,6 +2801,22 @@ private struct MobileStudyTreeView: View {
     private func endSelection() {
         selectionMode = nil
         selectedRoomIDs = []
+    }
+
+    private func resetTreeLayout() {
+        guard let snapshot else {
+            nodeOffsets = [:]
+            saveNodeOffsets()
+            return
+        }
+
+        cancelPendingInitialViewportFit()
+        withAnimation(.snappy) {
+            nodeOffsets = [:]
+            applyFittedViewport(for: snapshot)
+        }
+        saveNodeOffsets()
+        saveViewport()
     }
 
     private func loadTreeState() {
