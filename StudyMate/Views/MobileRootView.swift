@@ -2290,6 +2290,11 @@ private enum StudyTopicAddMode: String {
     case manual
 }
 
+private enum StudyTreeSelectionMode {
+    case activation
+    case deletion
+}
+
 private struct StudyTopicAddRequest: Identifiable {
     let id = UUID()
     var parent: BackendStudyRoom
@@ -2313,7 +2318,7 @@ private struct MobileStudyTreeView: View {
     @State private var hasLoadedTreeState = false
     @State private var hasFinishedInitialRefresh = false
     @State private var shouldFitInitialViewport = false
-    @State private var isSelectionMode = false
+    @State private var selectionMode: StudyTreeSelectionMode?
     @State private var showsDeleteConfirmation = false
 
     var rootStudyID: Int
@@ -2324,6 +2329,10 @@ private struct MobileStudyTreeView: View {
 
     private var root: BackendStudyRoom? {
         appState.backendStudyRoom(id: rootStudyID)
+    }
+
+    private var isSelectionMode: Bool {
+        selectionMode != nil
     }
 
     private var snapshot: StudyTreeLayoutSnapshot? {
@@ -2343,7 +2352,7 @@ private struct MobileStudyTreeView: View {
                     Text(strings.selectedTopicCount(selectedRoomIDs.count))
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Button(strings.done) {
+                    Button(strings.cancel) {
                         endSelection()
                     }
                 }
@@ -2545,9 +2554,14 @@ private struct MobileStudyTreeView: View {
     private var treeOptionsMenu: some View {
         Menu {
             Button {
-                isSelectionMode = true
+                beginSelection(.activation)
             } label: {
-                Label(strings.selectTopics, systemImage: "checkmark.circle")
+                Label(strings.activateTopics, systemImage: "checkmark.circle")
+            }
+            Button(role: .destructive) {
+                beginSelection(.deletion)
+            } label: {
+                Label(strings.deleteTopics, systemImage: "trash")
             }
             Button {
                 withAnimation(.snappy) {
@@ -2576,25 +2590,20 @@ private struct MobileStudyTreeView: View {
 
     private var selectionBar: some View {
         HStack(spacing: 0) {
-            Button {
-                appState.setStudyTopicsActive(studyIDs: selectedRoomIDs, active: true)
-                endSelection()
-            } label: {
-                Label(strings.enableQuestions, systemImage: "checkmark.circle")
-                    .frame(maxWidth: .infinity)
-            }
-            Button {
-                appState.setStudyTopicsActive(studyIDs: selectedRoomIDs, active: false)
-                endSelection()
-            } label: {
-                Label(strings.disableQuestions, systemImage: "pause.circle")
-                    .frame(maxWidth: .infinity)
-            }
-            Button(role: .destructive) {
-                showsDeleteConfirmation = true
-            } label: {
-                Image(systemName: "trash")
-                    .frame(width: 52)
+            if selectionMode == .activation {
+                Button {
+                    saveTopicActivationSelection()
+                } label: {
+                    Label(strings.save, systemImage: "checkmark.circle")
+                        .frame(maxWidth: .infinity)
+                }
+            } else if selectionMode == .deletion {
+                Button(role: .destructive) {
+                    showsDeleteConfirmation = true
+                } label: {
+                    Label(strings.deleteTopics, systemImage: "trash")
+                        .frame(maxWidth: .infinity)
+                }
             }
         }
         .font(.subheadline.weight(.semibold))
@@ -2604,7 +2613,7 @@ private struct MobileStudyTreeView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
         }
-        .disabled(selectedRoomIDs.isEmpty)
+        .disabled(selectionMode == .deletion && selectedRoomIDs.isEmpty)
     }
 
     private var zoomGesture: some Gesture {
@@ -2689,8 +2698,43 @@ private struct MobileStudyTreeView: View {
         }
     }
 
+    private func beginSelection(_ mode: StudyTreeSelectionMode) {
+        selectionMode = mode
+        switch mode {
+        case .activation:
+            selectedRoomIDs = Set(
+                snapshot?.placements.compactMap { placement in
+                    placement.room.activeForQuestions ? placement.room.id : nil
+                } ?? []
+            )
+        case .deletion:
+            selectedRoomIDs = []
+        }
+    }
+
+    private func saveTopicActivationSelection() {
+        guard let snapshot else {
+            endSelection()
+            return
+        }
+        let activeRoomIDs = Set(
+            snapshot.placements.compactMap { placement in
+                placement.room.activeForQuestions ? placement.room.id : nil
+            }
+        )
+        appState.setStudyTopicsActive(
+            studyIDs: selectedRoomIDs.subtracting(activeRoomIDs),
+            active: true
+        )
+        appState.setStudyTopicsActive(
+            studyIDs: activeRoomIDs.subtracting(selectedRoomIDs),
+            active: false
+        )
+        endSelection()
+    }
+
     private func endSelection() {
-        isSelectionMode = false
+        selectionMode = nil
         selectedRoomIDs = []
     }
 

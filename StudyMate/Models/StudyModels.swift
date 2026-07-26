@@ -1737,10 +1737,9 @@ struct AppStrings {
         )
     }
     var studyTree: String { text("학습 트리", "Study Tree") }
-    var selectTopics: String { text("주제 선택", "Select topics") }
+    var activateTopics: String { text("주제 활성화", "Activate topics") }
+    var deleteTopics: String { text("주제 삭제", "Delete topics") }
     var resetTreeLayout: String { text("트리 배치 초기화", "Reset tree layout") }
-    var enableQuestions: String { text("질문 받기", "Include") }
-    var disableQuestions: String { text("질문 멈추기", "Pause") }
     var deleteSelectedTopics: String { text("선택한 주제를 삭제할까요?", "Delete selected topics?") }
     func selectedTopicCount(_ count: Int) -> String {
         text("\(count)개 선택", "\(count) selected")
