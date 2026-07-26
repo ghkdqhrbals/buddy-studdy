@@ -2317,6 +2317,7 @@ private struct MobileStudyTreeView: View {
     @State private var treeViewportSize: CGSize = .zero
     @State private var hasLoadedTreeState = false
     @State private var hasFinishedInitialRefresh = false
+    @State private var hasAppliedInitialViewportFit = false
     @State private var shouldFitInitialViewport = false
     @State private var selectionMode: StudyTreeSelectionMode?
     @State private var showsDeleteConfirmation = false
@@ -2465,7 +2466,7 @@ private struct MobileStudyTreeView: View {
                             .frame(
                                 minWidth: geometry.size.width,
                                 minHeight: geometry.size.height,
-                                alignment: .center
+                                alignment: .topLeading
                             )
                             .background {
                                 StudyTreeScrollViewportBridge(
@@ -2502,9 +2503,18 @@ private struct MobileStudyTreeView: View {
                 Text(strings.studyTree)
                     .font(.headline)
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                if !isSelectionMode {
-                    treeOptionsMenu
+            if #available(iOS 26.0, *) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if !isSelectionMode {
+                        treeOptionsMenu
+                    }
+                }
+                .sharedBackgroundVisibility(.hidden)
+            } else {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if !isSelectionMode {
+                        treeOptionsMenu
+                    }
                 }
             }
         }
@@ -2787,6 +2797,9 @@ private struct MobileStudyTreeView: View {
     }
 
     private func loadTreeState() {
+        guard !hasLoadedTreeState else {
+            return
+        }
         nodeOffsets = appState.loadStudyTreeNodeOffsets(rootStudyID: rootStudyID)
         shouldFitInitialViewport = !appState.hasStudyTreeViewport(rootStudyID: rootStudyID)
         let viewport = appState.loadStudyTreeViewport(rootStudyID: rootStudyID)
@@ -2872,13 +2885,15 @@ private struct MobileStudyTreeView: View {
 
     private func fitInitialViewportIfNeeded(for snapshot: StudyTreeLayoutSnapshot) {
         guard shouldFitInitialViewport,
+              !hasAppliedInitialViewportFit,
               hasFinishedInitialRefresh,
               treeViewportSize.width > 0,
               treeViewportSize.height > 0 else {
             return
         }
-        applyFittedViewport(for: snapshot)
+        hasAppliedInitialViewportFit = true
         shouldFitInitialViewport = false
+        applyFittedViewport(for: snapshot)
         saveViewport()
     }
 
@@ -3121,10 +3136,8 @@ private struct StudyTreeNode: View {
         room.activeForQuestions ? Color.green : Color.gray.opacity(0.7)
     }
 
-    private var nodeFillColor: Color {
-        room.parentStudyId == nil
-            ? Color.accentColor.opacity(0.1)
-            : Color(.secondarySystemBackground)
+    private var levelFillFraction: CGFloat {
+        StudyTreeNodeStylePolicy.levelFillFraction(room.difficultyLevel)
     }
 
     var body: some View {
@@ -3152,7 +3165,18 @@ private struct StudyTreeNode: View {
                 height: StudyTreeLayoutSnapshot.nodeSize.height,
                 alignment: .center
             )
-            .background(nodeFillColor, in: Circle())
+            .background {
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Circle()
+                            .fill(Color(.secondarySystemBackground))
+                        Rectangle()
+                            .fill(Color.accentColor.opacity(0.2))
+                            .frame(width: geometry.size.width * levelFillFraction)
+                    }
+                    .clipShape(Circle())
+                }
+            }
             .overlay {
                 Circle()
                     .stroke(statusBorderColor, lineWidth: 2.5)

@@ -127,6 +127,12 @@ final class StudyTreeViewportPersistenceTests: XCTestCase {
 }
 
 final class StudyTreeLayoutPolicyTests: XCTestCase {
+    func testNodeLevelFillProgressesFromLeftToRight() {
+        XCTAssertEqual(StudyTreeNodeStylePolicy.levelFillFraction(1), 0.1)
+        XCTAssertEqual(StudyTreeNodeStylePolicy.levelFillFraction(5), 0.5)
+        XCTAssertEqual(StudyTreeNodeStylePolicy.levelFillFraction(10), 1)
+    }
+
     func testCanvasExpandsWithinFixedLimitsAndRecoversInvalidValues() {
         let baseCenters = [7: CGPoint(x: 100, y: 100)]
 

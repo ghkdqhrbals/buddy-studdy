@@ -29,6 +29,12 @@ struct StudyTreeDirectionalEdgeGeometry: Equatable {
     var arrowRight: CGPoint
 }
 
+enum StudyTreeNodeStylePolicy {
+    static func levelFillFraction(_ difficultyLevel: Int) -> CGFloat {
+        CGFloat(min(max(difficultyLevel, 1), 10)) / 10
+    }
+}
+
 enum StudyTreeEdgePolicy {
     static func directionalGeometry(
         parent: CGPoint,
