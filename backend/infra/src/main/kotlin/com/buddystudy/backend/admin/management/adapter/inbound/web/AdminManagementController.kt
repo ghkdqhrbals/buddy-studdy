@@ -1,6 +1,9 @@
 package com.buddystudy.backend.admin.management.adapter.inbound.web
 
 import com.buddystudy.backend.admin.analytics.application.port.inbound.AdminAnalyticsUseCase
+import com.buddystudy.backend.admin.management.application.model.AdminMembershipTierResponse
+import com.buddystudy.backend.admin.management.application.model.AdminUserPageResponse
+import com.buddystudy.backend.admin.management.application.model.AdminUserSummary
 import com.buddystudy.backend.admin.management.application.model.AssignUserPlanCommand
 import com.buddystudy.backend.admin.management.application.port.inbound.AdminManagementUseCase
 import jakarta.validation.Valid
@@ -28,10 +31,12 @@ class AdminManagementController(
         @RequestParam(required = false) query: String?,
         @RequestParam(defaultValue = "20") limit: Int,
         @RequestParam(defaultValue = "0") offset: Int,
-    ) = management.users(authorization.bearerToken(), query, limit, offset)
+    ): AdminUserPageResponse = management.users(authorization.bearerToken(), query, limit, offset)
 
     @GetMapping("/membership-tiers")
-    suspend fun tiers(@RequestHeader("Authorization") authorization: String?) =
+    suspend fun tiers(
+        @RequestHeader("Authorization") authorization: String?,
+    ): List<AdminMembershipTierResponse> =
         management.tiers(authorization.bearerToken())
 
     @PatchMapping("/membership-tiers/{tierCode}")
@@ -39,14 +44,16 @@ class AdminManagementController(
         @RequestHeader("Authorization") authorization: String?,
         @PathVariable tierCode: String,
         @Valid @RequestBody request: UpdateMembershipTierRequest,
-    ) = management.updateTier(authorization.bearerToken(), tierCode, request)
+    ): AdminMembershipTierResponse =
+        management.updateTier(authorization.bearerToken(), tierCode, request)
 
     @PatchMapping("/users/{userId}/membership")
     suspend fun assignPlan(
         @RequestHeader("Authorization") authorization: String?,
         @PathVariable userId: Long,
         @Valid @RequestBody request: AssignUserPlanRequest,
-    ) = management.assignPlan(authorization.bearerToken(), userId, request)
+    ): AdminUserSummary =
+        management.assignPlan(authorization.bearerToken(), userId, request)
 }
 
 data class UpdateMembershipTierRequest(
@@ -62,10 +69,18 @@ data class AssignUserPlanRequest(
 )
 
 interface AdminManagementWebPort {
-    suspend fun users(adminToken: String, query: String?, limit: Int, offset: Int): Any
-    suspend fun tiers(adminToken: String): Any
-    suspend fun updateTier(adminToken: String, tierCode: String, request: UpdateMembershipTierRequest): Any
-    suspend fun assignPlan(adminToken: String, userId: Long, request: AssignUserPlanRequest): Any
+    suspend fun users(adminToken: String, query: String?, limit: Int, offset: Int): AdminUserPageResponse
+    suspend fun tiers(adminToken: String): List<AdminMembershipTierResponse>
+    suspend fun updateTier(
+        adminToken: String,
+        tierCode: String,
+        request: UpdateMembershipTierRequest,
+    ): AdminMembershipTierResponse
+    suspend fun assignPlan(
+        adminToken: String,
+        userId: Long,
+        request: AssignUserPlanRequest,
+    ): AdminUserSummary
 }
 
 @Component
@@ -73,12 +88,17 @@ class AdminManagementWebAdapter(
     private val authentication: AdminAnalyticsUseCase,
     private val management: AdminManagementUseCase,
 ) : AdminManagementWebPort {
-    override suspend fun users(adminToken: String, query: String?, limit: Int, offset: Int): Any {
+    override suspend fun users(
+        adminToken: String,
+        query: String?,
+        limit: Int,
+        offset: Int,
+    ): AdminUserPageResponse {
         authentication.validate(adminToken)
         return management.users(query, limit, offset)
     }
 
-    override suspend fun tiers(adminToken: String): Any {
+    override suspend fun tiers(adminToken: String): List<AdminMembershipTierResponse> {
         authentication.validate(adminToken)
         return management.tiers()
     }
@@ -87,7 +107,7 @@ class AdminManagementWebAdapter(
         adminToken: String,
         tierCode: String,
         request: UpdateMembershipTierRequest,
-    ): Any {
+    ): AdminMembershipTierResponse {
         authentication.validate(adminToken)
         return management.updateTier(tierCode, request.monthlyQuestionLimit)
     }
@@ -96,7 +116,7 @@ class AdminManagementWebAdapter(
         adminToken: String,
         userId: Long,
         request: AssignUserPlanRequest,
-    ): Any {
+    ): AdminUserSummary {
         authentication.validate(adminToken)
         return management.assignPlan(
             userId,
