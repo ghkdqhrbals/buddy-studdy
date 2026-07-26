@@ -2,6 +2,7 @@ spring:
   config:
     activate:
       on-profile: dev
+    import: "optional:aws-secretsmanager:${AWS_SECRET_ID:buddystudy/dev}?prefix=local-secret."
   r2dbc:
     url: ${R2DBC_DATABASE_URL:r2dbc:mysql://localhost:3306/buddystudy?serverZoneId=UTC}
     username: ${DATABASE_USERNAME:buddystudy}
@@ -9,6 +10,13 @@ spring:
   flyway:
     enabled: ${FLYWAY_ENABLED:true}
     validate-on-migrate: ${FLYWAY_VALIDATE_ON_MIGRATE:false}
+  cloud:
+    aws:
+      region:
+        static: ${AWS_REGION:ap-northeast-2}
+      secretsmanager:
+        enabled: true
+        region: ${AWS_REGION:ap-northeast-2}
 management:
   health:
     mail:
@@ -24,6 +32,8 @@ springdoc:
     url: /v3/api-docs
 
 buddystudy:
+  openai:
+    api-key: ${OPENAI_API_KEY:${local-secret.OPENAI_API_KEY:}}
   scheduler:
     enabled: true
   streams:
