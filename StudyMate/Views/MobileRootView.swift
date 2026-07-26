@@ -2152,13 +2152,6 @@ private struct NotificationPublicQuestionsDestination: View {
     }
 }
 
-private enum StudyTreeDirection: String, CaseIterable, Identifiable {
-    case vertical
-    case horizontal
-
-    var id: String { rawValue }
-}
-
 private struct StudyTreePlacement: Identifiable {
     var room: BackendStudyRoom
     var center: CGPoint
@@ -2184,7 +2177,7 @@ private struct StudyTreeLayoutSnapshot {
     var edges: [StudyTreeEdge]
     var size: CGSize
 
-    init(root: BackendStudyRoom, rooms: [BackendStudyRoom], direction: StudyTreeDirection) {
+    init(root: BackendStudyRoom, rooms: [BackendStudyRoom]) {
         let roomByID = Dictionary(uniqueKeysWithValues: rooms.map { ($0.id, $0) })
         let childrenByParent = Dictionary(
             grouping: rooms.filter { $0.parentStudyId != nil },
@@ -2216,14 +2209,10 @@ private struct StudyTreeLayoutSnapshot {
         let verticalHeight = (maxDepth + 1) * (Self.nodeSize.height + Self.levelSpacing) - Self.levelSpacing + Self.margin * 2
 
         func renderedCenter(_ point: CGPoint) -> CGPoint {
-            let verticalPoint = CGPoint(
+            CGPoint(
                 x: Self.margin + Self.nodeSize.width / 2 + point.x * (Self.nodeSize.width + Self.siblingSpacing),
                 y: Self.margin + Self.nodeSize.height / 2 + point.y * (Self.nodeSize.height + Self.levelSpacing)
             )
-            guard direction == .horizontal else {
-                return verticalPoint
-            }
-            return CGPoint(x: verticalPoint.y, y: verticalPoint.x)
         }
 
         placements = logicalPositions.compactMap { id, point in
@@ -2256,9 +2245,7 @@ private struct StudyTreeLayoutSnapshot {
             }
         }
 
-        size = direction == .vertical
-            ? CGSize(width: max(verticalWidth, 320), height: max(verticalHeight, 320))
-            : CGSize(width: max(verticalHeight, 320), height: max(verticalWidth, 320))
+        size = CGSize(width: max(verticalWidth, 320), height: max(verticalHeight, 320))
     }
 
     private static func assignLogicalPosition(
@@ -2311,7 +2298,6 @@ private struct StudyTopicAddRequest: Identifiable {
 
 private struct MobileStudyTreeView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var direction: StudyTreeDirection = .vertical
     @State private var addRequest: StudyTopicAddRequest?
     @State private var editingRoom: BackendStudyRoom?
     @State private var selectedRoomID: Int?
@@ -2344,8 +2330,7 @@ private struct MobileStudyTreeView: View {
         }
         return StudyTreeLayoutSnapshot(
             root: root,
-            rooms: appState.backendStudyRooms,
-            direction: direction
+            rooms: appState.backendStudyRooms
         )
     }
 
@@ -2360,14 +2345,6 @@ private struct MobileStudyTreeView: View {
                         endSelection()
                     }
                 } else {
-                    Picker("", selection: $direction) {
-                        Text(strings.treeVertical).tag(StudyTreeDirection.vertical)
-                        Text(strings.treeHorizontal).tag(StudyTreeDirection.horizontal)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(maxWidth: 220)
-
                     Spacer()
 
                     Button {
@@ -2439,21 +2416,12 @@ private struct MobileStudyTreeView: View {
                                         )
                                         var path = Path()
                                         path.move(to: parent)
-                                        if direction == .vertical {
-                                            let midpoint = (parent.y + child.y) / 2
-                                            path.addCurve(
-                                                to: child,
-                                                control1: CGPoint(x: parent.x, y: midpoint),
-                                                control2: CGPoint(x: child.x, y: midpoint)
-                                            )
-                                        } else {
-                                            let midpoint = (parent.x + child.x) / 2
-                                            path.addCurve(
-                                                to: child,
-                                                control1: CGPoint(x: midpoint, y: parent.y),
-                                                control2: CGPoint(x: midpoint, y: child.y)
-                                            )
-                                        }
+                                        let midpoint = (parent.y + child.y) / 2
+                                        path.addCurve(
+                                            to: child,
+                                            control1: CGPoint(x: parent.x, y: midpoint),
+                                            control2: CGPoint(x: child.x, y: midpoint)
+                                        )
                                         context.stroke(path, with: .color(Color.secondary.opacity(0.32)), lineWidth: 1.5)
                                     }
                                 }
@@ -2590,13 +2558,6 @@ private struct MobileStudyTreeView: View {
                 sanitizeNodeOffsets()
                 fitInitialViewportIfNeeded(for: snapshot)
             }
-        }
-        .onChange(of: direction) { _, _ in
-            guard let snapshot else {
-                return
-            }
-            sanitizeNodeOffsets()
-            fitInitialViewportIfNeeded(for: snapshot)
         }
         .confirmationDialog(
             strings.deleteSelectedTopics,

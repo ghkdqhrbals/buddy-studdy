@@ -1747,8 +1747,6 @@ struct AppStrings {
     var addStudyTopicFailed: String { text("하위 학습을 추가하지 못했습니다.", "Could not add the sub-study.") }
     var deleteStudy: String { text("학습 삭제", "Delete Study") }
     var openQuestions: String { text("질문 열기", "Open Questions") }
-    var treeVertical: String { text("세로", "Vertical") }
-    var treeHorizontal: String { text("가로", "Horizontal") }
     func monthlyQuotaExceededMessage(serverMessage: String, resetAt: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: isKorean ? "ko_KR" : "en_US")
