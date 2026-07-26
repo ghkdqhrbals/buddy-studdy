@@ -312,6 +312,8 @@ final class StudyTreeLayoutPolicyTests: XCTestCase {
             StudyTreeViewportPolicy.contentOffsetPreservingAnchor(
                 startOffset: CGPoint(x: 100, y: 50),
                 anchor: CGPoint(x: 200, y: 300),
+                canvasSize: CGSize(width: 1_000, height: 800),
+                viewportSize: CGSize(width: 400, height: 600),
                 startScale: 1,
                 targetScale: 2
             ),
@@ -321,8 +323,38 @@ final class StudyTreeLayoutPolicyTests: XCTestCase {
             StudyTreeViewportPolicy.contentOffsetPreservingAnchor(
                 startOffset: .zero,
                 anchor: CGPoint(x: 200, y: 300),
+                canvasSize: CGSize(width: 1_000, height: 1_000),
+                viewportSize: CGSize(width: 400, height: 600),
                 startScale: 1,
                 targetScale: 0.5
+            ),
+            .zero
+        )
+    }
+
+    func testZoomCrossingViewportBoundaryKeepsCenteredCanvasStable() {
+        let canvasSize = CGSize(width: 200, height: 200)
+        let viewportSize = CGSize(width: 400, height: 600)
+        let viewportCenter = CGPoint(x: 200, y: 300)
+
+        let zoomedInOffset = StudyTreeViewportPolicy.contentOffsetPreservingAnchor(
+            startOffset: .zero,
+            anchor: viewportCenter,
+            canvasSize: canvasSize,
+            viewportSize: viewportSize,
+            startScale: 1,
+            targetScale: 3
+        )
+        XCTAssertEqual(zoomedInOffset, CGPoint(x: 100, y: 0))
+
+        XCTAssertEqual(
+            StudyTreeViewportPolicy.contentOffsetPreservingAnchor(
+                startOffset: zoomedInOffset,
+                anchor: viewportCenter,
+                canvasSize: canvasSize,
+                viewportSize: viewportSize,
+                startScale: 3,
+                targetScale: 1
             ),
             .zero
         )

@@ -307,6 +307,8 @@ enum StudyTreeViewportPolicy {
     static func contentOffsetPreservingAnchor(
         startOffset: CGPoint,
         anchor: CGPoint,
+        canvasSize: CGSize,
+        viewportSize: CGSize,
         startScale: CGFloat,
         targetScale: CGFloat
     ) -> CGPoint {
@@ -314,11 +316,49 @@ enum StudyTreeViewportPolicy {
             startScale.isFinite ? startScale : 1,
             minimumZoomScale
         )
-        let safeTargetScale = targetScale.isFinite ? targetScale : safeStartScale
-        let scaleRatio = safeTargetScale / safeStartScale
+        let safeTargetScale = max(
+            targetScale.isFinite ? targetScale : safeStartScale,
+            minimumZoomScale
+        )
+        guard canvasSize.width.isFinite,
+              canvasSize.height.isFinite,
+              viewportSize.width.isFinite,
+              viewportSize.height.isFinite,
+              canvasSize.width > 0,
+              canvasSize.height > 0,
+              viewportSize.width > 0,
+              viewportSize.height > 0 else {
+            return .zero
+        }
+
+        func centeredInset(for scale: CGFloat) -> CGSize {
+            CGSize(
+                width: max(0, (viewportSize.width - canvasSize.width * scale) / 2),
+                height: max(0, (viewportSize.height - canvasSize.height * scale) / 2)
+            )
+        }
+
+        let startInset = centeredInset(for: safeStartScale)
+        let targetInset = centeredInset(for: safeTargetScale)
+        let safeStartOffset = CGPoint(
+            x: startOffset.x.isFinite ? max(0, startOffset.x) : 0,
+            y: startOffset.y.isFinite ? max(0, startOffset.y) : 0
+        )
+        let canvasPoint = CGPoint(
+            x: (safeStartOffset.x + anchor.x - startInset.width) / safeStartScale,
+            y: (safeStartOffset.y + anchor.y - startInset.height) / safeStartScale
+        )
+        let maximumTargetOffset = CGPoint(
+            x: max(0, canvasSize.width * safeTargetScale - viewportSize.width),
+            y: max(0, canvasSize.height * safeTargetScale - viewportSize.height)
+        )
+        let targetOffset = CGPoint(
+            x: targetInset.width + canvasPoint.x * safeTargetScale - anchor.x,
+            y: targetInset.height + canvasPoint.y * safeTargetScale - anchor.y
+        )
         return CGPoint(
-            x: max(0, (startOffset.x + anchor.x) * scaleRatio - anchor.x),
-            y: max(0, (startOffset.y + anchor.y) * scaleRatio - anchor.y)
+            x: min(max(0, targetOffset.x), maximumTargetOffset.x),
+            y: min(max(0, targetOffset.y), maximumTargetOffset.y)
         )
     }
 }

@@ -2207,13 +2207,10 @@ private struct StudyTreeLayoutSnapshot {
         let maxLeaf = logicalPositions.values.map(\.x).max() ?? 0
         let contentWidth = (maxLeaf + 1) * (Self.nodeSize.width + Self.siblingSpacing) - Self.siblingSpacing + Self.margin * 2
         let verticalHeight = (maxDepth + 1) * (Self.nodeSize.height + Self.levelSpacing) - Self.levelSpacing + Self.margin * 2
-        let canvasWidth = max(contentWidth, 320)
-        let horizontalCenteringInset = (canvasWidth - contentWidth) / 2
 
         func renderedCenter(_ point: CGPoint) -> CGPoint {
             CGPoint(
-                x: horizontalCenteringInset
-                    + Self.margin
+                x: Self.margin
                     + Self.nodeSize.width / 2
                     + point.x * (Self.nodeSize.width + Self.siblingSpacing),
                 y: Self.margin + Self.nodeSize.height / 2 + point.y * (Self.nodeSize.height + Self.levelSpacing)
@@ -2250,7 +2247,7 @@ private struct StudyTreeLayoutSnapshot {
             }
         }
 
-        size = CGSize(width: canvasWidth, height: max(verticalHeight, 320))
+        size = CGSize(width: contentWidth, height: verticalHeight)
     }
 
     private static func assignLogicalPosition(
@@ -2464,7 +2461,7 @@ private struct MobileStudyTreeView: View {
                             .frame(
                                 minWidth: geometry.size.width,
                                 minHeight: geometry.size.height,
-                                alignment: .top
+                                alignment: .center
                             )
                             .background {
                                 StudyTreeScrollViewportBridge(
@@ -2649,10 +2646,15 @@ private struct MobileStudyTreeView: View {
                     x: value.startAnchor.x * treeViewportSize.width,
                     y: value.startAnchor.y * treeViewportSize.height
                 )
+                let canvasSize = snapshot.map {
+                    expandedCanvasLayout(for: $0).size
+                } ?? treeViewportSize
                 zoomScale = nextScale
                 viewportOffset = StudyTreeViewportPolicy.contentOffsetPreservingAnchor(
                     startOffset: zoomStartViewportOffset,
                     anchor: anchor,
+                    canvasSize: canvasSize,
+                    viewportSize: treeViewportSize,
                     startScale: zoomStartScale,
                     targetScale: nextScale
                 )
