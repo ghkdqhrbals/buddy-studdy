@@ -2375,12 +2375,14 @@ private struct MobileStudyTreeView: View {
                                         let parent = edge.parent.adding(
                                             renderedNodeOffset(
                                                 for: edge.parentID,
+                                                baseCenter: edge.parent,
                                                 canvasLayout: canvasLayout
                                             )
                                         )
                                         let child = edge.child.adding(
                                             renderedNodeOffset(
                                                 for: edge.childID,
+                                                baseCenter: edge.child,
                                                 canvasLayout: canvasLayout
                                             )
                                         )
@@ -2444,6 +2446,7 @@ private struct MobileStudyTreeView: View {
                                     .offset(
                                         renderedNodeOffset(
                                             for: placement.room.id,
+                                            baseCenter: placement.center,
                                             canvasLayout: canvasLayout
                                         )
                                     )
@@ -2545,7 +2548,7 @@ private struct MobileStudyTreeView: View {
             await appState.refreshVisibleData()
             hasFinishedInitialRefresh = true
             if let snapshot {
-                sanitizeNodeOffsets()
+                sanitizeNodeOffsets(for: snapshot)
                 fitInitialViewportIfNeeded(for: snapshot)
             }
         }
@@ -2655,14 +2658,20 @@ private struct MobileStudyTreeView: View {
             .onChanged { value in
                 guard !isSelectionMode else { return }
                 let initial = dragStartOffsets[roomID]
-                    ?? StudyTreeCanvasPolicy.sanitizedOffset(nodeOffsets[roomID] ?? .zero)
+                    ?? boundedNodeOffset(for: roomID, in: snapshot)
                 dragStartOffsets[roomID] = initial
                 let proposedOffset = CGSize(
                     width: initial.width + value.translation.width / zoomScale,
                     height: initial.height + value.translation.height / zoomScale
                 )
                 let previousLayout = expandedCanvasLayout(for: snapshot)
-                nodeOffsets[roomID] = StudyTreeCanvasPolicy.sanitizedOffset(proposedOffset)
+                if let baseCenter = snapshot.centerByRoomID[roomID] {
+                    nodeOffsets[roomID] = StudyTreeCanvasPolicy.boundedOffset(
+                        proposedOffset,
+                        baseCenter: baseCenter,
+                        nodeSize: StudyTreeLayoutSnapshot.nodeSize
+                    )
+                }
                 let expandedLayout = expandedCanvasLayout(for: snapshot)
                 viewportOffset = CGPoint(
                     x: max(
@@ -2804,21 +2813,49 @@ private struct MobileStudyTreeView: View {
 
     private func renderedNodeOffset(
         for roomID: Int,
+        baseCenter: CGPoint,
         canvasLayout: StudyTreeCanvasLayout
     ) -> CGSize {
-        let nodeOffset = StudyTreeCanvasPolicy.sanitizedOffset(nodeOffsets[roomID] ?? .zero)
+        let nodeOffset = StudyTreeCanvasPolicy.boundedOffset(
+            nodeOffsets[roomID] ?? .zero,
+            baseCenter: baseCenter,
+            nodeSize: StudyTreeLayoutSnapshot.nodeSize
+        )
         return CGSize(
             width: nodeOffset.width + canvasLayout.translation.width,
             height: nodeOffset.height + canvasLayout.translation.height
         )
     }
 
-    private func sanitizeNodeOffsets() {
-        let sanitizedOffsets = nodeOffsets.mapValues(StudyTreeCanvasPolicy.sanitizedOffset)
-        guard sanitizedOffsets != nodeOffsets else {
+    private func boundedNodeOffset(
+        for roomID: Int,
+        in snapshot: StudyTreeLayoutSnapshot
+    ) -> CGSize {
+        guard let baseCenter = snapshot.centerByRoomID[roomID] else {
+            return .zero
+        }
+        return StudyTreeCanvasPolicy.boundedOffset(
+            nodeOffsets[roomID] ?? .zero,
+            baseCenter: baseCenter,
+            nodeSize: StudyTreeLayoutSnapshot.nodeSize
+        )
+    }
+
+    private func sanitizeNodeOffsets(for snapshot: StudyTreeLayoutSnapshot) {
+        let boundedOffsets = nodeOffsets.reduce(into: [Int: CGSize]()) { result, entry in
+            guard let baseCenter = snapshot.centerByRoomID[entry.key] else {
+                return
+            }
+            result[entry.key] = StudyTreeCanvasPolicy.boundedOffset(
+                entry.value,
+                baseCenter: baseCenter,
+                nodeSize: StudyTreeLayoutSnapshot.nodeSize
+            )
+        }
+        guard boundedOffsets != nodeOffsets else {
             return
         }
-        nodeOffsets = sanitizedOffsets
+        nodeOffsets = boundedOffsets
         saveNodeOffsets()
     }
 
