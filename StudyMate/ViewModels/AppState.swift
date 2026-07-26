@@ -5047,6 +5047,7 @@ final class AppState: ObservableObject {
         let matchesCurrentQuestion = currentQuestion.map {
             Self.questionsMatch($0, record.question)
         } ?? false
+        let isStudyRoomPendingQuestion = studyRoomState.containsPendingQuestion(recordID: record.id)
 
         if matchesCurrentQuestion {
             notificationService.cancelQuestionNotification(for: record.question)
@@ -5056,7 +5057,7 @@ final class AppState: ObservableObject {
            storedRecord.gradingResult == nil {
             notificationService.cancelQuestionNotification(for: storedRecord.question)
             localStudyRecordUseCase.deleteRecord(storedRecord)
-        } else if !matchesCurrentQuestion {
+        } else if !matchesCurrentQuestion && !isStudyRoomPendingQuestion {
             return
         }
 
@@ -5116,19 +5117,49 @@ final class AppState: ObservableObject {
     }
 
     private func sendRemoteSkip(for record: StudyRecord) {
-        if let registration = storedBackendIdentityUseCase.loadRegistration() {
-            Task {
-                do {
-                    _ = try await recordsUseCase.skipRecord(registration: registration, recordID: record.id)
+        Task {
+            guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
+                  let registration = await registrationWithAccessToken(
+                      storedRegistration,
+                      reason: "skip-record"
+                  ) else {
+                statusMessage = nil
+                errorMessage = strings.skipQuestionFailed
+                log(.warning, "백엔드 등록 또는 access token이 없어 질문을 넘기지 못했습니다. recordID=\(record.id)")
+                await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+                return
+            }
+
+            await actionRunner.run(
+                operation: {
+                    try await performWithBackendIdentityRecovery(
+                        registration: registration,
+                        reason: "skip-record",
+                        operation: { recoveredRegistration in
+                            try await recordsUseCase.skipRecord(
+                                registration: recoveredRegistration,
+                                recordID: record.id
+                            )
+                        }
+                    )
+                },
+                onSuccess: { _ in
                     await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
                     await syncRemotePushScheduleIfPossible(reason: "skip")
-                } catch {
-                    if self.handlePageAccessError(error, page: .studyDetail) {
-                        return
+                },
+                onFailure: { error in
+                    let handled = handlePageAccessError(error, page: .studyDetail)
+                    if !handled {
+                        statusMessage = nil
+                        errorMessage = strings.skipQuestionFailed
                     }
-                    log(.warning, "백엔드 미제출 질문 넘기기 실패: \(error.localizedDescription)")
+                    log(
+                        .warning,
+                        "백엔드 미제출 질문 넘기기 실패: recordID=\(record.id), error=\(appErrorHandlingUseCase.diagnosticDescription(for: error))"
+                    )
+                    await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
                 }
-            }
+            )
         }
     }
 

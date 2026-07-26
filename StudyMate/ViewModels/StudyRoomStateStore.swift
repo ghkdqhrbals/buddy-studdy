@@ -130,6 +130,10 @@ struct StudyRoomStateStore {
         }
     }
 
+    func containsPendingQuestion(recordID: String) -> Bool {
+        rooms.contains { $0.pendingQuestion?.id == recordID }
+    }
+
     private static func isPendingQuestion(_ record: StudyRecord?) -> Bool {
         guard let record else {
             return false

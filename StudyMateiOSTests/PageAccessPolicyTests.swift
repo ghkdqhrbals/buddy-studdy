@@ -77,6 +77,47 @@ final class PageAccessPolicyTests: XCTestCase {
     }
 }
 
+final class StudyRoomStateStoreTests: XCTestCase {
+    func testBackendPendingQuestionCanBeClearedWithoutLocalRecordCacheEntry() {
+        let record = StudyRecord(
+            id: "record-42",
+            question: QuestionItem(
+                question: "What does SKIP LOCKED do?",
+                expectedAnswerHint: nil,
+                createdAt: Date(timeIntervalSince1970: 42)
+            ),
+            topic: "Database",
+            difficulty: .intermediate
+        )
+        let room = BackendStudyRoom(
+            id: 19,
+            topic: "Database",
+            difficultyLevel: 5,
+            intervalMinutes: 30,
+            enabled: true,
+            notificationSound: nil,
+            customPrompt: "",
+            openAIModel: "gpt-5.4",
+            maxHistoryCount: 100,
+            nextDueAt: nil,
+            lastSentAt: nil,
+            lastError: nil,
+            pendingQuestion: record,
+            createdAt: Date(timeIntervalSince1970: 1),
+            updatedAt: Date(timeIntervalSince1970: 1)
+        )
+        var state = StudyRoomStateStore()
+        state.replace(with: [room])
+
+        XCTAssertTrue(state.containsPendingQuestion(recordID: record.id))
+
+        state.clearPendingQuestion(recordID: record.id)
+
+        XCTAssertFalse(state.containsPendingQuestion(recordID: record.id))
+        XCTAssertEqual(state.pendingQuestionCount, 0)
+    }
+}
+
 final class StudyTreeViewportPersistenceTests: XCTestCase {
     func testViewportPersistsPerRootStudyAndSanitizesValues() {
         let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"

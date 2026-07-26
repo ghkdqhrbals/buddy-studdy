@@ -2385,6 +2385,12 @@ struct AppStrings {
     var gradeAnswer: String { text("채점 받기", "Grade Answer") }
     var skipQuestion: String { text("넘기기", "Skip") }
     var skipQuestionHelp: String { text("현재 미제출 질문을 넘기고 대기 중인 다음 질문으로 이동합니다.", "Skip the current ungraded question and move to the next pending one.") }
+    var skipQuestionFailed: String {
+        text(
+            "질문을 넘기지 못했습니다. 잠시 후 다시 시도하세요.",
+            "The question could not be skipped. Please try again shortly."
+        )
+    }
     var showHint: String { text("힌트 보기", "Show Hint") }
     var hideHint: String { text("힌트 숨기기", "Hide Hint") }
     var correct: String { text("정답", "Correct") }
