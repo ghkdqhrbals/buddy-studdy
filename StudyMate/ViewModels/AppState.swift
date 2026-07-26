@@ -5848,6 +5848,14 @@ final class AppState: ObservableObject {
         developerState = nextState
     }
 
+    func resetDebugLogs() {
+        appLogUseCase.clearLogs()
+        var nextState = developerState
+        nextState.clearAppLogs()
+        nextState.clearAPITrafficLogs()
+        developerState = nextState
+    }
+
     func showAPIDebugPanel() {
         isAPIDebugPanelPresented = true
     }

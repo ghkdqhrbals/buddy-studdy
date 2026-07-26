@@ -2473,6 +2473,13 @@ struct AppStrings {
     var cloudflareTunnel: String { text("Cloudflare 터널", "Cloudflare Tunnel") }
     var developerOptions: String { text("개발자 옵션", "Developer Options") }
     var apiDebugWindowTitle: String { text("API 통신 로그", "API Traffic Logs") }
+    var resetDebugLogs: String { text("디버그 로그 초기화", "Reset Debug Logs") }
+    var resetDebugLogsConfirmation: String {
+        text(
+            "저장된 앱 로그와 API 요청 및 응답 로그를 모두 삭제합니다.",
+            "Delete all saved app logs and API request and response logs."
+        )
+    }
     var requestLabel: String { text("요청", "Request") }
     var responseLabel: String { text("응답", "Response") }
     var statusLabel: String { text("상태", "Status") }

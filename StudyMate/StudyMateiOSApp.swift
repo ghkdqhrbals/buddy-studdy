@@ -103,7 +103,12 @@ private struct FloatingAPIDebugOverlay: View {
     @State private var committedOffset = CGSize(width: 12, height: 74)
     @State private var suppressTapAction = false
     @State private var selectedLogID: APITrafficLogEntry.ID?
+    @State private var showsLogResetConfirmation = false
     @GestureState private var dragTranslation: CGSize = .zero
+
+    private var strings: AppStrings {
+        AppStrings(language: appState.settings.appLanguage)
+    }
 
     private var recentLogs: [APITrafficLogEntry] {
         Array(appState.apiTrafficLogs.prefix(100))
@@ -144,6 +149,19 @@ private struct FloatingAPIDebugOverlay: View {
                 }
         }
         .ignoresSafeArea(.keyboard)
+        .confirmationDialog(
+            strings.resetDebugLogs,
+            isPresented: $showsLogResetConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(strings.resetDebugLogs, role: .destructive) {
+                selectedLogID = nil
+                appState.resetDebugLogs()
+            }
+            Button(strings.cancel, role: .cancel) {}
+        } message: {
+            Text(strings.resetDebugLogsConfirmation)
+        }
     }
 
     @ViewBuilder
@@ -197,6 +215,22 @@ private struct FloatingAPIDebugOverlay: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+
+                if isExpanded {
+                    Button {
+                        runTapAction {
+                            showsLogResetConfirmation = true
+                        }
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.red)
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(strings.resetDebugLogs)
+                }
 
                 Button {
                     runTapAction {
