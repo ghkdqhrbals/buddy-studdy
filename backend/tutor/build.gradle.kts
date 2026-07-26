@@ -92,6 +92,7 @@ dependencies {
     runtimeOnly("org.flywaydb:flyway-mysql")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("org.jooq:jooq:3.21.6")
     testImplementation("io.r2dbc:r2dbc-h2")
     testImplementation("org.testcontainers:junit-jupiter:1.21.3")
     testImplementation("org.testcontainers:mysql:1.21.3")

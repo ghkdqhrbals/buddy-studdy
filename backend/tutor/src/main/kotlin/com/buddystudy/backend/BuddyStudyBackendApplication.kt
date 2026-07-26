@@ -50,6 +50,14 @@ class ApplicationRuntimeHints : RuntimeHintsRegistrar {
                 MemberCategory.INVOKE_DECLARED_METHODS,
             )
         }
+        // jOOQ eagerly creates this array type while bootstrapping SQLDataType.
+        // Its upstream native metadata covers the other built-in array types.
+        val decfloatArrayType = Class.forName(
+            "[Lorg.jooq.Decfloat;",
+            false,
+            classLoader ?: javaClass.classLoader,
+        )
+        hints.reflection().registerType(decfloatArrayType)
         hints.resources().registerPattern("db/migration/*.sql")
     }
 

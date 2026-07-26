@@ -60,4 +60,18 @@ class ApplicationRuntimeHintsTest {
             ).isTrue()
         }
     }
+
+    @Test
+    fun `registers jooq decfloat array used during native data type initialization`() {
+        val hints = RuntimeHints()
+
+        ApplicationRuntimeHints().registerHints(hints, javaClass.classLoader)
+
+        val decfloatArrayType = Class.forName("[Lorg.jooq.Decfloat;")
+        assertThat(
+            RuntimeHintsPredicates.reflection()
+                .onType(decfloatArrayType)
+                .test(hints),
+        ).isTrue()
+    }
 }
