@@ -132,12 +132,7 @@ final class StudyTreeViewportPersistenceTests: XCTestCase {
             StudyTreeViewportState(
                 zoomScale: 1.45,
                 contentOffsetX: 180,
-                contentOffsetY: 96,
-                fittedCanvasWidth: 640,
-                fittedCanvasHeight: 920,
-                contentTranslationX: 48,
-                contentTranslationY: -24,
-                fitVersion: StudyTreeViewportState.currentFitVersion
+                contentOffsetY: 96
             ),
             rootStudyID: 7
         )
@@ -148,12 +143,7 @@ final class StudyTreeViewportPersistenceTests: XCTestCase {
             StudyTreeViewportState(
                 zoomScale: 1.45,
                 contentOffsetX: 180,
-                contentOffsetY: 96,
-                fittedCanvasWidth: 640,
-                fittedCanvasHeight: 920,
-                contentTranslationX: 48,
-                contentTranslationY: -24,
-                fitVersion: StudyTreeViewportState.currentFitVersion
+                contentOffsetY: 96
             )
         )
         XCTAssertEqual(store.loadStudyTreeViewport(rootStudyID: 8), .default)
@@ -162,12 +152,7 @@ final class StudyTreeViewportPersistenceTests: XCTestCase {
             StudyTreeViewportState(
                 zoomScale: 4,
                 contentOffsetX: -20,
-                contentOffsetY: .infinity,
-                fittedCanvasWidth: -100,
-                fittedCanvasHeight: .infinity,
-                contentTranslationX: .infinity,
-                contentTranslationY: -.infinity,
-                fitVersion: -1
+                contentOffsetY: .infinity
             ),
             rootStudyID: 9
         )
@@ -176,12 +161,7 @@ final class StudyTreeViewportPersistenceTests: XCTestCase {
             StudyTreeViewportState(
                 zoomScale: 1.8,
                 contentOffsetX: 0,
-                contentOffsetY: 0,
-                fittedCanvasWidth: 0,
-                fittedCanvasHeight: 0,
-                contentTranslationX: 0,
-                contentTranslationY: 0,
-                fitVersion: 0
+                contentOffsetY: 0
             )
         )
     }
@@ -249,43 +229,6 @@ final class StudyTreeLayoutPolicyTests: XCTestCase {
                 hasFinishedRefresh: true,
                 viewportSize: viewportSize
             )
-        )
-    }
-
-    func testInitialFitUsesNodeBoundsAndCentersThemInTheViewport() throws {
-        let contentBounds = try XCTUnwrap(
-            StudyTreeCanvasPolicy.contentBounds(
-                baseCenters: [
-                    1: CGPoint(x: 100, y: 100),
-                    2: CGPoint(x: 300, y: 500)
-                ],
-                nodeOffsets: [
-                    1: CGSize(width: 20, height: -10),
-                    2: CGSize(width: -20, height: 10)
-                ],
-                nodeSize: CGSize(width: 100, height: 100)
-            )
-        )
-        XCTAssertEqual(
-            contentBounds,
-            CGRect(x: 70, y: 40, width: 260, height: 520)
-        )
-
-        let fitted = StudyTreeViewportPolicy.fittedLayout(
-            contentBounds: contentBounds,
-            viewportSize: CGSize(width: 390, height: 700),
-            padding: 28
-        )
-        XCTAssertEqual(fitted.zoomScale, 1, accuracy: 0.0001)
-        XCTAssertEqual(
-            contentBounds.midX + fitted.contentTranslation.width,
-            fitted.canvasSize.width / 2,
-            accuracy: 0.0001
-        )
-        XCTAssertEqual(
-            contentBounds.midY + fitted.contentTranslation.height,
-            fitted.canvasSize.height / 2,
-            accuracy: 0.0001
         )
     }
 

@@ -120,20 +120,7 @@ final class SettingsStore {
                 )
                 : 1,
             contentOffsetX: viewport.contentOffsetX.isFinite ? max(0, viewport.contentOffsetX) : 0,
-            contentOffsetY: viewport.contentOffsetY.isFinite ? max(0, viewport.contentOffsetY) : 0,
-            fittedCanvasWidth: viewport.fittedCanvasWidth.isFinite
-                ? max(0, viewport.fittedCanvasWidth)
-                : 0,
-            fittedCanvasHeight: viewport.fittedCanvasHeight.isFinite
-                ? max(0, viewport.fittedCanvasHeight)
-                : 0,
-            contentTranslationX: viewport.contentTranslationX.isFinite
-                ? viewport.contentTranslationX
-                : 0,
-            contentTranslationY: viewport.contentTranslationY.isFinite
-                ? viewport.contentTranslationY
-                : 0,
-            fitVersion: max(0, viewport.fitVersion)
+            contentOffsetY: viewport.contentOffsetY.isFinite ? max(0, viewport.contentOffsetY) : 0
         )
     }
 

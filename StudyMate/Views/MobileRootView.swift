@@ -2205,12 +2205,17 @@ private struct StudyTreeLayoutSnapshot {
 
         let maxDepth = logicalPositions.values.map(\.y).max() ?? 0
         let maxLeaf = logicalPositions.values.map(\.x).max() ?? 0
-        let verticalWidth = (maxLeaf + 1) * (Self.nodeSize.width + Self.siblingSpacing) - Self.siblingSpacing + Self.margin * 2
+        let contentWidth = (maxLeaf + 1) * (Self.nodeSize.width + Self.siblingSpacing) - Self.siblingSpacing + Self.margin * 2
         let verticalHeight = (maxDepth + 1) * (Self.nodeSize.height + Self.levelSpacing) - Self.levelSpacing + Self.margin * 2
+        let canvasWidth = max(contentWidth, 320)
+        let horizontalCenteringInset = (canvasWidth - contentWidth) / 2
 
         func renderedCenter(_ point: CGPoint) -> CGPoint {
             CGPoint(
-                x: Self.margin + Self.nodeSize.width / 2 + point.x * (Self.nodeSize.width + Self.siblingSpacing),
+                x: horizontalCenteringInset
+                    + Self.margin
+                    + Self.nodeSize.width / 2
+                    + point.x * (Self.nodeSize.width + Self.siblingSpacing),
                 y: Self.margin + Self.nodeSize.height / 2 + point.y * (Self.nodeSize.height + Self.levelSpacing)
             )
         }
@@ -2245,7 +2250,7 @@ private struct StudyTreeLayoutSnapshot {
             }
         }
 
-        size = CGSize(width: max(verticalWidth, 320), height: max(verticalHeight, 320))
+        size = CGSize(width: canvasWidth, height: max(verticalHeight, 320))
     }
 
     private static func assignLogicalPosition(
@@ -2315,8 +2320,6 @@ private struct MobileStudyTreeView: View {
     @State private var isZoomGestureActive = false
     @State private var viewportOffset: CGPoint = .zero
     @State private var treeViewportSize: CGSize = .zero
-    @State private var fittedCanvasSize: CGSize = .zero
-    @State private var fittedContentTranslation: CGSize = .zero
     @State private var hasLoadedTreeState = false
     @State private var hasFinishedInitialRefresh = false
     @State private var hasAppliedInitialViewportFit = false
@@ -2808,11 +2811,10 @@ private struct MobileStudyTreeView: View {
             return
         }
         nodeOffsets = appState.loadStudyTreeNodeOffsets(rootStudyID: rootStudyID)
-        let viewport = appState.loadStudyTreeViewport(rootStudyID: rootStudyID)
         let needsInitialFit = !appState.hasStudyTreeViewport(rootStudyID: rootStudyID)
-            || viewport.fitVersion < StudyTreeViewportState.currentFitVersion
         shouldFitInitialViewport = needsInitialFit
         isPreparingInitialViewport = needsInitialFit
+        let viewport = appState.loadStudyTreeViewport(rootStudyID: rootStudyID)
         zoomScale = viewport.zoomScale
         zoomStartScale = viewport.zoomScale
         viewportOffset = CGPoint(
@@ -2820,43 +2822,16 @@ private struct MobileStudyTreeView: View {
             y: viewport.contentOffsetY
         )
         zoomStartViewportOffset = viewportOffset
-        fittedCanvasSize = needsInitialFit
-            ? .zero
-            : CGSize(
-                width: viewport.fittedCanvasWidth,
-                height: viewport.fittedCanvasHeight
-            )
-        fittedContentTranslation = needsInitialFit
-            ? .zero
-            : CGSize(
-                width: viewport.contentTranslationX,
-                height: viewport.contentTranslationY
-            )
         hasLoadedTreeState = true
     }
 
     private func expandedCanvasLayout(
         for snapshot: StudyTreeLayoutSnapshot
     ) -> StudyTreeCanvasLayout {
-        let translatedOffsets = snapshot.centerByRoomID.reduce(
-            into: [Int: CGSize]()
-        ) { result, entry in
-            let (roomID, _) = entry
-            let nodeOffset = StudyTreeCanvasPolicy.sanitizedOffset(
-                nodeOffsets[roomID] ?? .zero
-            )
-            result[roomID] = CGSize(
-                width: nodeOffset.width + fittedContentTranslation.width,
-                height: nodeOffset.height + fittedContentTranslation.height
-            )
-        }
-        return StudyTreeCanvasPolicy.expandedLayout(
+        StudyTreeCanvasPolicy.expandedLayout(
             baseCenters: snapshot.centerByRoomID,
-            nodeOffsets: translatedOffsets,
-            baseCanvasSize: CGSize(
-                width: max(snapshot.size.width, fittedCanvasSize.width),
-                height: max(snapshot.size.height, fittedCanvasSize.height)
-            ),
+            nodeOffsets: nodeOffsets,
+            baseCanvasSize: snapshot.size,
             nodeSize: StudyTreeLayoutSnapshot.nodeSize
         )
     }
@@ -2867,12 +2842,8 @@ private struct MobileStudyTreeView: View {
     ) -> CGSize {
         let nodeOffset = StudyTreeCanvasPolicy.sanitizedOffset(nodeOffsets[roomID] ?? .zero)
         return CGSize(
-            width: nodeOffset.width
-                + fittedContentTranslation.width
-                + canvasLayout.translation.width,
-            height: nodeOffset.height
-                + fittedContentTranslation.height
-                + canvasLayout.translation.height
+            width: nodeOffset.width + canvasLayout.translation.width,
+            height: nodeOffset.height + canvasLayout.translation.height
         )
     }
 
@@ -2927,21 +2898,13 @@ private struct MobileStudyTreeView: View {
     }
 
     private func applyFittedViewport(for snapshot: StudyTreeLayoutSnapshot) {
-        guard let contentBounds = StudyTreeCanvasPolicy.contentBounds(
-            baseCenters: snapshot.centerByRoomID,
-            nodeOffsets: nodeOffsets,
-            nodeSize: StudyTreeLayoutSnapshot.nodeSize
-        ) else {
-            return
-        }
-        let fittedLayout = StudyTreeViewportPolicy.fittedLayout(
-            contentBounds: contentBounds,
+        let canvasLayout = expandedCanvasLayout(for: snapshot)
+        let fittedScale = StudyTreeViewportPolicy.fittedZoomScale(
+            canvasSize: canvasLayout.size,
             viewportSize: treeViewportSize
         )
-        fittedCanvasSize = fittedLayout.canvasSize
-        fittedContentTranslation = fittedLayout.contentTranslation
-        zoomScale = fittedLayout.zoomScale
-        zoomStartScale = fittedLayout.zoomScale
+        zoomScale = fittedScale
+        zoomStartScale = fittedScale
         viewportOffset = .zero
         zoomStartViewportOffset = .zero
     }
@@ -2959,12 +2922,7 @@ private struct MobileStudyTreeView: View {
             StudyTreeViewportState(
                 zoomScale: zoomScale,
                 contentOffsetX: contentOffset.x,
-                contentOffsetY: contentOffset.y,
-                fittedCanvasWidth: fittedCanvasSize.width,
-                fittedCanvasHeight: fittedCanvasSize.height,
-                contentTranslationX: fittedContentTranslation.width,
-                contentTranslationY: fittedContentTranslation.height,
-                fitVersion: StudyTreeViewportState.currentFitVersion
+                contentOffsetY: contentOffset.y
             ),
             rootStudyID: rootStudyID
         )
@@ -3220,22 +3178,17 @@ private struct StudyTreeNode: View {
             }
             .overlay {
                 Circle()
-                    .stroke(statusBorderColor, lineWidth: 2.5)
+                    .strokeBorder(statusBorderColor, lineWidth: 2.5)
             }
             .overlay {
                 if isSelected {
                     Circle()
-                        .stroke(Color.accentColor, lineWidth: 3)
+                        .strokeBorder(Color.accentColor, lineWidth: 3)
                         .padding(-4)
                 }
             }
         }
         .buttonStyle(.plain)
-        .contextMenu {
-            Button(strings.editStudyCategory, action: onEdit)
-            Button(strings.deleteStudy, role: .destructive, action: onDelete)
-            Button(strings.newStudyCategory, action: onAddRecommendedChild)
-        }
         .overlay(alignment: .topLeading) {
             if isSelectionMode {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
@@ -3253,6 +3206,13 @@ private struct StudyTreeNode: View {
                     }
                     Button(action: onAddManualChild) {
                         Label(strings.addTopicManually, systemImage: "square.and.pencil")
+                    }
+                    Divider()
+                    Button(action: onEdit) {
+                        Label(strings.editStudyCategory, systemImage: "pencil")
+                    }
+                    Button(role: .destructive, action: onDelete) {
+                        Label(strings.deleteStudy, systemImage: "trash")
                     }
                 } label: {
                     Image(systemName: "plus")
