@@ -16,5 +16,6 @@ protocol LocalStudySettingsRepository {
     func loadStudyTreeNodeOffsets(rootStudyID: Int) -> [Int: StudyTreeNodeOffset]
     func saveStudyTreeNodeOffsets(_ offsets: [Int: StudyTreeNodeOffset], rootStudyID: Int)
     func loadStudyTreeViewport(rootStudyID: Int) -> StudyTreeViewportState
+    func hasStudyTreeViewport(rootStudyID: Int) -> Bool
     func saveStudyTreeViewport(_ viewport: StudyTreeViewportState, rootStudyID: Int)
 }

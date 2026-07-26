@@ -93,6 +93,13 @@ final class SettingsStore {
         return sanitizedStudyTreeViewport(viewport)
     }
 
+    func hasStudyTreeViewport(rootStudyID: Int) -> Bool {
+        guard let data = defaults.data(forKey: studyTreeViewportKey(rootStudyID)) else {
+            return false
+        }
+        return (try? decoder.decode(StudyTreeViewportState.self, from: data)) != nil
+    }
+
     func saveStudyTreeViewport(_ viewport: StudyTreeViewportState, rootStudyID: Int) {
         guard let data = try? encoder.encode(sanitizedStudyTreeViewport(viewport)) else {
             return
@@ -106,7 +113,12 @@ final class SettingsStore {
 
     private func sanitizedStudyTreeViewport(_ viewport: StudyTreeViewportState) -> StudyTreeViewportState {
         StudyTreeViewportState(
-            zoomScale: viewport.zoomScale.isFinite ? min(max(viewport.zoomScale, 0.6), 1.8) : 1,
+            zoomScale: viewport.zoomScale.isFinite
+                ? min(
+                    max(viewport.zoomScale, StudyTreeViewportPolicy.minimumZoomScale),
+                    StudyTreeViewportPolicy.maximumZoomScale
+                )
+                : 1,
             contentOffsetX: viewport.contentOffsetX.isFinite ? max(0, viewport.contentOffsetX) : 0,
             contentOffsetY: viewport.contentOffsetY.isFinite ? max(0, viewport.contentOffsetY) : 0
         )

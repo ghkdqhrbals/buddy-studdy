@@ -17,6 +17,73 @@ struct StudyTreeViewportState: Codable, Equatable {
     )
 }
 
+enum StudyTreeNodeOffsetPolicy {
+    static func boundedOffset(
+        _ proposedOffset: CGSize,
+        baseCenter: CGPoint,
+        canvasSize: CGSize,
+        nodeSize: CGSize,
+        padding: CGFloat = 8
+    ) -> CGSize {
+        let safeWidth = max(0, canvasSize.width.isFinite ? canvasSize.width : 0)
+        let safeHeight = max(0, canvasSize.height.isFinite ? canvasSize.height : 0)
+        let horizontalInset = min(
+            safeWidth / 2,
+            max(0, nodeSize.width / 2 + padding)
+        )
+        let verticalInset = min(
+            safeHeight / 2,
+            max(0, nodeSize.height / 2 + padding)
+        )
+        let proposedX = baseCenter.x + (proposedOffset.width.isFinite ? proposedOffset.width : 0)
+        let proposedY = baseCenter.y + (proposedOffset.height.isFinite ? proposedOffset.height : 0)
+        let boundedX = min(
+            max(proposedX, horizontalInset),
+            max(horizontalInset, safeWidth - horizontalInset)
+        )
+        let boundedY = min(
+            max(proposedY, verticalInset),
+            max(verticalInset, safeHeight - verticalInset)
+        )
+
+        return CGSize(
+            width: boundedX - baseCenter.x,
+            height: boundedY - baseCenter.y
+        )
+    }
+}
+
+enum StudyTreeViewportPolicy {
+    static let minimumZoomScale: CGFloat = 0.02
+    static let maximumZoomScale: CGFloat = 1.8
+
+    static func fittedZoomScale(
+        canvasSize: CGSize,
+        viewportSize: CGSize,
+        padding: CGFloat = 16
+    ) -> CGFloat {
+        guard canvasSize.width.isFinite,
+              canvasSize.height.isFinite,
+              viewportSize.width.isFinite,
+              viewportSize.height.isFinite,
+              canvasSize.width > 0,
+              canvasSize.height > 0,
+              viewportSize.width > 0,
+              viewportSize.height > 0 else {
+            return 1
+        }
+
+        let availableWidth = max(1, viewportSize.width - padding * 2)
+        let availableHeight = max(1, viewportSize.height - padding * 2)
+        let fittedScale = min(
+            availableWidth / canvasSize.width,
+            availableHeight / canvasSize.height,
+            1
+        )
+        return min(max(fittedScale, minimumZoomScale), maximumZoomScale)
+    }
+}
+
 private extension Collection {
     subscript(safe index: Index) -> Element? {
         indices.contains(index) ? self[index] : nil

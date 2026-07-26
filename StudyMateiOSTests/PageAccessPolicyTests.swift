@@ -86,6 +86,7 @@ final class StudyTreeViewportPersistenceTests: XCTestCase {
         }
 
         let store = SettingsStore(defaults: defaults)
+        XCTAssertFalse(store.hasStudyTreeViewport(rootStudyID: 7))
         store.saveStudyTreeViewport(
             StudyTreeViewportState(
                 zoomScale: 1.45,
@@ -94,6 +95,7 @@ final class StudyTreeViewportPersistenceTests: XCTestCase {
             ),
             rootStudyID: 7
         )
+        XCTAssertTrue(store.hasStudyTreeViewport(rootStudyID: 7))
 
         XCTAssertEqual(
             store.loadStudyTreeViewport(rootStudyID: 7),
@@ -120,6 +122,52 @@ final class StudyTreeViewportPersistenceTests: XCTestCase {
                 contentOffsetX: 0,
                 contentOffsetY: 0
             )
+        )
+    }
+}
+
+final class StudyTreeLayoutPolicyTests: XCTestCase {
+    func testNodeOffsetStaysInsideCanvasAndRecoversInvalidValues() {
+        let baseCenter = CGPoint(x: 100, y: 100)
+        let canvasSize = CGSize(width: 320, height: 320)
+        let nodeSize = CGSize(width: 112, height: 112)
+
+        XCTAssertEqual(
+            StudyTreeNodeOffsetPolicy.boundedOffset(
+                CGSize(width: 1_000, height: -1_000),
+                baseCenter: baseCenter,
+                canvasSize: canvasSize,
+                nodeSize: nodeSize
+            ),
+            CGSize(width: 156, height: -36)
+        )
+        XCTAssertEqual(
+            StudyTreeNodeOffsetPolicy.boundedOffset(
+                CGSize(width: CGFloat.infinity, height: CGFloat.nan),
+                baseCenter: baseCenter,
+                canvasSize: canvasSize,
+                nodeSize: nodeSize
+            ),
+            .zero
+        )
+    }
+
+    func testInitialZoomFitsEntireCanvasWithoutEnlargingSmallTrees() {
+        XCTAssertEqual(
+            StudyTreeViewportPolicy.fittedZoomScale(
+                canvasSize: CGSize(width: 1_000, height: 500),
+                viewportSize: CGSize(width: 400, height: 300),
+                padding: 20
+            ),
+            0.36,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            StudyTreeViewportPolicy.fittedZoomScale(
+                canvasSize: CGSize(width: 200, height: 200),
+                viewportSize: CGSize(width: 400, height: 500)
+            ),
+            1
         )
     }
 }

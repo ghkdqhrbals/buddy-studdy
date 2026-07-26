@@ -44,6 +44,10 @@ struct SettingsStoreLocalStudySettingsRepository: LocalStudySettingsRepository {
         settingsStore.loadStudyTreeViewport(rootStudyID: rootStudyID)
     }
 
+    func hasStudyTreeViewport(rootStudyID: Int) -> Bool {
+        settingsStore.hasStudyTreeViewport(rootStudyID: rootStudyID)
+    }
+
     func saveStudyTreeViewport(_ viewport: StudyTreeViewportState, rootStudyID: Int) {
         settingsStore.saveStudyTreeViewport(viewport, rootStudyID: rootStudyID)
     }

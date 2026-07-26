@@ -39,6 +39,10 @@ struct LocalStudySettingsUseCase {
         repository.loadStudyTreeViewport(rootStudyID: rootStudyID)
     }
 
+    func hasStudyTreeViewport(rootStudyID: Int) -> Bool {
+        repository.hasStudyTreeViewport(rootStudyID: rootStudyID)
+    }
+
     func saveStudyTreeViewport(_ viewport: StudyTreeViewportState, rootStudyID: Int) {
         repository.saveStudyTreeViewport(viewport, rootStudyID: rootStudyID)
     }

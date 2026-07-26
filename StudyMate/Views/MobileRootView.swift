@@ -2180,6 +2180,7 @@ private struct StudyTreeLayoutSnapshot {
     private static let levelSpacing: CGFloat = 74
 
     var placements: [StudyTreePlacement]
+    var centerByRoomID: [Int: CGPoint]
     var edges: [StudyTreeEdge]
     var size: CGSize
 
@@ -2237,6 +2238,9 @@ private struct StudyTreeLayoutSnapshot {
             }
             return $0.center.y < $1.center.y
         }
+        centerByRoomID = Dictionary(
+            uniqueKeysWithValues: placements.map { ($0.id, $0.center) }
+        )
 
         edges = logicalPositions.flatMap { parentID, parentPoint in
             (childrenByParent[parentID] ?? []).compactMap { child in
@@ -2317,7 +2321,10 @@ private struct MobileStudyTreeView: View {
     @State private var zoomScale: CGFloat = 1
     @State private var zoomStartScale: CGFloat = 1
     @State private var viewportOffset: CGPoint = .zero
+    @State private var treeViewportSize: CGSize = .zero
     @State private var hasLoadedTreeState = false
+    @State private var hasFinishedInitialRefresh = false
+    @State private var shouldFitInitialViewport = false
     @State private var isSelectionMode = false
     @State private var showsDeleteConfirmation = false
 
@@ -2368,14 +2375,14 @@ private struct MobileStudyTreeView: View {
                     } label: {
                         Image(systemName: "minus.magnifyingglass")
                     }
-                    .disabled(zoomScale <= 0.6)
+                    .disabled(zoomScale <= StudyTreeViewportPolicy.minimumZoomScale)
 
                     Button {
                         changeZoom(by: 0.15)
                     } label: {
                         Image(systemName: "plus.magnifyingglass")
                     }
-                    .disabled(zoomScale >= 1.8)
+                    .disabled(zoomScale >= StudyTreeViewportPolicy.maximumZoomScale)
 
                     Menu {
                         Button {
@@ -2386,9 +2393,13 @@ private struct MobileStudyTreeView: View {
                         Button {
                             withAnimation(.snappy) {
                                 nodeOffsets = [:]
-                                zoomScale = 1
-                                zoomStartScale = 1
-                                viewportOffset = .zero
+                                if let snapshot {
+                                    applyFittedViewport(for: snapshot)
+                                } else {
+                                    zoomScale = 1
+                                    zoomStartScale = 1
+                                    viewportOffset = .zero
+                                }
                             }
                             saveNodeOffsets()
                             saveViewport()
@@ -2407,91 +2418,110 @@ private struct MobileStudyTreeView: View {
             .background(Color(.secondarySystemBackground))
 
             if let snapshot {
-                ZStack(alignment: .bottom) {
-                    ScrollView([.horizontal, .vertical]) {
-                        ZStack(alignment: .topLeading) {
-                            Canvas { context, _ in
-                                for edge in snapshot.edges {
-                                    let parent = edge.parent.adding(nodeOffsets[edge.parentID] ?? .zero)
-                                    let child = edge.child.adding(nodeOffsets[edge.childID] ?? .zero)
-                                    var path = Path()
-                                    path.move(to: parent)
-                                    if direction == .vertical {
-                                        let midpoint = (parent.y + child.y) / 2
-                                        path.addCurve(
-                                            to: child,
-                                            control1: CGPoint(x: parent.x, y: midpoint),
-                                            control2: CGPoint(x: child.x, y: midpoint)
+                GeometryReader { geometry in
+                    ZStack(alignment: .bottom) {
+                        ScrollView([.horizontal, .vertical]) {
+                            ZStack(alignment: .topLeading) {
+                                Canvas { context, _ in
+                                    for edge in snapshot.edges {
+                                        let parent = edge.parent.adding(
+                                            boundedNodeOffset(for: edge.parentID, in: snapshot)
                                         )
-                                    } else {
-                                        let midpoint = (parent.x + child.x) / 2
-                                        path.addCurve(
-                                            to: child,
-                                            control1: CGPoint(x: midpoint, y: parent.y),
-                                            control2: CGPoint(x: midpoint, y: child.y)
+                                        let child = edge.child.adding(
+                                            boundedNodeOffset(for: edge.childID, in: snapshot)
                                         )
+                                        var path = Path()
+                                        path.move(to: parent)
+                                        if direction == .vertical {
+                                            let midpoint = (parent.y + child.y) / 2
+                                            path.addCurve(
+                                                to: child,
+                                                control1: CGPoint(x: parent.x, y: midpoint),
+                                                control2: CGPoint(x: child.x, y: midpoint)
+                                            )
+                                        } else {
+                                            let midpoint = (parent.x + child.x) / 2
+                                            path.addCurve(
+                                                to: child,
+                                                control1: CGPoint(x: midpoint, y: parent.y),
+                                                control2: CGPoint(x: midpoint, y: child.y)
+                                            )
+                                        }
+                                        context.stroke(path, with: .color(Color.secondary.opacity(0.32)), lineWidth: 1.5)
                                     }
-                                    context.stroke(path, with: .color(Color.secondary.opacity(0.32)), lineWidth: 1.5)
+                                }
+
+                                ForEach(snapshot.placements) { placement in
+                                    StudyTreeNode(
+                                        room: placement.room,
+                                        strings: strings,
+                                        isSelectionMode: isSelectionMode,
+                                        isSelected: selectedRoomIDs.contains(placement.room.id),
+                                        onOpen: { selectedRoomID = placement.room.id },
+                                        onSelect: { toggleSelection(placement.room.id) },
+                                        onAddRecommendedChild: {
+                                            addRequest = StudyTopicAddRequest(
+                                                parent: placement.room,
+                                                mode: .recommendation
+                                            )
+                                        },
+                                        onAddManualChild: {
+                                            addRequest = StudyTopicAddRequest(
+                                                parent: placement.room,
+                                                mode: .manual
+                                            )
+                                        },
+                                        onToggleActive: {
+                                            appState.setStudyTopicActive(
+                                                studyID: placement.room.id,
+                                                active: !placement.room.activeForQuestions
+                                            )
+                                        },
+                                        onEdit: { editingRoom = placement.room }
+                                    )
+                                    .position(placement.center)
+                                    .offset(boundedNodeOffset(for: placement.room.id, in: snapshot))
+                                    .highPriorityGesture(
+                                        nodeDragGesture(for: placement.room.id, in: snapshot)
+                                    )
                                 }
                             }
-
-                            ForEach(snapshot.placements) { placement in
-                                StudyTreeNode(
-                                    room: placement.room,
-                                    strings: strings,
-                                    isSelectionMode: isSelectionMode,
-                                    isSelected: selectedRoomIDs.contains(placement.room.id),
-                                    onOpen: { selectedRoomID = placement.room.id },
-                                    onSelect: { toggleSelection(placement.room.id) },
-                                    onAddRecommendedChild: {
-                                        addRequest = StudyTopicAddRequest(
-                                            parent: placement.room,
-                                            mode: .recommendation
-                                        )
-                                    },
-                                    onAddManualChild: {
-                                        addRequest = StudyTopicAddRequest(
-                                            parent: placement.room,
-                                            mode: .manual
-                                        )
-                                    },
-                                    onToggleActive: {
-                                        appState.setStudyTopicActive(
-                                            studyID: placement.room.id,
-                                            active: !placement.room.activeForQuestions
-                                        )
-                                    },
-                                    onEdit: { editingRoom = placement.room }
-                                )
-                                .position(placement.center)
-                                .offset(nodeOffsets[placement.room.id] ?? .zero)
-                                .highPriorityGesture(nodeDragGesture(for: placement.room.id))
+                            .frame(width: snapshot.size.width, height: snapshot.size.height)
+                            .scaleEffect(zoomScale, anchor: .topLeading)
+                            .frame(
+                                width: snapshot.size.width * zoomScale,
+                                height: snapshot.size.height * zoomScale,
+                                alignment: .topLeading
+                            )
+                            .frame(
+                                minWidth: geometry.size.width,
+                                minHeight: geometry.size.height,
+                                alignment: .center
+                            )
+                            .background {
+                                StudyTreeScrollViewportBridge(
+                                    contentOffset: viewportOffset
+                                ) { offset in
+                                    viewportOffset = offset
+                                    saveViewport(contentOffset: offset)
+                                }
+                                .frame(width: 0, height: 0)
+                                .allowsHitTesting(false)
                             }
                         }
-                        .frame(width: snapshot.size.width, height: snapshot.size.height)
-                        .scaleEffect(zoomScale, anchor: .topLeading)
-                        .frame(
-                            width: snapshot.size.width * zoomScale,
-                            height: snapshot.size.height * zoomScale,
-                            alignment: .topLeading
-                        )
-                        .background {
-                            StudyTreeScrollViewportBridge(
-                                contentOffset: viewportOffset
-                            ) { offset in
-                                viewportOffset = offset
-                                saveViewport(contentOffset: offset)
-                            }
-                            .frame(width: 0, height: 0)
-                            .allowsHitTesting(false)
+                        .simultaneousGesture(zoomGesture)
+
+                        if isSelectionMode {
+                            selectionBar
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 12)
                         }
                     }
-                    .simultaneousGesture(zoomGesture)
-
-                    if isSelectionMode {
-                        selectionBar
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 12)
+                    .onAppear {
+                        updateTreeViewportSize(geometry.size, snapshot: snapshot)
+                    }
+                    .onChange(of: geometry.size) { _, newSize in
+                        updateTreeViewportSize(newSize, snapshot: snapshot)
                     }
                 }
             } else {
@@ -2543,6 +2573,18 @@ private struct MobileStudyTreeView: View {
         .task {
             loadTreeState()
             await appState.refreshVisibleData()
+            hasFinishedInitialRefresh = true
+            if let snapshot {
+                normalizeNodeOffsets(using: snapshot)
+                fitInitialViewportIfNeeded(for: snapshot)
+            }
+        }
+        .onChange(of: direction) { _, _ in
+            guard let snapshot else {
+                return
+            }
+            normalizeNodeOffsets(using: snapshot)
+            fitInitialViewportIfNeeded(for: snapshot)
         }
         .confirmationDialog(
             strings.deleteSelectedTopics,
@@ -2593,7 +2635,13 @@ private struct MobileStudyTreeView: View {
     private var zoomGesture: some Gesture {
         MagnifyGesture()
             .onChanged { value in
-                zoomScale = min(max(zoomStartScale * value.magnification, 0.6), 1.8)
+                zoomScale = min(
+                    max(
+                        zoomStartScale * value.magnification,
+                        StudyTreeViewportPolicy.minimumZoomScale
+                    ),
+                    StudyTreeViewportPolicy.maximumZoomScale
+                )
             }
             .onEnded { _ in
                 zoomStartScale = zoomScale
@@ -2601,15 +2649,24 @@ private struct MobileStudyTreeView: View {
             }
     }
 
-    private func nodeDragGesture(for roomID: Int) -> some Gesture {
-        DragGesture(minimumDistance: 8)
+    private func nodeDragGesture(
+        for roomID: Int,
+        in snapshot: StudyTreeLayoutSnapshot
+    ) -> some Gesture {
+        DragGesture(minimumDistance: 8, coordinateSpace: .global)
             .onChanged { value in
                 guard !isSelectionMode else { return }
-                let initial = dragStartOffsets[roomID] ?? nodeOffsets[roomID] ?? .zero
+                let initial = dragStartOffsets[roomID]
+                    ?? boundedNodeOffset(for: roomID, in: snapshot)
                 dragStartOffsets[roomID] = initial
-                nodeOffsets[roomID] = CGSize(
+                let proposedOffset = CGSize(
                     width: initial.width + value.translation.width / zoomScale,
                     height: initial.height + value.translation.height / zoomScale
+                )
+                nodeOffsets[roomID] = boundedNodeOffset(
+                    proposedOffset,
+                    for: roomID,
+                    in: snapshot
                 )
             }
             .onEnded { _ in
@@ -2620,7 +2677,13 @@ private struct MobileStudyTreeView: View {
 
     private func changeZoom(by delta: CGFloat) {
         withAnimation(.snappy) {
-            zoomScale = min(max(zoomScale + delta, 0.6), 1.8)
+            zoomScale = min(
+                max(
+                    zoomScale + delta,
+                    StudyTreeViewportPolicy.minimumZoomScale
+                ),
+                StudyTreeViewportPolicy.maximumZoomScale
+            )
             zoomStartScale = zoomScale
         }
         saveViewport()
@@ -2641,6 +2704,7 @@ private struct MobileStudyTreeView: View {
 
     private func loadTreeState() {
         nodeOffsets = appState.loadStudyTreeNodeOffsets(rootStudyID: rootStudyID)
+        shouldFitInitialViewport = !appState.hasStudyTreeViewport(rootStudyID: rootStudyID)
         let viewport = appState.loadStudyTreeViewport(rootStudyID: rootStudyID)
         zoomScale = viewport.zoomScale
         zoomStartScale = viewport.zoomScale
@@ -2651,12 +2715,88 @@ private struct MobileStudyTreeView: View {
         hasLoadedTreeState = true
     }
 
+    private func boundedNodeOffset(
+        for roomID: Int,
+        in snapshot: StudyTreeLayoutSnapshot
+    ) -> CGSize {
+        boundedNodeOffset(
+            nodeOffsets[roomID] ?? .zero,
+            for: roomID,
+            in: snapshot
+        )
+    }
+
+    private func boundedNodeOffset(
+        _ proposedOffset: CGSize,
+        for roomID: Int,
+        in snapshot: StudyTreeLayoutSnapshot
+    ) -> CGSize {
+        guard let baseCenter = snapshot.centerByRoomID[roomID] else {
+            return .zero
+        }
+        return StudyTreeNodeOffsetPolicy.boundedOffset(
+            proposedOffset,
+            baseCenter: baseCenter,
+            canvasSize: snapshot.size,
+            nodeSize: StudyTreeLayoutSnapshot.nodeSize
+        )
+    }
+
+    private func normalizeNodeOffsets(using snapshot: StudyTreeLayoutSnapshot) {
+        var normalizedOffsets = nodeOffsets
+        for (roomID, offset) in nodeOffsets where snapshot.centerByRoomID[roomID] != nil {
+            normalizedOffsets[roomID] = boundedNodeOffset(
+                offset,
+                for: roomID,
+                in: snapshot
+            )
+        }
+        guard normalizedOffsets != nodeOffsets else {
+            return
+        }
+        nodeOffsets = normalizedOffsets
+        saveNodeOffsets()
+    }
+
+    private func updateTreeViewportSize(
+        _ size: CGSize,
+        snapshot: StudyTreeLayoutSnapshot
+    ) {
+        guard size.width > 0, size.height > 0 else {
+            return
+        }
+        treeViewportSize = size
+        fitInitialViewportIfNeeded(for: snapshot)
+    }
+
+    private func fitInitialViewportIfNeeded(for snapshot: StudyTreeLayoutSnapshot) {
+        guard shouldFitInitialViewport,
+              hasFinishedInitialRefresh,
+              treeViewportSize.width > 0,
+              treeViewportSize.height > 0 else {
+            return
+        }
+        applyFittedViewport(for: snapshot)
+        shouldFitInitialViewport = false
+        saveViewport()
+    }
+
+    private func applyFittedViewport(for snapshot: StudyTreeLayoutSnapshot) {
+        let fittedScale = StudyTreeViewportPolicy.fittedZoomScale(
+            canvasSize: snapshot.size,
+            viewportSize: treeViewportSize
+        )
+        zoomScale = fittedScale
+        zoomStartScale = fittedScale
+        viewportOffset = .zero
+    }
+
     private func saveNodeOffsets() {
         appState.saveStudyTreeNodeOffsets(nodeOffsets, rootStudyID: rootStudyID)
     }
 
     private func saveViewport(contentOffset: CGPoint? = nil) {
-        guard hasLoadedTreeState else {
+        guard hasLoadedTreeState, !shouldFitInitialViewport else {
             return
         }
         let contentOffset = contentOffset ?? viewportOffset

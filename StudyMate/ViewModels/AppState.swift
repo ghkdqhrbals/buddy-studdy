@@ -3931,6 +3931,10 @@ final class AppState: ObservableObject {
         localStudySettingsUseCase.loadStudyTreeViewport(rootStudyID: rootStudyID)
     }
 
+    func hasStudyTreeViewport(rootStudyID: Int) -> Bool {
+        localStudySettingsUseCase.hasStudyTreeViewport(rootStudyID: rootStudyID)
+    }
+
     func saveStudyTreeViewport(_ viewport: StudyTreeViewportState, rootStudyID: Int) {
         localStudySettingsUseCase.saveStudyTreeViewport(viewport, rootStudyID: rootStudyID)
     }
