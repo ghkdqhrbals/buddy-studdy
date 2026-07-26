@@ -1532,7 +1532,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
     }
 
     func asCommunityQuestion(author: CommunityUserProfile?) -> CommunityQuestion? {
-        guard let gradingResult else {
+        guard isPublic, let gradingResult else {
             return nil
         }
 

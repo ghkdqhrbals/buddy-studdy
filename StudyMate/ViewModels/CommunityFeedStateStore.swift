@@ -53,6 +53,16 @@ struct CommunityFeedStateStore {
         totalCount = 0
     }
 
+    mutating func removeQuestion(id: String) {
+        guard questions.contains(where: { $0.id == id }) else {
+            return
+        }
+
+        questions.removeAll { $0.id == id }
+        totalCount = max(0, totalCount - 1)
+        offset = max(0, offset - 1)
+    }
+
     func canLoadMore(currentCount: Int) -> Bool {
         if currentCount <= 0 {
             return totalCount == 0 ? !questions.isEmpty : true

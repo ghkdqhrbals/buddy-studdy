@@ -13,6 +13,7 @@ struct HistoryView: View {
     @State private var isSearchVisible = false
     @State private var searchFocusTask: Task<Void, Never>?
     @State private var recordSearchDebounceTask: Task<Void, Never>?
+    @State private var pendingRecordDeletion: StudyRecord?
     @FocusState private var isSearchFocused: Bool
 
     private let pageSize = 10
@@ -302,6 +303,28 @@ struct HistoryView: View {
         .sheet(isPresented: $showsRecordSettings) {
             RecordSettingsSheet()
         }
+        .confirmationDialog(
+            strings.deleteRecordHelp,
+            isPresented: Binding(
+                get: { pendingRecordDeletion != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        pendingRecordDeletion = nil
+                    }
+                }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let pendingRecordDeletion {
+                Button(strings.clear, role: .destructive) {
+                    delete(pendingRecordDeletion)
+                    self.pendingRecordDeletion = nil
+                }
+            }
+            Button(strings.cancel, role: .cancel) {
+                pendingRecordDeletion = nil
+            }
+        }
         #if os(iOS)
         .navigationDestination(item: $selectedRecordID) { recordID in
             recordDetailDestination(recordID: recordID, strings: strings)
@@ -477,15 +500,29 @@ struct HistoryView: View {
     private func recordDetailDestination(recordID: String, strings: AppStrings) -> some View {
         if let record = record(for: recordID) {
             #if os(iOS)
-            if let question = record.asCommunityQuestion(author: appState.communityProfile) {
-                CommunityQuestionDetailView(question: question)
-                    .navigationTitle(strings.browseQuestions)
-                    .navigationBarTitleDisplayMode(.inline)
-            } else {
-                StudyRecordDetailView(record: record)
-                    .padding(.horizontal, 16)
-                    .navigationTitle(strings.recordDetail)
-                    .navigationBarTitleDisplayMode(.inline)
+            Group {
+                if let question = record.asCommunityQuestion(author: appState.communityProfile) {
+                    CommunityQuestionDetailView(question: question)
+                        .navigationTitle(strings.browseQuestions)
+                        .navigationBarTitleDisplayMode(.inline)
+                } else {
+                    StudyRecordDetailView(record: record)
+                        .padding(.horizontal, 16)
+                        .navigationTitle(strings.recordDetail)
+                        .navigationBarTitleDisplayMode(.inline)
+                }
+            }
+            .toolbar {
+                if #available(iOS 26.0, *) {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        recordDetailActionsMenu(record: record, strings: strings)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                } else {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        recordDetailActionsMenu(record: record, strings: strings)
+                    }
+                }
             }
             #else
             StudyRecordDetailView(record: record)
@@ -503,6 +540,30 @@ struct HistoryView: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
         }
+    }
+
+    private func recordDetailActionsMenu(record: StudyRecord, strings: AppStrings) -> some View {
+        Menu {
+            if appState.isCommunitySessionActive {
+                Button {
+                    appState.updateStudyRecordPublicity(record, isPublic: !record.isPublic)
+                } label: {
+                    Label(
+                        record.isPublic ? strings.makeQuestionPrivate : strings.makeQuestionPublic,
+                        systemImage: record.isPublic ? "lock.fill" : "globe"
+                    )
+                }
+            }
+
+            Button(role: .destructive) {
+                pendingRecordDeletion = record
+            } label: {
+                Label(strings.clear, systemImage: "trash")
+            }
+        } label: {
+            MobileToolbarIconButtonLabel(systemName: "ellipsis")
+        }
+        .accessibilityLabel(strings.more)
     }
 
     private func record(for recordID: String) -> StudyRecord? {

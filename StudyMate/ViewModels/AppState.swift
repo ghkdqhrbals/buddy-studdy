@@ -2025,6 +2025,12 @@ final class AppState: ObservableObject {
         communityFeedState = nextState
     }
 
+    private func removeCommunityQuestion(id: String) {
+        var nextState = communityFeedState
+        nextState.removeQuestion(id: id)
+        communityFeedState = nextState
+    }
+
     private func beginBackendStatsRequest() -> UUID {
         var nextState = statsState
         let requestID = nextState.beginRequest()
@@ -5767,6 +5773,7 @@ final class AppState: ObservableObject {
         notificationService.cancelQuestionNotification(for: record.question)
         localStudyRecordUseCase.deleteRecord(record)
         reloadStudyRecordsFromStore()
+        removeCommunityQuestion(id: record.id)
         notificationLandingMessage = nil
 
         if StudyRecordIdentityPolicy.questionsMatch(currentQuestion?.question ?? "", record.question.question) {
@@ -5789,24 +5796,24 @@ final class AppState: ObservableObject {
                 await self.refreshBackendStudyIfPossible(updateVisibleQuestion: false)
                 await self.syncRemotePushScheduleIfPossible(reason: "delete-record")
             },
+            onFailure: { _ in
+                self.localStudyRecordUseCase.saveRecord(record)
+                self.reloadStudyRecordsFromStore()
+                await self.loadCommunityQuestions(reset: true, userInitiated: false)
+            },
             failureMessage: { "백엔드 학습 기록 삭제 실패: \($0.localizedDescription)" }
         )
         markCloudDataChanged(syncDelaySeconds: 0)
     }
 
     func updateStudyRecordPublicity(_ record: StudyRecord, isPublic: Bool) {
-        let updatedRecord = StudyRecord(
-            id: record.id,
-            question: record.question,
-            answer: record.answer,
-            gradingResult: record.gradingResult,
-            topic: record.topic,
-            difficulty: record.difficulty,
-            answeredAt: record.answeredAt,
-            isPublic: isPublic
-        )
+        var updatedRecord = record
+        updatedRecord.isPublic = isPublic
         localStudyRecordUseCase.saveRecord(updatedRecord)
         reloadStudyRecordsFromStore()
+        if !isPublic {
+            removeCommunityQuestion(id: record.id)
+        }
         markCloudDataChanged()
 
         runBackendRecordMutation(
@@ -5821,6 +5828,15 @@ final class AppState: ObservableObject {
             onSuccess: { backendRecord in
                 self.localStudyRecordUseCase.saveRecord(backendRecord)
                 self.reloadStudyRecordsFromStore()
+                if !backendRecord.isPublic {
+                    self.removeCommunityQuestion(id: backendRecord.id)
+                }
+                await self.loadCommunityQuestions(reset: true, userInitiated: false)
+            },
+            onFailure: { _ in
+                self.localStudyRecordUseCase.saveRecord(record)
+                self.reloadStudyRecordsFromStore()
+                await self.loadCommunityQuestions(reset: true, userInitiated: false)
             },
             failureMessage: { "기록 공개 상태 변경 실패: \($0.localizedDescription)" }
         )
@@ -5830,6 +5846,7 @@ final class AppState: ObservableObject {
         reason: String,
         operation: @escaping (RemotePushRegistration) async throws -> Value,
         onSuccess: @escaping (Value) async -> Void = { _ in },
+        onFailure: @escaping (Error) async -> Void = { _ in },
         failureMessage: @escaping (Error) -> String
     ) {
         guard let registration = storedBackendIdentityUseCase.loadRegistration() else {
@@ -5852,6 +5869,7 @@ final class AppState: ObservableObject {
                 },
                 onSuccess: onSuccess,
                 onFailure: { error in
+                    await onFailure(error)
                     handleAppError(error, fallback: "", target: .none)
                     log(.warning, failureMessage(error))
                 }
