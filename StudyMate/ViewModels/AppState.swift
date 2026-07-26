@@ -3798,6 +3798,40 @@ final class AppState: ObservableObject {
         applyPreferredPendingRecord(for: refreshedCategory)
     }
 
+    func pendingStudyRecord(categoryID: String?) -> StudyRecord? {
+        guard let category = studyCategoryForRoom(categoryID) else {
+            return nil
+        }
+
+        if let record = preferredPendingRecord(for: category) {
+            return record
+        }
+
+        let categoryKey = Self.normalizedCategoryText(for: category.title)
+        let matchesCategory: (StudyRecord?) -> StudyRecord? = { record in
+            guard let record,
+                  record.gradingResult == nil,
+                  Self.normalizedCategoryText(for: record.topic) == categoryKey else {
+                return nil
+            }
+            return record
+        }
+
+        if let studyID = Int(category.id),
+           let record = matchesCategory(backendStudyRoom(id: studyID)?.pendingQuestion) {
+            return record
+        }
+
+        if let studyID = Int(category.id),
+           let root = rootStudyRoom(for: studyID),
+           root.id != studyID,
+           let record = matchesCategory(root.pendingQuestion) {
+            return record
+        }
+
+        return nil
+    }
+
     func backendStudyRoom(categoryID: String?) -> BackendStudyRoom? {
         studyRoomState.room(categoryID: categoryID, settings: settings)
     }
@@ -4842,13 +4876,20 @@ final class AppState: ObservableObject {
         let categoryKey = Self.normalizedCategoryText(for: category.title)
         let records = pendingRecordsIncludingCurrent
             .filter { Self.normalizedCategoryText(for: $0.topic) == categoryKey }
+        let exactStudyRecords: [StudyRecord]
+        if let studyID = Int(category.id) {
+            exactStudyRecords = records.filter { $0.studyID == studyID }
+        } else {
+            exactStudyRecords = []
+        }
+        let preferredRecords = exactStudyRecords.isEmpty ? records : exactStudyRecords
 
         if let currentQuestion,
-           let currentRecord = records.first(where: { studyRecordMatches($0, question: currentQuestion) }) {
+           let currentRecord = preferredRecords.first(where: { studyRecordMatches($0, question: currentQuestion) }) {
             return currentRecord
         }
 
-        return records.max { $0.question.createdAt < $1.question.createdAt }
+        return preferredRecords.max { $0.question.createdAt < $1.question.createdAt }
     }
 
     private func applyPreferredPendingRecord(for category: StudyCategory) {

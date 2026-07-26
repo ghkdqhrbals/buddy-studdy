@@ -75,12 +75,12 @@ class StudyService(
         val user = userDeferred.await()
         val appLanguage = user?.appLanguage ?: "ko"
 
-        val pendingCountDeferred = async { questions.countPendingForStudy(rootStudy.id) }
-        val recentQuestionsDeferred = async { recentQuestions(principal, rootStudy.id, requestedStudy.topic) }
+        val pendingCountDeferred = async { questions.countPendingForStudy(requestedStudy.id) }
+        val recentQuestionsDeferred = async { recentQuestions(principal, requestedStudy.id, requestedStudy.topic) }
         val room = StudyRoom.of(
             requestedStudy.toStudyRoomSchedule(
                 appLanguage = appLanguage,
-                questionStudyId = rootStudy.id,
+                questionStudyId = requestedStudy.id,
                 questionSettings = rootStudy,
             ),
             pendingCountDeferred.await(),
@@ -93,7 +93,7 @@ class StudyService(
         val questionKey = questionKeys.resolveForQuestionGeneration(user)
         try {
             val recentEmbeddingsDeferred = async {
-                questionEmbeddings.findRecentByStudyIdAndTopic(rootStudy.id, requestedStudy.topic, RECENT_EMBEDDING_LIMIT)
+                questionEmbeddings.findRecentByStudyIdAndTopic(requestedStudy.id, requestedStudy.topic, RECENT_EMBEDDING_LIMIT)
             }
             val coverageSelectionDeferred = async {
                 selectCoverage(

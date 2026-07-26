@@ -72,7 +72,7 @@ class ScheduledQuestionService(
         while (true) {
             val dueStudies = studies.claimDue(now, batchSize)
             if (dueStudies.isEmpty()) break
-            val pendingCounts = pendingCounts(dueStudies.map { it.id })
+            val scheduledTopics = mutableListOf<Pair<StudyEntity, StudyEntity>>()
             dueStudies.forEach { scheduleStudy ->
                 val userStudies = studiesByUserId[scheduleStudy.userId]
                     ?: studies.findAllByUserId(scheduleStudy.userId).also {
@@ -89,11 +89,15 @@ class ScheduledQuestionService(
                     )
                     return@forEach
                 }
+                scheduledTopics += scheduleStudy to topicStudy
+            }
+            val pendingCounts = pendingCounts(scheduledTopics.map { it.second.id })
+            scheduledTopics.forEach { (scheduleStudy, topicStudy) ->
                 creator.createIfReady(
                     scheduleStudy = scheduleStudy,
                     topicStudy = topicStudy,
                     now = now,
-                    pending = pendingCounts[scheduleStudy.id] ?: 0L,
+                    pending = pendingCounts[topicStudy.id] ?: 0L,
                     usersById = usersById,
                     recentQuestionsByStudyTopic = recentQuestionsByStudyTopic,
                     recentEmbeddingsByStudyTopic = recentEmbeddingsByStudyTopic,
@@ -165,12 +169,12 @@ class ScheduledQuestionCreator(
             }
             val resolvedQuestionKey = questionKeys.resolveForQuestionGeneration(user)
             questionKey = resolvedQuestionKey
-            val studyTopicKey = StudyTopicKey(scheduleStudy.id, userId, topicStudy.topic.normalizedTopicKey())
+            val studyTopicKey = StudyTopicKey(topicStudy.id, userId, topicStudy.topic.normalizedTopicKey())
             val recent = recentQuestionsByStudyTopic[studyTopicKey]
-                ?: recentQuestions(userId, scheduleStudy.id, topicStudy.topic)
+                ?: recentQuestions(userId, topicStudy.id, topicStudy.topic)
                     .also { recentQuestionsByStudyTopic[studyTopicKey] = it }
             val recentEmbeddings = recentEmbeddingsByStudyTopic[studyTopicKey]
-                ?: questionEmbeddings.findRecentByStudyIdAndTopic(scheduleStudy.id, topicStudy.topic, RECENT_EMBEDDING_LIMIT)
+                ?: questionEmbeddings.findRecentByStudyIdAndTopic(topicStudy.id, topicStudy.topic, RECENT_EMBEDDING_LIMIT)
                     .also { recentEmbeddingsByStudyTopic[studyTopicKey] = it }
             val coverageSelection = selectCoverage(
                 apiKey = resolvedQuestionKey.apiKey,

@@ -78,6 +78,57 @@ final class PageAccessPolicyTests: XCTestCase {
 }
 
 final class StudyRoomStateStoreTests: XCTestCase {
+    @MainActor
+    func testPendingStudyRecordIsSelectedPerTopicStudy() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let swiftCategory = StudyCategory(id: "11", title: "Swift", difficulty: .level5)
+        let kotlinCategory = StudyCategory(id: "12", title: "Kotlin", difficulty: .level6)
+        store.saveSettings(
+            StudySettings(
+                topic: swiftCategory.title,
+                difficulty: swiftCategory.difficulty,
+                customPrompt: "",
+                intervalMinutes: 30,
+                studyCategories: [swiftCategory, kotlinCategory],
+                selectedStudyCategoryID: swiftCategory.id
+            )
+        )
+        store.replaceStudyRecords([
+            StudyRecord(
+                id: "swift-question",
+                studyID: 11,
+                question: QuestionItem(
+                    question: "What is actor isolation?",
+                    expectedAnswerHint: nil,
+                    createdAt: Date(timeIntervalSince1970: 11)
+                ),
+                topic: swiftCategory.title,
+                difficulty: swiftCategory.difficulty
+            ),
+            StudyRecord(
+                id: "kotlin-question",
+                studyID: 12,
+                question: QuestionItem(
+                    question: "What is structured concurrency?",
+                    expectedAnswerHint: nil,
+                    createdAt: Date(timeIntervalSince1970: 12)
+                ),
+                topic: kotlinCategory.title,
+                difficulty: kotlinCategory.difficulty
+            )
+        ])
+        let appState = AppState(settingsStore: store)
+
+        XCTAssertEqual(appState.pendingStudyRecord(categoryID: swiftCategory.id)?.id, "swift-question")
+        XCTAssertEqual(appState.pendingStudyRecord(categoryID: kotlinCategory.id)?.id, "kotlin-question")
+    }
+
     func testBackendPendingQuestionCanBeClearedWithoutLocalRecordCacheEntry() {
         let record = StudyRecord(
             id: "record-42",

@@ -155,6 +155,25 @@ class QuestionSchedulerTest {
     }
 
     @Test
+    fun `scheduled child topic question is stored against the selected topic study`(): Unit = runBlocking {
+        val now = Instant.parse("2026-06-10T00:00:00Z")
+        users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
+        studies.rows += study(id = 101, userId = 7, topic = "Backend", now = now).apply {
+            activeForQuestions = false
+        }
+        studies.rows += study(id = 102, userId = 7, topic = "Redis", now = now).apply {
+            parentStudyId = 101
+            nextDueAt = null
+        }
+
+        scheduler.runDueQuestions()
+
+        assertThat(questions.savedRows.single().studyId).isEqualTo(102)
+        assertThat(questionEmbeddings.savedStudyIds).containsExactly(102)
+        assertThat(notifications.commands.single().body).isEqualTo("Question for Redis")
+    }
+
+    @Test
     fun `scheduled run drains all due studies across multiple batches`(): Unit = runBlocking {
         properties.scheduler.batchSize = 2
         val now = Instant.parse("2026-06-10T00:00:00Z")
@@ -323,6 +342,8 @@ class QuestionSchedulerTest {
         override suspend fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity? = null
         override suspend fun findByUserIdAndTopics(userId: Long, topics: Collection<String>): List<StudyEntity> =
             rows.filter { it.userId == userId && it.topic in topics }
+        override suspend fun findAllByUserId(userId: Long): List<StudyEntity> =
+            rows.filter { it.userId == userId }
         override suspend fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity> = Page.empty()
         override suspend fun findByUserIdAndQuery(userId: Long, query: String, pageable: Pageable): Page<StudyEntity> = Page.empty()
         var claimDueCalls = 0
@@ -531,9 +552,11 @@ class QuestionSchedulerTest {
 
     private class FakeQuestionEmbeddingPort : QuestionEmbeddingPort {
         val savedRows = mutableListOf<QuestionEmbeddingCandidate>()
+        val savedStudyIds = mutableListOf<Long>()
         override suspend fun save(questionId: Long, userId: Long, studyId: Long, topic: String, question: String, embedding: List<Float>): QuestionEmbeddingCandidate {
             val row = QuestionEmbeddingCandidate(questionId, question, embedding)
             savedRows += row
+            savedStudyIds += studyId
             return row
         }
 

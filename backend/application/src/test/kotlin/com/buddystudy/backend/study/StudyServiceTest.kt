@@ -167,6 +167,36 @@ class StudyServiceTest {
     }
 
     @Test
+    fun `child topic question is stored against the requested topic study`(): Unit = runBlocking {
+        users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
+        serviceStudies.rows += StudyEntity(
+            id = 90,
+            deviceId = principal.deviceId,
+            userId = principal.userId,
+            topic = "Backend",
+            difficultyLevel = 5,
+            intervalMinutes = 15,
+            openaiModel = "gpt-5.4",
+        )
+        serviceStudies.rows += StudyEntity(
+            id = 91,
+            deviceId = principal.deviceId,
+            userId = principal.userId,
+            parentStudyId = 90,
+            topic = "Redis",
+            difficultyLevel = 7,
+            intervalMinutes = 15,
+            openaiModel = "gpt-5.4",
+        )
+
+        val response = service.createQuestion(principal, studyId = 91)
+
+        assertThat(response.studyId).isEqualTo(91)
+        assertThat(questions.visibleRows.single { it.id == response.id.toLong() }.studyId).isEqualTo(91)
+        assertThat(questionEmbeddings.savedStudyIds).containsExactly(91)
+    }
+
+    @Test
     fun `create question sends same study and same topic history before openai generation`(): Unit = runBlocking {
         users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         serviceStudies.rows += StudyEntity(
@@ -656,9 +686,11 @@ class StudyServiceTest {
     private class FakeQuestionEmbeddingPort : QuestionEmbeddingPort {
         val rows = mutableListOf<QuestionEmbeddingCandidate>()
         val savedRows = mutableListOf<QuestionEmbeddingCandidate>()
+        val savedStudyIds = mutableListOf<Long>()
         override suspend fun save(questionId: Long, userId: Long, studyId: Long, topic: String, question: String, embedding: List<Float>): QuestionEmbeddingCandidate {
             val row = QuestionEmbeddingCandidate(questionId, question, embedding)
             savedRows += row
+            savedStudyIds += studyId
             rows += row
             return row
         }

@@ -51,7 +51,7 @@ class ScheduledQuestionWriteManager(
         questionEmbeddings.save(
             questionId = saved.id,
             userId = scheduleStudy.userId,
-            studyId = scheduleStudy.id,
+            studyId = topicStudy.id,
             topic = topicStudy.topic,
             question = saved.question,
             embedding = generated.embedding,
@@ -99,7 +99,7 @@ private fun StudyEntity.toScheduledQuestion(
     QuestionEntity(
         deviceId = deviceId,
         userId = userId,
-        studyId = id,
+        studyId = topicStudy.id,
         question = question,
         hint = hint,
         topic = topicStudy.topic,
