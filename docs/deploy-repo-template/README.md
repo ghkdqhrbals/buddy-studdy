@@ -16,6 +16,8 @@ monitor changes must be deployed through separate workflows/jobs. Start with
 Current workflow templates:
 
 - `deploy-backend.yml`: backend API runtime on EC2.
+- `configure-backend-network.yml`: Redis administrator ingress on the backend
+  EC2 security group.
 - `deploy-admin-frontend.yml`: admin frontend runtime on EC2.
 - `deploy-macbookair-monitoring.yml`: API Logs dashboard, Grafana, and Loki on
   MacBook Air.
@@ -74,8 +76,12 @@ Repository variables:
 - `buddystudy-nginx`: public HTTPS proxy on host port `443`.
 - `buddystudy-backend-a`: blue slot for Spring Boot app on Docker network port `8080`.
 - `buddystudy-backend-b`: green slot for Spring Boot app on Docker network port `8080`.
-- `buddystudy-db`: private MySQL container on Docker network port `3306`.
+- `buddystudy-db`: MySQL on Docker network port `3306`, published to host port
+  `3306` for approved administrator CIDRs.
+- `buddystudy-redis`: password-protected Redis on Docker network port `6379`,
+  published to host port `6379` for the same approved administrator CIDRs.
 - `buddystudy-mysql-data`: persistent Docker volume for MySQL data.
+- `buddystudy-redis-data`: persistent Docker volume for Redis AOF/RDB data.
 - `buddystudy-backend-data`: legacy SQLite volume, kept for historical safety and not deleted.
 - `buddystudy-promtail`: lightweight EC2 log sender. It scrapes Docker logs and forwards them to the MacBook Air Loki endpoint when `REMOTE_LOKI_PUSH_URL` is set.
 - `buddystudy-mysql-data` retains live DB data across restarts and redeploys.

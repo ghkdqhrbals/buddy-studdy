@@ -365,6 +365,7 @@ jobs:
             --network buddystudy-net \
             --restart unless-stopped \
             --env-file redis.env \
+            -p 6379:6379 \
             -v buddystudy-redis-data:/data \
             redis:7.4-alpine \
             sh -c 'exec redis-server --requirepass "$REDIS_PASSWORD" --appendonly yes --appendfsync everysec --save 900 1 --save 300 10 --save 60 10000'
@@ -373,6 +374,10 @@ jobs:
           if [ "$(docker inspect -f '{{.State.Running}}' buddystudy-redis 2>/dev/null || true)" != "true" ]; then
             echo "Redis process exited during deployment." >&2
             docker logs buddystudy-redis || true
+            exit 1
+          fi
+          if ! docker inspect buddystudy-redis | python3 -c 'import json, sys; bindings = json.load(sys.stdin)[0]["HostConfig"]["PortBindings"] or {}; sys.exit(0 if any(item.get("HostPort") == "6379" for item in bindings.get("6379/tcp", [])) else 1)'; then
+            echo "Redis host port 6379 was not published." >&2
             exit 1
           fi
 

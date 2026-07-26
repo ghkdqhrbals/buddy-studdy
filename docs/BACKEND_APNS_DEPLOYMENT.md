@@ -78,7 +78,10 @@ The AWS access key is not required for the SSH-based deployment workflow. If an 
 
 - Public HTTPS: `https://api.ghkdqhrbals.org -> nginx:443 -> buddystudy-backend:8080`
 - Backend app port `8080` is not published on the EC2 host.
-- MySQL port `3306` is published on the EC2 host for production database access.
+- MySQL port `3306` is published on the EC2 host for production database access
+  from approved administrator CIDRs.
+- Redis port `6379` is published on the EC2 host with password authentication
+  and is restricted to the same approved administrator CIDRs as MySQL.
 - The workflow requests/renews a Let's Encrypt certificate with the `http-01` challenge, so public port `80` is used temporarily during certificate issuance.
 - If certificate issuance fails, the workflow can still keep the service reachable with a temporary self-signed certificate, but iOS production traffic should use the trusted certificate path.
 
@@ -92,6 +95,20 @@ user: buddystudy
 ```
 
 The password is managed through AWS Secrets Manager at `buddystudy/prod/mysql` and mirrored on EC2 at `/opt/buddystudy-backend/.mysql_password`. Keep it private and restrict the EC2 security group if public access is no longer required.
+
+Use these connection basics for Redis administration:
+
+```text
+host: api.ghkdqhrbals.org
+port: 6379
+TLS: disabled
+authentication: REDIS_PASSWORD
+```
+
+The Redis password remains in AWS Secrets Manager and must not be copied into
+source control. Run the separate `Configure BuddyStudy Backend Network`
+workflow before deploying a Redis host-port change; it mirrors the approved
+MySQL administrator CIDRs to Redis without opening `6379` to the whole internet.
 
 ## Data Durability
 

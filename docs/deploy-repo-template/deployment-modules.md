@@ -8,6 +8,7 @@ one workflow run just because they share a host.
 | Module | Workflow | Trigger | Runner | Owns |
 | --- | --- | --- | --- | --- |
 | Backend API | `Deploy BuddyStudy Backend` | `backend-image-published`, manual | EC2 self-hosted | Backend app rollout, backend env, backend nginx route, log-only MySQL runtime observer |
+| Backend network | `Configure BuddyStudy Backend Network` | manual | EC2 self-hosted | Redis administrator ingress on the backend security group |
 | Database cutover | `Migrate BuddyStudy PostgreSQL To MySQL` | manual, one-time | EC2 self-hosted | PostgreSQL backup, MySQL import, row-count and reference validation, automatic pre-cutover rollback |
 | Admin frontend | `Deploy BuddyStudy Admin Frontend` | `admin-frontend-image-published`, manual | EC2 self-hosted | Admin frontend container only |
 | Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, Server Dashboard, TestZone UI, Grafana, Loki, monitoring auth and access audit |
@@ -47,10 +48,12 @@ deployment.
 - Backend deployment has no Redis Stream Coordinator runtime dependency and
   must not provision coordinator containers, networks, routes, secrets, or
   readiness settings.
-- Backend deployment owns one private Redis runtime with AOF `everysec`, RDB
-  snapshots, a retained Docker volume, and a password stored in AWS Secrets
-  Manager. Redis starts before the backend; Actions verifies only process
-  survival while application readiness and Grafana verify runtime behavior.
+- Backend deployment owns one Redis runtime with AOF `everysec`, RDB snapshots,
+  a retained Docker volume, and a password stored in AWS Secrets Manager.
+  Redis publishes host port `6379`; the separate backend-network workflow
+  restricts that port to the same approved administrator CIDRs as MySQL. Redis
+  starts before the backend; Actions verifies only process survival and port
+  publication while application readiness and Grafana verify runtime behavior.
 - Scheduler readiness includes only jobs expected to succeed within the
   readiness freshness window. Daily correction jobs remain visible in run
   history and failure alerts but must not make a 15-minute readiness check stale.
@@ -79,6 +82,11 @@ deployment.
   the workflow recreates only the container after verifying that
   `/var/lib/mysql` is backed by the persistent `buddystudy-mysql-data` volume;
   it never removes the volume.
+- Production Redis administration uses host port `6379`, password
+  authentication, and the same approved administrator CIDRs as MySQL. Run
+  `Configure BuddyStudy Backend Network` before publishing the Redis port; it
+  removes stale Redis CIDRs, mirrors the MySQL `3306` CIDRs, and does not alter
+  unrelated ports or security groups.
 - The native backend image ships MySQL Flyway scripts at
   `/app/db/migration-mysql`. Both normal deployment and the one-time cutover
   bootstrap use `filesystem:/app/db/migration-mysql` so schema discovery does
