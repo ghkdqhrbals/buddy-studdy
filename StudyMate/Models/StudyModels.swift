@@ -54,6 +54,22 @@ enum StudyTreeNodeStylePolicy {
     static func levelFillFraction(_ difficultyLevel: Int) -> CGFloat {
         CGFloat(min(max(difficultyLevel, 1), 10)) / 10
     }
+
+    static func levelText(_ difficultyLevel: Int) -> String {
+        "\(min(max(difficultyLevel, 1), 10))/10"
+    }
+}
+
+enum StudyOutlinePolicy {
+    static let previewLimit = 3
+
+    static func visibleCount(totalTopicCount: Int) -> Int {
+        min(max(totalTopicCount, 0), previewLimit)
+    }
+
+    static func remainingCount(totalTopicCount: Int) -> Int {
+        max(0, totalTopicCount - previewLimit)
+    }
 }
 
 enum StudyTreeEdgePolicy {
@@ -2107,6 +2123,9 @@ struct AppStrings {
     }
     func selectedTopicCount(_ count: Int) -> String {
         text("\(count)개 선택", "\(count) selected")
+    }
+    func moreStudyTopics(_ count: Int) -> String {
+        text("+ \(count)개 주제 더 보기", "+ \(count) more topics")
     }
     var addSubstudy: String { text("하위 학습 추가", "Add Sub-study") }
     var recommendSubstudy: String { text("AI 추천 주제", "AI topic suggestions") }

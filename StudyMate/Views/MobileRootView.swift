@@ -1077,22 +1077,95 @@ private struct MobileHomeView: View {
 
     private var filteredStudyCategories: [StudyCategory] {
         let query = trimmedHomeStudySearchText
-        if !query.isEmpty,
-           query == submittedHomeStudySearchText,
-           let searchResults = appState.homeStudySearchResults {
-            return searchResults.filter { category in
-                appState.backendStudyRoom(categoryID: category.id)?.parentStudyId == nil
-            }
-        }
-
         let categories = appState.rootStudyCategoriesForDisplay
         guard !query.isEmpty else {
             return categories
         }
 
-        return categories.filter { category in
-            category.matchesHomeSearch(query, appLanguage: strings.language)
+        let matchingBackendRootIDs: Set<Int>
+        if query == submittedHomeStudySearchText,
+           let searchResults = appState.homeStudySearchResults {
+            matchingBackendRootIDs = Set(
+                searchResults.compactMap { category in
+                    guard let room = appState.backendStudyRoom(categoryID: category.id) else {
+                        return nil
+                    }
+                    return appState.rootStudyRoom(for: room.id)?.id
+                }
+            )
+        } else {
+            matchingBackendRootIDs = []
         }
+
+        return categories.filter { category in
+            categoryMatchesHomeSearch(category, query: query)
+                || (Int(category.id).map { matchingBackendRootIDs.contains($0) } ?? false)
+        }
+    }
+
+    private func categoryMatchesHomeSearch(_ category: StudyCategory, query: String) -> Bool {
+        if category.matchesHomeSearch(query, appLanguage: strings.language) {
+            return true
+        }
+
+        guard let rootStudyID = Int(category.id) else {
+            return false
+        }
+
+        return flattenedStudyTopics(rootStudyID: rootStudyID).contains { item in
+            item.room.topic.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private func studyOutlineSnapshot(for category: StudyCategory) -> MobileHomeStudyOutlineSnapshot? {
+        guard let rootStudyID = Int(category.id),
+              let rootRoom = appState.backendStudyRoom(id: rootStudyID) else {
+            return nil
+        }
+
+        let allTopics = flattenedStudyTopics(rootStudyID: rootStudyID)
+        let query = trimmedHomeStudySearchText
+        let candidates: [MobileHomeStudyTopicItem]
+        if query.isEmpty || rootRoom.topic.localizedCaseInsensitiveContains(query) {
+            candidates = allTopics
+        } else {
+            candidates = allTopics.filter {
+                $0.room.topic.localizedCaseInsensitiveContains(query)
+            }
+        }
+        let visibleTopics = Array(candidates.prefix(StudyOutlinePolicy.previewLimit))
+
+        return MobileHomeStudyOutlineSnapshot(
+            root: rootRoom,
+            visibleTopics: visibleTopics,
+            remainingCount: StudyOutlinePolicy.remainingCount(totalTopicCount: candidates.count)
+        )
+    }
+
+    private func flattenedStudyTopics(rootStudyID: Int) -> [MobileHomeStudyTopicItem] {
+        let childrenByParent = Dictionary(
+            grouping: appState.backendStudyRooms.filter { $0.parentStudyId != nil },
+            by: { $0.parentStudyId ?? 0 }
+        )
+        var result: [MobileHomeStudyTopicItem] = []
+        var visited = Set<Int>([rootStudyID])
+
+        func appendChildren(parentID: Int, depth: Int) {
+            let children = (childrenByParent[parentID] ?? []).sorted {
+                if $0.sortOrder == $1.sortOrder {
+                    return $0.id < $1.id
+                }
+                return $0.sortOrder < $1.sortOrder
+            }
+
+            for child in children where visited.insert(child.id).inserted {
+                result.append(MobileHomeStudyTopicItem(room: child, depth: depth))
+                appendChildren(parentID: child.id, depth: depth + 1)
+            }
+        }
+
+        appendChildren(parentID: rootStudyID, depth: 1)
+        return result
     }
 
     private var communityFeedItems: [MobileHomeFeedItem] {
@@ -1492,27 +1565,56 @@ private struct MobileHomeView: View {
                 strings: strings
             )
         } else {
-            Button {
-                appState.openStudyTree(category.id)
-            } label: {
-                MobileHomeCategoryRow(
-                    category: category,
-                    hasPendingQuestion: appState.pendingQuestionCount(for: category) > 0,
-                    strings: strings
+            if let snapshot = studyOutlineSnapshot(for: category) {
+                MobileHomeStudyOutlineRow(
+                    snapshot: snapshot,
+                    strings: strings,
+                    pendingQuestionCount: { room in
+                        appState.pendingQuestionCount(categoryID: String(room.id))
+                    },
+                    onOpenTree: {
+                        appState.openStudyTree(category.id)
+                    },
+                    onOpenTopic: { room in
+                        appState.openStudyCategory(String(room.id))
+                    }
                 )
-            }
-            .buttonStyle(.plain)
-            .contextMenu {
-                Button {
-                    editingStudyCategory = category
-                } label: {
-                    Label(strings.edit, systemImage: "pencil")
-                }
+                .contextMenu {
+                    Button {
+                        editingStudyCategory = category
+                    } label: {
+                        Label(strings.edit, systemImage: "pencil")
+                    }
 
-                Button(role: .destructive) {
-                    deletionStudyCategory = category
+                    Button(role: .destructive) {
+                        deletionStudyCategory = category
+                    } label: {
+                        Label(strings.deleteStudy, systemImage: "trash")
+                    }
+                }
+            } else {
+                Button {
+                    appState.openStudyTree(category.id)
                 } label: {
-                    Label(strings.deleteStudy, systemImage: "trash")
+                    MobileHomeCategoryRow(
+                        category: category,
+                        hasPendingQuestion: appState.pendingQuestionCount(for: category) > 0,
+                        strings: strings
+                    )
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    Button {
+                        editingStudyCategory = category
+                    } label: {
+                        Label(strings.edit, systemImage: "pencil")
+                    }
+
+                    Button(role: .destructive) {
+                        deletionStudyCategory = category
+                    } label: {
+                        Label(strings.deleteStudy, systemImage: "trash")
+                    }
                 }
             }
         }
@@ -3301,8 +3403,8 @@ private struct StudyTreeNode: View {
     var onEdit: () -> Void
     var onDelete: () -> Void
 
-    private var statusBorderColor: Color {
-        room.activeForQuestions ? Color.green : Color.gray.opacity(0.7)
+    private var levelProgressColor: Color {
+        room.activeForQuestions ? Color.green : Color.secondary.opacity(0.6)
     }
 
     private var levelFillFraction: CGFloat {
@@ -3320,13 +3422,10 @@ private struct StudyTreeNode: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
 
-                Text("Lv \(room.difficultyLevel)")
+                Text(StudyTreeNodeStylePolicy.levelText(room.difficultyLevel))
                     .font(.caption2.weight(.bold))
                     .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Color(.tertiarySystemFill), in: Capsule())
+                    .foregroundStyle(room.activeForQuestions ? Color.green : Color.secondary)
             }
             .padding(12)
             .frame(
@@ -3335,20 +3434,21 @@ private struct StudyTreeNode: View {
                 alignment: .center
             )
             .background {
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        Circle()
-                            .fill(Color(.secondarySystemBackground))
-                        Rectangle()
-                            .fill(Color.accentColor.opacity(0.2))
-                            .frame(width: geometry.size.width * levelFillFraction)
-                    }
-                    .clipShape(Circle())
-                }
+                Circle()
+                    .fill(Color(.secondarySystemBackground))
             }
             .overlay {
                 Circle()
-                    .strokeBorder(statusBorderColor, lineWidth: 2.5)
+                    .strokeBorder(Color.secondary.opacity(0.22), lineWidth: 2.5)
+            }
+            .overlay {
+                Circle()
+                    .trim(from: 0, to: levelFillFraction)
+                    .stroke(
+                        levelProgressColor,
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
             }
             .overlay {
                 if isSelected {
@@ -6370,6 +6470,194 @@ private struct MobileCommunityEmptyState: View {
         }
         .frame(maxWidth: .infinity, alignment: .center)
         .padding(.vertical, 34)
+    }
+}
+
+private struct MobileHomeStudyTopicItem: Identifiable {
+    var room: BackendStudyRoom
+    var depth: Int
+
+    var id: Int {
+        room.id
+    }
+}
+
+private struct MobileHomeStudyOutlineSnapshot {
+    var root: BackendStudyRoom
+    var visibleTopics: [MobileHomeStudyTopicItem]
+    var remainingCount: Int
+}
+
+private struct MobileHomeStudyOutlineRow: View {
+    var snapshot: MobileHomeStudyOutlineSnapshot
+    var strings: AppStrings
+    var pendingQuestionCount: (BackendStudyRoom) -> Int
+    var onOpenTree: () -> Void
+    var onOpenTopic: (BackendStudyRoom) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Button(action: onOpenTree) {
+                topicRow(
+                    room: snapshot.root,
+                    depth: 0,
+                    isRoot: true
+                )
+            }
+            .buttonStyle(.plain)
+
+            ForEach(snapshot.visibleTopics) { item in
+                Divider()
+                    .padding(.leading, 48)
+
+                Button {
+                    onOpenTopic(item.room)
+                } label: {
+                    topicRow(
+                        room: item.room,
+                        depth: item.depth,
+                        isRoot: false
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
+            if snapshot.remainingCount > 0 {
+                Divider()
+                    .padding(.leading, 48)
+
+                Button(action: onOpenTree) {
+                    HStack(spacing: 8) {
+                        Text(strings.moreStudyTopics(snapshot.remainingCount))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        Spacer()
+
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: 48)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .background(
+            Color(.secondarySystemBackground),
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.primary.opacity(0.04), lineWidth: 1)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func topicRow(
+        room: BackendStudyRoom,
+        depth: Int,
+        isRoot: Bool
+    ) -> some View {
+        let pendingCount = pendingQuestionCount(room)
+
+        return HStack(spacing: 12) {
+            if isRoot {
+                MobileStudyActivityIndicator(
+                    isActive: room.activeForQuestions,
+                    strings: strings
+                )
+                .frame(width: 24)
+            } else {
+                MobileHomeStudyBranchGuide(
+                    depth: depth,
+                    isActive: room.activeForQuestions,
+                    strings: strings
+                )
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(room.topic)
+                    .font(isRoot ? .body.weight(.semibold) : .subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(StudyTreeNodeStylePolicy.levelText(room.difficultyLevel))
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(room.activeForQuestions ? Color.green : Color.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if pendingCount > 0 {
+                Text("\(pendingCount)")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(minWidth: 22, minHeight: 22)
+                    .background(Color.red, in: Circle())
+                    .accessibilityLabel(strings.pendingQuestionCount(pendingCount))
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 14)
+        .frame(minHeight: isRoot ? 70 : 64)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct MobileStudyActivityIndicator: View {
+    var isActive: Bool
+    var strings: AppStrings
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(isActive ? Color.green.opacity(0.14) : Color.secondary.opacity(0.1))
+                .frame(width: 22, height: 22)
+
+            Circle()
+                .fill(isActive ? Color.green : Color.secondary.opacity(0.45))
+                .frame(width: 8, height: 8)
+        }
+        .accessibilityLabel(isActive ? strings.questionTopicActive : strings.questionTopicInactive)
+    }
+}
+
+private struct MobileHomeStudyBranchGuide: View {
+    var depth: Int
+    var isActive: Bool
+    var strings: AppStrings
+
+    private var cappedDepth: Int {
+        min(max(depth, 1), 3)
+    }
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            Canvas { context, size in
+                let end = CGPoint(x: size.width - 11, y: size.height / 2)
+                let startX = CGFloat(cappedDepth - 1) * 10 + 3
+                var path = Path()
+                path.move(to: CGPoint(x: startX, y: 0))
+                path.addLine(to: CGPoint(x: startX, y: end.y))
+                path.addLine(to: end)
+                context.stroke(
+                    path,
+                    with: .color(Color.secondary.opacity(0.32)),
+                    style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
+                )
+            }
+
+            MobileStudyActivityIndicator(isActive: isActive, strings: strings)
+        }
+        .frame(width: CGFloat(30 + (cappedDepth - 1) * 10), height: 44)
     }
 }
 

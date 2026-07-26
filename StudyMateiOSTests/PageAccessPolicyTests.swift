@@ -390,10 +390,13 @@ final class StudyTreeViewportPersistenceTests: XCTestCase {
 }
 
 final class StudyTreeLayoutPolicyTests: XCTestCase {
-    func testNodeLevelFillProgressesFromLeftToRight() {
+    func testNodeLevelProgressUsesClampedTenPointScale() {
         XCTAssertEqual(StudyTreeNodeStylePolicy.levelFillFraction(1), 0.1)
         XCTAssertEqual(StudyTreeNodeStylePolicy.levelFillFraction(5), 0.5)
         XCTAssertEqual(StudyTreeNodeStylePolicy.levelFillFraction(10), 1)
+        XCTAssertEqual(StudyTreeNodeStylePolicy.levelText(0), "1/10")
+        XCTAssertEqual(StudyTreeNodeStylePolicy.levelText(3), "3/10")
+        XCTAssertEqual(StudyTreeNodeStylePolicy.levelText(11), "10/10")
     }
 
     func testCanvasExpandsToIncludeMovedNodesAndRecoversInvalidValues() {
@@ -818,5 +821,15 @@ final class StudyTreeLayoutPolicyTests: XCTestCase {
                 accuracy: 0.0001
             )
         }
+    }
+}
+
+final class StudyOutlinePolicyTests: XCTestCase {
+    func testTopicPreviewIsBoundedForLongTrees() {
+        XCTAssertEqual(StudyOutlinePolicy.visibleCount(totalTopicCount: 0), 0)
+        XCTAssertEqual(StudyOutlinePolicy.visibleCount(totalTopicCount: 2), 2)
+        XCTAssertEqual(StudyOutlinePolicy.visibleCount(totalTopicCount: 12), 3)
+        XCTAssertEqual(StudyOutlinePolicy.remainingCount(totalTopicCount: 2), 0)
+        XCTAssertEqual(StudyOutlinePolicy.remainingCount(totalTopicCount: 12), 9)
     }
 }
