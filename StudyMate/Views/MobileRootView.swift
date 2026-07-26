@@ -2499,6 +2499,7 @@ private struct MobileStudyTreeView: View {
                                 .allowsHitTesting(false)
                             }
                         }
+                        .scrollDisabled(!dragStartOffsets.isEmpty)
                         .opacity(isPreparingInitialViewport ? 0 : 1)
                         .allowsHitTesting(!isPreparingInitialViewport)
                         .simultaneousGesture(viewportPanGesture)
@@ -3046,8 +3047,7 @@ private struct StudyTreeScrollViewportBridge: UIViewRepresentable {
     @MainActor
     final class Coordinator: NSObject {
         private weak var scrollView: UIScrollView?
-        private var contentOffsetObservation: NSKeyValueObservation?
-        private var reportTask: Task<Void, Never>?
+        private var scrollCompletionTask: Task<Void, Never>?
         private var retryTask: Task<Void, Never>?
         private var requestedContentOffset: CGPoint = .zero
         private var onContentOffsetChange: (CGPoint) -> Void
@@ -3081,7 +3081,7 @@ private struct StudyTreeScrollViewportBridge: UIViewRepresentable {
             )
             self.isReportingEnabled = isReportingEnabled
             if !isReportingEnabled {
-                reportTask?.cancel()
+                scrollCompletionTask?.cancel()
                 requiresNewPanBeforeReporting = true
             }
             self.onContentOffsetChange = onContentOffsetChange
@@ -3091,10 +3091,8 @@ private struct StudyTreeScrollViewportBridge: UIViewRepresentable {
         }
 
         func detach() {
-            reportTask?.cancel()
+            scrollCompletionTask?.cancel()
             retryTask?.cancel()
-            contentOffsetObservation?.invalidate()
-            contentOffsetObservation = nil
             scrollView?.panGestureRecognizer.removeTarget(
                 self,
                 action: #selector(handlePanGesture(_:))
@@ -3113,17 +3111,6 @@ private struct StudyTreeScrollViewportBridge: UIViewRepresentable {
                 self,
                 action: #selector(handlePanGesture(_:))
             )
-            contentOffsetObservation = scrollView.observe(
-                \.contentOffset,
-                options: [.new]
-            ) { [weak self] scrollView, _ in
-                Task { @MainActor [weak self, weak scrollView] in
-                    guard let self, let scrollView else {
-                        return
-                    }
-                    self.didScroll(to: scrollView.contentOffset)
-                }
-            }
         }
 
         private func applyRequestedContentOffset(from view: UIView) {
@@ -3189,35 +3176,66 @@ private struct StudyTreeScrollViewportBridge: UIViewRepresentable {
 
         @objc
         private func handlePanGesture(_ gesture: UIPanGestureRecognizer) {
-            guard gesture.state == .began, isReportingEnabled else {
+            guard let scrollView,
+                  isReportingEnabled else {
                 return
             }
-            requiresNewPanBeforeReporting = false
+
+            switch gesture.state {
+            case .began:
+                scrollCompletionTask?.cancel()
+                requiresNewPanBeforeReporting = false
+                reportCurrentContentOffset(from: scrollView)
+            case .changed:
+                guard !requiresNewPanBeforeReporting else {
+                    return
+                }
+                reportCurrentContentOffset(from: scrollView)
+            case .ended, .cancelled:
+                guard !requiresNewPanBeforeReporting else {
+                    return
+                }
+                trackScrollCompletion(from: scrollView)
+            default:
+                break
+            }
         }
 
-        private func didScroll(to contentOffset: CGPoint) {
+        private func reportCurrentContentOffset(from scrollView: UIScrollView) {
             guard !isApplyingContentOffset,
                   isReportingEnabled,
-                  !requiresNewPanBeforeReporting,
-                  (
-                    scrollView?.isDragging == true
-                        || scrollView?.isDecelerating == true
-                  ) else {
+                  !requiresNewPanBeforeReporting else {
                 return
             }
             let reportedContentOffset = CGPoint(
-                x: max(0, contentOffset.x),
-                y: max(0, contentOffset.y)
+                x: max(0, scrollView.contentOffset.x),
+                y: max(0, scrollView.contentOffset.y)
             )
             requestedContentOffset = reportedContentOffset
             onContentOffsetChange(reportedContentOffset)
-            reportTask?.cancel()
-            reportTask = Task { @MainActor [weak self, reportedContentOffset] in
-                try? await Task.sleep(for: .milliseconds(150))
-                guard let self, !Task.isCancelled else {
+        }
+
+        private func trackScrollCompletion(from scrollView: UIScrollView) {
+            scrollCompletionTask?.cancel()
+            scrollCompletionTask = Task { @MainActor [weak self, weak scrollView] in
+                try? await Task.sleep(for: .milliseconds(16))
+                guard let self, let scrollView, !Task.isCancelled else {
                     return
                 }
-                self.onContentOffsetSettled(reportedContentOffset)
+                repeat {
+                    self.reportCurrentContentOffset(from: scrollView)
+                    guard scrollView.isDecelerating else {
+                        break
+                    }
+                    try? await Task.sleep(for: .milliseconds(16))
+                } while !Task.isCancelled
+
+                guard !Task.isCancelled,
+                      self.isReportingEnabled,
+                      !self.requiresNewPanBeforeReporting else {
+                    return
+                }
+                self.onContentOffsetSettled(self.requestedContentOffset)
             }
         }
     }
