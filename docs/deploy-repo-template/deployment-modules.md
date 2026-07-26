@@ -69,6 +69,12 @@ deployment.
   `password`, `jdbcUrl`, and `r2dbcUrl`; the deploy workflow reads both JDBC
   and R2DBC settings from that secret. A legacy host password file is migrated
   into the secret once and is not the continuing configuration source.
+- Production MySQL administration uses host port `3306`, restricted by the EC2
+  security group to approved administrator CIDRs. The backend deploy verifies
+  the existing MySQL container has that host-port binding. When it is missing,
+  the workflow recreates only the container after verifying that
+  `/var/lib/mysql` is backed by the persistent `buddystudy-mysql-data` volume;
+  it never removes the volume.
 - The native backend image ships MySQL Flyway scripts at
   `/app/db/migration-mysql`. Both normal deployment and the one-time cutover
   bootstrap use `filesystem:/app/db/migration-mysql` so schema discovery does

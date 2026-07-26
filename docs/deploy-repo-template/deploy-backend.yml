@@ -293,6 +293,7 @@ jobs:
           fi
 
           docker rm -f buddystudy-caddy >/dev/null 2>&1 || true
+          DATABASE_CONTAINER_READY=false
           if docker inspect buddystudy-db >/dev/null 2>&1; then
             DATABASE_IMAGE="$(docker inspect -f '{{.Config.Image}}' buddystudy-db)"
             case "${DATABASE_IMAGE}" in
@@ -303,9 +304,34 @@ jobs:
                 exit 1
                 ;;
             esac
-            docker start buddystudy-db >/dev/null
-            docker network connect buddystudy-net buddystudy-db >/dev/null 2>&1 || true
-          else
+
+            DATABASE_DATA_VOLUME="$(
+              docker inspect buddystudy-db \
+                | python3 -c 'import json, sys; mounts=json.load(sys.stdin)[0].get("Mounts", []); print(next((mount.get("Name", "") for mount in mounts if mount.get("Destination") == "/var/lib/mysql" and mount.get("Type") == "volume"), ""))'
+            )"
+            if [ "${DATABASE_DATA_VOLUME}" != "buddystudy-mysql-data" ]; then
+              echo "Refusing to recreate buddystudy-db because /var/lib/mysql is not backed by buddystudy-mysql-data." >&2
+              exit 1
+            fi
+
+            DATABASE_PORT_BINDING="$(
+              docker inspect buddystudy-db \
+                | python3 -c 'import json, sys; bindings=(json.load(sys.stdin)[0].get("HostConfig", {}).get("PortBindings") or {}).get("3306/tcp") or []; print(",".join("{}:{}".format(binding.get("HostIp", ""), binding.get("HostPort", "")) for binding in bindings))'
+            )"
+            case "${DATABASE_PORT_BINDING}" in
+              ":3306"|0.0.0.0:3306)
+                docker start buddystudy-db >/dev/null
+                docker network connect buddystudy-net buddystudy-db >/dev/null 2>&1 || true
+                DATABASE_CONTAINER_READY=true
+                ;;
+              *)
+                echo "Recreating buddystudy-db with host port 3306; preserving buddystudy-mysql-data."
+                docker rm -f buddystudy-db >/dev/null
+                ;;
+            esac
+          fi
+
+          if [ "${DATABASE_CONTAINER_READY}" != "true" ]; then
             docker run -d \
               --name buddystudy-db \
               --network buddystudy-net \
