@@ -2,6 +2,7 @@ package com.buddystudy.backend.study.adapter.outbound.stream
 
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishOperations
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushPublishPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import org.slf4j.LoggerFactory
@@ -63,7 +64,7 @@ class RedisStreamPushPublisher(
             fields.keys,
         )
         return try {
-            val published = pushPublisher.publish(properties.streams.key, fields)
+            val published = pushPublisher.publish(RedisStreamTopic.DOMAIN_EVENTS, fields)
             val publishedAt = Instant.now()
             logger.info(
                 "redis_stream_publish_succeeded stream={} redisRecordId={} eventId={} eventType={} recordId={} deviceId={} userId={} pushCreatedAt={} publishedAt={} publishAgeMs={}",

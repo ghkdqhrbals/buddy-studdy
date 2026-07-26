@@ -6,6 +6,7 @@ import com.buddystudy.backend.community.adapter.inbound.stream.QuestionStatsStre
 import com.buddystudy.backend.community.adapter.outbound.stream.PublicQuestionReactionRedisStreamPublisher
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishOperations
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishedMessage
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
@@ -94,16 +95,16 @@ class QuestionStatsStreamListenerTest : MySqlIntegrationTestSupport() {
     }
 
     private data class PublishRequest(
-        val streamKey: String,
+        val topic: RedisStreamTopic,
         val fields: Map<String, String>,
     )
 
     private class RecordingPublisher : RedisStreamPublishOperations {
         val requests = mutableListOf<PublishRequest>()
 
-        override suspend fun publish(streamKey: String, fields: Map<String, String>): RedisStreamPublishedMessage {
-            requests += PublishRequest(streamKey, fields)
-            return RedisStreamPublishedMessage(streamKey, "record-1")
+        override suspend fun publish(topic: RedisStreamTopic, fields: Map<String, String>): RedisStreamPublishedMessage {
+            requests += PublishRequest(topic, fields)
+            return RedisStreamPublishedMessage(topic.apiName, "record-1")
         }
     }
 }

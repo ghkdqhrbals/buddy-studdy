@@ -1,6 +1,7 @@
 package com.buddystudy.backend.common.adapter.inbound.scheduler
 
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishOperations
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
 import com.buddystudy.backend.common.application.outbox.ClaimedRedisOutboxEvent
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxPort
 import com.buddystudy.backend.config.BuddyStudyProperties
@@ -36,7 +37,7 @@ class RedisEventOutboxDispatcher(
                 "Unsupported outbox payload version: ${event.payloadVersion}"
             }
             publisher.publish(
-                properties.streams.key,
+                RedisStreamTopic.DOMAIN_EVENTS,
                 mapOf(
                     "eventId" to event.eventId,
                     "eventType" to event.eventType.name,

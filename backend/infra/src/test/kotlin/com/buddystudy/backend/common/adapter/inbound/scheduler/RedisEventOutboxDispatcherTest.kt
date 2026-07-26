@@ -2,6 +2,7 @@ package com.buddystudy.backend.common.adapter.inbound.scheduler
 
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishOperations
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishedMessage
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
 import com.buddystudy.backend.common.application.outbox.ClaimedRedisOutboxEvent
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxPort
 import com.buddystudy.backend.common.application.outbox.RedisOutboxEventType
@@ -30,6 +31,7 @@ class RedisEventOutboxDispatcherTest {
                 "payload" to event.payloadJson,
             ),
         )
+        assertThat(publisher.topics).containsExactly(RedisStreamTopic.DOMAIN_EVENTS)
         assertThat(outbox.published).containsExactly(event.id to now)
         assertThat(outbox.retries).isEmpty()
     }
@@ -92,14 +94,16 @@ class RedisEventOutboxDispatcherTest {
         private val failure: Throwable? = null,
     ) : RedisStreamPublishOperations {
         val fields = mutableListOf<Map<String, String>>()
+        val topics = mutableListOf<RedisStreamTopic>()
 
         override suspend fun publish(
-            streamKey: String,
+            topic: RedisStreamTopic,
             fields: Map<String, String>,
         ): RedisStreamPublishedMessage {
             failure?.let { throw it }
+            topics += topic
             this.fields += fields
-            return RedisStreamPublishedMessage(streamKey, "1-0")
+            return RedisStreamPublishedMessage(topic.apiName, "1-0")
         }
     }
 

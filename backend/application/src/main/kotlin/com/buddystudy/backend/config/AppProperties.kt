@@ -44,7 +44,8 @@ data class BuddyStudyProperties(
     data class Streams(
         var enabled: Boolean = true,
         var key: String = "buddystudy-events-v1",
-        var maxLen: Long = 100_000,
+        var maxLen: Long = 1_000,
+        var pushConsumerConcurrency: Int = 10,
         var viewQueueCapacity: Int = 20_000,
         var viewPublisherConcurrency: Int = 4,
     )

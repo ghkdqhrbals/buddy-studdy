@@ -2,6 +2,7 @@ package com.buddystudy.backend.community.adapter.outbound.stream
 
 import com.buddystudy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishOperations
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.utils.toStringMapWithoutNull
 import org.slf4j.LoggerFactory
@@ -39,7 +40,7 @@ class PublicQuestionReactionRedisStreamPublisher(
                 fields["userId"],
                 fields.keys,
             )
-            val published = viewPublisher.publish(streamKey, fields)
+            val published = viewPublisher.publish(RedisStreamTopic.DOMAIN_EVENTS, fields)
             logger.debug(
                 "redis_stream_publish_succeeded stream={} redisRecordId={} eventId={} eventType={} partitionKey={} questionId={} userId={}",
                 published.streamKey,

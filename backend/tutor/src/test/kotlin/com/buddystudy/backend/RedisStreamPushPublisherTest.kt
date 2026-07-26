@@ -4,6 +4,7 @@ import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishOperations
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishedMessage
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.adapter.outbound.stream.RedisStreamPushPublisher
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
@@ -29,7 +30,7 @@ class RedisStreamPushPublisherTest {
         assertThat(service.publishPush(pushEvent(topic = "SwiftUI"))).isTrue()
 
         val request = publisher.requests.single()
-        assertThat(request.streamKey).isEqualTo("buddystudy-events-v1")
+        assertThat(request.topic).isEqualTo(RedisStreamTopic.DOMAIN_EVENTS)
         assertThat(request.fields).containsEntry("eventType", "QUESTION_PUSH_REQUESTED")
         assertThat(request.fields).containsKey("payload")
         assertThat(request.fields["payload"])
@@ -79,15 +80,15 @@ class RedisStreamPushPublisherTest {
         createdAt = Instant.parse("2026-06-08T00:00:00Z"),
     )
 
-    private data class PublishRequest(val streamKey: String, val fields: Map<String, String>)
+    private data class PublishRequest(val topic: RedisStreamTopic, val fields: Map<String, String>)
 
     private class RecordingPublisher(private val fail: Boolean = false) : RedisStreamPublishOperations {
         val requests = mutableListOf<PublishRequest>()
 
-        override suspend fun publish(streamKey: String, fields: Map<String, String>): RedisStreamPublishedMessage {
+        override suspend fun publish(topic: RedisStreamTopic, fields: Map<String, String>): RedisStreamPublishedMessage {
             if (fail) throw IllegalStateException("publish failed")
-            requests += PublishRequest(streamKey, fields)
-            return RedisStreamPublishedMessage(streamKey, "record-1")
+            requests += PublishRequest(topic, fields)
+            return RedisStreamPublishedMessage(topic.apiName, "record-1")
         }
     }
 }

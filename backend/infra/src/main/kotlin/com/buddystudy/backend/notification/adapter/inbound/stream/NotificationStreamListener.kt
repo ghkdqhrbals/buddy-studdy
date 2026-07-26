@@ -2,10 +2,11 @@ package com.buddystudy.backend.notification.adapter.inbound.stream
 
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
-import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumer
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamSubscription
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopicManager
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
-import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.notification.adapter.outbound.stream.NotificationRequestedPayload
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.notification.application.port.inbound.ProcessNotificationEventUseCase
@@ -24,8 +25,7 @@ import java.time.Instant
 @Component
 @ConditionalOnProperty(prefix = "buddystudy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
 class NotificationStreamListener(
-    private val properties: BuddyStudyProperties,
-    private val consumer: RedisStreamConsumer,
+    private val topics: RedisStreamTopicManager,
     private val processor: ProcessNotificationEventUseCase,
     private val notifications: NotificationPersistencePort,
     private val devices: DevicePort,
@@ -38,10 +38,16 @@ class NotificationStreamListener(
     private val group = "bs-backend-notification"
     private val consumerName = "buddystudy-notification"
     private val eventType = "NOTIFICATION_REQUESTED"
+    private val subscription = RedisStreamSubscription(
+        group = group,
+        consumerPrefix = consumerName,
+        count = 100,
+        timeout = Duration.ofMillis(3000),
+    )
 
     @Scheduled(fixedDelayString = "\${NOTIFICATION_CONSUMER_POLL_DELAY_MS:1000}")
     suspend fun pollNotificationRequests() {
-        consumer.poll(properties.streams.key, group, consumerName, 100, Duration.ofMillis(3000)) {
+        topics.poll(RedisStreamTopic.DOMAIN_EVENTS, subscription) {
             onNotificationRequested(it)
         }
     }
@@ -49,7 +55,7 @@ class NotificationStreamListener(
     suspend fun onNotificationRequested(message: RedisStreamMessage) {
         try {
             if (message.fields["eventType"] != eventType) {
-                consumer.acknowledge(message, group)
+                topics.acknowledge(message, group)
                 return
             }
             logger.debug(
@@ -84,7 +90,7 @@ class NotificationStreamListener(
                     command.userId,
                 )
             }
-            consumer.acknowledge(message, group)
+            topics.acknowledge(message, group)
             logger.debug(
                 "redis_stream_consume_succeeded listener={} stream={} redisRecordId={} eventId={} eventType={} userId={} notificationId={}",
                 "buddystudy-notification-listener",

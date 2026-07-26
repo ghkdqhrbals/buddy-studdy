@@ -5,6 +5,7 @@ import { JOB_PAGE_SIZE, sectionPaths, sections } from "./adminConfig";
 import { LoginScreen } from "./LoginScreen";
 import { MetricsDashboard } from "./MetricsDashboard";
 import { OperationsPanel } from "./OperationsPanel";
+import { EventStreamsPanel } from "./EventStreamsPanel";
 import type {
   AdminMetricSeries,
   ScheduledJobRun,
@@ -103,7 +104,7 @@ function sectionHref(
 ): string {
   const params = new URLSearchParams();
   if (section !== "operations") {
-    if (range) {
+    if (range && sectionUsesDateRange(section)) {
       params.set("startDate", range.startDate);
       params.set("endDate", range.endDate);
     }
@@ -122,6 +123,10 @@ function sectionHref(
   return `${path}${query ? `?${query}` : ""}`;
 }
 
+function sectionUsesDateRange(section: SectionKey): boolean {
+  return section !== "operations" && section !== "streams";
+}
+
 export function App() {
   const [token, setToken] = useState(() => getStoredToken());
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem("buddystudy.adminTheme") as Theme) || "light");
@@ -136,6 +141,7 @@ export function App() {
   const [highlightRunId, setHighlightRunId] = useState(() => routeState().runId);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [streamRefreshKey, setStreamRefreshKey] = useState(0);
 
   const active = sections.find((section) => section.key === activeSection) ?? sections[0];
   const isAuthenticated = Boolean(token);
@@ -208,6 +214,9 @@ export function App() {
         setJobPage(runs);
         setJobStatuses(statuses);
         setSeries([]);
+      } else if (activeSection === "streams") {
+        setSeries([]);
+        setJobPage(emptyJobPage);
       } else {
         const [metrics, runs] = await Promise.all([
           fetchMetrics(startDate, endDate, active.metrics, handleUnauthorized),
@@ -229,7 +238,9 @@ export function App() {
     setLoading(true);
     setError(null);
     try {
-      if (activeSection === "operations") {
+      if (activeSection === "streams") {
+        setStreamRefreshKey((current) => current + 1);
+      } else if (activeSection === "operations") {
         const [runs, statuses] = await Promise.all([
           fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset, jobNameFilter, highlightRunId),
           fetchJobStatuses(handleUnauthorized).catch(() => jobStatuses),
@@ -300,7 +311,7 @@ export function App() {
   function updateDateRange(nextStartDate: string, nextEndDate: string) {
     setStartDate(nextStartDate);
     setEndDate(nextEndDate);
-    if (activeSection !== "operations") {
+    if (sectionUsesDateRange(activeSection)) {
       window.history.replaceState(null, "", sectionHref(activeSection, 0, { startDate: nextStartDate, endDate: nextEndDate }));
     }
   }
@@ -342,8 +353,14 @@ export function App() {
       onNavigate={navigateToSection}
       onRefresh={handleRefresh}
       onThemeChange={setTheme}
+      showDateRange={sectionUsesDateRange(activeSection)}
     >
-      {activeSection === "operations" ? (
+      {activeSection === "streams" ? (
+        <EventStreamsPanel
+          onUnauthorized={handleUnauthorized}
+          refreshKey={streamRefreshKey}
+        />
+      ) : activeSection === "operations" ? (
         <OperationsPanel
           page={jobPage}
           statuses={jobStatuses.jobs}

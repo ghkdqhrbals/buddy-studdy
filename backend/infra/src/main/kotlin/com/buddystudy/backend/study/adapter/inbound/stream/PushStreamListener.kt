@@ -1,7 +1,9 @@
 package com.buddystudy.backend.study.adapter.inbound.stream
 
-import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumer
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamSubscription
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopicManager
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
@@ -29,7 +31,7 @@ import java.time.Instant
 @ConditionalOnProperty(prefix = "buddystudy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
 class PushStreamListener(
     private val properties: BuddyStudyProperties,
-    private val consumer: RedisStreamConsumer,
+    private val topics: RedisStreamTopicManager,
     private val pushNotifications: PushNotificationPort,
     private val devices: DevicePort,
     private val userDevices: UserDevicePort,
@@ -39,6 +41,13 @@ class PushStreamListener(
     private val group = "bs-backend-push"
     private val consumerName = "buddystudy-push"
     private val eventType = "QUESTION_PUSH_REQUESTED"
+    private val subscription = RedisStreamSubscription(
+        group = group,
+        consumerPrefix = consumerName,
+        concurrency = properties.streams.pushConsumerConcurrency,
+        count = 50,
+        timeout = Duration.ofMillis(3000),
+    )
 
     @PostConstruct
     fun logInitialized() {
@@ -47,14 +56,14 @@ class PushStreamListener(
             "buddystudy-push-listener",
             properties.streams.key,
             group,
-            1,
+            subscription.concurrency,
             true,
         )
     }
 
     @Scheduled(fixedDelayString = "\${PUSH_CONSUMER_POLL_DELAY_MS:1000}")
     suspend fun pollPushRequests() {
-        consumer.poll(properties.streams.key, group, consumerName, 50, Duration.ofMillis(3000)) {
+        topics.poll(RedisStreamTopic.DOMAIN_EVENTS, subscription) {
             onPushRequested(it)
         }
     }
@@ -63,7 +72,7 @@ class PushStreamListener(
         val notificationId = runCatching { PushEventPayloadParser.notificationId(message.fields) }.getOrNull()
         try {
             if (message.fields["eventType"] != eventType) {
-                consumer.acknowledge(message, group)
+                topics.acknowledge(message, group)
                 return
             }
             logger.info(
@@ -95,7 +104,7 @@ class PushStreamListener(
                     deviceId,
                     userId,
                 )
-                consumer.acknowledge(message, group)
+                topics.acknowledge(message, group)
                 return
             }
             val device = deviceId?.let { devices.findByDeviceId(it) }
@@ -108,7 +117,7 @@ class PushStreamListener(
             val consumedAt = Instant.now()
             val pushAgeMs = pushMessage.createdAt?.let { Duration.between(it, consumedAt).toMillis() }
             notificationId?.let { notifications.markPushSent(it, consumedAt) }
-            consumer.acknowledge(message, group)
+            topics.acknowledge(message, group)
             logger.info(
                 "redis_stream_consume_succeeded listener={} stream={} redisRecordId={} eventId={} eventType={} recordId={} deviceId={} userId={} pushProvider={} pushCreatedAt={} consumedAt={} pushAgeMs={}",
                 "buddystudy-push-listener",

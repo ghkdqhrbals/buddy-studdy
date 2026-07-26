@@ -1,8 +1,9 @@
 package com.buddystudy.backend.community.adapter.inbound.stream
 
-import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumer
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
-import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamSubscription
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopicManager
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import org.slf4j.LoggerFactory
@@ -16,25 +17,30 @@ import java.time.Instant
 @Component
 @ConditionalOnProperty(prefix = "buddystudy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
 class QuestionStatsStreamListener(
-    private val properties: BuddyStudyProperties,
-    private val consumer: RedisStreamConsumer,
+    private val topics: RedisStreamTopicManager,
     private val handler: QuestionStatsStreamEventHandler,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val group = "bs-backend-view"
     private val consumerName = "buddystudy-question-view"
     private val eventType = "CONTENT_VIEWED"
+    private val subscription = RedisStreamSubscription(
+        group = group,
+        consumerPrefix = consumerName,
+        count = 100,
+        timeout = Duration.ofMillis(3000),
+    )
 
     @Scheduled(fixedDelayString = "\${VIEW_CONSUMER_POLL_DELAY_MS:1000}")
     suspend fun pollQuestionViews() {
-        consumer.poll(properties.streams.key, group, consumerName, 100, Duration.ofMillis(3000)) {
+        topics.poll(RedisStreamTopic.DOMAIN_EVENTS, subscription) {
             onQuestionViewed(it)
         }
     }
 
     suspend fun onQuestionViewed(message: RedisStreamMessage) {
         if (message.fields["eventType"] != eventType) {
-            consumer.acknowledge(message, group)
+            topics.acknowledge(message, group)
             return
         }
         consume("buddystudy-question-view-listener", message) { handler.processViewEvent(message.fields) }
@@ -55,7 +61,7 @@ class QuestionStatsStreamListener(
                 message.fields.keys,
             )
             block()
-            consumer.acknowledge(message, group)
+            topics.acknowledge(message, group)
             logger.debug(
                 "redis_stream_consume_succeeded listener={} stream={} redisRecordId={} eventId={} eventType={} questionId={} userId={}",
                 listenerId,

@@ -10,6 +10,7 @@ type AdminShellProps = {
   theme: Theme;
   loading: boolean;
   error: string | null;
+  showDateRange: boolean;
   hrefForSection: (section: SectionKey) => string;
   onDateRangeChange: (startDate: string, endDate: string) => void;
   onLogout: () => void;
@@ -27,6 +28,7 @@ export function AdminShell({
   theme,
   loading,
   error,
+  showDateRange,
   hrefForSection,
   onDateRangeChange,
   onLogout,
@@ -94,7 +96,7 @@ export function AdminShell({
             <h1>{activeLabel}</h1>
           </div>
           <div className="toolbar">
-            {activeSection === "operations" ? null : (
+            {showDateRange && (
               <DateRange
                 startDate={startDate}
                 endDate={endDate}

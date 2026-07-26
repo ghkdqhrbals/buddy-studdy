@@ -46,6 +46,7 @@ export const sections: Array<{ key: SectionKey; label: string; metrics: string[]
   { key: "notifications", label: "Notifications", metrics: ["push_open_rate"] },
   { key: "quota", label: "Quota", metrics: ["quota_used_count"] },
   { key: "operations", label: "Operations", metrics: [] },
+  { key: "streams", label: "Event Streams", metrics: [] },
 ];
 
 export const JOB_PAGE_SIZE = 10;
@@ -57,4 +58,5 @@ export const sectionPaths: Record<SectionKey, string> = {
   notifications: "/analytics/notifications",
   quota: "/analytics/quota",
   operations: "/operations/scheduler-runs",
+  streams: "/operations/event-streams",
 };

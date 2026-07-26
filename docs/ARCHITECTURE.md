@@ -81,6 +81,9 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - Treats anonymous identities as installation credentials rather than administrator-visible members. Admin user and quota queries exclude `ANONYMOUS` rows.
   - Public question like/comment counts use source-of-truth reaction tables plus a `question_stats` read model; stream hooks are wired through direct Redis Streams.
   - Transactional domain writes append typed events to `redis_event_outbox` in the same R2DBC transaction. A single polling dispatcher claims rows with `FOR UPDATE SKIP LOCKED`, publishes them to Redis Streams, and retries failures with a lease and exponential backoff.
+  - `RedisStreamTopicManager` is the single topic registry and runtime boundary for stream publishing, consumer-group polling, acknowledgement, retention, and administrator inspection.
+  - The domain event stream is atomically trimmed to an exact maximum of 1,000 entries. Durable event and push outboxes remain the source for diagnosis and recovery when bounded Redis retention advances.
+  - Push delivery uses one consumer group with ten stable concurrent worker identities by default. Blocking Redis reads run on `Dispatchers.IO` instead of Reactor event-loop threads.
   - Redis delivery is at-least-once. `(event_type, event_id)` is the producer idempotency key, and consumers must keep their existing event-id deduplication because a crash can occur after Redis accepts an event but before the outbox row is marked published.
   - Outbox SQL uses jOOQ classes generated from the ordered Flyway migration history, so table and column changes fail at compile/code-generation time instead of relying on untyped row maps.
   - Forwards reports by SMTP only when report-email secrets are configured; reports are still stored when email delivery is unavailable.
@@ -95,6 +98,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - Rejects duplicate topics using a trim, case-fold, and repeated-whitespace normalized key across all studies owned by the user.
   - Resolves monthly question allowance from the active membership tier and an optional per-user override. `GET /api/v1/questions/quota` returns usage, allowance, remaining count, and the next UTC reset instant.
   - Provides authenticated admin APIs for paginated user search, tier allowance updates, and per-user tier/override assignment. Payment-plan metadata is never returned by the consumer quota endpoint.
+  - Provides authenticated cursor-based inspection of Redis Stream entries, consumer groups, `redis_event_outbox`, and `question_push_outbox`. Nested credentials are redacted before serialization. See [`REDIS_STREAM_OPERATIONS.md`](REDIS_STREAM_OPERATIONS.md).
 
 - `Views`
   - `StudyView`: active question and pending question workflow.
