@@ -35,6 +35,7 @@ final class SettingsStore {
         static let studyRecordsClearedAt = "studyRecordsClearedAt"
         static let remotePushRegistration = "remotePushRegistration"
         static let studyTreeNodeOffsetsPrefix = "studyTreeNodeOffsets"
+        static let studyTreeViewportPrefix = "studyTreeViewport"
     }
 
     private let defaults: UserDefaults
@@ -68,6 +69,33 @@ final class SettingsStore {
 
     private func studyTreeNodeOffsetsKey(_ rootStudyID: Int) -> String {
         "\(Keys.studyTreeNodeOffsetsPrefix).\(rootStudyID)"
+    }
+
+    func loadStudyTreeViewport(rootStudyID: Int) -> StudyTreeViewportState {
+        guard let data = defaults.data(forKey: studyTreeViewportKey(rootStudyID)),
+              let viewport = try? decoder.decode(StudyTreeViewportState.self, from: data) else {
+            return .default
+        }
+        return sanitizedStudyTreeViewport(viewport)
+    }
+
+    func saveStudyTreeViewport(_ viewport: StudyTreeViewportState, rootStudyID: Int) {
+        guard let data = try? encoder.encode(sanitizedStudyTreeViewport(viewport)) else {
+            return
+        }
+        defaults.set(data, forKey: studyTreeViewportKey(rootStudyID))
+    }
+
+    private func studyTreeViewportKey(_ rootStudyID: Int) -> String {
+        "\(Keys.studyTreeViewportPrefix).\(rootStudyID)"
+    }
+
+    private func sanitizedStudyTreeViewport(_ viewport: StudyTreeViewportState) -> StudyTreeViewportState {
+        StudyTreeViewportState(
+            zoomScale: viewport.zoomScale.isFinite ? min(max(viewport.zoomScale, 0.6), 1.8) : 1,
+            contentOffsetX: viewport.contentOffsetX.isFinite ? max(0, viewport.contentOffsetX) : 0,
+            contentOffsetY: viewport.contentOffsetY.isFinite ? max(0, viewport.contentOffsetY) : 0
+        )
     }
 
     func loadSettings() -> StudySettings {

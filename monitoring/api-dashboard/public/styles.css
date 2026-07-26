@@ -1879,6 +1879,80 @@ pre {
   flex: 1;
 }
 
+.admin-login-form input,
+.admin-toolbar input,
+.tier-settings-row input,
+.admin-users-table input,
+.admin-users-table select {
+  height: 38px;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 10px;
+  background: #ffffff;
+  color: var(--text);
+  outline: none;
+  font-size: 13px;
+}
+
+.admin-login-form input:focus,
+.admin-toolbar input:focus,
+.tier-settings-row input:focus,
+.admin-users-table input:focus,
+.admin-users-table select:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px var(--blue-soft);
+}
+
+.admin-login-form button,
+.admin-toolbar button,
+.tier-settings-row button,
+.admin-pagination button,
+.admin-users-table button,
+.topbar .secondary-button {
+  min-height: 38px;
+  border: 1px solid var(--blue);
+  border-radius: 7px;
+  padding: 0 14px;
+  background: var(--blue);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.admin-login-form button:hover,
+.admin-toolbar button:hover,
+.tier-settings-row button:hover,
+.admin-pagination button:not(:disabled):hover,
+.admin-users-table button:hover {
+  border-color: #1d4ed8;
+  background: #1d4ed8;
+}
+
+.admin-pagination button.secondary-button,
+.tier-settings-row button.secondary-button,
+.admin-users-table button.secondary-button,
+.topbar .secondary-button {
+  border-color: var(--line);
+  background: #ffffff;
+  color: var(--text);
+}
+
+.admin-pagination button.secondary-button:not(:disabled):hover,
+.tier-settings-row button.secondary-button:hover,
+.admin-users-table button.secondary-button:hover,
+.topbar .secondary-button:hover {
+  border-color: var(--blue);
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.admin-pagination button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
 .admin-toolbar {
   padding: 18px 28px;
 }

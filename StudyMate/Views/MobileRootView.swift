@@ -2316,6 +2316,8 @@ private struct MobileStudyTreeView: View {
     @State private var dragStartOffsets: [Int: CGSize] = [:]
     @State private var zoomScale: CGFloat = 1
     @State private var zoomStartScale: CGFloat = 1
+    @State private var viewportOffset: CGPoint = .zero
+    @State private var hasLoadedTreeState = false
     @State private var isSelectionMode = false
     @State private var showsDeleteConfirmation = false
 
@@ -2386,8 +2388,10 @@ private struct MobileStudyTreeView: View {
                                 nodeOffsets = [:]
                                 zoomScale = 1
                                 zoomStartScale = 1
+                                viewportOffset = .zero
                             }
                             saveNodeOffsets()
+                            saveViewport()
                         } label: {
                             Label(strings.resetTreeLayout, systemImage: "arrow.counterclockwise")
                         }
@@ -2461,7 +2465,7 @@ private struct MobileStudyTreeView: View {
                                 )
                                 .position(placement.center)
                                 .offset(nodeOffsets[placement.room.id] ?? .zero)
-                                .simultaneousGesture(nodeDragGesture(for: placement.room.id))
+                                .highPriorityGesture(nodeDragGesture(for: placement.room.id))
                             }
                         }
                         .frame(width: snapshot.size.width, height: snapshot.size.height)
@@ -2471,6 +2475,16 @@ private struct MobileStudyTreeView: View {
                             height: snapshot.size.height * zoomScale,
                             alignment: .topLeading
                         )
+                        .background {
+                            StudyTreeScrollViewportBridge(
+                                contentOffset: viewportOffset
+                            ) { offset in
+                                viewportOffset = offset
+                                saveViewport(contentOffset: offset)
+                            }
+                            .frame(width: 0, height: 0)
+                            .allowsHitTesting(false)
+                        }
                     }
                     .simultaneousGesture(zoomGesture)
 
@@ -2527,7 +2541,7 @@ private struct MobileStudyTreeView: View {
             }
         }
         .task {
-            loadNodeOffsets()
+            loadTreeState()
             await appState.refreshVisibleData()
         }
         .confirmationDialog(
@@ -2583,6 +2597,7 @@ private struct MobileStudyTreeView: View {
             }
             .onEnded { _ in
                 zoomStartScale = zoomScale
+                saveViewport()
             }
     }
 
@@ -2608,6 +2623,7 @@ private struct MobileStudyTreeView: View {
             zoomScale = min(max(zoomScale + delta, 0.6), 1.8)
             zoomStartScale = zoomScale
         }
+        saveViewport()
     }
 
     private func toggleSelection(_ roomID: Int) {
@@ -2623,12 +2639,225 @@ private struct MobileStudyTreeView: View {
         selectedRoomIDs = []
     }
 
-    private func loadNodeOffsets() {
+    private func loadTreeState() {
         nodeOffsets = appState.loadStudyTreeNodeOffsets(rootStudyID: rootStudyID)
+        let viewport = appState.loadStudyTreeViewport(rootStudyID: rootStudyID)
+        zoomScale = viewport.zoomScale
+        zoomStartScale = viewport.zoomScale
+        viewportOffset = CGPoint(
+            x: viewport.contentOffsetX,
+            y: viewport.contentOffsetY
+        )
+        hasLoadedTreeState = true
     }
 
     private func saveNodeOffsets() {
         appState.saveStudyTreeNodeOffsets(nodeOffsets, rootStudyID: rootStudyID)
+    }
+
+    private func saveViewport(contentOffset: CGPoint? = nil) {
+        guard hasLoadedTreeState else {
+            return
+        }
+        let contentOffset = contentOffset ?? viewportOffset
+        appState.saveStudyTreeViewport(
+            StudyTreeViewportState(
+                zoomScale: zoomScale,
+                contentOffsetX: contentOffset.x,
+                contentOffsetY: contentOffset.y
+            ),
+            rootStudyID: rootStudyID
+        )
+    }
+}
+
+private struct StudyTreeScrollViewportBridge: UIViewRepresentable {
+    var contentOffset: CGPoint
+    var onContentOffsetChange: (CGPoint) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onContentOffsetChange: onContentOffsetChange)
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = false
+        context.coordinator.update(
+            from: view,
+            contentOffset: contentOffset,
+            onContentOffsetChange: onContentOffsetChange
+        )
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        context.coordinator.update(
+            from: view,
+            contentOffset: contentOffset,
+            onContentOffsetChange: onContentOffsetChange
+        )
+    }
+
+    static func dismantleUIView(_ view: UIView, coordinator: Coordinator) {
+        coordinator.detach()
+    }
+
+    @MainActor
+    final class Coordinator {
+        private weak var scrollView: UIScrollView?
+        private var contentOffsetObservation: NSKeyValueObservation?
+        private var reportTask: Task<Void, Never>?
+        private var retryTask: Task<Void, Never>?
+        private var requestedContentOffset: CGPoint = .zero
+        private var onContentOffsetChange: (CGPoint) -> Void
+        private var isApplyingContentOffset = false
+        private var retryCount = 0
+
+        init(onContentOffsetChange: @escaping (CGPoint) -> Void) {
+            self.onContentOffsetChange = onContentOffsetChange
+        }
+
+        func update(
+            from view: UIView,
+            contentOffset: CGPoint,
+            onContentOffsetChange: @escaping (CGPoint) -> Void
+        ) {
+            requestedContentOffset = CGPoint(
+                x: max(0, contentOffset.x),
+                y: max(0, contentOffset.y)
+            )
+            self.onContentOffsetChange = onContentOffsetChange
+            attachIfNeeded(from: view)
+            applyRequestedContentOffset(from: view)
+        }
+
+        func detach() {
+            reportTask?.cancel()
+            retryTask?.cancel()
+            if let scrollView {
+                requestedContentOffset = CGPoint(
+                    x: max(0, scrollView.contentOffset.x),
+                    y: max(0, scrollView.contentOffset.y)
+                )
+                onContentOffsetChange(requestedContentOffset)
+            }
+            contentOffsetObservation?.invalidate()
+            contentOffsetObservation = nil
+            scrollView = nil
+        }
+
+        private func attachIfNeeded(from view: UIView) {
+            guard scrollView == nil,
+                  let scrollView = view.studyTreeEnclosingScrollView() else {
+                return
+            }
+
+            self.scrollView = scrollView
+            contentOffsetObservation = scrollView.observe(
+                \.contentOffset,
+                options: [.new]
+            ) { [weak self] scrollView, _ in
+                Task { @MainActor [weak self, weak scrollView] in
+                    guard let self, let scrollView else {
+                        return
+                    }
+                    self.didScroll(to: scrollView.contentOffset)
+                }
+            }
+        }
+
+        private func applyRequestedContentOffset(from view: UIView) {
+            guard let scrollView = scrollView ?? view.studyTreeEnclosingScrollView() else {
+                scheduleRetry(from: view)
+                return
+            }
+
+            if self.scrollView == nil {
+                attachIfNeeded(from: view)
+            }
+
+            guard scrollView.contentSize.width > 0,
+                  scrollView.contentSize.height > 0 else {
+                scheduleRetry(from: view)
+                return
+            }
+
+            retryCount = 0
+            let maximumOffset = CGPoint(
+                x: max(
+                    0,
+                    scrollView.contentSize.width
+                        - scrollView.bounds.width
+                        + scrollView.adjustedContentInset.right
+                ),
+                y: max(
+                    0,
+                    scrollView.contentSize.height
+                        - scrollView.bounds.height
+                        + scrollView.adjustedContentInset.bottom
+                )
+            )
+            let clampedOffset = CGPoint(
+                x: min(requestedContentOffset.x, maximumOffset.x),
+                y: min(requestedContentOffset.y, maximumOffset.y)
+            )
+            guard abs(scrollView.contentOffset.x - clampedOffset.x) > 0.5
+                    || abs(scrollView.contentOffset.y - clampedOffset.y) > 0.5 else {
+                return
+            }
+
+            isApplyingContentOffset = true
+            scrollView.setContentOffset(clampedOffset, animated: false)
+            isApplyingContentOffset = false
+        }
+
+        private func scheduleRetry(from view: UIView) {
+            guard retryCount < 12, retryTask == nil else {
+                return
+            }
+            retryCount += 1
+            retryTask = Task { @MainActor [weak self, weak view] in
+                try? await Task.sleep(for: .milliseconds(50))
+                guard let self, let view, !Task.isCancelled else {
+                    return
+                }
+                self.retryTask = nil
+                self.attachIfNeeded(from: view)
+                self.applyRequestedContentOffset(from: view)
+            }
+        }
+
+        private func didScroll(to contentOffset: CGPoint) {
+            guard !isApplyingContentOffset else {
+                return
+            }
+            requestedContentOffset = CGPoint(
+                x: max(0, contentOffset.x),
+                y: max(0, contentOffset.y)
+            )
+            reportTask?.cancel()
+            reportTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(150))
+                guard let self, !Task.isCancelled else {
+                    return
+                }
+                self.onContentOffsetChange(self.requestedContentOffset)
+            }
+        }
+    }
+}
+
+private extension UIView {
+    func studyTreeEnclosingScrollView() -> UIScrollView? {
+        var current = superview
+        while let view = current {
+            if let scrollView = view as? UIScrollView {
+                return scrollView
+            }
+            current = view.superview
+        }
+        return nil
     }
 }
 

@@ -42,6 +42,9 @@ test("user administration is searchable, paginated, and keeps plans internal", a
   assert.match(js, /Array\.isArray\(page\.users\)/);
   assert.match(js, /Array\.isArray\(tiers\)/);
   assert.match(css, /\[hidden\]\s*\{[\s\S]*display:\s*none !important/);
+  assert.match(css, /\.admin-login-form input,[\s\S]+?height:\s*38px/);
+  assert.match(css, /\.admin-login-form button,[\s\S]+?background:\s*var\(--blue\)/);
+  assert.match(css, /\.admin-users-table select:focus[\s\S]+?box-shadow:\s*0 0 0 3px var\(--blue-soft\)/);
   assert.doesNotMatch(html, /payment|billing/i);
 });
 

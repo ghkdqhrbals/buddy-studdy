@@ -5,6 +5,18 @@ struct StudyTreeNodeOffset: Codable, Equatable {
     var y: CGFloat
 }
 
+struct StudyTreeViewportState: Codable, Equatable {
+    var zoomScale: CGFloat
+    var contentOffsetX: CGFloat
+    var contentOffsetY: CGFloat
+
+    static let `default` = StudyTreeViewportState(
+        zoomScale: 1,
+        contentOffsetX: 0,
+        contentOffsetY: 0
+    )
+}
+
 private extension Collection {
     subscript(safe index: Index) -> Element? {
         indices.contains(index) ? self[index] : nil

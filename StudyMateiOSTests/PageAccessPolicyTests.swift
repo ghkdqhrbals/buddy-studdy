@@ -76,3 +76,50 @@ final class PageAccessPolicyTests: XCTestCase {
         XCTAssertNil(resolution.featureMessage)
     }
 }
+
+final class StudyTreeViewportPersistenceTests: XCTestCase {
+    func testViewportPersistsPerRootStudyAndSanitizesValues() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        store.saveStudyTreeViewport(
+            StudyTreeViewportState(
+                zoomScale: 1.45,
+                contentOffsetX: 180,
+                contentOffsetY: 96
+            ),
+            rootStudyID: 7
+        )
+
+        XCTAssertEqual(
+            store.loadStudyTreeViewport(rootStudyID: 7),
+            StudyTreeViewportState(
+                zoomScale: 1.45,
+                contentOffsetX: 180,
+                contentOffsetY: 96
+            )
+        )
+        XCTAssertEqual(store.loadStudyTreeViewport(rootStudyID: 8), .default)
+
+        store.saveStudyTreeViewport(
+            StudyTreeViewportState(
+                zoomScale: 4,
+                contentOffsetX: -20,
+                contentOffsetY: .infinity
+            ),
+            rootStudyID: 9
+        )
+        XCTAssertEqual(
+            store.loadStudyTreeViewport(rootStudyID: 9),
+            StudyTreeViewportState(
+                zoomScale: 1.8,
+                contentOffsetX: 0,
+                contentOffsetY: 0
+            )
+        )
+    }
+}

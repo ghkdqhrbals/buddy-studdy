@@ -3929,6 +3929,14 @@ final class AppState: ObservableObject {
         )
     }
 
+    func loadStudyTreeViewport(rootStudyID: Int) -> StudyTreeViewportState {
+        settingsStore.loadStudyTreeViewport(rootStudyID: rootStudyID)
+    }
+
+    func saveStudyTreeViewport(_ viewport: StudyTreeViewportState, rootStudyID: Int) {
+        settingsStore.saveStudyTreeViewport(viewport, rootStudyID: rootStudyID)
+    }
+
     func studyCategory(for room: BackendStudyRoom) -> StudyCategory {
         studyCategoriesForDisplay.first(where: { $0.id == String(room.id) })
             ?? StudyCategory(
