@@ -1019,6 +1019,14 @@ final class AppState: ObservableObject {
     }
 
     func pendingQuestionCount(for category: StudyCategory) -> Int {
+        if let studyID = Int(category.id) {
+            let localCount = pendingRecordsIncludingCurrent.filter { $0.studyID == studyID }.count
+            if let backendCount = studyRoomState.pendingQuestionCount(for: category) {
+                return max(backendCount, localCount)
+            }
+            return localCount
+        }
+
         if let backendCount = studyRoomState.pendingQuestionCount(for: category) {
             return backendCount
         }
@@ -1035,6 +1043,26 @@ final class AppState: ObservableObject {
         }
 
         return pendingQuestionCount(for: category) >= Self.maxPendingQuestionCount
+    }
+
+    func pendingQuestionCount(categoryID: String?) -> Int {
+        guard let categoryID else {
+            return pendingQuestionCount
+        }
+
+        if let category = settings.category(for: categoryID) {
+            return pendingQuestionCount(for: category)
+        }
+
+        if let studyID = Int(categoryID) {
+            return pendingRecordsIncludingCurrent.filter { $0.studyID == studyID }.count
+        }
+
+        return 0
+    }
+
+    func hasReachedPendingQuestionLimit(categoryID: String?) -> Bool {
+        pendingQuestionCount(categoryID: categoryID) >= Self.maxPendingQuestionCount
     }
 
     var pendingStudyRecords: [StudyRecord] {
@@ -3807,6 +3835,14 @@ final class AppState: ObservableObject {
             return record
         }
 
+        if let studyID = Int(category.id) {
+            guard let record = backendStudyRoom(id: studyID)?.pendingQuestion,
+                  record.gradingResult == nil else {
+                return nil
+            }
+            return record
+        }
+
         let categoryKey = Self.normalizedCategoryText(for: category.title)
         let matchesCategory: (StudyRecord?) -> StudyRecord? = { record in
             guard let record,
@@ -3817,19 +3853,10 @@ final class AppState: ObservableObject {
             return record
         }
 
-        if let studyID = Int(category.id),
-           let record = matchesCategory(backendStudyRoom(id: studyID)?.pendingQuestion) {
-            return record
-        }
-
-        if let studyID = Int(category.id),
-           let root = rootStudyRoom(for: studyID),
-           root.id != studyID,
-           let record = matchesCategory(root.pendingQuestion) {
-            return record
-        }
-
-        return nil
+        return backendStudyRooms
+            .compactMap(\.pendingQuestion)
+            .compactMap(matchesCategory)
+            .max { $0.question.createdAt < $1.question.createdAt }
     }
 
     func backendStudyRoom(categoryID: String?) -> BackendStudyRoom? {
@@ -4609,7 +4636,8 @@ final class AppState: ObservableObject {
             return
         }
 
-        guard await canCreateQuestionAfterGlobalPendingCheck(
+        guard await canCreateQuestionAfterPendingCheck(
+            studyCategoryID: studyCategoryID,
             reason: "백엔드 새 질문 생성",
             updateVisibleQuestion: manual
         ) else {
@@ -4618,13 +4646,14 @@ final class AppState: ObservableObject {
 
         errorMessage = nil
         statusMessage = manual ? "질문을 생성 중입니다." : "예약된 질문을 확인 중입니다."
-        log(.info, "백엔드 새 질문 생성 요청을 전송합니다.")
+        log(.info, "백엔드 새 질문 생성을 준비합니다. studyCategoryID=\(studyCategoryID ?? "-")")
 
         await actionRunner.run(
             operation: {
                 guard let studyID = await backendStudyID(for: studyCategoryID) else {
                     throw AppStateError.backendStudyMissing
                 }
+                log(.info, "백엔드 새 질문 생성 API를 호출합니다. studyID=\(studyID)")
                 let record = try await studyRoomUseCase.createQuestion(
                     registration: registration,
                     studyID: studyID
@@ -4652,7 +4681,7 @@ final class AppState: ObservableObject {
 
                 hasAPIKeyError = false
                 statusMessage = shouldActivateQuestion ? "새 질문이 준비됐습니다." : "새 질문이 준비됐지만 작성 중인 답변은 유지했습니다."
-                log(.info, "백엔드 질문을 생성했습니다: \(record.question.question)")
+                log(.info, "백엔드 질문을 생성했습니다. studyID=\(record.studyID ?? studyID), recordID=\(record.id)")
                 await refreshQuestionQuota()
             },
             onFailure: { error in
@@ -4754,7 +4783,8 @@ final class AppState: ObservableObject {
         return 0
     }
 
-    private func canCreateQuestionAfterGlobalPendingCheck(
+    private func canCreateQuestionAfterPendingCheck(
+        studyCategoryID: String?,
         reason: String,
         updateVisibleQuestion: Bool = true
     ) async -> Bool {
@@ -4768,7 +4798,9 @@ final class AppState: ObservableObject {
             return false
         }
 
-        guard !hasReachedPendingQuestionLimit(for: settings.category(for: settings.selectedStudyCategoryID)) else {
+        let targetCategoryID = studyCategoryID ?? settings.selectedStudyCategoryID
+        guard !hasReachedPendingQuestionLimit(categoryID: targetCategoryID) else {
+            log(.info, "\(reason)을 건너뛰었습니다. 해당 주제에 답변 대기 중인 질문이 있습니다. studyCategoryID=\(targetCategoryID ?? "-")")
             showPendingQuestionLimitStatus(reason: reason)
             return false
         }
@@ -4873,16 +4905,19 @@ final class AppState: ObservableObject {
     }
 
     private func preferredPendingRecord(for category: StudyCategory) -> StudyRecord? {
-        let categoryKey = Self.normalizedCategoryText(for: category.title)
-        let records = pendingRecordsIncludingCurrent
-            .filter { Self.normalizedCategoryText(for: $0.topic) == categoryKey }
-        let exactStudyRecords: [StudyRecord]
         if let studyID = Int(category.id) {
-            exactStudyRecords = records.filter { $0.studyID == studyID }
-        } else {
-            exactStudyRecords = []
+            let exactStudyRecords = pendingRecordsIncludingCurrent.filter { $0.studyID == studyID }
+            if let currentQuestion,
+               let currentRecord = exactStudyRecords.first(where: { studyRecordMatches($0, question: currentQuestion) }) {
+                return currentRecord
+            }
+
+            return exactStudyRecords.max { $0.question.createdAt < $1.question.createdAt }
         }
-        let preferredRecords = exactStudyRecords.isEmpty ? records : exactStudyRecords
+
+        let categoryKey = Self.normalizedCategoryText(for: category.title)
+        let preferredRecords = pendingRecordsIncludingCurrent
+            .filter { Self.normalizedCategoryText(for: $0.topic) == categoryKey }
 
         if let currentQuestion,
            let currentRecord = preferredRecords.first(where: { studyRecordMatches($0, question: currentQuestion) }) {

@@ -167,6 +167,122 @@ final class StudyRoomStateStoreTests: XCTestCase {
         XCTAssertFalse(state.containsPendingQuestion(recordID: record.id))
         XCTAssertEqual(state.pendingQuestionCount, 0)
     }
+
+    func testPendingQuestionCountUsesStudyIDWhenTopicsAreEqual() {
+        let pendingRecord = StudyRecord(
+            id: "record-11",
+            studyID: 11,
+            question: QuestionItem(
+                question: "Root question",
+                expectedAnswerHint: nil,
+                createdAt: Date(timeIntervalSince1970: 11)
+            ),
+            topic: "Redis",
+            difficulty: .intermediate
+        )
+        var state = StudyRoomStateStore()
+        state.replace(with: [
+            backendRoom(id: 11, topic: "Redis", pendingQuestion: pendingRecord),
+            backendRoom(id: 12, topic: "Redis", pendingQuestion: nil)
+        ])
+
+        XCTAssertEqual(
+            state.pendingQuestionCount(for: StudyCategory(id: "11", title: "Redis")),
+            1
+        )
+        XCTAssertEqual(
+            state.pendingQuestionCount(for: StudyCategory(id: "12", title: "Redis")),
+            0
+        )
+    }
+
+    func testIncomingRecordOnlyUpdatesItsStudyID() {
+        let record = StudyRecord(
+            id: "record-12",
+            studyID: 12,
+            question: QuestionItem(
+                question: "Child question",
+                expectedAnswerHint: nil,
+                createdAt: Date(timeIntervalSince1970: 12)
+            ),
+            topic: "Redis",
+            difficulty: .intermediate
+        )
+        var state = StudyRoomStateStore()
+        state.replace(with: [
+            backendRoom(id: 11, topic: "Redis", pendingQuestion: nil),
+            backendRoom(id: 12, topic: "Redis", pendingQuestion: nil)
+        ])
+
+        XCTAssertTrue(state.applyIncomingRecord(record))
+        XCTAssertNil(state.rooms.first(where: { $0.id == 11 })?.pendingQuestion)
+        XCTAssertEqual(state.rooms.first(where: { $0.id == 12 })?.pendingQuestion?.id, record.id)
+    }
+
+    @MainActor
+    func testPendingLimitDoesNotFallBackFromRootToChildStudy() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let root = StudyCategory(id: "11", title: "Redis", difficulty: .level5)
+        let child = StudyCategory(id: "12", title: "Redis Streams", difficulty: .level5)
+        store.saveSettings(
+            StudySettings(
+                topic: child.title,
+                difficulty: root.difficulty,
+                customPrompt: "",
+                intervalMinutes: 30,
+                studyCategories: [root, child],
+                selectedStudyCategoryID: root.id
+            )
+        )
+        store.replaceStudyRecords([
+            StudyRecord(
+                id: "root-question",
+                studyID: 11,
+                question: QuestionItem(
+                    question: "Root question",
+                    expectedAnswerHint: nil,
+                    createdAt: Date(timeIntervalSince1970: 11)
+                ),
+                topic: root.title,
+                difficulty: root.difficulty
+            )
+        ])
+        let appState = AppState(settingsStore: store)
+
+        XCTAssertTrue(appState.hasReachedPendingQuestionLimit(categoryID: root.id))
+        XCTAssertFalse(appState.hasReachedPendingQuestionLimit(categoryID: child.id))
+        XCTAssertNil(appState.pendingStudyRecord(categoryID: child.id))
+    }
+
+    private func backendRoom(
+        id: Int,
+        topic: String,
+        pendingQuestion: StudyRecord?
+    ) -> BackendStudyRoom {
+        BackendStudyRoom(
+            id: id,
+            topic: topic,
+            difficultyLevel: 5,
+            intervalMinutes: 30,
+            enabled: true,
+            notificationSound: nil,
+            customPrompt: "",
+            openAIModel: "gpt-5.4",
+            maxHistoryCount: 100,
+            nextDueAt: nil,
+            lastSentAt: nil,
+            lastError: nil,
+            pendingQuestion: pendingQuestion,
+            createdAt: Date(timeIntervalSince1970: 1),
+            updatedAt: Date(timeIntervalSince1970: 1)
+        )
+    }
 }
 
 final class StudyTreeViewportPersistenceTests: XCTestCase {

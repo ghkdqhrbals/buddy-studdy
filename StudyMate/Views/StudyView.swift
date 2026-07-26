@@ -249,12 +249,16 @@ struct StudyView: View {
         }
 
         Task {
-            await appState.generateQuestion(studyCategoryID: preferredCategoryID ?? selectedCategory?.id)
+            await appState.generateQuestion(studyCategoryID: targetCategoryID)
         }
     }
 
     private var hasReachedPendingQuestionLimit: Bool {
-        appState.hasReachedPendingQuestionLimit(for: selectedCategory)
+        appState.hasReachedPendingQuestionLimit(categoryID: targetCategoryID)
+    }
+
+    private var targetCategoryID: String? {
+        preferredCategoryID ?? selectedCategory?.id
     }
 
     private func questionQuotaNoticeView(_ message: String, strings: AppStrings) -> some View {

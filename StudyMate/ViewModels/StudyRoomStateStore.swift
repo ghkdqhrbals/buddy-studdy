@@ -16,6 +16,14 @@ struct StudyRoomStateStore {
     }
 
     func pendingQuestionCount(for category: StudyCategory) -> Int? {
+        if let studyID = Int(category.id) {
+            guard let room = rooms.first(where: { $0.id == studyID }) else {
+                return nil
+            }
+
+            return Self.isPendingQuestion(room.pendingQuestion) ? 1 : 0
+        }
+
         let categoryKey = Self.normalizedText(category.title)
         let matchingRooms = rooms.filter { Self.normalizedText($0.topic) == categoryKey }
 
@@ -103,8 +111,13 @@ struct StudyRoomStateStore {
         var didApply = false
         rooms = rooms.map { room in
             let matchesExistingQuestion = room.pendingQuestion?.id == record.id
-            let matchesTopic = Self.normalizedText(room.topic) == Self.normalizedText(record.topic)
-            guard matchesExistingQuestion || matchesTopic else {
+            let matchesTargetStudy: Bool
+            if let studyID = record.studyID {
+                matchesTargetStudy = room.id == studyID
+            } else {
+                matchesTargetStudy = Self.normalizedText(room.topic) == Self.normalizedText(record.topic)
+            }
+            guard matchesExistingQuestion || matchesTargetStudy else {
                 return room
             }
 
