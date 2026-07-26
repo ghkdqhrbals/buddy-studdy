@@ -9,7 +9,7 @@ pagination behavior.
 
 The target is one React application at `monitoring.lowfidev.cloud` with:
 
-- one router and fixed navigation shell;
+- one route boundary and fixed navigation shell;
 - one administrator session store;
 - query caching, cancellation, and explicit loading/error states;
 - reusable tables, cursor pagination, time ranges, and chart components;
@@ -17,19 +17,23 @@ The target is one React application at `monitoring.lowfidev.cloud` with:
 
 ## Phase 1: Shared Boundaries
 
-Status: started.
+Status: complete.
 
-- `admin-session.js` is the single backend administrator token/API boundary.
-- `Users & Quotas` and `Redis Streams` consume that boundary.
-- Redis Stream filtering and cursor path construction live in a pure model
-  module with Node tests.
+- `src/admin/adminApi.js` is the single backend administrator token/API
+  boundary.
+- `Users & Quotas` and `Redis Streams` consume the same session provider.
+- Redis Stream filtering, cursor construction, audit parsing, and nested object
+  parsing live in pure modules with Node tests.
 
 This removes the most error-prone duplicated state before introducing a
 framework.
 
 ## Phase 2: React Shell and Manage Pages
 
-Create a Vite React application inside `monitoring/api-dashboard` and preserve
+Status: complete.
+
+A Vite React application now lives inside `monitoring/api-dashboard` and
+preserves
 the current public paths. Migrate low-risk stateful pages first:
 
 1. `Users & Quotas`
@@ -37,9 +41,21 @@ the current public paths. Migrate low-risk stateful pages first:
 3. `Settings`
 4. `Access & Audit`
 
-Use React Router for page state and TanStack Query for server state. Keep admin
-credentials out of application state after login; retain only the existing
-session-scoped bearer token.
+The application uses the browser pathname as the route boundary and TanStack
+Query for server state. A client-side routing dependency is intentionally
+unnecessary while each operational page retains a stable `.html` URL. Admin
+credentials stay out of application state after login; only the
+session-scoped bearer token is retained.
+
+The shared Manage UI includes:
+
+- a fixed compact/expanded navigation shell;
+- dense, horizontally safe tables with bounded pagination;
+- row-selected detail drawers instead of inline table forms;
+- membership and quota edits isolated in the selected user drawer;
+- Stream Entries, Event Outbox, and Push Outbox views;
+- recursive JSON-string decoding with tree/raw object inspection;
+- consistent loading, empty, error, and expired-session states.
 
 ## Phase 3: Observability Pages
 

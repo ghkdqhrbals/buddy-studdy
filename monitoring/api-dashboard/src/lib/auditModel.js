@@ -12,7 +12,6 @@ export function parseMonitoringAccessLog(value) {
   const payload = JSON.parse(line);
   if (payload.event !== "monitoring_access") return null;
   const query = String(payload.query || "");
-  const path = `${payload.path || "/"}${query ? `?${query}` : ""}`;
   const entry = {
     nanoseconds: String(nanoseconds),
     timestampMs: Number(BigInt(nanoseconds) / 1_000_000n),
@@ -21,7 +20,7 @@ export function parseMonitoringAccessLog(value) {
     forwardedFor: String(payload.forwardedFor || ""),
     user: String(payload.user || ""),
     method: String(payload.method || "GET").toUpperCase(),
-    path,
+    path: `${payload.path || "/"}${query ? `?${query}` : ""}`,
     status: Number(payload.status) || 0,
     durationMs: Number(payload.durationSeconds) * 1000 || 0,
     userAgent: String(payload.userAgent || ""),
@@ -35,8 +34,7 @@ export function filterAuditEntries(entries, filters = {}) {
   const ip = String(filters.ip || "").trim().toLowerCase();
   const search = String(filters.search || "").trim().toLowerCase();
   return entries.filter((entry) => {
-    const event = entry.eventType || classifyAuditEvent(entry);
-    if (eventType !== "all" && event !== eventType) return false;
+    if (eventType !== "all" && entry.eventType !== eventType) return false;
     if (ip && !String(entry.clientIp || "").toLowerCase().includes(ip)) return false;
     if (!search) return true;
     return [entry.method, entry.path, entry.requestId, entry.user, entry.userAgent]
@@ -48,8 +46,8 @@ export function summarizeAuditEntries(entries) {
   return {
     total: entries.length,
     uniqueIps: new Set(entries.map((entry) => entry.clientIp).filter(Boolean)).size,
-    pageViews: entries.filter((entry) => (entry.eventType || classifyAuditEvent(entry)) === "page").length,
-    denied: entries.filter((entry) => (entry.eventType || classifyAuditEvent(entry)) === "denied").length,
+    pageViews: entries.filter((entry) => entry.eventType === "page").length,
+    denied: entries.filter((entry) => entry.eventType === "denied").length,
   };
 }
 

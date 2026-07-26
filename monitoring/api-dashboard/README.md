@@ -16,9 +16,13 @@ Grafana, and the private TestZone API behind one Basic Auth boundary.
   test components, and Grafana links
 - `/settings.html`: browser-local navigation and access-history preferences
 
-`Users & Quotas` and `Redis Streams` share `admin-session.js` as their only
-backend administrator session and API boundary. The gradual React migration is
-documented in `docs/observability/MONITORING_REACT_MIGRATION.md`.
+`Users & Quotas`, `Redis Streams`, `Access & Audit`, and `Settings` are served
+by the shared React Manage application. It provides one fixed navigation shell,
+one session-scoped administrator API boundary, TanStack Query server state,
+dense reusable tables, and a right-side object inspector. Redis field values
+and outbox payload JSON can be explored as a nested tree or raw JSON without
+flattening the stored object. The gradual migration is documented in
+`docs/observability/MONITORING_REACT_MIGRATION.md`.
 
 ## Access Audit
 
@@ -85,7 +89,7 @@ Metric semantics and component collection behavior are documented in
 ## Verification
 
 ```bash
-(cd monitoring/api-dashboard && npm test)
+(cd monitoring/api-dashboard && npm ci && npm test)
 (cd monitoring/testzone-service && npm test)
 node --check monitoring/api-dashboard/public/testzone.js
 node --check monitoring/testzone-service/src/server.mjs
@@ -95,3 +99,8 @@ Monitoring UI deployment is owned by
 `docs/deploy-repo-template/deploy-macbookair-monitoring.yml`. The execution
 service and InfluxDB are owned by
 `docs/deploy-repo-template/deploy-testzone.yml`.
+
+`npm test` builds the React bundle into `public/react` before running the
+contract suite. The generated `manage.js` and `manage.css` are committed
+because the monitoring deployment copies the versioned `public` artifact
+without compiling on the deploy host.

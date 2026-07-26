@@ -3,69 +3,59 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const publicRoot = new URL("../public/", import.meta.url);
+const sourceRoot = new URL("../src/", import.meta.url);
 
 async function text(file) {
   return readFile(new URL(file, publicRoot), "utf8");
 }
 
-test("all monitoring pages load the shared navigation shell", async () => {
-  for (const page of ["index.html", "performance.html", "testzone.html", "audit.html", "settings.html", "users.html", "streams.html"]) {
+async function source(file) {
+  return readFile(new URL(file, sourceRoot), "utf8");
+}
+
+test("Manage pages load the React application while observe pages keep the static shell", async () => {
+  for (const page of ["audit.html", "settings.html", "users.html", "streams.html"]) {
+    const html = await text(page);
+    assert.match(html, /id="monitoring-react-root"/);
+    assert.match(html, /src="\/react\/manage\.js\?/);
+    assert.match(html, /href="\/react\/manage\.css\?/);
+    assert.match(html, /src="\/nav-bootstrap\.js\?/);
+  }
+  for (const page of ["index.html", "performance.html", "testzone.html"]) {
     const html = await text(page);
     assert.match(html, /src="\/shell\.js\?/);
-    assert.match(html, /src="\/nav-bootstrap\.js\?/);
-    assert.ok(
-      html.indexOf("/nav-bootstrap.js") < html.indexOf("/styles.css"),
-      `${page} must restore navigation state before styles load`,
-    );
   }
-  const shell = await text("shell.js");
-  assert.match(shell, /Access & Audit/);
-  assert.match(shell, /Settings/);
-  assert.match(shell, /Users & Quotas/);
-  assert.match(shell, /Redis Streams/);
-  assert.match(shell, /Load testing/);
-  assert.match(shell, /side-nav-footer/);
-  assert.match(shell, /NAV_COLLAPSED_KEY/);
+  const navigation = await source("app/navigation.js");
+  assert.match(navigation, /Access & Audit/);
+  assert.match(navigation, /Users & Quotas/);
+  assert.match(navigation, /Redis Streams/);
 });
 
 test("user administration is searchable, paginated, and keeps plans internal", async () => {
-  const html = await text("users.html");
-  const js = await text("users.js");
-  const adminSession = await text("admin-session.js");
-  const css = await text("styles.css");
-  assert.match(html, /id="adminUserSearch"/);
-  assert.match(html, /id="adminPreviousButton"/);
-  assert.match(html, /id="adminNextButton"/);
-  assert.match(html, /Plan limits/);
-  assert.match(js, /const PAGE_SIZE = 20/);
-  assert.match(js, /monthlyQuestionLimitOverride/);
-  assert.match(js, /from "\.\/admin-session\.js"/);
-  assert.match(adminSession, /sessionStorage/);
-  assert.match(adminSession, /Authorization: `Bearer \$\{session\.token\}`/);
-  assert.match(js, /function escapeHTML/);
-  assert.match(js, /Array\.isArray\(page\.users\)/);
-  assert.match(js, /Array\.isArray\(tiers\)/);
-  assert.match(css, /\[hidden\]\s*\{[\s\S]*display:\s*none !important/);
-  assert.match(css, /\.admin-login-form input,[\s\S]+?height:\s*38px/);
-  assert.match(css, /\.admin-login-form button,[\s\S]+?background:\s*var\(--blue\)/);
-  assert.match(css, /\.admin-users-table select:focus[\s\S]+?box-shadow:\s*0 0 0 3px var\(--blue-soft\)/);
-  assert.doesNotMatch(html, /payment|billing/i);
+  const page = await source("pages/UsersPage.jsx");
+  const adminApi = await source("admin/adminApi.js");
+  assert.match(page, /const PAGE_SIZE = 20/);
+  assert.match(page, /SearchField/);
+  assert.match(page, /Pagination/);
+  assert.match(page, /DetailDrawer/);
+  assert.match(page, /ObjectInspector/);
+  assert.match(page, /monthlyQuestionLimitOverride/);
+  assert.match(adminApi, /sessionStorage/);
+  assert.match(adminApi, /Authorization: `Bearer \$\{session\.token\}`/);
+  assert.doesNotMatch(page, /payment|billing/i);
 });
 
 test("Redis Stream administration lives in monitoring Manage with bounded cursor navigation", async () => {
-  const html = await text("streams.html");
-  const js = await text("streams.js");
-  const shell = await text("shell.js");
-  assert.match(html, /id="streamTopicQuery"/);
-  assert.match(html, /id="streamEntryId"/);
-  assert.match(html, /id="streamPreviousButton"/);
-  assert.match(html, /id="streamNextButton"/);
-  assert.match(js, /buildStreamEntriesPath/);
-  assert.match(js, /buildStreamEntryPath/);
-  assert.match(js, /cursorStack/);
-  assert.match(js, /JSON\.stringify\(entry\.fields \|\| \{\}, null, 2\)/);
-  assert.match(shell, /id: "manage"[\s\S]+?Redis Streams/);
-  assert.doesNotMatch(js, /innerHTML/);
+  const page = await source("pages/StreamsPage.jsx");
+  const paths = await source("lib/streamPaths.js");
+  assert.match(page, /Stream entries/);
+  assert.match(page, /Event outbox/);
+  assert.match(page, /Push outbox/);
+  assert.match(page, /cursorStack/);
+  assert.match(page, /ObjectInspector/);
+  assert.match(paths, /streamEntriesPath/);
+  assert.match(paths, /streamEntryPath/);
+  assert.doesNotMatch(page, /innerHTML/);
 });
 
 test("navigation is fixed, collapsible, and keeps its version at the bottom", async () => {
@@ -90,29 +80,21 @@ test("navigation is fixed, collapsible, and keeps its version at the bottom", as
 });
 
 test("settings control navigation and access journal browser preferences", async () => {
-  const html = await text("settings.html");
-  const js = await text("settings.js");
-  assert.match(html, /id="navigationMode"/);
-  assert.match(html, /id="auditDefaultRange"/);
-  assert.match(html, /id="auditRefreshSeconds"/);
-  assert.match(html, /id="auditPageSize"/);
-  const css = await text("styles.css");
-  assert.match(css, /\.settings-row select\s*\{[\s\S]*height:\s*38px/);
-  assert.match(css, /\.settings-actions \.status-message:empty\s*\{[\s\S]*display:\s*none/);
-  assert.match(js, /buddystudy\.monitoring\.nav\.mode/);
-  assert.match(js, /buddystudy\.monitoring\.audit\.range/);
-  assert.match(js, /monitoring:nav-mode-change/);
+  const page = await source("pages/SettingsPage.jsx");
+  assert.match(page, /buddystudy\.monitoring\.nav\.mode/);
+  assert.match(page, /buddystudy\.monitoring\.audit\.range/);
+  assert.match(page, /buddystudy\.monitoring\.audit\.refreshSeconds/);
+  assert.match(page, /buddystudy\.monitoring\.audit\.pageSize/);
+  assert.match(page, /monitoring:nav-mode-change/);
 });
 
 test("access audit reads the monitoring gateway journal instead of backend API logs", async () => {
-  const html = await text("audit.html");
-  const js = await text("audit.js");
-  assert.match(html, /Monitoring access journal/);
-  assert.match(html, /passwords and request bodies are never recorded/);
-  assert.match(js, /\{job="monitoring-access"\}/);
-  assert.match(js, /parseMonitoringAccessLog/);
-  assert.doesNotMatch(js, /api_exchange/);
-  assert.doesNotMatch(js, /parseApiExchange/);
+  const page = await source("pages/AuditPage.jsx");
+  assert.match(page, /\{job="monitoring-access"\}/);
+  assert.match(page, /parseMonitoringAccessLog/);
+  assert.match(page, /DetailDrawer/);
+  assert.doesNotMatch(page, /api_exchange/);
+  assert.doesNotMatch(page, /parseApiExchange/);
 });
 
 test("server dashboard navigation and legacy URL open the detailed Grafana dashboard", async () => {
