@@ -9,6 +9,9 @@ import com.buddystudy.backend.common.adapter.outbound.security.SensitiveDataReda
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
+import io.lettuce.core.Consumer as LettuceConsumer
+import io.lettuce.core.XAutoClaimArgs
+import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands
 import org.springframework.http.HttpStatus
 import org.slf4j.LoggerFactory
 import org.springframework.data.domain.Range
@@ -61,10 +64,36 @@ interface RedisStreamPublishOperations {
     suspend fun publish(topic: RedisStreamTopic, fields: Map<String, String>): RedisStreamPublishedMessage
 }
 
+interface RedisStreamConsumerOperations {
+    suspend fun acknowledge(message: RedisStreamMessage, group: String)
+
+    suspend fun readNew(
+        topic: RedisStreamTopic,
+        group: String,
+        consumer: String,
+        count: Long,
+        timeout: Duration,
+    ): List<RedisStreamMessage>
+
+    suspend fun autoClaim(
+        topic: RedisStreamTopic,
+        group: String,
+        consumer: String,
+        minIdleTime: Duration,
+        count: Long,
+        startId: String,
+    ): RedisStreamClaimBatch
+}
+
 data class RedisStreamMessage(
     val streamKey: String,
     val recordId: String,
     val fields: Map<String, String>,
+)
+
+data class RedisStreamClaimBatch(
+    val nextStartId: String,
+    val messages: List<RedisStreamMessage>,
 )
 
 @Component
@@ -73,7 +102,7 @@ class RedisStreamTopicManager(
     private val blockingRedis: StringRedisTemplate,
     private val redactor: SensitiveDataRedactor,
     properties: BuddyStudyProperties,
-) : RedisStreamPublishOperations, AdminRedisStreamInspectionPort {
+) : RedisStreamPublishOperations, RedisStreamConsumerOperations, AdminRedisStreamInspectionPort {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val topics = listOf(
         RedisStreamTopicDefinition(
@@ -115,10 +144,75 @@ class RedisStreamTopicManager(
         Unit
     }
 
-    suspend fun acknowledge(message: RedisStreamMessage, group: String) {
+    override suspend fun acknowledge(message: RedisStreamMessage, group: String) {
         redis.opsForStream<String, String>()
             .acknowledge(message.streamKey, group, RecordId.of(message.recordId))
             .awaitSingle()
+    }
+
+    override suspend fun readNew(
+        topic: RedisStreamTopic,
+        group: String,
+        consumer: String,
+        count: Long,
+        timeout: Duration,
+    ): List<RedisStreamMessage> = withContext(Dispatchers.IO) {
+        val definition = definition(topic)
+        ensureGroup(definition.streamKey, group)
+        read(
+            streamKey = definition.streamKey,
+            group = group,
+            consumer = consumer,
+            count = count,
+            timeout = timeout,
+            offset = ReadOffset.lastConsumed(),
+        ).map { it.toMessage(definition.streamKey) }
+    }
+
+    override suspend fun autoClaim(
+        topic: RedisStreamTopic,
+        group: String,
+        consumer: String,
+        minIdleTime: Duration,
+        count: Long,
+        startId: String,
+    ): RedisStreamClaimBatch = withContext(Dispatchers.IO) {
+        val definition = definition(topic)
+        ensureGroup(definition.streamKey, group)
+        val connectionFactory = requireNotNull(blockingRedis.connectionFactory) {
+            "Redis connection factory is required for XAUTOCLAIM."
+        }
+        connectionFactory.connection.use { connection ->
+            @Suppress("UNCHECKED_CAST")
+            val commands = connection.nativeConnection as? RedisClusterAsyncCommands<ByteArray, ByteArray>
+                ?: error("XAUTOCLAIM requires a Lettuce Redis connection.")
+            val arguments = XAutoClaimArgs<ByteArray>()
+                .consumer(
+                    LettuceConsumer.from(
+                        group.toByteArray(Charsets.UTF_8),
+                        consumer.toByteArray(Charsets.UTF_8),
+                    ),
+                )
+                .minIdleTime(minIdleTime)
+                .startId(startId)
+                .count(count.coerceAtLeast(1))
+            val claimed = commands.xautoclaim(
+                definition.streamKey.toByteArray(Charsets.UTF_8),
+                arguments,
+            ).get()
+            RedisStreamClaimBatch(
+                nextStartId = claimed.id,
+                messages = claimed.messages.map { record ->
+                    RedisStreamMessage(
+                        streamKey = record.stream.toString(Charsets.UTF_8),
+                        recordId = record.id,
+                        fields = record.body
+                            .mapKeys { it.key.toString(Charsets.UTF_8) }
+                            .mapValues { it.value.toString(Charsets.UTF_8) },
+                    )
+                },
+            )
+        }
     }
 
     override suspend fun topics(): List<AdminStreamTopicSummary> = withContext(Dispatchers.IO) {
@@ -262,12 +356,7 @@ class RedisStreamTopicManager(
             }
         }
         records.forEach { record ->
-            val message = RedisStreamMessage(
-                streamKey = definition.streamKey,
-                recordId = record.id.value,
-                fields = record.value.mapKeys { it.key.toString() }.mapValues { it.value.toString() },
-            )
-            handler(message)
+            handler(record.toMessage(definition.streamKey))
         }
     }
 
@@ -289,21 +378,20 @@ class RedisStreamTopicManager(
 
     private fun ensureGroup(streamKey: String, group: String) {
         try {
-            blockingRedis.connectionFactory?.connection?.use { connection ->
-                connection.execute(
-                    "XGROUP",
-                    "CREATE".toByteArray(),
-                    streamKey.toByteArray(),
-                    group.toByteArray(),
-                    "0".toByteArray(),
-                    "MKSTREAM".toByteArray(),
-                )
-            }
+            blockingRedis.opsForStream<String, String>()
+                .createGroup(streamKey, ReadOffset.from("0-0"), group)
         } catch (error: Exception) {
             if (error.message?.contains("BUSYGROUP") == true) return
             logger.debug("redis_stream_group_create_ignored stream={} group={} error={}", streamKey, group, error.message)
         }
     }
+
+    private fun MapRecord<String, String, String>.toMessage(streamKey: String): RedisStreamMessage =
+        RedisStreamMessage(
+            streamKey = streamKey,
+            recordId = id.value,
+            fields = value.mapKeys { it.key.toString() }.mapValues { it.value.toString() },
+        )
 
     private companion object {
         const val MAX_CONCURRENCY = 32

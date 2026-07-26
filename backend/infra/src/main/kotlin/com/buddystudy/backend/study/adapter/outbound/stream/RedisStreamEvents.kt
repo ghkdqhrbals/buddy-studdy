@@ -1,6 +1,5 @@
 package com.buddystudy.backend.study.adapter.outbound.stream
 
-import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.common.application.model.QuestionStreamEventType
 import com.fasterxml.jackson.annotation.JsonInclude
 import java.time.Instant
@@ -56,14 +55,7 @@ data class QuestionPushRequestedPayload(
     val createdAt: Instant,
 )
 
-fun QuestionPushRequestedEvent.toRedisStreamFields(): Map<String, String> =
-    mapOf(
-        "eventId" to eventId,
-        "eventType" to eventType.name,
-        "payload" to JsonMapperProvider.mapper.writeValueAsString(toPayload()),
-    )
-
-private fun QuestionPushRequestedEvent.toPayload(): QuestionPushRequestedPayload =
+fun QuestionPushRequestedEvent.toPayload(): QuestionPushRequestedPayload =
     QuestionPushRequestedPayload(
         recordId = recordId,
         notificationId = notificationId,
