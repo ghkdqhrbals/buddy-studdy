@@ -2320,6 +2320,7 @@ private struct MobileStudyTreeView: View {
     @State private var hasAppliedInitialViewportFit = false
     @State private var hasUserInteractedWithTree = false
     @State private var shouldFitInitialViewport = false
+    @State private var isPreparingInitialViewport = true
     @State private var selectionMode: StudyTreeSelectionMode?
     @State private var showsDeleteConfirmation = false
     @State private var deletionCandidate: BackendStudyRoom?
@@ -2471,9 +2472,15 @@ private struct MobileStudyTreeView: View {
                                 .allowsHitTesting(false)
                             }
                         }
+                        .opacity(isPreparingInitialViewport ? 0 : 1)
+                        .allowsHitTesting(!isPreparingInitialViewport)
                         .simultaneousGesture(viewportPanGesture)
                         .simultaneousGesture(zoomGesture)
 
+                        if isPreparingInitialViewport {
+                            ProgressView()
+                                .controlSize(.regular)
+                        }
                     }
                     .onAppear {
                         updateTreeViewportSize(geometry.size, snapshot: snapshot)
@@ -2550,10 +2557,12 @@ private struct MobileStudyTreeView: View {
             loadTreeState()
             await appState.refreshVisibleData()
             hasFinishedInitialRefresh = true
-            if let snapshot {
-                sanitizeNodeOffsets(for: snapshot)
-                fitInitialViewportIfNeeded(for: snapshot)
+            guard let snapshot else {
+                isPreparingInitialViewport = false
+                return
             }
+            sanitizeNodeOffsets(for: snapshot)
+            fitInitialViewportIfNeeded(for: snapshot)
         }
         .confirmationDialog(
             strings.deleteSelectedTopics,
@@ -2797,7 +2806,9 @@ private struct MobileStudyTreeView: View {
             return
         }
         nodeOffsets = appState.loadStudyTreeNodeOffsets(rootStudyID: rootStudyID)
-        shouldFitInitialViewport = !appState.hasStudyTreeViewport(rootStudyID: rootStudyID)
+        let needsInitialFit = !appState.hasStudyTreeViewport(rootStudyID: rootStudyID)
+        shouldFitInitialViewport = needsInitialFit
+        isPreparingInitialViewport = needsInitialFit
         let viewport = appState.loadStudyTreeViewport(rootStudyID: rootStudyID)
         zoomScale = viewport.zoomScale
         zoomStartScale = viewport.zoomScale
@@ -2870,11 +2881,15 @@ private struct MobileStudyTreeView: View {
         shouldFitInitialViewport = false
         applyFittedViewport(for: snapshot)
         saveViewport()
+        withAnimation(.easeOut(duration: 0.2)) {
+            isPreparingInitialViewport = false
+        }
     }
 
     private func cancelPendingInitialViewportFit() {
         hasUserInteractedWithTree = true
         shouldFitInitialViewport = false
+        isPreparingInitialViewport = false
     }
 
     private func applyFittedViewport(for snapshot: StudyTreeLayoutSnapshot) {

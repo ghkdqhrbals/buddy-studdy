@@ -281,7 +281,7 @@ enum StudyTreeViewportPolicy {
     static func fittedZoomScale(
         canvasSize: CGSize,
         viewportSize: CGSize,
-        padding: CGFloat = 16
+        padding: CGFloat = 28
     ) -> CGFloat {
         guard canvasSize.width.isFinite,
               canvasSize.height.isFinite,
