@@ -985,6 +985,8 @@ private struct StatsAchievementCard: View {
                 .font(.system(size: 30, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .lineLimit(1)
+                .minimumScaleFactor(0.65)
+                .allowsTightening(true)
 
             Text(caption)
                 .font(.caption2.weight(.medium))
