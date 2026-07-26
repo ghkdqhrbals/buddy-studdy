@@ -132,7 +132,7 @@ same typed handler as the corresponding `@StreamListener`.
 - Jackson conversion or handler failure leaves the record pending.
 - `StreamOptions.ACK` acknowledges a shared domain event without deleting it.
 - `StreamOptions.ACK_DEL` acknowledges and deletes a successful dedicated
-  push record.
+  push record atomically through one Redis Lua script request.
 - Notification persistence deduplicates by `eventId`.
 - Push persistence/claiming prevents two consumers from sending the same
   notification concurrently; provider calls still follow at-least-once

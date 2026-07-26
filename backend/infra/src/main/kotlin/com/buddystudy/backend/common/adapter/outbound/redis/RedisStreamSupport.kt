@@ -25,6 +25,7 @@ import org.springframework.data.redis.connection.stream.StreamOffset
 import org.springframework.data.redis.connection.stream.StreamReadOptions
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate
 import org.springframework.data.redis.core.StringRedisTemplate
+import org.springframework.data.redis.core.script.DefaultRedisScript
 import org.springframework.stereotype.Component
 import java.time.Duration
 import kotlinx.coroutines.Dispatchers
@@ -158,10 +159,11 @@ class RedisStreamTopicManager(
     }
 
     override suspend fun acknowledgeAndDelete(message: RedisStreamMessage, group: String) {
-        acknowledge(message, group)
-        redis.opsForStream<String, String>()
-            .delete(message.streamKey, RecordId.of(message.recordId))
-            .awaitSingle()
+        redis.execute(
+            ACKNOWLEDGE_AND_DELETE,
+            listOf(message.streamKey),
+            listOf(group, message.recordId),
+        ).next().awaitSingle()
     }
 
     override suspend fun readNew(
@@ -409,5 +411,13 @@ class RedisStreamTopicManager(
 
     private companion object {
         const val MAX_CONCURRENCY = 32
+        val ACKNOWLEDGE_AND_DELETE = DefaultRedisScript(
+            """
+            redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
+            redis.call('XDEL', KEYS[1], ARGV[2])
+            return 1
+            """.trimIndent(),
+            Boolean::class.java,
+        )
     }
 }

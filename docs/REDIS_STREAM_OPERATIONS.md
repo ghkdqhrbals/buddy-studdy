@@ -21,7 +21,7 @@ blocking timeout, and completion policy.
 
 - `NONE`: leave the message pending for explicit handling.
 - `ACK`: execute `XACK` and retain the stream entry.
-- `ACK_DEL`: execute `XACK` followed by `XDEL`.
+- `ACK_DEL`: execute `XACK` and `XDEL` atomically in one Redis Lua script request.
 
 Handler or Jackson conversion failures never ACK or delete the message. The
 push listener and its idle-message recovery scheduler use `ACK_DEL` because
