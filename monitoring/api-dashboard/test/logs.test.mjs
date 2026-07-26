@@ -38,17 +38,28 @@ test("parseApiExchange extracts request row fields", () => {
 test("parseApiExchange extracts flat backend request logging fields", () => {
   const line = [
     "2026-07-06T13:16:18.261Z INFO [63c5eecb-66f1-49d1-b98e-8d20bae64b4b] 1 --- [buddystudy-backend]",
-    'c.b.RequestLoggingFilter : api_exchange {"requestId":"63c5eecb-66f1-49d1-b98e-8d20bae64b4b","clientIp":"2a06:98c0:3600::103","method":"GET","path":"/api/v1/health/readiness","query":"","requestHeaders":{"accept":"application/json"},"requestBody":"","status":200,"durationMs":"3.12","responseHeaders":{"Content-Type":"application/json"},"responseBody":{"ok":true}}',
+    'c.b.RequestLoggingFilter : api_exchange {"requestId":"63c5eecb-66f1-49d1-b98e-8d20bae64b4b","clientIp":"2a06:98c0:3600::103","userId":"42","method":"GET","path":"/api/v1/health/readiness","query":"","requestHeaders":{"accept":"application/json"},"requestBody":"","status":200,"durationMs":"3.12","responseHeaders":{"Content-Type":"application/json"},"responseBody":{"ok":true}}',
   ].join(" ");
 
   const parsed = parseApiExchange(["1783255799514000000", line]);
 
   assert.equal(parsed.method, "GET");
+  assert.equal(parsed.clientIp, "2a06:98c0:3600::103");
+  assert.equal(parsed.userId, "42");
   assert.equal(parsed.path, "/api/v1/health/readiness");
   assert.equal(parsed.status, 200);
   assert.equal(parsed.durationMs, 3.12);
   assert.deepEqual(parsed.request.body, "");
   assert.deepEqual(parsed.response.body, { ok: true });
+});
+
+test("parseApiExchange uses anonymous marker for legacy logs without user id", () => {
+  const line =
+    'c.b.RequestLoggingFilter : api_exchange {"requestId":"legacy","clientIp":"198.51.100.7","method":"GET","path":"/api/v1/public/questions","status":200,"durationMs":"1.00"}';
+
+  const parsed = parseApiExchange(["1783255799514000000", line]);
+
+  assert.equal(parsed.userId, "-");
 });
 
 test("parseApiError keeps stack trace when present", () => {

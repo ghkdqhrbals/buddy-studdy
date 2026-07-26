@@ -22,6 +22,7 @@ internal class ApiExchangeLogFormatter(
 ) {
     fun apiExchangeJson(
         requestId: String,
+        userId: String,
         request: ServerHttpRequest,
         response: ServerHttpResponse,
         requestBody: CapturedBody,
@@ -31,6 +32,7 @@ internal class ApiExchangeLogFormatter(
         buildJson(
             "requestId" to requestId,
             "clientIp" to ClientIpResolver.resolve(request),
+            "userId" to userId,
             "method" to request.method.name(),
             "path" to request.path.value(),
             "query" to (request.uri.rawQuery ?: ""),

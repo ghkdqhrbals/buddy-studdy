@@ -56,6 +56,7 @@ class RequestLoggingFilterTest {
                 .header("CF-Connecting-IP", "203.0.113.10")
                 .body("""{"idToken":"google-id-token"}"""),
         ) { current ->
+            current.attributes[RequestLoggingFilter.AUTHENTICATED_USER_ID_ATTRIBUTE] = 42L
             readBody(current).flatMap { writeJson(current, """{"accessToken":"app-token"}""") }
         }
 
@@ -66,6 +67,7 @@ class RequestLoggingFilterTest {
         assertThat(output.out).contains("\"requestBody\":{\"idToken\":\"[REDACTED]\"}")
         assertThat(output.out).contains("\"responseBody\":{\"accessToken\":\"[REDACTED]\"}")
         assertThat(output.out).contains("\"clientIp\":\"203.0.113.10\"")
+        assertThat(output.out).contains("\"userId\":\"42\"")
         assertThat(output.out).contains("\"Authorization\":\"[REDACTED]\"")
         assertThat(output.out).doesNotContain("Bearer access-token")
         assertThat(output.out).doesNotContain("google-id-token")
@@ -119,6 +121,7 @@ class RequestLoggingFilterTest {
         ) { current -> writeJson(current, """{"ok":true}""") }
 
         assertThat(output.out).contains("\"clientIp\":\"198.51.100.7\"")
+        assertThat(output.out).contains("\"userId\":\"-\"")
     }
 
     @Test

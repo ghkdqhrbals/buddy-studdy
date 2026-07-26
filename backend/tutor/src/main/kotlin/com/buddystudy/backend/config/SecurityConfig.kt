@@ -1,6 +1,7 @@
 package com.buddystudy.backend.config
 
 import com.buddystudy.backend.auth.TokenProvider
+import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.permission.RequirePermission
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
@@ -130,6 +131,10 @@ class BearerTokenFilter(
         } else {
             authentication(exchange.request, authorization)
                 .flatMap { authentication ->
+                    val principal = authentication.principal as Principal
+                    if (!principal.anonymous) {
+                        exchange.attributes[RequestLoggingFilter.AUTHENTICATED_USER_ID_ATTRIBUTE] = principal.userId
+                    }
                     chain.filter(exchange)
                         .contextWrite(ReactiveSecurityContextHolder.withAuthentication(authentication))
                 }

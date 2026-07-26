@@ -45,6 +45,7 @@ export function parseApiExchange(value) {
     level: extractLevel(line),
     requestId: payload.requestId,
     clientIp: payload.clientIp,
+    userId: payload.userId ?? "-",
     method: request.method ?? "-",
     path: request.path ?? "-",
     query: request.query ?? "",

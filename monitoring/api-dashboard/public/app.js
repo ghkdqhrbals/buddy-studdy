@@ -314,6 +314,7 @@ function renderRequestRow(request) {
     <div role="cell"><span class="status-badge ${statusTone(request.status)}">${request.status || "-"}</span></div>
     <div role="cell">${durationLabel(request.durationMs)}</div>
     <div class="ip-cell" role="cell">${escapeHtml(request.clientIp || "-")}</div>
+    <div class="user-id-cell" role="cell">${escapeHtml(request.userId || "-")}</div>
     <div class="request-id-cell" role="cell">${escapeHtml(request.requestId)}</div>
   `;
   return row;

@@ -30,6 +30,7 @@ test("all monitoring pages load the shared navigation shell", async () => {
 test("user administration is searchable, paginated, and keeps plans internal", async () => {
   const html = await text("users.html");
   const js = await text("users.js");
+  const css = await text("styles.css");
   assert.match(html, /id="adminUserSearch"/);
   assert.match(html, /id="adminPreviousButton"/);
   assert.match(html, /id="adminNextButton"/);
@@ -38,6 +39,9 @@ test("user administration is searchable, paginated, and keeps plans internal", a
   assert.match(js, /monthlyQuestionLimitOverride/);
   assert.match(js, /sessionStorage/);
   assert.match(js, /function escapeHTML/);
+  assert.match(js, /Array\.isArray\(page\.users\)/);
+  assert.match(js, /Array\.isArray\(tiers\)/);
+  assert.match(css, /\[hidden\]\s*\{[\s\S]*display:\s*none !important/);
   assert.doesNotMatch(html, /payment|billing/i);
 });
 

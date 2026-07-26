@@ -55,7 +55,7 @@ class TokenProviderTest {
 
         val payload = String(Base64.getUrlDecoder().decode(token.split(".")[1]))
 
-        assertThat(payload).contains("\"user_id\"")
+        assertThat(payload).contains("\"user_id\":7")
         assertThat(payload).contains("\"device_id\"")
         assertThat(payload).doesNotContain("permission")
     }

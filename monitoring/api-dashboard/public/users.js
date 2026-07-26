@@ -129,9 +129,10 @@ function tierOptions(selected) {
 }
 
 function renderUsers(users) {
+  const safeUsers = Array.isArray(users) ? users : [];
   elements.userRows.replaceChildren();
-  elements.usersEmpty.hidden = users.length > 0;
-  for (const user of users) {
+  elements.usersEmpty.hidden = safeUsers.length > 0;
+  for (const user of safeUsers) {
     const displayName = escapeHTML(user.displayName || "(no name)");
     const email = escapeHTML(user.email || `User ${user.id}`);
     const provider = escapeHTML(user.provider);
@@ -203,7 +204,10 @@ async function loadUsers() {
   if (state.query) params.set("query", state.query);
   try {
     const page = await adminFetch(`/users?${params}`);
-    state.totalCount = page.totalCount;
+    if (!page || !Array.isArray(page.users)) {
+      throw new Error("사용자 목록 응답 형식이 올바르지 않습니다.");
+    }
+    state.totalCount = Number(page.totalCount) || 0;
     renderUsers(page.users);
     updatePagination();
     elements.userStatus.textContent = "Ready";
@@ -216,7 +220,11 @@ async function loadUsers() {
 }
 
 async function loadWorkspace() {
-  state.tiers = await adminFetch("/membership-tiers");
+  const tiers = await adminFetch("/membership-tiers");
+  if (!Array.isArray(tiers)) {
+    throw new Error("요금제 응답 형식이 올바르지 않습니다.");
+  }
+  state.tiers = tiers;
   renderTierSettings();
   await loadUsers();
 }

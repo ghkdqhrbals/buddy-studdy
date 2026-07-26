@@ -88,6 +88,7 @@ class RequestLoggingFilter(
                 logApiExchange(
                     formatter.apiExchangeJson(
                         requestId,
+                        exchange.getAttribute<Long>(AUTHENTICATED_USER_ID_ATTRIBUTE)?.toString() ?: ANONYMOUS_USER_ID,
                         exchange.request,
                         exchange.response,
                         requestBody,
@@ -134,7 +135,9 @@ class RequestLoggingFilter(
 
     companion object {
         const val REQUEST_ID_ATTRIBUTE = "requestId"
+        const val AUTHENTICATED_USER_ID_ATTRIBUTE = "authenticatedUserId"
         const val REQUEST_ID_HEADER = "X-Request-Id"
+        const val ANONYMOUS_USER_ID = "-"
         private const val MAX_BODY_BYTES = 8_192
     }
 }
