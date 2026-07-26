@@ -15,6 +15,8 @@ interface AdminRedisStreamInspectionPort {
         limit: Int,
         eventType: String?,
     ): AdminCursorPage<AdminStreamEntry>
+
+    suspend fun entry(topic: String, entryId: String): AdminStreamEntry?
 }
 
 interface AdminOutboxInspectionPort {

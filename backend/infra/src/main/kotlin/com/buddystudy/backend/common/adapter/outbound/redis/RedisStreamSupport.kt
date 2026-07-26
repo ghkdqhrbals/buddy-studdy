@@ -6,7 +6,10 @@ import com.buddystudy.backend.admin.stream.application.model.AdminStreamGroupSum
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamTopicSummary
 import com.buddystudy.backend.admin.stream.application.port.outbound.AdminRedisStreamInspectionPort
 import com.buddystudy.backend.common.adapter.outbound.security.SensitiveDataRedactor
+import com.buddystudy.backend.common.application.error.ApiErrorCode
+import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
+import org.springframework.http.HttpStatus
 import org.slf4j.LoggerFactory
 import org.springframework.data.domain.Range
 import org.springframework.data.redis.connection.Limit
@@ -166,8 +169,7 @@ class RedisStreamTopicManager(
         limit: Int,
         eventType: String?,
     ): AdminCursorPage<AdminStreamEntry> = withContext(Dispatchers.IO) {
-        val definition = topics.firstOrNull { it.topic.apiName == topic }
-            ?: error("Unknown Redis Stream topic '$topic'.")
+        val definition = topicDefinition(topic)
         val upperBound = cursor ?: "+"
         val fetchCount = if (eventType == null) {
             limit + 1
@@ -183,20 +185,7 @@ class RedisStreamTopicManager(
             .orEmpty()
             .asSequence()
             .filterNot { cursor != null && it.id.value == cursor }
-            .map { record ->
-                val fields = redactor.fields(record.value
-                    .mapKeys { it.key.toString() }
-                    .mapValues { it.value.toString() })
-                AdminStreamEntry(
-                    id = record.id.value,
-                    eventType = fields["eventType"],
-                    eventId = fields["eventId"],
-                    recordId = fields["recordId"] ?: fields["questionId"],
-                    userId = fields["userId"],
-                    deviceId = fields["deviceId"],
-                    fields = fields,
-                )
-            }
+            .map(::adminEntry)
             .filter { eventType == null || it.eventType == eventType }
             .take(limit + 1)
             .toList()
@@ -205,6 +194,44 @@ class RedisStreamTopicManager(
             nextCursor = records.take(limit).lastOrNull()?.id?.takeIf { records.size > limit },
             hasMore = records.size > limit,
             limit = limit,
+        )
+    }
+
+    override suspend fun entry(topic: String, entryId: String): AdminStreamEntry? = withContext(Dispatchers.IO) {
+        val definition = topicDefinition(topic)
+        blockingRedis.opsForStream<String, String>()
+            .reverseRange(
+                definition.streamKey,
+                Range.closed(entryId, entryId),
+                Limit.limit().count(1),
+            )
+            .orEmpty()
+            .firstOrNull()
+            ?.let(::adminEntry)
+    }
+
+    private fun topicDefinition(topic: String): RedisStreamTopicDefinition =
+        topics.firstOrNull { it.topic.apiName == topic }
+            ?: throw ApiException(
+                HttpStatus.NOT_FOUND,
+                ApiErrorCode.RESOURCE_NOT_FOUND,
+                "Redis Stream topic '$topic' was not found.",
+            )
+
+    private fun adminEntry(record: MapRecord<String, String, String>): AdminStreamEntry {
+        val fields = redactor.fields(
+            record.value
+                .mapKeys { it.key.toString() }
+                .mapValues { it.value.toString() },
+        )
+        return AdminStreamEntry(
+            id = record.id.value,
+            eventType = fields["eventType"],
+            eventId = fields["eventId"],
+            recordId = fields["recordId"] ?: fields["questionId"],
+            userId = fields["userId"],
+            deviceId = fields["deviceId"],
+            fields = fields,
         )
     }
 

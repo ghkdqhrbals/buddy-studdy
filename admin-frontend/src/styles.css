@@ -1162,7 +1162,7 @@ table {
 
 .stream-summary {
   display: grid;
-  grid-template-columns: minmax(110px, 0.6fr) minmax(150px, 1fr) minmax(150px, 1fr) minmax(280px, 2fr);
+  grid-template-columns: minmax(180px, 1.2fr) minmax(110px, 0.6fr) minmax(150px, 1fr) minmax(150px, 1fr) minmax(280px, 2fr);
   min-width: 0;
   background: var(--surface-2);
   border-block: 1px solid var(--border);
@@ -1216,6 +1216,20 @@ code,
 
 .stream-toolbar label.grow {
   flex: 1 1 240px;
+}
+
+.stream-search-control {
+  display: flex;
+  gap: 4px;
+}
+
+.stream-search-control input {
+  min-width: 0;
+}
+
+.stream-search-control button {
+  flex: 0 0 auto;
+  min-height: 30px;
 }
 
 .stream-toolbar input,
@@ -1395,7 +1409,7 @@ code,
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .stream-summary > div:nth-child(2) {
+  .stream-summary > div:nth-child(even) {
     border-right: 0;
   }
 

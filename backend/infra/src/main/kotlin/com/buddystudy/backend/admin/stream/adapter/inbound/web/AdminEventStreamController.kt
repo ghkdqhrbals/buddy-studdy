@@ -23,8 +23,9 @@ class AdminEventStreamController(
     @GetMapping("/topics")
     suspend fun topics(
         @RequestHeader("Authorization") authorization: String?,
+        @RequestParam(required = false) query: String?,
     ): List<AdminStreamTopicSummary> =
-        streams.topics(authorization.adminBearerToken())
+        streams.topics(authorization.adminBearerToken(), query)
 
     @GetMapping("/topics/{topic}/entries")
     suspend fun entries(
@@ -35,6 +36,14 @@ class AdminEventStreamController(
         @RequestParam(required = false) eventType: String?,
     ): AdminCursorPage<AdminStreamEntry> =
         streams.entries(authorization.adminBearerToken(), topic, cursor, limit, eventType)
+
+    @GetMapping("/topics/{topic}/entries/{entryId}")
+    suspend fun entry(
+        @RequestHeader("Authorization") authorization: String?,
+        @PathVariable topic: String,
+        @PathVariable entryId: String,
+    ): AdminStreamEntry =
+        streams.entry(authorization.adminBearerToken(), topic, entryId)
 
     @GetMapping("/outboxes/events")
     suspend fun eventOutbox(
@@ -57,7 +66,7 @@ class AdminEventStreamController(
 }
 
 interface AdminEventStreamWebPort {
-    suspend fun topics(adminToken: String): List<AdminStreamTopicSummary>
+    suspend fun topics(adminToken: String, query: String?): List<AdminStreamTopicSummary>
 
     suspend fun entries(
         adminToken: String,
@@ -66,6 +75,8 @@ interface AdminEventStreamWebPort {
         limit: Int,
         eventType: String?,
     ): AdminCursorPage<AdminStreamEntry>
+
+    suspend fun entry(adminToken: String, topic: String, entryId: String): AdminStreamEntry
 
     suspend fun eventOutbox(
         adminToken: String,
@@ -88,9 +99,9 @@ class AdminEventStreamWebAdapter(
     private val authentication: AdminAnalyticsUseCase,
     private val streams: AdminEventStreamUseCase,
 ) : AdminEventStreamWebPort {
-    override suspend fun topics(adminToken: String): List<AdminStreamTopicSummary> {
+    override suspend fun topics(adminToken: String, query: String?): List<AdminStreamTopicSummary> {
         authentication.validate(adminToken)
-        return streams.topics()
+        return streams.topics(query)
     }
 
     override suspend fun entries(
@@ -102,6 +113,11 @@ class AdminEventStreamWebAdapter(
     ): AdminCursorPage<AdminStreamEntry> {
         authentication.validate(adminToken)
         return streams.streamEntries(topic, cursor, limit, eventType)
+    }
+
+    override suspend fun entry(adminToken: String, topic: String, entryId: String): AdminStreamEntry {
+        authentication.validate(adminToken)
+        return streams.streamEntry(topic, entryId)
     }
 
     override suspend fun eventOutbox(

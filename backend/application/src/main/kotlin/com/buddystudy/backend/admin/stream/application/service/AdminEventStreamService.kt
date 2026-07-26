@@ -8,6 +8,9 @@ import com.buddystudy.backend.admin.stream.application.model.AdminStreamTopicSum
 import com.buddystudy.backend.admin.stream.application.port.inbound.AdminEventStreamUseCase
 import com.buddystudy.backend.admin.stream.application.port.outbound.AdminOutboxInspectionPort
 import com.buddystudy.backend.admin.stream.application.port.outbound.AdminRedisStreamInspectionPort
+import com.buddystudy.backend.common.application.error.ApiErrorCode
+import com.buddystudy.backend.common.application.error.ApiException
+import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 
 @Service
@@ -15,7 +18,14 @@ class AdminEventStreamService(
     private val streams: AdminRedisStreamInspectionPort,
     private val outboxes: AdminOutboxInspectionPort,
 ) : AdminEventStreamUseCase {
-    override suspend fun topics(): List<AdminStreamTopicSummary> = streams.topics()
+    override suspend fun topics(query: String?): List<AdminStreamTopicSummary> {
+        val normalizedQuery = query.normalized()?.lowercase()
+        return streams.topics().filter { topic ->
+            normalizedQuery == null ||
+                topic.topic.lowercase().contains(normalizedQuery) ||
+                topic.streamKey.lowercase().contains(normalizedQuery)
+        }
+    }
 
     override suspend fun streamEntries(
         topic: String,
@@ -24,6 +34,22 @@ class AdminEventStreamService(
         eventType: String?,
     ): AdminCursorPage<AdminStreamEntry> =
         streams.entries(topic, cursor.validStreamCursor(), limit.normalized(), eventType.normalized())
+
+    override suspend fun streamEntry(topic: String, entryId: String): AdminStreamEntry {
+        val normalizedEntryId = entryId.normalized()
+            ?.takeIf(STREAM_CURSOR::matches)
+            ?: throw ApiException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.VALIDATION_ERROR,
+                "Redis Stream entry ID must use the '<milliseconds>-<sequence>' format.",
+            )
+        return streams.entry(topic, normalizedEntryId)
+            ?: throw ApiException(
+                HttpStatus.NOT_FOUND,
+                ApiErrorCode.RESOURCE_NOT_FOUND,
+                "Redis Stream entry was not found.",
+            )
+    }
 
     override suspend fun redisEventOutbox(
         cursor: String?,

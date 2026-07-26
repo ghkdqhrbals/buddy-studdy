@@ -98,7 +98,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - Rejects duplicate topics using a trim, case-fold, and repeated-whitespace normalized key across all studies owned by the user.
   - Resolves monthly question allowance from the active membership tier and an optional per-user override. `GET /api/v1/questions/quota` returns usage, allowance, remaining count, and the next UTC reset instant.
   - Provides authenticated admin APIs for paginated user search, tier allowance updates, and per-user tier/override assignment. Payment-plan metadata is never returned by the consumer quota endpoint.
-  - Provides authenticated cursor-based inspection of Redis Stream entries, consumer groups, `redis_event_outbox`, and `question_push_outbox`. Nested credentials are redacted before serialization. See [`REDIS_STREAM_OPERATIONS.md`](REDIS_STREAM_OPERATIONS.md).
+  - Provides authenticated topic/key search, cursor-based Redis Stream inspection, exact stream-entry ID lookup, consumer groups, `redis_event_outbox`, and `question_push_outbox`. Nested credentials are redacted before serialization. See [`REDIS_STREAM_OPERATIONS.md`](REDIS_STREAM_OPERATIONS.md).
 
 - `Views`
   - `StudyView`: active question and pending question workflow.

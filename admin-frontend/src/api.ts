@@ -135,8 +135,14 @@ export function retryJob(jobName: string, runId: number | null, onUnauthorized: 
   return request(`/api/v1/admin/jobs/${encodeURIComponent(jobName)}/retry${suffix}`, { method: "POST" }, onUnauthorized);
 }
 
-export function fetchStreamTopics(onUnauthorized: UnauthorizedHandler): Promise<AdminStreamTopicSummary[]> {
-  return request("/api/v1/admin/event-streams/topics", { method: "GET" }, onUnauthorized);
+export function fetchStreamTopics(
+  query: string,
+  onUnauthorized: UnauthorizedHandler,
+): Promise<AdminStreamTopicSummary[]> {
+  const params = new URLSearchParams();
+  if (query.trim()) params.set("query", query.trim());
+  const suffix = params.size ? `?${params}` : "";
+  return request(`/api/v1/admin/event-streams/topics${suffix}`, { method: "GET" }, onUnauthorized);
 }
 
 export function fetchStreamEntries(
@@ -150,6 +156,18 @@ export function fetchStreamEntries(
   if (eventType.trim()) params.set("eventType", eventType.trim());
   return request(
     `/api/v1/admin/event-streams/topics/${encodeURIComponent(topic)}/entries?${params}`,
+    { method: "GET" },
+    onUnauthorized,
+  );
+}
+
+export function fetchStreamEntry(
+  topic: string,
+  entryId: string,
+  onUnauthorized: UnauthorizedHandler,
+): Promise<AdminStreamEntry> {
+  return request(
+    `/api/v1/admin/event-streams/topics/${encodeURIComponent(topic)}/entries/${encodeURIComponent(entryId.trim())}`,
     { method: "GET" },
     onUnauthorized,
   );

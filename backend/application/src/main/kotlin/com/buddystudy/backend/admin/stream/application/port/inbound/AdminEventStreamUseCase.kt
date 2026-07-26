@@ -7,7 +7,7 @@ import com.buddystudy.backend.admin.stream.application.model.AdminStreamEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamTopicSummary
 
 interface AdminEventStreamUseCase {
-    suspend fun topics(): List<AdminStreamTopicSummary>
+    suspend fun topics(query: String?): List<AdminStreamTopicSummary>
 
     suspend fun streamEntries(
         topic: String,
@@ -15,6 +15,8 @@ interface AdminEventStreamUseCase {
         limit: Int,
         eventType: String?,
     ): AdminCursorPage<AdminStreamEntry>
+
+    suspend fun streamEntry(topic: String, entryId: String): AdminStreamEntry
 
     suspend fun redisEventOutbox(
         cursor: String?,

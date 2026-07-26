@@ -10,6 +10,7 @@ import com.buddystudy.backend.admin.stream.application.port.outbound.AdminRedisS
 import com.buddystudy.backend.admin.stream.application.service.AdminEventStreamService
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 
 class AdminEventStreamServiceTest {
@@ -53,10 +54,55 @@ class AdminEventStreamServiceTest {
         )
     }
 
+    @Test
+    fun `topics are searched by logical topic and redis key`(): Unit = runBlocking {
+        streams.topicItems = listOf(
+            topic("domain-events", "buddystudy:events"),
+            topic("notifications", "buddystudy:push"),
+        )
+
+        assertThat(service.topics(" PUSH ").map { it.topic })
+            .containsExactly("notifications")
+        assertThat(service.topics("domain").map { it.topic })
+            .containsExactly("domain-events")
+        assertThat(service.topics(" ")).hasSize(2)
+    }
+
+    @Test
+    fun `stream entry lookup validates id and returns the exact entry`(): Unit = runBlocking {
+        streams.entryResult = AdminStreamEntry(
+            id = "1785000998000-2",
+            eventType = "question.created",
+            eventId = "event-1",
+            recordId = "42",
+            userId = "7",
+            deviceId = null,
+            fields = mapOf("eventType" to "question.created"),
+        )
+
+        assertThat(service.streamEntry("domain-events", " 1785000998000-2 "))
+            .isEqualTo(streams.entryResult)
+        assertThat(streams.entryRequest).isEqualTo("domain-events" to "1785000998000-2")
+
+        assertThatThrownBy {
+            runBlocking { service.streamEntry("domain-events", "not-an-id") }
+        }.hasMessageContaining("milliseconds")
+    }
+
+    @Test
+    fun `missing stream entry is reported as not found`(): Unit {
+        assertThatThrownBy {
+            runBlocking { service.streamEntry("domain-events", "1785000998000-9") }
+        }.hasMessage("Redis Stream entry was not found.")
+    }
+
     private class RecordingStreamPort : AdminRedisStreamInspectionPort {
         var request: StreamRequest? = null
+        var entryRequest: Pair<String, String>? = null
+        var entryResult: AdminStreamEntry? = null
+        var topicItems: List<AdminStreamTopicSummary> = emptyList()
 
-        override suspend fun topics(): List<AdminStreamTopicSummary> = emptyList()
+        override suspend fun topics(): List<AdminStreamTopicSummary> = topicItems
 
         override suspend fun entries(
             topic: String,
@@ -66,6 +112,11 @@ class AdminEventStreamServiceTest {
         ): AdminCursorPage<AdminStreamEntry> {
             request = StreamRequest(topic, cursor, limit, eventType)
             return AdminCursorPage(emptyList(), null, false, limit)
+        }
+
+        override suspend fun entry(topic: String, entryId: String): AdminStreamEntry? {
+            entryRequest = topic to entryId
+            return entryResult
         }
     }
 
@@ -112,4 +163,7 @@ class AdminEventStreamServiceTest {
         val limit: Int,
         val status: String?,
     )
+
+    private fun topic(topic: String, key: String) =
+        AdminStreamTopicSummary(topic, key, 1_000, 0, null, null, emptyList())
 }

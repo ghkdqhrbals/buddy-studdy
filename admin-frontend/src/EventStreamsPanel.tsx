@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   fetchEventOutbox,
   fetchPushOutbox,
+  fetchStreamEntry,
   fetchStreamEntries,
   fetchStreamTopics,
   type UnauthorizedHandler,
@@ -29,7 +30,11 @@ export function EventStreamsPanel({
   const [source, setSource] = useState<Source>("stream");
   const [topics, setTopics] = useState<AdminStreamTopicSummary[]>([]);
   const [topic, setTopic] = useState("domain-events");
+  const [topicSearch, setTopicSearch] = useState("");
+  const [appliedTopicSearch, setAppliedTopicSearch] = useState("");
   const [eventType, setEventType] = useState("");
+  const [entryIdInput, setEntryIdInput] = useState("");
+  const [entryId, setEntryId] = useState("");
   const [status, setStatus] = useState("");
   const [limit, setLimit] = useState(20);
   const [cursorStack, setCursorStack] = useState<Array<string | null>>([null]);
@@ -39,25 +44,29 @@ export function EventStreamsPanel({
   const [error, setError] = useState<string | null>(null);
   const cursor = cursorStack[cursorStack.length - 1] ?? null;
 
-  useEffect(() => {
-    void loadTopics();
-  }, [refreshKey]);
-
-  useEffect(() => {
-    void loadPage();
-  }, [source, topic, eventType, status, limit, cursor, refreshKey]);
-
   const activeTopic = useMemo(
     () => topics.find((candidate) => candidate.topic === topic) ?? topics[0],
     [topic, topics],
   );
 
+  useEffect(() => {
+    void loadTopics();
+  }, [appliedTopicSearch, refreshKey]);
+
+  useEffect(() => {
+    void loadPage();
+  }, [source, activeTopic?.topic, eventType, entryId, status, limit, cursor, refreshKey]);
+
   async function loadTopics() {
     try {
-      const response = await fetchStreamTopics(onUnauthorized);
+      const response = await fetchStreamTopics(appliedTopicSearch, onUnauthorized);
       setTopics(response);
       if (response.length && !response.some((candidate) => candidate.topic === topic)) {
         setTopic(response[0].topic);
+      }
+      if (!response.length) {
+        setPage({ ...EMPTY_PAGE, limit });
+        setSelected(null);
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Failed to inspect Redis Stream topics");
@@ -65,11 +74,23 @@ export function EventStreamsPanel({
   }
 
   async function loadPage() {
+    if (source === "stream" && !activeTopic) {
+      setPage({ ...EMPTY_PAGE, limit });
+      setSelected(null);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
       const response = source === "stream"
-        ? await fetchStreamEntries(topic, cursor, limit, eventType, onUnauthorized)
+        ? entryId
+          ? {
+              items: [await fetchStreamEntry(activeTopic.topic, entryId, onUnauthorized)],
+              nextCursor: null,
+              hasMore: false,
+              limit: 1,
+            }
+          : await fetchStreamEntries(activeTopic.topic, cursor, limit, eventType, onUnauthorized)
         : source === "event-outbox"
           ? await fetchEventOutbox(cursor, limit, status, eventType, onUnauthorized)
           : await fetchPushOutbox(cursor, limit, status, onUnauthorized);
@@ -88,6 +109,8 @@ export function EventStreamsPanel({
     setCursorStack([null]);
     setPage({ ...EMPTY_PAGE, limit });
     setSelected(null);
+    setEntryId("");
+    setEntryIdInput("");
   }
 
   function resetCursor() {
@@ -104,6 +127,7 @@ export function EventStreamsPanel({
 
       {source === "stream" && activeTopic ? (
         <div className="stream-summary" aria-label="Redis Stream summary">
+          <Summary label="Stream key" value={activeTopic.streamKey} mono />
           <Summary label="Length" value={`${activeTopic.length} / ${activeTopic.maxLength}`} />
           <Summary label="First ID" value={activeTopic.firstEntryId ?? "-"} mono />
           <Summary label="Last ID" value={activeTopic.lastEntryId ?? "-"} mono />
@@ -118,12 +142,53 @@ export function EventStreamsPanel({
 
       <div className="stream-toolbar">
         {source === "stream" ? (
-          <label>
-            <span>Topic</span>
-            <select value={topic} onChange={(event) => { setTopic(event.target.value); resetCursor(); }}>
-              {topics.map((candidate) => <option key={candidate.topic} value={candidate.topic}>{candidate.topic}</option>)}
-            </select>
-          </label>
+          <>
+            <label className="grow">
+              <span>Stream search</span>
+              <div className="stream-search-control">
+                <input
+                  value={topicSearch}
+                  placeholder="Topic or Redis key"
+                  onChange={(event) => setTopicSearch(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter") return;
+                    event.preventDefault();
+                    setAppliedTopicSearch(topicSearch.trim());
+                    resetCursor();
+                  }}
+                />
+                <button
+                  className="secondary-button compact"
+                  onClick={() => {
+                    setAppliedTopicSearch(topicSearch.trim());
+                    resetCursor();
+                  }}
+                >
+                  Search
+                </button>
+              </div>
+            </label>
+            <label>
+              <span>Topic</span>
+              <select
+                value={activeTopic?.topic ?? ""}
+                disabled={!topics.length}
+                onChange={(event) => {
+                  setTopic(event.target.value);
+                  setEntryId("");
+                  setEntryIdInput("");
+                  resetCursor();
+                }}
+              >
+                {!topics.length ? <option value="">No streams</option> : null}
+                {topics.map((candidate) => (
+                  <option key={candidate.topic} value={candidate.topic}>
+                    {candidate.topic}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
         ) : null}
         {source !== "push-outbox" ? (
           <label className="grow">
@@ -131,8 +196,53 @@ export function EventStreamsPanel({
             <input
               value={eventType}
               placeholder="All event types"
-              onChange={(event) => { setEventType(event.target.value); resetCursor(); }}
+              onChange={(event) => {
+                setEventType(event.target.value);
+                setEntryId("");
+                setEntryIdInput("");
+                resetCursor();
+              }}
             />
+          </label>
+        ) : null}
+        {source === "stream" ? (
+          <label className="grow">
+            <span>Exact entry ID</span>
+            <div className="stream-search-control">
+              <input
+                value={entryIdInput}
+                placeholder="1785000998000-0"
+                onChange={(event) => setEntryIdInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  event.preventDefault();
+                  setEntryId(entryIdInput.trim());
+                  resetCursor();
+                }}
+              />
+              <button
+                className="secondary-button compact"
+                disabled={!activeTopic}
+                onClick={() => {
+                  setEntryId(entryIdInput.trim());
+                  resetCursor();
+                }}
+              >
+                Find
+              </button>
+              {entryId ? (
+                <button
+                  className="ghost-button compact"
+                  onClick={() => {
+                    setEntryId("");
+                    setEntryIdInput("");
+                    resetCursor();
+                  }}
+                >
+                  Clear
+                </button>
+              ) : null}
+            </div>
           </label>
         ) : null}
         {source !== "stream" ? (
@@ -180,18 +290,22 @@ export function EventStreamsPanel({
       </div>
 
       <div className="cursor-bar">
-        <span>Page {cursorStack.length} · cursor <code>{cursor ?? "latest"}</code></span>
+        <span>
+          {entryId
+            ? <>Exact ID <code>{entryId}</code></>
+            : <>Page {cursorStack.length} · cursor <code>{cursor ?? "latest"}</code></>}
+        </span>
         <div>
           <button
             className="secondary-button compact"
-            disabled={cursorStack.length === 1 || loading}
+            disabled={Boolean(entryId) || cursorStack.length === 1 || loading}
             onClick={() => setCursorStack((current) => current.slice(0, -1))}
           >
             Previous
           </button>
           <button
             className="secondary-button compact"
-            disabled={!page.hasMore || !page.nextCursor || loading}
+            disabled={Boolean(entryId) || !page.hasMore || !page.nextCursor || loading}
             onClick={() => setCursorStack((current) => [...current, page.nextCursor ?? null])}
           >
             Next

@@ -75,6 +75,10 @@ Sources:
 
 All lists use cursor pagination with a bounded `limit` of 1 to 100.
 
+Registered streams can be searched by logical topic or physical Redis key.
+Operators can also bypass pagination and retrieve one retained message by its
+exact Redis Stream ID. Missing IDs return `404`; malformed IDs return `422`.
+
 - Redis cursor: stream record ID such as `1785000998000-0`.
 - Database cursor: descending primary key.
 - `nextCursor`: last returned item only when another item exists.
@@ -85,8 +89,9 @@ using unstable database offsets. Filters reset that stack to the newest page.
 Admin endpoints:
 
 ```text
-GET /api/v1/admin/event-streams/topics
+GET /api/v1/admin/event-streams/topics?query={topic-or-key}
 GET /api/v1/admin/event-streams/topics/{topic}/entries
+GET /api/v1/admin/event-streams/topics/{topic}/entries/{entryId}
 GET /api/v1/admin/event-streams/outboxes/events
 GET /api/v1/admin/event-streams/outboxes/pushes
 ```
