@@ -11,6 +11,12 @@
   --blue: #2563eb;
   --blue-soft: #eaf1ff;
   --surface: #ffffff;
+  --nav-bg: #334657;
+  --nav-bg-deep: #2d3f4f;
+  --nav-bg-hover: #405568;
+  --nav-border: #4a5d6e;
+  --nav-text: #e6edf3;
+  --nav-muted: #b9c5cf;
 }
 
 * { box-sizing: border-box; }
@@ -30,8 +36,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
   width: var(--nav-width);
   flex-direction: column;
   overflow: hidden;
-  border-right: 1px solid #344354;
-  background: #2d3d4c;
+  border-right: 1px solid var(--nav-border);
+  background: var(--nav-bg);
   color: #f8fafc;
   transition: width 180ms ease;
 }
@@ -42,11 +48,12 @@ button, a { -webkit-tap-highlight-color: transparent; }
   align-items: center;
   gap: 12px;
   padding: 0 14px;
-  border-bottom: 1px solid #415161;
+  border-bottom: 1px solid var(--nav-border);
+  background: var(--nav-bg-deep);
 }
 .react-brand-copy { display: grid; min-width: 130px; line-height: 1.15; }
 .react-brand-copy strong { font-size: 15px; }
-.react-brand-copy span { color: #b8c3cf; font-size: 12px; }
+.react-brand-copy span { color: var(--nav-muted); font-size: 12px; }
 .react-side-nav[data-collapsed="true"] .react-brand-copy,
 .react-side-nav[data-collapsed="true"] .react-nav-group-button span,
 .react-side-nav[data-collapsed="true"] .react-nav-link span,
@@ -61,7 +68,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
   justify-content: space-between;
   border: 0;
   background: transparent;
-  color: #aeb9c4;
+  color: var(--nav-muted);
   cursor: pointer;
   padding: 0 10px;
   text-transform: uppercase;
@@ -77,12 +84,12 @@ button, a { -webkit-tap-highlight-color: transparent; }
   gap: 12px;
   overflow: hidden;
   border-radius: 5px;
-  color: #dce3e9;
+  color: var(--nav-text);
   padding: 0 11px;
   text-decoration: none;
   white-space: nowrap;
 }
-.react-nav-link:hover { background: #3a4b5b; color: white; }
+.react-nav-link:hover { background: var(--nav-bg-hover); color: white; }
 .react-nav-link[data-current="true"] { background: #f7f9fb; color: #1f3650; font-weight: 700; }
 .react-side-nav[data-collapsed="true"] .react-nav-group-button { height: 12px; pointer-events: none; }
 .react-side-nav[data-collapsed="true"] .react-nav-group-button svg { display: none; }
@@ -94,9 +101,9 @@ button, a { -webkit-tap-highlight-color: transparent; }
   height: 48px;
   align-items: center;
   justify-content: space-between;
-  border-top: 1px solid #415161;
-  background: #293846;
-  color: #aeb9c4;
+  border-top: 1px solid var(--nav-border);
+  background: var(--nav-bg-deep);
+  color: var(--nav-muted);
   padding: 0 14px;
   font-size: 10px;
 }
@@ -125,7 +132,49 @@ button, a { -webkit-tap-highlight-color: transparent; }
   transition: margin-left 180ms ease;
 }
 .react-content[data-nav-collapsed="true"] { margin-left: var(--nav-compact-width); }
-.mobile-nav-button { display: none; }
+.react-content-workspace { padding: 0 0 48px; }
+.react-app-shell .mobile-nav-button { display: none; }
+
+.observe-page {
+  width: min(100%, 1600px);
+  margin: 0 auto;
+}
+.react-legacy-surface {
+  min-width: 0;
+}
+.observe-page .react-legacy-surface {
+  width: 100%;
+}
+.testzone-react-page {
+  min-height: 100vh;
+}
+.legacy-controller-error {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 14px;
+  border: 1px solid #f1b9b5;
+  border-radius: 5px;
+  background: #fff1f0;
+  color: #a82b22;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.legacy-controller-error span { flex: 1; }
+.legacy-controller-error button {
+  display: inline-flex;
+  height: 30px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #e5a39e;
+  border-radius: 4px;
+  background: white;
+  color: #8e251e;
+  cursor: pointer;
+  padding: 0 10px;
+  font-weight: 700;
+}
 
 .page-header {
   display: flex;
@@ -415,7 +464,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .react-side-nav { transform: translateX(-100%); transition: transform 180ms ease; }
   .react-side-nav[data-collapsed="false"] { width: min(280px, 82vw); transform: translateX(0); box-shadow: 20px 0 40px rgba(15, 23, 42, .2); }
   .react-content, .react-content[data-nav-collapsed="true"] { margin-left: 0; padding: 68px 12px 36px; }
-  .mobile-nav-button { position: fixed; top: 14px; left: 14px; z-index: 25; display: grid; border-color: var(--border); background: white; color: #263548; box-shadow: 0 2px 8px rgba(15,23,42,.08); }
+  .react-content-workspace, .react-content-workspace[data-nav-collapsed="true"] { padding: 54px 0 32px; }
+  .react-app-shell .mobile-nav-button { position: fixed; top: 14px; left: 14px; z-index: 25; display: grid; border-color: var(--border); background: white; color: #263548; box-shadow: 0 2px 8px rgba(15,23,42,.08); }
   .page-header { min-height: auto; flex-direction: column; gap: 12px; }
   .page-header h1 { font-size: 22px; }
   .toolbar-heading { align-items: stretch; flex-direction: column; }

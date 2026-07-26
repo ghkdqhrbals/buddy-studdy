@@ -12,7 +12,7 @@ import {
   Users,
 } from "lucide-react";
 
-export const UI_VERSION = "2026.07.27.2";
+export const UI_VERSION = "2026.07.27.3";
 export const NAV_COLLAPSED_KEY = "buddystudy.monitoring.nav.collapsed";
 export const NAV_GROUP_KEY = "buddystudy.monitoring.nav.groups";
 export const NAV_MODE_KEY = "buddystudy.monitoring.nav.mode";

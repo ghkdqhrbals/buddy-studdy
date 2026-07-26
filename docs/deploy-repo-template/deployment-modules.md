@@ -141,11 +141,13 @@ deployment.
   and TestZone mutations; a module-local Promtail forwards it to Loki. Passwords
   and request bodies are never logged, and high-cardinality values such as IP,
   username, and path remain JSON fields instead of Loki labels.
-  The same authenticated gateway exposes the internal Users & Quotas page and
-  proxies `/backend/api/` to the backend admin API. The page provides bounded
-  user search, 20-row pagination, membership-tier allowance editing, and
-  per-user tier/allowance overrides. These controls are internal-only and must
-  not be linked from the consumer app.
+  The same authenticated gateway serves one React monitoring shell for API
+  Logs, API Performance, TestZone, Users & Quotas, Redis Streams, Access &
+  Audit, and Settings. It proxies `/backend/api/` to the backend admin API.
+  Users & Quotas provides bounded user search, 20-row pagination,
+  membership-tier allowance editing, and per-user tier/allowance overrides.
+  These controls are internal-only and must not be linked from the consumer
+  app.
 - Membership schema or quota API changes require a backend image/deploy first.
   Deploy the monitoring module separately after the backend rollout when the
   Users & Quotas UI changes; do not combine the two rollouts into one job.

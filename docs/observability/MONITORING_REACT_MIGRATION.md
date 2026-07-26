@@ -2,10 +2,10 @@
 
 ## Decision
 
-The Monitoring UI can move to React. The change should be incremental rather
-than a single replacement because API Logs, Grafana links, and TestZone are
-already operational tools with different refresh, chart, editor, and
-pagination behavior.
+The Monitoring UI is served through one React application. The migration kept
+the stable public URLs and the proven Loki/TestZone controllers while moving
+all rendered page composition, navigation, route selection, page headers, and
+administrator state into the React root.
 
 The target is one React application at `monitoring.lowfidev.cloud` with:
 
@@ -59,33 +59,43 @@ The shared Manage UI includes:
 
 ## Phase 3: Observability Pages
 
-Move API Logs and API Performance after the shared time-range, pagination, and
-uPlot wrappers exist. Preserve request cancellation so a new query cannot
-render stale results from an older time range.
+Status: complete.
+
+API Logs and API Performance now mount through the same React entry and fixed
+application shell as Manage. Their existing bounded Loki queries, request
+pagination, timeline selection, endpoint grouping, and detail rendering remain
+behind page-specific controllers so the route migration does not change query
+semantics.
 
 Grafana remains the source for server/JVM/database/Redis dashboards. Monitoring
 links to Grafana rather than recreating those panels.
 
 ## Phase 4: TestZone
 
-Migrate TestZone last. Its editor, live run polling, multi-scenario metrics,
-history detail, components, and charts have the largest behavioral surface.
-Move each feature behind contract tests before deleting the corresponding
-static module.
+Status: complete.
+
+TestZone now mounts through the React route and common navigation shell. The
+React page owns the workspace header and lifecycle boundary. The existing
+contract-tested controller continues to own its editor, live run polling,
+multi-scenario metrics, history detail, component controls, and uPlot chart
+lifecycle. This preserves saved-script keyboard behavior and active-run
+polling while removing the separate static navigation implementation.
 
 ## Rollout
 
-- Serve React and existing static pages from the same Nginx image during the
-  transition.
-- Migrate one route at a time without changing backend endpoint paths.
+- Serve one React entry from the existing Nginx image without changing backend
+  endpoint paths.
 - Preserve direct links and browser refresh for every migrated route.
 - Run static tests plus browser interaction checks for login, pagination,
   refresh, and session expiry before switching a route.
-- Remove a static implementation only after its React route is verified.
+- Keep page-specific controllers isolated behind React lifecycle boundaries
+  until their behavior is replaced by equivalent hooks and component tests.
 
-## Why Not a Big-Bang Rewrite
+## Controller Boundary
 
-React improves state composition, but it does not automatically fix polling,
-request races, or chart lifecycle problems. Replacing every page at once would
-combine framework migration with operational behavior changes and make
-production regressions harder to isolate.
+React owns every visible route and the entire shared shell. API Logs,
+API Performance, and TestZone still use isolated imperative controllers for
+their high-frequency canvas, editor, and polling behavior. They no longer own
+page routing, headers, navigation, or global styling. This boundary allows
+future controller-to-hook refactors without another route or deployment
+cutover.

@@ -1,4 +1,3 @@
-import React from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MonitoringApp } from "./MonitoringApp.jsx";
@@ -19,11 +18,9 @@ const queryClient = new QueryClient({
 });
 
 createRoot(document.querySelector("#monitoring-react-root")).render(
-  <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <AdminSessionProvider>
-        <MonitoringApp />
-      </AdminSessionProvider>
-    </QueryClientProvider>
-  </React.StrictMode>,
+  <QueryClientProvider client={queryClient}>
+    <AdminSessionProvider>
+      <MonitoringApp />
+    </AdminSessionProvider>
+  </QueryClientProvider>,
 );

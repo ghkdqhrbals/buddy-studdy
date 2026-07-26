@@ -16,12 +16,13 @@ Grafana, and the private TestZone API behind one Basic Auth boundary.
   test components, and Grafana links
 - `/settings.html`: browser-local navigation and access-history preferences
 
-`Users & Quotas`, `Redis Streams`, `Access & Audit`, and `Settings` are served
-by the shared React Manage application. It provides one fixed navigation shell,
-one session-scoped administrator API boundary, TanStack Query server state,
-dense reusable tables, and a right-side object inspector. Redis field values
-and outbox payload JSON can be explored as a nested tree or raw JSON without
-flattening the stored object. The gradual migration is documented in
+Every monitoring route is served by the shared React application. It provides
+one fixed navigation shell and visual system across API Logs, API Performance,
+TestZone, Users & Quotas, Redis Streams, Access & Audit, and Settings. Manage
+adds one session-scoped administrator API boundary, TanStack Query server
+state, dense reusable tables, and a right-side object inspector. Redis field
+values and outbox payload JSON can be explored as a nested tree or raw JSON
+without flattening the stored object. The migration and controller boundary are documented in
 `docs/observability/MONITORING_REACT_MIGRATION.md`.
 
 ## Access Audit

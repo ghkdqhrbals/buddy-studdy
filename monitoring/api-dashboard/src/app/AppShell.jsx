@@ -40,7 +40,7 @@ function NavItem({ item, collapsed, currentPath }) {
   );
 }
 
-export function AppShell({ children }) {
+export function AppShell({ children, contentClassName = "" }) {
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [openGroups, setOpenGroups] = useState(() => storedJson(NAV_GROUP_KEY, {}));
 
@@ -130,7 +130,10 @@ export function AppShell({ children }) {
         </footer>
       </aside>
 
-      <main className="react-content" data-nav-collapsed={collapsed ? "true" : "false"}>
+      <main
+        className={`react-content ${contentClassName}`.trim()}
+        data-nav-collapsed={collapsed ? "true" : "false"}
+      >
         <button
           className="mobile-nav-button icon-button"
           type="button"

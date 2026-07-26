@@ -13,18 +13,27 @@ async function source(file) {
   return readFile(new URL(file, sourceRoot), "utf8");
 }
 
-test("Manage pages load the React application while observe pages keep the static shell", async () => {
-  for (const page of ["audit.html", "settings.html", "users.html", "streams.html"]) {
+test("all monitoring pages load the shared React application", async () => {
+  for (const page of [
+    "index.html",
+    "performance.html",
+    "testzone.html",
+    "audit.html",
+    "settings.html",
+    "users.html",
+    "streams.html",
+  ]) {
     const html = await text(page);
     assert.match(html, /id="monitoring-react-root"/);
     assert.match(html, /src="\/react\/manage\.js\?/);
     assert.match(html, /href="\/react\/manage\.css\?/);
     assert.match(html, /src="\/nav-bootstrap\.js\?/);
+    assert.doesNotMatch(html, /src="\/shell\.js\?/);
   }
-  for (const page of ["index.html", "performance.html", "testzone.html"]) {
-    const html = await text(page);
-    assert.match(html, /src="\/shell\.js\?/);
-  }
+  const app = await source("MonitoringApp.jsx");
+  assert.match(app, /ApiLogsPage/);
+  assert.match(app, /ApiPerformancePage/);
+  assert.match(app, /TestZonePage/);
   const navigation = await source("app/navigation.js");
   assert.match(navigation, /Access & Audit/);
   assert.match(navigation, /Users & Quotas/);
@@ -59,24 +68,17 @@ test("Redis Stream administration lives in monitoring Manage with bounded cursor
 });
 
 test("navigation is fixed, collapsible, and keeps its version at the bottom", async () => {
-  const css = await text("styles.css");
-  const shell = await text("shell.js");
-  assert.match(css, /\.side-nav\s*\{[\s\S]*position:\s*fixed/);
-  assert.match(css, /\.side-nav\s*\{[\s\S]*background:\s*var\(--nav\)/);
-  assert.match(css, /--nav:\s*#000000/);
-  assert.match(css, /\.side-nav-group summary\s*\{[\s\S]*background:\s*var\(--nav-2\)/);
-  assert.match(css, /html\.nav-collapsed \.side-nav/);
-  assert.match(css, /html\.nav-collapsed \.side-nav-link-label/);
-  assert.match(css, /html:not\(\.nav-motion-ready\)[\s\S]*transition:\s*none !important/);
-  assert.match(css, /--side-nav-rail-width:\s*64px/);
-  assert.match(css, /\.side-nav-footer\s*\{[\s\S]*margin-top:\s*auto/);
-  assert.match(shell, /createIcon\("menu"/);
-  assert.match(shell, /setCollapsed\(!root\.classList\.contains\("nav-collapsed"\)\)/);
-  assert.match(shell, /root\.classList\.add\("nav-motion-ready"\)/);
-  assert.match(shell, /group\.dataset\.expandedOpen/);
-  assert.match(shell, /group\.open = true/);
+  const css = await source("styles/manage.css");
+  const shell = await source("app/AppShell.jsx");
+  assert.match(css, /\.react-side-nav\s*\{[\s\S]*position:\s*fixed/);
+  assert.match(css, /background:\s*var\(--nav-bg\)/);
+  assert.match(css, /--nav-bg:\s*#334657/);
+  assert.match(css, /\.react-side-nav\[data-collapsed="true"\]/);
+  assert.match(css, /\.react-nav-footer\s*\{[\s\S]*position:\s*absolute/);
+  assert.match(shell, /PanelLeftOpen/);
+  assert.match(shell, /PanelLeftClose/);
   assert.match(shell, /monitoring:nav-mode-change/);
-  assert.doesNotMatch(shell, /reopen\.textContent/);
+  assert.match(shell, /navigationGroups\.map/);
 });
 
 test("settings control navigation and access journal browser preferences", async () => {
@@ -99,9 +101,8 @@ test("access audit reads the monitoring gateway journal instead of backend API l
 
 test("server dashboard navigation and legacy URL open the detailed Grafana dashboard", async () => {
   const html = await text("system.html");
-  const shell = await text("shell.js");
-  assert.match(shell, /SERVER_DASHBOARD_URL/);
-  assert.match(shell, /buddystudy-server-runtime\/buddystudy-server-dashboard/);
+  const navigation = await source("app/navigation.js");
+  assert.match(navigation, /buddystudy-server-runtime\/buddystudy-server-dashboard/);
   assert.match(html, /http-equiv="refresh"/);
   assert.match(html, /window\.location\.replace/);
   assert.match(html, /buddystudy-server-runtime\/buddystudy-server-dashboard/);
