@@ -6,9 +6,71 @@ struct StudyTreeNodeOffset: Codable, Equatable {
 }
 
 struct StudyTreeViewportState: Codable, Equatable {
+    static let currentFitVersion = 1
+
     var zoomScale: CGFloat
     var contentOffsetX: CGFloat
     var contentOffsetY: CGFloat
+    var fittedCanvasWidth: CGFloat
+    var fittedCanvasHeight: CGFloat
+    var contentTranslationX: CGFloat
+    var contentTranslationY: CGFloat
+    var fitVersion: Int
+
+    init(
+        zoomScale: CGFloat,
+        contentOffsetX: CGFloat,
+        contentOffsetY: CGFloat,
+        fittedCanvasWidth: CGFloat = 0,
+        fittedCanvasHeight: CGFloat = 0,
+        contentTranslationX: CGFloat = 0,
+        contentTranslationY: CGFloat = 0,
+        fitVersion: Int = 0
+    ) {
+        self.zoomScale = zoomScale
+        self.contentOffsetX = contentOffsetX
+        self.contentOffsetY = contentOffsetY
+        self.fittedCanvasWidth = fittedCanvasWidth
+        self.fittedCanvasHeight = fittedCanvasHeight
+        self.contentTranslationX = contentTranslationX
+        self.contentTranslationY = contentTranslationY
+        self.fitVersion = fitVersion
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case zoomScale
+        case contentOffsetX
+        case contentOffsetY
+        case fittedCanvasWidth
+        case fittedCanvasHeight
+        case contentTranslationX
+        case contentTranslationY
+        case fitVersion
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        zoomScale = try container.decode(CGFloat.self, forKey: .zoomScale)
+        contentOffsetX = try container.decode(CGFloat.self, forKey: .contentOffsetX)
+        contentOffsetY = try container.decode(CGFloat.self, forKey: .contentOffsetY)
+        fittedCanvasWidth = try container.decodeIfPresent(
+            CGFloat.self,
+            forKey: .fittedCanvasWidth
+        ) ?? 0
+        fittedCanvasHeight = try container.decodeIfPresent(
+            CGFloat.self,
+            forKey: .fittedCanvasHeight
+        ) ?? 0
+        contentTranslationX = try container.decodeIfPresent(
+            CGFloat.self,
+            forKey: .contentTranslationX
+        ) ?? 0
+        contentTranslationY = try container.decodeIfPresent(
+            CGFloat.self,
+            forKey: .contentTranslationY
+        ) ?? 0
+        fitVersion = try container.decodeIfPresent(Int.self, forKey: .fitVersion) ?? 0
+    }
 
     static let `default` = StudyTreeViewportState(
         zoomScale: 1,
@@ -20,6 +82,12 @@ struct StudyTreeViewportState: Codable, Equatable {
 struct StudyTreeCanvasLayout: Equatable {
     var size: CGSize
     var translation: CGSize
+}
+
+struct StudyTreeFittedViewportLayout: Equatable {
+    var zoomScale: CGFloat
+    var canvasSize: CGSize
+    var contentTranslation: CGSize
 }
 
 struct StudyTreeDirectionalEdgeGeometry: Equatable {
@@ -222,6 +290,29 @@ enum StudyTreeCanvasPolicy {
         return resolvedOffsets
     }
 
+    static func contentBounds(
+        baseCenters: [Int: CGPoint],
+        nodeOffsets: [Int: CGSize],
+        nodeSize: CGSize
+    ) -> CGRect? {
+        let halfWidth = max(0, nodeSize.width / 2)
+        let halfHeight = max(0, nodeSize.height / 2)
+        return baseCenters.reduce(nil as CGRect?) { bounds, entry in
+            let (roomID, baseCenter) = entry
+            guard baseCenter.x.isFinite, baseCenter.y.isFinite else {
+                return bounds
+            }
+            let offset = sanitizedOffset(nodeOffsets[roomID] ?? .zero)
+            let nodeBounds = CGRect(
+                x: baseCenter.x + offset.width - halfWidth,
+                y: baseCenter.y + offset.height - halfHeight,
+                width: nodeSize.width,
+                height: nodeSize.height
+            )
+            return bounds?.union(nodeBounds) ?? nodeBounds
+        }
+    }
+
     static func expandedLayout(
         baseCenters: [Int: CGPoint],
         nodeOffsets: [Int: CGSize],
@@ -302,6 +393,31 @@ enum StudyTreeViewportPolicy {
             1
         )
         return min(max(fittedScale, minimumZoomScale), maximumZoomScale)
+    }
+
+    static func fittedLayout(
+        contentBounds: CGRect,
+        viewportSize: CGSize,
+        padding: CGFloat = 28
+    ) -> StudyTreeFittedViewportLayout {
+        let zoomScale = fittedZoomScale(
+            canvasSize: contentBounds.size,
+            viewportSize: viewportSize,
+            padding: padding
+        )
+        let safeScale = max(zoomScale, minimumZoomScale)
+        let canvasSize = CGSize(
+            width: max(contentBounds.width, viewportSize.width / safeScale),
+            height: max(contentBounds.height, viewportSize.height / safeScale)
+        )
+        return StudyTreeFittedViewportLayout(
+            zoomScale: zoomScale,
+            canvasSize: canvasSize,
+            contentTranslation: CGSize(
+                width: canvasSize.width / 2 - contentBounds.midX,
+                height: canvasSize.height / 2 - contentBounds.midY
+            )
+        )
     }
 
     static func contentOffsetPreservingAnchor(
