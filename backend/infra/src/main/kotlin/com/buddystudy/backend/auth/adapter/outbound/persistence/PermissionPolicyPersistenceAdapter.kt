@@ -120,8 +120,8 @@ class PermissionPolicyPersistenceAdapter(
         spec.fetch().rowsUpdated().awaitSingle()
     }
 
-    override suspend fun isEnabled(userId: Long?, deviceId: String, key: String): Boolean =
-        client.sql(
+    override suspend fun isEnabled(userId: Long?, deviceId: String, key: String): Boolean {
+        val storedPreference = client.sql(
             """
             select enabled from notification_preferences
             where preference_key = :key and (
@@ -131,7 +131,9 @@ class PermissionPolicyPersistenceAdapter(
         ).bind("key", key).bind("deviceId", deviceId)
             .bindNullable("userId", userId, Long::class.javaObjectType)
             .map { row, _ -> row.get("enabled", java.lang.Boolean::class.java)!!.booleanValue() }
-            .one().awaitSingleOrNull() == true
+            .one().awaitSingleOrNull()
+        return storedPreference ?: defaultNotificationPreference(userId, key)
+    }
 
     override suspend fun remaining(userId: Long, key: String, now: Instant): Long {
         if (key != "monthly_question") return 0
@@ -185,4 +187,9 @@ class PermissionPolicyPersistenceAdapter(
 
     private fun <T : Any> DatabaseClient.GenericExecuteSpec.bindNullable(name: String, value: T?, type: Class<T>) =
         if (value == null) bindNull(name, type) else bind(name, value)
+
+    internal companion object {
+        fun defaultNotificationPreference(userId: Long?, key: String): Boolean =
+            userId != null && key == "question_notification"
+    }
 }
