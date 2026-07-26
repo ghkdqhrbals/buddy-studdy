@@ -2434,12 +2434,6 @@ private struct MobileStudyTreeView: View {
                                                 mode: .manual
                                             )
                                         },
-                                        onToggleActive: {
-                                            appState.setStudyTopicActive(
-                                                studyID: placement.room.id,
-                                                active: !placement.room.activeForQuestions
-                                            )
-                                        },
                                         onEdit: { editingRoom = placement.room },
                                         onDelete: { deletionCandidate = placement.room }
                                     )
@@ -3128,7 +3122,6 @@ private struct StudyTreeNode: View {
     var onSelect: () -> Void
     var onAddRecommendedChild: () -> Void
     var onAddManualChild: () -> Void
-    var onToggleActive: () -> Void
     var onEdit: () -> Void
     var onDelete: () -> Void
 
@@ -3192,14 +3185,8 @@ private struct StudyTreeNode: View {
         .buttonStyle(.plain)
         .contextMenu {
             Button(strings.editStudyCategory, action: onEdit)
-            Button(strings.recommendSubstudy, action: onAddRecommendedChild)
-            Button(strings.addTopicManually, action: onAddManualChild)
-            Button(
-                room.activeForQuestions ? strings.questionTopicInactive : strings.questionTopicActive,
-                action: onToggleActive
-            )
-            Divider()
             Button(strings.deleteStudy, role: .destructive, action: onDelete)
+            Button(strings.newStudyCategory, action: onAddRecommendedChild)
         }
         .overlay(alignment: .topLeading) {
             if isSelectionMode {
@@ -3304,36 +3291,14 @@ private struct StudyTopicAddSheet: View {
                         if mode == .recommendation {
                             recommendationPicker
                         } else {
-                            HStack(spacing: 8) {
-                                TextField(strings.studyTopic, text: $manualTopic)
-                                    .textInputAutocapitalization(.sentences)
-                                    .submitLabel(.done)
-                                    .onSubmit {
-                                        guard !selectedTopic.isEmpty, !isSaving else { return }
-                                        add(selectedTopic)
-                                    }
-
-                                Button {
+                            TextField(strings.studyTopic, text: $manualTopic)
+                                .textInputAutocapitalization(.sentences)
+                                .submitLabel(.done)
+                                .onSubmit {
+                                    guard !selectedTopic.isEmpty, !isSaving else { return }
                                     add(selectedTopic)
-                                } label: {
-                                    if isSaving {
-                                        ProgressView()
-                                            .controlSize(.small)
-                                            .frame(width: 34, height: 34)
-                                    } else {
-                                        Image(systemName: "plus")
-                                            .font(.system(size: 15, weight: .bold))
-                                            .foregroundStyle(.white)
-                                            .frame(width: 34, height: 34)
-                                            .background(Color.accentColor, in: Circle())
-                                    }
                                 }
-                                .buttonStyle(.plain)
-                                .disabled(selectedTopic.isEmpty || isSaving)
-                                .accessibilityLabel(strings.addSubstudy)
-                            }
-                            .padding(.leading, 14)
-                            .padding(.trailing, 7)
+                            .padding(.horizontal, 14)
                             .frame(height: 50)
                             .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                             .overlay {
@@ -3365,25 +3330,23 @@ private struct StudyTopicAddSheet: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    if mode == .recommendation {
-                        Button {
-                            add(selectedTopic)
-                        } label: {
-                            HStack(spacing: 8) {
-                                if isSaving {
-                                    ProgressView()
-                                        .tint(.white)
-                                }
-                                Text(strings.addSubstudy)
-                                    .fontWeight(.semibold)
+                    Button {
+                        add(selectedTopic)
+                    } label: {
+                        HStack(spacing: 8) {
+                            if isSaving {
+                                ProgressView()
+                                    .tint(.white)
                             }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 48)
+                            Text(strings.addSubstudy)
+                                .fontWeight(.semibold)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .buttonBorderShape(.roundedRectangle(radius: 8))
-                        .disabled(selectedTopic.isEmpty || isSaving)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
                     }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.roundedRectangle(radius: 8))
+                    .disabled(selectedTopic.isEmpty || isSaving)
                 }
                 .padding(20)
             }
