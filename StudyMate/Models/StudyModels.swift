@@ -9,6 +9,22 @@ struct StudyTreeViewportState: Codable, Equatable {
     var zoomScale: CGFloat
     var contentOffsetX: CGFloat
     var contentOffsetY: CGFloat
+    var canvasAlignmentX: CGFloat?
+    var canvasAlignmentY: CGFloat?
+
+    init(
+        zoomScale: CGFloat,
+        contentOffsetX: CGFloat,
+        contentOffsetY: CGFloat,
+        canvasAlignmentX: CGFloat? = nil,
+        canvasAlignmentY: CGFloat? = nil
+    ) {
+        self.zoomScale = zoomScale
+        self.contentOffsetX = contentOffsetX
+        self.contentOffsetY = contentOffsetY
+        self.canvasAlignmentX = canvasAlignmentX
+        self.canvasAlignmentY = canvasAlignmentY
+    }
 
     static let `default` = StudyTreeViewportState(
         zoomScale: 1,
@@ -20,6 +36,11 @@ struct StudyTreeViewportState: Codable, Equatable {
 struct StudyTreeCanvasLayout: Equatable {
     var size: CGSize
     var translation: CGSize
+}
+
+struct StudyTreeCanvasTranslationCompensation: Equatable {
+    var viewportOffset: CGPoint
+    var alignmentInset: CGSize
 }
 
 struct StudyTreeDirectionalEdgeGeometry: Equatable {
@@ -304,11 +325,67 @@ enum StudyTreeViewportPolicy {
         return min(max(fittedScale, minimumZoomScale), maximumZoomScale)
     }
 
+    static func centeredCanvasAlignmentInset(
+        canvasSize: CGSize,
+        viewportSize: CGSize,
+        zoomScale: CGFloat
+    ) -> CGSize {
+        let safeScale = max(
+            zoomScale.isFinite ? zoomScale : 1,
+            minimumZoomScale
+        )
+        guard canvasSize.width.isFinite,
+              canvasSize.height.isFinite,
+              viewportSize.width.isFinite,
+              viewportSize.height.isFinite else {
+            return .zero
+        }
+        return CGSize(
+            width: max(0, (viewportSize.width - canvasSize.width * safeScale) / 2),
+            height: max(0, (viewportSize.height - canvasSize.height * safeScale) / 2)
+        )
+    }
+
+    static func compensationPreservingCanvasTranslation(
+        startOffset: CGPoint,
+        startAlignmentInset: CGSize,
+        startCanvasTranslation: CGSize,
+        targetCanvasTranslation: CGSize,
+        zoomScale: CGFloat
+    ) -> StudyTreeCanvasTranslationCompensation {
+        let safeScale = max(
+            zoomScale.isFinite ? zoomScale : 1,
+            minimumZoomScale
+        )
+        let rawHorizontalOffset = startOffset.x
+            + (targetCanvasTranslation.width - startCanvasTranslation.width)
+                * safeScale
+        let rawVerticalOffset = startOffset.y
+            + (targetCanvasTranslation.height - startCanvasTranslation.height)
+                * safeScale
+        return StudyTreeCanvasTranslationCompensation(
+            viewportOffset: CGPoint(
+                x: max(0, rawHorizontalOffset),
+                y: max(0, rawVerticalOffset)
+            ),
+            alignmentInset: CGSize(
+                width: rawHorizontalOffset >= 0
+                    ? max(0, startAlignmentInset.width)
+                    : max(0, startAlignmentInset.width - rawHorizontalOffset),
+                height: rawVerticalOffset >= 0
+                    ? max(0, startAlignmentInset.height)
+                    : max(0, startAlignmentInset.height - rawVerticalOffset)
+            )
+        )
+    }
+
     static func contentOffsetPreservingAnchor(
         startOffset: CGPoint,
         anchor: CGPoint,
         canvasSize: CGSize,
         viewportSize: CGSize,
+        startAlignmentInset: CGSize,
+        targetAlignmentInset: CGSize,
         startScale: CGFloat,
         targetScale: CGFloat
     ) -> CGPoint {
@@ -320,41 +397,43 @@ enum StudyTreeViewportPolicy {
             targetScale.isFinite ? targetScale : safeStartScale,
             minimumZoomScale
         )
-        guard canvasSize.width.isFinite,
-              canvasSize.height.isFinite,
-              viewportSize.width.isFinite,
-              viewportSize.height.isFinite,
-              canvasSize.width > 0,
-              canvasSize.height > 0,
-              viewportSize.width > 0,
-              viewportSize.height > 0 else {
-            return .zero
-        }
-
-        func centeredInset(for scale: CGFloat) -> CGSize {
-            CGSize(
-                width: max(0, (viewportSize.width - canvasSize.width * scale) / 2),
-                height: max(0, (viewportSize.height - canvasSize.height * scale) / 2)
-            )
-        }
-
-        let startInset = centeredInset(for: safeStartScale)
-        let targetInset = centeredInset(for: safeTargetScale)
         let safeStartOffset = CGPoint(
             x: startOffset.x.isFinite ? max(0, startOffset.x) : 0,
             y: startOffset.y.isFinite ? max(0, startOffset.y) : 0
         )
         let canvasPoint = CGPoint(
-            x: (safeStartOffset.x + anchor.x - startInset.width) / safeStartScale,
-            y: (safeStartOffset.y + anchor.y - startInset.height) / safeStartScale
-        )
-        let maximumTargetOffset = CGPoint(
-            x: max(0, canvasSize.width * safeTargetScale - viewportSize.width),
-            y: max(0, canvasSize.height * safeTargetScale - viewportSize.height)
+            x: (
+                safeStartOffset.x
+                    + anchor.x
+                    - max(0, startAlignmentInset.width)
+            ) / safeStartScale,
+            y: (
+                safeStartOffset.y
+                    + anchor.y
+                    - max(0, startAlignmentInset.height)
+            ) / safeStartScale
         )
         let targetOffset = CGPoint(
-            x: targetInset.width + canvasPoint.x * safeTargetScale - anchor.x,
-            y: targetInset.height + canvasPoint.y * safeTargetScale - anchor.y
+            x: max(0, targetAlignmentInset.width)
+                + canvasPoint.x * safeTargetScale
+                - anchor.x,
+            y: max(0, targetAlignmentInset.height)
+                + canvasPoint.y * safeTargetScale
+                - anchor.y
+        )
+        let maximumTargetOffset = CGPoint(
+            x: max(
+                0,
+                canvasSize.width * safeTargetScale
+                    + max(0, targetAlignmentInset.width)
+                    - viewportSize.width
+            ),
+            y: max(
+                0,
+                canvasSize.height * safeTargetScale
+                    + max(0, targetAlignmentInset.height)
+                    - viewportSize.height
+            )
         )
         return CGPoint(
             x: min(max(0, targetOffset.x), maximumTargetOffset.x),

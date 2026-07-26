@@ -132,7 +132,9 @@ final class StudyTreeViewportPersistenceTests: XCTestCase {
             StudyTreeViewportState(
                 zoomScale: 1.45,
                 contentOffsetX: 180,
-                contentOffsetY: 96
+                contentOffsetY: 96,
+                canvasAlignmentX: 24,
+                canvasAlignmentY: 80
             ),
             rootStudyID: 7
         )
@@ -143,7 +145,9 @@ final class StudyTreeViewportPersistenceTests: XCTestCase {
             StudyTreeViewportState(
                 zoomScale: 1.45,
                 contentOffsetX: 180,
-                contentOffsetY: 96
+                contentOffsetY: 96,
+                canvasAlignmentX: 24,
+                canvasAlignmentY: 80
             )
         )
         XCTAssertEqual(store.loadStudyTreeViewport(rootStudyID: 8), .default)
@@ -152,7 +156,9 @@ final class StudyTreeViewportPersistenceTests: XCTestCase {
             StudyTreeViewportState(
                 zoomScale: 4,
                 contentOffsetX: -20,
-                contentOffsetY: .infinity
+                contentOffsetY: .infinity,
+                canvasAlignmentX: -.infinity,
+                canvasAlignmentY: .infinity
             ),
             rootStudyID: 9
         )
@@ -161,7 +167,9 @@ final class StudyTreeViewportPersistenceTests: XCTestCase {
             StudyTreeViewportState(
                 zoomScale: 1.8,
                 contentOffsetX: 0,
-                contentOffsetY: 0
+                contentOffsetY: 0,
+                canvasAlignmentX: 0,
+                canvasAlignmentY: 0
             )
         )
     }
@@ -314,6 +322,8 @@ final class StudyTreeLayoutPolicyTests: XCTestCase {
                 anchor: CGPoint(x: 200, y: 300),
                 canvasSize: CGSize(width: 1_000, height: 800),
                 viewportSize: CGSize(width: 400, height: 600),
+                startAlignmentInset: .zero,
+                targetAlignmentInset: .zero,
                 startScale: 1,
                 targetScale: 2
             ),
@@ -325,6 +335,8 @@ final class StudyTreeLayoutPolicyTests: XCTestCase {
                 anchor: CGPoint(x: 200, y: 300),
                 canvasSize: CGSize(width: 1_000, height: 1_000),
                 viewportSize: CGSize(width: 400, height: 600),
+                startAlignmentInset: .zero,
+                targetAlignmentInset: .zero,
                 startScale: 1,
                 targetScale: 0.5
             ),
@@ -336,12 +348,19 @@ final class StudyTreeLayoutPolicyTests: XCTestCase {
         let canvasSize = CGSize(width: 200, height: 200)
         let viewportSize = CGSize(width: 400, height: 600)
         let viewportCenter = CGPoint(x: 200, y: 300)
+        let centeredInset = StudyTreeViewportPolicy.centeredCanvasAlignmentInset(
+            canvasSize: canvasSize,
+            viewportSize: viewportSize,
+            zoomScale: 1
+        )
 
         let zoomedInOffset = StudyTreeViewportPolicy.contentOffsetPreservingAnchor(
             startOffset: .zero,
             anchor: viewportCenter,
             canvasSize: canvasSize,
             viewportSize: viewportSize,
+            startAlignmentInset: centeredInset,
+            targetAlignmentInset: .zero,
             startScale: 1,
             targetScale: 3
         )
@@ -353,10 +372,210 @@ final class StudyTreeLayoutPolicyTests: XCTestCase {
                 anchor: viewportCenter,
                 canvasSize: canvasSize,
                 viewportSize: viewportSize,
+                startAlignmentInset: .zero,
+                targetAlignmentInset: centeredInset,
                 startScale: 3,
                 targetScale: 1
             ),
             .zero
         )
+    }
+
+    func testFiveHundredDragUpdatesNeverTeleportTheTree() {
+        let baseCenters = [
+            1: CGPoint(x: 100, y: 100),
+            2: CGPoint(x: 260, y: 100)
+        ]
+        let baseCanvasSize = CGSize(width: 320, height: 320)
+        let nodeSize = CGSize(width: 112, height: 112)
+        let zoomScale: CGFloat = 0.75
+        let fixedAlignmentInset = CGSize(width: 35, height: 90)
+        let startViewportOffset = CGPoint(x: 40, y: 30)
+        let startLayout = StudyTreeCanvasPolicy.expandedLayout(
+            baseCenters: baseCenters,
+            nodeOffsets: [:],
+            baseCanvasSize: baseCanvasSize,
+            nodeSize: nodeSize
+        )
+        let stationaryNodeStart = CGPoint(
+            x: (baseCenters[2]!.x + startLayout.translation.width) * zoomScale
+                + fixedAlignmentInset.width
+                - startViewportOffset.x,
+            y: (baseCenters[2]!.y + startLayout.translation.height) * zoomScale
+                + fixedAlignmentInset.height
+                - startViewportOffset.y
+        )
+        let draggedNodeStart = CGPoint(
+            x: (baseCenters[1]!.x + startLayout.translation.width) * zoomScale
+                + fixedAlignmentInset.width
+                - startViewportOffset.x,
+            y: (baseCenters[1]!.y + startLayout.translation.height) * zoomScale
+                + fixedAlignmentInset.height
+                - startViewportOffset.y
+        )
+
+        for step in 0...500 {
+            let progress = CGFloat(step) / 500
+            let triangularProgress = progress <= 0.5
+                ? progress * 2
+                : (1 - progress) * 2
+            let draggedOffset = CGSize(
+                width: -1_200 * triangularProgress,
+                height: -800 * triangularProgress
+            )
+            let layout = StudyTreeCanvasPolicy.expandedLayout(
+                baseCenters: baseCenters,
+                nodeOffsets: [1: draggedOffset],
+                baseCanvasSize: baseCanvasSize,
+                nodeSize: nodeSize
+            )
+            let compensation =
+                StudyTreeViewportPolicy.compensationPreservingCanvasTranslation(
+                    startOffset: startViewportOffset,
+                    startAlignmentInset: fixedAlignmentInset,
+                    startCanvasTranslation: startLayout.translation,
+                    targetCanvasTranslation: layout.translation,
+                    zoomScale: zoomScale
+                )
+            let viewportOffset = compensation.viewportOffset
+            let alignmentInset = compensation.alignmentInset
+            let stationaryNode = CGPoint(
+                x: (baseCenters[2]!.x + layout.translation.width) * zoomScale
+                    + alignmentInset.width
+                    - viewportOffset.x,
+                y: (baseCenters[2]!.y + layout.translation.height) * zoomScale
+                    + alignmentInset.height
+                    - viewportOffset.y
+            )
+            let draggedNode = CGPoint(
+                x: (
+                    baseCenters[1]!.x
+                        + draggedOffset.width
+                        + layout.translation.width
+                ) * zoomScale
+                    + alignmentInset.width
+                    - viewportOffset.x,
+                y: (
+                    baseCenters[1]!.y
+                        + draggedOffset.height
+                        + layout.translation.height
+                ) * zoomScale
+                    + alignmentInset.height
+                    - viewportOffset.y
+            )
+
+            XCTAssertEqual(stationaryNode.x, stationaryNodeStart.x, accuracy: 0.0001)
+            XCTAssertEqual(stationaryNode.y, stationaryNodeStart.y, accuracy: 0.0001)
+            XCTAssertEqual(
+                draggedNode.x,
+                draggedNodeStart.x + draggedOffset.width * zoomScale,
+                accuracy: 0.0001
+            )
+            XCTAssertEqual(
+                draggedNode.y,
+                draggedNodeStart.y + draggedOffset.height * zoomScale,
+                accuracy: 0.0001
+            )
+        }
+    }
+
+    func testFiveHundredInwardDragUpdatesNeverTeleportTheTree() {
+        let baseCenters = [
+            1: CGPoint(x: 100, y: 100),
+            2: CGPoint(x: 260, y: 100)
+        ]
+        let initialDraggedOffset = CGSize(width: -1_200, height: -800)
+        let baseCanvasSize = CGSize(width: 320, height: 320)
+        let nodeSize = CGSize(width: 112, height: 112)
+        let zoomScale: CGFloat = 0.75
+        let startAlignmentInset = CGSize(width: 35, height: 90)
+        let startViewportOffset = CGPoint.zero
+        let startLayout = StudyTreeCanvasPolicy.expandedLayout(
+            baseCenters: baseCenters,
+            nodeOffsets: [1: initialDraggedOffset],
+            baseCanvasSize: baseCanvasSize,
+            nodeSize: nodeSize
+        )
+        let stationaryNodeStart = CGPoint(
+            x: (baseCenters[2]!.x + startLayout.translation.width) * zoomScale
+                + startAlignmentInset.width,
+            y: (baseCenters[2]!.y + startLayout.translation.height) * zoomScale
+                + startAlignmentInset.height
+        )
+        let draggedNodeStart = CGPoint(
+            x: (
+                baseCenters[1]!.x
+                    + initialDraggedOffset.width
+                    + startLayout.translation.width
+            ) * zoomScale
+                + startAlignmentInset.width,
+            y: (
+                baseCenters[1]!.y
+                    + initialDraggedOffset.height
+                    + startLayout.translation.height
+            ) * zoomScale
+                + startAlignmentInset.height
+        )
+
+        for step in 0...500 {
+            let progress = CGFloat(step) / 500
+            let draggedOffset = CGSize(
+                width: initialDraggedOffset.width * (1 - progress),
+                height: initialDraggedOffset.height * (1 - progress)
+            )
+            let layout = StudyTreeCanvasPolicy.expandedLayout(
+                baseCenters: baseCenters,
+                nodeOffsets: [1: draggedOffset],
+                baseCanvasSize: baseCanvasSize,
+                nodeSize: nodeSize
+            )
+            let compensation =
+                StudyTreeViewportPolicy.compensationPreservingCanvasTranslation(
+                    startOffset: startViewportOffset,
+                    startAlignmentInset: startAlignmentInset,
+                    startCanvasTranslation: startLayout.translation,
+                    targetCanvasTranslation: layout.translation,
+                    zoomScale: zoomScale
+                )
+            let stationaryNode = CGPoint(
+                x: (baseCenters[2]!.x + layout.translation.width) * zoomScale
+                    + compensation.alignmentInset.width
+                    - compensation.viewportOffset.x,
+                y: (baseCenters[2]!.y + layout.translation.height) * zoomScale
+                    + compensation.alignmentInset.height
+                    - compensation.viewportOffset.y
+            )
+            let draggedNode = CGPoint(
+                x: (
+                    baseCenters[1]!.x
+                        + draggedOffset.width
+                        + layout.translation.width
+                ) * zoomScale
+                    + compensation.alignmentInset.width
+                    - compensation.viewportOffset.x,
+                y: (
+                    baseCenters[1]!.y
+                        + draggedOffset.height
+                        + layout.translation.height
+                ) * zoomScale
+                    + compensation.alignmentInset.height
+                    - compensation.viewportOffset.y
+            )
+
+            XCTAssertEqual(stationaryNode.x, stationaryNodeStart.x, accuracy: 0.0001)
+            XCTAssertEqual(stationaryNode.y, stationaryNodeStart.y, accuracy: 0.0001)
+            XCTAssertEqual(
+                draggedNode.x,
+                draggedNodeStart.x
+                    + (draggedOffset.width - initialDraggedOffset.width) * zoomScale,
+                accuracy: 0.0001
+            )
+            XCTAssertEqual(
+                draggedNode.y,
+                draggedNodeStart.y
+                    + (draggedOffset.height - initialDraggedOffset.height) * zoomScale,
+                accuracy: 0.0001
+            )
+        }
     }
 }

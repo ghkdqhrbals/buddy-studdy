@@ -120,7 +120,13 @@ final class SettingsStore {
                 )
                 : 1,
             contentOffsetX: viewport.contentOffsetX.isFinite ? max(0, viewport.contentOffsetX) : 0,
-            contentOffsetY: viewport.contentOffsetY.isFinite ? max(0, viewport.contentOffsetY) : 0
+            contentOffsetY: viewport.contentOffsetY.isFinite ? max(0, viewport.contentOffsetY) : 0,
+            canvasAlignmentX: viewport.canvasAlignmentX.map {
+                $0.isFinite ? max(0, $0) : 0
+            },
+            canvasAlignmentY: viewport.canvasAlignmentY.map {
+                $0.isFinite ? max(0, $0) : 0
+            }
         )
     }
 

@@ -2311,12 +2311,17 @@ private struct MobileStudyTreeView: View {
     @State private var selectedRoomIDs = Set<Int>()
     @State private var nodeOffsets: [Int: CGSize] = [:]
     @State private var dragStartOffsets: [Int: CGSize] = [:]
+    @State private var dragStartCanvasTranslations: [Int: CGSize] = [:]
+    @State private var dragStartViewportOffsets: [Int: CGPoint] = [:]
+    @State private var dragStartCanvasAlignmentInsets: [Int: CGSize] = [:]
     @State private var zoomScale: CGFloat = 1
     @State private var zoomStartScale: CGFloat = 1
     @State private var zoomStartViewportOffset: CGPoint = .zero
+    @State private var zoomStartCanvasAlignmentInset: CGSize = .zero
     @State private var isZoomGestureActive = false
     @State private var viewportOffset: CGPoint = .zero
     @State private var treeViewportSize: CGSize = .zero
+    @State private var canvasAlignmentInset: CGSize = .zero
     @State private var hasLoadedTreeState = false
     @State private var hasFinishedInitialRefresh = false
     @State private var hasAppliedInitialViewportFit = false
@@ -2372,100 +2377,117 @@ private struct MobileStudyTreeView: View {
             if let snapshot {
                 GeometryReader { geometry in
                     let canvasLayout = expandedCanvasLayout(for: snapshot)
+                    let scaledCanvasSize = CGSize(
+                        width: canvasLayout.size.width * zoomScale,
+                        height: canvasLayout.size.height * zoomScale
+                    )
                     ZStack(alignment: .bottom) {
                         ScrollView([.horizontal, .vertical]) {
                             ZStack(alignment: .topLeading) {
-                                Canvas { context, _ in
-                                    for edge in snapshot.edges {
-                                        let parent = edge.parent.adding(
-                                            renderedNodeOffset(
-                                                for: edge.parentID,
-                                                canvasLayout: canvasLayout
+                                ZStack(alignment: .topLeading) {
+                                    Canvas { context, _ in
+                                        for edge in snapshot.edges {
+                                            let parent = edge.parent.adding(
+                                                renderedNodeOffset(
+                                                    for: edge.parentID,
+                                                    canvasLayout: canvasLayout
+                                                )
                                             )
-                                        )
-                                        let child = edge.child.adding(
-                                            renderedNodeOffset(
-                                                for: edge.childID,
-                                                canvasLayout: canvasLayout
+                                            let child = edge.child.adding(
+                                                renderedNodeOffset(
+                                                    for: edge.childID,
+                                                    canvasLayout: canvasLayout
+                                                )
                                             )
-                                        )
-                                        guard let geometry = StudyTreeEdgePolicy.directionalGeometry(
-                                            parent: parent,
-                                            child: child,
-                                            nodeRadius: StudyTreeLayoutSnapshot.nodeSize.width / 2 + 4
-                                        ) else {
-                                            continue
-                                        }
-                                        var path = Path()
-                                        path.move(to: geometry.start)
-                                        let midpoint = (geometry.start.y + geometry.end.y) / 2
-                                        path.addCurve(
-                                            to: geometry.end,
-                                            control1: CGPoint(x: geometry.start.x, y: midpoint),
-                                            control2: CGPoint(x: geometry.end.x, y: midpoint)
-                                        )
-                                        let edgeColor = Color.secondary.opacity(0.48)
-                                        context.stroke(path, with: .color(edgeColor), lineWidth: 1.7)
+                                            guard let geometry = StudyTreeEdgePolicy.directionalGeometry(
+                                                parent: parent,
+                                                child: child,
+                                                nodeRadius: StudyTreeLayoutSnapshot.nodeSize.width / 2 + 4
+                                            ) else {
+                                                continue
+                                            }
+                                            var path = Path()
+                                            path.move(to: geometry.start)
+                                            let midpoint = (geometry.start.y + geometry.end.y) / 2
+                                            path.addCurve(
+                                                to: geometry.end,
+                                                control1: CGPoint(x: geometry.start.x, y: midpoint),
+                                                control2: CGPoint(x: geometry.end.x, y: midpoint)
+                                            )
+                                            let edgeColor = Color.secondary.opacity(0.48)
+                                            context.stroke(path, with: .color(edgeColor), lineWidth: 1.7)
 
-                                        var arrow = Path()
-                                        arrow.move(to: geometry.end)
-                                        arrow.addLine(to: geometry.arrowLeft)
-                                        arrow.addLine(to: geometry.arrowRight)
-                                        arrow.closeSubpath()
-                                        context.fill(arrow, with: .color(edgeColor))
+                                            var arrow = Path()
+                                            arrow.move(to: geometry.end)
+                                            arrow.addLine(to: geometry.arrowLeft)
+                                            arrow.addLine(to: geometry.arrowRight)
+                                            arrow.closeSubpath()
+                                            context.fill(arrow, with: .color(edgeColor))
+                                        }
+                                    }
+
+                                    ForEach(snapshot.placements) { placement in
+                                        StudyTreeNode(
+                                            room: placement.room,
+                                            strings: strings,
+                                            isSelectionMode: isSelectionMode,
+                                            isSelected: selectedRoomIDs.contains(placement.room.id),
+                                            onOpen: { selectedRoomID = placement.room.id },
+                                            onSelect: { toggleSelection(placement.room.id) },
+                                            onAddRecommendedChild: {
+                                                addRequest = StudyTopicAddRequest(
+                                                    parent: placement.room,
+                                                    mode: .recommendation
+                                                )
+                                            },
+                                            onAddManualChild: {
+                                                addRequest = StudyTopicAddRequest(
+                                                    parent: placement.room,
+                                                    mode: .manual
+                                                )
+                                            },
+                                            onEdit: { editingRoom = placement.room },
+                                            onDelete: { deletionCandidate = placement.room }
+                                        )
+                                        .position(placement.center)
+                                        .offset(
+                                            renderedNodeOffset(
+                                                for: placement.room.id,
+                                                canvasLayout: canvasLayout
+                                            )
+                                        )
+                                        .highPriorityGesture(
+                                            nodeDragGesture(for: placement.room.id, in: snapshot)
+                                        )
                                     }
                                 }
-
-                                ForEach(snapshot.placements) { placement in
-                                    StudyTreeNode(
-                                        room: placement.room,
-                                        strings: strings,
-                                        isSelectionMode: isSelectionMode,
-                                        isSelected: selectedRoomIDs.contains(placement.room.id),
-                                        onOpen: { selectedRoomID = placement.room.id },
-                                        onSelect: { toggleSelection(placement.room.id) },
-                                        onAddRecommendedChild: {
-                                            addRequest = StudyTopicAddRequest(
-                                                parent: placement.room,
-                                                mode: .recommendation
-                                            )
-                                        },
-                                        onAddManualChild: {
-                                            addRequest = StudyTopicAddRequest(
-                                                parent: placement.room,
-                                                mode: .manual
-                                            )
-                                        },
-                                        onEdit: { editingRoom = placement.room },
-                                        onDelete: { deletionCandidate = placement.room }
-                                    )
-                                    .position(placement.center)
-                                    .offset(
-                                        renderedNodeOffset(
-                                            for: placement.room.id,
-                                            canvasLayout: canvasLayout
-                                        )
-                                    )
-                                    .highPriorityGesture(
-                                        nodeDragGesture(for: placement.room.id, in: snapshot)
-                                    )
-                                }
+                                .frame(width: canvasLayout.size.width, height: canvasLayout.size.height)
+                                .scaleEffect(zoomScale, anchor: .topLeading)
+                                .frame(
+                                    width: scaledCanvasSize.width,
+                                    height: scaledCanvasSize.height,
+                                    alignment: .topLeading
+                                )
+                                .offset(
+                                    x: canvasAlignmentInset.width,
+                                    y: canvasAlignmentInset.height
+                                )
                             }
-                            .frame(width: canvasLayout.size.width, height: canvasLayout.size.height)
-                            .scaleEffect(zoomScale, anchor: .topLeading)
                             .frame(
-                                width: canvasLayout.size.width * zoomScale,
-                                height: canvasLayout.size.height * zoomScale,
+                                width: max(
+                                    geometry.size.width,
+                                    scaledCanvasSize.width + canvasAlignmentInset.width
+                                ),
+                                height: max(
+                                    geometry.size.height,
+                                    scaledCanvasSize.height + canvasAlignmentInset.height
+                                ),
                                 alignment: .topLeading
-                            )
-                            .frame(
-                                minWidth: geometry.size.width,
-                                minHeight: geometry.size.height,
-                                alignment: .center
                             )
                             .background {
                                 StudyTreeScrollViewportBridge(
-                                    contentOffset: viewportOffset
+                                    contentOffset: viewportOffset,
+                                    isReportingEnabled: dragStartOffsets.isEmpty
                                 ) { offset in
                                     viewportOffset = offset
                                     saveViewport(contentOffset: offset)
@@ -2634,6 +2656,7 @@ private struct MobileStudyTreeView: View {
                     isZoomGestureActive = true
                     zoomStartScale = zoomScale
                     zoomStartViewportOffset = viewportOffset
+                    zoomStartCanvasAlignmentInset = canvasAlignmentInset
                 }
                 let nextScale = min(
                     max(
@@ -2649,15 +2672,24 @@ private struct MobileStudyTreeView: View {
                 let canvasSize = snapshot.map {
                     expandedCanvasLayout(for: $0).size
                 } ?? treeViewportSize
-                zoomScale = nextScale
+                let targetAlignmentInset =
+                    StudyTreeViewportPolicy.centeredCanvasAlignmentInset(
+                        canvasSize: canvasSize,
+                        viewportSize: treeViewportSize,
+                        zoomScale: nextScale
+                    )
                 viewportOffset = StudyTreeViewportPolicy.contentOffsetPreservingAnchor(
                     startOffset: zoomStartViewportOffset,
                     anchor: anchor,
                     canvasSize: canvasSize,
                     viewportSize: treeViewportSize,
+                    startAlignmentInset: zoomStartCanvasAlignmentInset,
+                    targetAlignmentInset: targetAlignmentInset,
                     startScale: zoomStartScale,
                     targetScale: nextScale
                 )
+                canvasAlignmentInset = targetAlignmentInset
+                zoomScale = nextScale
             }
             .onEnded { _ in
                 isZoomGestureActive = false
@@ -2684,31 +2716,37 @@ private struct MobileStudyTreeView: View {
                 cancelPendingInitialViewportFit()
                 let initial = dragStartOffsets[roomID]
                     ?? StudyTreeCanvasPolicy.sanitizedOffset(nodeOffsets[roomID] ?? .zero)
+                if dragStartOffsets[roomID] == nil {
+                    let startLayout = expandedCanvasLayout(for: snapshot)
+                    dragStartCanvasTranslations[roomID] = startLayout.translation
+                    dragStartViewportOffsets[roomID] = viewportOffset
+                    dragStartCanvasAlignmentInsets[roomID] = canvasAlignmentInset
+                }
                 dragStartOffsets[roomID] = initial
                 let proposedOffset = CGSize(
                     width: initial.width + value.translation.width / zoomScale,
                     height: initial.height + value.translation.height / zoomScale
                 )
-                let previousLayout = expandedCanvasLayout(for: snapshot)
                 nodeOffsets[roomID] = StudyTreeCanvasPolicy.sanitizedOffset(proposedOffset)
                 let expandedLayout = expandedCanvasLayout(for: snapshot)
-                viewportOffset = CGPoint(
-                    x: max(
-                        0,
-                        viewportOffset.x
-                            + (expandedLayout.translation.width - previousLayout.translation.width)
-                                * zoomScale
-                    ),
-                    y: max(
-                        0,
-                        viewportOffset.y
-                            + (expandedLayout.translation.height - previousLayout.translation.height)
-                                * zoomScale
+                let compensation = StudyTreeViewportPolicy
+                    .compensationPreservingCanvasTranslation(
+                        startOffset: dragStartViewportOffsets[roomID] ?? viewportOffset,
+                        startAlignmentInset:
+                            dragStartCanvasAlignmentInsets[roomID] ?? canvasAlignmentInset,
+                        startCanvasTranslation:
+                            dragStartCanvasTranslations[roomID] ?? expandedLayout.translation,
+                        targetCanvasTranslation: expandedLayout.translation,
+                        zoomScale: zoomScale
                     )
-                )
+                viewportOffset = compensation.viewportOffset
+                canvasAlignmentInset = compensation.alignmentInset
             }
             .onEnded { _ in
                 dragStartOffsets[roomID] = nil
+                dragStartCanvasTranslations[roomID] = nil
+                dragStartViewportOffsets[roomID] = nil
+                dragStartCanvasAlignmentInsets[roomID] = nil
                 saveNodeOffsets()
                 saveViewport()
             }
@@ -2826,10 +2864,12 @@ private struct MobileStudyTreeView: View {
             return
         }
         nodeOffsets = appState.loadStudyTreeNodeOffsets(rootStudyID: rootStudyID)
+        let viewport = appState.loadStudyTreeViewport(rootStudyID: rootStudyID)
         let needsInitialFit = !appState.hasStudyTreeViewport(rootStudyID: rootStudyID)
+            || viewport.canvasAlignmentX == nil
+            || viewport.canvasAlignmentY == nil
         shouldFitInitialViewport = needsInitialFit
         isPreparingInitialViewport = needsInitialFit
-        let viewport = appState.loadStudyTreeViewport(rootStudyID: rootStudyID)
         zoomScale = viewport.zoomScale
         zoomStartScale = viewport.zoomScale
         viewportOffset = CGPoint(
@@ -2837,6 +2877,12 @@ private struct MobileStudyTreeView: View {
             y: viewport.contentOffsetY
         )
         zoomStartViewportOffset = viewportOffset
+        canvasAlignmentInset = needsInitialFit
+            ? .zero
+            : CGSize(
+                width: viewport.canvasAlignmentX ?? 0,
+                height: viewport.canvasAlignmentY ?? 0
+            )
         hasLoadedTreeState = true
     }
 
@@ -2920,6 +2966,12 @@ private struct MobileStudyTreeView: View {
         )
         zoomScale = fittedScale
         zoomStartScale = fittedScale
+        canvasAlignmentInset = StudyTreeViewportPolicy.centeredCanvasAlignmentInset(
+            canvasSize: canvasLayout.size,
+            viewportSize: treeViewportSize,
+            zoomScale: fittedScale
+        )
+        zoomStartCanvasAlignmentInset = canvasAlignmentInset
         viewportOffset = .zero
         zoomStartViewportOffset = .zero
     }
@@ -2937,7 +2989,9 @@ private struct MobileStudyTreeView: View {
             StudyTreeViewportState(
                 zoomScale: zoomScale,
                 contentOffsetX: contentOffset.x,
-                contentOffsetY: contentOffset.y
+                contentOffsetY: contentOffset.y,
+                canvasAlignmentX: canvasAlignmentInset.width,
+                canvasAlignmentY: canvasAlignmentInset.height
             ),
             rootStudyID: rootStudyID
         )
@@ -2946,10 +3000,14 @@ private struct MobileStudyTreeView: View {
 
 private struct StudyTreeScrollViewportBridge: UIViewRepresentable {
     var contentOffset: CGPoint
+    var isReportingEnabled: Bool
     var onContentOffsetChange: (CGPoint) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onContentOffsetChange: onContentOffsetChange)
+        Coordinator(
+            isReportingEnabled: isReportingEnabled,
+            onContentOffsetChange: onContentOffsetChange
+        )
     }
 
     func makeUIView(context: Context) -> UIView {
@@ -2959,6 +3017,7 @@ private struct StudyTreeScrollViewportBridge: UIViewRepresentable {
         context.coordinator.update(
             from: view,
             contentOffset: contentOffset,
+            isReportingEnabled: isReportingEnabled,
             onContentOffsetChange: onContentOffsetChange
         )
         return view
@@ -2968,6 +3027,7 @@ private struct StudyTreeScrollViewportBridge: UIViewRepresentable {
         context.coordinator.update(
             from: view,
             contentOffset: contentOffset,
+            isReportingEnabled: isReportingEnabled,
             onContentOffsetChange: onContentOffsetChange
         )
     }
@@ -2985,21 +3045,31 @@ private struct StudyTreeScrollViewportBridge: UIViewRepresentable {
         private var requestedContentOffset: CGPoint = .zero
         private var onContentOffsetChange: (CGPoint) -> Void
         private var isApplyingContentOffset = false
+        private var isReportingEnabled: Bool
         private var retryCount = 0
 
-        init(onContentOffsetChange: @escaping (CGPoint) -> Void) {
+        init(
+            isReportingEnabled: Bool,
+            onContentOffsetChange: @escaping (CGPoint) -> Void
+        ) {
+            self.isReportingEnabled = isReportingEnabled
             self.onContentOffsetChange = onContentOffsetChange
         }
 
         func update(
             from view: UIView,
             contentOffset: CGPoint,
+            isReportingEnabled: Bool,
             onContentOffsetChange: @escaping (CGPoint) -> Void
         ) {
             requestedContentOffset = CGPoint(
                 x: max(0, contentOffset.x),
                 y: max(0, contentOffset.y)
             )
+            self.isReportingEnabled = isReportingEnabled
+            if !isReportingEnabled {
+                reportTask?.cancel()
+            }
             self.onContentOffsetChange = onContentOffsetChange
             attachIfNeeded(from: view)
             applyRequestedContentOffset(from: view)
@@ -3008,7 +3078,7 @@ private struct StudyTreeScrollViewportBridge: UIViewRepresentable {
         func detach() {
             reportTask?.cancel()
             retryTask?.cancel()
-            if let scrollView {
+            if let scrollView, isReportingEnabled {
                 requestedContentOffset = CGPoint(
                     x: max(0, scrollView.contentOffset.x),
                     y: max(0, scrollView.contentOffset.y)
@@ -3102,7 +3172,7 @@ private struct StudyTreeScrollViewportBridge: UIViewRepresentable {
         }
 
         private func didScroll(to contentOffset: CGPoint) {
-            guard !isApplyingContentOffset else {
+            guard !isApplyingContentOffset, isReportingEnabled else {
                 return
             }
             requestedContentOffset = CGPoint(
