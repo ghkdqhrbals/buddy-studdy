@@ -2487,7 +2487,9 @@ private struct MobileStudyTreeView: View {
                             .background {
                                 StudyTreeScrollViewportBridge(
                                     contentOffset: viewportOffset,
-                                    isReportingEnabled: dragStartOffsets.isEmpty
+                                    isReportingEnabled:
+                                        dragStartOffsets.isEmpty
+                                            && !isZoomGestureActive
                                 ) { offset in
                                     viewportOffset = offset
                                     saveViewport(contentOffset: offset)
