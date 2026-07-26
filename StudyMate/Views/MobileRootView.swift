@@ -2499,12 +2499,12 @@ private struct MobileStudyTreeView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                HStack(spacing: 4) {
-                    Text(strings.studyTree)
-                        .font(.headline)
-                    if !isSelectionMode {
-                        treeOptionsMenu
-                    }
+                Text(strings.studyTree)
+                    .font(.headline)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                if !isSelectionMode {
+                    treeOptionsMenu
                 }
             }
         }
