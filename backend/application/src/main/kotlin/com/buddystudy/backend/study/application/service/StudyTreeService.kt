@@ -61,11 +61,37 @@ class StudyTreeService(
         studyId: Long,
         command: UpdateStudyTopicActivationCommand,
     ): StudyRoomResponse {
-        val study = studies.findByIdAndUserId(studyId, principal.userId)
+        val allStudies = studies.findAllByUserId(principal.userId)
+        val study = allStudies.firstOrNull { it.id == studyId }
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
+        val root = StudyTreeSelector.rootFor(study, allStudies)
+        val subtree = StudyTreeSelector.subtreeFor(root, allStudies)
+        if (!command.active && study.activeForQuestions && subtree.none { it.id != study.id && it.activeForQuestions }) {
+            throw ApiException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.VALIDATION_ERROR,
+                "At least one topic must remain active for scheduled questions.",
+            )
+        }
+
+        val now = Instant.now()
         study.activeForQuestions = command.active
-        study.updatedAt = Instant.now()
-        return studies.save(study).toStudyRoomResponse()
+        study.updatedAt = now
+
+        if (command.active) {
+            root.enabled = true
+            if (root.nextDueAt == null) {
+                root.nextDueAt = now.plusSeconds(root.intervalMinutes.coerceAtLeast(1).toLong() * 60)
+            }
+            root.lastError = null
+            root.updatedAt = now
+        }
+
+        val savedStudy = studies.save(study)
+        if (root.id != study.id && command.active) {
+            studies.save(root)
+        }
+        return savedStudy.toStudyRoomResponse()
     }
 }
 
@@ -80,9 +106,9 @@ internal object StudyTreeSelector {
         return current
     }
 
-    fun nextActiveTopic(root: StudyEntity, allStudies: Collection<StudyEntity>): StudyEntity? {
+    fun subtreeFor(root: StudyEntity, allStudies: Collection<StudyEntity>): List<StudyEntity> {
         val byParent = allStudies.groupBy { it.parentStudyId }
-        val subtree = buildList {
+        return buildList {
             val pending = ArrayDeque<StudyEntity>()
             pending.add(root)
             val visited = mutableSetOf<Long>()
@@ -95,7 +121,10 @@ internal object StudyTreeSelector {
                     .forEach(pending::addLast)
             }
         }
-        return subtree
+    }
+
+    fun nextActiveTopic(root: StudyEntity, allStudies: Collection<StudyEntity>): StudyEntity? {
+        return subtreeFor(root, allStudies)
             .filter { it.activeForQuestions }
             .minWithOrNull(
                 compareBy<StudyEntity> { it.lastSentAt != null }

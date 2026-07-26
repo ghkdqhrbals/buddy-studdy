@@ -2,6 +2,19 @@ import XCTest
 @testable import StudyMate
 
 final class QuestionSchedulePolicyTests: XCTestCase {
+    func testIOSRemotePushRequiresOnlyAnAPNSToken() {
+        XCTAssertTrue(
+            QuestionSchedulePolicy.shouldEnableIOSRemotePush(
+                apnsToken: "device-token"
+            )
+        )
+        XCTAssertFalse(
+            QuestionSchedulePolicy.shouldEnableIOSRemotePush(
+                apnsToken: " "
+            )
+        )
+    }
+
     func testRemotePushRequiresOnlyAnEnabledScheduleAndAPNSToken() {
         XCTAssertTrue(
             QuestionSchedulePolicy.shouldEnableRemotePush(

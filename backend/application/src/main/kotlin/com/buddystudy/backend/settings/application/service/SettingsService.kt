@@ -11,6 +11,7 @@ import com.buddystudy.backend.settings.application.port.inbound.ScheduleCommand
 import com.buddystudy.backend.settings.application.port.inbound.ScheduleItemCommand
 import com.buddystudy.backend.settings.application.port.inbound.SettingsUseCase
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
+import com.buddystudy.backend.study.application.service.StudyTreeSelector
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
@@ -48,6 +49,7 @@ class SettingsService(
             users.save(user)
         }
         var next: Instant? = null
+        val allUserStudies = studies.findAllByUserId(principal.userId).toMutableList()
         val studiesByTopic = studies.findByUserIdAndTopics(principal.userId, items.map { it.topic }.distinct())
             .associateBy { it.topic }
             .toMutableMap()
@@ -77,8 +79,16 @@ class SettingsService(
             if (study.shouldReschedule(isNewStudy, previousEnabled, previousIntervalMinutes, previousNextDueAt)) {
                 study.reschedule(now)
             }
+            if (command.enabled && StudyTreeSelector.nextActiveTopic(study, allUserStudies + study) == null) {
+                study.activeForQuestions = true
+                study.lastError = null
+                study.updatedAt = now
+            }
             val saved = studies.save(study)
             studiesByTopic[item.topic] = saved
+            if (allUserStudies.none { it.id == saved.id }) {
+                allUserStudies += saved
+            }
             next = saved.nextDueAt
         }
         return ScheduleResponse(principal.deviceId, command.enabled, next)
@@ -137,6 +147,14 @@ class SettingsService(
         study.deviceId = principal.deviceId
         if (study.shouldReschedule(false, previousEnabled, previousIntervalMinutes, previousNextDueAt)) {
             study.reschedule(now)
+        }
+        if (study.parentStudyId == null && command.enabled) {
+            val allUserStudies = studies.findAllByUserId(principal.userId)
+            if (StudyTreeSelector.nextActiveTopic(study, allUserStudies) == null) {
+                study.activeForQuestions = true
+                study.lastError = null
+                study.updatedAt = now
+            }
         }
         val saved = studies.save(study)
         return ScheduleResponse(principal.deviceId, saved.enabled, saved.nextDueAt)

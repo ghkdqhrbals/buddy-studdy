@@ -112,6 +112,45 @@ class SettingsServiceTest {
     }
 
     @Test
+    fun `enabling schedule repairs a tree with no active question topic`(): Unit = runBlocking {
+        users.row = UserEntity(id = 7, providerId = "u7", status = "ACTIVE")
+        val root = StudyEntity(
+            id = 11,
+            userId = 7,
+            deviceId = "dev-1",
+            topic = "Redis",
+            intervalMinutes = 15,
+            enabled = false,
+            activeForQuestions = false,
+            nextDueAt = null,
+            lastError = "Monthly question limit reached.",
+        )
+        studies.rows += root
+        studies.rows += StudyEntity(
+            id = 12,
+            userId = 7,
+            deviceId = "dev-1",
+            parentStudyId = 11,
+            topic = "Streams",
+            activeForQuestions = false,
+        )
+
+        service.upsertSchedule(
+            principal,
+            ScheduleCommand(
+                intervalMinutes = 15,
+                enabled = true,
+                schedules = listOf(ScheduleItemCommand(topic = "Redis", difficultyLevel = 6)),
+            ),
+        )
+
+        assertThat(root.enabled).isTrue()
+        assertThat(root.activeForQuestions).isTrue()
+        assertThat(root.nextDueAt).isNotNull()
+        assertThat(root.lastError).isNull()
+    }
+
+    @Test
     fun `upsert schedule without a topic does not create a default study`(): Unit = runBlocking {
         users.row = UserEntity(id = 7, providerId = "u7", status = "ACTIVE")
 

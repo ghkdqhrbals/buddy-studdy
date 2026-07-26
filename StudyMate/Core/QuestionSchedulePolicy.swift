@@ -1,6 +1,10 @@
 import Foundation
 
 enum QuestionSchedulePolicy {
+    static func shouldEnableIOSRemotePush(apnsToken: String) -> Bool {
+        !apnsToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     static func shouldEnableRemotePush(
         isRunning: Bool,
         apnsToken: String

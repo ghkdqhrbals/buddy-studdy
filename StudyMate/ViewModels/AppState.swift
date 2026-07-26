@@ -6620,10 +6620,16 @@ final class AppState: ObservableObject {
         includeAPIKey: Bool = false
     ) async throws {
         let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        #if os(iOS)
+        let shouldEnableRemotePush = QuestionSchedulePolicy.shouldEnableIOSRemotePush(
+            apnsToken: registration.apnsToken
+        )
+        #else
         let shouldEnableRemotePush = QuestionSchedulePolicy.shouldEnableRemotePush(
             isRunning: isRunning,
             apnsToken: registration.apnsToken
         )
+        #endif
         let shouldUploadAPIKey = !trimmedAPIKey.isEmpty && (includeAPIKey || !isBackendOpenAIKeyConfigured)
         let sessionSettings = isCommunitySessionActive ? settings : settings.withQuestionPrivacy(false)
         let backendSettings = settingsForRootScheduleSync(sessionSettings)
