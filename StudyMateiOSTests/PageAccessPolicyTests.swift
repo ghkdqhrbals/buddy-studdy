@@ -168,4 +168,25 @@ final class StudyTreeLayoutPolicyTests: XCTestCase {
             1
         )
     }
+
+    func testZoomKeepsGestureAnchorStationary() {
+        XCTAssertEqual(
+            StudyTreeViewportPolicy.contentOffsetPreservingAnchor(
+                startOffset: CGPoint(x: 100, y: 50),
+                anchor: CGPoint(x: 200, y: 300),
+                startScale: 1,
+                targetScale: 2
+            ),
+            CGPoint(x: 400, y: 400)
+        )
+        XCTAssertEqual(
+            StudyTreeViewportPolicy.contentOffsetPreservingAnchor(
+                startOffset: .zero,
+                anchor: CGPoint(x: 200, y: 300),
+                startScale: 1,
+                targetScale: 0.5
+            ),
+            .zero
+        )
+    }
 }

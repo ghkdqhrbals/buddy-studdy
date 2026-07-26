@@ -2306,6 +2306,8 @@ private struct MobileStudyTreeView: View {
     @State private var dragStartOffsets: [Int: CGSize] = [:]
     @State private var zoomScale: CGFloat = 1
     @State private var zoomStartScale: CGFloat = 1
+    @State private var zoomStartViewportOffset: CGPoint = .zero
+    @State private var isZoomGestureActive = false
     @State private var viewportOffset: CGPoint = .zero
     @State private var treeViewportSize: CGSize = .zero
     @State private var hasLoadedTreeState = false
@@ -2336,63 +2338,20 @@ private struct MobileStudyTreeView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                if isSelectionMode {
+            if isSelectionMode {
+                HStack(spacing: 10) {
                     Text(strings.selectedTopicCount(selectedRoomIDs.count))
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Button(strings.done) {
                         endSelection()
                     }
-                } else {
-                    Spacer()
-
-                    Button {
-                        changeZoom(by: -0.15)
-                    } label: {
-                        Image(systemName: "minus.magnifyingglass")
-                    }
-                    .disabled(zoomScale <= StudyTreeViewportPolicy.minimumZoomScale)
-
-                    Button {
-                        changeZoom(by: 0.15)
-                    } label: {
-                        Image(systemName: "plus.magnifyingglass")
-                    }
-                    .disabled(zoomScale >= StudyTreeViewportPolicy.maximumZoomScale)
-
-                    Menu {
-                        Button {
-                            isSelectionMode = true
-                        } label: {
-                            Label(strings.selectTopics, systemImage: "checkmark.circle")
-                        }
-                        Button {
-                            withAnimation(.snappy) {
-                                nodeOffsets = [:]
-                                if let snapshot {
-                                    applyFittedViewport(for: snapshot)
-                                } else {
-                                    zoomScale = 1
-                                    zoomStartScale = 1
-                                    viewportOffset = .zero
-                                }
-                            }
-                            saveNodeOffsets()
-                            saveViewport()
-                        } label: {
-                            Label(strings.resetTreeLayout, systemImage: "arrow.counterclockwise")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .frame(width: 30, height: 30)
-                    }
                 }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(Color(.secondarySystemBackground))
             }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(Color(.secondarySystemBackground))
 
             if let snapshot {
                 GeometryReader { geometry in
@@ -2513,6 +2472,17 @@ private struct MobileStudyTreeView: View {
         .background(Color(.systemBackground))
         .navigationTitle(strings.studyTree)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 4) {
+                    Text(strings.studyTree)
+                        .font(.headline)
+                    if !isSelectionMode {
+                        treeOptionsMenu
+                    }
+                }
+            }
+        }
         .navigationDestination(item: $selectedRoomID) { roomID in
             if let room = appState.backendStudyRoom(id: roomID) {
                 StudyView(preferredCategoryID: String(room.id))
@@ -2572,6 +2542,38 @@ private struct MobileStudyTreeView: View {
         }
     }
 
+    private var treeOptionsMenu: some View {
+        Menu {
+            Button {
+                isSelectionMode = true
+            } label: {
+                Label(strings.selectTopics, systemImage: "checkmark.circle")
+            }
+            Button {
+                withAnimation(.snappy) {
+                    nodeOffsets = [:]
+                    if let snapshot {
+                        applyFittedViewport(for: snapshot)
+                    } else {
+                        zoomScale = 1
+                        zoomStartScale = 1
+                        zoomStartViewportOffset = .zero
+                        viewportOffset = .zero
+                    }
+                }
+                saveNodeOffsets()
+                saveViewport()
+            } label: {
+                Label(strings.resetTreeLayout, systemImage: "arrow.counterclockwise")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .frame(width: 28, height: 28)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(strings.more)
+    }
+
     private var selectionBar: some View {
         HStack(spacing: 0) {
             Button {
@@ -2608,16 +2610,34 @@ private struct MobileStudyTreeView: View {
     private var zoomGesture: some Gesture {
         MagnifyGesture()
             .onChanged { value in
-                zoomScale = min(
+                if !isZoomGestureActive {
+                    isZoomGestureActive = true
+                    zoomStartScale = zoomScale
+                    zoomStartViewportOffset = viewportOffset
+                }
+                let nextScale = min(
                     max(
                         zoomStartScale * value.magnification,
                         StudyTreeViewportPolicy.minimumZoomScale
                     ),
                     StudyTreeViewportPolicy.maximumZoomScale
                 )
+                let anchor = CGPoint(
+                    x: value.startAnchor.x * treeViewportSize.width,
+                    y: value.startAnchor.y * treeViewportSize.height
+                )
+                zoomScale = nextScale
+                viewportOffset = StudyTreeViewportPolicy.contentOffsetPreservingAnchor(
+                    startOffset: zoomStartViewportOffset,
+                    anchor: anchor,
+                    startScale: zoomStartScale,
+                    targetScale: nextScale
+                )
             }
             .onEnded { _ in
+                isZoomGestureActive = false
                 zoomStartScale = zoomScale
+                zoomStartViewportOffset = viewportOffset
                 saveViewport()
             }
     }
@@ -2661,20 +2681,6 @@ private struct MobileStudyTreeView: View {
             }
     }
 
-    private func changeZoom(by delta: CGFloat) {
-        withAnimation(.snappy) {
-            zoomScale = min(
-                max(
-                    zoomScale + delta,
-                    StudyTreeViewportPolicy.minimumZoomScale
-                ),
-                StudyTreeViewportPolicy.maximumZoomScale
-            )
-            zoomStartScale = zoomScale
-        }
-        saveViewport()
-    }
-
     private func toggleSelection(_ roomID: Int) {
         if selectedRoomIDs.contains(roomID) {
             selectedRoomIDs.remove(roomID)
@@ -2698,6 +2704,7 @@ private struct MobileStudyTreeView: View {
             x: viewport.contentOffsetX,
             y: viewport.contentOffsetY
         )
+        zoomStartViewportOffset = viewportOffset
         hasLoadedTreeState = true
     }
 
@@ -2764,6 +2771,7 @@ private struct MobileStudyTreeView: View {
         zoomScale = fittedScale
         zoomStartScale = fittedScale
         viewportOffset = .zero
+        zoomStartViewportOffset = .zero
     }
 
     private func saveNodeOffsets() {

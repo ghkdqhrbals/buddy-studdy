@@ -96,6 +96,24 @@ enum StudyTreeViewportPolicy {
         )
         return min(max(fittedScale, minimumZoomScale), maximumZoomScale)
     }
+
+    static func contentOffsetPreservingAnchor(
+        startOffset: CGPoint,
+        anchor: CGPoint,
+        startScale: CGFloat,
+        targetScale: CGFloat
+    ) -> CGPoint {
+        let safeStartScale = max(
+            startScale.isFinite ? startScale : 1,
+            minimumZoomScale
+        )
+        let safeTargetScale = targetScale.isFinite ? targetScale : safeStartScale
+        let scaleRatio = safeTargetScale / safeStartScale
+        return CGPoint(
+            x: max(0, (startOffset.x + anchor.x) * scaleRatio - anchor.x),
+            y: max(0, (startOffset.y + anchor.y) * scaleRatio - anchor.y)
+        )
+    }
 }
 
 private extension Collection {
