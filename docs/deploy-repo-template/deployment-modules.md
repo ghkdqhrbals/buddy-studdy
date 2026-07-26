@@ -36,6 +36,10 @@ deployment.
 - Backend image build remains in the app repository on GitHub-hosted runners.
 - EC2 self-hosted runners are deploy-only. They pull images and restart
   containers, but must not compile backend code or build Docker images.
+- Before pulling a backend release, the backend deploy removes only Docker
+  images that are not referenced by any container. This keeps the small EC2
+  disk from accumulating superseded release images without touching running
+  or rollback containers.
 - Monitoring dashboards, the TestZone browser UI, Loki, and Grafana are
   deployed by the monitoring workflow. TestZone's execution service and
   InfluxDB are deployed by the TestZone workflow. Backend deploys must not

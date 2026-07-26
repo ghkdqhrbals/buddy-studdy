@@ -206,6 +206,8 @@ jobs:
           chmod 600 redis.env
 
           echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+          echo "Reclaiming disk space from Docker images unused by any container."
+          docker image prune -af
           docker pull "${IMAGE_REF}"
           docker pull nginx:1.27-alpine
           docker pull mysql:8.4
