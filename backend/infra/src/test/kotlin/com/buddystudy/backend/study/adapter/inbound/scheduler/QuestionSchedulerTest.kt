@@ -23,6 +23,8 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSe
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingCandidate
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
+import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxPort
+import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPlan
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionQuotaStatus
@@ -56,6 +58,7 @@ class QuestionSchedulerTest {
     private val questionCoverage = FakeQuestionCoveragePort()
     private val openAI = FakeOpenAI()
     private val notifications = FakeNotificationPublisher()
+    private val pushOutbox = FakeQuestionPushOutbox()
     private val memberships = FakeQuestionMembershipPort()
     private val properties = BuddyStudyProperties(
         scheduler = BuddyStudyProperties.Scheduler(enabled = true, maxPendingPerStudy = 1),
@@ -70,6 +73,7 @@ class QuestionSchedulerTest {
         questionCoverage = questionCoverage,
         questionKeys = questionKeys,
         notifications = notifications,
+        pushOutbox = pushOutbox,
     )
     private val scheduler = ScheduledQuestionService(
         properties = properties,
@@ -121,6 +125,7 @@ class QuestionSchedulerTest {
 
         assertThat(questions.savedRows).hasSize(2)
         assertThat(notifications.commands).hasSize(2)
+        assertThat(pushOutbox.requests).hasSize(2)
         assertThat(notifications.commands).allSatisfy { command ->
             assertThat(command.shouldPush).isTrue()
             assertThat(command.type).isEqualTo("STUDY_QUESTION")
@@ -575,6 +580,15 @@ class QuestionSchedulerTest {
         override suspend fun publish(command: NotificationRequestCommand): Boolean {
             commands += command
             return true
+        }
+    }
+
+    private class FakeQuestionPushOutbox : QuestionPushOutboxPort {
+        val requests = mutableListOf<QuestionPushRequest>()
+
+        override suspend fun enqueue(request: QuestionPushRequest, now: Instant): Long {
+            requests += request
+            return requests.size.toLong()
         }
     }
 

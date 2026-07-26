@@ -32,7 +32,7 @@ data class QuestionPushRequestedEvent(
     val body: String? = null,
     val deepLink: String? = null,
     val createdAt: Instant = Instant.now(),
-    override val eventId: String = UUID.randomUUID().toString(),
+    override val eventId: String = "question-push-${notificationId ?: recordId}-$deviceId",
 ) : BaseRedisStreamEvent(QuestionStreamEventType.QUESTION_PUSH_REQUESTED, eventId)
 
 @JsonInclude(JsonInclude.Include.NON_NULL)

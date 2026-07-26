@@ -25,6 +25,7 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSe
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingCandidate
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
+import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
@@ -137,6 +138,7 @@ class StudyService(
                     questionKey = questionKey,
                     question = question,
                     notification = { saved -> saved.toQuestionNotification(rootStudy, appLanguage) },
+                    push = { saved -> saved.toQuestionPushRequest(rootStudy, appLanguage) },
                     now = now,
                 )
                 saved
@@ -394,6 +396,25 @@ internal fun QuestionEntity.toQuestionNotification(study: StudyEntity, appLangua
             intervalMinutes = study.intervalMinutes,
         ).toJson(),
         shouldPush = true,
+    )
+
+internal fun QuestionEntity.toQuestionPushRequest(study: StudyEntity, appLanguage: String): QuestionPushRequest =
+    QuestionPushRequest(
+        recordId = id,
+        studyId = studyId,
+        deviceId = deviceId,
+        userId = userId,
+        question = question,
+        expectedAnswerHint = hint,
+        topic = topic,
+        difficultyLevel = difficultyLevel,
+        language = appLanguage,
+        sound = study.notificationSound,
+        intervalMinutes = study.intervalMinutes,
+        title = "BuddyStudy",
+        body = question,
+        deepLink = "buddystudy://records/$id",
+        createdAt = createdAt,
     )
 
 internal fun QuestionNotificationMetadata.toJson(): String =

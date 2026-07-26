@@ -25,7 +25,7 @@ class QuestionPushOutboxDispatcher(
     private val log = LoggerFactory.getLogger(javaClass)
 
     suspend fun dispatchPendingPushes(): Int {
-        if (!properties.scheduler.enabled || !properties.streams.enabled) return 0
+        if (!properties.streams.enabled) return 0
 
         val now = Instant.now()
         var processed = 0
@@ -52,7 +52,7 @@ class QuestionPushOutboxDispatcher(
     }
 
     override suspend fun dispatchOutbox(outboxId: Long) {
-        if (!properties.scheduler.enabled || !properties.streams.enabled) return
+        if (!properties.streams.enabled) return
         val item = outbox.findById(outboxId) ?: run {
             log.warn("question_push_outbox_missing outboxId={}", outboxId)
             return
@@ -119,12 +119,12 @@ class QuestionPushOutboxDispatcher(
 }
 
 @Component
-@ConditionalOnProperty(prefix = "buddystudy.scheduler", name = ["enabled"], havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(prefix = "buddystudy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
 class QuestionPushOutboxScheduler(
     private val jobs: ManagedJobExecutionUseCase,
     private val questionPushOutboxDispatchJob: QuestionPushOutboxDispatchJob,
 ) {
-    @Scheduled(fixedDelayString = "\${buddystudy.scheduler.poll-ms:30000}")
+    @Scheduled(fixedDelayString = "\${buddystudy.outbox.poll-ms:1000}")
     suspend fun dispatchPendingPushes() {
         jobs.execute(questionPushOutboxDispatchJob, JobTriggerType.SCHEDULED)
     }

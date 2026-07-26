@@ -22,7 +22,7 @@ This backend is the operational source of truth for the iOS app. The app may cac
 - Uses Spring Data R2DBC with suspending repository/service transaction boundaries.
 - Runs Flyway through a startup-only JDBC connection in the `dev` profile.
 - Generates due questions with OpenAI.
-- Publishes scheduled push jobs through Redis Streams and consumes them with the backend's lightweight polling consumers.
+- Publishes question push jobs from the durable outbox to the dedicated `buddystudy-push-v1` Redis Stream and consumes them through `@StreamListener`.
 - Sends APNs remote notifications to iPhone from the stream consumer.
 - Runs in Docker with MySQL stored on a mounted volume.
 - Persists Redis with AOF (`appendfsync everysec`) and compressed, checksummed
@@ -50,6 +50,7 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`: Google SMTP settings. `SMTP_HOST` defaults to `smtp.gmail.com` and `SMTP_PORT` defaults to `587`; store the Gmail address and Google app password as `SMTP_USERNAME` and `SMTP_PASSWORD` in the active AWS Secrets Manager application secret. When credentials are omitted, reports are stored in the database only and email signup codes cannot be sent.
 - `PROFILE_PHOTO_DIRECTORY`, `PROFILE_PHOTO_PUBLIC_BASE_URL`: legacy profile-photo storage retained temporarily so existing files can be removed when an account switches to a pixel avatar or is deleted. New uploads are disabled.
 - `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_SSL`: Redis settings used by Redis Streams and email verification sessions.
+- `BUDDYSTUDY_STREAMS_KEY`, `BUDDYSTUDY_PUSH_STREAM_KEY`: physical Redis Stream keys for domain events and dedicated question-push delivery.
 - `EMAIL_VERIFICATION_TTL_SECONDS`: signup code TTL. Production default is `180`.
 - `AWS_SECRET_ID`, `AWS_REGION`: optional AWS Secrets Manager config import. Local `dev` imports `buddystudy/dev` with a `local-secret.` prefix and maps only `OPENAI_API_KEY`, so database and Redis values in that secret cannot override local services. Use the `dev-aws` profile to import the entire development secret; `prod` imports `buddystudy/prod`. Store keys using the same names as environment placeholders, for example `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, `BACKEND_MASTER_KEY`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `OPENAI_API_KEY`, `SMTP_HOST`, `SMTP_USERNAME`, and `SMTP_PASSWORD`.
   Spring property keys are also supported by Spring Cloud AWS, for example `spring.r2dbc.url`, `spring.r2dbc.username`, `spring.r2dbc.password`, and the separate `spring.flyway.*` keys. Keep runtime R2DBC and Flyway JDBC URLs in their respective formats.

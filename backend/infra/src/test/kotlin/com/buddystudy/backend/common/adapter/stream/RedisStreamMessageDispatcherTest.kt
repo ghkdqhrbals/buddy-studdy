@@ -26,6 +26,7 @@ class RedisStreamMessageDispatcherTest {
             eventType = "SAMPLE",
             payloadType = SamplePayload::class.java,
             group = "sample-group",
+            options = StreamOptions.ACK,
             message = message("""{"value":31}"""),
             claimed = false,
         )
@@ -48,6 +49,7 @@ class RedisStreamMessageDispatcherTest {
             eventType = "SAMPLE",
             payloadType = SamplePayload::class.java,
             group = "sample-group",
+            options = StreamOptions.ACK,
             message = message("""{"wrong":31}"""),
             claimed = false,
         )
@@ -69,11 +71,58 @@ class RedisStreamMessageDispatcherTest {
             eventType = "SAMPLE",
             payloadType = SamplePayload::class.java,
             group = "sample-group",
+            options = StreamOptions.ACK,
             message = message("""{"value":31}"""),
             claimed = true,
         )
 
         assertThat(streams.acknowledged).isEmpty()
+    }
+
+    @Test
+    fun `ack del option acknowledges and deletes after successful invocation`() = runBlocking {
+        val streams = RecordingConsumerOperations()
+        val dispatcher = RedisStreamMessageDispatcher(
+            streams,
+            JacksonRedisStreamCodec(JsonMapperProvider.mapper),
+        )
+
+        dispatcher.dispatch(
+            bean = SampleHandler(),
+            method = handlerMethod("consume"),
+            eventType = "SAMPLE",
+            payloadType = SamplePayload::class.java,
+            group = "sample-group",
+            options = StreamOptions.ACK_DEL,
+            message = message("""{"value":31}"""),
+            claimed = false,
+        )
+
+        assertThat(streams.acknowledged).isEmpty()
+        assertThat(streams.acknowledgedAndDeleted).containsExactly("sample-group" to "1-0")
+    }
+
+    @Test
+    fun `none option leaves successful message pending`() = runBlocking {
+        val streams = RecordingConsumerOperations()
+        val dispatcher = RedisStreamMessageDispatcher(
+            streams,
+            JacksonRedisStreamCodec(JsonMapperProvider.mapper),
+        )
+
+        dispatcher.dispatch(
+            bean = SampleHandler(),
+            method = handlerMethod("consume"),
+            eventType = "SAMPLE",
+            payloadType = SamplePayload::class.java,
+            group = "sample-group",
+            options = StreamOptions.NONE,
+            message = message("""{"value":31}"""),
+            claimed = false,
+        )
+
+        assertThat(streams.acknowledged).isEmpty()
+        assertThat(streams.acknowledgedAndDeleted).isEmpty()
     }
 
     private fun handlerMethod(name: String): RedisStreamHandlerMethod {
@@ -115,9 +164,14 @@ class RedisStreamMessageDispatcherTest {
 
     private class RecordingConsumerOperations : RedisStreamConsumerOperations {
         val acknowledged = mutableListOf<Pair<String, String>>()
+        val acknowledgedAndDeleted = mutableListOf<Pair<String, String>>()
 
         override suspend fun acknowledge(message: RedisStreamMessage, group: String) {
             acknowledged += group to message.recordId
+        }
+
+        override suspend fun acknowledgeAndDelete(message: RedisStreamMessage, group: String) {
+            acknowledgedAndDeleted += group to message.recordId
         }
 
         override suspend fun readNew(

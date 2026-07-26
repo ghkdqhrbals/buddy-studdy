@@ -9,6 +9,7 @@ import com.buddystudy.backend.study.adapter.outbound.persistence.StudyRepository
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKey
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingCandidate
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
+import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystudy.backend.study.application.service.QuestionCreationWriteManager
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.StudyEntity
@@ -87,6 +88,21 @@ class QuestionCreationTransactionIntegrationTest : MySqlIntegrationTestSupport()
                         userId = user.id,
                         title = "Question",
                         body = it.question,
+                    )
+                },
+                push = {
+                    QuestionPushRequest(
+                        recordId = it.id,
+                        studyId = it.studyId,
+                        deviceId = it.deviceId,
+                        userId = it.userId,
+                        question = it.question,
+                        expectedAnswerHint = it.hint,
+                        topic = it.topic,
+                        difficultyLevel = it.difficultyLevel,
+                        language = it.language,
+                        sound = null,
+                        intervalMinutes = 15,
                     )
                 },
                 now = now,

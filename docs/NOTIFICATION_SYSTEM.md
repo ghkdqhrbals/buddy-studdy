@@ -104,6 +104,7 @@ Push is a separate channel from the inbox.
 
 - `should_push=false`: only the inbox item is created.
 - `should_push=true`: listener attempts APNs delivery after the inbox item is stored.
+- A completed study question also writes `question_push_outbox` in the question transaction. Its dispatcher publishes `QUESTION_PUSH_REQUESTED` to the dedicated push topic; the push listener creates or reuses the same `question-created-{recordId}` inbox event before delivery.
 - Push claim uses `push_claimed_at` and permits retry of stale claims after five minutes.
 - A notification is marked sent only after the APNs adapter accepts the request; publishing the intermediate push stream event is not delivery success.
 - Stream consumers use stable names so pending entries remain recoverable across container replacement.

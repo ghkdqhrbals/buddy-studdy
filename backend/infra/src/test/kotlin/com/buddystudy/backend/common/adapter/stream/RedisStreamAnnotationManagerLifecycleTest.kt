@@ -76,6 +76,7 @@ class RedisStreamAnnotationManagerLifecycleTest {
         val readCount = AtomicInteger()
 
         override suspend fun acknowledge(message: RedisStreamMessage, group: String) = Unit
+        override suspend fun acknowledgeAndDelete(message: RedisStreamMessage, group: String) = Unit
 
         override suspend fun readNew(
             topic: RedisStreamTopic,

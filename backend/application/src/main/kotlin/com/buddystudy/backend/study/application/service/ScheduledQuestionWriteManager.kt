@@ -7,6 +7,7 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePo
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSelection
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
+import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.study.domain.entity.QuestionEntity
@@ -25,6 +26,7 @@ class ScheduledQuestionWriteManager(
     private val questionCoverage: QuestionCoveragePort,
     private val questionKeys: OpenAIQuestionKeyProvider,
     private val notifications: PublishNotificationUseCase,
+    private val pushOutbox: QuestionPushOutboxPort,
 ) {
     @Transactional
     suspend fun complete(
@@ -66,6 +68,7 @@ class ScheduledQuestionWriteManager(
             studies.save(scheduleStudy)
         }
         notifications.publish(saved.toQuestionNotification(scheduleStudy, appLanguage))
+        pushOutbox.enqueue(saved.toQuestionPushRequest(scheduleStudy, appLanguage), now)
         return saved
     }
 

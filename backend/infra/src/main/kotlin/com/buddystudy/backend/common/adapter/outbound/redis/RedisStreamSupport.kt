@@ -36,6 +36,7 @@ import kotlinx.coroutines.withContext
 
 enum class RedisStreamTopic(val apiName: String) {
     DOMAIN_EVENTS("domain-events"),
+    PUSH_EVENTS("push-events"),
 }
 
 data class RedisStreamTopicDefinition(
@@ -66,6 +67,7 @@ interface RedisStreamPublishOperations {
 
 interface RedisStreamConsumerOperations {
     suspend fun acknowledge(message: RedisStreamMessage, group: String)
+    suspend fun acknowledgeAndDelete(message: RedisStreamMessage, group: String)
 
     suspend fun readNew(
         topic: RedisStreamTopic,
@@ -110,6 +112,11 @@ class RedisStreamTopicManager(
             streamKey = properties.streams.key,
             maxLength = properties.streams.maxLen.coerceAtLeast(1),
         ),
+        RedisStreamTopicDefinition(
+            topic = RedisStreamTopic.PUSH_EVENTS,
+            streamKey = properties.streams.pushKey,
+            maxLength = properties.streams.maxLen.coerceAtLeast(1),
+        ),
     )
 
     fun definition(topic: RedisStreamTopic): RedisStreamTopicDefinition =
@@ -147,6 +154,13 @@ class RedisStreamTopicManager(
     override suspend fun acknowledge(message: RedisStreamMessage, group: String) {
         redis.opsForStream<String, String>()
             .acknowledge(message.streamKey, group, RecordId.of(message.recordId))
+            .awaitSingle()
+    }
+
+    override suspend fun acknowledgeAndDelete(message: RedisStreamMessage, group: String) {
+        acknowledge(message, group)
+        redis.opsForStream<String, String>()
+            .delete(message.streamKey, RecordId.of(message.recordId))
             .awaitSingle()
     }
 

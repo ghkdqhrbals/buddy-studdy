@@ -21,6 +21,8 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionMembership
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionQuotaStatus
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
+import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxPort
+import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
@@ -51,6 +53,7 @@ class StudyServiceTest {
     private val questionCoverage = FakeQuestionCoveragePort()
     private val serviceStudies = FakeStudyPort()
     private val memberships = FakeQuestionMembershipPort()
+    private val pushOutbox = FakeQuestionPushOutbox()
     private val properties = BuddyStudyProperties().apply { openai.apiKey = "test-api-key" }
     private val cipher = KeyCipher(BuddyStudyProperties().apply { crypto.masterKey = "test-key" })
     private val questionKeys = OpenAIQuestionKeyProvider(properties, memberships)
@@ -74,6 +77,7 @@ class StudyServiceTest {
             questionCoverage = questionCoverage,
             questionKeys = questionKeys,
             notifications = FakeNotificationPublisher(),
+            pushOutbox = pushOutbox,
         ),
         recordWriter = StudyRecordWriteManager(questions, questionCoverage),
     )
@@ -164,6 +168,8 @@ class StudyServiceTest {
         assertThat(response.question.question).isEqualTo("Question")
         assertThat(openAI.generateCalls).isEqualTo(1)
         assertThat(users.findByIdCalls).isEqualTo(1)
+        assertThat(pushOutbox.requests.single().recordId).isEqualTo(response.id.toLong())
+        assertThat(pushOutbox.requests.single().topic).isEqualTo("Kotlin")
     }
 
     @Test
@@ -784,6 +790,15 @@ class StudyServiceTest {
         override suspend fun publish(command: NotificationRequestCommand): Boolean {
             commands += command
             return true
+        }
+    }
+
+    private class FakeQuestionPushOutbox : QuestionPushOutboxPort {
+        val requests = mutableListOf<QuestionPushRequest>()
+
+        override suspend fun enqueue(request: QuestionPushRequest, now: Instant): Long {
+            requests += request
+            return requests.size.toLong()
         }
     }
 

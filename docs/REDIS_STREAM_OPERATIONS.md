@@ -14,16 +14,31 @@ Topics are registered once through:
 - `RedisStreamTopicManager`
 
 Adding a topic therefore requires one enum value and one manager definition.
-Consumer-specific behavior remains a `RedisStreamSubscription`, which owns the
-group, consumer prefix, concurrency, batch count, and blocking timeout.
+Annotated consumers own their group, consumer name, concurrency, batch count,
+blocking timeout, and completion policy.
+
+`StreamOptions` controls what happens only after a handler succeeds:
+
+- `NONE`: leave the message pending for explicit handling.
+- `ACK`: execute `XACK` and retain the stream entry.
+- `ACK_DEL`: execute `XACK` followed by `XDEL`.
+
+Handler or Jackson conversion failures never ACK or delete the message. The
+push listener and its idle-message recovery scheduler use `ACK_DEL` because
+the dedicated push stream has one owning consumer group and the durable
+`question_push_outbox` remains the recovery source.
 
 ## Retention
 
-The domain event stream uses an exact `MAXLEN` of `1000`.
+The domain event and dedicated push streams each use an exact `MAXLEN` of
+`1000`. Their default physical keys are `buddystudy-events-v1` and
+`buddystudy-push-v1`.
 
 ```yaml
 buddystudy:
   streams:
+    key: ${BUDDYSTUDY_STREAMS_KEY:buddystudy-events-v1}
+    push-key: ${BUDDYSTUDY_PUSH_STREAM_KEY:buddystudy-push-v1}
     max-len: ${REACTION_STREAM_XADD_MAX_LEN:1000}
 ```
 

@@ -94,6 +94,7 @@ buddystudy:
   streams:
     enabled: ${REACTION_STREAM_ENABLED:true}
     key: ${BUDDYSTUDY_STREAMS_KEY:buddystudy-events-v1}
+    push-key: ${BUDDYSTUDY_PUSH_STREAM_KEY:buddystudy-push-v1}
     max-len: ${REACTION_STREAM_XADD_MAX_LEN:1000}
     push-consumer-concurrency: ${PUSH_CONSUMER_CONCURRENCY:10}
     view-queue-capacity: ${VIEW_EVENT_QUEUE_CAPACITY:20000}

@@ -19,12 +19,13 @@ class RedisStreamMessageDispatcher(
         eventType: String,
         payloadType: Class<*>,
         group: String,
+        options: StreamOptions,
         message: RedisStreamMessage,
         claimed: Boolean,
     ) {
         val actualEventType = message.fields[JacksonRedisStreamPublisher.EVENT_TYPE_FIELD]
         if (actualEventType != eventType) {
-            streams.acknowledge(message, group)
+            complete(message, group, options)
             return
         }
         try {
@@ -40,7 +41,7 @@ class RedisStreamMessageDispatcher(
                 claimed = claimed,
             )
             method.invoke(bean, payload, context)
-            streams.acknowledge(message, group)
+            complete(message, group, options)
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -54,6 +55,14 @@ class RedisStreamMessageDispatcher(
                 claimed,
                 error.cause?.message ?: error.message,
             )
+        }
+    }
+
+    private suspend fun complete(message: RedisStreamMessage, group: String, options: StreamOptions) {
+        when (options) {
+            StreamOptions.NONE -> Unit
+            StreamOptions.ACK -> streams.acknowledge(message, group)
+            StreamOptions.ACK_DEL -> streams.acknowledgeAndDelete(message, group)
         }
     }
 }

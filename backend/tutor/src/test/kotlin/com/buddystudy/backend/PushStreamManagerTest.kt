@@ -11,6 +11,8 @@ import com.buddystudy.backend.study.adapter.stream.PushStreamManager
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystudy.backend.notification.application.port.outbound.NotificationPersistencePort
+import com.buddystudy.backend.notification.application.port.inbound.ProcessNotificationEventUseCase
+import com.buddystudy.backend.notification.application.service.NotificationSendPolicy
 import com.buddystudy.backend.study.application.port.outbound.PushNotificationPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import org.assertj.core.api.Assertions.assertThat
@@ -36,7 +38,7 @@ class PushStreamManagerTest {
         assertThat(service.publishPush(pushEvent(topic = "SwiftUI"))).isTrue()
 
         val request = publisher.requests.single()
-        assertThat(request.topic).isEqualTo(RedisStreamTopic.DOMAIN_EVENTS)
+        assertThat(request.topic).isEqualTo(RedisStreamTopic.PUSH_EVENTS)
         assertThat(request.eventType).isEqualTo("QUESTION_PUSH_REQUESTED")
         val payload = request.payload as QuestionPushRequestedPayload
         assertThat(payload.recordId).isEqualTo(10)
@@ -70,6 +72,8 @@ class PushStreamManagerTest {
             devices = mock(DevicePort::class.java),
             userDevices = mock(UserDevicePort::class.java),
             notifications = mock(NotificationPersistencePort::class.java),
+            notificationProcessor = mock(ProcessNotificationEventUseCase::class.java),
+            notificationSendPolicy = mock(NotificationSendPolicy::class.java),
         )
     }
 

@@ -10,6 +10,12 @@ import java.lang.reflect.AnnotatedElement
 import java.lang.reflect.Method
 import kotlin.reflect.KClass
 
+enum class StreamOptions {
+    NONE,
+    ACK,
+    ACK_DEL,
+}
+
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 @Reflective(StreamReflectiveProcessor::class)
@@ -25,6 +31,7 @@ annotation class StreamListener(
     val concurrency: Int = 1,
     val concurrencyProperty: String = "",
     val enabledProperty: String = "",
+    val options: StreamOptions = StreamOptions.ACK,
 )
 
 @Target(AnnotationTarget.FUNCTION)
@@ -41,6 +48,7 @@ annotation class StreamScheduler(
     val fixedDelayMs: Long,
     val initialDelayMs: Long = 0,
     val enabledProperty: String = "",
+    val options: StreamOptions = StreamOptions.ACK,
 )
 
 data class StreamMessageContext(

@@ -6,9 +6,14 @@ import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
 import com.buddystudy.backend.common.adapter.stream.RedisStreamObjectPublisher
 import com.buddystudy.backend.common.adapter.stream.StreamListener
 import com.buddystudy.backend.common.adapter.stream.StreamMessageContext
+import com.buddystudy.backend.common.adapter.stream.StreamOptions
 import com.buddystudy.backend.common.adapter.stream.StreamScheduler
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.common.application.json.JsonMapperProvider
+import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
+import com.buddystudy.backend.notification.application.port.inbound.ProcessNotificationEventUseCase
 import com.buddystudy.backend.notification.application.port.outbound.NotificationPersistencePort
+import com.buddystudy.backend.notification.application.service.NotificationSendPolicy
 import com.buddystudy.backend.study.adapter.outbound.stream.QuestionPushRequestedEvent
 import com.buddystudy.backend.study.adapter.outbound.stream.QuestionPushRequestedPayload
 import com.buddystudy.backend.study.adapter.outbound.stream.toPayload
@@ -35,8 +40,11 @@ class PushStreamManager(
     private val devices: DevicePort,
     private val userDevices: UserDevicePort,
     private val notifications: NotificationPersistencePort,
+    private val notificationProcessor: ProcessNotificationEventUseCase,
+    private val notificationSendPolicy: NotificationSendPolicy,
 ) : QuestionPushPublishPort {
     private val logger = LoggerFactory.getLogger(javaClass)
+    private val stalePushClaimAge = Duration.ofMinutes(5)
 
     override suspend fun publishPush(request: QuestionPushRequest): Boolean {
         if (!properties.streams.enabled) {
@@ -53,7 +61,7 @@ class PushStreamManager(
         val publishStartedAt = Instant.now()
         logger.info(
             "redis_stream_publish_started streamKey={} eventId={} eventType={} recordId={} deviceId={} userId={} topic={} pushCreatedAt={} publishAgeMs={}",
-            properties.streams.key,
+            properties.streams.pushKey,
             event.eventId,
             EVENT_TYPE,
             event.recordId,
@@ -65,7 +73,7 @@ class PushStreamManager(
         )
         return try {
             val published = publisher.publish(
-                topic = RedisStreamTopic.DOMAIN_EVENTS,
+                topic = RedisStreamTopic.PUSH_EVENTS,
                 eventType = EVENT_TYPE,
                 eventId = event.eventId,
                 payload = event.toPayload(),
@@ -87,7 +95,7 @@ class PushStreamManager(
         } catch (error: Exception) {
             logger.warn(
                 "redis_stream_publish_failed streamKey={} eventId={} eventType={} recordId={} deviceId={} userId={} error={}",
-                properties.streams.key,
+                properties.streams.pushKey,
                 event.eventId,
                 EVENT_TYPE,
                 event.recordId,
@@ -100,7 +108,7 @@ class PushStreamManager(
     }
 
     @StreamListener(
-        topic = RedisStreamTopic.DOMAIN_EVENTS,
+        topic = RedisStreamTopic.PUSH_EVENTS,
         group = GROUP,
         consumer = CONSUMER,
         eventType = EVENT_TYPE,
@@ -111,6 +119,7 @@ class PushStreamManager(
         concurrency = 10,
         concurrencyProperty = "buddystudy.streams.push-consumer-concurrency",
         enabledProperty = "buddystudy.streams.enabled",
+        options = StreamOptions.ACK_DEL,
     )
     private suspend fun consumePush(
         payload: QuestionPushRequestedPayload,
@@ -120,7 +129,7 @@ class PushStreamManager(
     }
 
     @StreamScheduler(
-        topic = RedisStreamTopic.DOMAIN_EVENTS,
+        topic = RedisStreamTopic.PUSH_EVENTS,
         group = GROUP,
         consumer = RECOVERY_CONSUMER,
         eventType = EVENT_TYPE,
@@ -130,6 +139,7 @@ class PushStreamManager(
         fixedDelayMs = 30_000,
         initialDelayMs = 30_000,
         enabledProperty = "buddystudy.streams.enabled",
+        options = StreamOptions.ACK_DEL,
     )
     private suspend fun recoverIdlePush(
         payload: QuestionPushRequestedPayload,
@@ -138,7 +148,8 @@ class PushStreamManager(
         deliver(payload, context)
     }
 
-    private suspend fun deliver(payload: QuestionPushRequestedPayload, context: StreamMessageContext) {
+    internal suspend fun deliver(payload: QuestionPushRequestedPayload, context: StreamMessageContext) {
+        var notificationId = payload.notificationId
         try {
             logger.info(
                 "redis_stream_consume_started stream={} redisRecordId={} eventId={} eventType={} recordId={} notificationId={} deviceId={} userId={} claimed={}",
@@ -152,10 +163,40 @@ class PushStreamManager(
                 payload.userId,
                 context.claimed,
             )
-            if (payload.userId != null && !userDevices.hasActiveSession(payload.userId, payload.deviceId)) {
-                payload.notificationId?.let {
-                    notifications.markPushFailed(it, "Push target session is inactive.", Instant.now())
+            if (notificationId == null) {
+                val command = payload.toQuestionNotificationCommand()
+                val createdNotificationId = notificationProcessor.process(command)
+                notificationId = createdNotificationId
+                if (!notificationSendPolicy.canSendPush(command)) {
+                    notifications.markPushFailed(createdNotificationId, "Push policy denied.", Instant.now())
+                    logger.info(
+                        "redis_stream_consume_skipped reason=send_policy_denied redisRecordId={} eventId={} recordId={} notificationId={} deviceId={} userId={}",
+                        context.recordId,
+                        context.eventId,
+                        payload.recordId,
+                        createdNotificationId,
+                        payload.deviceId,
+                        payload.userId,
+                    )
+                    return
                 }
+                val claimTime = Instant.now()
+                if (notifications.claimPush(createdNotificationId, claimTime, claimTime.minus(stalePushClaimAge)) == 0) {
+                    logger.info(
+                        "redis_stream_consume_skipped reason=push_claim_not_acquired redisRecordId={} eventId={} recordId={} notificationId={} deviceId={} userId={}",
+                        context.recordId,
+                        context.eventId,
+                        payload.recordId,
+                        createdNotificationId,
+                        payload.deviceId,
+                        payload.userId,
+                    )
+                    return
+                }
+            }
+            val resolvedNotificationId = requireNotNull(notificationId)
+            if (payload.userId != null && !userDevices.hasActiveSession(payload.userId, payload.deviceId)) {
+                notifications.markPushFailed(resolvedNotificationId, "Push target session is inactive.", Instant.now())
                 logger.info(
                     "redis_stream_consume_skipped_inactive_session redisRecordId={} eventId={} recordId={} deviceId={} userId={}",
                     context.recordId,
@@ -168,14 +209,14 @@ class PushStreamManager(
             }
             val device = devices.findByDeviceId(payload.deviceId)
             val pushMessage = PushEventPayloadMapper.toPushQuestionMessage(
-                payload = payload,
+                payload = payload.copy(notificationId = resolvedNotificationId),
                 fields = context.fields,
                 apnsToken = context.fields["apnsToken"] ?: device?.apnsToken ?: "",
                 apnsEnvironment = context.fields["apnsEnvironment"] ?: device?.apnsEnvironment ?: "production",
             )
             pushNotifications.sendQuestion(pushMessage)
             val consumedAt = Instant.now()
-            payload.notificationId?.let { notifications.markPushSent(it, consumedAt) }
+            notifications.markPushSent(resolvedNotificationId, consumedAt)
             logger.info(
                 "redis_stream_consume_succeeded stream={} redisRecordId={} eventId={} eventType={} recordId={} deviceId={} userId={} pushProvider={} pushCreatedAt={} pushAgeMs={} claimed={}",
                 context.streamKey,
@@ -191,7 +232,7 @@ class PushStreamManager(
                 context.claimed,
             )
         } catch (error: Exception) {
-            payload.notificationId?.let {
+            notificationId?.let {
                 runCatching {
                     notifications.markPushFailed(it, error.message ?: error.javaClass.simpleName, Instant.now())
                 }
@@ -199,6 +240,31 @@ class PushStreamManager(
             throw error
         }
     }
+
+    private fun QuestionPushRequestedPayload.toQuestionNotificationCommand(): NotificationRequestCommand =
+        NotificationRequestCommand(
+            eventId = "question-created-$recordId",
+            userId = userId,
+            deviceId = deviceId,
+            type = "STUDY_QUESTION",
+            title = title ?: "BuddyStudy",
+            body = body ?: question,
+            threadType = "study_question",
+            threadId = recordId.toString(),
+            deepLink = deepLink ?: PushDeepLinkFactory.studyRoomOrRecord(recordId.toString()),
+            metadataJson = JsonMapperProvider.mapper.writeValueAsString(
+                mapOf(
+                    "recordId" to recordId,
+                    "studyId" to studyId,
+                    "topic" to topic,
+                    "difficultyLevel" to difficultyLevel,
+                    "language" to language,
+                    "sound" to sound,
+                    "intervalMinutes" to intervalMinutes,
+                )
+            ),
+            shouldPush = true,
+        )
 
     private fun QuestionPushRequest.toEvent(): QuestionPushRequestedEvent =
         QuestionPushRequestedEvent(

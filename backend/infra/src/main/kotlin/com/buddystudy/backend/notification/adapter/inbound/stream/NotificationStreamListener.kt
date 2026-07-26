@@ -80,8 +80,15 @@ class NotificationStreamListener(
                 command.threadId,
                 command.deepLink,
             )
-            if (command.shouldPush) {
+            if (command.shouldPush && command.type != DIRECT_PUSH_EVENT_TYPE) {
                 sendPushIfClaimed(notificationId, command)
+            } else if (command.type == DIRECT_PUSH_EVENT_TYPE) {
+                logger.info(
+                    "notification_push_skipped reason=dedicated_push_stream notificationId={} eventId={} userId={}",
+                    notificationId,
+                    command.eventId,
+                    command.userId,
+                )
             } else {
                 logger.info(
                     "notification_push_skipped reason=should_push_false notificationId={} eventId={} userId={}",
@@ -218,6 +225,10 @@ class NotificationStreamListener(
                 error.message,
             )
         }
+    }
+
+    private companion object {
+        const val DIRECT_PUSH_EVENT_TYPE = "STUDY_QUESTION"
     }
 }
 

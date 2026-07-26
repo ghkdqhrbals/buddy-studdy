@@ -8,6 +8,8 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePo
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSelection
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
+import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxPort
+import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
@@ -23,6 +25,7 @@ class QuestionCreationWriteManager(
     private val questionCoverage: QuestionCoveragePort,
     private val questionKeys: OpenAIQuestionKeyProvider,
     private val notifications: PublishNotificationUseCase,
+    private val pushOutbox: QuestionPushOutboxPort,
 ) {
     @Transactional
     suspend fun saveQuestionWithNotification(
@@ -31,6 +34,7 @@ class QuestionCreationWriteManager(
         coverage: QuestionCoverageSelection?,
         questionKey: OpenAIQuestionKey,
         notification: (QuestionEntity) -> NotificationRequestCommand,
+        push: (QuestionEntity) -> QuestionPushRequest,
         now: Instant,
     ): QuestionEntity {
         val savedQuestion = questions.save(question)
@@ -46,6 +50,7 @@ class QuestionCreationWriteManager(
         )
         questionKeys.markQuestionCreated(questionKey, now)
         notifications.publish(notification(savedQuestion))
+        pushOutbox.enqueue(push(savedQuestion), now)
         return savedQuestion
     }
 }

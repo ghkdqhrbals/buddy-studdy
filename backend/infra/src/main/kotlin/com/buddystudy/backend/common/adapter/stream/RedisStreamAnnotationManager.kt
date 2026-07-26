@@ -203,6 +203,7 @@ class RedisStreamAnnotationManager(
             annotation.eventType,
             annotation.payloadType.java,
             annotation.group,
+            annotation.options,
             message,
             claimed,
         )
@@ -221,6 +222,7 @@ class RedisStreamAnnotationManager(
             annotation.eventType,
             annotation.payloadType.java,
             annotation.group,
+            annotation.options,
             message,
             claimed,
         )
@@ -232,10 +234,11 @@ class RedisStreamAnnotationManager(
         eventType: String,
         payloadType: Class<*>,
         group: String,
+        options: StreamOptions,
         message: RedisStreamMessage,
         claimed: Boolean,
     ) {
-        dispatcher.dispatch(bean, method, eventType, payloadType, group, message, claimed)
+        dispatcher.dispatch(bean, method, eventType, payloadType, group, options, message, claimed)
     }
 
     private fun handlerMethod(beanName: String, method: Method, payloadType: Class<*>): RedisStreamHandlerMethod =
