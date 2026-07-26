@@ -21,6 +21,7 @@ import com.buddystudy.backend.auth.application.port.outbound.EmailVerificationQu
 import com.buddystudy.backend.auth.application.port.outbound.NotificationPreferenceQueryPort
 import com.buddystudy.backend.auth.application.port.outbound.PermissionQueryPort
 import com.buddystudy.backend.auth.application.port.outbound.PermissionQuotaQueryPort
+import com.buddystudy.backend.auth.application.port.outbound.PermissionQuotaStatus
 import com.buddystudy.backend.auth.application.port.outbound.PermissionRequirementProjection
 import com.buddystudy.backend.auth.application.port.outbound.PermissionRequirementQueryPort
 import com.buddystudy.backend.auth.application.port.outbound.TermsAgreementQueryPort
@@ -219,7 +220,8 @@ class DatabasePermissionEvaluatorTest {
         assertThat(result.metadata["remaining"]).isEqualTo(0L)
         assertThat(result.metadata["required"]).isEqualTo(1L)
         assertThat(result.metadata["quotaPeriod"]).isEqualTo("MONTHLY")
-        assertThat(result.metadata["quotaResetAt"]).isEqualTo("2026-08-01T00:00:00Z")
+        assertThat(result.metadata["quotaPeriodStartedAt"]).isEqualTo("2026-07-07T10:00:00Z")
+        assertThat(result.metadata["quotaResetAt"]).isEqualTo("2026-08-07T10:00:00Z")
         assertThat(result.metadata["quotaTimeZone"]).isEqualTo("Z")
     }
 
@@ -343,7 +345,12 @@ class DatabasePermissionEvaluatorTest {
 
     private class FakePermissionQuotaQueryPort : PermissionQuotaQueryPort {
         var remaining = 1L
-        override suspend fun remaining(userId: Long, key: String, now: Instant): Long = remaining
+        override suspend fun status(userId: Long, key: String, now: Instant): PermissionQuotaStatus =
+            PermissionQuotaStatus(
+                remaining = remaining,
+                periodStartedAt = Instant.parse("2026-07-07T10:00:00Z"),
+                resetAt = Instant.parse("2026-08-07T10:00:00Z"),
+            )
     }
 
     private class FakeDevicePort : DevicePort {

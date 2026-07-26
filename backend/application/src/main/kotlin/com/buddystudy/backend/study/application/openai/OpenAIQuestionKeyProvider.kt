@@ -9,7 +9,6 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionMembership
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 import java.time.Instant
-import java.time.YearMonth
 
 data class OpenAIQuestionKey(
     val apiKey: String,
@@ -21,7 +20,7 @@ data class OpenAIQuestionKey(
 
 data class SystemQuestionQuotaReservation(
     val userId: Long,
-    val yearMonth: YearMonth,
+    val periodStartedAt: Instant,
 )
 
 @Component
@@ -35,25 +34,25 @@ class OpenAIQuestionKeyProvider(
         val now = Instant.now()
 
         if (user == null) {
-            throw monthlyQuotaExceeded(now)
+            throw monthlyQuotaExceeded(now, now)
         }
 
         val plan = memberships.activePlanForUser(user.id)
-            ?: throw monthlyQuotaExceeded(now)
-        val yearMonth = MonthlyQuotaWindow.periodAt(now)
+            ?: throw monthlyQuotaExceeded(user.createdAt, now)
+        val quotaPeriod = MonthlyQuotaWindow.periodAt(user.createdAt, now)
         val consumed = memberships.tryConsumeMonthlySystemQuestion(
             userId = user.id,
-            yearMonth = yearMonth,
+            periodStartedAt = quotaPeriod.startedAt,
             limit = plan.monthlyQuestionLimit,
             now = now,
         )
         if (!consumed) {
-            throw monthlyQuotaExceeded(now)
+            throw monthlyQuotaExceeded(user.createdAt, now)
         }
 
         return OpenAIQuestionKey(
             apiKey = systemApiKey,
-            quotaReservation = SystemQuestionQuotaReservation(user.id, yearMonth),
+            quotaReservation = SystemQuestionQuotaReservation(user.id, quotaPeriod.startedAt),
             user = user,
         )
     }
@@ -64,14 +63,14 @@ class OpenAIQuestionKeyProvider(
 
     suspend fun releaseQuestionReservation(key: OpenAIQuestionKey, now: Instant = Instant.now()) {
         val reservation = key.quotaReservation ?: return
-        memberships.refundMonthlySystemQuestion(reservation.userId, reservation.yearMonth, now)
+        memberships.refundMonthlySystemQuestion(reservation.userId, reservation.periodStartedAt, now)
     }
 
-    private fun monthlyQuotaExceeded(now: Instant) =
+    private fun monthlyQuotaExceeded(accountCreatedAt: Instant, now: Instant) =
         ApiException(
             status = HttpStatus.FORBIDDEN,
             code = ApiErrorCode.QUOTA_EXCEEDED,
             message = "Monthly question limit reached.",
-            metadata = MonthlyQuotaWindow.exceededMetadata(now),
+            metadata = MonthlyQuotaWindow.exceededMetadata(accountCreatedAt, now),
         )
 }

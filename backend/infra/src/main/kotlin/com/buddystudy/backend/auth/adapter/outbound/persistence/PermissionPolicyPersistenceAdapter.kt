@@ -4,13 +4,14 @@ import com.buddystudy.backend.auth.application.permission.PermissionRequirementO
 import com.buddystudy.backend.auth.application.permission.PermissionRequirementType
 import com.buddystudy.backend.auth.application.port.outbound.*
 import com.buddystudy.backend.common.application.error.ApiErrorCode
+import com.buddystudy.backend.common.application.quota.MonthlyQuotaWindow
 import io.r2dbc.spi.Row
 import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.stereotype.Component
 import java.time.Instant
-import java.time.YearMonth
+import java.time.LocalDateTime
 import java.time.ZoneOffset
 
 @Component
@@ -135,10 +136,21 @@ class PermissionPolicyPersistenceAdapter(
         return storedPreference ?: defaultNotificationPreference(userId, key)
     }
 
-    override suspend fun remaining(userId: Long, key: String, now: Instant): Long {
-        if (key != "monthly_question") return 0
-        val yearMonth = YearMonth.from(now.atZone(ZoneOffset.UTC)).toString()
-        return client.sql(
+    override suspend fun status(userId: Long, key: String, now: Instant): PermissionQuotaStatus {
+        val accountCreatedAt = client.sql("select created_at from users where id = :userId")
+            .bind("userId", userId)
+            .map { row, _ ->
+                row.get("created_at", LocalDateTime::class.java)?.toInstant(ZoneOffset.UTC)
+                    ?: now
+            }
+            .one()
+            .awaitSingleOrNull()
+            ?: now
+        val period = MonthlyQuotaWindow.periodAt(accountCreatedAt, now)
+        if (key != "monthly_question") {
+            return PermissionQuotaStatus(0, period.startedAt, period.resetAt)
+        }
+        val remaining = client.sql(
             """
             select greatest(coalesce(t.monthly_question_limit, 0) - coalesce(u.system_question_count, 0), 0) as remaining
             from users usr
@@ -148,12 +160,15 @@ class PermissionPolicyPersistenceAdapter(
                   and (m.expires_at is null or m.expires_at > :now)
                 order by m.updated_at desc, m.id desc limit 1
             ), 'TIER1')
-            left join user_monthly_question_usage u on u.user_id = usr.id and u.usage_month = :yearMonth
+            left join user_monthly_question_usage u on u.user_id = usr.id and u.period_start = :periodStartedAt
             where usr.id = :userId
             """.trimIndent(),
-        ).bind("now", now).bind("yearMonth", yearMonth).bind("userId", userId)
+        ).bind("now", now)
+            .bind("periodStartedAt", LocalDateTime.ofInstant(period.startedAt, ZoneOffset.UTC))
+            .bind("userId", userId)
             .map { row, _ -> (row.get("remaining") as Number).toLong() }
             .one().awaitSingleOrNull() ?: 0L
+        return PermissionQuotaStatus(remaining, period.startedAt, period.resetAt)
     }
 
     override suspend fun isVerified(userId: Long): Boolean =

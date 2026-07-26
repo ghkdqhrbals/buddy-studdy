@@ -228,6 +228,9 @@ Public community feed
 
 - `user_membership_tiers` is the operator-managed plan catalog and owns the default monthly limit.
 - `user_memberships.monthly_question_limit_override` is nullable. `NULL` inherits the tier value; a non-negative value overrides it for that user.
+- Monthly quota periods are anchored to each user's `users.created_at` timestamp rather than calendar-month boundaries. A user created on the 7th resets on the 7th at the same UTC instant each month.
+- Month-end anchors use the target month's last valid day without drift. For example, a January 31 anchor resets on February 28 (or 29) and then March 31.
+- `user_monthly_question_usage.period_start` is the exact period identity used by consumption, permission evaluation, quota responses, analytics, and admin views. `usage_month` remains only as a legacy reporting label.
 - The monitoring Users & Quotas page proxies admin APIs through the authenticated monitoring origin. It does not persist backend admin tokens outside the browser session.
 - User search is bounded to 100 rows per API call and the UI uses 20-row pages.
 

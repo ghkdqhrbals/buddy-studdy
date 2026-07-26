@@ -44,7 +44,6 @@ import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
 import java.time.Instant
-import java.time.YearMonth
 import java.util.Optional
 
 class StudyServiceTest {
@@ -668,19 +667,19 @@ class StudyServiceTest {
         var consumeCalls = 0
         var refundCalls = 0
         override suspend fun activePlanForUser(userId: Long): QuestionMembershipPlan? = activePlan
-        override suspend fun quotaStatusForUser(userId: Long, yearMonth: YearMonth): QuestionQuotaStatus =
+        override suspend fun quotaStatusForUser(userId: Long, periodStartedAt: Instant): QuestionQuotaStatus =
             QuestionQuotaStatus(
                 tierCode = activePlan.tierCode,
                 usedCount = usedCount,
                 monthlyQuestionLimit = activePlan.monthlyQuestionLimit,
             )
-        override suspend fun tryConsumeMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, limit: Int, now: Instant): Boolean {
+        override suspend fun tryConsumeMonthlySystemQuestion(userId: Long, periodStartedAt: Instant, limit: Int, now: Instant): Boolean {
             consumeCalls += 1
             if (usedCount >= limit) return false
             usedCount += 1
             return true
         }
-        override suspend fun refundMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, now: Instant) {
+        override suspend fun refundMonthlySystemQuestion(userId: Long, periodStartedAt: Instant, now: Instant) {
             refundCalls += 1
             if (usedCount > 0) usedCount -= 1
         }

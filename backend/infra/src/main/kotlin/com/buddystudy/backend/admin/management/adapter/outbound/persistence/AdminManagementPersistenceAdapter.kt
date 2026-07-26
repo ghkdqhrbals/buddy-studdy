@@ -21,6 +21,7 @@ class AdminManagementPersistenceAdapter(
     private val database: DatabaseClient,
 ) : AdminManagementPort {
     override suspend fun users(query: String?, limit: Int, offset: Int): AdminUserPageResponse {
+        val now = Instant.now()
         val search = query?.lowercase()?.let { "%$it%" }
         val where = buildString {
             append("where u.status <> 'ANONYMOUS'")
@@ -39,25 +40,30 @@ class AdminManagementPersistenceAdapter(
             limit :limit offset :offset
             """.trimIndent(),
         ).bindSearch(search, query)
-            .bind("usageMonth", MonthlyQuotaWindow.periodAt(Instant.now()).toString())
             .bind("limit", limit)
             .bind("offset", offset)
-        val users = listSpec.map { row, _ -> row.toAdminUser() }.all().collectList().awaitSingle()
+        val userRows = listSpec.map { row, _ -> row.toAdminUserRow() }.all().collectList().awaitSingle()
+        val usageByUser = currentUsageByUser(userRows, now)
+        val users = userRows.map { it.toAdminUser(usageByUser[it.id] ?: 0, now) }
         return AdminUserPageResponse(users, totalCount, limit, offset)
     }
 
-    override suspend fun user(userId: Long): AdminUserSummary? =
-        database.sql(
+    override suspend fun user(userId: Long): AdminUserSummary? {
+        val now = Instant.now()
+        val row = database.sql(
             """
             ${userSelect()}
             where u.id = :userId
               and u.status <> 'ANONYMOUS'
             """.trimIndent(),
-        ).bind("usageMonth", MonthlyQuotaWindow.periodAt(Instant.now()).toString())
-            .bind("userId", userId)
-            .map { row, _ -> row.toAdminUser() }
+        ).bind("userId", userId)
+            .map { result, _ -> result.toAdminUserRow() }
             .one()
             .awaitSingleOrNull()
+            ?: return null
+        val usedCount = currentUsageByUser(listOf(row), now)[userId] ?: 0
+        return row.toAdminUser(usedCount, now)
+    }
 
     override suspend fun tiers(): List<AdminMembershipTierResponse> =
         database.sql(
@@ -141,8 +147,7 @@ class AdminManagementPersistenceAdapter(
             coalesce(m.tier, 'TIER1') as tier_code,
             coalesce(t.description, fallback_tier.description, '') as tier_description,
             m.monthly_question_limit_override,
-            coalesce(m.monthly_question_limit_override, t.monthly_question_limit, fallback_tier.monthly_question_limit, 0) as monthly_limit,
-            coalesce(usage_row.system_question_count, 0) as used_count
+            coalesce(m.monthly_question_limit_override, t.monthly_question_limit, fallback_tier.monthly_question_limit, 0) as monthly_limit
         from users u
         left join user_memberships m on m.id = (
             select max(active_membership.id)
@@ -154,8 +159,6 @@ class AdminManagementPersistenceAdapter(
         )
         left join user_membership_tiers t on t.tier_code = m.tier
         left join user_membership_tiers fallback_tier on fallback_tier.tier_code = 'TIER1'
-        left join user_monthly_question_usage usage_row
-          on usage_row.user_id = u.id and usage_row.usage_month = :usageMonth
         """.trimIndent()
 
     private fun DatabaseClient.GenericExecuteSpec.bindSearch(search: String?, exact: String?): DatabaseClient.GenericExecuteSpec {
@@ -163,10 +166,33 @@ class AdminManagementPersistenceAdapter(
         return bind("query", search).bind("exactQuery", exact.orEmpty())
     }
 
-    private fun Row.toAdminUser(): AdminUserSummary {
-        val monthlyLimit = int("monthly_limit")
-        val usedCount = int("used_count")
-        return AdminUserSummary(
+    private suspend fun currentUsageByUser(rows: List<AdminUserRow>, now: Instant): Map<Long, Int> {
+        if (rows.isEmpty()) return emptyMap()
+        val periods = rows.associate { it.id to MonthlyQuotaWindow.periodAt(it.createdAt, now) }
+        val conditions = rows.indices.joinToString(" or ") { index ->
+            "(user_id = :userId$index and period_start = :periodStartedAt$index)"
+        }
+        var spec = database.sql(
+            """
+            select user_id, system_question_count
+            from user_monthly_question_usage
+            where $conditions
+            """.trimIndent(),
+        )
+        rows.forEachIndexed { index, row ->
+            spec = spec.bind("userId$index", row.id)
+                .bind(
+                    "periodStartedAt$index",
+                    LocalDateTime.ofInstant(periods.getValue(row.id).startedAt, ZoneOffset.UTC),
+                )
+        }
+        return spec.map { result, _ ->
+            result.long("user_id") to result.int("system_question_count")
+        }.all().collectList().awaitSingle().toMap()
+    }
+
+    private fun Row.toAdminUserRow(): AdminUserRow =
+        AdminUserRow(
             id = long("id"),
             email = string("email"),
             displayName = string("display_name"),
@@ -174,20 +200,47 @@ class AdminManagementPersistenceAdapter(
             status = string("status"),
             tierCode = string("tier_code"),
             tierDescription = string("tier_description"),
-            monthlyLimit = monthlyLimit,
+            monthlyLimit = int("monthly_limit"),
             monthlyLimitOverride = get("monthly_question_limit_override", java.lang.Integer::class.java)?.toInt(),
-            usedCount = usedCount,
-            remainingCount = (monthlyLimit - usedCount).coerceAtLeast(0),
-            resetAt = MonthlyQuotaWindow.resetAt(Instant.now()),
             createdAt = instant("created_at"),
         )
+
+    private fun AdminUserRow.toAdminUser(usedCount: Int, now: Instant): AdminUserSummary {
+        val period = MonthlyQuotaWindow.periodAt(createdAt, now)
+        return AdminUserSummary(
+            id = id,
+            email = email,
+            displayName = displayName,
+            provider = provider,
+            status = status,
+            tierCode = tierCode,
+            tierDescription = tierDescription,
+            monthlyLimit = monthlyLimit,
+            monthlyLimitOverride = monthlyLimitOverride,
+            usedCount = usedCount,
+            remainingCount = (monthlyLimit - usedCount).coerceAtLeast(0),
+            resetAt = period.resetAt,
+            createdAt = createdAt,
+        )
     }
+
+    private data class AdminUserRow(
+        val id: Long,
+        val email: String,
+        val displayName: String,
+        val provider: String,
+        val status: String,
+        val tierCode: String,
+        val tierDescription: String,
+        val monthlyLimit: Int,
+        val monthlyLimitOverride: Int?,
+        val createdAt: Instant,
+    )
 
     private fun Row.string(name: String): String = get(name, String::class.java).orEmpty()
     private fun Row.int(name: String): Int = get(name, java.lang.Integer::class.java)?.toInt() ?: 0
     private fun Row.long(name: String): Long = get(name, java.lang.Long::class.java)?.toLong() ?: 0L
     private fun Row.instant(name: String): Instant =
-        get(name, Instant::class.java)
-            ?: get(name, LocalDateTime::class.java)?.toInstant(ZoneOffset.UTC)
+        get(name, LocalDateTime::class.java)?.toInstant(ZoneOffset.UTC)
             ?: Instant.EPOCH
 }

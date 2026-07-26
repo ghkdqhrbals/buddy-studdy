@@ -77,8 +77,14 @@ interface NotificationPreferenceQueryPort {
 }
 
 interface PermissionQuotaQueryPort {
-    suspend fun remaining(userId: Long, key: String, now: Instant): Long
+    suspend fun status(userId: Long, key: String, now: Instant): PermissionQuotaStatus
 }
+
+data class PermissionQuotaStatus(
+    val remaining: Long,
+    val periodStartedAt: Instant,
+    val resetAt: Instant,
+)
 
 interface EmailVerificationQueryPort {
     suspend fun isVerified(userId: Long): Boolean

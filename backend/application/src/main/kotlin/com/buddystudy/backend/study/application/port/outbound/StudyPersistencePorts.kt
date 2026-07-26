@@ -6,7 +6,6 @@ import com.buddystudy.study.domain.entity.StudyEntity
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import java.time.Instant
-import java.time.YearMonth
 
 interface StudyPort {
     suspend fun save(entity: StudyEntity): StudyEntity
@@ -137,7 +136,7 @@ data class QuestionQuotaStatus(
 
 interface QuestionMembershipPort {
     suspend fun activePlanForUser(userId: Long): QuestionMembershipPlan?
-    suspend fun quotaStatusForUser(userId: Long, yearMonth: YearMonth): QuestionQuotaStatus?
-    suspend fun tryConsumeMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, limit: Int, now: Instant): Boolean
-    suspend fun refundMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, now: Instant)
+    suspend fun quotaStatusForUser(userId: Long, periodStartedAt: Instant): QuestionQuotaStatus?
+    suspend fun tryConsumeMonthlySystemQuestion(userId: Long, periodStartedAt: Instant, limit: Int, now: Instant): Boolean
+    suspend fun refundMonthlySystemQuestion(userId: Long, periodStartedAt: Instant, now: Instant)
 }
