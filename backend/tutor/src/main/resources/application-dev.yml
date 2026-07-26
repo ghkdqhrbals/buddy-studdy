@@ -7,6 +7,11 @@ spring:
     url: ${R2DBC_DATABASE_URL:r2dbc:mysql://localhost:3306/buddystudy?serverZoneId=UTC}
     username: ${DATABASE_USERNAME:buddystudy}
     password: ${DATABASE_PASSWORD:local-password}
+  mail:
+    host: ${SMTP_HOST:${local-secret.SMTP_HOST:smtp.gmail.com}}
+    port: ${SMTP_PORT:${local-secret.SMTP_PORT:587}}
+    username: ${SMTP_USERNAME:${local-secret.SMTP_USERNAME:}}
+    password: ${SMTP_PASSWORD:${local-secret.SMTP_PASSWORD:}}
   flyway:
     enabled: ${FLYWAY_ENABLED:true}
     validate-on-migrate: ${FLYWAY_VALIDATE_ON_MIGRATE:false}
@@ -32,6 +37,8 @@ springdoc:
     url: /v3/api-docs
 
 buddystudy:
+  email:
+    from: ${SMTP_FROM:${local-secret.SMTP_FROM:${SMTP_USERNAME:${local-secret.SMTP_USERNAME:}}}}
   openai:
     api-key: ${OPENAI_API_KEY:${local-secret.OPENAI_API_KEY:}}
   scheduler:
