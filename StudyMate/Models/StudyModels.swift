@@ -145,42 +145,10 @@ enum StudyTreeDeletionPolicy {
 }
 
 enum StudyTreeCanvasPolicy {
-    static let maximumCanvasSize = CGSize(width: 4_096, height: 8_192)
-
     static func sanitizedOffset(_ offset: CGSize) -> CGSize {
         CGSize(
             width: offset.width.isFinite ? offset.width : 0,
             height: offset.height.isFinite ? offset.height : 0
-        )
-    }
-
-    static func boundedOffset(
-        _ offset: CGSize,
-        baseCenter: CGPoint,
-        nodeSize: CGSize,
-        padding: CGFloat = 8,
-        maximumCanvasSize: CGSize = StudyTreeCanvasPolicy.maximumCanvasSize
-    ) -> CGSize {
-        let sanitized = sanitizedOffset(offset)
-        let halfWidth = max(0, nodeSize.width / 2 + padding)
-        let halfHeight = max(0, nodeSize.height / 2 + padding)
-        let maximumWidth = maximumCanvasSize.width.isFinite
-            ? max(halfWidth * 2, maximumCanvasSize.width)
-            : Self.maximumCanvasSize.width
-        let maximumHeight = maximumCanvasSize.height.isFinite
-            ? max(halfHeight * 2, maximumCanvasSize.height)
-            : Self.maximumCanvasSize.height
-        let boundedCenterX = min(
-            max(baseCenter.x + sanitized.width, halfWidth),
-            maximumWidth - halfWidth
-        )
-        let boundedCenterY = min(
-            max(baseCenter.y + sanitized.height, halfHeight),
-            maximumHeight - halfHeight
-        )
-        return CGSize(
-            width: boundedCenterX - baseCenter.x,
-            height: boundedCenterY - baseCenter.y
         )
     }
 
@@ -243,13 +211,11 @@ enum StudyTreeCanvasPolicy {
                 attempts += 1
             }
 
-            resolvedOffsets[roomID] = boundedOffset(
+            resolvedOffsets[roomID] = sanitizedOffset(
                 CGSize(
                     width: candidateX - baseCenter.x,
                     height: initialOffset.height
-                ),
-                baseCenter: baseCenter,
-                nodeSize: nodeSize
+                )
             )
             placedNewRoomIDs.insert(roomID)
         }
@@ -261,36 +227,23 @@ enum StudyTreeCanvasPolicy {
         nodeOffsets: [Int: CGSize],
         baseCanvasSize: CGSize,
         nodeSize: CGSize,
-        padding: CGFloat = 8,
-        maximumCanvasSize: CGSize = StudyTreeCanvasPolicy.maximumCanvasSize
+        padding: CGFloat = 8
     ) -> StudyTreeCanvasLayout {
         let halfWidth = max(0, nodeSize.width / 2 + padding)
         let halfHeight = max(0, nodeSize.height / 2 + padding)
-        let maximumWidth = maximumCanvasSize.width.isFinite
-            ? max(halfWidth * 2, maximumCanvasSize.width)
-            : Self.maximumCanvasSize.width
-        let maximumHeight = maximumCanvasSize.height.isFinite
-            ? max(halfHeight * 2, maximumCanvasSize.height)
-            : Self.maximumCanvasSize.height
         var minimumX: CGFloat = 0
         var minimumY: CGFloat = 0
-        var maximumX = min(maximumWidth, max(0, baseCanvasSize.width))
-        var maximumY = min(maximumHeight, max(0, baseCanvasSize.height))
+        var maximumX = max(0, baseCanvasSize.width)
+        var maximumY = max(0, baseCanvasSize.height)
 
         for (roomID, baseCenter) in baseCenters {
-            let offset = boundedOffset(
-                nodeOffsets[roomID] ?? .zero,
-                baseCenter: baseCenter,
-                nodeSize: nodeSize,
-                padding: padding,
-                maximumCanvasSize: CGSize(width: maximumWidth, height: maximumHeight)
-            )
+            let offset = sanitizedOffset(nodeOffsets[roomID] ?? .zero)
             let centerX = baseCenter.x + offset.width
             let centerY = baseCenter.y + offset.height
             minimumX = min(minimumX, centerX - halfWidth)
             minimumY = min(minimumY, centerY - halfHeight)
-            maximumX = min(maximumWidth, max(maximumX, centerX + halfWidth))
-            maximumY = min(maximumHeight, max(maximumY, centerY + halfHeight))
+            maximumX = max(maximumX, centerX + halfWidth)
+            maximumY = max(maximumY, centerY + halfHeight)
         }
 
         return StudyTreeCanvasLayout(
@@ -309,6 +262,21 @@ enum StudyTreeCanvasPolicy {
 enum StudyTreeViewportPolicy {
     static let minimumZoomScale: CGFloat = 0.02
     static let maximumZoomScale: CGFloat = 1.8
+
+    static func shouldApplyInitialFit(
+        isRequested: Bool,
+        hasApplied: Bool,
+        hasUserInteracted: Bool,
+        hasFinishedRefresh: Bool,
+        viewportSize: CGSize
+    ) -> Bool {
+        isRequested
+            && !hasApplied
+            && !hasUserInteracted
+            && hasFinishedRefresh
+            && viewportSize.width > 0
+            && viewportSize.height > 0
+    }
 
     static func fittedZoomScale(
         canvasSize: CGSize,
