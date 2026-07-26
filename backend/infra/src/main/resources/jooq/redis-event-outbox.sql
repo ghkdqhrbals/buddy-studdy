@@ -8,6 +8,7 @@ create table redis_event_outbox (
     attempts integer not null default 0,
     next_attempt_at timestamp not null,
     claimed_at timestamp,
+    claim_token varchar(64),
     published_at timestamp,
     last_error clob,
     created_at timestamp not null,

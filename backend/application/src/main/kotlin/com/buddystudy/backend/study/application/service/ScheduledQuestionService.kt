@@ -4,8 +4,11 @@ import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.study.application.model.GeneratedQuestionWithEmbedding
 import com.buddystudy.backend.study.application.port.inbound.RunQuestionScheduleUseCase
+import com.buddystudy.backend.study.application.port.inbound.ScheduledQuestionWriteUseCase
 import com.buddystudy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSelection
@@ -41,7 +44,8 @@ class ScheduledQuestionService(
     private val questionKeys: OpenAIQuestionKeyProvider,
     private val questionPrompts: QuestionPromptProvider,
     private val questionDiversity: QuestionDiversityPolicy,
-    private val writer: ScheduledQuestionWriteManager,
+    private val writer: ScheduledQuestionWriteUseCase,
+    private val outboxPublisher: PublishOutboxUseCase,
     private val backoffPolicy: ScheduleBackoffPolicy = ScheduleBackoffPolicy(),
 ) : RunQuestionScheduleUseCase {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -57,6 +61,7 @@ class ScheduledQuestionService(
         questionDiversity = questionDiversity,
         backoffPolicy = backoffPolicy,
         writer = writer,
+        outboxPublisher = outboxPublisher,
         log = log,
     )
 
@@ -127,7 +132,8 @@ class ScheduledQuestionCreator(
     private val questionPrompts: QuestionPromptProvider,
     private val questionDiversity: QuestionDiversityPolicy,
     private val backoffPolicy: ScheduleBackoffPolicy,
-    private val writer: ScheduledQuestionWriteManager,
+    private val writer: ScheduledQuestionWriteUseCase,
+    private val outboxPublisher: PublishOutboxUseCase,
     private val log: Logger,
 ) {
     suspend fun createIfReady(
@@ -194,7 +200,7 @@ class ScheduledQuestionCreator(
                 recentEmbeddings = recentEmbeddings,
                 coverageSelection = coverageSelection,
             )
-            val saved = writer.complete(
+            val result = writer.complete(
                 scheduleStudy = scheduleStudy,
                 topicStudy = topicStudy,
                 generated = generated,
@@ -203,6 +209,8 @@ class ScheduledQuestionCreator(
                 appLanguage = appLanguage,
                 now = now,
             )
+            outboxPublisher.publishNow(result.outboxes)
+            val saved = result.question
             log.info(
                 "scheduled_question_created deviceId={} userId={} rootStudyId={} topicStudyId={} topic={} questionId={} notification=true",
                 scheduleStudy.deviceId,

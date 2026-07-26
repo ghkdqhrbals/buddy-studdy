@@ -28,6 +28,11 @@ push listener and its idle-message recovery scheduler use `ACK_DEL` because
 the dedicated push stream has one owning consumer group and the durable
 `question_push_outbox` remains the recovery source.
 
+Notification events use `ACK`: the domain stream can have multiple consumer
+groups, so one successful listener must not delete a record needed by another
+group. Its `@StreamScheduler` auto-claims idle pending records and invokes the
+same Jackson-typed handler.
+
 ## Retention
 
 The domain event and dedicated push streams use independently configurable
@@ -55,6 +60,13 @@ exist in `redis_event_outbox`, and push requests also have
 corresponding stream's configured maximum as urgent: Redis can trim a record
 that is still pending when the bounded stream advances beyond it. The database
 outboxes remain available for diagnosis and recovery.
+
+Normal publication does not wait for the recovery poll. The business
+transaction commits its `PENDING` outbox row, then immediately calls the
+central publication use case. The managed recovery job only handles failed,
+due, or stale rows. Both paths use claim-token fencing and the same
+claim/publish/complete implementation. See
+[`EVENT_OUTBOX_ARCHITECTURE.md`](EVENT_OUTBOX_ARCHITECTURE.md).
 
 ## Push Workers
 

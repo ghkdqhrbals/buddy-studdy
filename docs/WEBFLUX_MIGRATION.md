@@ -65,7 +65,7 @@ WebFlux transactions are carried in Reactor context, not thread-local state. A c
 - Do not wrap external HTTP, OpenAI, SMTP, APNs, or Redis publication in a database transaction.
 - Use a dedicated write manager for multi-table mutations so the atomic boundary is visible and testable.
 - Do not launch an application coroutine from inside a transaction for database work.
-- Register non-durable integrations with `afterReactiveCommit`; use a transactional outbox when losing an event during a process crash is unacceptable.
+- Register non-durable integrations through `AfterCommitPort`; use a transactional outbox when losing an event during a process crash is unacceptable.
 - R2DBC entities are detached values. Every mutation requires an explicit `save` or update statement.
 
 The scheduled-question flow claims work in a short transaction, releases the connection while OpenAI runs, and completes or fails in a second short transaction. The claim has an expiry, allowing another worker to recover work after a process crash.

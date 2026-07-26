@@ -7,9 +7,11 @@ import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
+import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.crypto.KeyCipher
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
+import com.buddystudy.backend.study.application.model.GeneratedQuestionWithEmbedding
 import com.buddystudy.backend.study.application.model.RecordsPageResponse
 import com.buddystudy.backend.study.application.model.StudyRecordResponse
 import com.buddystudy.backend.study.application.model.toRecordResponse
@@ -18,6 +20,8 @@ import com.buddystudy.study.domain.StudyRoomPendingLimitExceeded
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.StudyEntity
 import com.buddystudy.backend.study.application.port.inbound.BrowseRecordsUseCase
+import com.buddystudy.backend.study.application.port.inbound.QuestionCreationWriteUseCase
+import com.buddystudy.backend.study.application.port.inbound.StudyRecordWriteUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudyUseCase
 import com.buddystudy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
@@ -32,15 +36,15 @@ import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
 import com.buddystudy.backend.study.application.prompt.QuestionDiversityPolicy
 import com.buddystudy.backend.study.application.prompt.QuestionCoverageGuide
 import com.buddystudy.backend.study.application.prompt.QuestionPromptProvider
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
-import kotlin.reflect.jvm.internal.KotlinReflectionInternalError
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import java.time.Instant
+import kotlin.reflect.jvm.internal.KotlinReflectionInternalError
 
 @Service
 class StudyService(
@@ -57,8 +61,9 @@ class StudyService(
     private val questionKeys: OpenAIQuestionKeyProvider,
     private val questionPrompts: QuestionPromptProvider,
     private val questionDiversity: QuestionDiversityPolicy,
-    private val questionWriter: QuestionCreationWriteManager,
-    private val recordWriter: StudyRecordWriteManager,
+    private val questionWriter: QuestionCreationWriteUseCase,
+    private val recordWriter: StudyRecordWriteUseCase,
+    private val outboxPublisher: PublishOutboxUseCase,
     private val questionSimilarity: QuestionSimilarityPolicy = QuestionSimilarityPolicy(),
 ) : StudyUseCase, BrowseRecordsUseCase {
     @RequirePermission(Permissions.STUDY_CREATE)
@@ -132,7 +137,7 @@ class StudyService(
                 val question = room.createQuestion(generated.question, generated.hint, source = "manual", now = now)
                     .toQuestionEntity()
                     .applyCoverage(coverageSelection)
-                val saved = questionWriter.saveQuestionWithNotification(
+                val result = questionWriter.saveQuestionWithOutboxes(
                     embedding = generated.embedding,
                     coverage = coverageSelection,
                     questionKey = questionKey,
@@ -141,7 +146,8 @@ class StudyService(
                     push = { saved -> saved.toQuestionPushRequest(rootStudy, appLanguage) },
                     now = now,
                 )
-                saved
+                outboxPublisher.publishNow(result.outboxes)
+                result.question
             }
 
             val question = questionDeferred.await()

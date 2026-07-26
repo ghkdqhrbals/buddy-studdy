@@ -1,5 +1,7 @@
 package com.buddystudy.backend.study.application.port.outbound
 
+import com.buddystudy.backend.common.application.outbox.OutboxReference
+import com.buddystudy.backend.common.application.outbox.OutboxType
 import java.time.Instant
 
 data class QuestionPushRequest(
@@ -19,7 +21,9 @@ data class QuestionPushRequest(
     val body: String? = null,
     val deepLink: String? = null,
     val createdAt: Instant = Instant.now(),
-)
+) {
+    val eventId: String get() = "question-push-${notificationId ?: recordId}-$deviceId"
+}
 
 interface QuestionPushPublishPort {
     suspend fun publishPush(request: QuestionPushRequest): Boolean
@@ -55,13 +59,33 @@ data class QuestionPushOutboxCommand(
         )
 }
 
-interface QuestionPushOutboxPort {
+interface QuestionPushOutboxAppendPort {
     suspend fun enqueue(request: QuestionPushRequest, now: Instant = Instant.now()): Long
 }
 
-interface QuestionPushOutboxDispatchPort {
-    suspend fun dispatchOutbox(outboxId: Long)
+interface QuestionPushOutboxPort : QuestionPushOutboxAppendPort {
+    suspend fun claim(id: Long, now: Instant, staleBefore: Instant): ClaimedQuestionPushOutbox?
+    suspend fun claimBatch(now: Instant, staleBefore: Instant, limit: Int): List<ClaimedQuestionPushOutbox>
+    suspend fun markPublished(id: Long, claimToken: String, publishedAt: Instant): Boolean
+    suspend fun markRetry(
+        id: Long,
+        claimToken: String,
+        attempts: Int,
+        nextAttemptAt: Instant,
+        error: String,
+        updatedAt: Instant,
+    ): Boolean
 }
+
+data class ClaimedQuestionPushOutbox(
+    val id: Long,
+    val request: QuestionPushRequest,
+    val attempts: Int,
+    val createdAt: Instant,
+    val claimToken: String,
+)
+
+fun Long.toQuestionPushOutboxReference(): OutboxReference = OutboxReference(OutboxType.QUESTION_PUSH, this)
 
 enum class PushMessageType {
     APNS,

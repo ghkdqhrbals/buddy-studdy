@@ -6,10 +6,13 @@ import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
+import com.buddystudy.backend.common.application.outbox.OutboxPublishSummary
+import com.buddystudy.backend.common.application.outbox.OutboxReference
+import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
+import com.buddystudy.backend.common.application.outbox.RedisEventOutboxAppendPort
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.crypto.KeyCipher
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
-import com.buddystudy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystudy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystudy.backend.study.application.port.outbound.OpenAIPort
@@ -21,7 +24,7 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionMembership
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionQuotaStatus
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
-import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxPort
+import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxAppendPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
@@ -29,8 +32,8 @@ import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
 import com.buddystudy.backend.study.application.prompt.QuestionDiversityPolicy
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
 import com.buddystudy.backend.study.application.prompt.QuestionPromptProvider
-import com.buddystudy.backend.study.application.service.QuestionCreationWriteManager
-import com.buddystudy.backend.study.application.service.StudyRecordWriteManager
+import com.buddystudy.backend.study.application.service.QuestionCreationWriteService
+import com.buddystudy.backend.study.application.service.StudyRecordWriteService
 import com.buddystudy.backend.study.application.service.StudyService
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
@@ -70,16 +73,17 @@ class StudyServiceTest {
         questionKeys = questionKeys,
         questionPrompts = QuestionPromptProvider(),
         questionDiversity = QuestionDiversityPolicy(),
-        questionWriter = QuestionCreationWriteManager(
+        questionWriter = QuestionCreationWriteService(
             questions = questions,
             questionStats = questionStats,
             questionEmbeddings = questionEmbeddings,
             questionCoverage = questionCoverage,
             questionKeys = questionKeys,
-            notifications = FakeNotificationPublisher(),
+            notificationOutbox = FakeNotificationOutbox(),
             pushOutbox = pushOutbox,
         ),
-        recordWriter = StudyRecordWriteManager(questions, questionCoverage),
+        recordWriter = StudyRecordWriteService(questions, questionCoverage),
+        outboxPublisher = NoOpOutboxPublisher(),
     )
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
@@ -785,21 +789,26 @@ class StudyServiceTest {
         data class AnsweredCall(val conceptId: Long, val angleKey: String, val score: Int, val correct: Boolean)
     }
 
-    private class FakeNotificationPublisher : PublishNotificationUseCase {
+    private class FakeNotificationOutbox : RedisEventOutboxAppendPort {
         val commands = mutableListOf<NotificationRequestCommand>()
-        override suspend fun publish(command: NotificationRequestCommand): Boolean {
+        override suspend fun appendNotification(command: NotificationRequestCommand, createdAt: Instant): Long {
             commands += command
-            return true
+            return commands.size.toLong()
         }
     }
 
-    private class FakeQuestionPushOutbox : QuestionPushOutboxPort {
+    private class FakeQuestionPushOutbox : QuestionPushOutboxAppendPort {
         val requests = mutableListOf<QuestionPushRequest>()
 
         override suspend fun enqueue(request: QuestionPushRequest, now: Instant): Long {
             requests += request
             return requests.size.toLong()
         }
+    }
+
+    private class NoOpOutboxPublisher : PublishOutboxUseCase {
+        override suspend fun publishNow(references: Collection<OutboxReference>): OutboxPublishSummary =
+            OutboxPublishSummary(references.size, references.size, 0)
     }
 
 }

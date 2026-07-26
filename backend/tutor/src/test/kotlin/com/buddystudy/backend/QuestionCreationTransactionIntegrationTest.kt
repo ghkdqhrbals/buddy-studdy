@@ -10,7 +10,7 @@ import com.buddystudy.backend.study.application.openai.OpenAIQuestionKey
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingCandidate
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
-import com.buddystudy.backend.study.application.service.QuestionCreationWriteManager
+import com.buddystudy.backend.study.application.service.QuestionCreationWriteService
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.StudyEntity
 import kotlinx.coroutines.runBlocking
@@ -41,7 +41,7 @@ class QuestionCreationTransactionIntegrationTest : MySqlIntegrationTestSupport()
     @Autowired lateinit var studies: StudyRepository
     @Autowired lateinit var questions: QuestionRepository
     @Autowired lateinit var stats: QuestionStatsRepository
-    @Autowired lateinit var manager: QuestionCreationWriteManager
+    @Autowired lateinit var writer: QuestionCreationWriteService
 
     @Test
     fun `late persistence failure rolls back question and stats together`(): Unit = runBlocking {
@@ -77,7 +77,7 @@ class QuestionCreationTransactionIntegrationTest : MySqlIntegrationTestSupport()
         val statsBefore = stats.count()
 
         val result = runCatching {
-            manager.saveQuestionWithNotification(
+            writer.saveQuestionWithOutboxes(
                 question = question,
                 embedding = listOf(0.1f, 0.2f),
                 coverage = null,

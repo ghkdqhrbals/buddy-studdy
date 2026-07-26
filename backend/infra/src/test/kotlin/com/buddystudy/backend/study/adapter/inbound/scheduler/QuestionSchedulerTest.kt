@@ -4,9 +4,12 @@ import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
+import com.buddystudy.backend.common.application.outbox.OutboxPublishSummary
+import com.buddystudy.backend.common.application.outbox.OutboxReference
+import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
+import com.buddystudy.backend.common.application.outbox.RedisEventOutboxAppendPort
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
-import com.buddystudy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystudy.backend.scheduler.application.model.JobRunStatus
 import com.buddystudy.backend.scheduler.application.model.JobTriggerType
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobRun
@@ -23,7 +26,7 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSe
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingCandidate
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
-import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxPort
+import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxAppendPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPlan
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
@@ -35,7 +38,7 @@ import com.buddystudy.backend.study.application.prompt.QuestionDiversityPolicy
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
 import com.buddystudy.backend.study.application.prompt.QuestionPromptProvider
 import com.buddystudy.backend.study.application.service.ScheduledQuestionService
-import com.buddystudy.backend.study.application.service.ScheduledQuestionWriteManager
+import com.buddystudy.backend.study.application.service.ScheduledQuestionWriteService
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.study.domain.entity.StudyEntity
@@ -65,14 +68,14 @@ class QuestionSchedulerTest {
         openai = BuddyStudyProperties.OpenAI(apiKey = "sk-test", model = "gpt-5.4"),
     )
     private val questionKeys = OpenAIQuestionKeyProvider(properties, memberships)
-    private val writer = ScheduledQuestionWriteManager(
+    private val writer = ScheduledQuestionWriteService(
         studies = studies,
         questions = questions,
         questionStats = questionStats,
         questionEmbeddings = questionEmbeddings,
         questionCoverage = questionCoverage,
         questionKeys = questionKeys,
-        notifications = notifications,
+        notificationOutbox = notifications,
         pushOutbox = pushOutbox,
     )
     private val scheduler = ScheduledQuestionService(
@@ -87,6 +90,7 @@ class QuestionSchedulerTest {
         questionPrompts = QuestionPromptProvider(),
         questionDiversity = QuestionDiversityPolicy(),
         writer = writer,
+        outboxPublisher = NoOpOutboxPublisher(),
     )
 
     @Test
@@ -575,21 +579,26 @@ class QuestionSchedulerTest {
         override suspend fun markAnswered(conceptId: Long, angleKey: String, score: Int, correct: Boolean, now: Instant) = Unit
     }
 
-    private class FakeNotificationPublisher : PublishNotificationUseCase {
+    private class FakeNotificationPublisher : RedisEventOutboxAppendPort {
         val commands = mutableListOf<NotificationRequestCommand>()
-        override suspend fun publish(command: NotificationRequestCommand): Boolean {
+        override suspend fun appendNotification(command: NotificationRequestCommand, createdAt: Instant): Long {
             commands += command
-            return true
+            return commands.size.toLong()
         }
     }
 
-    private class FakeQuestionPushOutbox : QuestionPushOutboxPort {
+    private class FakeQuestionPushOutbox : QuestionPushOutboxAppendPort {
         val requests = mutableListOf<QuestionPushRequest>()
 
         override suspend fun enqueue(request: QuestionPushRequest, now: Instant): Long {
             requests += request
             return requests.size.toLong()
         }
+    }
+
+    private class NoOpOutboxPublisher : PublishOutboxUseCase {
+        override suspend fun publishNow(references: Collection<OutboxReference>): OutboxPublishSummary =
+            OutboxPublishSummary(references.size, references.size, 0)
     }
 
 }

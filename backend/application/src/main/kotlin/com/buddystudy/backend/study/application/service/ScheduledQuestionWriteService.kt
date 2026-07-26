@@ -1,35 +1,40 @@
 package com.buddystudy.backend.study.application.service
 
-import com.buddystudy.backend.notification.application.port.inbound.PublishNotificationUseCase
+import com.buddystudy.backend.common.application.outbox.OutboxReference
+import com.buddystudy.backend.common.application.outbox.OutboxType
+import com.buddystudy.backend.common.application.outbox.RedisEventOutboxAppendPort
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKey
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
+import com.buddystudy.backend.study.application.model.GeneratedQuestionWithEmbedding
+import com.buddystudy.backend.study.application.port.inbound.QuestionWriteResult
+import com.buddystudy.backend.study.application.port.inbound.ScheduledQuestionWriteUseCase
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSelection
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
-import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxPort
+import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxAppendPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.study.domain.entity.StudyEntity
-import org.springframework.stereotype.Component
+import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 
-@Component
-class ScheduledQuestionWriteManager(
+@Service
+class ScheduledQuestionWriteService(
     private val studies: StudyPort,
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
     private val questionEmbeddings: QuestionEmbeddingPort,
     private val questionCoverage: QuestionCoveragePort,
     private val questionKeys: OpenAIQuestionKeyProvider,
-    private val notifications: PublishNotificationUseCase,
-    private val pushOutbox: QuestionPushOutboxPort,
-) {
+    private val notificationOutbox: RedisEventOutboxAppendPort,
+    private val pushOutbox: QuestionPushOutboxAppendPort,
+) : ScheduledQuestionWriteUseCase {
     @Transactional
-    suspend fun complete(
+    override suspend fun complete(
         scheduleStudy: StudyEntity,
         topicStudy: StudyEntity,
         generated: GeneratedQuestionWithEmbedding,
@@ -37,7 +42,7 @@ class ScheduledQuestionWriteManager(
         questionKey: OpenAIQuestionKey,
         appLanguage: String,
         now: Instant,
-    ): QuestionEntity {
+    ): QuestionWriteResult {
         val saved = questions.save(
             scheduleStudy.toScheduledQuestion(
                 topicStudy = topicStudy,
@@ -67,19 +72,28 @@ class ScheduledQuestionWriteManager(
             studies.save(topicStudy)
             studies.save(scheduleStudy)
         }
-        notifications.publish(saved.toQuestionNotification(scheduleStudy, appLanguage))
-        pushOutbox.enqueue(saved.toQuestionPushRequest(scheduleStudy, appLanguage), now)
-        return saved
+        val notificationOutboxId = notificationOutbox.appendNotification(
+            saved.toQuestionNotification(scheduleStudy, appLanguage),
+            now,
+        )
+        val pushOutboxId = pushOutbox.enqueue(saved.toQuestionPushRequest(scheduleStudy, appLanguage), now)
+        return QuestionWriteResult(
+            question = saved,
+            outboxes = listOf(
+                OutboxReference(OutboxType.DOMAIN_EVENT, notificationOutboxId),
+                OutboxReference(OutboxType.QUESTION_PUSH, pushOutboxId),
+            ),
+        )
     }
 
     @Transactional
-    suspend fun deferUntilNextInterval(study: StudyEntity, now: Instant) {
+    override suspend fun deferUntilNextInterval(study: StudyEntity, now: Instant) {
         study.markScheduleCompleted(now)
         studies.save(study)
     }
 
     @Transactional
-    suspend fun fail(
+    override suspend fun fail(
         study: StudyEntity,
         questionKey: OpenAIQuestionKey?,
         error: String,

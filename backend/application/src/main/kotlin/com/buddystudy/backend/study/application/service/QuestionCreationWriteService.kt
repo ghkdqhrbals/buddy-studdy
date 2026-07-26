@@ -1,34 +1,38 @@
 package com.buddystudy.backend.study.application.service
 
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
-import com.buddystudy.backend.notification.application.port.inbound.PublishNotificationUseCase
+import com.buddystudy.backend.common.application.outbox.OutboxReference
+import com.buddystudy.backend.common.application.outbox.OutboxType
+import com.buddystudy.backend.common.application.outbox.RedisEventOutboxAppendPort
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKey
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
+import com.buddystudy.backend.study.application.port.inbound.QuestionCreationWriteUseCase
+import com.buddystudy.backend.study.application.port.inbound.QuestionWriteResult
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSelection
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
-import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxPort
+import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxAppendPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
-import org.springframework.stereotype.Component
+import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 
-@Component
-class QuestionCreationWriteManager(
+@Service
+class QuestionCreationWriteService(
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
     private val questionEmbeddings: QuestionEmbeddingPort,
     private val questionCoverage: QuestionCoveragePort,
     private val questionKeys: OpenAIQuestionKeyProvider,
-    private val notifications: PublishNotificationUseCase,
-    private val pushOutbox: QuestionPushOutboxPort,
-) {
+    private val notificationOutbox: RedisEventOutboxAppendPort,
+    private val pushOutbox: QuestionPushOutboxAppendPort,
+) : QuestionCreationWriteUseCase {
     @Transactional
-    suspend fun saveQuestionWithNotification(
+    override suspend fun saveQuestionWithOutboxes(
         question: QuestionEntity,
         embedding: List<Float>,
         coverage: QuestionCoverageSelection?,
@@ -36,7 +40,7 @@ class QuestionCreationWriteManager(
         notification: (QuestionEntity) -> NotificationRequestCommand,
         push: (QuestionEntity) -> QuestionPushRequest,
         now: Instant,
-    ): QuestionEntity {
+    ): QuestionWriteResult {
         val savedQuestion = questions.save(question)
         questionStats.save(QuestionStatsEntity(questionId = savedQuestion.id, updatedAt = now))
         coverage?.let { questionCoverage.markAsked(it, now) }
@@ -49,8 +53,14 @@ class QuestionCreationWriteManager(
             embedding = embedding,
         )
         questionKeys.markQuestionCreated(questionKey, now)
-        notifications.publish(notification(savedQuestion))
-        pushOutbox.enqueue(push(savedQuestion), now)
-        return savedQuestion
+        val notificationOutboxId = notificationOutbox.appendNotification(notification(savedQuestion), now)
+        val pushOutboxId = pushOutbox.enqueue(push(savedQuestion), now)
+        return QuestionWriteResult(
+            question = savedQuestion,
+            outboxes = listOf(
+                OutboxReference(OutboxType.DOMAIN_EVENT, notificationOutboxId),
+                OutboxReference(OutboxType.QUESTION_PUSH, pushOutboxId),
+            ),
+        )
     }
 }

@@ -67,6 +67,7 @@ class RedisEventOutboxIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(
             outbox.markRetry(
                 id = retry.id,
+                claimToken = retry.claimToken,
                 attempts = 1,
                 nextAttemptAt = now.plusSeconds(30),
                 error = "temporary",
@@ -81,13 +82,15 @@ class RedisEventOutboxIntegrationTest : MySqlIntegrationTestSupport() {
                 limit = 100,
             ).none { it.eventId == eventId },
         ).isTrue()
-        assertThat(
-            outbox.claimBatch(
+        val reclaimed = outbox.claimBatch(
                 now = now.plusSeconds(30),
                 staleBefore = now.minusSeconds(90),
                 limit = 100,
-            ).filter { it.eventId == eventId }.map { it.id },
-        ).containsExactly(retry.id)
+            ).single { it.eventId == eventId }
+        assertThat(reclaimed.id).isEqualTo(retry.id)
+        assertThat(reclaimed.claimToken).isNotEqualTo(retry.claimToken)
+        assertThat(outbox.markPublished(reclaimed.id, retry.claimToken, now.plusSeconds(30))).isFalse()
+        assertThat(outbox.markPublished(reclaimed.id, reclaimed.claimToken, now.plusSeconds(30))).isTrue()
     }
 
     @Test

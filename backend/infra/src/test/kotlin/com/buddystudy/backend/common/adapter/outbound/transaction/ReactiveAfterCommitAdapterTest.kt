@@ -1,4 +1,4 @@
-package com.buddystudy.backend.common.application.transaction
+package com.buddystudy.backend.common.adapter.outbound.transaction
 
 import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
@@ -8,16 +8,17 @@ import org.junit.jupiter.api.Test
 import org.springframework.transaction.reactive.TransactionContextManager
 import org.springframework.transaction.reactive.TransactionSynchronizationManager
 
-class ReactiveAfterCommitTest {
+class ReactiveAfterCommitAdapterTest {
     @Test
     fun `action runs only after reactive transaction commit callback`(): Unit = kotlinx.coroutines.runBlocking {
         val events = mutableListOf<String>()
+        val adapter = ReactiveAfterCommitAdapter()
 
         mono {
             val manager = TransactionSynchronizationManager.forCurrentTransaction().awaitSingle()
             manager.initSynchronization()
 
-            afterReactiveCommit { events += "after-commit" }
+            adapter.execute { events += "after-commit" }
             events += "inside-transaction"
 
             assertThat(events).containsExactly("inside-transaction")

@@ -23,6 +23,8 @@ class QuestionPushOutboxEntity(
     var status: String = "PENDING",
     var attempts: Int = 0,
     var nextAttemptAt: Instant = Instant.now(),
+    var claimedAt: Instant? = null,
+    var claimToken: String? = null,
     var publishedAt: Instant? = null,
     var lastError: String? = null,
     var createdAt: Instant = Instant.now(),

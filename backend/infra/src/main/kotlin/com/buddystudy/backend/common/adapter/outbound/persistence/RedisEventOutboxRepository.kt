@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneOffset
+import java.util.UUID
 
 @Component
 class RedisEventOutboxRepository(
@@ -27,6 +28,60 @@ class RedisEventOutboxRepository(
             payloadJson = objectMapper.writeValueAsString(command),
             createdAt = createdAt,
         )
+
+    @Transactional
+    override suspend fun claim(
+        id: Long,
+        now: Instant,
+        staleBefore: Instant,
+    ): ClaimedRedisOutboxEvent? = jooq.withDsl { dsl ->
+        val table = REDIS_EVENT_OUTBOX
+        val nowOffset = now.toUtcLocalDateTime()
+        val claimedId = dsl
+            .select(table.ID)
+            .from(table)
+            .where(
+                table.ID.eq(id).and(
+                    table.STATUS.eq(PENDING)
+                        .and(table.NEXT_ATTEMPT_AT.le(nowOffset))
+                        .or(table.STATUS.eq(PROCESSING).and(table.CLAIMED_AT.le(staleBefore.toUtcLocalDateTime()))),
+                ),
+            )
+            .forUpdate()
+            .skipLocked()
+            .asFlow()
+            .toList()
+            .firstOrNull()
+            ?.value1()
+            ?: return@withDsl null
+        val claimToken = UUID.randomUUID().toString()
+
+        dsl.update(table)
+            .set(table.STATUS, PROCESSING)
+            .set(table.CLAIMED_AT, nowOffset)
+            .set(table.CLAIM_TOKEN, claimToken)
+            .set(table.UPDATED_AT, nowOffset)
+            .where(table.ID.eq(claimedId))
+            .awaitFirst()
+
+        dsl.selectFrom(table)
+            .where(table.ID.eq(claimedId))
+            .asFlow()
+            .toList()
+            .firstOrNull()
+            ?.let { record ->
+                ClaimedRedisOutboxEvent(
+                    id = record.id,
+                    eventId = record.eventId,
+                    eventType = RedisOutboxEventType.valueOf(record.eventType),
+                    payloadVersion = record.payloadVersion,
+                    payloadJson = record.payloadJson,
+                    attempts = record.attempts,
+                    createdAt = record.createdAt.toInstant(ZoneOffset.UTC),
+                    claimToken = claimToken,
+                )
+            }
+    }
 
     @Transactional
     override suspend fun claimBatch(
@@ -54,10 +109,12 @@ class RedisEventOutboxRepository(
             .map { it.value1() }
 
         if (ids.isEmpty()) return@withDsl emptyList()
+        val claimToken = UUID.randomUUID().toString()
 
         dsl.update(table)
             .set(table.STATUS, PROCESSING)
             .set(table.CLAIMED_AT, nowOffset)
+            .set(table.CLAIM_TOKEN, claimToken)
             .set(table.UPDATED_AT, nowOffset)
             .where(table.ID.`in`(ids))
             .awaitFirst()
@@ -76,25 +133,32 @@ class RedisEventOutboxRepository(
                     payloadJson = record.payloadJson,
                     attempts = record.attempts,
                     createdAt = record.createdAt.toInstant(ZoneOffset.UTC),
+                    claimToken = claimToken,
                 )
             }
     }
 
-    override suspend fun markPublished(id: Long, publishedAt: Instant): Boolean = jooq.withDsl { dsl ->
+    override suspend fun markPublished(id: Long, claimToken: String, publishedAt: Instant): Boolean = jooq.withDsl { dsl ->
         val table = REDIS_EVENT_OUTBOX
         val now = publishedAt.toUtcLocalDateTime()
         dsl.update(table)
             .set(table.STATUS, PUBLISHED)
             .set(table.PUBLISHED_AT, now)
             .setNull(table.CLAIMED_AT)
+            .setNull(table.CLAIM_TOKEN)
             .setNull(table.LAST_ERROR)
             .set(table.UPDATED_AT, now)
-            .where(table.ID.eq(id).and(table.STATUS.eq(PROCESSING)))
+            .where(
+                table.ID.eq(id)
+                    .and(table.STATUS.eq(PROCESSING))
+                    .and(table.CLAIM_TOKEN.eq(claimToken)),
+            )
             .awaitFirst() == 1
     }
 
     override suspend fun markRetry(
         id: Long,
+        claimToken: String,
         attempts: Int,
         nextAttemptAt: Instant,
         error: String,
@@ -106,9 +170,14 @@ class RedisEventOutboxRepository(
             .set(table.ATTEMPTS, attempts)
             .set(table.NEXT_ATTEMPT_AT, nextAttemptAt.toUtcLocalDateTime())
             .setNull(table.CLAIMED_AT)
+            .setNull(table.CLAIM_TOKEN)
             .set(table.LAST_ERROR, error.take(MAX_ERROR_LENGTH))
             .set(table.UPDATED_AT, updatedAt.toUtcLocalDateTime())
-            .where(table.ID.eq(id).and(table.STATUS.eq(PROCESSING)))
+            .where(
+                table.ID.eq(id)
+                    .and(table.STATUS.eq(PROCESSING))
+                    .and(table.CLAIM_TOKEN.eq(claimToken)),
+            )
             .awaitFirst() == 1
     }
 

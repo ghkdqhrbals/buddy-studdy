@@ -268,6 +268,7 @@ class PushStreamManager(
 
     private fun QuestionPushRequest.toEvent(): QuestionPushRequestedEvent =
         QuestionPushRequestedEvent(
+            eventId = eventId,
             recordId = recordId,
             notificationId = notificationId,
             studyId = studyId,

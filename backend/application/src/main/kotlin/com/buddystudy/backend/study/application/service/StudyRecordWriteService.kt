@@ -3,21 +3,22 @@ package com.buddystudy.backend.study.application.service
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
+import com.buddystudy.backend.study.application.port.inbound.StudyRecordWriteUseCase
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.study.domain.entity.QuestionEntity
 import org.springframework.http.HttpStatus
-import org.springframework.stereotype.Component
+import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 
-@Component
-class StudyRecordWriteManager(
+@Service
+class StudyRecordWriteService(
     private val questions: QuestionPort,
     private val questionCoverage: QuestionCoveragePort,
-) {
+) : StudyRecordWriteUseCase {
     @Transactional
-    suspend fun answer(
+    override suspend fun answer(
         userId: Long,
         recordId: Long,
         answer: String,
@@ -51,21 +52,21 @@ class StudyRecordWriteManager(
     }
 
     @Transactional
-    suspend fun skip(userId: Long, recordId: Long): QuestionEntity {
+    override suspend fun skip(userId: Long, recordId: Long): QuestionEntity {
         val question = lockRecord(recordId, userId)
         question.apply(question.toStudyRecord().skip())
         return questions.save(question)
     }
 
     @Transactional
-    suspend fun delete(userId: Long, recordId: Long, now: Instant) {
+    override suspend fun delete(userId: Long, recordId: Long, now: Instant) {
         lockRecord(recordId, userId)
         val deleted = questions.softDelete(recordId, userId, now)
         check(deleted == 1) { "Expected one record to be deleted, but updated $deleted." }
     }
 
     @Transactional
-    suspend fun updatePublicity(userId: Long, recordId: Long, isPublic: Boolean): QuestionEntity {
+    override suspend fun updatePublicity(userId: Long, recordId: Long, isPublic: Boolean): QuestionEntity {
         val question = lockRecord(recordId, userId)
         question.apply(question.toStudyRecord().restrictPublicity(isPublic))
         return questions.save(question)
