@@ -3130,31 +3130,36 @@ private struct StudyTreeScrollViewportBridge: UIViewRepresentable {
             }
 
             retryCount = 0
-            let maximumOffset = CGPoint(
-                x: max(
-                    0,
-                    scrollView.contentSize.width
-                        - scrollView.bounds.width
-                        + scrollView.adjustedContentInset.right
-                ),
-                y: max(
-                    0,
-                    scrollView.contentSize.height
-                        - scrollView.bounds.height
-                        + scrollView.adjustedContentInset.bottom
-                )
+            let leadingInset = CGSize(
+                width: scrollView.adjustedContentInset.left,
+                height: scrollView.adjustedContentInset.top
             )
-            let clampedOffset = CGPoint(
+            let maximumOffset =
+                StudyTreeViewportPolicy.maximumNormalizedContentOffset(
+                    contentSize: scrollView.contentSize,
+                    viewportSize: scrollView.bounds.size,
+                    totalInset: CGSize(
+                        width: scrollView.adjustedContentInset.left
+                            + scrollView.adjustedContentInset.right,
+                        height: scrollView.adjustedContentInset.top
+                            + scrollView.adjustedContentInset.bottom
+                    )
+                )
+            let clampedNormalizedOffset = CGPoint(
                 x: min(requestedContentOffset.x, maximumOffset.x),
                 y: min(requestedContentOffset.y, maximumOffset.y)
             )
-            guard abs(scrollView.contentOffset.x - clampedOffset.x) > 0.5
-                    || abs(scrollView.contentOffset.y - clampedOffset.y) > 0.5 else {
+            let rawTargetOffset = StudyTreeViewportPolicy.rawContentOffset(
+                normalizedContentOffset: clampedNormalizedOffset,
+                leadingInset: leadingInset
+            )
+            guard abs(scrollView.contentOffset.x - rawTargetOffset.x) > 0.5
+                    || abs(scrollView.contentOffset.y - rawTargetOffset.y) > 0.5 else {
                 return
             }
 
             isApplyingContentOffset = true
-            scrollView.setContentOffset(clampedOffset, animated: false)
+            scrollView.setContentOffset(rawTargetOffset, animated: false)
             isApplyingContentOffset = false
         }
 
@@ -3207,10 +3212,14 @@ private struct StudyTreeScrollViewportBridge: UIViewRepresentable {
                   !requiresNewPanBeforeReporting else {
                 return
             }
-            let reportedContentOffset = CGPoint(
-                x: max(0, scrollView.contentOffset.x),
-                y: max(0, scrollView.contentOffset.y)
-            )
+            let reportedContentOffset =
+                StudyTreeViewportPolicy.normalizedContentOffset(
+                    rawContentOffset: scrollView.contentOffset,
+                    leadingInset: CGSize(
+                        width: scrollView.adjustedContentInset.left,
+                        height: scrollView.adjustedContentInset.top
+                    )
+                )
             requestedContentOffset = reportedContentOffset
             onContentOffsetChange(reportedContentOffset)
         }

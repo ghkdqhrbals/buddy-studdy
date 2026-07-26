@@ -284,6 +284,37 @@ enum StudyTreeViewportPolicy {
     static let minimumZoomScale: CGFloat = 0.02
     static let maximumZoomScale: CGFloat = 1.8
 
+    static func normalizedContentOffset(
+        rawContentOffset: CGPoint,
+        leadingInset: CGSize
+    ) -> CGPoint {
+        CGPoint(
+            x: max(0, rawContentOffset.x + max(0, leadingInset.width)),
+            y: max(0, rawContentOffset.y + max(0, leadingInset.height))
+        )
+    }
+
+    static func rawContentOffset(
+        normalizedContentOffset: CGPoint,
+        leadingInset: CGSize
+    ) -> CGPoint {
+        CGPoint(
+            x: max(0, normalizedContentOffset.x) - max(0, leadingInset.width),
+            y: max(0, normalizedContentOffset.y) - max(0, leadingInset.height)
+        )
+    }
+
+    static func maximumNormalizedContentOffset(
+        contentSize: CGSize,
+        viewportSize: CGSize,
+        totalInset: CGSize
+    ) -> CGPoint {
+        CGPoint(
+            x: max(0, contentSize.width - viewportSize.width + totalInset.width),
+            y: max(0, contentSize.height - viewportSize.height + totalInset.height)
+        )
+    }
+
     static func shouldApplyInitialFit(
         isRequested: Bool,
         hasApplied: Bool,

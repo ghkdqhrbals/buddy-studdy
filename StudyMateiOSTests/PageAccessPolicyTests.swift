@@ -240,6 +240,33 @@ final class StudyTreeLayoutPolicyTests: XCTestCase {
         )
     }
 
+    func testScrollOffsetPreservesSafeAreaInsetAtLogicalOrigin() {
+        let leadingInset = CGSize(width: 0, height: 116)
+
+        XCTAssertEqual(
+            StudyTreeViewportPolicy.normalizedContentOffset(
+                rawContentOffset: CGPoint(x: 0, y: -116),
+                leadingInset: leadingInset
+            ),
+            .zero
+        )
+        XCTAssertEqual(
+            StudyTreeViewportPolicy.rawContentOffset(
+                normalizedContentOffset: .zero,
+                leadingInset: leadingInset
+            ),
+            CGPoint(x: 0, y: -116)
+        )
+        XCTAssertEqual(
+            StudyTreeViewportPolicy.maximumNormalizedContentOffset(
+                contentSize: CGSize(width: 390, height: 800),
+                viewportSize: CGSize(width: 390, height: 700),
+                totalInset: CGSize(width: 0, height: 116)
+            ),
+            CGPoint(x: 0, y: 216)
+        )
+    }
+
     func testNewNodesMoveAsideFromExistingNodesAtTheSameLevel() {
         let baseCenters = [
             1: CGPoint(x: 100, y: 100),
