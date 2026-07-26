@@ -2464,7 +2464,7 @@ private struct MobileStudyTreeView: View {
                             .frame(
                                 minWidth: geometry.size.width,
                                 minHeight: geometry.size.height,
-                                alignment: .center
+                                alignment: .top
                             )
                             .background {
                                 StudyTreeScrollViewportBridge(
