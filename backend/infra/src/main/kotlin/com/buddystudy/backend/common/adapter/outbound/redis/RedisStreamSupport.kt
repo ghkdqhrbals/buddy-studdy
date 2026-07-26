@@ -110,12 +110,12 @@ class RedisStreamTopicManager(
         RedisStreamTopicDefinition(
             topic = RedisStreamTopic.DOMAIN_EVENTS,
             streamKey = properties.streams.key,
-            maxLength = properties.streams.maxLen.coerceAtLeast(1),
+            maxLength = properties.streams.domainMaxLen.coerceAtLeast(1),
         ),
         RedisStreamTopicDefinition(
             topic = RedisStreamTopic.PUSH_EVENTS,
             streamKey = properties.streams.pushKey,
-            maxLength = properties.streams.maxLen.coerceAtLeast(1),
+            maxLength = properties.streams.pushMaxLen.coerceAtLeast(1),
         ),
     )
 

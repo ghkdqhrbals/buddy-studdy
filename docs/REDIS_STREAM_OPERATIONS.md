@@ -30,28 +30,31 @@ the dedicated push stream has one owning consumer group and the durable
 
 ## Retention
 
-The domain event and dedicated push streams each use an exact `MAXLEN` of
-`1000`. Their default physical keys are `buddystudy-events-v1` and
-`buddystudy-push-v1`.
+The domain event and dedicated push streams use independently configurable
+exact `MAXLEN` values. Both default to `1000`. Their default physical keys are
+`buddystudy-events-v1` and `buddystudy-push-v1`.
 
 ```yaml
 buddystudy:
   streams:
     key: ${BUDDYSTUDY_STREAMS_KEY:buddystudy-events-v1}
     push-key: ${BUDDYSTUDY_PUSH_STREAM_KEY:buddystudy-push-v1}
-    max-len: ${REACTION_STREAM_XADD_MAX_LEN:1000}
+    domain-max-len: ${BUDDYSTUDY_DOMAIN_STREAM_MAX_LEN:${REACTION_STREAM_XADD_MAX_LEN:1000}}
+    push-max-len: ${BUDDYSTUDY_PUSH_STREAM_MAX_LEN:${REACTION_STREAM_XADD_MAX_LEN:1000}}
 ```
 
-Publishing uses atomic `XADD ... MAXLEN = 1000`; trimming is not a separate
-command and approximate trimming is disabled. This gives a deterministic
-operational bound.
+Publishing uses each topic's configured `XADD ... MAXLEN` value; trimming is
+not a separate command and approximate trimming is disabled. This gives each
+stream a deterministic operational bound. `REACTION_STREAM_XADD_MAX_LEN`
+remains a compatibility fallback for both values when their stream-specific
+environment variable is unset.
 
-This stream is a delivery buffer, not the source of truth. Durable events first
+These streams are delivery buffers, not sources of truth. Durable events first
 exist in `redis_event_outbox`, and push requests also have
-`question_push_outbox`. Operators must treat consumer lag approaching 1000
-records as urgent: Redis can trim a record that is still pending when the
-bounded stream advances beyond it. The database outboxes remain available for
-diagnosis and recovery.
+`question_push_outbox`. Operators must treat consumer lag approaching the
+corresponding stream's configured maximum as urgent: Redis can trim a record
+that is still pending when the bounded stream advances beyond it. The database
+outboxes remain available for diagnosis and recovery.
 
 ## Push Workers
 
