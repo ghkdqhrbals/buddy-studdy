@@ -33,6 +33,7 @@ import com.buddystudy.backend.study.application.prompt.QuestionPromptProvider
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlin.reflect.jvm.internal.KotlinReflectionInternalError
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
@@ -381,19 +382,38 @@ internal fun QuestionEntity.toQuestionNotification(study: StudyEntity, appLangua
         threadType = "study_question",
         threadId = id.toString(),
         deepLink = "buddystudy://records/$id",
-        metadataJson = studyNotificationMapper.writeValueAsString(
-            QuestionNotificationMetadata(
-                recordId = id,
-                studyId = checkNotNull(studyId) { "Question notification requires a study id." },
-                topic = topic,
-                difficultyLevel = difficultyLevel,
-                language = appLanguage,
-                sound = study.notificationSound,
-                intervalMinutes = study.intervalMinutes,
-            )
-        ),
+        metadataJson = QuestionNotificationMetadata(
+            recordId = id,
+            studyId = checkNotNull(studyId) { "Question notification requires a study id." },
+            topic = topic,
+            difficultyLevel = difficultyLevel,
+            language = appLanguage,
+            sound = study.notificationSound,
+            intervalMinutes = study.intervalMinutes,
+        ).toJson(),
         shouldPush = true,
     )
+
+internal fun QuestionNotificationMetadata.toJson(): String =
+    translateNotificationMetadataSerializationError {
+        studyNotificationMapper.writeValueAsString(this)
+    }
+
+internal fun <T> translateNotificationMetadataSerializationError(block: () -> T): T =
+    try {
+        block()
+    } catch (error: KotlinReflectionInternalError) {
+        throw QuestionNotificationSerializationException(error)
+    } catch (error: LinkageError) {
+        throw QuestionNotificationSerializationException(error)
+    }
+
+internal class QuestionNotificationSerializationException(
+    cause: Error,
+) : IllegalStateException(
+    "Question notification metadata serialization failed (${cause.javaClass.simpleName}: ${cause.message ?: "no detail"}).",
+    cause,
+)
 
 internal data class QuestionNotificationMetadata(
     val recordId: Long,

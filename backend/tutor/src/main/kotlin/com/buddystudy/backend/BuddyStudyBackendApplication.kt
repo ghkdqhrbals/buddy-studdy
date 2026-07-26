@@ -92,5 +92,6 @@ class ApplicationRuntimeHints : RuntimeHintsRegistrar {
         "com.buddystudy.backend.profile.application.model.AvatarCategoryResponse",
         "com.buddystudy.backend.profile.application.model.AvatarItemResponse",
         "com.buddystudy.backend.profile.application.model.UserProfileResponse",
+        "com.buddystudy.backend.study.application.service.QuestionNotificationMetadata",
     )
 }

@@ -74,4 +74,26 @@ class ApplicationRuntimeHintsTest {
                 .test(hints),
         ).isTrue()
     }
+
+    @Test
+    fun `registers question notification metadata for native Jackson serialization`() {
+        val hints = RuntimeHints()
+
+        ApplicationRuntimeHints().registerHints(hints, javaClass.classLoader)
+
+        val metadataType = Class.forName(
+            "com.buddystudy.backend.study.application.service.QuestionNotificationMetadata",
+        )
+        assertThat(
+            RuntimeHintsPredicates.reflection()
+                .onType(metadataType)
+                .withMemberCategories(
+                    MemberCategory.INVOKE_DECLARED_CONSTRUCTORS,
+                    MemberCategory.DECLARED_FIELDS,
+                    MemberCategory.INVOKE_PUBLIC_METHODS,
+                    MemberCategory.INVOKE_DECLARED_METHODS,
+                )
+                .test(hints),
+        ).isTrue()
+    }
 }
