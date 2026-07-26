@@ -20,6 +20,9 @@ test("monitoring gateway preserves the public scheme from its upstream proxy", (
 });
 
 test("monitoring gateway records a bounded access audit without request bodies", () => {
+  const auditLogFormat = config.match(/log_format monitoring_access[\s\S]*?';/)?.[0];
+
+  assert.ok(auditLogFormat, "Monitoring access log format must exist");
   assert.match(config, /log_format monitoring_access escape=json/);
   assert.match(config, /"event":"monitoring_access"/);
   assert.match(config, /"user":"\$remote_user"/);
@@ -27,13 +30,16 @@ test("monitoring gateway records a bounded access audit without request bodies",
   assert.match(config, /GET:\/\(index\|performance\|system\|testzone\|audit\|settings\|users\)/);
   assert.match(config, /testzone\/api/);
   assert.match(config, /backend\/api/);
-  assert.doesNotMatch(config, /requestBody/);
-  assert.doesNotMatch(config, /\$http_authorization/);
+  assert.doesNotMatch(auditLogFormat, /requestBody/);
+  assert.doesNotMatch(auditLogFormat, /\$http_authorization/);
 });
 
 test("monitoring proxies admin APIs through the same authenticated origin", () => {
-  const backendLocation = config.match(/location \/backend\/api\/ \{([\s\S]*?)\n  \}/)?.[1];
+  const backendLocation = config.match(/location \^~ \/backend\/api\/v1\/admin\/ \{([\s\S]*?)\n  \}/)?.[1];
   assert.ok(backendLocation, "Backend admin proxy location must exist");
-  assert.match(backendLocation, /proxy_pass https:\/\/api\.ghkdqhrbals\.org\/api\//);
+  assert.match(backendLocation, /auth_basic off;/);
+  assert.match(backendLocation, /proxy_pass https:\/\/api\.ghkdqhrbals\.org\/api\/v1\/admin\//);
   assert.match(backendLocation, /proxy_ssl_server_name on/);
+  assert.match(backendLocation, /proxy_set_header Authorization \$http_authorization;/);
+  assert.doesNotMatch(config, /location \/backend\/api\/ \{/);
 });
