@@ -2,6 +2,7 @@ package com.buddystudy.backend.config
 
 import io.r2dbc.spi.ConnectionFactoryOptions
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.springframework.mock.env.MockEnvironment
 
@@ -97,5 +98,23 @@ class R2dbcConnectionDetailsConfigTest {
 
         assertThat(options.getValue(ConnectionFactoryOptions.HOST)).isEqualTo("buddystudy-db")
         assertThat(options.getValue(ConnectionFactoryOptions.DATABASE)).isEqualTo("buddystudy")
+    }
+
+    @Test
+    fun `rejects a PostgreSQL URL with an actionable configuration error`() {
+        val details =
+            EnvironmentR2dbcConnectionDetails(
+                MockEnvironment()
+                    .withProperty(
+                        "spring.r2dbc.url",
+                        "r2dbc:postgresql://localhost:5432/buddystudy",
+                    ),
+            )
+
+        assertThatThrownBy { details.connectionFactoryOptions }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("supports only MySQL R2DBC URLs")
+            .hasMessageContaining("R2DBC_DATABASE_URL")
+            .hasMessageContaining("active AWS secret")
     }
 }

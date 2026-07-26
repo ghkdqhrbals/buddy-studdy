@@ -21,6 +21,9 @@ spring:
       moderation: none
   profiles:
     default: dev
+    group:
+      dev-aws:
+        - dev
   r2dbc:
     url: ${R2DBC_DATABASE_URL:r2dbc:mysql://localhost:3306/buddystudy?serverZoneId=UTC}
     username: ${DATABASE_USERNAME:}

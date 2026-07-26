@@ -2,7 +2,6 @@ spring:
   config:
     activate:
       on-profile: dev
-    import: optional:aws-secretsmanager:${AWS_SECRET_ID:buddystudy/dev}
   r2dbc:
     url: ${R2DBC_DATABASE_URL:r2dbc:mysql://localhost:3306/buddystudy?serverZoneId=UTC}
     username: ${DATABASE_USERNAME:buddystudy}
@@ -10,14 +9,6 @@ spring:
   flyway:
     enabled: ${FLYWAY_ENABLED:true}
     validate-on-migrate: ${FLYWAY_VALIDATE_ON_MIGRATE:false}
-  cloud:
-    aws:
-      region:
-        static: ap-northeast-2
-      secretsmanager:
-        enabled: true
-        region: ap-northeast-2
-
 management:
   health:
     mail:

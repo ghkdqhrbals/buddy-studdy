@@ -68,6 +68,13 @@ internal class EnvironmentR2dbcConnectionDetails(
                 "DATABASE_PASSWORD",
             )
         val parsed = ConnectionFactoryOptions.parse(url)
+        val driver = parsed.getRequiredValue(ConnectionFactoryOptions.DRIVER).toString()
+        val protocol = parsed.getValue(ConnectionFactoryOptions.PROTOCOL)?.toString()
+        val databaseDriver = if (driver == "pool") protocol else driver
+        require(databaseDriver == "mysql") {
+            "BuddyStudy supports only MySQL R2DBC URLs, but '$databaseDriver' was configured. " +
+                "Check spring.r2dbc.url, R2DBC_DATABASE_URL, DATABASE_URL, and the active AWS secret."
+        }
         val builder = parsed.mutate()
 
         if (!parsed.hasOption(ConnectionFactoryOptions.USER) && username != null) {
