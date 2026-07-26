@@ -6,7 +6,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
@@ -18,11 +17,13 @@ import org.springframework.aop.support.AopUtils
 import org.springframework.beans.factory.DisposableBean
 import org.springframework.beans.factory.ListableBeanFactory
 import org.springframework.beans.factory.SmartInitializingSingleton
+import org.springframework.context.SmartLifecycle
 import org.springframework.core.env.Environment
 import org.springframework.stereotype.Component
 import java.lang.reflect.Method
 import java.time.Duration
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.reflect.KFunction
 import kotlin.reflect.full.callSuspend
 import kotlin.reflect.full.valueParameters
@@ -36,19 +37,30 @@ class RedisStreamAnnotationManager(
     private val dispatcher: RedisStreamMessageDispatcher,
     private val environment: Environment,
     private val beanFactory: ListableBeanFactory,
-) : SmartInitializingSingleton, DisposableBean {
+) : SmartInitializingSingleton, SmartLifecycle, DisposableBean {
     private val logger = LoggerFactory.getLogger(javaClass)
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineName("redis-stream-annotations"))
     private val listeners = CopyOnWriteArrayList<ListenerHandler>()
     private val schedulers = CopyOnWriteArrayList<SchedulerHandler>()
-    private val jobs = CopyOnWriteArrayList<Job>()
+    private val running = AtomicBoolean(false)
+    @Volatile
+    private var workerScope: CoroutineScope? = null
 
     override fun afterSingletonsInstantiated() {
         scanHandlers()
+    }
+
+    @Synchronized
+    override fun start() {
+        if (!running.compareAndSet(false, true)) return
+        val scope =
+            CoroutineScope(
+                SupervisorJob() + Dispatchers.IO + CoroutineName("redis-stream-annotations"),
+            )
+        workerScope = scope
         val enabledListeners = listeners.filter { isEnabled(it.annotation.enabledProperty) }
         val enabledSchedulers = schedulers.filter { isEnabled(it.annotation.enabledProperty) }
-        enabledListeners.forEach(::startListener)
-        enabledSchedulers.forEach(::startScheduler)
+        enabledListeners.forEach { startListener(it, scope) }
+        enabledSchedulers.forEach { startScheduler(it, scope) }
         logger.info(
             "redis_stream_annotations_started registeredListeners={} registeredSchedulers={} startedListeners={} startedSchedulers={}",
             listeners.size,
@@ -58,9 +70,25 @@ class RedisStreamAnnotationManager(
         )
     }
 
-    override fun destroy() {
-        scope.cancel()
+    @Synchronized
+    override fun stop() {
+        running.set(false)
+        workerScope?.cancel()
+        workerScope = null
     }
+
+    override fun stop(callback: Runnable) {
+        stop()
+        callback.run()
+    }
+
+    override fun isRunning(): Boolean = running.get()
+
+    override fun isAutoStartup(): Boolean = true
+
+    override fun getPhase(): Int = Int.MAX_VALUE
+
+    override fun destroy() = stop()
 
     private fun scanHandlers() {
         beanFactory.getBeanNamesForType(Any::class.java, true, false).forEach { beanName ->
@@ -88,7 +116,7 @@ class RedisStreamAnnotationManager(
         }
     }
 
-    private fun startListener(handler: ListenerHandler) {
+    private fun startListener(handler: ListenerHandler, scope: CoroutineScope) {
         val annotation = handler.annotation
         val concurrency = annotation.concurrencyProperty
             .takeIf(String::isNotBlank)
@@ -96,7 +124,7 @@ class RedisStreamAnnotationManager(
             ?: annotation.concurrency
         repeat(concurrency.coerceIn(1, MAX_CONCURRENCY)) { workerIndex ->
             val consumer = consumerName(annotation.consumer, workerIndex)
-            jobs += scope.launch(CoroutineName("stream-listener-${handler.beanName}-$consumer")) {
+            scope.launch(CoroutineName("stream-listener-${handler.beanName}-$consumer")) {
                 while (currentCoroutineContext().isActive) {
                     try {
                         val messages = streams.readNew(
@@ -127,9 +155,9 @@ class RedisStreamAnnotationManager(
         }
     }
 
-    private fun startScheduler(handler: SchedulerHandler) {
+    private fun startScheduler(handler: SchedulerHandler, scope: CoroutineScope) {
         val annotation = handler.annotation
-        jobs += scope.launch(CoroutineName("stream-scheduler-${handler.beanName}-${annotation.consumer}")) {
+        scope.launch(CoroutineName("stream-scheduler-${handler.beanName}-${annotation.consumer}")) {
             delay(annotation.initialDelayMs.coerceAtLeast(0))
             var startId = START_ID
             while (currentCoroutineContext().isActive) {

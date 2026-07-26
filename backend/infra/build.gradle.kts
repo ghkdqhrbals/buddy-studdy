@@ -44,6 +44,11 @@ dependencies {
 
     runtimeOnly("io.asyncer:r2dbc-mysql")
     runtimeOnly("io.r2dbc:r2dbc-pool")
+    runtimeOnly("io.netty:netty-resolver-dns-native-macos") {
+        artifact {
+            classifier = "osx-aarch_64"
+        }
+    }
 
     jooqCodegen("org.jooq:jooq-meta-extensions:3.21.6")
 
