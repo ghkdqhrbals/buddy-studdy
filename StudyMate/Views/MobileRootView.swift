@@ -3173,8 +3173,14 @@ private struct StudyTopicAddSheet: View {
                 }
 
                 Picker("", selection: $mode) {
-                    Text(strings.recommendSubstudy).tag(StudyTopicAddMode.recommendation)
-                    Text(strings.addTopicManually).tag(StudyTopicAddMode.manual)
+                    Text(strings.recommendSubstudyTab)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .tag(StudyTopicAddMode.recommendation)
+                    Text(strings.addTopicManually)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .tag(StudyTopicAddMode.manual)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -3351,18 +3357,24 @@ private struct StudyTopicAddSheet: View {
                             selectedSuggestion = topic
                             inlineMessage = nil
                         } label: {
-                            HStack(spacing: 6) {
+                            HStack(alignment: .top, spacing: 6) {
                                 Text(topic)
                                     .font(.subheadline.weight(.medium))
                                     .foregroundStyle(.primary)
-                                    .lineLimit(2)
+                                    .lineLimit(3)
+                                    .truncationMode(.tail)
                                     .multilineTextAlignment(.leading)
-                                Spacer(minLength: 2)
+                                    .allowsTightening(true)
+                                    .minimumScaleFactor(0.85)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .fixedSize(horizontal: false, vertical: true)
                                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                                    .fixedSize()
                             }
                             .padding(.horizontal, 10)
-                            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
                             .background(
                                 isSelected
                                     ? Color.accentColor.opacity(0.08)

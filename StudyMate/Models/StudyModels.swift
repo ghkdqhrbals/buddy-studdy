@@ -1729,6 +1729,7 @@ struct AppStrings {
     }
     var addSubstudy: String { text("하위 학습 추가", "Add Sub-study") }
     var recommendSubstudy: String { text("AI 추천 주제", "AI topic suggestions") }
+    var recommendSubstudyTab: String { text("AI 추천", "AI suggestions") }
     var recommendSubstudyDescription: String {
         text("선택한 주제에서 다음에 학습할 내용을 추천합니다.", "Get focused next topics based on the selected node.")
     }
