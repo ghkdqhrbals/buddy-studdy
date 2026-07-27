@@ -74,6 +74,35 @@ class QuestionPushOutboxRepositoryTest : MySqlIntegrationTestSupport() {
         assertThat(outbox.markPublished(item.id, reclaimed.claimToken, reclaimedAt)).isTrue()
     }
 
+    @Test
+    fun `claimed push rebuilds a markdown-safe notification preview`(): Unit = runBlocking {
+        val now = Instant.parse("2026-06-10T00:00:00Z")
+        val item = outbox.save(
+            QuestionPushOutboxEntity(
+                recordId = 11,
+                deviceId = "device-markdown",
+                userId = 21,
+                question = "# 컬렉션\n\n**List**와 `Set`의 차이는?",
+                expectedAnswerHint = null,
+                topic = "Kotlin",
+                difficultyLevel = 3,
+                language = "ko",
+                sound = "default",
+                intervalMinutes = 15,
+                status = "PENDING",
+                nextAttemptAt = now.minusSeconds(1),
+                createdAt = now.minusSeconds(10),
+                updatedAt = now.minusSeconds(10),
+            ),
+        )
+
+        val claimed = checkNotNull(outbox.claim(item.id, now, now.minusSeconds(120)))
+
+        assertThat(claimed.request.title).isEqualTo("새 질문 도착")
+        assertThat(claimed.request.body).isEqualTo("컬렉션\nList와 \"Set\"의 차이는?")
+        assertThat(claimed.request.question).startsWith("# 컬렉션")
+    }
+
     private suspend fun pendingItem(now: Instant): QuestionPushOutboxEntity =
         outbox.save(
             QuestionPushOutboxEntity(

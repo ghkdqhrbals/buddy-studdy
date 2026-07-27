@@ -11,8 +11,9 @@ import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.auth.application.service.AccountSessionManager
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
-import com.buddystudy.backend.profile.application.model.UserProfileResponse
+import com.buddystudy.backend.profile.application.model.AccountWithdrawnEvent
 import com.buddystudy.backend.profile.application.model.AvatarCatalogResponse
+import com.buddystudy.backend.profile.application.model.UserProfileResponse
 import com.buddystudy.backend.profile.application.model.toAvatarConfigJson
 import com.buddystudy.backend.profile.application.model.toAvatarConfigMap
 import com.buddystudy.backend.profile.application.model.toCompatibleBases
@@ -21,6 +22,7 @@ import com.buddystudy.backend.profile.application.model.toResponse
 import com.buddystudy.backend.profile.application.port.inbound.AvatarUpdateCommand
 import com.buddystudy.backend.profile.application.port.inbound.ProfileUpdateCommand
 import com.buddystudy.backend.profile.application.port.inbound.ProfileUseCase
+import com.buddystudy.backend.profile.application.port.outbound.AccountWithdrawalEventPort
 import com.buddystudy.backend.profile.application.port.outbound.AvatarCatalogPort
 import com.buddystudy.backend.profile.application.port.outbound.ProfilePhotoStoragePort
 import com.buddystudy.backend.profile.application.port.outbound.StoredProfilePhoto
@@ -40,6 +42,7 @@ class ProfileService(
     private val roles: RoleAssignmentPort,
     private val tokenService: TokenProvider,
     private val accountDeletion: AccountDeletionPort,
+    private val withdrawalEvents: AccountWithdrawalEventPort,
     private val avatarCatalog: AvatarCatalogPort,
     private val profilePhotos: ProfilePhotoStoragePort = UnavailableProfilePhotoStoragePort,
 ) : ProfileUseCase {
@@ -148,8 +151,14 @@ class ProfileService(
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_ACCESS_TOKEN_REQUIRED, "Account deletion requires an active login.")
         }
         val now = Instant.now()
-        profilePhotos.delete(principal.userId)
-        accountDeletion.deleteAccountData(principal.userId, principal.deviceId, now)
+        val withdrawal = accountDeletion.beginWithdrawal(principal.userId, now)
+        withdrawalEvents.append(
+            AccountWithdrawnEvent.create(
+                userId = principal.userId,
+                deviceIds = withdrawal.deviceIds,
+                withdrawnAt = now,
+            ),
+        )
         val device = sessions.device(principal.deviceId)
         val anonymousUser = sessions.ensureAnonymousUser(device)
         devices.save(device)

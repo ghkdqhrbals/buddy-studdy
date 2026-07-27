@@ -89,6 +89,7 @@ final class AppState: ObservableObject {
     @Published private var backendRuntimeState = BackendRuntimeStateStore()
     @Published private var communitySessionState: CommunitySessionStateStore
     @Published private var searchState = SearchStateStore()
+    private var communityCommentsCache: [String: CommunityCommentsResponse] = [:]
 
     var appLogs: [AppLogEntry] {
         get {
@@ -2955,6 +2956,7 @@ final class AppState: ObservableObject {
         avatarCatalog = nil
         activeTerms = []
         notificationPreferences = []
+        communityCommentsCache.removeAll()
         updateNotificationState { state in
             state.reset()
         }
@@ -3340,19 +3342,21 @@ final class AppState: ObservableObject {
         setCommunitySessionSignedIn(true)
     }
 
-    func withdrawCommunityAccount() async {
+    func withdrawCommunityAccount() async -> Bool {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-withdraw") else {
             clearCommunityErrorForMissingRegistration(reason: "community-withdraw")
-            return
+            return false
         }
 
         isWithdrawingCommunityAccount = true
+        var didSucceed = false
 
         await actionRunner.run(
             operation: {
                 try await communityUseCase.withdrawMyProfile(registration: registration)
             },
             onSuccess: { updatedRegistration in
+                didSucceed = true
                 storedBackendIdentityUseCase.saveRegistration(updatedRegistration)
                 signOutFromCommunity()
                 communityProfileCacheUseCase.clearProfileIdentity()
@@ -3366,6 +3370,7 @@ final class AppState: ObservableObject {
                 isWithdrawingCommunityAccount = false
             }
         )
+        return didSucceed
     }
 
     func reportCommunityQuestion(_ question: CommunityQuestion, reason: String, message: String = "") async {
@@ -3454,7 +3459,20 @@ final class AppState: ObservableObject {
         )
     }
 
-    func loadCommunityQuestionComments(questionID: String, limit: Int = 30, offset: Int = 0) async -> CommunityCommentsResponse? {
+    func cachedCommunityQuestionComments(questionID: String) -> CommunityCommentsResponse? {
+        communityCommentsCache[questionID]
+    }
+
+    func loadCommunityQuestionComments(
+        questionID: String,
+        limit: Int = 30,
+        offset: Int = 0,
+        refresh: Bool = false
+    ) async -> CommunityCommentsResponse? {
+        if !refresh, offset == 0, let cached = communityCommentsCache[questionID] {
+            return cached
+        }
+
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-comments") else {
             clearCommunityErrorForMissingRegistration(reason: "community-comments")
             return nil
@@ -3468,6 +3486,11 @@ final class AppState: ObservableObject {
                     limit: limit,
                     offset: offset
                 )
+            },
+            onSuccess: { response in
+                if offset == 0 {
+                    communityCommentsCache[questionID] = response
+                }
             },
             onFailure: { error in
                 handleCommunityError(error)
@@ -3520,9 +3543,15 @@ final class AppState: ObservableObject {
                     body: body
                 )
             },
-            onSuccess: { _ in
+            onSuccess: { comment in
                 if let index = communityQuestions.firstIndex(where: { $0.id == questionID }) {
                     communityQuestions[index].commentCount += 1
+                }
+                if var cached = communityCommentsCache[questionID],
+                   !cached.comments.contains(where: { $0.id == comment.id }) {
+                    cached.comments.append(comment)
+                    cached.totalCount += 1
+                    communityCommentsCache[questionID] = cached
                 }
             },
             onFailure: { error in
@@ -3553,6 +3582,14 @@ final class AppState: ObservableObject {
             onSuccess: {
                 if let index = communityQuestions.firstIndex(where: { $0.id == questionID }) {
                     communityQuestions[index].commentCount = max(0, communityQuestions[index].commentCount - 1)
+                }
+                if var cached = communityCommentsCache[questionID] {
+                    let previousCount = cached.comments.count
+                    cached.comments.removeAll { $0.id == commentID }
+                    if cached.comments.count != previousCount {
+                        cached.totalCount = max(0, cached.totalCount - 1)
+                    }
+                    communityCommentsCache[questionID] = cached
                 }
             },
             onFailure: { error in

@@ -12,6 +12,7 @@ import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.crypto.KeyCipher
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.study.application.content.MarkdownContentPolicy
+import com.buddystudy.backend.study.application.content.QuestionNotificationContentPolicy
 import com.buddystudy.backend.study.application.model.GeneratedQuestionWithEmbedding
 import com.buddystudy.backend.study.application.model.RecordsPageResponse
 import com.buddystudy.backend.study.application.model.StudyRecordResponse
@@ -388,7 +389,7 @@ internal fun QuestionEntity.toQuestionNotification(study: StudyEntity, appLangua
         eventId = "question-created-$id",
         userId = study.userId,
         type = "STUDY_QUESTION",
-        title = questionNotificationTitle(appLanguage),
+        title = QuestionNotificationContentPolicy.title(appLanguage),
         body = MarkdownContentPolicy.plainText(question),
         threadType = "study_question",
         threadId = id.toString(),
@@ -418,14 +419,11 @@ internal fun QuestionEntity.toQuestionPushRequest(study: StudyEntity, appLanguag
         language = appLanguage,
         sound = study.notificationSound,
         intervalMinutes = study.intervalMinutes,
-        title = questionNotificationTitle(appLanguage),
+        title = QuestionNotificationContentPolicy.title(appLanguage),
         body = MarkdownContentPolicy.plainText(question),
         deepLink = "buddystudy://records/$id",
         createdAt = createdAt,
     )
-
-internal fun questionNotificationTitle(appLanguage: String): String =
-    if (appLanguage.lowercase().startsWith("en")) "New Question" else "새 질문 도착"
 
 internal fun QuestionNotificationMetadata.toJson(): String =
     translateNotificationMetadataSerializationError {

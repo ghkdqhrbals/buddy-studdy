@@ -11,6 +11,7 @@ import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.TokenProvider
 import com.buddystudy.backend.auth.application.permission.Roles
 import com.buddystudy.backend.auth.application.port.outbound.AccountDeletionPort
+import com.buddystudy.backend.auth.application.port.outbound.AccountWithdrawalSnapshot
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.RoleAssignmentPort
 import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
@@ -19,6 +20,8 @@ import com.buddystudy.backend.auth.application.service.AccountSessionManager
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.profile.application.port.outbound.AvatarCatalogPort
 import com.buddystudy.backend.profile.application.port.outbound.ProfilePhotoStoragePort
+import com.buddystudy.backend.profile.application.model.AccountWithdrawnEvent
+import com.buddystudy.backend.profile.application.port.outbound.AccountWithdrawalEventPort
 import com.buddystudy.backend.profile.application.port.outbound.StoredProfilePhoto
 import com.buddystudy.backend.profile.application.service.ProfileService
 import org.assertj.core.api.Assertions.assertThat
@@ -32,6 +35,7 @@ class ProfileServiceAccountDeletionTest {
     private val userDevices = InMemoryUserDevicePort()
     private val roles = InMemoryRoleAssignmentPort()
     private val deletion = CapturingAccountDeletionPort(users, userDevices, devices)
+    private val withdrawalEvents = CapturingAccountWithdrawalEventPort()
     private val avatars = InMemoryAvatarCatalogPort()
     private val photos = InMemoryProfilePhotoStoragePort()
     private val properties = BuddyStudyProperties().apply {
@@ -44,6 +48,7 @@ class ProfileServiceAccountDeletionTest {
         roles = roles,
         tokenService = TokenProvider(properties),
         accountDeletion = deletion,
+        withdrawalEvents = withdrawalEvents,
         avatarCatalog = avatars,
         profilePhotos = photos,
     )
@@ -138,7 +143,7 @@ class ProfileServiceAccountDeletionTest {
     }
 
     @Test
-    fun `withdraw deletes member data and reconnects current device to a new anonymous user`(): Unit = runBlocking {
+    fun `withdraw disables member and emits cleanup event before reconnecting current device anonymously`(): Unit = runBlocking {
         val activeUser = users.save(
             UserEntity(
                 provider = "GOOGLE",
@@ -181,32 +186,60 @@ class ProfileServiceAccountDeletionTest {
         )
 
         assertThat(response.accessToken).isNotBlank()
-        assertThat(deletion.deleted).containsExactly(DeletedAccount(activeUser.id, "dev-current"))
+        assertThat(deletion.started).containsExactly(activeUser.id)
         assertThat(users.findByProviderAndProviderId("GOOGLE", "google-subject")).isNull()
+        assertThat(users.findById(activeUser.id)?.status).isEqualTo("WITHDRAWN")
+        val withdrawalEvent = withdrawalEvents.events.single()
+        assertThat(withdrawalEvent.userId).isEqualTo(activeUser.id)
+        assertThat(withdrawalEvent.deviceIds).containsExactly("dev-current")
         val anonymousUserId = devices.findByDeviceId("dev-current")?.userId
         assertThat(anonymousUserId).isNotNull()
         assertThat(anonymousUserId).isNotEqualTo(activeUser.id)
         assertThat(users.findById(anonymousUserId!!)!!.status).isEqualTo("ANONYMOUS")
         assertThat(roles.grants).contains(anonymousUserId to Roles.ANONYMOUS_USER)
         assertThat(userDevices.findActiveByUserId(activeUser.id)).isEmpty()
-        assertThat(userDevices.findAllByUserId(activeUser.id)).isEmpty()
+        assertThat(userDevices.findAllByUserId(activeUser.id)).hasSize(1)
         assertThat(userDevices.findActiveByUserId(anonymousUserId).map { it.deviceId }).containsExactly("dev-current")
     }
-
-    private data class DeletedAccount(val userId: Long, val currentDeviceId: String)
 
     private class CapturingAccountDeletionPort(
         private val users: InMemoryUserPort,
         private val userDevices: InMemoryUserDevicePort,
         private val devices: InMemoryDevicePort,
     ) : AccountDeletionPort {
-        val deleted = mutableListOf<DeletedAccount>()
+        val started = mutableListOf<Long>()
 
-        override suspend fun deleteAccountData(userId: Long, currentDeviceId: String, now: Instant) {
-            deleted += DeletedAccount(userId, currentDeviceId)
-            userDevices.deleteAllForUser(userId)
+        override suspend fun beginWithdrawal(userId: Long, now: Instant): AccountWithdrawalSnapshot {
+            started += userId
+            val deviceIds = devices.deviceIdsForUser(userId)
+            userDevices.revokeAllForUser(userId, now)
             devices.detachUser(userId, now)
-            users.deleteById(userId)
+            users.findById(userId)?.apply {
+                provider = "WITHDRAWN"
+                providerId = "withdrawn-$userId"
+                status = "WITHDRAWN"
+                email = ""
+                displayName = "Withdrawn-$userId"
+                passwordHash = null
+                openaiApiKeyCipher = null
+                updatedAt = now
+            }
+            return AccountWithdrawalSnapshot(deviceIds)
+        }
+
+        override suspend fun deleteAccountData(
+            userId: Long,
+            deviceIds: List<String>,
+            withdrawnAt: Instant,
+        ) = Unit
+    }
+
+    private class CapturingAccountWithdrawalEventPort : AccountWithdrawalEventPort {
+        val events = mutableListOf<AccountWithdrawnEvent>()
+
+        override suspend fun append(event: AccountWithdrawnEvent): Long {
+            events += event
+            return events.size.toLong()
         }
     }
 
@@ -253,6 +286,9 @@ class ProfileServiceAccountDeletionTest {
         override suspend fun findAllByUserId(userId: Long): List<DeviceEntity> =
             devices.values.filter { it.userId == userId }
 
+        fun deviceIdsForUser(userId: Long): List<String> =
+            devices.values.filter { it.userId == userId }.map { it.deviceId }
+
         fun detachUser(userId: Long, now: Instant) {
             devices.values
                 .filter { it.userId == userId }
@@ -288,9 +324,11 @@ class ProfileServiceAccountDeletionTest {
         override suspend fun hasActiveSession(userId: Long, deviceId: String): Boolean =
             sessions.values.any { it.userId == userId && it.deviceId == deviceId && it.isActive() }
 
-        fun deleteAllForUser(userId: Long) {
-            val ids = sessions.values.filter { it.userId == userId }.map { it.id }
-            ids.forEach { sessions.remove(it) }
+        fun revokeAllForUser(userId: Long, now: Instant) {
+            sessions.values.filter { it.userId == userId }.forEach {
+                it.revokedAt = now
+                it.updatedAt = now
+            }
         }
     }
 

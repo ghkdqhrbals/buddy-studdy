@@ -5,6 +5,8 @@ import com.buddystudy.backend.common.application.outbox.RedisEventOutboxPort
 import com.buddystudy.backend.common.application.outbox.RedisOutboxEventType
 import com.buddystudy.backend.jooq.tables.RedisEventOutbox.REDIS_EVENT_OUTBOX
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
+import com.buddystudy.backend.profile.application.model.AccountWithdrawnEvent
+import com.buddystudy.backend.profile.application.port.outbound.AccountWithdrawalEventPort
 import com.fasterxml.jackson.databind.ObjectMapper
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.reactive.asFlow
@@ -20,13 +22,21 @@ import java.util.UUID
 class RedisEventOutboxRepository(
     private val jooq: JooqR2dbcExecutor,
     private val objectMapper: ObjectMapper,
-) : RedisEventOutboxPort {
+) : RedisEventOutboxPort, AccountWithdrawalEventPort {
     override suspend fun appendNotification(command: NotificationRequestCommand, createdAt: Instant): Long =
         append(
             eventId = command.eventId,
             eventType = RedisOutboxEventType.NOTIFICATION_REQUESTED,
             payloadJson = objectMapper.writeValueAsString(command),
             createdAt = createdAt,
+        )
+
+    override suspend fun append(event: AccountWithdrawnEvent): Long =
+        append(
+            eventId = event.eventId,
+            eventType = RedisOutboxEventType.ACCOUNT_WITHDRAWN,
+            payloadJson = objectMapper.writeValueAsString(event),
+            createdAt = event.withdrawnAt,
         )
 
     @Transactional

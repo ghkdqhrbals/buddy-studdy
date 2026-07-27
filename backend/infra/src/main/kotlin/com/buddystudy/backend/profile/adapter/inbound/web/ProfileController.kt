@@ -62,7 +62,10 @@ class ProfileController(
             .body(photo.bytes)
     }
 
-    @Operation(summary = "Delete my account", description = "Deletes the active member account and reconnects the current device as anonymous.")
+    @Operation(
+        summary = "Delete my account",
+        description = "Withdraws the active member, reconnects the current device as anonymous, and schedules idempotent asynchronous data cleanup.",
+    )
     @DeleteMapping("/profile")
     suspend fun withdrawProfile(authentication: Authentication) = profiles.withdrawProfile(authentication)
 }

@@ -353,7 +353,7 @@ Patch request:
 }
 ```
 
-`DELETE /api/v1/profile` deletes the active Google-linked account for the current device. The backend immediately removes the profile, sign-in mapping, public questions, and related study records for that user, reconnects the current device to an anonymous user, and returns a fresh anonymous `accessToken`.
+`DELETE /api/v1/profile` immediately withdraws the active member, revokes its sessions, scrubs login/profile secrets, reconnects the current device to an anonymous user, and returns a fresh anonymous `accessToken`. In the same transaction it writes an `ACCOUNT_WITHDRAWN` outbox event. An at-least-once Redis Stream consumer then idempotently removes profile assets, public questions, studies, records, reactions, notifications, and related data.
 
 ### Permission Policy, Terms, And Notifications
 

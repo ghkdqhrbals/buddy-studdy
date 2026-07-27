@@ -37,6 +37,7 @@ interface AfterCommitPort {
 
 enum class RedisOutboxEventType {
     NOTIFICATION_REQUESTED,
+    ACCOUNT_WITHDRAWN,
 }
 
 data class ClaimedRedisOutboxEvent(

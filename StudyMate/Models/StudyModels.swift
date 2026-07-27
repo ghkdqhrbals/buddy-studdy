@@ -2879,6 +2879,14 @@ struct AppStrings {
     var communityUnavailable: String { text("다른 사용자 질문 기능을 현재 사용할 수 없습니다.", "Community questions are currently unavailable.") }
     var communityRequestFailed: String { text("다른 사용자 질문을 불러오지 못했습니다.", "Could not load community questions.") }
     var profile: String { text("프로필", "Profile") }
+    var avatar: String { text("아바타", "Avatar") }
+    var accountSettings: String { text("계정 설정", "Account Settings") }
+    var accountSettingsHelp: String {
+        text(
+            "로그인 계정과 회원탈퇴를 관리합니다.",
+            "Manage your signed-in account and account deletion."
+        )
+    }
     var profileRequestFailed: String { text("프로필을 불러오지 못했습니다.", "Could not load your profile.") }
     var profileAccount: String { text("로그인 계정", "Signed in as") }
     var profileDisplayName: String { text("이름", "Name") }
@@ -2893,17 +2901,17 @@ struct AppStrings {
     var useProfilePhoto: String { text("사진 사용", "Use Photo") }
     var profileBio: String { text("소개말", "Bio") }
     var profileSaved: String { text("프로필을 저장했습니다.", "Profile saved.") }
-    var deleteAccount: String { text("앱 탈퇴", "Delete Account") }
+    var deleteAccount: String { text("회원탈퇴", "Delete Account") }
     var deleteAccountNotice: String {
         text(
-            "탈퇴하면 프로필, 로그인 정보, 공개 질문과 관련 기록이 즉시 삭제됩니다.",
-            "Deleting your account immediately removes your profile, sign-in data, public questions, and related records."
+            "탈퇴하면 즉시 로그아웃되고 계정을 다시 사용할 수 없습니다. 프로필, 공개 질문, 학습과 관련 기록은 탈퇴 이벤트에 따라 순차적으로 삭제됩니다.",
+            "You will be signed out immediately and cannot use this account again. Your profile, public questions, studies, and related records are then deleted asynchronously."
         )
     }
     var deleteAccountConfirmMessage: String {
         text(
-            "탈퇴 후에는 이 계정의 프로필과 관련 기록을 복구할 수 없습니다.",
-            "After deletion, this account's profile and related records cannot be recovered."
+            "회원탈퇴 후에는 계정과 관련 기록을 복구할 수 없습니다.",
+            "Your account and related records cannot be recovered after deletion."
         )
     }
     var accountDeleted: String { text("탈퇴 처리되었습니다.", "Account deleted.") }

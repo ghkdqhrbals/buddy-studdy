@@ -22,8 +22,17 @@ interface DevicePort {
 }
 
 interface AccountDeletionPort {
-    suspend fun deleteAccountData(userId: Long, currentDeviceId: String, now: Instant)
+    suspend fun beginWithdrawal(userId: Long, now: Instant): AccountWithdrawalSnapshot
+    suspend fun deleteAccountData(
+        userId: Long,
+        deviceIds: List<String>,
+        withdrawnAt: Instant,
+    )
 }
+
+data class AccountWithdrawalSnapshot(
+    val deviceIds: List<String>,
+)
 
 interface UserDevicePort {
     suspend fun save(entity: UserDeviceEntity): UserDeviceEntity

@@ -1,6 +1,7 @@
 package com.buddystudy.backend.study.adapter.outbound.persistence
 
 import com.buddystudy.backend.config.saveEntity
+import com.buddystudy.backend.study.application.content.QuestionNotificationContentPolicy
 import com.buddystudy.backend.study.application.port.outbound.ClaimedQuestionPushOutbox
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
@@ -199,6 +200,9 @@ class QuestionPushOutboxRepository(
                 language = language,
                 sound = sound,
                 intervalMinutes = intervalMinutes,
+                title = QuestionNotificationContentPolicy.title(language),
+                body = QuestionNotificationContentPolicy.preview(question),
+                deepLink = "buddystudy://records/$recordId",
             ),
             attempts = attempts,
             createdAt = createdAt,

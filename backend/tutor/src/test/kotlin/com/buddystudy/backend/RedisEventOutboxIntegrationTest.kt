@@ -3,6 +3,8 @@ package com.buddystudy.backend
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxPort
 import com.buddystudy.backend.common.application.outbox.RedisOutboxEventType
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
+import com.buddystudy.backend.profile.application.model.AccountWithdrawnEvent
+import com.buddystudy.backend.profile.application.port.outbound.AccountWithdrawalEventPort
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -29,6 +31,7 @@ import java.util.UUID
 )
 class RedisEventOutboxIntegrationTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var outbox: RedisEventOutboxPort
+    @Autowired lateinit var withdrawalEvents: AccountWithdrawalEventPort
     @Autowired lateinit var rollbackWriter: RollbackWriter
 
     @Test
@@ -91,6 +94,30 @@ class RedisEventOutboxIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(reclaimed.claimToken).isNotEqualTo(retry.claimToken)
         assertThat(outbox.markPublished(reclaimed.id, retry.claimToken, now.plusSeconds(30))).isFalse()
         assertThat(outbox.markPublished(reclaimed.id, reclaimed.claimToken, now.plusSeconds(30))).isTrue()
+    }
+
+    @Test
+    fun `account withdrawal event is durably appended with a stable id`(): Unit = runBlocking {
+        val userId = UUID.randomUUID().mostSignificantBits.and(Long.MAX_VALUE)
+        val now = Instant.parse("2030-07-24T00:00:00Z")
+        val event = AccountWithdrawnEvent.create(
+            userId = userId,
+            deviceIds = listOf("device-a", "device-a", "device-b"),
+            withdrawnAt = now,
+        )
+
+        val first = withdrawalEvents.append(event)
+        val duplicate = withdrawalEvents.append(event)
+
+        assertThat(duplicate).isEqualTo(first)
+        val claimed = outbox.claimBatch(
+            now = now,
+            staleBefore = now.minusSeconds(120),
+            limit = 100,
+        ).single { it.eventId == event.eventId }
+        assertThat(claimed.eventType).isEqualTo(RedisOutboxEventType.ACCOUNT_WITHDRAWN)
+        assertThat(claimed.payloadJson).contains("\"userId\":$userId")
+        assertThat(claimed.payloadJson).contains("\"deviceIds\":[\"device-a\",\"device-b\"]")
     }
 
     @Test

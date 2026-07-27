@@ -3998,7 +3998,7 @@ private struct MobileNotificationRow: View {
                         .lineLimit(1)
                 }
 
-                Text(notification.body)
+                Text(MarkdownContent.plainText(notification.body))
                     .font(.subheadline)
                     .foregroundStyle(notification.isRead ? .secondary : .primary)
                     .lineLimit(3)
@@ -5175,7 +5175,7 @@ private struct MobileProfileSettingsSheet: View {
                         MobileProfileEditorView()
                     } label: {
                         profileDestinationLabel(
-                            title: strings.profile,
+                            title: strings.avatar,
                             subtitle: appState.communityProfile?.displayName,
                             systemImage: "person.crop.circle"
                         )
@@ -5236,6 +5236,18 @@ private struct MobileProfileSettingsSheet: View {
                         Spacer()
                         Text(appVersionText)
                             .foregroundStyle(.secondary)
+                    }
+                }
+
+                if appState.isCommunitySessionActive {
+                    Section {
+                        Button(role: .destructive) {
+                            appState.signOutFromCommunity()
+                            dismiss()
+                        } label: {
+                            Text(strings.communityLogout)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                 }
             }
@@ -5487,14 +5499,6 @@ private struct MobileProfileEditorView: View {
                     }
                     .listRowBackground(Color.clear)
 
-                    Section {
-                        Button(role: .destructive) {
-                            appState.signOutFromCommunity()
-                            dismiss()
-                        } label: {
-                            Text(strings.communityLogout)
-                        }
-                    }
                 } else {
                     Section {
                         VStack(alignment: .leading, spacing: 10) {
@@ -5521,7 +5525,7 @@ private struct MobileProfileEditorView: View {
                 }
             }
             .keyboardDoneToolbar(strings.done)
-            .navigationTitle(strings.profile)
+            .navigationTitle(strings.avatar)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -7279,7 +7283,7 @@ struct CommunityQuestionDetailView: View {
     @State private var displayQuestion: CommunityQuestion
     @State private var comments: [CommunityQuestionComment] = []
     @State private var commentsTotalCount = 0
-    @State private var isLoadingComments = false
+    @State private var hasLoadedComments = false
     @State private var commentDraft = ""
     @State private var isSendingComment = false
     @State private var deletingCommentIDs: Set<String> = []
@@ -7288,6 +7292,7 @@ struct CommunityQuestionDetailView: View {
     init(question: CommunityQuestion) {
         self.question = question
         _displayQuestion = State(initialValue: question)
+        _commentsTotalCount = State(initialValue: question.commentCount)
     }
 
     private var strings: AppStrings {
@@ -7356,6 +7361,7 @@ struct CommunityQuestionDetailView: View {
             }
         }
         .task(id: displayQuestion.id) {
+            applyCachedComments()
             await loadQuestionDetail()
             await loadComments()
         }
@@ -7436,10 +7442,7 @@ struct CommunityQuestionDetailView: View {
             Text(strings.comments)
                 .font(.headline)
 
-            if isLoadingComments && comments.isEmpty {
-                ProgressView()
-                    .frame(maxWidth: .infinity, alignment: .center)
-            } else if comments.isEmpty {
+            if hasLoadedComments && comments.isEmpty {
                 Text(strings.noComments)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -7537,15 +7540,28 @@ struct CommunityQuestionDetailView: View {
     }
 
     private func loadComments() async {
-        isLoadingComments = true
-        defer { isLoadingComments = false }
-        guard let response = await appState.loadCommunityQuestionComments(questionID: displayQuestion.id) else {
+        guard let response = await appState.loadCommunityQuestionComments(
+            questionID: displayQuestion.id,
+            refresh: true
+        ) else {
             return
         }
 
+        applyComments(response)
+    }
+
+    private func applyCachedComments() {
+        guard let response = appState.cachedCommunityQuestionComments(questionID: displayQuestion.id) else {
+            return
+        }
+        applyComments(response)
+    }
+
+    private func applyComments(_ response: CommunityCommentsResponse) {
         comments = response.comments
         commentsTotalCount = response.totalCount
         displayQuestion.commentCount = response.totalCount
+        hasLoadedComments = true
     }
 
     private func loadQuestionDetail() async {
@@ -7938,6 +7954,25 @@ private struct MobileSettingsView: View {
             LazyVStack(alignment: .leading, spacing: 18) {
                 if appState.isCommunitySessionActive {
                     MobileSettingsCard(
+                        title: strings.accountSettings,
+                        systemImage: "person.crop.circle.badge.gearshape"
+                    ) {
+                        NavigationLink {
+                            MobileAccountSettingsView()
+                        } label: {
+                            MobileSettingsRow(
+                                systemImage: "person.crop.circle.badge.gearshape",
+                                title: strings.accountSettings,
+                                value: strings.accountSettingsHelp,
+                                showsChevron: true
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                if appState.isCommunitySessionActive {
+                    MobileSettingsCard(
                         title: strings.publicQuestionsPage,
                         systemImage: "person.2"
                     ) {
@@ -8165,6 +8200,62 @@ private struct MobileSettingsView: View {
         }
         .buttonStyle(.plain)
         .disabled(appState.isValidatingAPIKey)
+    }
+}
+
+private struct MobileAccountSettingsView: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    @State private var isShowingWithdrawalConfirmation = false
+
+    private var strings: AppStrings { appState.strings }
+
+    private var accountLabel: String {
+        guard let profile = appState.communityProfile else {
+            return strings.profileRequestFailed
+        }
+        let email = profile.email.trimmingCharacters(in: .whitespacesAndNewlines)
+        return email.isEmpty ? profile.displayName : email
+    }
+
+    var body: some View {
+        List {
+            Section(strings.profileAccount) {
+                Text(accountLabel)
+            }
+
+            Section {
+                Button(role: .destructive) {
+                    isShowingWithdrawalConfirmation = true
+                } label: {
+                    HStack {
+                        Text(strings.deleteAccount)
+                        Spacer()
+                        if appState.isWithdrawingCommunityAccount {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                    }
+                }
+                .disabled(appState.isWithdrawingCommunityAccount)
+            } footer: {
+                Text(strings.deleteAccountNotice)
+            }
+        }
+        .navigationTitle(strings.accountSettings)
+        .navigationBarTitleDisplayMode(.inline)
+        .alert(strings.deleteAccount, isPresented: $isShowingWithdrawalConfirmation) {
+            Button(strings.cancel, role: .cancel) {}
+            Button(strings.deleteAccount, role: .destructive) {
+                Task {
+                    if await appState.withdrawCommunityAccount() {
+                        dismiss()
+                    }
+                }
+            }
+        } message: {
+            Text(strings.deleteAccountConfirmMessage)
+        }
     }
 }
 

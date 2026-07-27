@@ -1,11 +1,11 @@
 package com.buddystudy.backend.study
 
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
+import com.buddystudy.backend.study.application.content.QuestionNotificationContentPolicy
 import com.buddystudy.backend.study.application.service.QuestionNotificationMetadata
 import com.buddystudy.backend.study.application.service.QuestionNotificationSerializationException
-import com.buddystudy.backend.study.application.service.toJson
-import com.buddystudy.backend.study.application.service.questionNotificationTitle
 import com.buddystudy.backend.study.application.service.translateNotificationMetadataSerializationError
+import com.buddystudy.backend.study.application.service.toJson
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -14,8 +14,8 @@ import kotlin.reflect.jvm.internal.KotlinReflectionInternalError
 class QuestionNotificationMetadataTest {
     @Test
     fun `localizes question notification title`() {
-        assertThat(questionNotificationTitle("ko")).isEqualTo("새 질문 도착")
-        assertThat(questionNotificationTitle("en-US")).isEqualTo("New Question")
+        assertThat(QuestionNotificationContentPolicy.title("ko")).isEqualTo("새 질문 도착")
+        assertThat(QuestionNotificationContentPolicy.title("en-US")).isEqualTo("New Question")
     }
 
     @Test

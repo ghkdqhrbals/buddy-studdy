@@ -112,6 +112,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - `SettingsView`: macOS settings.
 - `MobileRootView`: iOS tabs, onboarding, profile category hub, settings, notification inbox, and study-tree interaction.
   - The primary tab bar exposes Home, Records, Statistics, and Notifications. Settings is a profile-hub destination so account and app preferences share one predictable entry point.
+  - Avatar editing is a dedicated `Avatar` destination. Logout is the final destructive action in the profile hub, while irreversible membership deletion is isolated under `Settings > Account Settings`.
   - Public-question visibility is persisted through `PATCH /api/v1/profile` as `allowPublicQuestions`; it is independent of protected-page access policy.
   - Per-topic question generation exposes its category-scoped in-flight state so only the selected study room renders the inline loading message.
   - The compact My Studies outline swaps branch data in one view, then reveals only the new row contents with a subtle direction-aware stagger. Row frames, dividers, and the card remain outside the animation, and content never becomes fully transparent or overlaps. Root expand/collapse stays immediate.
@@ -124,7 +125,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
 - The backend stores model Markdown exactly as received; it does not normalize or rewrite generated content before persistence. iOS renders the stored source with MarkdownUI, while the backend uses commonmark-java only to derive notification-safe plain text.
 - iOS permits only `http` and `https` links from rendered Markdown. Unsupported link schemes remain visible as text without an active link.
 - Dense list rows use a plain-text projection for predictable height. Full question, hint, answer, feedback, and explanation bubbles render Markdown.
-- APNs and local notification bodies use a plain-text projection of the stored Markdown so notification surfaces do not expose formatting markers.
+- APNs, the notification inbox, and local notification bodies use a parser-derived plain-text projection of the stored Markdown so notification surfaces do not expose formatting markers. `question_push_outbox` intentionally keeps the Markdown source; its persistence adapter reconstructs the safe title/body projection when a queued request is claimed.
 
 ## Data Flow
 
@@ -222,7 +223,8 @@ Public community feed
 - Google Login links a verified Google subject to the registered device through `users` and `devices.user_id`.
 - New Google and email users receive a cryptographically randomized `Adjective-Noun-####` display name. MySQL stores a generated, normalized key for non-anonymous users and enforces it with `uq_users_display_name_key`; creation retries a new candidate when a concurrent collision is detected.
 - Anonymous installation rows are excluded from that display-name key so their internal `Buddy` placeholder can repeat. Profile edits use the same database constraint and return `DISPLAY_NAME_TAKEN` on conflict.
-- User status is one of `ANONYMOUS`, `ACTIVE`, or `WITHDRAWN`. Account deletion immediately removes the active profile, sign-in mappings, public questions, and related study records, then reconnects the current device to an anonymous user.
+- User status is one of `ANONYMOUS`, `ACTIVE`, or `WITHDRAWN`. Account deletion transactionally changes the member to `WITHDRAWN`, scrubs login/secret/profile fields, revokes active sessions, detaches its devices, reconnects the current device to an anonymous user, and appends an `ACCOUNT_WITHDRAWN` row to `redis_event_outbox`.
+- The outbox recovery job publishes `ACCOUNT_WITHDRAWN` to the domain Redis Stream. `AccountWithdrawalStreamListener` processes it at least once and acknowledges only after idempotent SQL cleanup and profile-photo deletion complete. Failures remain pending and are reclaimed after the idle lease; replays are safe because deletes are idempotent and device-scoped rows are bounded by the event's `withdrawnAt` cutoff.
 - Public question rows expose only the author's public profile fields: display name, bio, pixel-avatar symbol, and color seed. The iOS app renders the avatar locally and does not upload or display user photos.
 - Question publicity defaults to private unless the signed-in user enables public sharing.
 - Reports are stored in MySQL and can optionally be emailed to the operator Gmail through SMTP settings.

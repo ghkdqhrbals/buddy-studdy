@@ -91,6 +91,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 6. Decorative setting-row icons are omitted so labels and controls remain the primary scan targets.
 7. The primary iOS tab bar contains Home, Records, Statistics, and Notifications. Settings is reached through Profile.
 8. The notification inbox supports marking every visible account/device notification as read in one action, independently from deletion.
+9. Profile is a compact category hub: avatar editing is labeled `Avatar`, logout sits at the bottom of the hub, and account deletion lives under `Settings > Account Settings`.
 
 ### Identity
 
@@ -99,6 +100,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 3. Access-token expiry refreshes the token without signing the user out or replacing the device identity.
 4. Administrator user and quota lists contain registered members only; anonymous installation identities are operational device records, not members.
 5. A newly registered email or Google account receives a Reddit-style `Adjective-Noun-####` display name. Registered display names are case-insensitively unique and remain editable subject to the same uniqueness rule.
+6. Account deletion immediately disables the member identity, revokes its sessions, reconnects the current device anonymously, and durably emits `ACCOUNT_WITHDRAWN`. Idempotent asynchronous cleanup removes profile assets, public questions, studies, records, reactions, notifications, and related account data.
 
 ### Sync And Push
 
@@ -110,7 +112,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 6. Server-scheduled APNs delivery is handled by the Spring Boot Kotlin backend. It generates each due question, stores it before push delivery, publishes a Redis stream push job, then sends the APNs alert from an `@StreamListener` consumer.
 7. Push arrival syncs data without opening a new answer page unless the user taps the notification.
 8. If APNs registration is not available yet, the app can still register a backend device and use backend questions/grading manually. Scheduled push delivery starts after the APNs token is attached to that backend device.
-9. Persisted message content keeps Markdown source, while notification previews use a plain-text projection so formatting markers are not exposed in APNs alerts.
+9. Persisted message content keeps Markdown source, while notification previews use a parser-derived plain-text projection so formatting markers are not exposed in APNs alerts. Rehydrating a queued push must rebuild this projection instead of falling back to the Markdown source.
 
 ### Internal Operations
 
