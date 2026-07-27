@@ -45,5 +45,8 @@ fun StudyRecordProjection.toRecordResponse(): StudyRecordResponse {
         commentCount = commentCount,
         viewCount = viewCount,
         studyId = studyId,
+        gradingRequestId = gradingRequestId,
+        gradingStatus = gradingStatus?.let { runCatching { AnswerGradingStatus.valueOf(it) }.getOrNull() },
+        gradingError = gradingError,
     )
 }

@@ -91,6 +91,9 @@ internal fun QuestionEntity.toStudyRecord(stats: QuestionStatsEntity? = null) = 
         gradingPolicyVersion = gradingPolicyVersion,
         gradingModel = gradingModel,
         gradingAssessmentJson = gradingAssessmentJson,
+        gradingRequestId = gradingRequestId,
+        gradingStatus = gradingStatus,
+        gradingError = gradingError,
     ),
     stats?.let { StudyRecordStats(it.likeCount, it.commentCount, it.viewCount) },
 )

@@ -78,6 +78,9 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - API request, exception, and authentication logs share `ApiLoggingPolicy`. The `dev` profile emits compact method/path/status/duration logs without body capture, request IDs, IP addresses, headers, or full stack traces; production keeps detailed structured logs for operations.
   - Uses a private Dockerized MySQL container with a persistent named volume.
   - Calls OpenAI for API-key validation, question generation, and answer grading.
+  - Answer submission and AI grading are separated by a transactional outbox. `POST /api/v1/records/{id}/grade` stores the answer, `QUEUED` state, first progress event, and `ANSWER_GRADING_REQUESTED` outbox row in one transaction, returns `202 Accepted`, and never waits for OpenAI.
+  - `AnswerGradingStreamListener` consumes the typed Redis domain event and runs evidence analysis, criticism, judging, and optional adjudication through `AnswerGradingService`. Each transition is persisted before it is exposed to clients; completion stores the AI decision and statistics dirty key atomically.
+  - `GET /api/v1/records/{id}/grading-events` exposes request-scoped SSE progress. The server fixes the current `gradingRequestId` when the connection opens, preventing terminal events from an older retry from closing a newer grading stream. The iOS app reconnects with the SSE event ID as its cursor and reconciles the final record from MySQL.
   - Stores generated questions in MySQL before sending APNs notifications.
   - Owns Google-linked community profiles, public question browsing metadata, and question reports.
   - Treats anonymous identities as installation credentials rather than administrator-visible members. Admin user and quota queries exclude `ANONYMOUS` rows.

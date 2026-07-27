@@ -32,6 +32,18 @@ struct RecordsUseCase {
         try await repository.gradeRecord(registration: registration, recordID: recordID, answer: answer)
     }
 
+    func gradingEvents(
+        registration: RemotePushRegistration,
+        recordID: String,
+        afterEventID: Int64
+    ) -> AsyncThrowingStream<AnswerGradingProgressEvent, Error> {
+        repository.gradingEvents(
+            registration: registration,
+            recordID: recordID,
+            afterEventID: afterEventID
+        )
+    }
+
     func saveRecordAnswer(
         registration: RemotePushRegistration,
         recordID: String,

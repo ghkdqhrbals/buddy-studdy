@@ -141,6 +141,27 @@ same typed handler as the corresponding `@StreamListener`.
   notification concurrently; provider calls still follow at-least-once
   semantics across an unrecoverable process boundary.
 
+### Asynchronous answer grading
+
+Answer grading uses the shared domain-event outbox rather than performing an
+OpenAI request in the HTTP transaction:
+
+1. The answer, a UUID `grading_request_id`, `QUEUED` state,
+   `question_grading_events` row, and `ANSWER_GRADING_REQUESTED` outbox row
+   commit together.
+2. Immediate publication sends the typed event to the domain Redis Stream;
+   scheduled outbox recovery handles publication failure.
+3. `AnswerGradingStreamListener` invokes the grading use case. A duplicate or
+   stale event is ignored when its request ID no longer matches the question.
+4. The worker persists `ANALYZING_EVIDENCE`, `CRITIQUING`, `JUDGING`, optional
+   `ADJUDICATING`, and a terminal `COMPLETED` or `FAILED` state.
+5. The iOS client observes the current request through cursor-based SSE.
+   Progress is read from MySQL rather than directly from Redis, so reconnects
+   do not lose state when bounded stream retention advances.
+
+The outbox contains identifiers only. The submitted answer remains in MySQL
+and is loaded by the authorized worker, avoiding answer text in Redis payloads.
+
 ## Failure modes
 
 | Failure | Result |

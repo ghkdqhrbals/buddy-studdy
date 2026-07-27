@@ -9,7 +9,6 @@ import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
 import com.buddystudy.backend.config.BuddyStudyProperties
-import com.buddystudy.backend.crypto.KeyCipher
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.study.application.content.MarkdownContentPolicy
 import com.buddystudy.backend.study.application.content.QuestionNotificationContentPolicy
@@ -22,6 +21,7 @@ import com.buddystudy.study.domain.StudyRoomPendingLimitExceeded
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.StudyEntity
 import com.buddystudy.backend.study.application.port.inbound.BrowseRecordsUseCase
+import com.buddystudy.backend.study.application.port.inbound.AnswerGradingWriteUseCase
 import com.buddystudy.backend.study.application.port.inbound.QuestionCreationWriteUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudyRecordWriteUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudyUseCase
@@ -59,12 +59,12 @@ class StudyService(
     private val questionEmbeddings: QuestionEmbeddingPort,
     private val questionCoverage: QuestionCoveragePort,
     private val users: UserPort,
-    private val cipher: KeyCipher,
     private val questionKeys: OpenAIQuestionKeyProvider,
     private val questionPrompts: QuestionPromptProvider,
     private val questionDiversity: QuestionDiversityPolicy,
     private val questionWriter: QuestionCreationWriteUseCase,
     private val recordWriter: StudyRecordWriteUseCase,
+    private val gradingWriter: AnswerGradingWriteUseCase,
     private val outboxPublisher: PublishOutboxUseCase,
     private val questionSimilarity: QuestionSimilarityPolicy = QuestionSimilarityPolicy(),
 ) : StudyUseCase, BrowseRecordsUseCase {
@@ -162,33 +162,24 @@ class StudyService(
     }
 
     override suspend fun answer(principal: Principal, recordId: Long, answer: String, grade: Boolean): StudyRecordResponse {
-        val question = questions.findByIdAndUserIdAndDeletedAtIsNull(recordId, principal.userId)
-            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
-        val user = users.findById(principal.userId)
-        val graded = if (grade && question.score == null) {
-            val study = question.studyId?.let { studies.findByIdAndUserId(it, principal.userId) }
-                ?: studies.findByUserIdAndTopic(principal.userId, question.topic)
-                ?: studies.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId)
-            openAI.gradeWithRubric(
-                apiKeyFor(user),
-                openAIModelFor(study),
-                question.question,
-                answer,
-                question.topic,
-                question.difficultyLevel,
-                user?.appLanguage ?: "ko",
-                question.gradingRubric(),
+        val saved = if (grade) {
+            val queued = gradingWriter.queue(
+                userId = principal.userId,
+                recordId = recordId,
+                answer = answer,
+                now = Instant.now(),
             )
+            outboxPublisher.publishNow(queued.outboxes)
+            queued.question
         } else {
-            null
+            recordWriter.answer(
+                userId = principal.userId,
+                recordId = recordId,
+                answer = answer,
+                grade = null,
+                now = Instant.now(),
+            )
         }
-        val saved = recordWriter.answer(
-            userId = principal.userId,
-            recordId = recordId,
-            answer = answer,
-            grade = graded,
-            now = Instant.now(),
-        )
         return saved.toStudyRecord(questionStats.findById(saved.id)).toProjection().toRecordResponse()
     }
 
@@ -235,14 +226,6 @@ class StudyService(
         val saved = recordWriter.updatePublicity(principal.userId, id, isPublic)
         return saved.toStudyRecord(questionStats.findById(saved.id)).toProjection().toRecordResponse()
     }
-
-    private suspend fun apiKeyFor(user: com.buddystudy.account.domain.entity.UserEntity?): String {
-        return cipher.decrypt(user?.openaiApiKeyCipher)
-            ?: properties.openai.apiKey.takeIf { it.isNotBlank() }
-            ?: throw ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.OPENAI_API_KEY_MISSING, "OpenAI API key is not configured.")
-    }
-
-    private suspend fun openAIModelFor(study: StudyEntity?): String = study?.openaiModel?.takeIf { it.isNotBlank() } ?: properties.openai.model
 
     private suspend fun recentQuestions(principal: Principal, rootStudyId: Long, topic: String): List<String> {
         val sameStudy = questions.findRecentQuestionTextsByStudyIdAndTopic(rootStudyId, topic, PageRequest.of(0, 30))

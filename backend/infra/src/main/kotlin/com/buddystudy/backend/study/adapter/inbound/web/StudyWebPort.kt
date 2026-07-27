@@ -14,6 +14,8 @@ import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.StudyRecordResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
 import com.buddystudy.backend.study.application.model.QuestionQuotaResponse
+import com.buddystudy.backend.study.application.model.AnswerGradingProgressResponse
+import kotlinx.coroutines.flow.Flow
 import com.buddystudy.backend.study.application.model.StudyTopicSuggestionsResponse
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
@@ -25,7 +27,12 @@ interface StudyWebPort {
     suspend fun clearRecords(authentication: Authentication): ResponseEntity<Unit>
     suspend fun record(id: Long, language: String, authentication: Authentication): StudyRecordResponse
     suspend fun saveAnswer(id: Long, body: AnswerRequest, authentication: Authentication): StudyRecordResponse
-    suspend fun grade(id: Long, body: AnswerRequest, authentication: Authentication): StudyRecordResponse
+    suspend fun grade(id: Long, body: AnswerRequest, authentication: Authentication): ResponseEntity<StudyRecordResponse>
+    suspend fun gradingEvents(
+        id: Long,
+        afterId: Long,
+        authentication: Authentication,
+    ): Flow<AnswerGradingProgressResponse>
     suspend fun skip(id: Long, authentication: Authentication): StudyRecordResponse
     suspend fun delete(id: Long, authentication: Authentication): ResponseEntity<Unit>
     suspend fun publicity(id: Long, body: RecordPublicityRequest, authentication: Authentication): StudyRecordResponse

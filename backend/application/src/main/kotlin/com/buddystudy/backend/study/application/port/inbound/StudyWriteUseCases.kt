@@ -1,6 +1,8 @@
 package com.buddystudy.backend.study.application.port.inbound
 
 import com.buddystudy.backend.common.application.outbox.OutboxReference
+import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
+import com.buddystudy.backend.study.application.model.AnswerGradingStatus
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.study.application.model.GeneratedQuestionWithEmbedding
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKey
@@ -62,4 +64,36 @@ interface StudyRecordWriteUseCase {
     suspend fun skip(userId: Long, recordId: Long): QuestionEntity
     suspend fun delete(userId: Long, recordId: Long, now: Instant)
     suspend fun updatePublicity(userId: Long, recordId: Long, isPublic: Boolean): QuestionEntity
+}
+
+data class QueuedAnswerGrading(
+    val question: QuestionEntity,
+    val outboxes: List<OutboxReference>,
+)
+
+interface AnswerGradingWriteUseCase {
+    suspend fun queue(
+        userId: Long,
+        recordId: Long,
+        answer: String,
+        now: Instant,
+    ): QueuedAnswerGrading
+
+    suspend fun transition(
+        event: AnswerGradingRequestedEvent,
+        status: AnswerGradingStatus,
+        now: Instant,
+    ): Boolean
+
+    suspend fun complete(
+        event: AnswerGradingRequestedEvent,
+        grade: GradedAnswer,
+        now: Instant,
+    ): Boolean
+
+    suspend fun fail(
+        event: AnswerGradingRequestedEvent,
+        errorMessage: String,
+        now: Instant,
+    )
 }

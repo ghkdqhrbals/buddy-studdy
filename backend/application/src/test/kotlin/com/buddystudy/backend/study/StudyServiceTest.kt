@@ -35,6 +35,10 @@ import com.buddystudy.backend.study.application.prompt.QuestionPromptProvider
 import com.buddystudy.backend.study.application.service.QuestionCreationWriteService
 import com.buddystudy.backend.study.application.service.StudyRecordWriteService
 import com.buddystudy.backend.study.application.service.StudyService
+import com.buddystudy.backend.study.application.model.AnswerGradingProgress
+import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
+import com.buddystudy.backend.study.application.model.AnswerGradingStatus
+import com.buddystudy.backend.study.application.port.outbound.AnswerGradingProgressPort
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.study.domain.entity.StudyEntity
@@ -59,6 +63,14 @@ class StudyServiceTest {
     private val properties = BuddyStudyProperties().apply { openai.apiKey = "test-api-key" }
     private val cipher = KeyCipher(BuddyStudyProperties().apply { crypto.masterKey = "test-key" })
     private val questionKeys = OpenAIQuestionKeyProvider(properties, memberships)
+    private val gradingProgress = FakeAnswerGradingProgressPort()
+    private val notificationOutbox = FakeNotificationOutbox()
+    private val recordWriter = StudyRecordWriteService(
+        questions,
+        questionCoverage,
+        gradingProgress,
+        notificationOutbox,
+    )
     private val service = StudyService(
         properties = properties,
         studies = serviceStudies,
@@ -68,7 +80,6 @@ class StudyServiceTest {
         questionEmbeddings = questionEmbeddings,
         questionCoverage = questionCoverage,
         users = users,
-        cipher = cipher,
         questionKeys = questionKeys,
         questionPrompts = QuestionPromptProvider(),
         questionDiversity = QuestionDiversityPolicy(),
@@ -78,10 +89,11 @@ class StudyServiceTest {
             questionEmbeddings = questionEmbeddings,
             questionCoverage = questionCoverage,
             questionKeys = questionKeys,
-            notificationOutbox = FakeNotificationOutbox(),
+            notificationOutbox = notificationOutbox,
             pushOutbox = pushOutbox,
         ),
-        recordWriter = StudyRecordWriteService(questions, questionCoverage),
+        recordWriter = recordWriter,
+        gradingWriter = recordWriter,
         outboxPublisher = NoOpOutboxPublisher(),
     )
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
@@ -129,7 +141,7 @@ class StudyServiceTest {
     }
 
     @Test
-    fun `graded answer loads user and question stats only once`(): Unit = runBlocking {
+    fun `graded answer is queued without waiting for OpenAI`(): Unit = runBlocking {
         users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         questions.visibleRows += pendingQuestion(id = 501, topic = "Kotlin")
         questionStats.rows += QuestionStatsEntity(questionId = 501, viewCount = 5)
@@ -137,9 +149,10 @@ class StudyServiceTest {
         val response = service.answer(principal, recordId = 501, answer = "My answer", grade = true)
 
         assertThat(response.id).isEqualTo("501")
-        assertThat(response.gradingResult?.score).isEqualTo(100)
-        assertThat(openAI.gradeCalls).isEqualTo(1)
-        assertThat(users.findByIdCalls).isEqualTo(1)
+        assertThat(response.gradingResult).isNull()
+        assertThat(response.gradingStatus).isEqualTo(AnswerGradingStatus.QUEUED)
+        assertThat(openAI.gradeCalls).isZero()
+        assertThat(users.findByIdCalls).isZero()
         assertThat(questionStats.findByIdCalls).isEqualTo(1)
     }
 
@@ -362,7 +375,7 @@ class StudyServiceTest {
     }
 
     @Test
-    fun `graded answer updates coverage score when question has concept angle`(): Unit = runBlocking {
+    fun `queued grading does not update coverage before the consumer completes`(): Unit = runBlocking {
         users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         questions.visibleRows += pendingQuestion(id = 502, topic = "Redis").apply {
             conceptId = 11
@@ -372,9 +385,7 @@ class StudyServiceTest {
 
         service.answer(principal, recordId = 502, answer = "My answer", grade = true)
 
-        assertThat(questionCoverage.markAnsweredCalls).containsExactly(
-            FakeQuestionCoveragePort.AnsweredCall(conceptId = 11, angleKey = "failure_mode", score = 100, correct = true),
-        )
+        assertThat(questionCoverage.markAnsweredCalls).isEmpty()
     }
 
     @Test
@@ -790,10 +801,46 @@ class StudyServiceTest {
 
     private class FakeNotificationOutbox : RedisEventOutboxAppendPort {
         val commands = mutableListOf<NotificationRequestCommand>()
+        val gradingEvents = mutableListOf<AnswerGradingRequestedEvent>()
         override suspend fun appendNotification(command: NotificationRequestCommand, createdAt: Instant): Long {
             commands += command
             return commands.size.toLong()
         }
+
+        override suspend fun appendAnswerGrading(event: AnswerGradingRequestedEvent, createdAt: Instant): Long {
+            gradingEvents += event
+            return (commands.size + gradingEvents.size).toLong()
+        }
+    }
+
+    private class FakeAnswerGradingProgressPort : AnswerGradingProgressPort {
+        private val events = mutableListOf<AnswerGradingProgress>()
+
+        override suspend fun append(
+            recordId: Long,
+            userId: Long,
+            requestId: String,
+            status: AnswerGradingStatus,
+            errorMessage: String?,
+            occurredAt: Instant,
+        ): AnswerGradingProgress = AnswerGradingProgress(
+            id = (events.size + 1).toLong(),
+            recordId = recordId,
+            requestId = requestId,
+            status = status,
+            errorMessage = errorMessage,
+            occurredAt = occurredAt,
+        ).also(events::add)
+
+        override suspend fun findAfter(
+            recordId: Long,
+            userId: Long,
+            requestId: String,
+            afterId: Long,
+            limit: Int,
+        ): List<AnswerGradingProgress> = events
+            .filter { it.recordId == recordId && it.requestId == requestId && it.id > afterId }
+            .take(limit)
     }
 
     private class FakeQuestionPushOutbox : QuestionPushOutboxAppendPort {

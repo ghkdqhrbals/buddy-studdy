@@ -41,6 +41,9 @@ data class StudyRecordResponse(
     val commentCount: Int = 0,
     val viewCount: Int = 0,
     val studyId: Long? = null,
+    val gradingRequestId: String? = null,
+    val gradingStatus: AnswerGradingStatus? = null,
+    val gradingError: String? = null,
 )
 
 data class RecordsPageResponse(

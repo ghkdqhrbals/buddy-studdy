@@ -55,6 +55,13 @@ data class GradedAnswer(
     val model: String? = null,
 )
 
+enum class AiGradingStage {
+    ANALYZING_EVIDENCE,
+    CRITIQUING,
+    JUDGING,
+    ADJUDICATING,
+}
+
 interface OpenAIPort {
     suspend fun validate(apiKey: String)
     suspend fun generateQuestion(apiKey: String, model: String, prompt: QuestionGenerationPrompt): GeneratedQuestion
@@ -77,6 +84,7 @@ interface OpenAIPort {
         level: Int,
         language: String,
         rubric: AiGradingRubric?,
+        onProgress: suspend (AiGradingStage) -> Unit = {},
     ): GradedAnswer = grade(apiKey, model, question, answer, topic, level, language)
 
     data class QuestionCoverageConcept(

@@ -43,6 +43,7 @@ struct StudyView: View {
                             showsHint: $showsHint,
                             gradingResult: record.gradingResult,
                             isGradingAnswer: appState.isGradingAnswer,
+                            gradingStatusMessage: appState.answerGradingStatusMessage,
                             canSubmitAnswer: canSubmitAnswer,
                             strings: strings,
                             answerEditor: {
@@ -380,6 +381,7 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
     @Binding var showsHint: Bool
     var gradingResult: GradingResult?
     var isGradingAnswer: Bool
+    var gradingStatusMessage: String?
     var canSubmitAnswer: Bool
     var strings: AppStrings
     @ViewBuilder var answerEditor: () -> AnswerEditorContent
@@ -438,6 +440,21 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                         .padding(.horizontal, 13)
                         .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
+            }
+
+            if isGradingAnswer, let gradingStatusMessage {
+                StudyChatBubble(role: .feedback) {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                            .controlSize(.small)
+
+                        Text(gradingStatusMessage)
+                            .font(.subheadline.weight(.medium))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(gradingStatusMessage)
             }
 
             if let gradingResult {

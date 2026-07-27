@@ -10,6 +10,17 @@ private enum QuestionGenerationSkip: Error {
     case duplicateQuestion
 }
 
+private enum EventDrivenGradingError: LocalizedError {
+    case failed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .failed(let message):
+            return message
+        }
+    }
+}
+
 private enum AppStateError: LocalizedError {
     case backendStudyMissing
     case missingRemotePushRegistration
@@ -61,6 +72,7 @@ final class AppState: ObservableObject {
     @Published var isGeneratingQuestion = false
     @Published private(set) var generatingQuestionCategoryID: String?
     @Published var isGradingAnswer = false
+    @Published private(set) var answerGradingStatusMessage: String?
     @Published var isRunning: Bool
     @Published private var recordsState = RecordsStateStore()
     @Published private var studyRoomState = StudyRoomStateStore()
@@ -4543,6 +4555,7 @@ final class AppState: ObservableObject {
         }
 
         isGradingAnswer = true
+        answerGradingStatusMessage = strings.gradingQueued
 
         errorMessage = nil
         statusMessage = "답변을 채점 중입니다."
@@ -4556,16 +4569,21 @@ final class AppState: ObservableObject {
             errorMessage = "백엔드 등록이 없어 채점할 수 없습니다."
             statusMessage = nil
             isGradingAnswer = false
+            answerGradingStatusMessage = nil
             log(.warning, "백엔드 등록이 없어 학습룸 질문 채점을 중단했습니다.")
             return
         }
 
         await actionRunner.run(
             operation: {
-                try await recordsUseCase.gradeRecord(
+                let queued = try await recordsUseCase.gradeRecord(
                     registration: registration,
                     recordID: record.id,
                     answer: trimmedAnswer
+                )
+                return try await awaitGradingResult(
+                    queued,
+                    registration: registration
                 )
             },
             onSuccess: { updatedRecord in
@@ -4578,6 +4596,7 @@ final class AppState: ObservableObject {
             },
             onCompletion: {
                 isGradingAnswer = false
+                answerGradingStatusMessage = nil
             }
         )
     }
@@ -5457,6 +5476,7 @@ final class AppState: ObservableObject {
         }
 
         isGradingAnswer = true
+        answerGradingStatusMessage = strings.gradingQueued
         errorMessage = nil
         statusMessage = "답변을 채점 중입니다."
         lastAnswer = answerToGrade
@@ -5469,6 +5489,7 @@ final class AppState: ObservableObject {
             errorMessage = "백엔드 등록이 없어 채점할 수 없습니다."
             statusMessage = nil
             isGradingAnswer = false
+            answerGradingStatusMessage = nil
             log(.warning, "백엔드 등록이 없어 현재 질문 채점을 중단했습니다.")
             return
         }
@@ -5477,16 +5498,21 @@ final class AppState: ObservableObject {
             errorMessage = "이 질문은 백엔드 기록에 없어 채점할 수 없습니다. 새 질문을 다시 생성하세요."
             statusMessage = nil
             isGradingAnswer = false
+            answerGradingStatusMessage = nil
             log(.warning, "현재 질문에 매칭되는 백엔드 기록이 없어 채점을 중단했습니다.")
             return
         }
 
         await actionRunner.run(
             operation: {
-                try await recordsUseCase.gradeRecord(
+                let queued = try await recordsUseCase.gradeRecord(
                     registration: registration,
                     recordID: record.id,
                     answer: trimmedAnswer
+                )
+                return try await awaitGradingResult(
+                    queued,
+                    registration: registration
                 )
             },
             onSuccess: { updatedRecord in
@@ -5499,6 +5525,7 @@ final class AppState: ObservableObject {
             },
             onCompletion: {
                 isGradingAnswer = false
+                answerGradingStatusMessage = nil
             }
         )
     }
@@ -5547,6 +5574,7 @@ final class AppState: ObservableObject {
         }
 
         isGradingAnswer = true
+        answerGradingStatusMessage = strings.gradingQueued
         errorMessage = nil
         statusMessage = "기록의 답변을 채점 중입니다."
         log(.info, "기록 답변 채점 요청을 전송합니다.")
@@ -5555,16 +5583,21 @@ final class AppState: ObservableObject {
             errorMessage = "백엔드 등록이 없어 채점할 수 없습니다."
             statusMessage = nil
             isGradingAnswer = false
+            answerGradingStatusMessage = nil
             log(.warning, "백엔드 등록이 없어 기록 채점을 중단했습니다.")
             return
         }
 
         await actionRunner.run(
             operation: {
-                try await recordsUseCase.gradeRecord(
+                let queued = try await recordsUseCase.gradeRecord(
                     registration: registration,
                     recordID: record.id,
                     answer: trimmedAnswer
+                )
+                return try await awaitGradingResult(
+                    queued,
+                    registration: registration
                 )
             },
             onSuccess: { updatedRecord in
@@ -5578,8 +5611,100 @@ final class AppState: ObservableObject {
             },
             onCompletion: {
                 isGradingAnswer = false
+                answerGradingStatusMessage = nil
             }
         )
+    }
+
+    private func awaitGradingResult(
+        _ queuedRecord: StudyRecord,
+        registration: RemotePushRegistration
+    ) async throws -> StudyRecord {
+        if queuedRecord.gradingResult != nil {
+            return queuedRecord
+        }
+
+        var cursor: Int64 = 0
+        var lastConnectionError: Error?
+        let queuedMessage = gradingMessage(for: queuedRecord.gradingStatus ?? .queued)
+        statusMessage = queuedMessage
+        answerGradingStatusMessage = queuedMessage
+
+        for attempt in 0..<4 {
+            do {
+                let events = recordsUseCase.gradingEvents(
+                    registration: registration,
+                    recordID: queuedRecord.id,
+                    afterEventID: cursor
+                )
+                for try await event in events {
+                    cursor = max(cursor, event.id)
+                    let progressMessage = gradingMessage(for: event.status)
+                    statusMessage = progressMessage
+                    answerGradingStatusMessage = progressMessage
+                    log(
+                        .info,
+                        "채점 상태를 수신했습니다. recordID=\(event.recordID), status=\(event.status.rawValue), eventID=\(event.id)"
+                    )
+                    switch event.status {
+                    case .completed:
+                        return try await recordsUseCase.fetchRecord(
+                            registration: registration,
+                            recordID: queuedRecord.id
+                        )
+                    case .failed:
+                        throw EventDrivenGradingError.failed(
+                            event.errorMessage ?? strings.gradingFailed
+                        )
+                    default:
+                        break
+                    }
+                }
+            } catch let error as EventDrivenGradingError {
+                throw error
+            } catch {
+                lastConnectionError = error
+                log(
+                    .warning,
+                    "채점 상태 연결이 끊겼습니다. recordID=\(queuedRecord.id), attempt=\(attempt + 1), error=\(error.localizedDescription)"
+                )
+            }
+
+            let snapshot = try await recordsUseCase.fetchRecord(
+                registration: registration,
+                recordID: queuedRecord.id
+            )
+            if snapshot.gradingResult != nil || snapshot.gradingStatus == .completed {
+                return snapshot
+            }
+            if snapshot.gradingStatus == .failed {
+                throw EventDrivenGradingError.failed(snapshot.gradingError ?? strings.gradingFailed)
+            }
+            if attempt < 3 {
+                try await Task.sleep(nanoseconds: 500_000_000)
+            }
+        }
+
+        throw lastConnectionError ?? EventDrivenGradingError.failed(strings.gradingFailed)
+    }
+
+    private func gradingMessage(for status: AnswerGradingStatus) -> String {
+        switch status {
+        case .queued:
+            strings.gradingQueued
+        case .analyzingEvidence:
+            strings.gradingAnalyzing
+        case .critiquing:
+            strings.gradingCritiquing
+        case .judging:
+            strings.gradingJudging
+        case .adjudicating:
+            strings.gradingAdjudicating
+        case .completed:
+            strings.gradingCompleted
+        case .failed:
+            strings.gradingFailed
+        }
     }
 
     func skipCurrentQuestion() {

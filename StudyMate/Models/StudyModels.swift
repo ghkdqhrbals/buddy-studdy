@@ -1533,6 +1533,38 @@ struct GradingResult: Codable, Equatable {
     }
 }
 
+enum AnswerGradingStatus: String, Codable, Equatable {
+    case queued = "QUEUED"
+    case analyzingEvidence = "ANALYZING_EVIDENCE"
+    case critiquing = "CRITIQUING"
+    case judging = "JUDGING"
+    case adjudicating = "ADJUDICATING"
+    case completed = "COMPLETED"
+    case failed = "FAILED"
+
+    var isTerminal: Bool {
+        self == .completed || self == .failed
+    }
+}
+
+struct AnswerGradingProgressEvent: Codable, Equatable, Identifiable {
+    var id: Int64
+    var recordID: String
+    var requestID: String
+    var status: AnswerGradingStatus
+    var errorMessage: String?
+    var occurredAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case recordID = "recordId"
+        case requestID = "requestId"
+        case status
+        case errorMessage
+        case occurredAt
+    }
+}
+
 struct StudyRecord: Codable, Equatable, Identifiable {
     var id: String
     var studyID: Int?
@@ -1546,6 +1578,9 @@ struct StudyRecord: Codable, Equatable, Identifiable {
     var likeCount: Int
     var commentCount: Int
     var viewCount: Int
+    var gradingRequestID: String?
+    var gradingStatus: AnswerGradingStatus?
+    var gradingError: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -1560,6 +1595,9 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         case likeCount
         case commentCount
         case viewCount
+        case gradingRequestID = "gradingRequestId"
+        case gradingStatus
+        case gradingError
     }
 
     private enum BackendBooleanCodingKeys: String, CodingKey {
@@ -1578,7 +1616,10 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         isPublic: Bool = true,
         likeCount: Int = 0,
         commentCount: Int = 0,
-        viewCount: Int = 0
+        viewCount: Int = 0,
+        gradingRequestID: String? = nil,
+        gradingStatus: AnswerGradingStatus? = nil,
+        gradingError: String? = nil
     ) {
         self.id = id
         self.studyID = studyID
@@ -1592,6 +1633,9 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         self.likeCount = likeCount
         self.commentCount = commentCount
         self.viewCount = viewCount
+        self.gradingRequestID = gradingRequestID
+        self.gradingStatus = gradingStatus
+        self.gradingError = gradingError
     }
 
     init(from decoder: Decoder) throws {
@@ -1611,6 +1655,9 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         likeCount = try container.decodeIfPresent(Int.self, forKey: .likeCount) ?? 0
         commentCount = try container.decodeIfPresent(Int.self, forKey: .commentCount) ?? 0
         viewCount = try container.decodeIfPresent(Int.self, forKey: .viewCount) ?? 0
+        gradingRequestID = try container.decodeIfPresent(String.self, forKey: .gradingRequestID)
+        gradingStatus = try container.decodeIfPresent(AnswerGradingStatus.self, forKey: .gradingStatus)
+        gradingError = try container.decodeIfPresent(String.self, forKey: .gradingError)
     }
 
     func asCommunityQuestion(author: CommunityUserProfile?) -> CommunityQuestion? {
@@ -2056,6 +2103,14 @@ struct AppStrings {
     private func text(_ korean: String, _ english: String) -> String {
         isKorean ? korean : english
     }
+
+    var gradingQueued: String { text("답변을 접수했습니다.", "Answer received.") }
+    var gradingAnalyzing: String { text("답변의 근거를 분석하고 있습니다.", "Analyzing answer evidence.") }
+    var gradingCritiquing: String { text("답변의 오류와 누락을 검토하고 있습니다.", "Reviewing errors and omissions.") }
+    var gradingJudging: String { text("채점 기준에 따라 판정하고 있습니다.", "Judging against the rubric.") }
+    var gradingAdjudicating: String { text("판정 결과를 다시 검증하고 있습니다.", "Verifying the grading decision.") }
+    var gradingCompleted: String { text("채점이 완료됐습니다.", "Grading completed.") }
+    var gradingFailed: String { text("채점을 완료하지 못했습니다. 다시 시도해 주세요.", "Grading could not be completed. Please try again.") }
 
     var tabStudy: String { text("학습", "Study") }
     var tabHome: String { text("홈", "Home") }

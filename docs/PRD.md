@@ -38,14 +38,18 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 1. User receives or manually creates a study question through the backend.
 2. User writes an answer draft that is preserved automatically.
 3. User can reveal the hint on demand.
-4. User submits for grading.
-5. Grading result, feedback, and explanation are stored in records.
-6. Ungraded pending questions are capped at 3.
-7. My Studies shows root studies first. Selecting one opens an unlimited-depth study tree whose orientation can be switched between vertical and horizontal.
-8. A root study owns the question schedule, OpenAI model, prompt, and the single question flow. Descendant nodes own only their topic, difficulty level, ordering, and question-rotation activation.
-9. Adding a tree node opens GPT topic recommendations by default. The user can select one or more recommendations and add them together with one shared difficulty, or switch to manual topic entry. Duplicate normalized topic names are rejected across the user's studies.
-10. Topic recommendations use a shared system catalog before generating new entries. The catalog manages up to five descendant levels and up to ten children per opened branch; missing children are generated once and become reusable suggestions.
-11. The user's study tree materializes selected catalog topics lazily so a five-level catalog never creates an exponential number of unused user nodes. New root and descendant nodes participate in question rotation by default.
+4. User submits for grading. The backend accepts and persists the answer
+   immediately, then grades it asynchronously through the event outbox.
+5. The app shows persisted grading stages in real time over SSE and reconciles
+   the completed AI decision from the record API. Reconnection resumes from
+   the last received event without replacing the user's draft.
+6. Grading result, feedback, and explanation are stored in records.
+7. Ungraded pending questions are capped at 3.
+8. My Studies shows root studies first. Selecting one opens an unlimited-depth study tree whose orientation can be switched between vertical and horizontal.
+9. A root study owns the question schedule, OpenAI model, prompt, and the single question flow. Descendant nodes own only their topic, difficulty level, ordering, and question-rotation activation.
+10. Adding a tree node opens GPT topic recommendations by default. The user can select one or more recommendations and add them together with one shared difficulty, or switch to manual topic entry. Duplicate normalized topic names are rejected across the user's studies.
+11. Topic recommendations use a shared system catalog before generating new entries. The catalog manages up to five descendant levels and up to ten children per opened branch; missing children are generated once and become reusable suggestions.
+12. The user's study tree materializes selected catalog topics lazily so a five-level catalog never creates an exponential number of unused user nodes. New root and descendant nodes participate in question rotation by default.
 12. Any number of tree nodes can participate in scheduled questions. The backend rotates through active nodes by least-recent selection, skips nodes already at their pending-question limit, and backs off only when every active node is blocked; an inactive node can still be opened for explicit manual question generation.
 13. Generated questions are stored under the root study and retain the selected node's topic and difficulty. Level is communicated with restrained color instead of decorative icons.
 14. Tree nodes are circular. The tree supports vertical/horizontal layout, pinch and button zoom, draggable saved positions, layout reset, and multi-select activation, pause, and deletion.

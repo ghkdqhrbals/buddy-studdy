@@ -2,6 +2,14 @@ package com.buddystudy.backend.study.application.service
 
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.common.application.outbox.OutboxReference
+import com.buddystudy.backend.common.application.outbox.OutboxType
+import com.buddystudy.backend.common.application.outbox.RedisEventOutboxAppendPort
+import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
+import com.buddystudy.backend.study.application.model.AnswerGradingStatus
+import com.buddystudy.backend.study.application.port.outbound.AnswerGradingProgressPort
+import com.buddystudy.backend.study.application.port.inbound.AnswerGradingWriteUseCase
+import com.buddystudy.backend.study.application.port.inbound.QueuedAnswerGrading
 import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystudy.backend.study.application.port.inbound.StudyRecordWriteUseCase
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
@@ -11,12 +19,15 @@ import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
+import java.util.UUID
 
 @Service
 class StudyRecordWriteService(
     private val questions: QuestionPort,
     private val questionCoverage: QuestionCoveragePort,
-) : StudyRecordWriteUseCase {
+    private val gradingProgress: AnswerGradingProgressPort,
+    private val redisOutbox: RedisEventOutboxAppendPort,
+) : StudyRecordWriteUseCase, AnswerGradingWriteUseCase {
     @Transactional
     override suspend fun answer(
         userId: Long,
@@ -71,6 +82,116 @@ class StudyRecordWriteService(
         val question = lockRecord(recordId, userId)
         question.apply(question.toStudyRecord().restrictPublicity(isPublic))
         return questions.save(question)
+    }
+
+    @Transactional
+    override suspend fun queue(
+        userId: Long,
+        recordId: Long,
+        answer: String,
+        now: Instant,
+    ): QueuedAnswerGrading {
+        val question = lockRecord(recordId, userId)
+        val currentStatus = question.gradingStatus?.let {
+            runCatching { AnswerGradingStatus.valueOf(it) }.getOrNull()
+        }
+        if (question.score != null || (currentStatus != null && !currentStatus.terminal)) {
+            return QueuedAnswerGrading(question, emptyList())
+        }
+
+        val requestId = UUID.randomUUID().toString()
+        val event = AnswerGradingRequestedEvent(
+            eventId = "answer-grading-$recordId-$requestId",
+            requestId = requestId,
+            recordId = recordId,
+            userId = userId,
+            requestedAt = now,
+        )
+        question.apply(question.toStudyRecord().answer(answer, now))
+        question.gradingRequestId = requestId
+        question.gradingStatus = AnswerGradingStatus.QUEUED.name
+        question.gradingError = null
+        question.gradingRequestedAt = now
+        question.gradingStartedAt = null
+        val saved = questions.save(question)
+        gradingProgress.append(recordId, userId, requestId, AnswerGradingStatus.QUEUED, null, now)
+        val outboxId = redisOutbox.appendAnswerGrading(event, now)
+        return QueuedAnswerGrading(saved, listOf(OutboxReference(OutboxType.DOMAIN_EVENT, outboxId)))
+    }
+
+    @Transactional
+    override suspend fun transition(
+        event: AnswerGradingRequestedEvent,
+        status: AnswerGradingStatus,
+        now: Instant,
+    ): Boolean {
+        require(!status.terminal) { "Terminal grading status must use complete or fail." }
+        val question = lockRecord(event.recordId, event.userId)
+        if (question.gradingRequestId != event.requestId || question.score != null) return false
+        if (question.gradingStatus == status.name) return true
+        question.gradingStatus = status.name
+        question.gradingStartedAt = question.gradingStartedAt ?: now
+        question.updatedAt = now
+        questions.save(question)
+        gradingProgress.append(event.recordId, event.userId, event.requestId, status, null, now)
+        return true
+    }
+
+    @Transactional
+    override suspend fun complete(
+        event: AnswerGradingRequestedEvent,
+        grade: GradedAnswer,
+        now: Instant,
+    ): Boolean {
+        val question = lockRecord(event.recordId, event.userId)
+        if (question.gradingRequestId != event.requestId) return false
+        if (question.score != null && question.gradingStatus == AnswerGradingStatus.COMPLETED.name) return true
+        val record = question.toStudyRecord()
+        question.applyGradingMetadata(grade)
+        question.apply(record.grade(grade.score, grade.isCorrect, grade.feedback, grade.explanation, now))
+        question.gradingStatus = AnswerGradingStatus.COMPLETED.name
+        question.gradingError = null
+        questions.save(question)
+        if (question.conceptId != null && question.angleKey != null) {
+            questionCoverage.markAnswered(
+                question.conceptId!!,
+                question.angleKey!!,
+                grade.score,
+                grade.isCorrect,
+                now,
+            )
+        }
+        gradingProgress.append(
+            event.recordId,
+            event.userId,
+            event.requestId,
+            AnswerGradingStatus.COMPLETED,
+            null,
+            now,
+        )
+        return true
+    }
+
+    @Transactional
+    override suspend fun fail(
+        event: AnswerGradingRequestedEvent,
+        errorMessage: String,
+        now: Instant,
+    ) {
+        val question = lockRecord(event.recordId, event.userId)
+        if (question.gradingRequestId != event.requestId || question.score != null) return
+        question.gradingStatus = AnswerGradingStatus.FAILED.name
+        question.gradingError = errorMessage.take(255)
+        question.updatedAt = now
+        questions.save(question)
+        gradingProgress.append(
+            event.recordId,
+            event.userId,
+            event.requestId,
+            AnswerGradingStatus.FAILED,
+            question.gradingError,
+            now,
+        )
     }
 
     private suspend fun lockRecord(recordId: Long, userId: Long): QuestionEntity =

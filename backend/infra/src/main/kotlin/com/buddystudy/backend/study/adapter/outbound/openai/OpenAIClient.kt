@@ -3,6 +3,7 @@ package com.buddystudy.backend.study.adapter.outbound.openai
 import com.buddystudy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystudy.backend.study.application.port.outbound.AiGradingRubric
+import com.buddystudy.backend.study.application.port.outbound.AiGradingStage
 import com.buddystudy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
 import org.springframework.stereotype.Component
@@ -41,5 +42,6 @@ class OpenAIClient(
         level: Int,
         language: String,
         rubric: AiGradingRubric?,
-    ): GradedAnswer = executor.grade(apiKey, model, question, answer, topic, level, language, rubric)
+        onProgress: suspend (AiGradingStage) -> Unit,
+    ): GradedAnswer = executor.grade(apiKey, model, question, answer, topic, level, language, rubric, onProgress)
 }

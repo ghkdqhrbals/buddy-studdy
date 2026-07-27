@@ -7,6 +7,7 @@ import com.buddystudy.backend.study.application.port.outbound.AiCriterionAssessm
 import com.buddystudy.backend.study.application.port.outbound.AiGradingAssessment
 import com.buddystudy.backend.study.application.port.outbound.AiGradingCriterion
 import com.buddystudy.backend.study.application.port.outbound.AiGradingRubric
+import com.buddystudy.backend.study.application.port.outbound.AiGradingStage
 import com.buddystudy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystudy.backend.study.application.port.outbound.OpenAIPort
@@ -159,13 +160,17 @@ class OpenAIRequestExecutor(
         level: Int,
         language: String,
         rubric: AiGradingRubric? = null,
+        onProgress: suspend (AiGradingStage) -> Unit = {},
     ): GradedAnswer = withContext(Dispatchers.IO) {
         val startedAt = System.nanoTime()
         val resolvedRubric = rubric ?: generateRubric(apiKey, model, question, topic, level, language)
+        onProgress(AiGradingStage.ANALYZING_EVIDENCE)
         val evidenceDeferred = async { analyzeEvidence(apiKey, model, question, answer, resolvedRubric) }
+        onProgress(AiGradingStage.CRITIQUING)
         val critiqueDeferred = async { critiqueAnswer(apiKey, model, question, answer, resolvedRubric) }
         val evidence = evidenceDeferred.await()
         val critique = critiqueDeferred.await()
+        onProgress(AiGradingStage.JUDGING)
         var judgement = judge(
             apiKey = apiKey,
             model = model,
@@ -180,6 +185,7 @@ class OpenAIRequestExecutor(
             adjudication = false,
         )
         if (judgement.confidence < properties.openai.gradingMinConfidence.coerceIn(0.0, 1.0)) {
+            onProgress(AiGradingStage.ADJUDICATING)
             judgement = judge(
                 apiKey = apiKey,
                 model = model,

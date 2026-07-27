@@ -16,6 +16,12 @@ protocol RecordsRepository {
         answer: String
     ) async throws -> StudyRecord
 
+    func gradingEvents(
+        registration: RemotePushRegistration,
+        recordID: String,
+        afterEventID: Int64
+    ) -> AsyncThrowingStream<AnswerGradingProgressEvent, Error>
+
     func saveRecordAnswer(
         registration: RemotePushRegistration,
         recordID: String,

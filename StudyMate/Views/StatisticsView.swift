@@ -440,6 +440,22 @@ struct StudyRecordDetailView: View {
                         }
                     }
 
+                    if appState.isGradingAnswer,
+                       let gradingStatusMessage = appState.answerGradingStatusMessage {
+                        RecordChatBubble(role: .feedback) {
+                            HStack(spacing: 10) {
+                                ProgressView()
+                                    .controlSize(.small)
+
+                                Text(gradingStatusMessage)
+                                    .font(.subheadline.weight(.medium))
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(gradingStatusMessage)
+                    }
+
                     if let result = displayedRecord.gradingResult {
                         RecordChatBubble(role: .feedback) {
                             VStack(alignment: .leading, spacing: 8) {
