@@ -6722,26 +6722,6 @@ private struct MobileHomeStudyOutlineRow: View {
                     isExpanded.toggle()
                 }
             )
-            .contextMenu {
-                Button {
-                    onAction(.configureRoot)
-                } label: {
-                    Label(strings.editStudyCategory, systemImage: "pencil")
-                }
-                Button {
-                    onAction(.openTree)
-                } label: {
-                    Label(
-                        strings.viewFullStudyTree,
-                        systemImage: "point.3.connected.trianglepath.dotted"
-                    )
-                }
-                Button(role: .destructive) {
-                    onAction(.deleteRoot)
-                } label: {
-                    Label(strings.deleteStudy, systemImage: "trash")
-                }
-            }
 
             if isExpanded && hasRootChildren {
                 Group {
@@ -6912,6 +6892,30 @@ private struct MobileHomeStudyOutlineRow: View {
         }
     }
 
+    @ViewBuilder
+    private var rootActions: some View {
+        Button {
+            onAction(.configureRoot)
+        } label: {
+            Label(strings.editStudyCategory, systemImage: "pencil")
+        }
+
+        Button {
+            onAction(.openTree)
+        } label: {
+            Label(
+                strings.viewFullStudyTree,
+                systemImage: "point.3.connected.trianglepath.dotted"
+            )
+        }
+
+        Button(role: .destructive) {
+            onAction(.deleteRoot)
+        } label: {
+            Label(strings.deleteStudy, systemImage: "trash")
+        }
+    }
+
     private func studyNavigationRow(
         room: BackendStudyRoom,
         isRoot: Bool,
@@ -6928,7 +6932,7 @@ private struct MobileHomeStudyOutlineRow: View {
             )
 
             if childCount > 0, let onOpenChildren {
-                Button(action: onOpenChildren) {
+                let childNavigationButton = Button(action: onOpenChildren) {
                     childTopicActionLabel(
                         childCount: childCount,
                         isExpanded: isChildListExpanded
@@ -6940,6 +6944,18 @@ private struct MobileHomeStudyOutlineRow: View {
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
                 .layoutPriority(1)
+
+                if isRoot {
+                    childNavigationButton
+                        .contextMenu {
+                            rootActions
+                        }
+                } else {
+                    childNavigationButton
+                        .contextMenu {
+                            topicActions(for: room)
+                        }
+                }
             }
         }
         .padding(.horizontal, 14)
@@ -6968,6 +6984,19 @@ private struct MobileHomeStudyOutlineRow: View {
 
         if isRoot {
             button
+                .contentShape(
+                    .contextMenuPreview,
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
+                .contextMenu {
+                    rootActions
+                }
+                .accessibilityAction(named: strings.editStudyCategory) {
+                    onAction(.configureRoot)
+                }
+                .accessibilityAction(named: strings.deleteStudy) {
+                    onAction(.deleteRoot)
+                }
         } else {
             button
                 .contentShape(
