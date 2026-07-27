@@ -6657,6 +6657,11 @@ private enum MobileHomeStudyOutlineAction {
     case openTree
 }
 
+private enum MobileStudyHierarchyPosition {
+    case root(continues: Bool)
+    case child(isLast: Bool)
+}
+
 private struct MobileHomeStudyOutlineSnapshot {
     var root: BackendStudyRoom
     var roomsByID: [Int: BackendStudyRoom]
@@ -6777,6 +6782,7 @@ private struct MobileHomeStudyOutlineRow: View {
                     studyNavigationRow(
                         room: room,
                         isRoot: false,
+                        isLastSibling: index == visibleChildren.indices.last,
                         onOpenChildren: snapshot.children(of: room.id).isEmpty
                             ? nil
                             : {
@@ -6839,11 +6845,27 @@ private struct MobileHomeStudyOutlineRow: View {
 
     private var branchPathHeader: some View {
         HStack(spacing: 10) {
-            if currentBranch.id == snapshot.root.id {
+            MobileStudyHierarchyContinuation()
+                .frame(width: 30)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(currentPath.map(\.topic).joined(separator: "  ›  "))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+
                 Text(strings.childTopics)
-                    .font(.caption2.weight(.semibold))
+                    .font(.caption2.weight(.medium))
                     .foregroundStyle(.tertiary)
-            } else {
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                "\(currentPath.map(\.topic).joined(separator: ", ")), \(strings.childTopics)"
+            )
+
+            if currentBranch.id != snapshot.root.id {
                 Button {
                     let parentID = snapshot.parentByID[currentBranch.id]
                         .flatMap(snapshot.room(id:))?.id
@@ -6858,17 +6880,10 @@ private struct MobileHomeStudyOutlineRow: View {
                 }
                 .buttonStyle(.plain)
             }
-
-            Text(currentPath.map(\.topic).joined(separator: "  ›  "))
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.head)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .accessibilityLabel(currentPath.map(\.topic).joined(separator: ", "))
         }
         .padding(.horizontal, 14)
-        .frame(minHeight: 42)
+        .padding(.vertical, 8)
+        .frame(minHeight: 48)
         .opacity(isBranchContentRevealed ? 1 : 0.78)
         .offset(
             x: isBranchContentRevealed
@@ -6896,20 +6911,19 @@ private struct MobileHomeStudyOutlineRow: View {
                     Button {
                         onAction(.openTopic(room))
                     } label: {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(snapshot.path(to: room.id).dropLast().map(\.topic).joined(separator: "  ›  "))
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.head)
-
-                            studyDestinationContent(
-                                room: room,
-                                isRoot: false,
-                                childCount: snapshot.children(of: room.id).count,
-                                showsDisclosure: true
-                            )
-                        }
+                        studyDestinationContent(
+                            room: room,
+                            isRoot: false,
+                            childCount: snapshot.children(of: room.id).count,
+                            showsDisclosure: true,
+                            hierarchyPosition: .child(
+                                isLast: index == visibleResults.indices.last
+                            ),
+                            ancestorPath: snapshot.path(to: room.id)
+                                .dropLast()
+                                .map(\.topic)
+                                .joined(separator: "  ›  ")
+                        )
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
                     }
@@ -6971,6 +6985,7 @@ private struct MobileHomeStudyOutlineRow: View {
     private func studyNavigationRow(
         room: BackendStudyRoom,
         isRoot: Bool,
+        isLastSibling: Bool = false,
         isChildListExpanded: Bool? = nil,
         onOpenChildren: (() -> Void)?
     ) -> some View {
@@ -6980,7 +6995,10 @@ private struct MobileHomeStudyOutlineRow: View {
             studyDestinationButton(
                 room: room,
                 isRoot: isRoot,
-                childCount: childCount
+                childCount: childCount,
+                hierarchyPosition: isRoot
+                    ? .root(continues: isChildListExpanded == true && childCount > 0)
+                    : .child(isLast: isLastSibling)
             )
 
             if childCount > 0, let onOpenChildren {
@@ -7018,7 +7036,8 @@ private struct MobileHomeStudyOutlineRow: View {
     private func studyDestinationButton(
         room: BackendStudyRoom,
         isRoot: Bool,
-        childCount: Int
+        childCount: Int,
+        hierarchyPosition: MobileStudyHierarchyPosition
     ) -> some View {
         let button = Button {
             onAction(.openTopic(room))
@@ -7027,7 +7046,8 @@ private struct MobileHomeStudyOutlineRow: View {
                 room: room,
                 isRoot: isRoot,
                 childCount: childCount,
-                showsDisclosure: childCount == 0
+                showsDisclosure: childCount == 0,
+                hierarchyPosition: hierarchyPosition
             )
         }
         .buttonStyle(.plain)
@@ -7071,19 +7091,35 @@ private struct MobileHomeStudyOutlineRow: View {
         room: BackendStudyRoom,
         isRoot: Bool,
         childCount: Int,
-        showsDisclosure: Bool
+        showsDisclosure: Bool,
+        hierarchyPosition: MobileStudyHierarchyPosition,
+        ancestorPath: String? = nil
     ) -> some View {
         let pendingCount = pendingQuestionCount(room)
         let levelText = StudyTreeNodeStylePolicy.levelText(room.difficultyLevel)
 
         return HStack(spacing: 12) {
-            MobileStudyActivityIndicator(
+            MobileStudyHierarchyMarker(
+                position: hierarchyPosition,
                 isActive: room.activeForQuestions,
                 strings: strings
             )
-            .frame(width: 24)
+            .frame(width: 30)
 
             VStack(alignment: .leading, spacing: 3) {
+                if let ancestorPath, !ancestorPath.isEmpty {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.turn.down.right")
+                            .font(.caption2.weight(.semibold))
+
+                        Text(ancestorPath)
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                    }
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                }
+
                 Text(room.topic)
                     .font(isRoot ? .body.weight(.semibold) : .subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
@@ -7091,13 +7127,17 @@ private struct MobileHomeStudyOutlineRow: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 HStack(spacing: 5) {
-                    Text(levelText)
-                        .font(.caption.weight(.semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(room.activeForQuestions ? Color.green : Color.secondary)
+                    if !isRoot {
+                        Text(levelText)
+                            .font(.caption.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(
+                                room.activeForQuestions ? Color.green : Color.secondary
+                            )
 
-                    Text("·")
-                        .foregroundStyle(.tertiary)
+                        Text("·")
+                            .foregroundStyle(.tertiary)
+                    }
 
                     HStack(spacing: 3) {
                         Text(strings.studyAction)
@@ -7111,8 +7151,8 @@ private struct MobileHomeStudyOutlineRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityValue(
                 childCount > 0
-                    ? "\(levelText), \(strings.childTopicCount(childCount))"
-                    : "\(levelText), \(strings.openStudyPage)"
+                    ? "\(isRoot ? "" : "\(levelText), ")\(strings.childTopicCount(childCount))"
+                    : "\(isRoot ? "" : "\(levelText), ")\(strings.openStudyPage)"
             )
 
             if pendingCount > 0 {
@@ -7198,21 +7238,92 @@ private struct MobileHomeStudyOutlineRow: View {
     }
 }
 
-private struct MobileStudyActivityIndicator: View {
+private struct MobileStudyHierarchyContinuation: View {
+    var body: some View {
+        GeometryReader { proxy in
+            Path { path in
+                path.move(to: CGPoint(x: 8, y: 0))
+                path.addLine(to: CGPoint(x: 8, y: proxy.size.height))
+            }
+            .stroke(
+                Color.secondary.opacity(0.28),
+                style: StrokeStyle(lineWidth: 1.5, lineCap: .round)
+            )
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct MobileStudyHierarchyMarker: View {
+    var position: MobileStudyHierarchyPosition
     var isActive: Bool
     var strings: AppStrings
 
     var body: some View {
-        ZStack {
-            Circle()
-                .fill(isActive ? Color.green.opacity(0.14) : Color.secondary.opacity(0.1))
-                .frame(width: 22, height: 22)
+        GeometryReader { proxy in
+            let centerY = proxy.size.height / 2
+            let trunkX: CGFloat = 8
+            let childX: CGFloat = 24
+            let lineColor = Color.secondary.opacity(0.28)
 
-            Circle()
-                .fill(isActive ? Color.green : Color.secondary.opacity(0.45))
-                .frame(width: 8, height: 8)
+            ZStack(alignment: .topLeading) {
+                Path { path in
+                    switch position {
+                    case let .root(continues):
+                        if continues {
+                            path.move(to: CGPoint(x: trunkX, y: centerY))
+                            path.addLine(to: CGPoint(x: trunkX, y: proxy.size.height))
+                        }
+                    case let .child(isLast):
+                        path.move(to: CGPoint(x: trunkX, y: 0))
+                        path.addLine(
+                            to: CGPoint(
+                                x: trunkX,
+                                y: isLast ? centerY : proxy.size.height
+                            )
+                        )
+                        path.move(to: CGPoint(x: trunkX, y: centerY))
+                        path.addLine(to: CGPoint(x: childX, y: centerY))
+                    }
+                }
+                .stroke(
+                    lineColor,
+                    style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
+                )
+
+                Circle()
+                    .fill(
+                        isActive
+                            ? Color.green
+                            : Color.secondary.opacity(0.5)
+                    )
+                    .frame(
+                        width: isRoot ? 12 : 9,
+                        height: isRoot ? 12 : 9
+                    )
+                    .overlay {
+                        Circle()
+                            .stroke(
+                                isActive
+                                    ? Color.green.opacity(0.18)
+                                    : Color.secondary.opacity(0.12),
+                                lineWidth: isRoot ? 5 : 3
+                            )
+                    }
+                    .position(
+                        x: isRoot ? trunkX : childX,
+                        y: centerY
+                    )
+            }
         }
         .accessibilityLabel(isActive ? strings.questionTopicActive : strings.questionTopicInactive)
+    }
+
+    private var isRoot: Bool {
+        if case .root = position {
+            return true
+        }
+        return false
     }
 }
 
