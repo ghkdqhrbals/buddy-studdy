@@ -18,6 +18,7 @@ enum class TranslationReason {
     EXPLICIT_TL,
     ACCOUNT_LOCALE,
     ORIGINAL_VIEW,
+    AUTHOR_ORIGINAL,
 }
 
 data class ContentLocalizationResponse(
@@ -72,4 +73,17 @@ fun translatedLocalization(
     isTranslated = true,
     originalAvailable = true,
     translationReason = TranslationReason.EXPLICIT_TL,
+)
+
+fun authorOriginalLocalization(
+    sourceLanguage: String,
+    requestedLanguage: String,
+): ContentLocalizationResponse = ContentLocalizationResponse(
+    sourceLanguage = com.buddystudy.study.domain.QuestionLanguage.normalize(sourceLanguage),
+    requestedLanguage = com.buddystudy.study.domain.QuestionLanguage.normalize(requestedLanguage),
+    displayLanguage = com.buddystudy.study.domain.QuestionLanguage.normalize(sourceLanguage),
+    translationState = TranslationState.ORIGINAL,
+    isTranslated = false,
+    originalAvailable = false,
+    translationReason = TranslationReason.AUTHOR_ORIGINAL,
 )

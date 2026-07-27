@@ -4,6 +4,7 @@ import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.backend.profile.application.model.UserProfileResponse
 import com.buddystudy.backend.study.application.model.TranslationViewMode
 import com.buddystudy.backend.study.application.model.originalLocalization
+import com.buddystudy.backend.study.application.model.authorOriginalLocalization
 import com.buddystudy.backend.study.application.model.translatedLocalization
 
 fun QuestionCommentEntity.toResponse(
@@ -12,13 +13,16 @@ fun QuestionCommentEntity.toResponse(
     viewMode: TranslationViewMode = TranslationViewMode.LOCALIZED,
     displayLanguage: String = sourceLanguage,
     translationPending: Boolean = true,
+    authorOriginal: Boolean = false,
 ) = CommunityCommentResponse(
     id.toString(),
     questionId.toString(),
     body,
     createdAt,
     author,
-    if (
+    if (authorOriginal) {
+        authorOriginalLocalization(sourceLanguage, requestedLanguage)
+    } else if (
         viewMode == TranslationViewMode.LOCALIZED &&
         com.buddystudy.study.domain.QuestionLanguage.normalize(displayLanguage) ==
         com.buddystudy.study.domain.QuestionLanguage.normalize(requestedLanguage) &&

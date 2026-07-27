@@ -98,8 +98,9 @@ class CommunityController(
         @RequestParam(required = false) tl: String?,
         @RequestParam(required = false) language: String?,
         @RequestParam(defaultValue = "localized") view: String,
+        authentication: Authentication?,
     ) =
-        community.getComments(id, targetLanguage(tl, language), view, limit, offset)
+        community.getComments(id, targetLanguage(tl, language), view, limit, offset, authentication)
 
     @Operation(summary = "Create a comment", description = "Creates a comment on a public question as the authenticated user. Comment counts may be aggregated asynchronously.")
     @PostMapping("/public/questions/{id}/comments")
@@ -180,7 +181,14 @@ interface CommunityWebPort {
     suspend fun getPublicQuestion(id: Long, language: String, view: String, authentication: Authentication?): Any
     suspend fun likePublicQuestion(id: Long, authentication: Authentication): Any
     suspend fun unlikePublicQuestion(id: Long, authentication: Authentication): Any
-    suspend fun getComments(id: Long, language: String, view: String, limit: Int, offset: Int): Any
+    suspend fun getComments(
+        id: Long,
+        language: String,
+        view: String,
+        limit: Int,
+        offset: Int,
+        authentication: Authentication?,
+    ): Any
     suspend fun createComment(id: Long, body: CommunityCommentRequest, authentication: Authentication): Any
     suspend fun deleteComment(id: Long, commentId: Long, authentication: Authentication): Any
     suspend fun reportQuestion(id: Long, body: ReportQuestionRequest, authentication: Authentication): ReportQuestionResponse
@@ -204,8 +212,21 @@ class CommunityWebAdapter(
 
     override suspend fun unlikePublicQuestion(id: Long, authentication: Authentication) = community.setLike(authentication.principalOrThrow(), id, false)
 
-    override suspend fun getComments(id: Long, language: String, view: String, limit: Int, offset: Int) =
-        community.getComments(id, language, view, safeLimit(limit, 100), max(0, offset))
+    override suspend fun getComments(
+        id: Long,
+        language: String,
+        view: String,
+        limit: Int,
+        offset: Int,
+        authentication: Authentication?,
+    ) = community.getComments(
+        id,
+        language,
+        view,
+        safeLimit(limit, 100),
+        max(0, offset),
+        authentication.optionalPrincipal(),
+    )
 
     override suspend fun createComment(id: Long, body: CommunityCommentRequest, authentication: Authentication) =
         community.createComment(authentication.principalOrThrow(), id, body.body, body.sourceLanguage)

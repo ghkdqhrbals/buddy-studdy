@@ -89,6 +89,8 @@ view=localized|original
 
 `displayLanguage`는 실제 반환 문자열의 언어다. 따라서 대기 또는 실패 상태에서는 `requestedLanguage`와 다를 수 있다. 댓글은 각각 독립된 메타데이터를 가진다.
 
+인증 사용자가 직접 작성한 답변과 댓글은 본인에게 항상 원문으로 반환한다. 이 경우 `translationState=ORIGINAL`, `translationReason=AUTHOR_ORIGINAL`을 사용하며, 같은 콘텐츠를 다른 사용자가 조회할 때는 요청한 표시 언어의 준비된 번역을 반환한다. AI가 생성한 질문과 채점 응답은 이 규칙의 대상이 아니다.
+
 답변과 댓글 쓰기 요청은 구버전과 호환되도록 선택 필드를 추가한다.
 
 ```json

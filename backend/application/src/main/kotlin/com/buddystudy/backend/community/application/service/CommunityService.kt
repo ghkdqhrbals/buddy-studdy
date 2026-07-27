@@ -237,6 +237,7 @@ class CommunityService(
         view: String,
         limit: Int,
         offset: Int,
+        principal: Principal?,
     ): CommunityCommentsResponse {
         publicAnsweredQuestion(id)
         val requestedLanguage = QuestionLanguage.normalize(language)
@@ -254,13 +255,15 @@ class CommunityService(
             .orEmpty()
         return CommunityCommentsResponse(
             page.content.map { comment ->
-                val projected = localizedComment(comment, requestedLanguage, viewMode)
+                val authorOriginal = comment.userId == principal?.userId
+                val projected = localizedComment(comment, requestedLanguage, viewMode, authorOriginal)
                 projected.comment.toResponse(
                     profiles[comment.userId]?.toProfile() ?: UserProfileResponse(0, "Buddy"),
                     requestedLanguage,
                     viewMode,
                     projected.displayLanguage,
                     projected.translationPending,
+                    authorOriginal,
                 )
             },
             page.totalElements,
@@ -311,6 +314,7 @@ class CommunityService(
             authorsById = users.findAllById(userIds).associateBy { it.id },
             statsByQuestionId = questionStats.findAllByIds(questionIds).associateBy { it.questionId },
             likedQuestionIds = principal?.let { likes.findLikedQuestionIds(it.userId, questionIds) }.orEmpty(),
+            viewerUserId = principal?.userId,
         )
     }
 
@@ -320,7 +324,12 @@ class CommunityService(
         requestedLanguage: String = q.sourceLanguage,
         viewMode: TranslationViewMode = TranslationViewMode.LOCALIZED,
     ): CommunityQuestionResponse {
-        val projected = localizedRecord(q, requestedLanguage, viewMode)
+        val projected = localizedRecord(
+            q,
+            requestedLanguage,
+            viewMode,
+            preserveAnswerOriginal = q.userId != null && q.userId == context.viewerUserId,
+        )
         val displayQuestion = projected.question
         val author = displayQuestion.userId?.let { context.authorsById[it]?.toAuthorProjection() }
         val stats = context.statsByQuestionId[displayQuestion.id]
@@ -336,6 +345,7 @@ class CommunityService(
                 questionTranslationPending = projected.questionTranslationPending,
                 answerTranslationPending = projected.answerTranslationPending,
                 aiResponseTranslationPending = projected.aiResponseTranslationPending,
+                answerAuthorOriginal = projected.answerAuthorOriginal,
             )
     }
 
@@ -343,13 +353,23 @@ class CommunityService(
         question: QuestionEntity,
         requestedLanguage: String,
         viewMode: TranslationViewMode,
+        preserveAnswerOriginal: Boolean,
     ): ProjectedRecord {
         val target = QuestionLanguage.normalize(requestedLanguage)
         val questionSource = QuestionLanguage.normalize(question.sourceLanguage)
         val answerSource = QuestionLanguage.normalize(question.answerSourceLanguage ?: question.sourceLanguage)
         val aiSource = QuestionLanguage.normalize(question.aiResponseSourceLanguage ?: question.sourceLanguage)
         if (viewMode == TranslationViewMode.ORIGINAL) {
-            return ProjectedRecord(question, questionSource, answerSource, aiSource, false, false, false)
+            return ProjectedRecord(
+                question,
+                questionSource,
+                answerSource,
+                aiSource,
+                false,
+                false,
+                false,
+                preserveAnswerOriginal && !question.answer.isNullOrBlank(),
+            )
         }
 
         val hashes = ContentLocalizationService.recordHashes(question)
@@ -359,7 +379,8 @@ class CommunityService(
         val aiReady = snapshot.aiResponse.readyFor(hashes.aiResponse)
         val needsTranslation =
             (questionSource != target && questionReady == null) ||
-                (!question.answer.isNullOrBlank() && answerSource != target && answerReady == null) ||
+                (!preserveAnswerOriginal && !question.answer.isNullOrBlank() &&
+                    answerSource != target && answerReady == null) ||
                 ((!question.feedback.isNullOrBlank() || !question.explanation.isNullOrBlank()) &&
                     aiSource != target && aiReady == null)
         if (needsTranslation) {
@@ -377,7 +398,7 @@ class CommunityService(
                 questionDisplay = target
             }
         }
-        if (!question.answer.isNullOrBlank() && answerSource != target) {
+        if (!preserveAnswerOriginal && !question.answer.isNullOrBlank() && answerSource != target) {
             answerReady?.let {
                 question.answer = it.fields["answer"] ?: question.answer
                 answerDisplay = target
@@ -396,10 +417,11 @@ class CommunityService(
             answerDisplay,
             aiDisplay,
             questionSource != target && questionDisplay != target && snapshot.question?.status != "FAILED",
-            !question.answer.isNullOrBlank() && answerSource != target &&
+            !preserveAnswerOriginal && !question.answer.isNullOrBlank() && answerSource != target &&
                 answerDisplay != target && snapshot.answer?.status != "FAILED",
             (!question.feedback.isNullOrBlank() || !question.explanation.isNullOrBlank()) &&
                 aiSource != target && aiDisplay != target && snapshot.aiResponse?.status != "FAILED",
+            preserveAnswerOriginal && !question.answer.isNullOrBlank(),
         )
     }
 
@@ -407,10 +429,11 @@ class CommunityService(
         comment: QuestionCommentEntity,
         requestedLanguage: String,
         viewMode: TranslationViewMode,
+        authorOriginal: Boolean,
     ): ProjectedComment {
         val target = QuestionLanguage.normalize(requestedLanguage)
         val source = QuestionLanguage.normalize(comment.sourceLanguage)
-        if (viewMode == TranslationViewMode.ORIGINAL || source == target) {
+        if (authorOriginal || viewMode == TranslationViewMode.ORIGINAL || source == target) {
             return ProjectedComment(comment, source, false)
         }
         val sourceHash = ContentLocalizationService.sha256(comment.body)
@@ -521,6 +544,7 @@ class CommunityService(
         val questionTranslationPending: Boolean,
         val answerTranslationPending: Boolean,
         val aiResponseTranslationPending: Boolean,
+        val answerAuthorOriginal: Boolean,
     )
 
     private data class ProjectedComment(
@@ -534,6 +558,7 @@ private data class CommunityContext(
     val authorsById: Map<Long, UserEntity> = emptyMap(),
     val statsByQuestionId: Map<Long, QuestionStatsEntity> = emptyMap(),
     val likedQuestionIds: Set<Long> = emptySet(),
+    val viewerUserId: Long? = null,
 )
 
 private suspend fun UserEntity.toAuthorProjection() = PublicQuestionAuthorProjection(

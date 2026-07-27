@@ -5,6 +5,7 @@ import com.buddystudy.backend.profile.application.model.UserProfileResponse
 import com.buddystudy.backend.study.application.model.GradingResultResponse
 import com.buddystudy.backend.study.application.model.RecordLocalizationResponse
 import com.buddystudy.backend.study.application.model.originalLocalization
+import com.buddystudy.backend.study.application.model.authorOriginalLocalization
 import com.buddystudy.backend.study.application.model.translatedLocalization
 import com.buddystudy.backend.study.application.model.TranslationViewMode
 
@@ -17,6 +18,7 @@ fun PublicQuestionProjection.toCommunityQuestionResponse(
     questionTranslationPending: Boolean = true,
     answerTranslationPending: Boolean = true,
     aiResponseTranslationPending: Boolean = true,
+    answerAuthorOriginal: Boolean = false,
 ) = CommunityQuestionResponse(
     id = id,
     question = question,
@@ -59,6 +61,7 @@ fun PublicQuestionProjection.toCommunityQuestionResponse(
                 answerDisplayLanguage,
                 viewMode,
                 answerTranslationPending,
+                answerAuthorOriginal,
             )
         },
         aiResponse = score?.let {
@@ -79,7 +82,9 @@ private fun locale(
     displayLanguage: String,
     viewMode: TranslationViewMode,
     pending: Boolean,
+    authorOriginal: Boolean = false,
 ) = when {
+    authorOriginal -> authorOriginalLocalization(sourceLanguage, requestedLanguage)
     viewMode == TranslationViewMode.ORIGINAL || sourceLanguage == requestedLanguage ->
         originalLocalization(sourceLanguage, requestedLanguage, viewMode)
     displayLanguage == requestedLanguage -> translatedLocalization(sourceLanguage, requestedLanguage)

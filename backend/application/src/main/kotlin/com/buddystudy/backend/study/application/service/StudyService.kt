@@ -84,7 +84,8 @@ class StudyService(
                 now = Instant.now(),
             )
         }
-        return saved.toStudyRecord(questionStats.findById(saved.id)).toProjection().toRecordResponse()
+        return saved.toStudyRecord(questionStats.findById(saved.id)).toProjection()
+            .toRecordResponse(answerAuthorOriginal = !saved.answer.isNullOrBlank())
     }
 
     @Transactional(readOnly = true)
@@ -149,12 +150,14 @@ class StudyService(
                 questionTranslationPending = projected.questionTranslationPending,
                 answerTranslationPending = projected.answerTranslationPending,
                 aiResponseTranslationPending = projected.aiResponseTranslationPending,
+                answerAuthorOriginal = projected.answerAuthorOriginal,
             )
     }
 
     override suspend fun skip(principal: Principal, id: Long): StudyRecordResponse {
         val saved = recordWriter.skip(principal.userId, id)
-        return saved.toStudyRecord(questionStats.findById(saved.id)).toProjection().toRecordResponse()
+        return saved.toStudyRecord(questionStats.findById(saved.id)).toProjection()
+            .toRecordResponse(answerAuthorOriginal = !saved.answer.isNullOrBlank())
     }
 
     override suspend fun delete(principal: Principal, id: Long) {
@@ -163,7 +166,8 @@ class StudyService(
 
     override suspend fun publicity(principal: Principal, id: Long, isPublic: Boolean): StudyRecordResponse {
         val saved = recordWriter.updatePublicity(principal.userId, id, isPublic)
-        return saved.toStudyRecord(questionStats.findById(saved.id)).toProjection().toRecordResponse()
+        return saved.toStudyRecord(questionStats.findById(saved.id)).toProjection()
+            .toRecordResponse(answerAuthorOriginal = !saved.answer.isNullOrBlank())
     }
 
     private suspend fun List<QuestionEntity>.toRecordResponses(
@@ -189,6 +193,7 @@ class StudyService(
                     questionTranslationPending = projected.questionTranslationPending,
                     answerTranslationPending = projected.answerTranslationPending,
                     aiResponseTranslationPending = projected.aiResponseTranslationPending,
+                    answerAuthorOriginal = projected.answerAuthorOriginal,
                 )
         }
     }
@@ -203,23 +208,30 @@ class StudyService(
         val answerSource = QuestionLanguage.normalize(question.answerSourceLanguage ?: question.sourceLanguage)
         val aiSource = QuestionLanguage.normalize(question.aiResponseSourceLanguage ?: question.sourceLanguage)
         if (viewMode == TranslationViewMode.ORIGINAL) {
-            return ProjectedRecord(question, questionSource, answerSource, aiSource, false, false, false)
+            return ProjectedRecord(
+                question,
+                questionSource,
+                answerSource,
+                aiSource,
+                false,
+                false,
+                false,
+                !question.answer.isNullOrBlank(),
+            )
         }
         val hashes = ContentLocalizationService.recordHashes(question)
         val snapshot = contentLocalizations.record(question.id, target)
         val questionReady = snapshot.question.readyFor(hashes.question)
-        val answerReady = snapshot.answer.readyFor(hashes.answer)
         val aiReady = snapshot.aiResponse.readyFor(hashes.aiResponse)
         val needsTranslation =
             (questionSource != target && questionReady == null) ||
-                (!question.answer.isNullOrBlank() && answerSource != target && answerReady == null) ||
                 ((!question.feedback.isNullOrBlank() || !question.explanation.isNullOrBlank()) &&
                     aiSource != target && aiReady == null)
         if (needsTranslation) {
             localizationRequests.requestRecord(question, target)
         }
         var questionDisplay = questionSource
-        var answerDisplay = answerSource
+        val answerDisplay = answerSource
         var aiDisplay = aiSource
         if (questionSource != target) {
             val localized = questionReady
@@ -228,12 +240,6 @@ class StudyService(
                 question.question = localized.fields["question"] ?: question.question
                 question.hint = localized.fields["hint"] ?: question.hint
                 questionDisplay = target
-            }
-        }
-        if (!question.answer.isNullOrBlank() && answerSource != target) {
-            answerReady?.let {
-                question.answer = it.fields["answer"] ?: question.answer
-                answerDisplay = target
             }
         }
         if ((!question.feedback.isNullOrBlank() || !question.explanation.isNullOrBlank()) && aiSource != target) {
@@ -250,10 +256,10 @@ class StudyService(
             answerDisplay,
             aiDisplay,
             questionSource != target && questionDisplay != target && snapshot.question?.status != "FAILED",
-            !question.answer.isNullOrBlank() && answerSource != target &&
-                answerDisplay != target && snapshot.answer?.status != "FAILED",
+            false,
             (!question.feedback.isNullOrBlank() || !question.explanation.isNullOrBlank()) &&
                 aiSource != target && aiDisplay != target && snapshot.aiResponse?.status != "FAILED",
+            !question.answer.isNullOrBlank(),
         )
     }
 
@@ -276,6 +282,7 @@ class StudyService(
         val questionTranslationPending: Boolean,
         val answerTranslationPending: Boolean,
         val aiResponseTranslationPending: Boolean,
+        val answerAuthorOriginal: Boolean,
     )
 }
 

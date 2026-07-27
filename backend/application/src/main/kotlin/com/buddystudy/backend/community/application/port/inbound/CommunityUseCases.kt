@@ -38,6 +38,7 @@ interface CommunityUseCase {
         view: String = "localized",
         limit: Int,
         offset: Int,
+        principal: Principal? = null,
     ): CommunityCommentsResponse
     suspend fun createComment(
         principal: Principal,

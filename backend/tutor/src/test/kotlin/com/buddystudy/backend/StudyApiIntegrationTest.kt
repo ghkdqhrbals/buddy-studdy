@@ -568,6 +568,16 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
             ),
             now = publicQuestion.updatedAt,
         )
+        contentLocalizations.saveAnswerReady(
+            question = publicQuestion,
+            targetLanguage = "en",
+            sourceHash = sourceHashes.answer!!,
+            result = ContentTranslationResult(
+                fields = mapOf("answer" to "Translated public boundary answer"),
+                provider = "test",
+            ),
+            now = publicQuestion.updatedAt,
+        )
         stats.save(QuestionStatsEntity(questionId = publicQuestion.id, likeCount = 9, commentCount = 3, viewCount = 14))
 
         val list = get("/api/v1/public/questions?query=boundary")
@@ -589,6 +599,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(translatedList["questions"]).hasSize(1)
         assertThat(translatedList["questions"][0]["topic"].asText()).isEqualTo("Public Boundary Topic")
         assertThat(translatedList["questions"][0]["question"].asText()).isEqualTo("Translated public boundary question")
+        assertThat(translatedList["questions"][0]["answer"].asText()).isEqualTo("Translated public boundary answer")
 
         val detail = get("/api/v1/public/questions/${publicQuestion.id}?tl=en")
             .also { assertThat(it.statusCode()).isEqualTo(200) }
@@ -597,6 +608,28 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(detail["likedByMe"].asBoolean()).isFalse()
         assertThat(detail["topic"].asText()).isEqualTo("Public Boundary Topic")
         assertThat(detail["question"].asText()).isEqualTo("Translated public boundary question")
+        assertThat(detail["answer"].asText()).isEqualTo("Translated public boundary answer")
+
+        val ownerDetail = getJson(
+            "/api/v1/public/questions/${publicQuestion.id}?tl=en",
+            owner.accessToken,
+            owner.deviceId,
+            owner.clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        assertThat(ownerDetail["question"].asText()).isEqualTo("Translated public boundary question")
+        assertThat(ownerDetail["answer"].asText()).isEqualTo("Answer for Public Boundary")
+        assertThat(ownerDetail["localization"]["answer"]["translationState"].asText()).isEqualTo("ORIGINAL")
+        assertThat(ownerDetail["localization"]["answer"]["translationReason"].asText()).isEqualTo("AUTHOR_ORIGINAL")
+
+        val ownerRecord = getJson(
+            "/api/v1/records/${publicQuestion.id}?tl=en",
+            owner.accessToken,
+            owner.deviceId,
+            owner.clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        assertThat(ownerRecord["question"]["question"].asText()).isEqualTo("Translated public boundary question")
+        assertThat(ownerRecord["answer"].asText()).isEqualTo("Answer for Public Boundary")
+        assertThat(ownerRecord["localization"]["answer"]["translationReason"].asText()).isEqualTo("AUTHOR_ORIGINAL")
 
         val legacyDetail = get("/api/v1/public/questions/${publicQuestion.id}?language=en")
             .also { assertThat(it.statusCode()).isEqualTo(200) }
@@ -664,6 +697,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
     fun `comment keeps its original text and reads translation from comment localizations`(): Unit = runBlocking {
         val owner = registerActiveUser("localized-comment-owner")
         val commenter = registerActiveUser("localized-comment-author")
+        val viewer = registerActiveUser("localized-comment-viewer")
         val study = createStudy(owner, "Localized Comment")
         val publicQuestion = questions.save(
             gradedQuestion(
@@ -697,11 +731,22 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
             now = comment.updatedAt,
         )
 
-        val localized = getJson(
+        val authorView = getJson(
             "/api/v1/public/questions/${publicQuestion.id}/comments?tl=en",
             commenter.accessToken,
             commenter.deviceId,
             commenter.clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()["comments"][0]
+        assertThat(authorView["body"].asText()).isEqualTo("원문 댓글입니다.")
+        assertThat(authorView["localization"]["displayLanguage"].asText()).isEqualTo("ko")
+        assertThat(authorView["localization"]["translationState"].asText()).isEqualTo("ORIGINAL")
+        assertThat(authorView["localization"]["translationReason"].asText()).isEqualTo("AUTHOR_ORIGINAL")
+
+        val localized = getJson(
+            "/api/v1/public/questions/${publicQuestion.id}/comments?tl=en",
+            viewer.accessToken,
+            viewer.deviceId,
+            viewer.clientSecret,
         ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()["comments"][0]
         assertThat(localized["body"].asText()).isEqualTo("This is the original comment.")
         assertThat(localized["localization"]["sourceLanguage"].asText()).isEqualTo("ko")

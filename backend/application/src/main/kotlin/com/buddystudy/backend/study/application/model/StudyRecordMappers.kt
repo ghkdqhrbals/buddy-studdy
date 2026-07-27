@@ -13,6 +13,7 @@ fun StudyRecordProjection.toRecordResponse(
     questionTranslationPending: Boolean = true,
     answerTranslationPending: Boolean = true,
     aiResponseTranslationPending: Boolean = true,
+    answerAuthorOriginal: Boolean = false,
 ): StudyRecordResponse {
     val assessment = gradingAssessmentJson?.let { json ->
         runCatching { JsonMapperProvider.mapper.readValue(json, AiGradingAssessment::class.java) }.getOrNull()
@@ -72,6 +73,7 @@ fun StudyRecordProjection.toRecordResponse(
                     displayLanguage = answerDisplayLanguage,
                     viewMode = viewMode,
                     pending = answerTranslationPending,
+                    authorOriginal = answerAuthorOriginal,
                 )
             },
             aiResponse = score?.let {
@@ -93,11 +95,13 @@ private fun localeMetadata(
     displayLanguage: String,
     viewMode: TranslationViewMode,
     pending: Boolean,
+    authorOriginal: Boolean = false,
 ): ContentLocalizationResponse {
     val source = com.buddystudy.study.domain.QuestionLanguage.normalize(sourceLanguage)
     val requested = com.buddystudy.study.domain.QuestionLanguage.normalize(requestedLanguage)
     val display = com.buddystudy.study.domain.QuestionLanguage.normalize(displayLanguage)
     return when {
+        authorOriginal -> authorOriginalLocalization(source, requested)
         viewMode == TranslationViewMode.ORIGINAL || source == requested ->
             originalLocalization(source, requested, viewMode)
         display == requested -> translatedLocalization(source, requested)
