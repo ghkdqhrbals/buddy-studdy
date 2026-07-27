@@ -6566,9 +6566,7 @@ private struct MobileHomeStudyOutlineRow: View {
     var body: some View {
         VStack(spacing: 0) {
             Button {
-                withAnimation(.snappy(duration: 0.22)) {
-                    isExpanded.toggle()
-                }
+                isExpanded.toggle()
             } label: {
                 studyRow(
                     room: snapshot.root,
