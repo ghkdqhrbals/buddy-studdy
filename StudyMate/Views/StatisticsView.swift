@@ -1827,26 +1827,27 @@ private struct StudyGrowthDetailView: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
-                if let root, let rootNode {
-                    StudyGrowthTreeCard(
-                        root: root,
-                        rootNode: rootNode,
-                        orderedNodes: orderedNodes,
-                        strings: strings
-                    )
-                } else {
-                    ContentUnavailableView(
-                        strings.noGrowthRecords,
-                        systemImage: "point.3.connected.trianglepath.dotted",
-                        description: Text(strings.noGrowthRecordsDescription)
-                    )
-                    .frame(maxWidth: .infinity, minHeight: 240)
-                }
+        VStack(spacing: 0) {
+            if let root, let rootNode {
+                StudyGrowthTreeCard(
+                    root: root,
+                    rootNode: rootNode,
+                    orderedNodes: orderedNodes,
+                    strings: strings
+                )
+                .frame(maxHeight: .infinity)
+            } else {
+                ContentUnavailableView(
+                    strings.noGrowthRecords,
+                    systemImage: "point.3.connected.trianglepath.dotted",
+                    description: Text(strings.noGrowthRecordsDescription)
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding(.vertical, 12)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle(root?.topic ?? strings.growthDetails)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -1874,146 +1875,49 @@ private struct StudyGrowthTreeItem: Identifiable {
 }
 
 private struct StudyGrowthTreeCard: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var zoomMultiplier: CGFloat = 1
+    @State private var zoomStartMultiplier: CGFloat = 1
+    @State private var isZoomGestureActive = false
+
     var root: BackendStudyGrowthRoot
     var rootNode: BackendStudyGrowthNode
     var orderedNodes: [BackendStudyGrowthNode]
     var strings: AppStrings
 
-    private var childrenByID: [Int: [BackendStudyGrowthNode]] {
-        Dictionary(grouping: orderedNodes.filter { $0.parentStudyId != nil }) {
-            $0.parentStudyId ?? -1
-        }
-        .mapValues {
-            $0.sorted {
-                if $0.sortOrder != $1.sortOrder {
-                    return $0.sortOrder < $1.sortOrder
-                }
-                return $0.studyId < $1.studyId
-            }
-        }
+    private var nodesByID: [Int: BackendStudyGrowthNode] {
+        Dictionary(uniqueKeysWithValues: orderedNodes.map { ($0.studyId, $0) })
     }
 
-    private var treeItems: [StudyGrowthTreeItem] {
-        var result: [StudyGrowthTreeItem] = []
-        var visited = Set<Int>()
-
-        func append(
-            _ node: BackendStudyGrowthNode,
-            depth: Int,
-            continuingAncestorDepths: Set<Int>,
-            isLastSibling: Bool
-        ) {
-            guard visited.insert(node.studyId).inserted else {
-                return
-            }
-            result.append(
-                StudyGrowthTreeItem(
-                    node: node,
-                    localDepth: depth,
-                    continuingAncestorDepths: continuingAncestorDepths,
-                    isLastSibling: isLastSibling
-                )
-            )
-
-            var descendantContinuations = continuingAncestorDepths
-            if depth > 0, !isLastSibling {
-                descendantContinuations.insert(depth - 1)
-            }
-            let children = childrenByID[node.studyId] ?? []
-            for (index, child) in children.enumerated() {
-                append(
-                    child,
-                    depth: depth + 1,
-                    continuingAncestorDepths: descendantContinuations,
-                    isLastSibling: index == children.count - 1
-                )
-            }
+    private var snapshot: StudyTreeLayoutSnapshot? {
+        guard let rootRoom = appState.backendStudyRoom(id: root.studyId) else {
+            return nil
         }
-
-        append(
-            rootNode,
-            depth: 0,
-            continuingAncestorDepths: [],
-            isLastSibling: true
+        return StudyTreeLayoutSnapshot(
+            root: rootRoom,
+            rooms: appState.backendStudyRooms
         )
+    }
 
-        let disconnectedNodes = orderedNodes.filter { !visited.contains($0.studyId) }
-        for (index, node) in disconnectedNodes.enumerated() {
-            append(
-                node,
-                depth: 1,
-                continuingAncestorDepths: [],
-                isLastSibling: index == disconnectedNodes.count - 1
-            )
-        }
-        return result
+    private var nodeOffsets: [Int: CGSize] {
+        appState.loadStudyTreeNodeOffsets(rootStudyID: root.studyId)
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(strings.studyStatusTree)
-                            .font(.headline)
-                        Text(strings.studyStatusTreeDescription)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Spacer(minLength: 8)
-
-                    Text(strings.abilityScale)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack(spacing: 8) {
-                    StudyGrowthSummaryMetric(
-                        value: "\(root.measuredTopicCount)/\(root.totalTopicCount)",
-                        label: strings.measuredStudyShort
-                    )
-                    StudyGrowthSummaryMetric(
-                        value: strings.growthCompletionValue(root.profile?.completion),
-                        label: strings.completion
-                    )
-                    StudyGrowthSummaryMetric(
-                        value: "\(root.answerCount)",
-                        label: strings.answersUnit
-                    )
-                }
-            }
-            .padding(18)
+            summary
 
             Divider()
                 .padding(.leading, 18)
 
-            ForEach(treeItems) { item in
-                NavigationLink {
-                    StudyGrowthNodeDetailView(node: item.node, strings: strings)
-                } label: {
-                    StudyGrowthTreeNodeRow(
-                        item: item,
-                        currentLevel: item.node.studyId == root.studyId
-                            ? root.currentLevel
-                            : item.node.currentLevel,
-                        growth: item.node.studyId == root.studyId
-                            ? root.growth
-                            : item.node.growth,
-                        answerCount: item.node.studyId == root.studyId
-                            ? root.answerCount
-                            : item.node.answerCount,
-                        measuredTopicCount: item.node.studyId == root.studyId
-                            ? root.measuredTopicCount
-                            : item.node.measuredTopicCount,
-                        totalTopicCount: item.node.studyId == root.studyId
-                            ? root.totalTopicCount
-                            : item.node.totalTopicCount,
-                        isRoot: item.node.studyId == root.studyId,
-                        strings: strings
-                    )
-                }
-                .buttonStyle(.plain)
+            if let snapshot {
+                treeCanvas(snapshot)
+            } else {
+                ContentUnavailableView(
+                    strings.noGrowthRecords,
+                    systemImage: "point.3.connected.trianglepath.dotted"
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .background(Color(.secondarySystemBackground))
@@ -2022,6 +1926,308 @@ private struct StudyGrowthTreeCard: View {
                 .stroke(Color.secondary.opacity(0.08), lineWidth: 1)
         }
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var summary: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(strings.studyStatusTree)
+                        .font(.headline)
+                    Text(strings.studyStatusTreeDescription)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 8)
+
+                Text(strings.abilityScale)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 8) {
+                StudyGrowthSummaryMetric(
+                    value: "\(root.measuredTopicCount)/\(root.totalTopicCount)",
+                    label: strings.measuredStudyShort
+                )
+                StudyGrowthSummaryMetric(
+                    value: strings.growthCompletionValue(root.profile?.completion),
+                    label: strings.completion
+                )
+                StudyGrowthSummaryMetric(
+                    value: "\(root.answerCount)",
+                    label: strings.answersUnit
+                )
+            }
+        }
+        .padding(18)
+    }
+
+    private func treeCanvas(_ snapshot: StudyTreeLayoutSnapshot) -> some View {
+        GeometryReader { geometry in
+            let canvasLayout = StudyTreeCanvasPolicy.expandedLayout(
+                baseCenters: snapshot.centerByRoomID,
+                nodeOffsets: nodeOffsets,
+                baseCanvasSize: snapshot.size,
+                nodeSize: StudyTreeLayoutSnapshot.nodeSize
+            )
+            let fittedScale = StudyTreeViewportPolicy.fittedZoomScale(
+                canvasSize: canvasLayout.size,
+                viewportSize: geometry.size
+            )
+            let zoomScale = min(
+                max(
+                    fittedScale * zoomMultiplier,
+                    StudyTreeViewportPolicy.minimumZoomScale
+                ),
+                StudyTreeViewportPolicy.maximumZoomScale
+            )
+            let scaledCanvasSize = CGSize(
+                width: canvasLayout.size.width * zoomScale,
+                height: canvasLayout.size.height * zoomScale
+            )
+
+            ZStack(alignment: .bottomTrailing) {
+                ScrollView([.horizontal, .vertical]) {
+                    ZStack(alignment: .topLeading) {
+                        Canvas { context, _ in
+                            for edge in snapshot.edges {
+                                let parent = renderedCenter(
+                                    edge.parent,
+                                    roomID: edge.parentID,
+                                    canvasLayout: canvasLayout
+                                )
+                                let child = renderedCenter(
+                                    edge.child,
+                                    roomID: edge.childID,
+                                    canvasLayout: canvasLayout
+                                )
+                                guard let edgeGeometry = StudyTreeEdgePolicy.directionalGeometry(
+                                    parent: parent,
+                                    child: child,
+                                    nodeRadius: StudyTreeLayoutSnapshot.nodeSize.width / 2 + 4
+                                ) else {
+                                    continue
+                                }
+
+                                var path = Path()
+                                path.move(to: edgeGeometry.start)
+                                let midpoint = (edgeGeometry.start.y + edgeGeometry.end.y) / 2
+                                path.addCurve(
+                                    to: edgeGeometry.end,
+                                    control1: CGPoint(x: edgeGeometry.start.x, y: midpoint),
+                                    control2: CGPoint(x: edgeGeometry.end.x, y: midpoint)
+                                )
+                                let edgeColor = Color.secondary.opacity(0.48)
+                                context.stroke(path, with: .color(edgeColor), lineWidth: 1.7)
+
+                                var arrow = Path()
+                                arrow.move(to: edgeGeometry.end)
+                                arrow.addLine(to: edgeGeometry.arrowLeft)
+                                arrow.addLine(to: edgeGeometry.arrowRight)
+                                arrow.closeSubpath()
+                                context.fill(arrow, with: .color(edgeColor))
+                            }
+                        }
+
+                        ForEach(snapshot.placements) { placement in
+                            if let node = nodesByID[placement.id] {
+                                NavigationLink {
+                                    StudyGrowthNodeDetailView(node: node, strings: strings)
+                                        .padding(.horizontal, 16)
+                                } label: {
+                                    StudyGrowthScoreTreeNode(
+                                        topic: node.topic,
+                                        currentLevel: node.studyId == root.studyId
+                                            ? root.currentLevel
+                                            : node.currentLevel,
+                                        growth: node.studyId == root.studyId
+                                            ? root.growth
+                                            : node.growth,
+                                        isRoot: node.studyId == root.studyId,
+                                        strings: strings
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .position(
+                                    renderedCenter(
+                                        placement.center,
+                                        roomID: placement.id,
+                                        canvasLayout: canvasLayout
+                                    )
+                                )
+                            }
+                        }
+                    }
+                    .frame(width: canvasLayout.size.width, height: canvasLayout.size.height)
+                    .scaleEffect(zoomScale, anchor: .topLeading)
+                    .frame(
+                        width: scaledCanvasSize.width,
+                        height: scaledCanvasSize.height,
+                        alignment: .topLeading
+                    )
+                    .frame(
+                        width: max(geometry.size.width, scaledCanvasSize.width),
+                        height: max(geometry.size.height, scaledCanvasSize.height),
+                        alignment: .center
+                    )
+                }
+                .simultaneousGesture(zoomGesture)
+
+                HStack(spacing: 2) {
+                    zoomButton(systemImage: "minus.magnifyingglass") {
+                        adjustZoom(by: -0.25)
+                    }
+                    zoomButton(systemImage: "arrow.up.left.and.down.right.magnifyingglass") {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            zoomMultiplier = 1
+                            zoomStartMultiplier = 1
+                        }
+                    }
+                    zoomButton(systemImage: "plus.magnifyingglass") {
+                        adjustZoom(by: 0.25)
+                    }
+                }
+                .padding(6)
+                .background(.ultraThinMaterial, in: Capsule())
+                .padding(12)
+            }
+        }
+    }
+
+    private var zoomGesture: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                if !isZoomGestureActive {
+                    isZoomGestureActive = true
+                    zoomStartMultiplier = zoomMultiplier
+                }
+                zoomMultiplier = min(
+                    max(zoomStartMultiplier * value.magnification, 0.6),
+                    3
+                )
+            }
+            .onEnded { _ in
+                isZoomGestureActive = false
+                zoomStartMultiplier = zoomMultiplier
+            }
+    }
+
+    private func renderedCenter(
+        _ center: CGPoint,
+        roomID: Int,
+        canvasLayout: StudyTreeCanvasLayout
+    ) -> CGPoint {
+        let offset = StudyTreeCanvasPolicy.sanitizedOffset(nodeOffsets[roomID] ?? .zero)
+        return CGPoint(
+            x: center.x + offset.width + canvasLayout.translation.width,
+            y: center.y + offset.height + canvasLayout.translation.height
+        )
+    }
+
+    private func adjustZoom(by amount: CGFloat) {
+        withAnimation(.easeInOut(duration: 0.18)) {
+            zoomMultiplier = min(max(zoomMultiplier + amount, 0.6), 3)
+            zoomStartMultiplier = zoomMultiplier
+        }
+    }
+
+    private func zoomButton(
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.caption.weight(.semibold))
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.primary)
+    }
+}
+
+private struct StudyGrowthScoreTreeNode: View {
+    var topic: String
+    var currentLevel: Double?
+    var growth: Double?
+    var isRoot: Bool
+    var strings: AppStrings
+
+    private var nodeColor: Color {
+        guard currentLevel != nil else {
+            return .secondary.opacity(0.65)
+        }
+        if let growth, growth < -0.15 {
+            return .orange
+        }
+        return .accentColor
+    }
+
+    private var fillFraction: CGFloat {
+        guard let currentLevel else {
+            return 0
+        }
+        return CGFloat(min(max(currentLevel / 10, 0), 1))
+    }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(topic)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+
+            if isRoot {
+                Text(strings.comprehensive)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Color.accentColor)
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(StudyGrowthFormat.level(currentLevel))
+                    .font(.system(size: 19, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                Text("/10")
+                    .font(.system(size: 8, weight: .semibold, design: .rounded))
+            }
+            .foregroundStyle(nodeColor)
+
+            Text(growth.map(StudyGrowthFormat.delta) ?? strings.measuringGrowth)
+                .font(.caption2.weight(.bold))
+                .monospacedDigit()
+                .foregroundStyle(StudyGrowthFormat.color(growth))
+        }
+        .padding(11)
+        .frame(
+            width: StudyTreeLayoutSnapshot.nodeSize.width,
+            height: StudyTreeLayoutSnapshot.nodeSize.height
+        )
+        .background {
+            Circle()
+                .fill(Color(.secondarySystemBackground))
+        }
+        .overlay {
+            Circle()
+                .strokeBorder(Color.secondary.opacity(0.22), lineWidth: 2.5)
+        }
+        .overlay {
+            Circle()
+                .trim(from: 0, to: fillFraction)
+                .stroke(
+                    nodeColor,
+                    style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(topic), \(isRoot ? strings.comprehensive : ""), "
+                + "\(strings.currentAbility) \(StudyGrowthFormat.level(currentLevel)), "
+                + "\(StudyGrowthFormat.delta(growth))"
+        )
     }
 }
 

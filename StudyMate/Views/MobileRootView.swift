@@ -2314,13 +2314,13 @@ private struct NotificationPublicQuestionsDestination: View {
     }
 }
 
-private struct StudyTreePlacement: Identifiable {
+struct StudyTreePlacement: Identifiable {
     var room: BackendStudyRoom
     var center: CGPoint
     var id: Int { room.id }
 }
 
-private struct StudyTreeEdge: Identifiable {
+struct StudyTreeEdge: Identifiable {
     var parentID: Int
     var childID: Int
     var parent: CGPoint
@@ -2328,7 +2328,7 @@ private struct StudyTreeEdge: Identifiable {
     var id = UUID()
 }
 
-private struct StudyTreeLayoutSnapshot {
+struct StudyTreeLayoutSnapshot {
     static let nodeSize = CGSize(width: 112, height: 112)
     private static let margin: CGFloat = 44
     private static let siblingSpacing: CGFloat = 42

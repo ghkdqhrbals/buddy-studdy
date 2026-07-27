@@ -935,6 +935,15 @@ final class ArchitecturePolicyTests: XCTestCase {
             detail.contains("StudyGrowthTreeCard("),
             "Study growth detail should present the combined root and individual descendants in one score tree."
         )
+        XCTAssertTrue(
+            content.contains("StudyTreeLayoutSnapshot(")
+                && content.contains("StudyGrowthScoreTreeNode("),
+            "The statistics tree should reuse the circular My Studies tree layout instead of rendering a depth-indented list."
+        )
+        XCTAssertTrue(
+            detail.contains(".padding(.horizontal, 16)"),
+            "The pushed growth detail should preserve the same horizontal screen padding as the statistics root."
+        )
         XCTAssertFalse(
             detail.contains("StudyGrowthAttentionCard("),
             "Review candidates should be visible in the tree instead of a separate priority card."

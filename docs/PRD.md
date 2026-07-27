@@ -78,14 +78,14 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 6. Before sign-in, the tab uses a subdued sample summary to explain topic progress and keeps the login invitation as a consistent bottom action.
 7. Growth-topic labels wrap to show their full value instead of being truncated with an ellipsis.
 8. Growth is presented root-study first. Each root card summarizes its full subtree with current 1-10 ability, period growth, measured-topic coverage, answer count, and a compact trend.
-9. Opening a root shows one always-expanded statistics tree. The root row is labeled as the combined subtree score, and every descendant row shows its individual 1–10 ability, growth, answer count, and measurement coverage in the same hierarchy.
+9. Opening a root shows the same circular-node tree language used by My Studies: curved directional edges, saved node positions, two-axis navigation, and zoom. The root node is labeled as the combined subtree score, while every descendant node shows its individual 1–10 ability and growth.
 10. Growth compares non-overlapping previous and recent answer windows of three to five graded answers. A topic needs at least six answers before a delta is claimed; otherwise it is shown as measuring.
 11. Parent growth includes its subtree and caps each measured node's weight so one high-volume topic cannot dominate the result.
 12. Statistics do not expose question-activation state. Ability uses the app accent color, decline uses orange, and insufficient or stable data uses secondary gray.
 13. Growth supports recent 30-day, 90-day, and one-year periods, with 90 days as the default.
 14. The root-study overview uses one shared 1–10 ability axis with previous and current markers so all studies can be compared at a glance.
 15. A `?` beside Growth by Study explains ability estimation, non-overlapping answer windows, minimum sample size, subtree aggregation, and capped topic weighting in plain language.
-16. Measured-study coverage, generated-question completion, and answer count sit above the tree. Declining and unmeasured nodes are distinguished within the tree itself; statistics do not duplicate them in a separate priority list.
+16. Measured-study coverage, generated-question completion, and answer count sit above the tree. Declining and unmeasured nodes are distinguished within the circular nodes themselves; statistics do not duplicate them in a separate priority list.
 
 ### Settings
 

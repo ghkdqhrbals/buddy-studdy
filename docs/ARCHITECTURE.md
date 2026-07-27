@@ -110,7 +110,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
 - `Views`
   - `StudyView`: active question and pending question workflow.
   - `HistoryView`: 30-row incremental record/search pagination, detail, and deletion.
-  - `StatisticsView`: shared-axis root-study growth comparison, calculation help, period filtering, one always-expanded score tree with combined root and individual descendant values, trend charts, and a compatibility projection for older servers.
+  - `StatisticsView`: shared-axis root-study growth comparison, calculation help, period filtering, a zoomable circular score tree that reuses the My Studies layout and saved node positions, trend charts, and a compatibility projection for older servers.
   - `SettingsView`: macOS settings.
 - `MobileRootView`: iOS tabs, onboarding, profile category hub, settings, notification inbox, and study-tree interaction.
   - The primary tab bar exposes Home, Records, Statistics, and Notifications. Settings is a profile-hub destination so account and app preferences share one predictable entry point.
@@ -154,7 +154,7 @@ User answer
 -> backend stats are refreshed from MySQL records
 -> GET /api/v1/stats/studies joins graded question study IDs to the current study tree
 -> root and parent nodes aggregate capped descendant weights
--> iOS shows the root aggregate and every descendant's individual score in one hierarchy
+-> iOS reuses the My Studies circular tree geometry to show the root aggregate and every descendant's individual score
 ```
 
 ```text
