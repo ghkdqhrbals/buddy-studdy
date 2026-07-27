@@ -1658,7 +1658,11 @@ final class AppState: ObservableObject {
                     log(.info, "로그아웃 후 알림 목록 오류 처리를 건너뛰었습니다.")
                     return
                 }
-                handleAppError(error, fallback: error.localizedDescription, target: .notification)
+                handleAppError(
+                    error,
+                    fallback: strings.notificationLoadRetryDescription,
+                    target: .notification
+                )
                 log(
                     .warning,
                     "알림 목록 조회 실패: \(appErrorHandlingUseCase.diagnosticDescription(for: error))"

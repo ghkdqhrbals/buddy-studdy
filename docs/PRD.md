@@ -99,6 +99,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 8. The notification inbox supports marking every visible account/device notification as read in one action, independently from deletion.
 9. Profile is a compact category hub: avatar editing is labeled `Avatar`, logout sits at the bottom of the hub, and account deletion lives under `Settings > Account Settings`.
 10. Record settings provide destructive record management only; record retention is not configurable.
+11. Notification loading failures show a short retry action without exposing HTTP status codes, gateway names, request IDs, or backend diagnostics.
 
 ### Identity
 

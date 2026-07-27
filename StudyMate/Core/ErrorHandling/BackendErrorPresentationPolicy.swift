@@ -38,7 +38,7 @@ enum BackendErrorPresentationPolicy {
             )
         }
 
-        let message = fallbackMessage(for: error, fallback: fallback)
+        let message = fallbackMessage(for: error, fallback: fallback, language: language)
         return BackendErrorPresentation(
             message: message,
             inlineMessage: message,
@@ -289,7 +289,14 @@ enum BackendErrorPresentationPolicy {
         language: AppLanguage? = nil
     ) -> String {
         switch error {
-        case .httpStatus(_, _, let apiError):
+        case .httpStatus(let statusCode, _, let apiError):
+            if isTransientInfrastructureStatus(statusCode) {
+                return nonemptyFallback(
+                    fallback,
+                    defaultMessage: transientServiceMessage(language: language)
+                )
+            }
+
             if let message = apiError?.message.trimmingCharacters(in: .whitespacesAndNewlines),
                !message.isEmpty {
                 if apiError?.code == "QUOTA_EXCEEDED",
@@ -303,11 +310,16 @@ enum BackendErrorPresentationPolicy {
                 return message
             }
         case .invalidResponse:
-            break
+            return nonemptyFallback(
+                fallback,
+                defaultMessage: invalidResponseMessage(language: language)
+            )
         }
 
-        let localized = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-        return localized.isEmpty ? fallback : localized
+        return nonemptyFallback(
+            fallback,
+            defaultMessage: transientServiceMessage(language: language)
+        )
     }
 
     static func shouldClearFeatureMessage(for error: Error) -> Bool {
@@ -346,9 +358,26 @@ enum BackendErrorPresentationPolicy {
         }
     }
 
-    private static func fallbackMessage(for error: Error, fallback: String) -> String {
+    private static func fallbackMessage(
+        for error: Error,
+        fallback: String,
+        language: AppLanguage?
+    ) -> String {
+        let strings = AppStrings(language: language ?? .korean)
+
         if error is DecodingError {
-            return "응답 데이터를 읽을 수 없습니다. 잠시 후 다시 시도하세요."
+            return strings.responseDataUnreadable
+        }
+
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost, .cannotFindHost, .cannotConnectToHost:
+                return strings.networkUnavailableRetry
+            case .timedOut:
+                return strings.requestTimedOutRetry
+            default:
+                break
+            }
         }
 
         let localized = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -356,6 +385,23 @@ enum BackendErrorPresentationPolicy {
             return fallback
         }
         return localized
+    }
+
+    private static func isTransientInfrastructureStatus(_ statusCode: Int) -> Bool {
+        statusCode == 408 || statusCode == 429 || (500...599).contains(statusCode)
+    }
+
+    private static func nonemptyFallback(_ fallback: String, defaultMessage: String) -> String {
+        let trimmedFallback = fallback.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedFallback.isEmpty ? defaultMessage : trimmedFallback
+    }
+
+    private static func transientServiceMessage(language: AppLanguage?) -> String {
+        AppStrings(language: language ?? .korean).serviceTemporarilyUnavailable
+    }
+
+    private static func invalidResponseMessage(language: AppLanguage?) -> String {
+        AppStrings(language: language ?? .korean).invalidServerResponse
     }
 
     private static func decodingDiagnostic(

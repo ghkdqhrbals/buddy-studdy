@@ -2169,6 +2169,36 @@ struct AppStrings {
     }
     var loading: String { text("불러오는 중", "Loading") }
     var retry: String { text("다시 시도", "Retry") }
+    var serviceTemporarilyUnavailable: String {
+        text(
+            "서비스가 잠시 불안정합니다. 잠시 후 다시 시도하세요.",
+            "The service is temporarily unavailable. Please try again shortly."
+        )
+    }
+    var invalidServerResponse: String {
+        text(
+            "서버 응답을 확인할 수 없습니다. 잠시 후 다시 시도하세요.",
+            "The server response could not be read. Please try again shortly."
+        )
+    }
+    var responseDataUnreadable: String {
+        text(
+            "응답 데이터를 읽을 수 없습니다. 잠시 후 다시 시도하세요.",
+            "The response data could not be read. Please try again shortly."
+        )
+    }
+    var networkUnavailableRetry: String {
+        text(
+            "인터넷 연결을 확인한 뒤 다시 시도하세요.",
+            "Check your internet connection and try again."
+        )
+    }
+    var requestTimedOutRetry: String {
+        text(
+            "응답이 지연되고 있습니다. 잠시 후 다시 시도하세요.",
+            "The response is taking longer than expected. Please try again shortly."
+        )
+    }
     var monthlyQuestionQuota: String { text("월간 질문", "Monthly questions") }
     var monthlyQuotaReached: String { text("이번 달 질문 한도에 도달했습니다.", "You have reached this month's question limit.") }
     func monthlyQuotaUsage(remaining: Int, limit: Int) -> String {
@@ -2528,6 +2558,12 @@ struct AppStrings {
     var notificationInbox: String { text("알림", "Notifications") }
     var noNotifications: String { text("아직 알림이 없습니다", "No notifications yet") }
     var unableToLoadNotifications: String { text("알림을 불러오지 못했습니다", "Unable to load notifications") }
+    var notificationLoadRetryDescription: String {
+        text(
+            "잠시 후 다시 시도하거나 화면을 아래로 당겨 새로고침해 주세요.",
+            "Try again shortly or pull down to refresh."
+        )
+    }
     var noNotificationsDescription: String {
         text("댓글, 좋아요 같은 활동이 생기면 여기에 표시됩니다.", "Thread activity such as comments and likes will appear here.")
     }

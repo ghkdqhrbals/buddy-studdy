@@ -1484,6 +1484,57 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertFalse(resolution.shouldClearFeatureMessage)
     }
 
+    func testTransientBackendFailuresDoNotExposeHTTPStatusOrServerDetails() {
+        let gatewayError = RemotePushBackendError.httpStatus(502, "", nil)
+        let detailedServiceError = RemotePushBackendError.httpStatus(
+            503,
+            "",
+            BackendAPIError(
+                code: "UPSTREAM_FAILURE",
+                message: "upstream failed with HTTP 503",
+                status: 503
+            )
+        )
+
+        let gatewayResolution = AppErrorHandlingPolicy.resolve(
+            gatewayError,
+            fallback: "잠시 후 다시 시도해 주세요.",
+            language: .korean
+        )
+        let detailedResolution = AppErrorHandlingPolicy.resolve(
+            detailedServiceError,
+            fallback: "잠시 후 다시 시도해 주세요.",
+            language: .korean
+        )
+
+        XCTAssertEqual(gatewayResolution.featureMessage, "잠시 후 다시 시도해 주세요.")
+        XCTAssertEqual(detailedResolution.featureMessage, "잠시 후 다시 시도해 주세요.")
+        XCTAssertFalse(gatewayResolution.featureMessage?.contains("502") ?? true)
+        XCTAssertFalse(detailedResolution.featureMessage?.contains("503") ?? true)
+    }
+
+    func testInvalidBackendResponseUsesSafeLocalizedFallback() {
+        let koreanResolution = AppErrorHandlingPolicy.resolve(
+            RemotePushBackendError.invalidResponse,
+            fallback: "",
+            language: .korean
+        )
+        let englishResolution = AppErrorHandlingPolicy.resolve(
+            RemotePushBackendError.invalidResponse,
+            fallback: "",
+            language: .english
+        )
+
+        XCTAssertEqual(
+            koreanResolution.featureMessage,
+            "서버 응답을 확인할 수 없습니다. 잠시 후 다시 시도하세요."
+        )
+        XCTAssertEqual(
+            englishResolution.featureMessage,
+            "The server response could not be read. Please try again shortly."
+        )
+    }
+
     func testEmailVerificationRequirementStaysInVerificationFlow() {
         let apiError = BackendAPIError(
             code: "AUTH_GOOGLE_REQUIRED",
