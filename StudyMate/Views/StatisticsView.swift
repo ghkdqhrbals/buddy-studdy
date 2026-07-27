@@ -2478,75 +2478,112 @@ private struct StudyGrowthHierarchyMapCard: View {
     private var mapItems: [StudyGrowthMapItem] {
         var result: [StudyGrowthMapItem] = []
         var weightCache: [Int: CGFloat] = [:]
+        let mapChildrenByID = childrenByID
 
-        func leafWeight(_ node: BackendStudyGrowthNode, path: Set<Int>) -> CGFloat {
-            if let cached = weightCache[node.studyId] {
-                return cached
-            }
-            guard !path.contains(node.studyId) else {
-                return 1
-            }
-            let children = childrenByID[node.studyId] ?? []
-            guard !children.isEmpty else {
-                weightCache[node.studyId] = 1
-                return 1
-            }
-            let nextPath = path.union([node.studyId])
-            var childWeight = CGFloat.zero
-            for child in children {
-                childWeight += leafWeight(child, path: nextPath)
-            }
-            let weight = max(childWeight, 1)
-            weightCache[node.studyId] = weight
-            return weight
-        }
-
-        func append(
-            _ node: BackendStudyGrowthNode,
-            localDepth: Int,
-            start: CGFloat,
-            width: CGFloat,
-            path: Set<Int>
-        ) {
-            guard !path.contains(node.studyId) else {
-                return
-            }
-            result.append(
-                StudyGrowthMapItem(
-                    node: node,
-                    localDepth: localDepth,
-                    start: start,
-                    width: width
-                )
-            )
-
-            let children = childrenByID[node.studyId] ?? []
-            guard !children.isEmpty else {
-                return
-            }
-            let nextPath = path.union([node.studyId])
-            let totalWeight = max(
-                children.reduce(CGFloat.zero) {
-                    $0 + leafWeight($1, path: nextPath)
-                },
-                1
-            )
-            var nextStart = start
-            for child in children {
-                let childWidth = width * leafWeight(child, path: nextPath) / totalWeight
-                append(
-                    child,
-                    localDepth: localDepth + 1,
-                    start: nextStart,
-                    width: childWidth,
-                    path: nextPath
-                )
-                nextStart += childWidth
-            }
-        }
-
-        append(focusNode, localDepth: 0, start: 0, width: 1, path: [])
+        appendMapItem(
+            focusNode,
+            localDepth: 0,
+            start: 0,
+            width: 1,
+            path: [],
+            childrenByID: mapChildrenByID,
+            result: &result,
+            weightCache: &weightCache
+        )
         return result
+    }
+
+    private func leafWeight(
+        _ node: BackendStudyGrowthNode,
+        path: Set<Int>,
+        childrenByID: [Int: [BackendStudyGrowthNode]],
+        weightCache: inout [Int: CGFloat]
+    ) -> CGFloat {
+        if let cached = weightCache[node.studyId] {
+            return cached
+        }
+        guard !path.contains(node.studyId) else {
+            return 1
+        }
+        let children = childrenByID[node.studyId] ?? []
+        guard !children.isEmpty else {
+            weightCache[node.studyId] = 1
+            return 1
+        }
+        let nextPath = path.union([node.studyId])
+        var childWeight = CGFloat.zero
+        for child in children {
+            childWeight += leafWeight(
+                child,
+                path: nextPath,
+                childrenByID: childrenByID,
+                weightCache: &weightCache
+            )
+        }
+        let weight = max(childWeight, 1)
+        weightCache[node.studyId] = weight
+        return weight
+    }
+
+    private func appendMapItem(
+        _ node: BackendStudyGrowthNode,
+        localDepth: Int,
+        start: CGFloat,
+        width: CGFloat,
+        path: Set<Int>,
+        childrenByID: [Int: [BackendStudyGrowthNode]],
+        result: inout [StudyGrowthMapItem],
+        weightCache: inout [Int: CGFloat]
+    ) {
+        guard !path.contains(node.studyId) else {
+            return
+        }
+        result.append(
+            StudyGrowthMapItem(
+                node: node,
+                localDepth: localDepth,
+                start: start,
+                width: width
+            )
+        )
+
+        let children = childrenByID[node.studyId] ?? []
+        guard !children.isEmpty else {
+            return
+        }
+        let nextPath = path.union([node.studyId])
+        var totalWeight = CGFloat.zero
+        for child in children {
+            totalWeight += leafWeight(
+                child,
+                path: nextPath,
+                childrenByID: childrenByID,
+                weightCache: &weightCache
+            )
+        }
+        totalWeight = max(totalWeight, 1)
+
+        var nextStart = start
+        for child in children {
+            let childWeight = leafWeight(
+                child,
+                path: nextPath,
+                childrenByID: childrenByID,
+                weightCache: &weightCache
+            )
+            let childWidth = width * childWeight / totalWeight
+            appendMapItem(
+                child,
+                localDepth: localDepth + 1,
+                start: nextStart,
+                width: childWidth,
+                path: nextPath,
+                childrenByID: childrenByID,
+                result: &result,
+                weightCache: &weightCache
+            )
+            nextStart += childWidth
+        }
     }
 
     private var visibleDepthCount: Int {
