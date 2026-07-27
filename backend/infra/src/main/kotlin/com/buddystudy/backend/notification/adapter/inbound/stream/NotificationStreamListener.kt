@@ -12,14 +12,12 @@ import com.buddystudy.backend.notification.adapter.outbound.stream.NotificationR
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.notification.application.port.inbound.ProcessNotificationEventUseCase
 import com.buddystudy.backend.notification.application.port.outbound.NotificationPersistencePort
-import com.buddystudy.backend.notification.application.service.NotificationSendPolicy
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushPublishPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.fasterxml.jackson.module.kotlin.readValue
 import org.slf4j.LoggerFactory
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Component
-import java.time.Duration
 import java.time.Instant
 
 @Component
@@ -30,10 +28,8 @@ class NotificationStreamListener(
     private val devices: DevicePort,
     private val userDevices: UserDevicePort,
     private val pushPublisher: QuestionPushPublishPort,
-    private val sendPolicy: NotificationSendPolicy,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
-    private val stalePushClaimAge = Duration.ofMinutes(5)
 
     @StreamListener(
         topic = RedisStreamTopic.DOMAIN_EVENTS,
@@ -101,7 +97,7 @@ class NotificationStreamListener(
             command.deepLink,
         )
         if (command.shouldPush && command.type != DIRECT_PUSH_EVENT_TYPE) {
-            sendPushIfClaimed(notificationId, command)
+            publishPush(notificationId, command)
         } else {
             logger.info(
                 "notification_push_skipped reason={} notificationId={} eventId={} userId={}",
@@ -113,17 +109,7 @@ class NotificationStreamListener(
         }
     }
 
-    private suspend fun sendPushIfClaimed(notificationId: Long, command: NotificationRequestCommand) {
-        val now = Instant.now()
-        if (notifications.claimPush(notificationId, now, now.minus(stalePushClaimAge)) == 0) {
-            logger.info(
-                "notification_push_skipped reason=claim_not_acquired notificationId={} eventId={} userId={}",
-                notificationId,
-                command.eventId,
-                command.userId,
-            )
-            return
-        }
+    private suspend fun publishPush(notificationId: Long, command: NotificationRequestCommand) {
         val activeSessions = command.userId?.let { userDevices.findActiveByUserId(it) }.orEmpty()
         val candidateDeviceIds = buildList {
             addAll(activeSessions.map { it.deviceId })
@@ -139,22 +125,6 @@ class NotificationStreamListener(
                 notificationId,
                 command.eventId,
                 command.userId,
-            )
-            return
-        }
-        val policyCommand = command.copy(
-            userId = command.userId ?: targetDevice.userId,
-            deviceId = targetDevice.deviceId,
-        )
-        if (!sendPolicy.canSendPush(policyCommand)) {
-            notifications.markPushFailed(notificationId, "Push policy denied.", Instant.now())
-            logger.info(
-                "notification_push_skipped reason=send_policy_denied notificationId={} eventId={} userId={} deviceId={} type={}",
-                notificationId,
-                command.eventId,
-                policyCommand.userId,
-                targetDevice.deviceId,
-                command.type,
             )
             return
         }

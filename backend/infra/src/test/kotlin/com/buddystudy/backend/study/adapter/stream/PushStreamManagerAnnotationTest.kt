@@ -1,6 +1,5 @@
 package com.buddystudy.backend.study.adapter.stream
 
-import com.buddystudy.auth.domain.entity.DeviceEntity
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
@@ -10,7 +9,6 @@ import com.buddystudy.backend.common.adapter.stream.StreamMessageContext
 import com.buddystudy.backend.common.adapter.stream.StreamOptions
 import com.buddystudy.backend.common.adapter.stream.StreamScheduler
 import com.buddystudy.backend.config.BuddyStudyProperties
-import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.notification.application.port.inbound.ProcessNotificationEventUseCase
 import com.buddystudy.backend.notification.application.port.outbound.NotificationPersistencePort
 import com.buddystudy.backend.notification.application.service.NotificationSendPolicy
@@ -23,12 +21,10 @@ import kotlin.reflect.full.findAnnotation
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import org.mockito.ArgumentCaptor
-import org.mockito.Mockito.any
-import org.mockito.Mockito.eq
+import org.mockito.Answers
 import org.mockito.Mockito.mock
-import org.mockito.Mockito.verify
-import org.mockito.Mockito.`when`
+import org.mockito.Mockito.mockingDetails
+import org.mockito.Mockito.verifyNoInteractions
 
 class PushStreamManagerAnnotationTest {
     @Test
@@ -64,15 +60,18 @@ class PushStreamManagerAnnotationTest {
     }
 
     @Test
-    fun `direct question push creates notification and sends apns from push topic`() = runBlocking {
+    fun `push consumer sends prepared apns message without target or policy validation`() = runBlocking {
         val pushNotifications = mock(PushNotificationPort::class.java)
         val devices = mock(DevicePort::class.java)
         val userDevices = mock(UserDevicePort::class.java)
-        val notifications = mock(NotificationPersistencePort::class.java)
+        val notifications = mock(NotificationPersistencePort::class.java) { invocation ->
+            if (invocation.method.name == "markPushSent") 1 else Answers.RETURNS_DEFAULTS.answer(invocation)
+        }
         val notificationProcessor = mock(ProcessNotificationEventUseCase::class.java)
         val notificationSendPolicy = mock(NotificationSendPolicy::class.java)
         val payload = QuestionPushRequestedPayload(
             recordId = 10,
+            notificationId = 42,
             studyId = 77,
             deviceId = "device-1",
             userId = 11,
@@ -93,15 +92,12 @@ class PushStreamManagerAnnotationTest {
             recordId = "1-0",
             eventId = "question-push-10-device-1",
             eventType = "QUESTION_PUSH_REQUESTED",
-            fields = emptyMap(),
+            fields = mapOf(
+                "pushProvider" to "APNS",
+                "apnsToken" to "apns-token",
+                "apnsEnvironment" to "sandbox",
+            ),
             claimed = false,
-        )
-        `when`(notificationProcessor.process(any(NotificationRequestCommand::class.java))).thenReturn(42L)
-        `when`(notificationSendPolicy.canSendPush(any(NotificationRequestCommand::class.java))).thenReturn(true)
-        `when`(notifications.claimPush(eq(42L), any(Instant::class.java), any(Instant::class.java))).thenReturn(1)
-        `when`(userDevices.hasActiveSession(11, "device-1")).thenReturn(true)
-        `when`(devices.findByDeviceId("device-1")).thenReturn(
-            DeviceEntity(deviceId = "device-1", apnsToken = "apns-token", apnsEnvironment = "sandbox")
         )
         val manager = PushStreamManager(
             properties = BuddyStudyProperties(),
@@ -116,14 +112,15 @@ class PushStreamManagerAnnotationTest {
 
         manager.deliver(payload, context)
 
-        val commandCaptor = ArgumentCaptor.forClass(NotificationRequestCommand::class.java)
-        verify(notificationProcessor).process(commandCaptor.capture())
-        assertThat(commandCaptor.value.eventId).isEqualTo("question-created-10")
-        assertThat(commandCaptor.value.shouldPush).isTrue()
-        val messageCaptor = ArgumentCaptor.forClass(com.buddystudy.backend.study.application.port.outbound.PushQuestionMessage::class.java)
-        verify(pushNotifications).sendQuestion(messageCaptor.capture())
-        assertThat(messageCaptor.value).isInstanceOf(ApnsQuestionMessage::class.java)
-        assertThat(messageCaptor.value.notificationId).isEqualTo("42")
-        verify(notifications).markPushSent(eq(42L), any(Instant::class.java))
+        val sentMessage = mockingDetails(pushNotifications).invocations
+            .single { it.method.name == "sendQuestion" }
+            .arguments[0]
+        assertThat(sentMessage).isInstanceOf(ApnsQuestionMessage::class.java)
+        assertThat((sentMessage as ApnsQuestionMessage).notificationId).isEqualTo("42")
+        val pushStatus = mockingDetails(notifications).invocations
+            .single { it.method.name == "markPushSent" }
+        assertThat(pushStatus.arguments[0]).isEqualTo(42L)
+        assertThat(pushStatus.arguments[1]).isInstanceOf(Instant::class.java)
+        verifyNoInteractions(devices, userDevices, notificationProcessor, notificationSendPolicy)
     }
 }

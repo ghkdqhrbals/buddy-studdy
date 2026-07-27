@@ -2,6 +2,7 @@ package com.buddystudy.backend
 
 import kotlinx.coroutines.runBlocking
 
+import com.buddystudy.auth.domain.entity.DeviceEntity
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishedMessage
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
 import com.buddystudy.backend.common.adapter.stream.RedisStreamObjectPublisher
@@ -17,7 +18,10 @@ import com.buddystudy.backend.study.application.port.outbound.PushNotificationPo
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.mockito.Answers
 import org.mockito.Mockito.mock
+import org.mockito.Mockito.mockingDetails
+import org.mockito.Mockito.`when`
 import java.time.Instant
 
 class PushStreamManagerTest {
@@ -51,6 +55,10 @@ class PushStreamManagerTest {
         assertThat(payload.language).isEqualTo("en")
         assertThat(payload.sound).isEqualTo("default")
         assertThat(payload.intervalMinutes).isEqualTo(15)
+        assertThat(payload.notificationId).isEqualTo(42)
+        assertThat(request.fields).containsEntry("pushProvider", "APNS")
+        assertThat(request.fields).containsEntry("apnsToken", "apns-token")
+        assertThat(request.fields).containsEntry("apnsEnvironment", "sandbox")
     }
 
     @Test
@@ -60,21 +68,74 @@ class PushStreamManagerTest {
         assertThat(service.publishPush(pushEvent())).isFalse()
     }
 
+    @Test
+    fun `push event is rejected before stream publish when apns credentials are missing`(): Unit = runBlocking {
+        val publisher = RecordingPublisher()
+        val fixture = fixture(enabled = true, publisher = publisher, configureApns = false)
+
+        assertThat(fixture.manager.publishPush(pushEvent())).isFalse()
+
+        assertThat(publisher.requests).isEmpty()
+        val failure = mockingDetails(fixture.notifications).invocations
+            .single { it.method.name == "markPushFailed" }
+        assertThat(failure.arguments[0]).isEqualTo(42L)
+        assertThat(failure.arguments[1]).isEqualTo("APNs credentials are not configured.")
+        assertThat(failure.arguments[2]).isInstanceOf(Instant::class.java)
+    }
+
     private fun service(enabled: Boolean, publisher: RedisStreamObjectPublisher): PushStreamManager {
+        return fixture(enabled, publisher).manager
+    }
+
+    private fun fixture(
+        enabled: Boolean,
+        publisher: RedisStreamObjectPublisher,
+        configureApns: Boolean = true,
+    ): Fixture {
         val properties = BuddyStudyProperties().apply {
             streams.enabled = enabled
             streams.key = "buddystudy-events-v1"
+            if (configureApns) {
+                apns.teamId = "team-id"
+                apns.keyId = "key-id"
+                apns.authKeyP8 = "private-key"
+            }
         }
-        return PushStreamManager(
+        val devices = mock(DevicePort::class.java)
+        val userDevices = mock(UserDevicePort::class.java)
+        val notifications = mock(NotificationPersistencePort::class.java) { invocation ->
+            when (invocation.method.name) {
+                "claimPush", "markPushSent", "markPushFailed" -> 1
+                else -> Answers.RETURNS_DEFAULTS.answer(invocation)
+            }
+        }
+        val notificationProcessor = mock(ProcessNotificationEventUseCase::class.java) { invocation ->
+            if (invocation.method.name == "process") 42L else Answers.RETURNS_DEFAULTS.answer(invocation)
+        }
+        val notificationSendPolicy = mock(NotificationSendPolicy::class.java) { invocation ->
+            if (invocation.method.name == "canSendPush") true else Answers.RETURNS_DEFAULTS.answer(invocation)
+        }
+        runBlocking {
+            `when`(userDevices.hasActiveSession(11, "device-1")).thenReturn(true)
+            `when`(devices.findByDeviceId("device-1")).thenReturn(
+                DeviceEntity(
+                    deviceId = "device-1",
+                    apnsToken = "apns-token",
+                    apnsEnvironment = "sandbox",
+                ),
+            )
+        }
+        val manager = PushStreamManager(
             properties = properties,
             publisher = publisher,
             pushNotifications = mock(PushNotificationPort::class.java),
-            devices = mock(DevicePort::class.java),
-            userDevices = mock(UserDevicePort::class.java),
-            notifications = mock(NotificationPersistencePort::class.java),
-            notificationProcessor = mock(ProcessNotificationEventUseCase::class.java),
-            notificationSendPolicy = mock(NotificationSendPolicy::class.java),
+            devices = devices,
+            userDevices = userDevices,
+            notifications = notifications,
+            notificationProcessor = notificationProcessor,
+            notificationSendPolicy = notificationSendPolicy,
         )
+        return Fixture(manager, notifications)
     }
 
     private fun pushEvent(
@@ -119,4 +180,9 @@ class PushStreamManagerTest {
             return RedisStreamPublishedMessage(topic.apiName, "record-1")
         }
     }
+
+    private data class Fixture(
+        val manager: PushStreamManager,
+        val notifications: NotificationPersistencePort,
+    )
 }

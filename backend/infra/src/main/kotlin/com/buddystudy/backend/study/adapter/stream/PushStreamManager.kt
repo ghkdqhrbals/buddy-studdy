@@ -57,7 +57,8 @@ class PushStreamManager(
             )
             return false
         }
-        val event = request.toEvent()
+        val prepared = prepareForPublish(request) ?: return false
+        val event = prepared.request.toEvent()
         val publishStartedAt = Instant.now()
         logger.info(
             "redis_stream_publish_started streamKey={} eventId={} eventType={} recordId={} deviceId={} userId={} topic={} pushCreatedAt={} publishAgeMs={}",
@@ -77,6 +78,11 @@ class PushStreamManager(
                 eventType = EVENT_TYPE,
                 eventId = event.eventId,
                 payload = event.toPayload(),
+                fields = mapOf(
+                    "pushProvider" to PushMessageType.APNS.name,
+                    "apnsToken" to prepared.apnsToken,
+                    "apnsEnvironment" to prepared.apnsEnvironment,
+                ),
             )
             val publishedAt = Instant.now()
             logger.info(
@@ -105,6 +111,77 @@ class PushStreamManager(
             )
             false
         }
+    }
+
+    private suspend fun prepareForPublish(request: QuestionPushRequest): PreparedPush? {
+        val notificationCommand = request.toQuestionNotificationCommand()
+        val notificationId = request.notificationId ?: notificationProcessor.process(notificationCommand)
+
+        suspend fun reject(reason: String, detail: String): PreparedPush? {
+            notifications.markPushFailed(notificationId, detail, Instant.now())
+            logger.info(
+                "redis_stream_publish_rejected reason={} eventId={} recordId={} notificationId={} deviceId={} userId={}",
+                reason,
+                request.eventId,
+                request.recordId,
+                notificationId,
+                request.deviceId,
+                request.userId,
+            )
+            return null
+        }
+
+        if (!notificationSendPolicy.canSendPush(notificationCommand)) {
+            return reject("send_policy_denied", "Push policy denied.")
+        }
+        val userId = request.userId
+        if (userId != null && !userDevices.hasActiveSession(userId, request.deviceId)) {
+            return reject("inactive_session", "Push target session is inactive.")
+        }
+        val device = devices.findByDeviceId(request.deviceId)
+            ?: return reject("device_not_found", "Push target device was not found.")
+        val apnsToken = device.apnsToken.trim()
+        if (apnsToken.isBlank()) {
+            return reject("apns_token_missing", "APNs token is missing.")
+        }
+        val missingCredentials = missingApnsCredentials()
+        if (missingCredentials.isNotEmpty()) {
+            logger.warn(
+                "redis_stream_publish_rejected reason=apns_credentials_missing missing={} eventId={} recordId={} notificationId={} deviceId={} userId={}",
+                missingCredentials.joinToString(","),
+                request.eventId,
+                request.recordId,
+                notificationId,
+                request.deviceId,
+                request.userId,
+            )
+            notifications.markPushFailed(notificationId, "APNs credentials are not configured.", Instant.now())
+            return null
+        }
+        val claimTime = Instant.now()
+        if (notifications.claimPush(notificationId, claimTime, claimTime.minus(stalePushClaimAge)) == 0) {
+            logger.info(
+                "redis_stream_publish_rejected reason=push_claim_not_acquired eventId={} recordId={} notificationId={} deviceId={} userId={}",
+                request.eventId,
+                request.recordId,
+                notificationId,
+                request.deviceId,
+                request.userId,
+            )
+            return null
+        }
+        return PreparedPush(
+            request = request.copy(notificationId = notificationId),
+            apnsToken = apnsToken,
+            apnsEnvironment = device.apnsEnvironment.ifBlank { "production" },
+        )
+    }
+
+    private fun missingApnsCredentials(): List<String> = buildList {
+        if (properties.apns.teamId.isBlank()) add("teamId")
+        if (properties.apns.keyId.isBlank()) add("keyId")
+        if (properties.apns.authKeyP8.isBlank()) add("authKeyP8")
+        if (properties.apns.bundleId.isBlank()) add("bundleId")
     }
 
     @StreamListener(
@@ -149,7 +226,6 @@ class PushStreamManager(
     }
 
     internal suspend fun deliver(payload: QuestionPushRequestedPayload, context: StreamMessageContext) {
-        var notificationId = payload.notificationId
         try {
             logger.info(
                 "redis_stream_consume_started stream={} redisRecordId={} eventId={} eventType={} recordId={} notificationId={} deviceId={} userId={} claimed={}",
@@ -163,60 +239,15 @@ class PushStreamManager(
                 payload.userId,
                 context.claimed,
             )
-            if (notificationId == null) {
-                val command = payload.toQuestionNotificationCommand()
-                val createdNotificationId = notificationProcessor.process(command)
-                notificationId = createdNotificationId
-                if (!notificationSendPolicy.canSendPush(command)) {
-                    notifications.markPushFailed(createdNotificationId, "Push policy denied.", Instant.now())
-                    logger.info(
-                        "redis_stream_consume_skipped reason=send_policy_denied redisRecordId={} eventId={} recordId={} notificationId={} deviceId={} userId={}",
-                        context.recordId,
-                        context.eventId,
-                        payload.recordId,
-                        createdNotificationId,
-                        payload.deviceId,
-                        payload.userId,
-                    )
-                    return
-                }
-                val claimTime = Instant.now()
-                if (notifications.claimPush(createdNotificationId, claimTime, claimTime.minus(stalePushClaimAge)) == 0) {
-                    logger.info(
-                        "redis_stream_consume_skipped reason=push_claim_not_acquired redisRecordId={} eventId={} recordId={} notificationId={} deviceId={} userId={}",
-                        context.recordId,
-                        context.eventId,
-                        payload.recordId,
-                        createdNotificationId,
-                        payload.deviceId,
-                        payload.userId,
-                    )
-                    return
-                }
-            }
-            val resolvedNotificationId = requireNotNull(notificationId)
-            if (payload.userId != null && !userDevices.hasActiveSession(payload.userId, payload.deviceId)) {
-                notifications.markPushFailed(resolvedNotificationId, "Push target session is inactive.", Instant.now())
-                logger.info(
-                    "redis_stream_consume_skipped_inactive_session redisRecordId={} eventId={} recordId={} deviceId={} userId={}",
-                    context.recordId,
-                    context.eventId,
-                    payload.recordId,
-                    payload.deviceId,
-                    payload.userId,
-                )
-                return
-            }
-            val device = devices.findByDeviceId(payload.deviceId)
             val pushMessage = PushEventPayloadMapper.toPushQuestionMessage(
-                payload = payload.copy(notificationId = resolvedNotificationId),
+                payload = payload,
                 fields = context.fields,
-                apnsToken = context.fields["apnsToken"] ?: device?.apnsToken ?: "",
-                apnsEnvironment = context.fields["apnsEnvironment"] ?: device?.apnsEnvironment ?: "production",
+                apnsToken = context.fields["apnsToken"].orEmpty(),
+                apnsEnvironment = context.fields["apnsEnvironment"] ?: "production",
             )
             pushNotifications.sendQuestion(pushMessage)
             val consumedAt = Instant.now()
-            notifications.markPushSent(resolvedNotificationId, consumedAt)
+            payload.notificationId?.let { notifications.markPushSent(it, consumedAt) }
             logger.info(
                 "redis_stream_consume_succeeded stream={} redisRecordId={} eventId={} eventType={} recordId={} deviceId={} userId={} pushProvider={} pushCreatedAt={} pushAgeMs={} claimed={}",
                 context.streamKey,
@@ -232,7 +263,7 @@ class PushStreamManager(
                 context.claimed,
             )
         } catch (error: Exception) {
-            notificationId?.let {
+            payload.notificationId?.let {
                 runCatching {
                     notifications.markPushFailed(it, error.message ?: error.javaClass.simpleName, Instant.now())
                 }
@@ -241,7 +272,7 @@ class PushStreamManager(
         }
     }
 
-    private fun QuestionPushRequestedPayload.toQuestionNotificationCommand(): NotificationRequestCommand =
+    private fun QuestionPushRequest.toQuestionNotificationCommand(): NotificationRequestCommand =
         NotificationRequestCommand(
             eventId = "question-created-$recordId",
             userId = userId,
@@ -293,6 +324,12 @@ class PushStreamManager(
         const val RECOVERY_CONSUMER = "buddystudy-push-recovery"
         const val EVENT_TYPE = "QUESTION_PUSH_REQUESTED"
     }
+
+    private data class PreparedPush(
+        val request: QuestionPushRequest,
+        val apnsToken: String,
+        val apnsEnvironment: String,
+    )
 }
 
 internal object PushEventPayloadMapper {
