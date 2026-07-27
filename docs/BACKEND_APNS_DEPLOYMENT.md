@@ -49,13 +49,22 @@ Deploy repository:
 - `GHCR_TOKEN`: GitHub token with `read:packages`.
 - `BACKEND_MASTER_KEY`: random base64 key for encrypting stored OpenAI keys.
 - `BACKEND_API_TOKEN`: optional token required by registration/admin endpoints.
-- `APNS_AUTH_KEY_P8`: raw or base64 encoded Apple APNs `.p8` key.
+- `APNS_AUTH_KEY_BASE64`: Base64-encoded Apple APNs `.p8` key.
 - `APNS_KEY_ID`: APNs key ID.
 - `APNS_TEAM_ID`: Apple Developer Team ID.
 - `APNS_BUNDLE_ID`: `io.github.ghkdqhrbals.StudyMate`.
 - `APNS_ENV`: `production` for TestFlight/App Store.
 
-MySQL credentials are managed in AWS Secrets Manager, not GitHub Actions Secrets.
+APNs credentials are managed in AWS Secrets Manager, not GitHub Actions
+Secrets.
+
+- AWS Secrets Manager secret: `buddystudy/prod`.
+- Required keys: `APNS_AUTH_KEY_BASE64`, `APNS_KEY_ID`, `APNS_TEAM_ID`,
+  `APNS_BUNDLE_ID`, and `APNS_ENV`.
+- The deploy workflow validates all required APNs values before starting the
+  backend.
+
+MySQL credentials are also managed in AWS Secrets Manager.
 
 - AWS Secrets Manager secret: `buddystudy/prod/mysql`.
 - EC2 instance profile: `BuddyStudyEC2SecretsProfile`.

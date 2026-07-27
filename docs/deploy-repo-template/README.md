@@ -33,13 +33,14 @@ Backend deploy:
 - `GHCR_TOKEN`
 - `BACKEND_MASTER_KEY`
 - `BACKEND_API_TOKEN`
-- `APNS_AUTH_KEY_BASE64`
-- `APNS_KEY_ID`
-- `APNS_TEAM_ID`
-- `APNS_BUNDLE_ID`
-- `APNS_ENV`
 - `OPENAPI_ACCESS_TOKEN` (optional, only if docs API endpoint is enabled)
 - `GOOGLE_IOS_CLIENT_ID`
+
+Backend application values are stored in AWS Secrets Manager secret
+`buddystudy/prod`. Required APNs keys are `APNS_AUTH_KEY_BASE64`,
+`APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`, and `APNS_ENV`. The deploy
+workflow reads and validates them before writing the backend environment file;
+do not duplicate them as GitHub Actions Secrets.
 
 EC2 log forwarding to MacBook Air Loki:
 

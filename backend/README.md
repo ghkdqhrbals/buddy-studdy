@@ -34,7 +34,7 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 
 - `SPRING_PROFILES_ACTIVE`: runtime profile. Use `dev` for local MySQL and Redis plus the OpenAI and SMTP settings from AWS Secrets Manager, `dev-aws` when development must import the entire AWS secret, or `prod`; the default is `dev`.
 - `BACKEND_MASTER_KEY`: base64/random master key used to encrypt stored OpenAI API keys.
-- `APNS_AUTH_KEY_P8`: raw or base64 encoded Apple APNs `.p8` key.
+- `APNS_AUTH_KEY_P8`, `APNS_AUTH_KEY_BASE64`: raw or Base64-encoded Apple APNs `.p8` key.
 - `APNS_KEY_ID`: Apple APNs key ID.
 - `APNS_TEAM_ID`: Apple Developer Team ID.
 - `APNS_BUNDLE_ID`: app bundle ID, currently `io.github.ghkdqhrbals.StudyMate`.
@@ -53,7 +53,7 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `BUDDYSTUDY_STREAMS_KEY`, `BUDDYSTUDY_PUSH_STREAM_KEY`: physical Redis Stream keys for domain events and dedicated question-push delivery.
 - `BUDDYSTUDY_DOMAIN_STREAM_MAX_LEN`, `BUDDYSTUDY_PUSH_STREAM_MAX_LEN`: independent exact `MAXLEN` limits for the domain-event and push streams. Both default to the legacy `REACTION_STREAM_XADD_MAX_LEN` value, or `1000` when it is unset.
 - `EMAIL_VERIFICATION_TTL_SECONDS`: signup code TTL. Production default is `180`.
-- `AWS_SECRET_ID`, `AWS_REGION`: optional AWS Secrets Manager config import. Local `dev` imports `buddystudy/dev` with a `local-secret.` prefix and maps only `OPENAI_API_KEY` plus `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, and `SMTP_FROM`, so database and Redis values in that secret cannot override local services. Explicit non-empty environment variables override the corresponding AWS values. Use the `dev-aws` profile to import the entire development secret; `prod` imports `buddystudy/prod`. Store keys using the same names as environment placeholders, for example `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, `BACKEND_MASTER_KEY`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `OPENAI_API_KEY`, `SMTP_HOST`, `SMTP_USERNAME`, and `SMTP_PASSWORD`.
+- `AWS_SECRET_ID`, `AWS_REGION`: optional AWS Secrets Manager config import. Local `dev` imports `buddystudy/dev` with a `local-secret.` prefix and maps only `OPENAI_API_KEY`, SMTP, and APNs values, so database and Redis values in that secret cannot override local services. Explicit non-empty environment variables override the corresponding AWS values. Use the `dev-aws` profile to import the entire development secret; `prod` imports `buddystudy/prod`. Store APNs as `APNS_AUTH_KEY_BASE64`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`, and `APNS_ENV`. Other keys use the same names as environment placeholders, for example `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, `BACKEND_MASTER_KEY`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `OPENAI_API_KEY`, `SMTP_HOST`, `SMTP_USERNAME`, and `SMTP_PASSWORD`.
   Spring property keys are also supported by Spring Cloud AWS, for example `spring.r2dbc.url`, `spring.r2dbc.username`, `spring.r2dbc.password`, and the separate `spring.flyway.*` keys. Keep runtime R2DBC and Flyway JDBC URLs in their respective formats.
 
 The schedule API may store the user's OpenAI API key encrypted at rest. This changes the privacy model: the backend operator becomes responsible for protecting that key.
