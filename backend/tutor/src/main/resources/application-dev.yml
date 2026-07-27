@@ -49,6 +49,7 @@ buddystudy:
     from: ${SMTP_FROM:${local-secret.SMTP_FROM:${SMTP_USERNAME:${local-secret.SMTP_USERNAME:}}}}
   openai:
     api-key: ${OPENAI_API_KEY:${local-secret.OPENAI_API_KEY:}}
+    grading-response-style: ${OPENAI_GRADING_RESPONSE_STYLE:${local-secret.OPENAI_GRADING_RESPONSE_STYLE:structured-brief-v1}}
   scheduler:
     enabled: true
   streams:

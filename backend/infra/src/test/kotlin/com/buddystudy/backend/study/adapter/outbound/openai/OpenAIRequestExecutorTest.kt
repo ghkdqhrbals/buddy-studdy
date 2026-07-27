@@ -110,7 +110,9 @@ class OpenAIRequestExecutorTest {
             .contains("\"strongPoint\":\"...\"")
             .contains("\"improvement\":\"...\"")
             .contains("\"nextAction\":\"...\"")
-            .contains("summary within 60 characters")
+            .contains("only when it materially helps")
+            .contains("score is at least 95")
+            .contains("use a natural polite tone")
     }
 
     @Test
@@ -149,7 +151,29 @@ class OpenAIRequestExecutorTest {
 
         assertThat(compact.feedback).isEqualTo(values.getValue("summary"))
         assertThat(compact.explanation).isEqualTo(values.getValue("improvement"))
-        assertThat(structured.explanation).contains("**잘한 점**", "**보완할 점**")
-        assertThat(action.explanation).contains("**판단 근거**", "**다음 답변**")
+        assertThat(structured.explanation).isEqualTo(
+            "Sentinel은 HA, Cluster는 샤딩으로 구분했습니다. " +
+                "Sentinel의 감시 역할을 보완하세요. 마스터 선출 과정을 한 문장 추가하세요."
+        )
+        assertThat(action.explanation).isEqualTo(
+            "Sentinel은 HA, Cluster는 샤딩으로 구분했습니다. " +
+                "마스터 선출 과정을 한 문장 추가하세요. Sentinel의 감시 역할을 보완하세요."
+        )
+        assertThat(structured.explanation).doesNotContain("-", "**", "잘한 점", "보완할 점")
+    }
+
+    @Test
+    fun `structured response omits unnecessary coaching and strips markdown labels`() {
+        val response = renderGradingResponse(
+            GradingResponseStyle.STRUCTURED_BRIEF,
+            "ko",
+            "핵심 차이를 정확히 설명했어요.",
+            "- **잘한 점** 역할과 사용 상황을 모두 구분했어요.",
+            "",
+            "",
+        )
+
+        assertThat(response.feedback).isEqualTo("핵심 차이를 정확히 설명했어요.")
+        assertThat(response.explanation).isEqualTo("역할과 사용 상황을 모두 구분했어요.")
     }
 }
