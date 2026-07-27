@@ -44,6 +44,11 @@ class NotificationController(
     suspend fun markRead(@PathVariable id: Long, authentication: Authentication): NotificationMutationResponse =
         notifications.markRead(id, authentication)
 
+    @Operation(summary = "Mark all visible notifications as read")
+    @PostMapping("/read-all")
+    suspend fun markAllRead(authentication: Authentication): NotificationMutationResponse =
+        notifications.markAllRead(authentication)
+
     @Operation(summary = "Delete one notification")
     @DeleteMapping("/{id}")
     @RequirePermission(Permissions.NOTIFICATION_DELETE)

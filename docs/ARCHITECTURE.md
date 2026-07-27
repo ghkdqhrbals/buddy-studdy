@@ -36,7 +36,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
 - `UseCases/`
   - Thin application action boundaries around backend capabilities.
   - `AppUseCases.swift` is the app composition root for use-case construction. `AppState` should replace this container when the backend client changes instead of constructing individual use cases in multiple places.
-  - `Notifications/NotificationsUseCase.swift` centralizes backend notification list, unread count, read, delete, and clear operations.
+  - `Notifications/NotificationsUseCase.swift` centralizes backend notification list, unread count, individual/all read, delete, and clear operations.
   - `Records/RecordsUseCase.swift` centralizes backend record operations such as fetch, grading, draft saving, skipping, deletion, publicity, and full clear.
   - `Settings/SettingsUseCase.swift` centralizes backend settings, model option, API validation, and schedule sync requests.
   - `Stats/StatsUseCase.swift` centralizes backend topic statistics and activity requests.
@@ -114,6 +114,8 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - The primary tab bar exposes Home, Records, Statistics, and Notifications. Settings is a profile-hub destination so account and app preferences share one predictable entry point.
   - Public-question visibility is persisted through `PATCH /api/v1/profile` as `allowPublicQuestions`; it is independent of protected-page access policy.
   - Per-topic question generation exposes its category-scoped in-flight state so only the selected study room renders the inline loading message.
+  - The compact My Studies outline animates child drill-down toward the leading edge and parent navigation toward the trailing edge. Root expand/collapse stays immediate so opening a top-level study does not create an extra vertical sliding effect.
+  - The notification inbox calls `POST /api/v1/notifications/read-all` and updates loaded rows through `NotificationStateStore` only after the backend mutation succeeds.
 
 ## Markdown Message Contract
 
@@ -152,6 +154,7 @@ User answer
 My Studies root
 -> GET /api/v1/studies
 -> app builds parentStudyId adjacency map
+-> compact branch navigation uses opposite horizontal transitions for child and parent movement
 -> recursive tree layout renders circular nodes with restrained level colors
 -> the user can switch orientation, pinch or button zoom, drag nodes, and reset saved positions
 -> selecting a node opens the root-owned question page with that node as the manual topic
@@ -214,6 +217,8 @@ Public community feed
 - Device credentials are used to register a backend device and bootstrap or refresh an access token.
 - Access tokens carry both `user_id` and `device_id`; protected API calls resolve the current principal from those claims and the stored user-device mapping.
 - Google Login links a verified Google subject to the registered device through `users` and `devices.user_id`.
+- New Google and email users receive a cryptographically randomized `Adjective-Noun-####` display name. MySQL stores a generated, normalized key for non-anonymous users and enforces it with `uq_users_display_name_key`; creation retries a new candidate when a concurrent collision is detected.
+- Anonymous installation rows are excluded from that display-name key so their internal `Buddy` placeholder can repeat. Profile edits use the same database constraint and return `DISPLAY_NAME_TAKEN` on conflict.
 - User status is one of `ANONYMOUS`, `ACTIVE`, or `WITHDRAWN`. Account deletion immediately removes the active profile, sign-in mappings, public questions, and related study records, then reconnects the current device to an anonymous user.
 - Public question rows expose only the author's public profile fields: display name, bio, pixel-avatar symbol, and color seed. The iOS app renders the avatar locally and does not upload or display user photos.
 - Question publicity defaults to private unless the signed-in user enables public sharing.

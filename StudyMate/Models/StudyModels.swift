@@ -2506,6 +2506,7 @@ struct AppStrings {
         text("댓글, 좋아요 같은 활동이 생기면 여기에 표시됩니다.", "Thread activity such as comments and likes will appear here.")
     }
     var deleteAllNotifications: String { text("전체삭제", "Clear All") }
+    var markAllNotificationsRead: String { text("모두 읽음", "Mark All as Read") }
     var deleteNotification: String { text("삭제", "Delete") }
     var unreadNotification: String { text("읽지 않음", "Unread") }
     var updates: String { text("업데이트", "Updates") }

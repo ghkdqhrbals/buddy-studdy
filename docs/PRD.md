@@ -54,6 +54,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 17. Study deletion always requires an explicit destructive confirmation.
 18. Manual question generation immediately shows an inline conversation-style loading message for the selected topic until the request completes.
 19. Question, hint, grading feedback, and explanation content supports Markdown for emphasis, lists, and code while remaining backward-compatible with existing plain-text records.
+20. The compact My Studies outline uses directional motion when drilling into a child topic or returning to a parent so hierarchy changes are spatially clear.
 
 ### Records
 
@@ -83,6 +84,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 5. User-facing debugging logs are not provided.
 6. Decorative setting-row icons are omitted so labels and controls remain the primary scan targets.
 7. The primary iOS tab bar contains Home, Records, Statistics, and Notifications. Settings is reached through Profile.
+8. The notification inbox supports marking every visible account/device notification as read in one action, independently from deletion.
 
 ### Identity
 
@@ -90,6 +92,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 2. Repeated registration for the same installation rotates credentials without creating another anonymous user.
 3. Access-token expiry refreshes the token without signing the user out or replacing the device identity.
 4. Administrator user and quota lists contain registered members only; anonymous installation identities are operational device records, not members.
+5. A newly registered email or Google account receives a Reddit-style `Adjective-Noun-####` display name. Registered display names are case-insensitively unique and remain editable subject to the same uniqueness rule.
 
 ### Sync And Push
 

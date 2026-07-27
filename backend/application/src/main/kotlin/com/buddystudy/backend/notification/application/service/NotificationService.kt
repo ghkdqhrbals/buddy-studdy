@@ -68,6 +68,12 @@ class NotificationService(
     }
 
     @Transactional
+    override suspend fun markAllRead(principal: Principal): NotificationMutationResponse {
+        notificationStore.markVisibleRead(visibleUserId(principal), principal.deviceId, Instant.now())
+        return NotificationMutationResponse()
+    }
+
+    @Transactional
     override suspend fun delete(principal: Principal, id: Long): NotificationMutationResponse {
         val notification = owned(id, principal)
         if (notification.deletedAt == null) {

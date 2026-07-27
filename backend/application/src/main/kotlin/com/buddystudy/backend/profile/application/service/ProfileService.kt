@@ -26,6 +26,7 @@ import com.buddystudy.backend.profile.application.port.outbound.ProfilePhotoStor
 import com.buddystudy.backend.profile.application.port.outbound.StoredProfilePhoto
 import com.buddystudy.backend.profile.application.port.outbound.UnavailableProfilePhotoStoragePort
 import org.slf4j.LoggerFactory
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -115,7 +116,18 @@ class ProfileService(
             validated["base"]?.let { user.avatarSymbolName = baseSymbolName(it) }
         }
         user.updatedAt = Instant.now()
-        val saved = users.save(user)
+        val saved = try {
+            users.save(user)
+        } catch (duplicate: DataIntegrityViolationException) {
+            if (command.displayName == null) {
+                throw duplicate
+            }
+            throw ApiException(
+                HttpStatus.CONFLICT,
+                ApiErrorCode.DISPLAY_NAME_TAKEN,
+                "Display name is already in use.",
+            )
+        }
         log.info(
             "profile_update_saved userId={} avatarSymbolName={} avatarColorSeed={}",
             saved.id,

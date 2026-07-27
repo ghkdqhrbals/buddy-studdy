@@ -49,6 +49,14 @@ struct NotificationStateStore {
         unreadCount = max(0, unreadCount - 1)
     }
 
+    mutating func markAllRead(at readAt: Date) {
+        for index in notifications.indices where !notifications[index].isRead {
+            notifications[index].isRead = true
+            notifications[index].readAt = readAt
+        }
+        unreadCount = 0
+    }
+
     mutating func delete(notificationID: String) {
         guard let index = notifications.firstIndex(where: { $0.id == notificationID }) else {
             return

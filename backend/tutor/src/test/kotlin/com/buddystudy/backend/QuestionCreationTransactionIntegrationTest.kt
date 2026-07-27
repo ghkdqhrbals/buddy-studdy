@@ -52,6 +52,7 @@ class QuestionCreationTransactionIntegrationTest : MySqlIntegrationTestSupport()
                 providerId = "question-rollback@example.com",
                 email = "question-rollback@example.com",
                 status = "ACTIVE",
+                displayName = "Question-Rollback-0001",
             ),
         )
         val study = studies.save(

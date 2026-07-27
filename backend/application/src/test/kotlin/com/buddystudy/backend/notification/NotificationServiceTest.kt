@@ -116,6 +116,22 @@ class NotificationServiceTest {
     }
 
     @Test
+    fun `mark all read updates every visible unread notification only`(): Unit = runBlocking {
+        store.save(AppNotificationEntity(eventId = "user", userId = 10, title = "User", body = "Body"))
+        store.save(AppNotificationEntity(eventId = "device", userId = null, deviceId = "dev-1", title = "Device", body = "Body"))
+        store.save(AppNotificationEntity(eventId = "other-user", userId = 11, title = "Other", body = "Body"))
+        store.save(AppNotificationEntity(eventId = "deleted", userId = 10, title = "Deleted", body = "Body", deletedAt = Instant.now()))
+
+        service.markAllRead(principal)
+
+        assertThat(store.rows.single { it.eventId == "user" }.readAt).isNotNull()
+        assertThat(store.rows.single { it.eventId == "device" }.readAt).isNotNull()
+        assertThat(store.rows.single { it.eventId == "other-user" }.readAt).isNull()
+        assertThat(store.rows.single { it.eventId == "deleted" }.readAt).isNull()
+        assertThat(service.unreadCount(principal).unreadCount).isZero()
+    }
+
+    @Test
     fun `mark read and delete mutate only owner notification`(): Unit = runBlocking {
         val notification = store.save(AppNotificationEntity(eventId = "n1", userId = 10, title = "Title", body = "Body"))
 
@@ -197,6 +213,19 @@ class NotificationServiceTest {
             var count = 0
             rows.filter { it.userId == userId && it.deletedAt == null }.forEach {
                 it.deletedAt = deletedAt
+                count += 1
+            }
+            return count
+        }
+
+        override suspend fun markVisibleRead(userId: Long?, deviceId: String, readAt: Instant): Int {
+            var count = 0
+            rows.filter {
+                it.readAt == null &&
+                    it.deletedAt == null &&
+                    ((userId != null && it.userId == userId) || (it.userId == null && it.deviceId == deviceId))
+            }.forEach {
+                it.readAt = readAt
                 count += 1
             }
             return count

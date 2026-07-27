@@ -271,6 +271,8 @@ protocol RemotePushBackendClientProtocol {
 
     func markNotificationRead(registration: RemotePushRegistration, notificationID: String) async throws
 
+    func markAllNotificationsRead(registration: RemotePushRegistration) async throws
+
     func deleteNotification(registration: RemotePushRegistration, notificationID: String) async throws
 
     func deleteAllNotifications(registration: RemotePushRegistration) async throws
@@ -947,6 +949,15 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var request = authenticatedRequest(
             registration: registration,
             url: endpoint("api", "v1", "notifications", notificationID, "read")
+        )
+        request.httpMethod = "POST"
+        _ = try await perform(request)
+    }
+
+    func markAllNotificationsRead(registration: RemotePushRegistration) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "notifications", "read-all")
         )
         request.httpMethod = "POST"
         _ = try await perform(request)

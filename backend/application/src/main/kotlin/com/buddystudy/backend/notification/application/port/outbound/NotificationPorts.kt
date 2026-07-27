@@ -15,6 +15,7 @@ interface NotificationPersistencePort {
     suspend fun countByUserIdAndReadAtIsNullAndDeletedAtIsNull(userId: Long): Long
     suspend fun countVisibleUnread(userId: Long?, deviceId: String): Long
     suspend fun markAllDeleted(userId: Long, deletedAt: Instant): Int
+    suspend fun markVisibleRead(userId: Long?, deviceId: String, readAt: Instant): Int
     suspend fun markVisibleDeleted(userId: Long?, deviceId: String, deletedAt: Instant): Int
     suspend fun markUserThreadRead(userId: Long, threadType: String, threadId: String, readAt: Instant): Int
     suspend fun claimPush(id: Long, now: Instant, staleBefore: Instant): Int

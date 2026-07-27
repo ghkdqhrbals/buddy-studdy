@@ -11,6 +11,7 @@ import com.buddystudy.backend.study.adapter.outbound.persistence.StudyRepository
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
 import com.buddystudy.study.domain.entity.StudyEntity
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -42,12 +43,43 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
                 providerId = "flyway@example.com",
                 email = "flyway@example.com",
                 status = "ACTIVE",
+                displayName = "Flyway-User-0001",
                 openaiApiKeyCipher = "cipher",
             )
         )
 
         assertThat(saved.id).isPositive()
         assertThat(users.findByProviderAndProviderId("EMAIL", "flyway@example.com")?.openaiApiKeyCipher).isEqualTo("cipher")
+    }
+
+    @Test
+    fun `registered display names are unique while anonymous buddy names can repeat`(): Unit = runBlocking {
+        users.save(
+            UserEntity(
+                provider = "EMAIL",
+                providerId = "unique-name-one@example.com",
+                email = "unique-name-one@example.com",
+                status = "ACTIVE",
+                displayName = "Bright-Fox-4321",
+            )
+        )
+
+        assertThatThrownBy {
+            runBlocking {
+                users.save(
+                    UserEntity(
+                        provider = "GOOGLE",
+                        providerId = "unique-name-google",
+                        email = "unique-name-two@example.com",
+                        status = "PENDING_TERMS",
+                        displayName = "bright-fox-4321",
+                    )
+                )
+            }
+        }.hasMessageContaining("uq_users_display_name_key")
+
+        users.save(UserEntity(provider = "ANONYMOUS", providerId = "anonymous-one", displayName = "Buddy"))
+        users.save(UserEntity(provider = "ANONYMOUS", providerId = "anonymous-two", displayName = "Buddy"))
     }
 
     @Test
@@ -73,6 +105,7 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
                 providerId = "coverage-tree@example.com",
                 email = "coverage-tree@example.com",
                 status = "ACTIVE",
+                displayName = "Coverage-Tree-0001",
             )
         )
         val study = studies.save(
@@ -133,6 +166,7 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
                 providerId = "schedule-lease@example.com",
                 email = "schedule-lease@example.com",
                 status = "ACTIVE",
+                displayName = "Schedule-Lease-0001",
             ),
         )
         val study = studies.save(

@@ -19,6 +19,7 @@ import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.auth.application.service.AccountSessionManager
 import com.buddystudy.backend.auth.application.service.AuthenticatedLoginManager
 import com.buddystudy.backend.auth.application.service.LoginService
+import com.buddystudy.backend.auth.application.service.RandomDisplayNameProvider
 import com.buddystudy.backend.auth.application.service.RandomTokenGenerator
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
@@ -55,7 +56,14 @@ class LoginServiceEmailVerificationTest {
         emailSender = emailSender,
         roles = roles,
         googleIdentities = googleIdentities,
-        authenticatedLogins = AuthenticatedLoginManager(users, devices, sessions, roles, tokenProvider),
+        authenticatedLogins = AuthenticatedLoginManager(
+            users,
+            devices,
+            sessions,
+            roles,
+            tokenProvider,
+            RandomDisplayNameProvider(),
+        ),
     )
 
     @Test
@@ -213,7 +221,8 @@ class LoginServiceEmailVerificationTest {
         assertThat(user).isNotNull
         assertThat(user?.status).isEqualTo("PENDING_TERMS")
         assertThat(user?.passwordHash).isEqualTo(sha256("password123"))
-        assertThat(response.profile.displayName).isEqualTo("new")
+        assertThat(response.profile.displayName).matches("[A-Z][a-z]+-[A-Z][a-z]+-\\d{4}")
+        assertThat(response.profile.displayName).isNotEqualTo("new")
         assertThat(emailCodes.consumed).isTrue()
         assertThat(roles.grantRoleCalls).isEqualTo(2)
         assertThat(roles.grantRoleCallsFor(user!!.id, "REGISTERED_USER")).isEqualTo(1)
@@ -249,7 +258,8 @@ class LoginServiceEmailVerificationTest {
         )
 
         assertThat(response.profile.email).isEqualTo("google@example.com")
-        assertThat(response.profile.displayName).isEqualTo("Google User")
+        assertThat(response.profile.displayName).matches("[A-Z][a-z]+-[A-Z][a-z]+-\\d{4}")
+        assertThat(response.profile.displayName).isNotEqualTo("Google User")
         assertThat(users.findByProviderAndProviderId("GOOGLE", "google-provider-id")).isNotNull
     }
 

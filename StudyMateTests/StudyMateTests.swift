@@ -398,6 +398,7 @@ final class StudyMateTests: XCTestCase {
             registration: backendClient.registration,
             notificationID: "notification-1"
         )
+        try await useCase.markAllRead(registration: backendClient.registration)
         try await useCase.deleteNotification(
             registration: backendClient.registration,
             notificationID: "notification-2"
@@ -409,6 +410,7 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(backendClient.fetchNotificationsRequests.first?.offset, 10)
         XCTAssertEqual(backendClient.fetchNotificationUnreadCountCallCount, 1)
         XCTAssertEqual(backendClient.markedNotificationIDs, ["notification-1"])
+        XCTAssertEqual(backendClient.markAllNotificationsReadCallCount, 1)
         XCTAssertEqual(backendClient.deletedNotificationIDs, ["notification-2"])
         XCTAssertEqual(backendClient.deleteAllNotificationsCallCount, 1)
     }
@@ -4744,6 +4746,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var fetchNotificationsRequests: [(limit: Int, offset: Int)] = []
     var fetchNotificationUnreadCountCallCount = 0
     var markedNotificationIDs: [String] = []
+    var markAllNotificationsReadCallCount = 0
     var deletedNotificationIDs: [String] = []
     var deleteAllNotificationsCallCount = 0
     var markNotificationReadErrors: [Error] = []
@@ -4873,6 +4876,10 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
             throw markNotificationReadErrors.removeFirst()
         }
         markedNotificationIDs.append(notificationID)
+    }
+
+    func markAllNotificationsRead(registration: RemotePushRegistration) async throws {
+        markAllNotificationsReadCallCount += 1
     }
 
     func deleteNotification(registration: RemotePushRegistration, notificationID: String) async throws {

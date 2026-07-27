@@ -61,6 +61,11 @@ class AppNotificationRepository(
         Update.update("deleted_at", deletedAt).set("updated_at", deletedAt),
     )
 
+    override suspend fun markVisibleRead(userId: Long?, deviceId: String, readAt: Instant): Int = update(
+        visibleCriteria(userId, deviceId).and("read_at").isNull,
+        Update.update("read_at", readAt).set("updated_at", readAt),
+    )
+
     override suspend fun markVisibleDeleted(userId: Long?, deviceId: String, deletedAt: Instant): Int = update(
         visibleCriteria(userId, deviceId),
         Update.update("deleted_at", deletedAt).set("updated_at", deletedAt),

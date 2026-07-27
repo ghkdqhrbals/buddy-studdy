@@ -22,6 +22,9 @@ class NotificationWebAdapter(
     override suspend fun markRead(id: Long, authentication: Authentication) =
         mutate.markRead(authentication.principalOrThrow(), id)
 
+    override suspend fun markAllRead(authentication: Authentication) =
+        mutate.markAllRead(authentication.principalOrThrow())
+
     override suspend fun delete(id: Long, authentication: Authentication) =
         mutate.delete(authentication.principalOrThrow(), id)
 

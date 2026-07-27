@@ -42,6 +42,12 @@ enum class ApiErrorCode(
         "error.study.pending_question_exists",
         "A pending question already exists for this study.",
     ),
+    DISPLAY_NAME_TAKEN(
+        HttpStatus.CONFLICT,
+        502,
+        "error.profile.display_name_taken",
+        "Display name is already in use.",
+    ),
 
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, 900, "error.internal.server_error", "Internal server error."),
     EMAIL_DELIVERY_FAILED(HttpStatus.SERVICE_UNAVAILABLE, 901, "error.email.delivery_failed", "Email delivery failed."),

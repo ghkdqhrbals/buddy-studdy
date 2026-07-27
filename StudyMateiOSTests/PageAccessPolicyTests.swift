@@ -124,6 +124,43 @@ final class PageAccessPolicyTests: XCTestCase {
     }
 }
 
+final class NotificationStateStoreTests: XCTestCase {
+    @MainActor
+    func testMarkAllReadUpdatesEveryLoadedNotificationAndUnreadCount() {
+        let readAt = Date(timeIntervalSince1970: 100)
+        var store = NotificationStateStore(
+            notifications: [
+                BackendAppNotification(
+                    id: "unread",
+                    type: "QUESTION",
+                    title: "새 질문",
+                    body: "질문 본문",
+                    isRead: false,
+                    createdAt: Date(timeIntervalSince1970: 1)
+                ),
+                BackendAppNotification(
+                    id: "already-read",
+                    type: "QUESTION",
+                    title: "읽은 질문",
+                    body: "질문 본문",
+                    isRead: true,
+                    createdAt: Date(timeIntervalSince1970: 2),
+                    readAt: Date(timeIntervalSince1970: 50)
+                ),
+            ],
+            unreadCount: 1,
+            totalCount: 2
+        )
+
+        store.markAllRead(at: readAt)
+
+        XCTAssertEqual(store.unreadCount, 0)
+        XCTAssertTrue(store.notifications.allSatisfy(\.isRead))
+        XCTAssertEqual(store.notifications[0].readAt, readAt)
+        XCTAssertEqual(store.notifications[1].readAt, Date(timeIntervalSince1970: 50))
+    }
+}
+
 final class StudyRoomStateStoreTests: XCTestCase {
     @MainActor
     func testPendingStudyRecordIsSelectedPerTopicStudy() {

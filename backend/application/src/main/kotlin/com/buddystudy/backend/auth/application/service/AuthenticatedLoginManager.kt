@@ -17,6 +17,7 @@ import com.buddystudy.backend.auth.application.port.outbound.GoogleIdentity
 import com.buddystudy.backend.auth.application.port.outbound.RoleAssignmentPort
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.profile.application.model.toProfile
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
@@ -29,6 +30,7 @@ class AuthenticatedLoginManager(
     private val sessions: AccountSessionManager,
     private val roles: RoleAssignmentPort,
     private val tokenService: TokenProvider,
+    private val displayNames: RandomDisplayNameProvider,
 ) {
     @Transactional
     suspend fun attachGoogleIdentity(
@@ -36,21 +38,12 @@ class AuthenticatedLoginManager(
         identity: GoogleIdentity,
         now: Instant,
     ): GoogleLoginResponse {
-        val displayName = identity.name
-            ?.takeIf(String::isNotBlank)
-            ?: identity.email.substringBefore("@").ifBlank { "Buddy" }
         val user = users.findByProviderAndProviderId("GOOGLE", identity.providerId)
-            ?: users.save(
-                UserEntity(
-                    provider = "GOOGLE",
-                    providerId = identity.providerId,
-                    email = identity.email,
-                    status = "PENDING_TERMS",
-                    displayName = displayName,
-                    avatarColorSeed = "avatar-color-mint",
-                    createdAt = now,
-                    updatedAt = now,
-                ),
+            ?: createUser(
+                provider = "GOOGLE",
+                providerId = identity.providerId,
+                email = identity.email,
+                now = now,
             )
 
         return attachAuthenticatedUser(principal, user, now)
@@ -64,18 +57,12 @@ class AuthenticatedLoginManager(
         now: Instant,
     ): GoogleLoginResponse {
         val user = users.findByEmailAndProvider(email, "EMAIL")
-            ?: users.save(
-                UserEntity(
-                    provider = "EMAIL",
-                    providerId = email,
-                    email = email,
-                    passwordHash = passwordHash,
-                    status = "PENDING_TERMS",
-                    displayName = email.substringBefore("@"),
-                    avatarColorSeed = "avatar-color-mint",
-                    createdAt = now,
-                    updatedAt = now,
-                ),
+            ?: createUser(
+                provider = "EMAIL",
+                providerId = email,
+                email = email,
+                passwordHash = passwordHash,
+                now = now,
             )
         if (user.passwordHash != passwordHash) {
             throw ApiException(
@@ -85,6 +72,41 @@ class AuthenticatedLoginManager(
             )
         }
         return attachAuthenticatedUser(principal, user, now)
+    }
+
+    private suspend fun createUser(
+        provider: String,
+        providerId: String,
+        email: String,
+        passwordHash: String? = null,
+        now: Instant,
+    ): UserEntity {
+        repeat(DISPLAY_NAME_ATTEMPTS) {
+            try {
+                return users.save(
+                    UserEntity(
+                        provider = provider,
+                        providerId = providerId,
+                        email = email,
+                        passwordHash = passwordHash,
+                        status = "PENDING_TERMS",
+                        displayName = displayNames.next(),
+                        avatarColorSeed = "avatar-color-mint",
+                        createdAt = now,
+                        updatedAt = now,
+                    ),
+                )
+            } catch (duplicate: DataIntegrityViolationException) {
+                users.findByProviderAndProviderId(provider, providerId)?.let {
+                    return it
+                }
+            }
+        }
+        throw ApiException(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            ApiErrorCode.SERVER_BUSY,
+            "Could not reserve a unique display name.",
+        )
     }
 
     private suspend fun attachAuthenticatedUser(
@@ -108,5 +130,9 @@ class AuthenticatedLoginManager(
     private fun DeviceEntity.apply(attachment: DeviceAttachment) {
         userId = attachment.userId
         updatedAt = attachment.updatedAt
+    }
+
+    private companion object {
+        const val DISPLAY_NAME_ATTEMPTS = 12
     }
 }

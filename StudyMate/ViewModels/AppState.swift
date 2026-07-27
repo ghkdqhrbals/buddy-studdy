@@ -1628,6 +1628,21 @@ final class AppState: ObservableObject {
         )
     }
 
+    func markAllNotificationsRead() async {
+        await runBackendNotificationMutation(
+            reason: "notifications-read-all",
+            operation: { recoveredRegistration in
+                try await self.notificationsUseCase.markAllRead(registration: recoveredRegistration)
+            },
+            onSuccess: {
+                updateNotificationState { state in
+                    state.markAllRead(at: appClock.now)
+                }
+            },
+            failureMessage: { "알림 모두 읽음 처리 실패: \($0.localizedDescription)" }
+        )
+    }
+
     func deleteNotification(_ notification: BackendAppNotification) async {
         await runBackendNotificationMutation(
             reason: "notification-delete",

@@ -34,6 +34,10 @@ struct NotificationsUseCase {
         )
     }
 
+    func markAllRead(registration: RemotePushRegistration) async throws {
+        try await repository.markAllRead(registration: registration)
+    }
+
     func deleteNotification(
         registration: RemotePushRegistration,
         notificationID: String

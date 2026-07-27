@@ -2086,6 +2086,15 @@ private struct MobileNotificationsView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    Button {
+                        Task {
+                            await appState.markAllNotificationsRead()
+                        }
+                    } label: {
+                        Label(strings.markAllNotificationsRead, systemImage: "checkmark.circle")
+                    }
+                    .disabled(appState.notificationUnreadCount == 0)
+
                     Button(role: .destructive) {
                         Task {
                             await appState.deleteAllNotifications()
@@ -6547,6 +6556,11 @@ private struct MobileHomeStudyOutlineSnapshot {
     }
 }
 
+private enum StudyBranchNavigationDirection {
+    case deeper
+    case parent
+}
+
 private struct MobileHomeStudyOutlineRow: View {
     var snapshot: MobileHomeStudyOutlineSnapshot
     var strings: AppStrings
@@ -6556,6 +6570,7 @@ private struct MobileHomeStudyOutlineRow: View {
     @State private var currentBranchID: Int?
     @State private var isExpanded = true
     @State private var isChangingBranch = false
+    @State private var branchDirection: StudyBranchNavigationDirection = .deeper
     @State private var branchUnlockTask: Task<Void, Never>?
 
     private var currentBranch: BackendStudyRoom {
@@ -6592,50 +6607,57 @@ private struct MobileHomeStudyOutlineRow: View {
             )
 
             if isExpanded {
-                if let searchResults = snapshot.searchResults {
-                    searchResultRows(searchResults)
-                } else {
-                    branchRows
-                }
-
-                Divider()
-                    .padding(.leading, 14)
-
-                Button(action: onOpenTree) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "point.3.connected.trianglepath.dotted")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24)
-
-                        Text(strings.viewFullStudyTree)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
-
-                        Spacer()
-
-                        if hiddenItemCount > 0 {
-                            Text("+\(hiddenItemCount)")
-                                .font(.caption2.weight(.bold))
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
+                Group {
+                    if let searchResults = snapshot.searchResults {
+                        searchResultRows(searchResults)
+                    } else {
+                        Group {
+                            branchRows
                         }
-
-                        Image(systemName: "chevron.right")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.tertiary)
+                        .id(currentBranch.id)
+                        .transition(branchTransition)
                     }
-                    .padding(.horizontal, 14)
-                    .frame(minHeight: 50)
-                    .contentShape(Rectangle())
+
+                    Divider()
+                        .padding(.leading, 14)
+
+                    Button(action: onOpenTree) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "point.3.connected.trianglepath.dotted")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 24)
+
+                            Text(strings.viewFullStudyTree)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+
+                            Spacer()
+
+                            if hiddenItemCount > 0 {
+                                Text("+\(hiddenItemCount)")
+                                    .font(.caption2.weight(.bold))
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Image(systemName: "chevron.right")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 50)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
         .background(
             Color(.secondarySystemBackground),
             in: RoundedRectangle(cornerRadius: 18, style: .continuous)
         )
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color.primary.opacity(0.04), lineWidth: 1)
@@ -6666,8 +6688,8 @@ private struct MobileHomeStudyOutlineRow: View {
                 onOpenChildren: snapshot.children(of: room.id).isEmpty
                     ? nil
                     : {
-                    replaceBranch(with: room.id)
-                }
+                        replaceBranch(with: room.id, direction: .deeper)
+                    }
             )
         }
         .allowsHitTesting(!isChangingBranch)
@@ -6683,7 +6705,7 @@ private struct MobileHomeStudyOutlineRow: View {
                 Button {
                     let parentID = snapshot.parentByID[currentBranch.id]
                         .flatMap(snapshot.room(id:))?.id
-                    replaceBranch(with: parentID)
+                    replaceBranch(with: parentID, direction: .parent)
                 } label: {
                     Label(strings.moveToParentTopic, systemImage: "chevron.left")
                         .font(.caption.weight(.semibold))
@@ -6850,22 +6872,37 @@ private struct MobileHomeStudyOutlineRow: View {
         .accessibilityLabel("\(room.topic), \(strings.openStudyPage)")
     }
 
-    private func replaceBranch(with roomID: Int?) {
+    private var branchTransition: AnyTransition {
+        switch branchDirection {
+        case .deeper:
+            .asymmetric(
+                insertion: .move(edge: .trailing).combined(with: .opacity),
+                removal: .move(edge: .leading).combined(with: .opacity)
+            )
+        case .parent:
+            .asymmetric(
+                insertion: .move(edge: .leading).combined(with: .opacity),
+                removal: .move(edge: .trailing).combined(with: .opacity)
+            )
+        }
+    }
+
+    private func replaceBranch(
+        with roomID: Int?,
+        direction: StudyBranchNavigationDirection
+    ) {
         guard !isChangingBranch else {
             return
         }
 
         branchUnlockTask?.cancel()
         isChangingBranch = true
-        branchUnlockTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(120))
-            guard !Task.isCancelled else {
-                return
-            }
-
+        branchDirection = direction
+        withAnimation(.smooth(duration: 0.28)) {
             currentBranchID = roomID
-
-            try? await Task.sleep(for: .milliseconds(180))
+        }
+        branchUnlockTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(280))
             guard !Task.isCancelled else {
                 return
             }
