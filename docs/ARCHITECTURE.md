@@ -110,14 +110,14 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
 - `Views`
   - `StudyView`: active question and pending question workflow.
   - `HistoryView`: 30-row incremental record/search pagination, detail, and deletion.
-  - `StatisticsView`: shared-axis root-study growth comparison, calculation help, period filtering, a zoomable circular score tree that reuses the My Studies layout and saved node positions, trend charts, and a compatibility projection for older servers.
+  - `StatisticsView`: shared-axis root-study growth comparison, calculation help, period filtering, a pinch-zoomable circular score tree without separate zoom buttons that reuses the My Studies layout and saved node positions, trend charts, and a compatibility projection for older servers.
   - `SettingsView`: macOS settings.
 - `MobileRootView`: iOS tabs, onboarding, profile category hub, settings, notification inbox, and study-tree interaction.
   - The primary tab bar exposes Home, Records, Statistics, and Notifications. Settings is a profile-hub destination so account and app preferences share one predictable entry point.
   - Avatar editing is a dedicated `Avatar` destination. Logout is the final destructive action in the profile hub, while irreversible membership deletion is isolated under `Settings > Account Settings`.
   - Public-question visibility is persisted through `PATCH /api/v1/profile` as `allowPublicQuestions`; it is independent of protected-page access policy.
   - Per-topic question generation exposes its category-scoped in-flight state so only the selected study room renders the inline loading message.
-  - The compact My Studies outline swaps branch data in one view, then reveals only the new row contents with a subtle direction-aware stagger. Row frames, dividers, and the card remain outside the animation, and content never becomes fully transparent or overlaps. Root expand/collapse stays immediate.
+  - The compact My Studies outline swaps branch data in one view, then reveals only the new row contents with a subtle direction-aware stagger. Row frames, dividers, and the card remain outside the animation, and content never becomes fully transparent or overlaps. Root expand/collapse stays immediate, while the full-tree destination requires an intentional long press with pressed feedback.
   - Recommended child topics support multi-selection. iOS filters duplicate normalized names, creates the selected topics in stable order through the existing single-topic use case, and refreshes the study tree once after the batch so topic creation remains separate from question generation.
   - The notification inbox calls `POST /api/v1/notifications/read-all` and updates loaded rows through `NotificationStateStore` only after the backend mutation succeeds.
 

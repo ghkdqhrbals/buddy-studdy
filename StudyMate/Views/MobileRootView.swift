@@ -6622,6 +6622,7 @@ private struct MobileHomeStudyOutlineRow: View {
     @State private var isBranchContentRevealed = true
     @State private var branchTransitionDirection = 1.0
     @State private var branchUnlockTask: Task<Void, Never>?
+    @State private var isPressingFullTree = false
 
     private var currentBranch: BackendStudyRoom {
         currentBranchID.flatMap(snapshot.room(id:)) ?? snapshot.root
@@ -6643,6 +6644,56 @@ private struct MobileHomeStudyOutlineRow: View {
         StudyOutlinePolicy.remainingCount(
             totalTopicCount: snapshot.searchResults?.count ?? currentChildren.count
         )
+    }
+
+    private var fullTreeEntryRow: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "point.3.connected.trianglepath.dotted")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(strings.viewFullStudyTree)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Text(strings.holdToOpen)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer()
+
+            if hiddenItemCount > 0 {
+                Text("+\(hiddenItemCount)")
+                    .font(.caption2.weight(.bold))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+
+            Image(systemName: "hand.tap")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 14)
+        .frame(minHeight: 54)
+        .contentShape(Rectangle())
+        .background(Color.accentColor.opacity(isPressingFullTree ? 0.1 : 0))
+        .scaleEffect(isPressingFullTree ? 0.985 : 1)
+        .animation(.easeOut(duration: 0.12), value: isPressingFullTree)
+        .onLongPressGesture(
+            minimumDuration: 0.5,
+            maximumDistance: 24,
+            pressing: { isPressing in
+                isPressingFullTree = isPressing
+            },
+            perform: onOpenTree
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(strings.holdToOpen)
+        .accessibilityAction(named: Text(strings.viewFullStudyTree), onOpenTree)
     }
 
     var body: some View {
@@ -6670,35 +6721,7 @@ private struct MobileHomeStudyOutlineRow: View {
                     Divider()
                         .padding(.leading, 14)
 
-                    Button(action: onOpenTree) {
-                        HStack(spacing: 12) {
-                            Image(systemName: "point.3.connected.trianglepath.dotted")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 24)
-
-                            Text(strings.viewFullStudyTree)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.secondary)
-
-                            Spacer()
-
-                            if hiddenItemCount > 0 {
-                                Text("+\(hiddenItemCount)")
-                                    .font(.caption2.weight(.bold))
-                                    .monospacedDigit()
-                                    .foregroundStyle(.secondary)
-                            }
-
-                            Image(systemName: "chevron.right")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.tertiary)
-                        }
-                        .padding(.horizontal, 14)
-                        .frame(minHeight: 50)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
+                    fullTreeEntryRow
                 }
             }
         }

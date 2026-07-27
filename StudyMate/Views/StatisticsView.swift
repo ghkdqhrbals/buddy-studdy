@@ -1988,7 +1988,7 @@ private struct StudyGrowthTreeCard: View {
                 height: canvasLayout.size.height * zoomScale
             )
 
-            ZStack(alignment: .bottomTrailing) {
+            ZStack {
                 ScrollView([.horizontal, .vertical]) {
                     ZStack(alignment: .topLeading) {
                         Canvas { context, _ in
@@ -2074,24 +2074,6 @@ private struct StudyGrowthTreeCard: View {
                     )
                 }
                 .simultaneousGesture(zoomGesture)
-
-                HStack(spacing: 2) {
-                    zoomButton(systemImage: "minus.magnifyingglass") {
-                        adjustZoom(by: -0.25)
-                    }
-                    zoomButton(systemImage: "arrow.up.left.and.down.right.magnifyingglass") {
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            zoomMultiplier = 1
-                            zoomStartMultiplier = 1
-                        }
-                    }
-                    zoomButton(systemImage: "plus.magnifyingglass") {
-                        adjustZoom(by: 0.25)
-                    }
-                }
-                .padding(6)
-                .background(.ultraThinMaterial, in: Capsule())
-                .padding(12)
             }
         }
     }
@@ -2126,26 +2108,6 @@ private struct StudyGrowthTreeCard: View {
         )
     }
 
-    private func adjustZoom(by amount: CGFloat) {
-        withAnimation(.easeInOut(duration: 0.18)) {
-            zoomMultiplier = min(max(zoomMultiplier + amount, 0.6), 3)
-            zoomStartMultiplier = zoomMultiplier
-        }
-    }
-
-    private func zoomButton(
-        systemImage: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.caption.weight(.semibold))
-                .frame(width: 30, height: 30)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.primary)
-    }
 }
 
 private struct StudyGrowthScoreTreeNode: View {

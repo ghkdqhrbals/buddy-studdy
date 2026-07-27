@@ -2203,6 +2203,7 @@ struct AppStrings {
         text("+ \(count)개 주제 더 보기", "+ \(count) more topics")
     }
     var viewFullStudyTree: String { text("전체 트리 보기", "View full tree") }
+    var holdToOpen: String { text("길게 눌러 열기", "Press and hold to open") }
     var moveToParentTopic: String { text("상위로", "Up one level") }
     var childTopics: String { text("하위 주제", "Child topics") }
     var studyAction: String { text("학습", "Study") }
