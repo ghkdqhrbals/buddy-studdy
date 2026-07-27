@@ -7679,7 +7679,7 @@ struct CommunityQuestionDetailView: View {
 
                 if let answer = displayQuestion.answer?.trimmingCharacters(in: .whitespacesAndNewlines),
                    !answer.isEmpty {
-                    CommunityAnswerMessage(answer: answer, author: displayQuestion.author)
+                    CommunityAnswerMessage(answer: answer)
                 }
 
                 if let gradingResult = displayQuestion.gradingResult {
@@ -8050,10 +8050,9 @@ private struct CommunityCommentRow: View {
 
 private struct CommunityAnswerMessage: View {
     var answer: String
-    var author: CommunityUserProfile?
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
+        HStack(alignment: .bottom) {
             Spacer(minLength: 24)
 
             MarkdownMessageText(markdown: answer, fillsWidth: false)
@@ -8067,25 +8066,6 @@ private struct CommunityAnswerMessage: View {
                 .frame(maxWidth: 260, alignment: .leading)
                 .background(CommunityMessageBubbleRole.answer.foregroundBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-
-            if let author {
-                VStack(spacing: 3) {
-                    HomeProfileAvatar(
-                        symbolName: author.avatarSymbolName,
-                        displayName: author.displayName,
-                        colorSeed: author.avatarColorSeed,
-                        size: 34
-                    )
-
-                    Text(author.displayName)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                }
-                .frame(width: 42)
-                .accessibilityElement(children: .combine)
-            }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
