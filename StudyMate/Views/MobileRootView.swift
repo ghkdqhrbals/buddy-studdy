@@ -2035,7 +2035,11 @@ private struct MobileNotificationsView: View {
                             await appState.markNotificationRead(notification)
                         }
                     } label: {
-                        MobileNotificationRow(notification: notification, referenceDate: openedAt)
+                        MobileNotificationRow(
+                            notification: notification,
+                            referenceDate: openedAt,
+                            strings: strings
+                        )
                     }
                     .buttonStyle(.plain)
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -3943,6 +3947,7 @@ private struct NotificationStudyListDestination: View {
 private struct MobileNotificationRow: View {
     var notification: BackendAppNotification
     var referenceDate: Date
+    var strings: AppStrings
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -3953,14 +3958,26 @@ private struct MobileNotificationRow: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(notification.title)
+                    Text(
+                        strings.notificationTitle(
+                            type: notification.type,
+                            threadType: notification.threadType,
+                            fallback: notification.title
+                        )
+                    )
                         .font(.body.weight(notification.isRead ? .semibold : .bold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
 
                     Spacer(minLength: 8)
 
-                    Text(StudyDateDisplayFormatter.relativeOrShortDateString(for: notification.createdAt, relativeTo: referenceDate))
+                    Text(
+                        StudyDateDisplayFormatter.relativeOrShortDateString(
+                            for: notification.createdAt,
+                            relativeTo: referenceDate,
+                            language: strings.language
+                        )
+                    )
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

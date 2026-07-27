@@ -387,7 +387,7 @@ internal fun QuestionEntity.toQuestionNotification(study: StudyEntity, appLangua
         eventId = "question-created-$id",
         userId = study.userId,
         type = "STUDY_QUESTION",
-        title = "BuddyStudy",
+        title = questionNotificationTitle(appLanguage),
         body = question,
         threadType = "study_question",
         threadId = id.toString(),
@@ -417,11 +417,14 @@ internal fun QuestionEntity.toQuestionPushRequest(study: StudyEntity, appLanguag
         language = appLanguage,
         sound = study.notificationSound,
         intervalMinutes = study.intervalMinutes,
-        title = "BuddyStudy",
+        title = questionNotificationTitle(appLanguage),
         body = question,
         deepLink = "buddystudy://records/$id",
         createdAt = createdAt,
     )
+
+internal fun questionNotificationTitle(appLanguage: String): String =
+    if (appLanguage.lowercase().startsWith("en")) "New Question" else "새 질문 도착"
 
 internal fun QuestionNotificationMetadata.toJson(): String =
     translateNotificationMetadataSerializationError {

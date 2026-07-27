@@ -4999,7 +4999,7 @@ final class AppState: ObservableObject {
 
         let didSend = await notificationService.showQuestionNotification(
             question: question,
-            title: strings.notificationTitle,
+            title: strings.newQuestionNotificationTitle,
             subtitle: strings.notifications,
             sound: settings.notificationSound,
             language: settings.appLanguage,

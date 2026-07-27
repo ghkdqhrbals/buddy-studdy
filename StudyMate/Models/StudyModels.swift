@@ -661,6 +661,15 @@ enum AppLanguage: String, CaseIterable, Codable, Identifiable {
 
     var id: String { rawValue }
 
+    var locale: Locale {
+        switch self {
+        case .korean:
+            Locale(identifier: "ko_KR")
+        case .english:
+            Locale(identifier: "en_US")
+        }
+    }
+
     var displayName: String {
         switch self {
         case .korean:
@@ -1600,16 +1609,25 @@ struct StudyRecord: Codable, Equatable, Identifiable {
 enum StudyDateDisplayFormatter {
     private static let absoluteThreshold: TimeInterval = 7 * 24 * 60 * 60
 
-    static func relativeOrShortDateString(for date: Date, relativeTo referenceDate: Date = Date()) -> String {
+    static func relativeOrShortDateString(
+        for date: Date,
+        relativeTo referenceDate: Date = Date(),
+        language: AppLanguage? = nil
+    ) -> String {
+        let locale = language?.locale ?? .autoupdatingCurrent
+
         if abs(referenceDate.timeIntervalSince(date)) >= absoluteThreshold {
             let formatter = DateFormatter()
             formatter.calendar = Calendar(identifier: .gregorian)
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.dateFormat = "yy.M.d"
+            formatter.locale = locale
+            formatter.timeZone = .autoupdatingCurrent
+            formatter.dateStyle = .short
+            formatter.timeStyle = .none
             return formatter.string(from: date)
         }
 
         let relativeFormatter = RelativeDateTimeFormatter()
+        relativeFormatter.locale = locale
         relativeFormatter.unitsStyle = .short
         return relativeFormatter.localizedString(for: date, relativeTo: referenceDate)
     }
@@ -2244,7 +2262,23 @@ struct AppStrings {
     }
 
     var invalidAPIKey: String { text("API 키가 잘못되었습니다", "Invalid API key") }
-    var notificationTitle: String { "BuddyStudy" }
+    var newQuestionNotificationTitle: String { text("새 질문 도착", "New Question") }
+    var commentNotificationTitle: String { text("댓글", "Comment") }
+    func notificationTitle(type: String, threadType: String?, fallback: String) -> String {
+        let normalizedType = type.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let normalizedThreadType = threadType?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let normalizedFallback = fallback.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        if normalizedType == "STUDY_QUESTION" || normalizedThreadType == "study_question" {
+            return newQuestionNotificationTitle
+        }
+        if normalizedFallback.contains("댓글") || normalizedFallback.contains("comment") {
+            return commentNotificationTitle
+        }
+        return fallback
+    }
     var cloudQuestionPushBody: String {
         text("새 학습 질문이 도착했습니다. 탭해서 이어가세요.", "A new study question is ready. Tap to continue.")
     }

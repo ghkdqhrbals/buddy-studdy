@@ -808,14 +808,46 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(StudyNotificationPayload.backendRecordID(from: recordIDPayload), "record-999")
     }
 
-    func testStudyDateDisplayFormatterUsesShortDateAfterSevenDays() {
+    func testStudyDateDisplayFormatterUsesAppLanguageForShortDateAfterSevenDays() {
         let formatter = ISO8601DateFormatter()
         let referenceDate = formatter.date(from: "2026-06-08T00:00:00Z")!
         let oldDate = formatter.date(from: "2026-06-01T00:00:00Z")!
 
+        let korean = StudyDateDisplayFormatter.relativeOrShortDateString(
+            for: oldDate,
+            relativeTo: referenceDate,
+            language: .korean
+        )
+        let english = StudyDateDisplayFormatter.relativeOrShortDateString(
+            for: oldDate,
+            relativeTo: referenceDate,
+            language: .english
+        )
+
+        XCTAssertNotEqual(korean, english)
+        XCTAssertTrue(korean.contains("6"))
+        XCTAssertTrue(english.contains("6"))
+    }
+
+    func testNotificationTitlesAreLocalizedByNotificationKind() {
+        let korean = AppStrings(language: .korean)
+        let english = AppStrings(language: .english)
+
         XCTAssertEqual(
-            StudyDateDisplayFormatter.relativeOrShortDateString(for: oldDate, relativeTo: referenceDate),
-            "26.6.1"
+            korean.notificationTitle(type: "STUDY_QUESTION", threadType: "study_question", fallback: "BuddyStudy"),
+            "새 질문 도착"
+        )
+        XCTAssertEqual(
+            english.notificationTitle(type: "STUDY_QUESTION", threadType: "study_question", fallback: "BuddyStudy"),
+            "New Question"
+        )
+        XCTAssertEqual(
+            korean.notificationTitle(type: "THREAD_ACTIVITY", threadType: "question", fallback: "새 댓글"),
+            "댓글"
+        )
+        XCTAssertEqual(
+            english.notificationTitle(type: "THREAD_ACTIVITY", threadType: "question", fallback: "New comment"),
+            "Comment"
         )
     }
 

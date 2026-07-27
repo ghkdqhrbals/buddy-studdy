@@ -127,7 +127,7 @@ class CommunityService(
             ownerUserId = question.userId,
             actorUserId = principal.userId,
             eventId = "question-comment-${saved.id}",
-            title = "새 댓글",
+            title = localizedCommentTitle(question.userId),
             body = saved.body,
             questionId = id,
             shouldPush = true,
@@ -288,6 +288,11 @@ class CommunityService(
                 shouldPush = shouldPush,
             )
         )
+    }
+
+    private suspend fun localizedCommentTitle(ownerUserId: Long?): String {
+        val language = ownerUserId?.let { users.findById(it)?.appLanguage }.orEmpty()
+        return if (language.lowercase().startsWith("en")) "Comment" else "댓글"
     }
 
 }

@@ -121,6 +121,7 @@ class CommunityServiceTest {
         assertThat(notification.threadId).isEqualTo("100")
         assertThat(notification.deepLink).isEqualTo("buddystudy://public/questions/100")
         assertThat(notification.shouldPush).isTrue()
+        assertThat(notification.title).isEqualTo("댓글")
     }
 
     @Test
