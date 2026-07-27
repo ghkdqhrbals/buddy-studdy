@@ -891,6 +891,35 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testEveryStudyContextMenuCanOpenTheFullTree() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+        let rowStart = try XCTUnwrap(
+            content.range(of: "private func myStudyCategoryRow")
+        )
+        let rowEnd = try XCTUnwrap(
+            content.range(
+                of: "private var communityQuestionSection",
+                range: rowStart.upperBound..<content.endIndex
+            )
+        )
+        let row = String(content[rowStart.lowerBound..<rowEnd.lowerBound])
+        let fullTreeActionCount = row.components(
+            separatedBy: "strings.viewFullStudyTree"
+        ).count - 1
+
+        XCTAssertEqual(
+            fullTreeActionCount,
+            2,
+            "Both tree-backed and childless fallback study cards must expose View Full Tree so the user can add a first child topic."
+        )
+        XCTAssertFalse(
+            row.contains("if !snapshot.children(of: snapshot.root.id).isEmpty"),
+            "View Full Tree must not disappear when a root has no child topics."
+        )
+    }
+
     func testChildTopicRecommendationsSupportOrderedBatchSelection() throws {
         let root = try repositoryRoot()
         let viewFile = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")

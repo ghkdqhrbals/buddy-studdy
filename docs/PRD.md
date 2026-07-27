@@ -56,7 +56,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 19. Study deletion always requires an explicit destructive confirmation.
 20. Manual question generation immediately shows an inline conversation-style loading message for the selected topic until the request completes.
 21. Question, hint, grading feedback, and explanation content supports Markdown for emphasis, lists, and code while remaining backward-compatible with existing plain-text records.
-22. The compact My Studies outline keeps the card, row geometry, and dividers fixed while newly selected branch contents settle in with a subtle direction-aware stagger; it does not blink or overlay old and new rows. Long-pressing a study card presents Edit, View Full Tree, and Delete actions; View Full Tree is not duplicated as an inline list row and is omitted when the root has no child topics. Roots without children also omit the empty child-topic section.
+22. The compact My Studies outline keeps the card, row geometry, and dividers fixed while newly selected branch contents settle in with a subtle direction-aware stagger; it does not blink or overlay old and new rows. Long-pressing every study card presents Edit, View Full Tree, and Delete actions; View Full Tree is not duplicated as an inline list row and remains available for childless roots so the user can enter the tree and add the first child topic. Roots without children omit only the empty child-topic section.
 
 ### Records
 

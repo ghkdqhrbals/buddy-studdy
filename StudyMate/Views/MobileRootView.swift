@@ -1609,15 +1609,13 @@ private struct MobileHomeView: View {
                         Label(strings.edit, systemImage: "pencil")
                     }
 
-                    if !snapshot.children(of: snapshot.root.id).isEmpty {
-                        Button {
-                            appState.openStudyTree(category.id)
-                        } label: {
-                            Label(
-                                strings.viewFullStudyTree,
-                                systemImage: "point.3.connected.trianglepath.dotted"
-                            )
-                        }
+                    Button {
+                        appState.openStudyTree(category.id)
+                    } label: {
+                        Label(
+                            strings.viewFullStudyTree,
+                            systemImage: "point.3.connected.trianglepath.dotted"
+                        )
                     }
 
                     Button(role: .destructive) {
@@ -1642,6 +1640,15 @@ private struct MobileHomeView: View {
                         editingStudyCategory = category
                     } label: {
                         Label(strings.edit, systemImage: "pencil")
+                    }
+
+                    Button {
+                        appState.openStudyTree(category.id)
+                    } label: {
+                        Label(
+                            strings.viewFullStudyTree,
+                            systemImage: "point.3.connected.trianglepath.dotted"
+                        )
                     }
 
                     Button(role: .destructive) {
