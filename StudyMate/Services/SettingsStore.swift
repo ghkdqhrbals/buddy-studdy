@@ -13,6 +13,7 @@ final class SettingsStore {
         static let gradingResult = "gradingResult"
         static let lastAnswer = "lastAnswer"
         static let answerDraftsByRecordID = "answerDraftsByRecordID"
+        static let pendingQuestionGenerationProcess = "pendingQuestionGenerationProcess"
         static let isRunning = "isRunning"
         static let hasExplicitRunningPreference = "hasExplicitRunningPreference"
         static let apiKey = "openAIAPIKey"
@@ -183,6 +184,17 @@ final class SettingsStore {
 
     func saveQuestion(_ question: QuestionItem?) {
         saveOptional(question, forKey: Keys.currentQuestion)
+    }
+
+    func loadPendingQuestionGenerationProcess() -> PendingQuestionGenerationProcess? {
+        guard let data = defaults.data(forKey: Keys.pendingQuestionGenerationProcess) else {
+            return nil
+        }
+        return try? decoder.decode(PendingQuestionGenerationProcess.self, from: data)
+    }
+
+    func savePendingQuestionGenerationProcess(_ process: PendingQuestionGenerationProcess?) {
+        saveOptional(process, forKey: Keys.pendingQuestionGenerationProcess)
     }
 
     func loadQuestionHistory() -> [QuestionItem] {

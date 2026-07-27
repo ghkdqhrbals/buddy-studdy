@@ -33,6 +33,7 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import jakarta.validation.Valid
@@ -315,13 +316,21 @@ class StudyController(
         authentication: Authentication,
     ) = study.studyGrowth(startAt, endAt, authentication)
 
-    @Operation(summary = "Create a new study question", description = "Creates one new question for the requested study room. The backend enforces the per-study pending-question limit and uses the user's stored OpenAI settings.")
+    @Operation(summary = "Request a new study question", description = "Queues question generation and immediately returns a correlation id for polling.")
     @PostMapping("/studies/{studyId}/questions")
     suspend fun createQuestion(
         @Parameter(description = "Study room id.", example = "42")
         @PathVariable studyId: Long,
+        @RequestHeader("Idempotency-Key") idempotencyKey: String,
         authentication: Authentication,
-    ): StudyRecordResponse = study.createQuestion(studyId, authentication)
+    ) = study.createQuestion(studyId, idempotencyKey, authentication)
+
+    @Operation(summary = "Fetch question generation status")
+    @GetMapping("/question-processes/{correlationId}")
+    suspend fun questionProcess(
+        @PathVariable correlationId: String,
+        authentication: Authentication,
+    ) = study.questionProcess(correlationId, authentication)
 
     @Operation(
         summary = "Fetch my monthly question quota",

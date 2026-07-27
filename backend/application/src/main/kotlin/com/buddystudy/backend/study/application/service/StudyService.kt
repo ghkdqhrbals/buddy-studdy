@@ -1,170 +1,45 @@
 package com.buddystudy.backend.study.application.service
 
 import com.buddystudy.backend.auth.Principal
-import com.buddystudy.backend.auth.application.permission.Permissions
-import com.buddystudy.backend.auth.application.permission.RequirePermission
-import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
-import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.study.application.content.MarkdownContentPolicy
 import com.buddystudy.backend.study.application.content.QuestionNotificationContentPolicy
-import com.buddystudy.backend.study.application.model.GeneratedQuestionWithEmbedding
 import com.buddystudy.backend.study.application.model.RecordsPageResponse
 import com.buddystudy.backend.study.application.model.StudyRecordResponse
 import com.buddystudy.backend.study.application.model.toRecordResponse
-import com.buddystudy.study.domain.StudyRoom
-import com.buddystudy.study.domain.StudyRoomPendingLimitExceeded
 import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.study.domain.localizedFor
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.StudyEntity
 import com.buddystudy.backend.study.application.port.inbound.BrowseRecordsUseCase
 import com.buddystudy.backend.study.application.port.inbound.AnswerGradingWriteUseCase
-import com.buddystudy.backend.study.application.port.inbound.QuestionCreationWriteUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudyRecordWriteUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudyUseCase
 import com.buddystudy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSelection
-import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingCandidate
-import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
-import com.buddystudy.backend.study.application.port.outbound.StudyPort
-import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
-import com.buddystudy.backend.study.application.prompt.QuestionDiversityPolicy
-import com.buddystudy.backend.study.application.prompt.QuestionCoverageGuide
-import com.buddystudy.backend.study.application.prompt.QuestionPromptProvider
-import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import java.time.Instant
 import kotlin.reflect.jvm.internal.KotlinReflectionInternalError
 
 @Service
 class StudyService(
-    private val properties: BuddyStudyProperties,
-    private val studies: StudyPort,
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
-    @param:Qualifier("openAIClient")
-    private val openAI: OpenAIPort,
-    private val questionEmbeddings: QuestionEmbeddingPort,
-    private val questionCoverage: QuestionCoveragePort,
-    private val users: UserPort,
-    private val questionKeys: OpenAIQuestionKeyProvider,
-    private val questionPrompts: QuestionPromptProvider,
-    private val questionDiversity: QuestionDiversityPolicy,
-    private val questionWriter: QuestionCreationWriteUseCase,
     private val recordWriter: StudyRecordWriteUseCase,
     private val gradingWriter: AnswerGradingWriteUseCase,
     private val outboxPublisher: PublishOutboxUseCase,
-    private val questionSimilarity: QuestionSimilarityPolicy = QuestionSimilarityPolicy(),
 ) : StudyUseCase, BrowseRecordsUseCase {
-    @RequirePermission(Permissions.STUDY_CREATE)
-    override suspend fun createQuestion(principal: Principal, studyId: Long): StudyRecordResponse =
-        createQuestionAsync(principal, studyId)
-
-    private suspend fun createQuestionAsync(principal: Principal, studyId: Long): StudyRecordResponse = coroutineScope {
-        val studyDeferred = async { studies.findByIdAndUserId(studyId, principal.userId) }
-        val userDeferred = async { users.findById(principal.userId) }
-
-        val requestedStudy = studyDeferred.await()
-            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
-        val userStudies = studies.findAllByUserId(principal.userId)
-        val rootStudy = StudyTreeSelector.rootFor(requestedStudy, userStudies)
-        val user = userDeferred.await()
-        val appLanguage = QuestionLanguage.normalize(user?.appLanguage)
-
-        val pendingCountDeferred = async {
-            questions.countPendingForStudyAndLanguage(requestedStudy.id, appLanguage)
-        }
-        val recentQuestionsDeferred = async {
-            recentQuestions(principal, requestedStudy.id, requestedStudy.topic, appLanguage)
-        }
-        val room = StudyRoom.of(
-            requestedStudy.toStudyRoomSchedule(
-                appLanguage = appLanguage,
-                questionStudyId = requestedStudy.id,
-                questionSettings = rootStudy,
-            ),
-            pendingCountDeferred.await(),
-        )
-        try {
-            room.canCreateQuestion(properties.scheduler.maxPendingPerStudy)
-        } catch (error: StudyRoomPendingLimitExceeded) {
-            throw ApiException(
-                HttpStatus.CONFLICT,
-                ApiErrorCode.STUDY_PENDING_QUESTION_EXISTS,
-                "A pending question already exists for this study.",
-            )
-        }
-        val questionKey = questionKeys.resolveForQuestionGeneration(user)
-        try {
-            val recentEmbeddingsDeferred = async {
-                questionEmbeddings.findRecentByStudyIdAndTopic(requestedStudy.id, requestedStudy.topic, RECENT_EMBEDDING_LIMIT)
-            }
-            val coverageSelectionDeferred = async {
-                selectCoverage(
-                    apiKey = questionKey.apiKey,
-                    topicStudy = requestedStudy,
-                    questionSettings = rootStudy,
-                )
-            }
-            val generatedQuestionDeferred = async {
-                val coverageSelection = coverageSelectionDeferred.await()
-                generateDistinctQuestion(
-                    apiKey = questionKey.apiKey,
-                    model = room.openaiModel.ifBlank { properties.openai.model },
-                    topic = room.topic,
-                    level = room.difficultyLevel,
-                    language = room.appLanguage,
-                    customPrompt = room.customPrompt,
-                    studyId = requestedStudy.id,
-                    userId = principal.userId,
-                    recentQuestions = recentQuestionsDeferred.await(),
-                    recentEmbeddings = recentEmbeddingsDeferred.await(),
-                    coverageSelection = coverageSelection,
-                )
-            }
-
-            val generated = generatedQuestionDeferred.await()
-            val coverageSelection = coverageSelectionDeferred.await()
-            val now = Instant.now()
-
-            val questionDeferred = async {
-                val question = room.createQuestion(generated.question, generated.hint, source = "manual", now = now)
-                    .toQuestionEntity()
-                    .applyRubric(generated.generated.rubric)
-                    .applyCoverage(coverageSelection)
-                val result = questionWriter.saveQuestionWithOutboxes(
-                    embedding = generated.embedding,
-                    coverage = coverageSelection,
-                    questionKey = questionKey,
-                    question = question,
-                    now = now,
-                )
-                outboxPublisher.publishNow(result.outboxes)
-                result.question
-            }
-
-            val question = questionDeferred.await()
-            question.toStudyRecord().toProjection().toRecordResponse()
-        } catch (error: Exception) {
-            questionKeys.releaseQuestionReservation(questionKey)
-            throw error
-        }
-    }
-
     override suspend fun answer(principal: Principal, recordId: Long, answer: String, grade: Boolean): StudyRecordResponse {
         val saved = if (grade) {
             val queued = gradingWriter.queue(
@@ -257,124 +132,6 @@ class StudyService(
         return saved.toStudyRecord(questionStats.findById(saved.id)).toProjection().toRecordResponse()
     }
 
-    private suspend fun recentQuestions(
-        principal: Principal,
-        rootStudyId: Long,
-        topic: String,
-        language: String,
-    ): List<String> {
-        val sameStudy = questions.findRecentQuestionTextsByStudyIdAndTopicAndLanguage(
-            rootStudyId,
-            topic,
-            language,
-            PageRequest.of(0, 30),
-        )
-        val sameTopic = questions.findRecentQuestionTextsByUserIdAndTopicAndLanguage(
-            principal.userId,
-            topic,
-            language,
-            PageRequest.of(0, 30),
-        )
-        return (sameStudy + sameTopic)
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .distinctBy { it.normalizedQuestionKey() }
-            .take(40)
-    }
-
-    private suspend fun generateDistinctQuestion(
-        apiKey: String,
-        model: String,
-        topic: String,
-        level: Int,
-        language: String,
-        customPrompt: String,
-        studyId: Long,
-        userId: Long,
-        recentQuestions: List<String>,
-        recentEmbeddings: List<QuestionEmbeddingCandidate>,
-        coverageSelection: QuestionCoverageSelection?,
-    ): GeneratedQuestionWithEmbedding {
-        val maxAttempts = properties.openai.questionSimilarityMaxAttempts.coerceAtLeast(1)
-        val rejectedQuestions = mutableListOf<String>()
-        repeat(maxAttempts) { attempt ->
-            val history = recentQuestions + rejectedQuestions
-            val prompt = questionPrompts.buildQuestionGenerationPrompt(
-                topic = topic,
-                level = level,
-                language = language,
-                customPrompt = customPrompt,
-                recentQuestions = history,
-                diversity = questionDiversity.choose(topic, studyId, userId, history),
-                coverage = coverageSelection?.let {
-                    QuestionCoverageGuide(
-                        conceptName = it.conceptName,
-                        angleName = it.angleName,
-                        conceptPath = it.conceptPath,
-                    )
-                },
-            )
-            val generated = openAI.generateQuestion(apiKey, model, prompt)
-            if (!QuestionLanguage.matches(generated.question, language)) {
-                rejectedQuestions += generated.question
-                if (attempt == maxAttempts - 1) {
-                    throw ApiException(
-                        HttpStatus.UNPROCESSABLE_ENTITY,
-                        ApiErrorCode.VALIDATION_ERROR,
-                        "Generated question did not match the requested language.",
-                    )
-                }
-                return@repeat
-            }
-            val embedding = openAI.embedText(apiKey, generated.question)
-            val similar = questionSimilarity.findSimilar(
-                embedding = embedding,
-                candidates = recentEmbeddings,
-                threshold = properties.openai.questionSimilarityThreshold,
-            )
-            if (similar == null) {
-                return GeneratedQuestionWithEmbedding(generated, embedding)
-            }
-            rejectedQuestions += generated.question
-            if (attempt == maxAttempts - 1) {
-                throw ApiException(
-                    HttpStatus.CONFLICT,
-                    ApiErrorCode.VALIDATION_ERROR,
-                    "Generated question is too similar to a previous question.",
-                )
-            }
-        }
-        error("unreachable")
-    }
-
-    private suspend fun selectCoverage(
-        apiKey: String,
-        topicStudy: StudyEntity,
-        questionSettings: StudyEntity,
-    ): QuestionCoverageSelection? {
-        questionCoverage.selectNext(topicStudy.id)?.let { return it }
-        val blueprint = openAI.generateQuestionCoverageBlueprint(
-            apiKey = apiKey,
-            model = questionSettings.openaiModel.ifBlank { properties.openai.model },
-            topic = topicStudy.topic,
-            level = topicStudy.difficultyLevel,
-            customPrompt = questionSettings.customPrompt,
-        ).map { concept ->
-            QuestionCoveragePort.CoverageConceptBlueprint(
-                key = concept.key,
-                name = concept.name,
-                angles = concept.angles.map { QuestionCoveragePort.CoverageAngleBlueprint(it.key, it.name) },
-                children = concept.children.toCoverageBlueprints(),
-            )
-        }
-        questionCoverage.ensureCoverage(
-            topicStudy.id,
-            topicStudy.topic,
-            blueprint.ifEmpty { defaultCoverageBlueprint(topicStudy.topic) },
-        )
-        return questionCoverage.selectNext(topicStudy.id)
-    }
-
     private suspend fun List<QuestionEntity>.toRecordResponses(): List<StudyRecordResponse> {
         if (isEmpty()) return emptyList()
         val statsByQuestionId = questionStats.findAllByIds(map { it.id }).associateBy { it.questionId }
@@ -417,13 +174,6 @@ internal fun List<OpenAIPort.QuestionCoverageConcept>.toCoverageBlueprints(): Li
             children = concept.children.toCoverageBlueprints(),
         )
     }
-
-private const val RECENT_EMBEDDING_LIMIT = 200
-
-private suspend fun String.normalizedQuestionKey(): String =
-    lowercase()
-        .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
-        .trim()
 
 internal fun QuestionEntity.toQuestionNotification(study: StudyEntity, appLanguage: String): NotificationRequestCommand =
     NotificationRequestCommand(

@@ -6,13 +6,31 @@ import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.StudyRecordResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
 import com.buddystudy.backend.study.application.model.StudyTopicSuggestionsResponse
+import com.buddystudy.backend.study.application.model.QuestionGenerationAcceptedResponse
+import com.buddystudy.backend.study.application.model.QuestionGenerationProcessResponse
+import com.buddystudy.backend.study.application.model.QuestionGenerationRequestedEvent
 
 interface StudyUseCase {
-    suspend fun createQuestion(principal: Principal, studyId: Long): StudyRecordResponse
     suspend fun answer(principal: Principal, recordId: Long, answer: String, grade: Boolean): StudyRecordResponse
     suspend fun skip(principal: Principal, id: Long): StudyRecordResponse
     suspend fun delete(principal: Principal, id: Long)
     suspend fun publicity(principal: Principal, id: Long, isPublic: Boolean): StudyRecordResponse
+}
+
+interface RequestQuestionGenerationUseCase {
+    suspend fun request(
+        principal: Principal,
+        studyId: Long,
+        idempotencyKey: String,
+    ): QuestionGenerationAcceptedResponse
+}
+
+interface GetQuestionGenerationProcessUseCase {
+    suspend fun get(principal: Principal, correlationId: String): QuestionGenerationProcessResponse
+}
+
+interface ProcessQuestionGenerationUseCase {
+    suspend fun process(event: QuestionGenerationRequestedEvent)
 }
 
 interface BrowseRecordsUseCase {

@@ -37,4 +37,12 @@ struct SettingsStoreCurrentStudySessionRepository: CurrentStudySessionRepository
     func hasExplicitRunningPreference() -> Bool {
         settingsStore.hasExplicitRunningPreference()
     }
+
+    func loadPendingQuestionGenerationProcess() -> PendingQuestionGenerationProcess? {
+        settingsStore.loadPendingQuestionGenerationProcess()
+    }
+
+    func savePendingQuestionGenerationProcess(_ process: PendingQuestionGenerationProcess?) {
+        settingsStore.savePendingQuestionGenerationProcess(process)
+    }
 }

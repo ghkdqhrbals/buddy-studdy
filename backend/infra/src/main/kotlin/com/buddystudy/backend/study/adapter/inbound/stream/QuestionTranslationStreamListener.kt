@@ -7,6 +7,7 @@ import com.buddystudy.backend.common.adapter.stream.StreamOptions
 import com.buddystudy.backend.common.adapter.stream.StreamScheduler
 import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
 import com.buddystudy.backend.study.application.port.inbound.ProcessQuestionTranslationUseCase
+import com.buddystudy.backend.study.application.service.QuestionTranslationExecutionWriteService
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Component
 
@@ -17,7 +18,7 @@ class QuestionTranslationStreamListener(
 ) {
     @StreamListener(
         topic = RedisStreamTopic.QUESTION_GENERATED,
-        group = GROUP,
+        group = QuestionTranslationExecutionWriteService.CONSUMER_GROUP,
         consumer = CONSUMER,
         eventType = EVENT_TYPE,
         payloadType = QuestionGeneratedEvent::class,
@@ -34,14 +35,14 @@ class QuestionTranslationStreamListener(
 
     @StreamScheduler(
         topic = RedisStreamTopic.QUESTION_GENERATED,
-        group = GROUP,
+        group = QuestionTranslationExecutionWriteService.CONSUMER_GROUP,
         consumer = RECOVERY_CONSUMER,
         eventType = EVENT_TYPE,
         payloadType = QuestionGeneratedEvent::class,
         batchSize = 10,
-        minIdleTimeMs = 300_000,
-        fixedDelayMs = 30_000,
-        initialDelayMs = 30_000,
+        minIdleTimeMs = QuestionTranslationExecutionWriteService.RECOVERY_MIN_IDLE_TIME_MILLIS,
+        fixedDelayMs = 10_000,
+        initialDelayMs = 10_000,
         enabledProperty = "buddystudy.streams.enabled",
         options = StreamOptions.ACK,
     )
@@ -50,7 +51,6 @@ class QuestionTranslationStreamListener(
     }
 
     private companion object {
-        const val GROUP = "bs-backend-question-translation"
         const val CONSUMER = "buddystudy-question-translation"
         const val RECOVERY_CONSUMER = "buddystudy-question-translation-recovery"
         const val EVENT_TYPE = "QUESTION_GENERATED"

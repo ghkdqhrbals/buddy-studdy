@@ -21,6 +21,7 @@ class RedisDomainEventPublisher(
 
     private fun ClaimedRedisOutboxEvent.topic(): RedisStreamTopic =
         when (eventType) {
+            RedisOutboxEventType.QUESTION_GENERATION_REQUESTED -> RedisStreamTopic.QUESTION_GENERATION
             RedisOutboxEventType.QUESTION_GENERATED -> RedisStreamTopic.QUESTION_GENERATED
             else -> RedisStreamTopic.DOMAIN_EVENTS
         }

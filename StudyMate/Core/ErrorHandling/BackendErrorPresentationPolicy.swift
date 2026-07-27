@@ -326,6 +326,10 @@ enum BackendErrorPresentationPolicy {
         isCancellationLike(error)
     }
 
+    static func isPermanentBackendOperationError(_ error: Error) -> Bool {
+        error is RemotePushBackendError || error is DecodingError
+    }
+
     static func diagnosticDescription(for error: Error) -> String {
         switch error {
         case DecodingError.keyNotFound(let key, let context):

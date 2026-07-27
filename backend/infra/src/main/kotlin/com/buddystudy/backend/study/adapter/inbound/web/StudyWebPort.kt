@@ -15,6 +15,8 @@ import com.buddystudy.backend.study.application.model.StudyRecordResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
 import com.buddystudy.backend.study.application.model.QuestionQuotaResponse
 import com.buddystudy.backend.study.application.model.AnswerGradingProgressResponse
+import com.buddystudy.backend.study.application.model.QuestionGenerationAcceptedResponse
+import com.buddystudy.backend.study.application.model.QuestionGenerationProcessResponse
 import kotlinx.coroutines.flow.Flow
 import com.buddystudy.backend.study.application.model.StudyTopicSuggestionsResponse
 import org.springframework.http.ResponseEntity
@@ -45,7 +47,15 @@ interface StudyWebPort {
     suspend fun stats(limit: Int, offset: Int, query: StatsQuery, authentication: Authentication): StatsResponse
     suspend fun statsActivity(startAt: Instant?, endAt: Instant?, authentication: Authentication): StatsActivityResponse
     suspend fun studyGrowth(startAt: Instant?, endAt: Instant?, authentication: Authentication): StudyGrowthResponse
-    suspend fun createQuestion(studyId: Long, authentication: Authentication): StudyRecordResponse
+    suspend fun createQuestion(
+        studyId: Long,
+        idempotencyKey: String,
+        authentication: Authentication,
+    ): ResponseEntity<QuestionGenerationAcceptedResponse>
+    suspend fun questionProcess(
+        correlationId: String,
+        authentication: Authentication,
+    ): QuestionGenerationProcessResponse
     suspend fun questionQuota(authentication: Authentication): QuestionQuotaResponse
     suspend fun createStudy(body: CreateStudyRequest, authentication: Authentication): StudyRoomResponse
     suspend fun createStudyTopic(

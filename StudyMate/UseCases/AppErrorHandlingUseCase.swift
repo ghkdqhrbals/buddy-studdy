@@ -29,6 +29,10 @@ struct AppErrorHandlingUseCase {
         BackendErrorPresentationPolicy.shouldRefreshBackendAccessToken(after: error)
     }
 
+    func isPermanentBackendOperationError(_ error: Error) -> Bool {
+        BackendErrorPresentationPolicy.isPermanentBackendOperationError(error)
+    }
+
     func diagnosticDescription(for error: Error) -> String {
         BackendErrorPresentationPolicy.diagnosticDescription(for: error)
     }

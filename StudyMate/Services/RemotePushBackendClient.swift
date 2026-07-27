@@ -467,7 +467,16 @@ protocol RemotePushBackendClientProtocol {
         commentID: String
     ) async throws
 
-    func createQuestion(registration: RemotePushRegistration, studyID: Int) async throws -> StudyRecord
+    func createQuestion(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        idempotencyKey: String
+    ) async throws -> QuestionGenerationAccepted
+
+    func fetchQuestionGenerationProcess(
+        registration: RemotePushRegistration,
+        correlationID: String
+    ) async throws -> QuestionGenerationProcess
 
     func gradeRecord(
         registration: RemotePushRegistration,
@@ -1451,14 +1460,32 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         _ = try await perform(request)
     }
 
-    func createQuestion(registration: RemotePushRegistration, studyID: Int) async throws -> StudyRecord {
+    func createQuestion(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        idempotencyKey: String
+    ) async throws -> QuestionGenerationAccepted {
         var request = authenticatedRequest(
             registration: registration,
             url: endpoint("api", "v1", "studies", String(studyID), "questions")
         )
         request.httpMethod = "POST"
+        request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
         let data = try await perform(request)
-        return try decoder.decode(StudyRecord.self, from: data)
+        return try decoder.decode(QuestionGenerationAccepted.self, from: data)
+    }
+
+    func fetchQuestionGenerationProcess(
+        registration: RemotePushRegistration,
+        correlationID: String
+    ) async throws -> QuestionGenerationProcess {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "question-processes", correlationID)
+        )
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(QuestionGenerationProcess.self, from: data)
     }
 
     func gradeRecord(
@@ -2175,6 +2202,81 @@ struct BackendQuestionQuota: Decodable, Equatable {
     var monthlyLimit: Int
     var remainingCount: Int
     var resetAt: Date
+}
+
+enum QuestionGenerationStatus: String, Codable, Equatable {
+    case queued = "QUEUED"
+    case generating = "GENERATING"
+    case translating = "TRANSLATING"
+    case completed = "COMPLETED"
+    case failed = "FAILED"
+}
+
+enum QuestionGenerationStep: String, Codable, Equatable {
+    case queued = "QUEUED"
+    case generating = "GENERATING"
+    case translating = "TRANSLATING"
+    case completed = "COMPLETED"
+}
+
+struct QuestionGenerationAccepted: Codable, Equatable {
+    var correlationID: String
+    var studyID: String
+    var topicID: String
+    var status: QuestionGenerationStatus
+    var pollAfterMilliseconds: Int
+    var submittedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case correlationID = "correlationId"
+        case studyID = "studyId"
+        case topicID = "topicId"
+        case status
+        case pollAfterMilliseconds = "pollAfterMs"
+        case submittedAt
+    }
+}
+
+struct QuestionGenerationProcessError: Codable, Equatable {
+    var code: String
+    var message: String
+    var retryable: Bool
+}
+
+struct QuestionGenerationProcess: Codable, Equatable {
+    var correlationID: String
+    var status: QuestionGenerationStatus
+    var currentStep: QuestionGenerationStep
+    var terminal: Bool
+    var pollAfterMilliseconds: Int?
+    var questionID: String?
+    var question: StudyRecord?
+    var failedStep: QuestionGenerationStep?
+    var error: QuestionGenerationProcessError?
+    var updatedAt: Date
+    var completedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case correlationID = "correlationId"
+        case status
+        case currentStep
+        case terminal
+        case pollAfterMilliseconds = "pollAfterMs"
+        case questionID = "questionId"
+        case question
+        case failedStep
+        case error
+        case updatedAt
+        case completedAt
+    }
+}
+
+struct PendingQuestionGenerationProcess: Codable, Equatable {
+    var idempotencyKey: String
+    var correlationID: String?
+    var studyID: Int
+    var studyCategoryID: String?
+    var submittedAt: Date
 }
 
 struct BackendRecordsPage: Decodable, Equatable {

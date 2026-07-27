@@ -57,6 +57,16 @@ class OpenAIQuestionKeyProvider(
         )
     }
 
+    fun resolveReservedQuestionGeneration(user: UserEntity, periodStartedAt: Instant): OpenAIQuestionKey {
+        val systemApiKey = properties.openai.apiKey.takeIf { it.isNotBlank() }
+            ?: throw ApiException(HttpStatus.BAD_REQUEST, ApiErrorCode.OPENAI_API_KEY_MISSING, "OpenAI API key is not configured.")
+        return OpenAIQuestionKey(
+            apiKey = systemApiKey,
+            quotaReservation = SystemQuestionQuotaReservation(user.id, periodStartedAt),
+            user = user,
+        )
+    }
+
     suspend fun markQuestionCreated(key: OpenAIQuestionKey, now: Instant = Instant.now()) {
         if (!key.usesSystemMembershipQuota) return
     }
@@ -64,6 +74,10 @@ class OpenAIQuestionKeyProvider(
     suspend fun releaseQuestionReservation(key: OpenAIQuestionKey, now: Instant = Instant.now()) {
         val reservation = key.quotaReservation ?: return
         memberships.refundMonthlySystemQuestion(reservation.userId, reservation.periodStartedAt, now)
+    }
+
+    suspend fun releaseQuestionReservation(userId: Long, periodStartedAt: Instant, now: Instant = Instant.now()) {
+        memberships.refundMonthlySystemQuestion(userId, periodStartedAt, now)
     }
 
     private fun monthlyQuotaExceeded(accountCreatedAt: Instant, now: Instant) =

@@ -100,6 +100,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - Keeps study identity on record responses so the iOS cache can remove only records owned by a deleted subtree, even when two branches use the same topic label.
   - Root studies own schedule state and question-generation settings. Descendants own topic, difficulty, ordering, and `active_for_questions`; scheduled claims never target descendants directly.
   - Keeps three write boundaries explicit: `POST /api/v1/studies` creates a root, `POST /api/v1/studies/{parentStudyId}/topics` creates a descendant without generating a question or consuming quota, and `POST /api/v1/studies/{topicId}/questions` generates a question.
+  - Question generation is an asynchronous Choreography Saga. Submission reserves quota and stores the `QUEUED` Saga plus `QUESTION_GENERATION_REQUESTED` outbox in one transaction, then returns `202 Accepted` with a correlation ID. Generation and translation use separate Redis consumer groups and `(event_id, consumer_group)` Inbox leases; the canonical Saga advances through compare-and-set transitions. The iOS client polls `GET /api/v1/question-processes/{correlationId}` and resumes a persisted process after restart. See [`QUESTION_GENERATION_SAGA.md`](QUESTION_GENERATION_SAGA.md).
   - Selects the next eligible active node from the complete root subtree by oldest `last_sent_at`, with never-selected nodes first and stable `sort_order`/`id` tie-breaking. Nodes already at their per-topic pending-question limit are excluded before selection, preventing one unanswered branch from starving the rest of the tree; the root backs off only when every active node is blocked.
   - Stores both manual and scheduled questions with the root study ID while copying the selected node's topic and difficulty into the question. Inactive nodes remain available for manual generation.
   - `POST /api/v1/studies/{id}/topic-suggestions` requests unique GPT suggestions for a parent node, and `PATCH /api/v1/studies/{id}/question-activation` changes only rotation participation.
@@ -137,14 +138,17 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
 ## Data Flow
 
 ```text
-Manual action / pull-to-refresh / backend scheduled interval
--> AppState.generateQuestion
--> RemotePushBackendClient.createQuestion
--> backend POST /api/v1/me/questions
--> backend calls OpenAI and stores an ungraded StudyRecord in MySQL
--> SettingsStore caches the returned StudyRecord
--> current question updates only when it is safe to activate
--> APNs notification is sent by the backend for scheduled questions
+Manual action / backend scheduled interval
+-> backend request transaction reserves quota and stores Saga(QUEUED) + outbox
+-> manual API returns 202 Accepted + correlationId
+-> generation consumer claims its Inbox row and advances Saga to GENERATING
+-> OpenAI runs outside the database transaction
+-> generated question + QUESTION_GENERATED outbox advance Saga to TRANSLATING
+-> translation consumer persists localization and delivery outboxes
+-> Saga advances to COMPLETED
+-> iOS polls by correlationId and caches the returned StudyRecord
+-> current question updates only when it will not replace an active ungraded draft
+-> notification/push outboxes deliver asynchronously
 ```
 
 ```text

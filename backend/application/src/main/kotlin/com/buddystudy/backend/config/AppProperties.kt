@@ -47,9 +47,11 @@ data class BuddyStudyProperties(
     data class Streams(
         var enabled: Boolean = true,
         var key: String = "buddystudy-events-v1",
+        var questionGenerationKey: String = "buddystudy-question-generation-v1",
         var questionGeneratedKey: String = "buddystudy-question-generated-v1",
         var pushKey: String = "buddystudy-push-v1",
         var domainMaxLen: Long = 1_000,
+        var questionGenerationMaxLen: Long = 1_000,
         var questionGeneratedMaxLen: Long = 1_000,
         var pushMaxLen: Long = 1_000,
         var pushConsumerConcurrency: Int = 10,

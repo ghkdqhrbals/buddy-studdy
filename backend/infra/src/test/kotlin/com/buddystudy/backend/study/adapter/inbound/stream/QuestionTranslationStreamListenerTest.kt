@@ -3,6 +3,7 @@ package com.buddystudy.backend.study.adapter.inbound.stream
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
 import com.buddystudy.backend.common.adapter.stream.StreamListener
 import com.buddystudy.backend.common.adapter.stream.StreamScheduler
+import com.buddystudy.backend.study.application.service.QuestionTranslationExecutionWriteService
 import kotlin.reflect.full.declaredFunctions
 import kotlin.reflect.full.findAnnotation
 import org.assertj.core.api.Assertions.assertThat
@@ -26,5 +27,7 @@ class QuestionTranslationStreamListenerTest {
         assertThat(recover!!.topic).isEqualTo(RedisStreamTopic.QUESTION_GENERATED)
         assertThat(recover.eventType).isEqualTo("QUESTION_GENERATED")
         assertThat(recover.group).isEqualTo(consume.group)
+        assertThat(recover.minIdleTimeMs)
+            .isEqualTo(QuestionTranslationExecutionWriteService.RECOVERY_MIN_IDLE_TIME_MILLIS)
     }
 }

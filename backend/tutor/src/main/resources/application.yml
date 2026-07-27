@@ -100,9 +100,11 @@ buddystudy:
   streams:
     enabled: ${REACTION_STREAM_ENABLED:true}
     key: ${BUDDYSTUDY_STREAMS_KEY:buddystudy-events-v1}
+    question-generation-key: ${BUDDYSTUDY_QUESTION_GENERATION_STREAM_KEY:buddystudy-question-generation-v1}
     question-generated-key: ${BUDDYSTUDY_QUESTION_GENERATED_STREAM_KEY:buddystudy-question-generated-v1}
     push-key: ${BUDDYSTUDY_PUSH_STREAM_KEY:buddystudy-push-v1}
     domain-max-len: ${BUDDYSTUDY_DOMAIN_STREAM_MAX_LEN:${REACTION_STREAM_XADD_MAX_LEN:1000}}
+    question-generation-max-len: ${BUDDYSTUDY_QUESTION_GENERATION_STREAM_MAX_LEN:1000}
     question-generated-max-len: ${BUDDYSTUDY_QUESTION_GENERATED_STREAM_MAX_LEN:1000}
     push-max-len: ${BUDDYSTUDY_PUSH_STREAM_MAX_LEN:${REACTION_STREAM_XADD_MAX_LEN:1000}}
     push-consumer-concurrency: ${PUSH_CONSUMER_CONCURRENCY:10}

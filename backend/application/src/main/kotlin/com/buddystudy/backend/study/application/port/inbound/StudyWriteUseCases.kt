@@ -4,6 +4,14 @@ import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
 import com.buddystudy.backend.study.application.model.AnswerGradingStatus
 import com.buddystudy.backend.study.application.model.GeneratedQuestionWithEmbedding
+import com.buddystudy.backend.study.application.model.QueuedQuestionGeneration
+import com.buddystudy.backend.study.application.model.ClaimedQuestionGeneration
+import com.buddystudy.backend.study.application.model.PreparedQuestionGeneration
+import com.buddystudy.backend.study.application.model.QuestionGenerationRequestedEvent
+import com.buddystudy.backend.study.application.model.StreamInboxClaim
+import com.buddystudy.backend.study.application.model.ClaimedQuestionTranslation
+import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
+import com.buddystudy.backend.study.application.model.TranslatedQuestionContent
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKey
 import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSelection
@@ -26,6 +34,47 @@ interface QuestionCreationWriteUseCase {
     ): QuestionWriteResult
 }
 
+interface QuestionGenerationRequestWriteUseCase {
+    suspend fun enqueueManual(
+        userId: Long,
+        deviceId: String,
+        studyId: Long,
+        idempotencyKey: String,
+        now: Instant,
+    ): QueuedQuestionGeneration
+
+    suspend fun enqueueScheduled(
+        scheduleStudy: StudyEntity,
+        topicStudy: StudyEntity,
+        idempotencyKey: String,
+        now: Instant,
+    ): QueuedQuestionGeneration
+}
+
+interface QuestionGenerationExecutionWriteUseCase {
+    suspend fun claim(
+        event: QuestionGenerationRequestedEvent,
+        now: Instant,
+    ): ClaimedQuestionGeneration?
+
+    suspend fun complete(
+        event: QuestionGenerationRequestedEvent,
+        claim: StreamInboxClaim,
+        prepared: PreparedQuestionGeneration,
+        now: Instant,
+    ): QuestionWriteResult
+
+    suspend fun retry(claim: StreamInboxClaim, error: String, now: Instant)
+
+    suspend fun fail(
+        event: QuestionGenerationRequestedEvent,
+        claim: StreamInboxClaim,
+        errorCode: String,
+        errorMessage: String,
+        now: Instant,
+    )
+}
+
 interface QuestionDeliveryWriteUseCase {
     suspend fun enqueue(
         question: QuestionEntity,
@@ -33,6 +82,28 @@ interface QuestionDeliveryWriteUseCase {
         appLanguage: String,
         now: Instant,
     ): QuestionWriteResult
+}
+
+interface QuestionTranslationExecutionWriteUseCase {
+    suspend fun claim(event: QuestionGeneratedEvent, now: Instant): ClaimedQuestionTranslation?
+
+    suspend fun complete(
+        event: QuestionGeneratedEvent,
+        claim: StreamInboxClaim,
+        translation: TranslatedQuestionContent?,
+        rootStudy: StudyEntity,
+        appLanguage: String,
+        now: Instant,
+    ): QuestionWriteResult
+
+    suspend fun retry(claim: StreamInboxClaim, error: String, now: Instant)
+
+    suspend fun fail(
+        event: QuestionGeneratedEvent,
+        claim: StreamInboxClaim,
+        errorMessage: String,
+        now: Instant,
+    )
 }
 
 interface ScheduledQuestionWriteUseCase {

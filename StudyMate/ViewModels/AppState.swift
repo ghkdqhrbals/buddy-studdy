@@ -569,6 +569,7 @@ final class AppState: ObservableObject {
     private var visibleDataRefreshTask: Task<Void, Never>?
     private var answerDraftSaveTask: Task<Void, Never>?
     private var protectedPageAccessRefreshTask: Task<Void, Never>?
+    private var questionGenerationPollingTask: Task<Void, Never>?
     private var pendingTermsRequirementRetry: (() async -> Void)?
     private var pendingAnswerDraft: PendingAnswerDraft?
     private var lastBackgroundQuestionPreparationAt: Date?
@@ -1286,9 +1287,12 @@ final class AppState: ObservableObject {
         self.settings = effectiveLoadedSettings
         self.draftSettings = effectiveLoadedSettings
         let loadedCurrentStudySession = localUseCases.currentStudySession.loadSession()
+        let loadedPendingQuestionGeneration = localUseCases.currentStudySession.loadPendingQuestionGenerationProcess()
         self.currentQuestion = loadedCurrentStudySession.question
         self.lastAnswer = loadedCurrentStudySession.lastAnswer
         self.gradingResult = loadedCurrentStudySession.gradingResult
+        self.isGeneratingQuestion = loadedPendingQuestionGeneration != nil
+        self.generatingQuestionCategoryID = loadedPendingQuestionGeneration?.studyCategoryID
         let loadedIsRunning = loadedCurrentStudySession.isRunning
         let shouldRecoverLegacyRunningState = loadedHasCompletedOnboarding
             && !loadedIsRunning
@@ -1375,12 +1379,14 @@ final class AppState: ObservableObject {
             let cloudSyncTask = cloudSyncTask
             let answerDraftSaveTask = answerDraftSaveTask
             let protectedPageAccessRefreshTask = protectedPageAccessRefreshTask
+            let questionGenerationPollingTask = questionGenerationPollingTask
             let appNotificationEventCancellables = appNotificationEventCancellables
 
             timerTask?.cancel()
             cloudSyncTask?.cancel()
             answerDraftSaveTask?.cancel()
             protectedPageAccessRefreshTask?.cancel()
+            questionGenerationPollingTask?.cancel()
             appNotificationEventCancellables.forEach { $0.cancel() }
         }
     }
@@ -1405,6 +1411,7 @@ final class AppState: ObservableObject {
         await refreshPermissionEvaluations(reason: "startup")
         await refreshNotificationUnreadCount()
         await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+        await resumePendingQuestionGenerationIfNeeded(reason: "startup")
         _ = await notificationService.requestAuthorizationIfNeeded(language: settings.appLanguage)
         await validateAPIKeyOnStartup()
         #if os(macOS)
@@ -1422,6 +1429,7 @@ final class AppState: ObservableObject {
         await loadOpenAIModelOptions()
         await refreshPermissionEvaluations(reason: "foreground")
         await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+        await resumePendingQuestionGenerationIfNeeded(reason: "foreground")
         if isCloudSyncEnabled {
             await syncCloudNow(updateVisibleQuestion: false)
             await ensureCloudQuestionPushSubscription()
@@ -3035,6 +3043,9 @@ final class AppState: ObservableObject {
 
     func signOutFromCommunity() {
         logAuthTrace("community_sign_out_start", reason: "manual", deduplicate: false)
+        questionGenerationPollingTask?.cancel()
+        questionGenerationPollingTask = nil
+        finishQuestionGenerationProcess()
         let registrationForLogout = storedBackendIdentityUseCase.loadRegistration()
         resetCommunitySignInState()
         if var registration = registrationForLogout {
@@ -5109,19 +5120,20 @@ final class AppState: ObservableObject {
         let resolvedCategoryID = studyCategoryID ?? settings.selectedStudyCategoryID
         generatingQuestionCategoryID = resolvedCategoryID
         isGeneratingQuestion = true
-        defer {
-            isGeneratingQuestion = false
-            generatingQuestionCategoryID = nil
-        }
 
         guard let registration = await backendRegistrationForOpenAIRequests(reason: manual ? "manual-question" : "scheduled-question") else {
             statusMessage = nil
             errorMessage = "백엔드 등록이 없어 질문을 생성할 수 없습니다. 네트워크와 알림 권한을 확인한 뒤 다시 시도하세요."
             log(.warning, "백엔드 등록이 없어 질문 생성을 중단했습니다.")
+            finishQuestionGenerationProcess()
             return
         }
 
-        await generateBackendQuestion(registration: registration, manual: manual, studyCategoryID: studyCategoryID)
+        await generateBackendQuestion(
+            registration: registration,
+            manual: manual,
+            studyCategoryID: resolvedCategoryID
+        )
     }
 
     func isGeneratingQuestion(categoryID: String?) -> Bool {
@@ -5130,6 +5142,7 @@ final class AppState: ObservableObject {
 
     private func generateBackendQuestion(registration: RemotePushRegistration, manual: Bool, studyCategoryID: String?) async {
         guard requirePageAccess(.studyDetail) else {
+            finishQuestionGenerationProcess()
             return
         }
 
@@ -5138,85 +5151,270 @@ final class AppState: ObservableObject {
             reason: "백엔드 새 질문 생성",
             updateVisibleQuestion: manual
         ) else {
+            finishQuestionGenerationProcess()
             return
         }
 
         errorMessage = nil
-        statusMessage = manual ? nil : "예약된 질문을 확인 중입니다."
+        statusMessage = strings.fetchingQuestion
         log(.info, "백엔드 새 질문 생성을 준비합니다. studyCategoryID=\(studyCategoryID ?? "-")")
 
-        await actionRunner.run(
-            operation: {
-                guard let studyID = await backendStudyID(for: studyCategoryID) else {
-                    throw AppStateError.backendStudyMissing
-                }
-                log(.info, "백엔드 새 질문 생성 API를 호출합니다. studyID=\(studyID)")
-                let record = try await studyRoomUseCase.createQuestion(
-                    registration: registration,
-                    studyID: studyID
-                )
-                return (record, studyID)
-            },
-            onSuccess: { result in
-                let (record, studyID) = result
-                localStudyRecordUseCase.appendQuestionToHistory(record.question)
-                localStudyRecordUseCase.replaceRecords(mergeBackendRecord(record, into: studyRecords))
-                reloadStudyRecordsFromStore()
-                studyRoomState.setPendingQuestion(record, forStudyID: record.studyID ?? studyID)
+        guard let studyID = await backendStudyID(for: studyCategoryID) else {
+            finishQuestionGenerationProcess()
+            await handleQuestionGenerationRequestFailure(
+                AppStateError.backendStudyMissing,
+                manual: manual,
+                studyCategoryID: studyCategoryID
+            )
+            return
+        }
 
-                let shouldActivateQuestion = !hasActiveUngradedCurrentQuestion
-                if shouldActivateQuestion {
-                    currentQuestion = record.question
-                    gradingResult = record.gradingResult
-                    lastAnswer = record.answer ?? ""
-                    currentStudySessionUseCase.saveCurrentQuestionState(
-                        question: record.question,
-                        lastAnswer: record.answer ?? "",
-                        gradingResult: record.gradingResult
-                    )
-                }
-
-                hasAPIKeyError = false
-                statusMessage = shouldActivateQuestion ? "새 질문이 준비됐습니다." : "새 질문이 준비됐지만 작성 중인 답변은 유지했습니다."
-                log(.info, "백엔드 질문을 생성했습니다. studyID=\(record.studyID ?? studyID), recordID=\(record.id)")
-                await refreshQuestionQuota()
-            },
-            onFailure: { error in
-                statusMessage = nil
-                let resolution = appErrorHandlingUseCase.resolve(
-                    error,
-                    fallback: strings.monthlyQuotaReached,
-                    language: settings.appLanguage
-                )
-                if resolution.isQuotaExceeded {
-                    let message = resolution.featureMessage ?? strings.monthlyQuotaReached
-                    questionQuotaNotice = message
-                    errorMessage = message
-                    await refreshQuestionQuota()
-                }
-                if resolution.isPendingQuestionConflict {
-                    await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
-                    showPendingQuestionLimitStatus(
-                        reason: "백엔드 질문 생성 충돌",
-                        categoryID: studyCategoryID
-                    )
-                    return
-                }
-                if handleAppError(
-                    error,
-                    fallback: "",
-                    target: .none,
-                    protectedPage: .studyDetail,
-                    termsRetry: { [weak self] in
-                        await self?.generateQuestion(manual: manual, studyCategoryID: studyCategoryID)
-                    }
-                ) {
-                    return
-                }
-                handleOpenAIError(error)
-                log(.error, "백엔드 질문 생성에 실패했습니다: \(error.localizedDescription)")
-            }
+        let pending = PendingQuestionGenerationProcess(
+            idempotencyKey: appIdentifierProvider.makeIdentifier(),
+            correlationID: nil,
+            studyID: studyID,
+            studyCategoryID: studyCategoryID,
+            submittedAt: appClock.now
         )
+        currentStudySessionUseCase.savePendingQuestionGenerationProcess(pending)
+        startQuestionGenerationPolling(pending: pending, registration: registration, manual: manual)
+    }
+
+    private func startQuestionGenerationPolling(
+        pending: PendingQuestionGenerationProcess,
+        registration: RemotePushRegistration,
+        manual: Bool
+    ) {
+        guard questionGenerationPollingTask == nil else {
+            return
+        }
+        isGeneratingQuestion = true
+        generatingQuestionCategoryID = pending.studyCategoryID
+        statusMessage = strings.fetchingQuestion
+        questionGenerationPollingTask = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+            await runQuestionGenerationPolling(
+                pending: pending,
+                registration: registration,
+                manual: manual
+            )
+        }
+    }
+
+    private func runQuestionGenerationPolling(
+        pending initialPending: PendingQuestionGenerationProcess,
+        registration: RemotePushRegistration,
+        manual: Bool
+    ) async {
+        var pending = initialPending
+        var consecutiveTransportFailures = 0
+        defer {
+            questionGenerationPollingTask = nil
+        }
+
+        while !Task.isCancelled {
+            if pending.correlationID == nil {
+                do {
+                    log(.info, "백엔드 질문 생성 요청을 등록합니다. studyID=\(pending.studyID)")
+                    let accepted = try await performWithBackendIdentityRecovery(
+                        registration: registration,
+                        reason: "question-generation-submit",
+                        operation: { recoveredRegistration in
+                            try await studyRoomUseCase.createQuestion(
+                                registration: recoveredRegistration,
+                                studyID: pending.studyID,
+                                idempotencyKey: pending.idempotencyKey
+                            )
+                        }
+                    )
+                    pending.correlationID = accepted.correlationID
+                    currentStudySessionUseCase.savePendingQuestionGenerationProcess(pending)
+                    consecutiveTransportFailures = 0
+                    statusMessage = strings.fetchingQuestion
+                    log(
+                        .info,
+                        "질문 생성 요청이 접수됐습니다. correlationID=\(accepted.correlationID), status=\(accepted.status.rawValue)"
+                    )
+                    await sleepForQuestionGeneration(milliseconds: accepted.pollAfterMilliseconds)
+                } catch {
+                    if appErrorHandlingUseCase.isPermanentBackendOperationError(error) {
+                        finishQuestionGenerationProcess()
+                        await handleQuestionGenerationRequestFailure(
+                            error,
+                            manual: manual,
+                            studyCategoryID: pending.studyCategoryID
+                        )
+                        return
+                    }
+                    consecutiveTransportFailures += 1
+                    statusMessage = strings.fetchingQuestion
+                    log(.warning, "질문 생성 요청 연결 실패 후 재시도합니다. error=\(error.localizedDescription)")
+                    await sleepForQuestionGenerationRetry(failureCount: consecutiveTransportFailures)
+                }
+                continue
+            }
+
+            guard let correlationID = pending.correlationID else {
+                continue
+            }
+
+            do {
+                let process = try await performWithBackendIdentityRecovery(
+                    registration: registration,
+                    reason: "question-generation-poll",
+                    operation: { recoveredRegistration in
+                        try await studyRoomUseCase.fetchQuestionGenerationProcess(
+                            registration: recoveredRegistration,
+                            correlationID: correlationID
+                        )
+                    }
+                )
+                consecutiveTransportFailures = 0
+                if process.terminal {
+                    if process.status == .completed, let record = process.question {
+                        applyCompletedQuestionGeneration(record, fallbackStudyID: pending.studyID)
+                    } else {
+                        let message = process.error?.message ?? strings.communityRequestFailed
+                        errorMessage = message
+                        statusMessage = nil
+                        log(
+                            .error,
+                            "질문 생성 Saga가 실패했습니다. correlationID=\(correlationID), step=\(process.failedStep?.rawValue ?? "-"), error=\(message)"
+                        )
+                    }
+                    finishQuestionGenerationProcess()
+                    await refreshQuestionQuota()
+                    return
+                }
+
+                statusMessage = strings.fetchingQuestion
+                await sleepForQuestionGeneration(milliseconds: process.pollAfterMilliseconds ?? 250)
+            } catch {
+                if appErrorHandlingUseCase.isPermanentBackendOperationError(error) {
+                    finishQuestionGenerationProcess()
+                    await handleQuestionGenerationRequestFailure(
+                        error,
+                        manual: manual,
+                        studyCategoryID: pending.studyCategoryID
+                    )
+                    return
+                }
+                consecutiveTransportFailures += 1
+                statusMessage = strings.fetchingQuestion
+                log(
+                    .warning,
+                    "질문 생성 상태 조회 연결 실패 후 재시도합니다. correlationID=\(correlationID), error=\(error.localizedDescription)"
+                )
+                await sleepForQuestionGenerationRetry(failureCount: consecutiveTransportFailures)
+            }
+        }
+    }
+
+    private func applyCompletedQuestionGeneration(_ record: StudyRecord, fallbackStudyID: Int) {
+        localStudyRecordUseCase.appendQuestionToHistory(record.question)
+        localStudyRecordUseCase.replaceRecords(mergeBackendRecord(record, into: studyRecords))
+        reloadStudyRecordsFromStore()
+        studyRoomState.setPendingQuestion(record, forStudyID: record.studyID ?? fallbackStudyID)
+
+        let shouldActivateQuestion = !hasActiveUngradedCurrentQuestion
+        if shouldActivateQuestion {
+            currentQuestion = record.question
+            gradingResult = record.gradingResult
+            lastAnswer = record.answer ?? ""
+            currentStudySessionUseCase.saveCurrentQuestionState(
+                question: record.question,
+                lastAnswer: record.answer ?? "",
+                gradingResult: record.gradingResult
+            )
+        }
+
+        hasAPIKeyError = false
+        statusMessage = shouldActivateQuestion
+            ? strings.questionGenerationCompleted
+            : strings.questionGenerationCompletedWhileDrafting
+        log(
+            .info,
+            "질문 생성 Saga가 완료됐습니다. studyID=\(record.studyID ?? fallbackStudyID), recordID=\(record.id)"
+        )
+    }
+
+    private func resumePendingQuestionGenerationIfNeeded(reason: String) async {
+        guard questionGenerationPollingTask == nil,
+              let pending = currentStudySessionUseCase.loadPendingQuestionGenerationProcess() else {
+            return
+        }
+        guard let registration = await backendRegistrationForOpenAIRequests(
+            reason: "question-generation-resume-\(reason)"
+        ) else {
+            isGeneratingQuestion = true
+            generatingQuestionCategoryID = pending.studyCategoryID
+            statusMessage = strings.fetchingQuestion
+            log(.warning, "저장된 질문 생성 상태를 복구할 인증 정보를 아직 가져오지 못했습니다. reason=\(reason)")
+            return
+        }
+        log(
+            .info,
+            "저장된 질문 생성 상태 조회를 재개합니다. correlationID=\(pending.correlationID ?? "pending-submit"), reason=\(reason)"
+        )
+        startQuestionGenerationPolling(pending: pending, registration: registration, manual: true)
+    }
+
+    private func finishQuestionGenerationProcess() {
+        currentStudySessionUseCase.savePendingQuestionGenerationProcess(nil)
+        isGeneratingQuestion = false
+        generatingQuestionCategoryID = nil
+    }
+
+    private func sleepForQuestionGeneration(milliseconds: Int) async {
+        let normalized = max(50, min(milliseconds, 5_000))
+        try? await appSleepProvider.sleep(nanoseconds: UInt64(normalized) * 1_000_000)
+    }
+
+    private func sleepForQuestionGenerationRetry(failureCount: Int) async {
+        let delay = min(5_000, max(1_000, failureCount * 1_000))
+        await sleepForQuestionGeneration(milliseconds: delay)
+    }
+
+    private func handleQuestionGenerationRequestFailure(
+        _ error: Error,
+        manual: Bool,
+        studyCategoryID: String?
+    ) async {
+        statusMessage = nil
+        let resolution = appErrorHandlingUseCase.resolve(
+            error,
+            fallback: strings.monthlyQuotaReached,
+            language: settings.appLanguage
+        )
+        if resolution.isQuotaExceeded {
+            let message = resolution.featureMessage ?? strings.monthlyQuotaReached
+            questionQuotaNotice = message
+            errorMessage = message
+            await refreshQuestionQuota()
+        }
+        if resolution.isPendingQuestionConflict {
+            await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+            showPendingQuestionLimitStatus(
+                reason: "백엔드 질문 생성 충돌",
+                categoryID: studyCategoryID
+            )
+            return
+        }
+        if handleAppError(
+            error,
+            fallback: "",
+            target: .none,
+            protectedPage: .studyDetail,
+            termsRetry: { [weak self] in
+                await self?.generateQuestion(manual: manual, studyCategoryID: studyCategoryID)
+            }
+        ) {
+            return
+        }
+        handleOpenAIError(error)
+        log(.error, "백엔드 질문 생성 요청에 실패했습니다: \(error.localizedDescription)")
     }
 
     private func backendStudyID(for categoryID: String?) async -> Int? {
@@ -5637,7 +5835,7 @@ final class AppState: ObservableObject {
         var cursor: Int64 = 0
         var lastConnectionError: Error?
         var displayedStatus = queuedRecord.gradingStatus ?? .queued
-        var displayedAt = ContinuousClock.now
+        var displayedAt = appClock.now
         let queuedMessage = gradingMessage(for: displayedStatus)
         statusMessage = queuedMessage
         answerGradingStatusMessage = queuedMessage
@@ -5659,7 +5857,7 @@ final class AppState: ObservableObject {
                         since: displayedAt
                     )
                     displayedStatus = event.status
-                    displayedAt = ContinuousClock.now
+                    displayedAt = appClock.now
                     let progressMessage = gradingMessage(for: event.status)
                     statusMessage = progressMessage
                     answerGradingStatusMessage = progressMessage
@@ -5717,7 +5915,7 @@ final class AppState: ObservableObject {
                 throw EventDrivenGradingError.failed(snapshot.gradingError ?? strings.gradingFailed)
             }
             if attempt < 3 {
-                try await Task.sleep(nanoseconds: 500_000_000)
+                try await appSleepProvider.sleep(nanoseconds: 500_000_000)
             }
         }
 
@@ -5726,21 +5924,24 @@ final class AppState: ObservableObject {
 
     private func keepGradingStatusVisible(
         _ status: AnswerGradingStatus,
-        since displayedAt: ContinuousClock.Instant
+        since displayedAt: Date
     ) async throws {
-        let elapsed = displayedAt.duration(to: ContinuousClock.now)
+        let elapsed = max(0, appClock.now.timeIntervalSince(displayedAt))
         let minimumDuration = minimumGradingStatusDuration(for: status)
-        if elapsed < minimumDuration {
-            try await Task.sleep(for: minimumDuration - elapsed)
+        let remaining = minimumDuration - elapsed
+        if remaining > 0 {
+            try await appSleepProvider.sleep(
+                nanoseconds: UInt64(remaining * 1_000_000_000)
+            )
         }
     }
 
     private func minimumGradingStatusDuration(
         for status: AnswerGradingStatus
-    ) -> Duration {
+    ) -> TimeInterval {
         switch status {
         case .queued, .analyzingEvidence, .critiquing, .judging, .adjudicating, .completed, .failed:
-            .seconds(1)
+            1
         }
     }
 

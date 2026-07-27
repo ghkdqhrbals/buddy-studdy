@@ -18,6 +18,8 @@ import com.buddystudy.backend.study.application.port.inbound.StudyUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudyTreeUseCase
 import com.buddystudy.backend.study.application.port.inbound.UpdateStudyTopicActivationCommand
 import com.buddystudy.backend.study.application.port.inbound.QuestionQuotaUseCase
+import com.buddystudy.backend.study.application.port.inbound.GetQuestionGenerationProcessUseCase
+import com.buddystudy.backend.study.application.port.inbound.RequestQuestionGenerationUseCase
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
 import org.springframework.stereotype.Component
@@ -35,6 +37,8 @@ class StudyWebAdapter(
     private val studyTreeUseCase: StudyTreeUseCase,
     private val questionQuotaUseCase: QuestionQuotaUseCase,
     private val answerGrading: ObserveAnswerGradingUseCase,
+    private val requestQuestionGeneration: RequestQuestionGenerationUseCase,
+    private val getQuestionGenerationProcess: GetQuestionGenerationProcessUseCase,
 ) : StudyWebPort {
     override suspend fun study(
         limit: Int,
@@ -89,8 +93,20 @@ class StudyWebAdapter(
     override suspend fun studyGrowth(startAt: Instant?, endAt: Instant?, authentication: Authentication) =
         studyGrowthUseCase.growth(authentication.principalOrThrow(), startAt, endAt)
 
-    override suspend fun createQuestion(studyId: Long, authentication: Authentication) =
-        studyUseCase.createQuestion(authentication.principalOrThrow(), studyId)
+    override suspend fun createQuestion(
+        studyId: Long,
+        idempotencyKey: String,
+        authentication: Authentication,
+    ) = ResponseEntity.accepted().body(
+        requestQuestionGeneration.request(
+            principal = authentication.principalOrThrow(),
+            studyId = studyId,
+            idempotencyKey = idempotencyKey,
+        ),
+    )
+
+    override suspend fun questionProcess(correlationId: String, authentication: Authentication) =
+        getQuestionGenerationProcess.get(authentication.principalOrThrow(), correlationId)
 
     override suspend fun questionQuota(authentication: Authentication) =
         questionQuotaUseCase.status(authentication.principalOrThrow())

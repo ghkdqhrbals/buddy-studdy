@@ -107,8 +107,23 @@ struct RemoteStudyRoomRepository: StudyRoomRepository {
 
     func createQuestion(
         registration: RemotePushRegistration,
-        studyID: Int
-    ) async throws -> StudyRecord {
-        try await backendClient.createQuestion(registration: registration, studyID: studyID)
+        studyID: Int,
+        idempotencyKey: String
+    ) async throws -> QuestionGenerationAccepted {
+        try await backendClient.createQuestion(
+            registration: registration,
+            studyID: studyID,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func fetchQuestionGenerationProcess(
+        registration: RemotePushRegistration,
+        correlationID: String
+    ) async throws -> QuestionGenerationProcess {
+        try await backendClient.fetchQuestionGenerationProcess(
+            registration: registration,
+            correlationID: correlationID
+        )
     }
 }

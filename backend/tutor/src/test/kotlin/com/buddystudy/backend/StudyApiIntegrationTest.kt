@@ -405,18 +405,27 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(studyPage["studies"].map { it["id"].asLong() })
             .containsExactlyInAnyOrder(created["id"].asLong(), child["id"].asLong())
 
-        val question = postJson(
+        val accepted = postJson(
             "/api/v1/studies/${child["id"].asLong()}/questions",
             "",
             accessToken,
             deviceId,
             clientSecret,
-        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
-        assertThat(question["topic"].asText()).isEqualTo("Kotlin Coroutines")
-        assertThat(question["question"]["question"].asText()).isEqualTo("Generated question for Kotlin Coroutines")
+            idempotencyKey = "create-study-question-1",
+        ).also { assertThat(it.statusCode()).isEqualTo(202) }.json()
+        assertThat(accepted["status"].asText()).isEqualTo("QUEUED")
+        assertThat(accepted["correlationId"].asText()).isNotBlank()
 
-        val pendingQuestionCount = questions.countPendingForStudy(child["id"].asLong())
-        assertThat(pendingQuestionCount).isEqualTo(1)
+        val process = getJson(
+            "/api/v1/question-processes/${accepted["correlationId"].asText()}",
+            accessToken,
+            deviceId,
+            clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        assertThat(process["status"].asText()).isEqualTo("QUEUED")
+        assertThat(process["terminal"].asBoolean()).isFalse()
+
+        assertThat(questions.countPendingForStudy(child["id"].asLong())).isZero()
         assertThat(questions.countPendingForStudy(created["id"].asLong())).isZero()
     }
 
@@ -563,8 +572,15 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         assertAuthRequired(postJson("/api/v1/public/questions/${publicQuestion.id}/report", """{"reason":"spam"}"""))
     }
 
-    private fun postJson(path: String, body: String, bearerToken: String? = null, deviceId: String? = null, clientSecret: String? = null): HttpResponse<String> =
-        request("POST", path, body, bearerToken, deviceId, clientSecret)
+    private fun postJson(
+        path: String,
+        body: String,
+        bearerToken: String? = null,
+        deviceId: String? = null,
+        clientSecret: String? = null,
+        idempotencyKey: String? = null,
+    ): HttpResponse<String> =
+        request("POST", path, body, bearerToken, deviceId, clientSecret, idempotencyKey)
 
     private fun putJson(path: String, body: String, bearerToken: String? = null, deviceId: String? = null, clientSecret: String? = null): HttpResponse<String> =
         request("PUT", path, body, bearerToken, deviceId, clientSecret)
@@ -578,10 +594,21 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         return client.send(builder.build(), HttpResponse.BodyHandlers.ofString())
     }
 
-    private fun request(method: String, path: String, body: String, bearerToken: String?, deviceId: String?, clientSecret: String?): HttpResponse<String> {
+    private fun request(
+        method: String,
+        path: String,
+        body: String,
+        bearerToken: String?,
+        deviceId: String?,
+        clientSecret: String?,
+        idempotencyKey: String? = null,
+    ): HttpResponse<String> {
         val builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port$path"))
             .header("Content-Type", "application/json")
             .method(method, HttpRequest.BodyPublishers.ofString(body))
+        if (!idempotencyKey.isNullOrBlank()) {
+            builder.header("Idempotency-Key", idempotencyKey)
+        }
         addAuthHeaders(builder, bearerToken, deviceId, clientSecret)
         return client.send(builder.build(), HttpResponse.BodyHandlers.ofString())
     }

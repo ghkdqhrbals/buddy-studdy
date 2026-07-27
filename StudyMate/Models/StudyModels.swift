@@ -2111,6 +2111,15 @@ struct AppStrings {
     var gradingAdjudicating: String { text("판정 결과를 다시 검증하고 있습니다.", "Verifying the grading decision.") }
     var gradingCompleted: String { text("채점이 완료됐습니다.", "Grading completed.") }
     var gradingFailed: String { text("채점을 완료하지 못했습니다. 다시 시도해 주세요.", "Grading could not be completed. Please try again.") }
+    var questionGenerationCompleted: String {
+        text("새 질문이 준비됐습니다.", "Your new question is ready.")
+    }
+    var questionGenerationCompletedWhileDrafting: String {
+        text(
+            "새 질문이 준비됐지만 작성 중인 답변은 유지했습니다.",
+            "Your new question is ready. Your current draft was kept."
+        )
+    }
 
     var tabStudy: String { text("학습", "Study") }
     var tabHome: String { text("홈", "Home") }

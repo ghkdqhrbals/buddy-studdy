@@ -55,6 +55,12 @@ protocol StudyRoomRepository {
 
     func createQuestion(
         registration: RemotePushRegistration,
-        studyID: Int
-    ) async throws -> StudyRecord
+        studyID: Int,
+        idempotencyKey: String
+    ) async throws -> QuestionGenerationAccepted
+
+    func fetchQuestionGenerationProcess(
+        registration: RemotePushRegistration,
+        correlationID: String
+    ) async throws -> QuestionGenerationProcess
 }
