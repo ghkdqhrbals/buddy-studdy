@@ -6542,12 +6542,6 @@ private struct MobileHomeStudyOutlineSnapshot {
 }
 
 private struct MobileHomeStudyOutlineRow: View {
-    private enum RowAction {
-        case rootToggle
-        case drillDown(childCount: Int)
-        case openStudy
-    }
-
     var snapshot: MobileHomeStudyOutlineSnapshot
     var strings: AppStrings
     var pendingQuestionCount: (BackendStudyRoom) -> Int
@@ -6582,17 +6576,14 @@ private struct MobileHomeStudyOutlineRow: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Button {
-                isExpanded.toggle()
-            } label: {
-                studyRow(
-                    room: snapshot.root,
-                    isRoot: true,
-                    childCount: snapshot.children(of: snapshot.root.id).count,
-                    action: .rootToggle
-                )
-            }
-            .buttonStyle(.plain)
+            studyNavigationRow(
+                room: snapshot.root,
+                isRoot: true,
+                isChildListExpanded: isExpanded,
+                onOpenChildren: {
+                    isExpanded.toggle()
+                }
+            )
 
             if isExpanded {
                 if let searchResults = snapshot.searchResults {
@@ -6663,24 +6654,15 @@ private struct MobileHomeStudyOutlineRow: View {
             Divider()
                 .padding(.leading, 50)
 
-            Button {
-                let childCount = snapshot.children(of: room.id).count
-                if childCount > 0 {
+            studyNavigationRow(
+                room: room,
+                isRoot: false,
+                onOpenChildren: snapshot.children(of: room.id).isEmpty
+                    ? nil
+                    : {
                     replaceBranch(with: room.id)
-                } else {
-                    onOpenTopic(room)
                 }
-            } label: {
-                studyRow(
-                    room: room,
-                    isRoot: false,
-                    childCount: snapshot.children(of: room.id).count,
-                    action: snapshot.children(of: room.id).isEmpty
-                        ? .openStudy
-                        : .drillDown(childCount: snapshot.children(of: room.id).count)
-                )
-            }
-            .buttonStyle(.plain)
+            )
         }
         .allowsHitTesting(!isChangingBranch)
     }
@@ -6737,13 +6719,12 @@ private struct MobileHomeStudyOutlineRow: View {
                         .lineLimit(1)
                         .truncationMode(.head)
 
-                    studyRow(
+                    studyDestinationContent(
                         room: room,
                         isRoot: false,
                         childCount: snapshot.children(of: room.id).count,
-                        action: .openStudy
+                        showsDisclosure: true
                     )
-                    .padding(.horizontal, -14)
                 }
                 .padding(.horizontal, 14)
                 .padding(.top, 8)
@@ -6752,11 +6733,53 @@ private struct MobileHomeStudyOutlineRow: View {
         }
     }
 
-    private func studyRow(
+    private func studyNavigationRow(
+        room: BackendStudyRoom,
+        isRoot: Bool,
+        isChildListExpanded: Bool? = nil,
+        onOpenChildren: (() -> Void)?
+    ) -> some View {
+        let childCount = snapshot.children(of: room.id).count
+
+        return HStack(spacing: 8) {
+            Button {
+                onOpenTopic(room)
+            } label: {
+                studyDestinationContent(
+                    room: room,
+                    isRoot: isRoot,
+                    childCount: childCount,
+                    showsDisclosure: childCount == 0
+                )
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+
+            if childCount > 0, let onOpenChildren {
+                Button(action: onOpenChildren) {
+                    childTopicActionLabel(
+                        childCount: childCount,
+                        isExpanded: isChildListExpanded
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 70)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+                .layoutPriority(1)
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(minHeight: isRoot ? 70 : 64)
+    }
+
+    private func studyDestinationContent(
         room: BackendStudyRoom,
         isRoot: Bool,
         childCount: Int,
-        action: RowAction
+        showsDisclosure: Bool
     ) -> some View {
         let pendingCount = pendingQuestionCount(room)
         let levelText = StudyTreeNodeStylePolicy.levelText(room.difficultyLevel)
@@ -6775,10 +6798,23 @@ private struct MobileHomeStudyOutlineRow: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text(levelText)
-                    .font(.caption.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(room.activeForQuestions ? Color.green : Color.secondary)
+                HStack(spacing: 5) {
+                    Text(levelText)
+                        .font(.caption.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(room.activeForQuestions ? Color.green : Color.secondary)
+
+                    Text("·")
+                        .foregroundStyle(.tertiary)
+
+                    HStack(spacing: 3) {
+                        Text(strings.studyAction)
+
+                        Image(systemName: "arrow.up.right")
+                    }
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityValue(
@@ -6796,12 +6832,16 @@ private struct MobileHomeStudyOutlineRow: View {
                     .accessibilityLabel(strings.pendingQuestionCount(pendingCount))
             }
 
-            rowActionView(action)
+            if showsDisclosure {
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
         }
-        .padding(.horizontal, 14)
         .frame(minHeight: isRoot ? 70 : 64)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(room.topic), \(strings.openStudyPage)")
     }
 
     private func replaceBranch(with roomID: Int?) {
@@ -6811,55 +6851,43 @@ private struct MobileHomeStudyOutlineRow: View {
 
         branchUnlockTask?.cancel()
         isChangingBranch = true
-        currentBranchID = roomID
         branchUnlockTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(220))
+            try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled else {
                 return
             }
+
+            currentBranchID = roomID
+
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled else {
+                return
+            }
+
             isChangingBranch = false
         }
     }
 
-    @ViewBuilder
-    private func rowActionView(_ action: RowAction) -> some View {
-        switch action {
-        case .rootToggle:
-            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
-                .accessibilityLabel(
-                    isExpanded ? strings.collapseStudyTopics : strings.expandStudyTopics
-                )
+    private func childTopicActionLabel(
+        childCount: Int,
+        isExpanded: Bool?
+    ) -> some View {
+        HStack(spacing: 4) {
+            Text(strings.childTopicAction(childCount))
+                .lineLimit(1)
 
-        case let .drillDown(childCount):
-            HStack(spacing: 4) {
-                Text(strings.childTopicAction(childCount))
-                    .lineLimit(1)
-
-                Image(systemName: "chevron.down")
-            }
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(Color(.tertiarySystemFill), in: Capsule())
-            .accessibilityLabel(strings.childTopicCount(childCount))
-
-        case .openStudy:
-            HStack(spacing: 4) {
-                Text(strings.studyAction)
-                    .lineLimit(1)
-
-                Image(systemName: "arrow.up.right")
-            }
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(Color(.tertiarySystemFill), in: Capsule())
-            .accessibilityLabel(strings.openStudyPage)
+            Image(systemName: isExpanded == true ? "chevron.up" : "chevron.down")
         }
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color(.tertiarySystemFill), in: Capsule())
+        .accessibilityLabel(
+            isExpanded.map {
+                $0 ? strings.collapseStudyTopics : strings.expandStudyTopics
+            } ?? strings.childTopicCount(childCount)
+        )
     }
 }
 
