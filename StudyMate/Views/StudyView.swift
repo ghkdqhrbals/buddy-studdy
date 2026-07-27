@@ -123,18 +123,18 @@ struct StudyView: View {
             HStack(alignment: .center, spacing: 12) {
                 ProgressView()
                     .controlSize(.small)
-                    .tint(.white)
+                    .tint(.accentColor)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(strings.fetchingQuestion)
                         .font(.body.weight(.semibold))
+                        .foregroundStyle(.primary)
 
                     Text(strings.fetchingQuestionDescription)
                         .font(.caption)
-                        .foregroundStyle(.white.opacity(0.82))
+                        .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .foregroundStyle(.white)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
