@@ -6556,11 +6556,6 @@ private struct MobileHomeStudyOutlineSnapshot {
     }
 }
 
-private enum StudyBranchNavigationDirection {
-    case deeper
-    case parent
-}
-
 private struct MobileHomeStudyOutlineRow: View {
     var snapshot: MobileHomeStudyOutlineSnapshot
     var strings: AppStrings
@@ -6571,7 +6566,6 @@ private struct MobileHomeStudyOutlineRow: View {
     @State private var currentBranchID: Int?
     @State private var isExpanded = true
     @State private var isChangingBranch = false
-    @State private var branchDirection: StudyBranchNavigationDirection = .deeper
     @State private var branchUnlockTask: Task<Void, Never>?
 
     private var currentBranch: BackendStudyRoom {
@@ -6617,7 +6611,7 @@ private struct MobileHomeStudyOutlineRow: View {
                                 branchRows
                             }
                             .id(currentBranch.id)
-                            .transition(branchTransition)
+                            .transition(.opacity)
                             .allowsHitTesting(!isChangingBranch)
                         }
                         .clipped()
@@ -6693,7 +6687,7 @@ private struct MobileHomeStudyOutlineRow: View {
                 onOpenChildren: snapshot.children(of: room.id).isEmpty
                     ? nil
                     : {
-                        replaceBranch(with: room.id, direction: .deeper)
+                        replaceBranch(with: room.id)
                     }
             )
         }
@@ -6710,7 +6704,7 @@ private struct MobileHomeStudyOutlineRow: View {
                 Button {
                     let parentID = snapshot.parentByID[currentBranch.id]
                         .flatMap(snapshot.room(id:))?.id
-                    replaceBranch(with: parentID, direction: .parent)
+                    replaceBranch(with: parentID)
                 } label: {
                     Label(strings.moveToParentTopic, systemImage: "chevron.left")
                         .font(.caption.weight(.semibold))
@@ -6877,45 +6871,22 @@ private struct MobileHomeStudyOutlineRow: View {
         .accessibilityLabel("\(room.topic), \(strings.openStudyPage)")
     }
 
-    private var branchTransition: AnyTransition {
-        if accessibilityReduceMotion {
-            return .opacity
-        }
-
-        switch branchDirection {
-        case .deeper:
-            return AnyTransition.asymmetric(
-                insertion: AnyTransition.offset(x: 24).combined(with: .opacity),
-                removal: AnyTransition.offset(x: -24).combined(with: .opacity)
-            )
-        case .parent:
-            return AnyTransition.asymmetric(
-                insertion: AnyTransition.offset(x: -24).combined(with: .opacity),
-                removal: AnyTransition.offset(x: 24).combined(with: .opacity)
-            )
-        }
-    }
-
-    private func replaceBranch(
-        with roomID: Int?,
-        direction: StudyBranchNavigationDirection
-    ) {
+    private func replaceBranch(with roomID: Int?) {
         guard !isChangingBranch else {
             return
         }
 
         branchUnlockTask?.cancel()
         isChangingBranch = true
-        branchDirection = direction
         let animation = accessibilityReduceMotion
-            ? Animation.linear(duration: 0.12)
-            : Animation.easeOut(duration: 0.20)
+            ? Animation.linear(duration: 0.08)
+            : Animation.easeInOut(duration: 0.16)
         withAnimation(animation) {
             currentBranchID = roomID
         }
         branchUnlockTask = Task { @MainActor in
             try? await Task.sleep(
-                for: accessibilityReduceMotion ? .milliseconds(120) : .milliseconds(200)
+                for: accessibilityReduceMotion ? .milliseconds(80) : .milliseconds(160)
             )
             guard !Task.isCancelled else {
                 return
