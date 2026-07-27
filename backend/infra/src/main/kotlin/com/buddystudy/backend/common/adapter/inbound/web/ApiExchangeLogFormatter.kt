@@ -54,9 +54,12 @@ internal class ApiExchangeLogFormatter(
         buildJson(
             "method" to request.method.name(),
             "path" to request.path.value(),
+            "query" to (request.uri.rawQuery ?: ""),
+            "requestHeaders" to headers(request.headers),
             "requestBody" to body(requestBody, request.headers),
             "status" to (response.statusCode?.value() ?: 200),
             "durationMs" to "%.2f".format(Locale.US, durationMs),
+            "responseHeaders" to headers(response.headers),
             "responseBody" to body(responseBody, response.headers),
         )
 

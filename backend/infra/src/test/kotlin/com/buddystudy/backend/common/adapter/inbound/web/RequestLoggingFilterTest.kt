@@ -138,12 +138,13 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `compact api log includes redacted bodies but omits request identity and headers`(output: CapturedOutput) = runBlocking {
+    fun `compact api log includes redacted headers and bodies but omits request identity`(output: CapturedOutput) = runBlocking {
         val requestBody = """{"topic":"Redis","accessToken":"secret-token"}"""
         val exchange = execute(
-            request = MockServerHttpRequest.post("/api/v1/studies")
+            request = MockServerHttpRequest.post("/api/v1/studies?source=dev")
                 .contentType(MediaType.APPLICATION_JSON)
                 .header("Authorization", "Bearer access-token")
+                .header("X-App-Version", "1.0.16")
                 .header("CF-Connecting-IP", "203.0.113.10")
                 .body(requestBody),
             activeFilter = compactFilter,
@@ -158,14 +159,17 @@ class RequestLoggingFilterTest {
         assertThat(exchange.response.bodyAsString.block()).isEqualTo("""{"id":10}""")
         assertThat(output.out).contains("\"method\":\"POST\"")
         assertThat(output.out).contains("\"path\":\"/api/v1/studies\"")
+        assertThat(output.out).contains("\"query\":\"source=dev\"")
+        assertThat(output.out).contains("\"requestHeaders\":")
+        assertThat(output.out).contains("\"X-App-Version\":\"1.0.16\"")
+        assertThat(output.out).contains("\"Authorization\":\"[REDACTED]\"")
         assertThat(output.out).contains("\"requestBody\":{\"topic\":\"Redis\",\"accessToken\":\"[REDACTED]\"}")
         assertThat(output.out).contains("\"status\":200")
+        assertThat(output.out).contains("\"responseHeaders\":")
         assertThat(output.out).contains("\"responseBody\":{\"id\":10}")
         assertThat(output.out).doesNotContain("requestId")
         assertThat(output.out).doesNotContain("clientIp")
         assertThat(output.out).doesNotContain("userId")
-        assertThat(output.out).doesNotContain("requestHeaders")
-        assertThat(output.out).doesNotContain("responseHeaders")
         assertThat(output.out).doesNotContain("203.0.113.10")
         assertThat(output.out).doesNotContain("secret-token")
     }
