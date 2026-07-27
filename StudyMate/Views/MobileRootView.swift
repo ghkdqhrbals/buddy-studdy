@@ -1750,7 +1750,6 @@ private struct MobileHomeView: View {
         .buttonStyle(.plain)
         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
         .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
         .contextMenu {
             if appState.isCommunitySessionActive {
                 Button(role: .destructive) {
@@ -7246,12 +7245,8 @@ private struct MobileFeedbackPromptRow: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(Color.accentColor.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .contentShape(Rectangle())
     }
 }
@@ -7366,14 +7361,8 @@ private struct MobileCommunityQuestionRow: View {
 
             CommunityQuestionStatsMeta(question: question)
         }
-        .padding(14)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemBackground))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
