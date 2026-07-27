@@ -724,9 +724,17 @@ final class AppState: ObservableObject {
 
     @discardableResult
     func openRouteFromNotification(_ route: AppRoute) -> Bool {
+        log(
+            .info,
+            "push_route_applying route=\(route), selectedTabBefore=\(selectedTab)"
+        )
         selectedTab = .home
         homeStudyRoute = nil
         appRouteRequest = AppRouteRequest(route: route, presentation: .notificationInbox)
+        log(
+            .info,
+            "push_route_applied route=\(route), presentation=notificationInbox"
+        )
         return true
     }
 
@@ -6330,8 +6338,9 @@ final class AppState: ObservableObject {
     }
 
     func requestDebugPanelIfEnabledOrEnableOnDemand() {
+        loadAppLogPage(0)
         isAPIDebugPanelPresented = true
-        log(.info, "API 디버그 패널을 열었습니다.")
+        log(.info, "APP/API 디버그 패널을 열었습니다.")
     }
 
     func logRemoteNotificationEvent(_ message: String, isWarning: Bool = false) {

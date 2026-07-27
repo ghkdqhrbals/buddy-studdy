@@ -629,6 +629,8 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
     private var pendingLocalResponses: [PendingLocalNotificationResponse] = []
     @MainActor
     private var pendingAppRoutes: [AppRoute] = []
+    @MainActor
+    private var pendingEventLogs: [(message: String, isWarning: Bool)] = []
 
     private struct PendingLocalNotificationResponse {
         var actionIdentifier: String
@@ -642,12 +644,14 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
     func configure(appState: AppState) {
         self.appState = appState
         register(language: appState.settings.appLanguage)
+        flushPendingEventLogs()
         processPendingAppRoutes()
         processPendingLocalResponsesIfActive()
     }
 
     @MainActor
     private func enqueueAppRoute(_ route: AppRoute) {
+        logEvent("push_route_enqueued route=\(route)")
         guard let appState else {
             pendingAppRoutes.append(route)
             return
@@ -665,7 +669,29 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
         let routes = pendingAppRoutes
         pendingAppRoutes.removeAll()
         for route in routes {
+            logEvent("push_route_processing route=\(route)")
             appState.openRouteFromNotification(route)
+        }
+    }
+
+    @MainActor
+    private func logEvent(_ message: String, isWarning: Bool = false) {
+        guard let appState else {
+            pendingEventLogs.append((message, isWarning))
+            return
+        }
+        appState.logRemoteNotificationEvent(message, isWarning: isWarning)
+    }
+
+    @MainActor
+    private func flushPendingEventLogs() {
+        guard let appState else {
+            return
+        }
+        let logs = pendingEventLogs
+        pendingEventLogs.removeAll()
+        for log in logs {
+            appState.logRemoteNotificationEvent(log.message, isWarning: log.isWarning)
         }
     }
 
@@ -705,6 +731,9 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
         let pendingResponses = pendingLocalResponses
         pendingLocalResponses.removeAll()
         for response in pendingResponses {
+            logEvent(
+                "push_response_processing action=\(response.actionIdentifier), openStudy=\(response.openStudy), recordID=\(response.recordID ?? "-")"
+            )
             if response.openStudy {
                 handle(
                     actionIdentifier: response.actionIdentifier,
@@ -810,19 +839,34 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
         let questionCreatedAt = StudyNotificationPayload.questionCreatedAt(from: userInfo)
 
         #if os(iOS)
-        if !StudyNotificationRouting.isIgnored(actionIdentifier),
-           StudyNotificationRouting.shouldOpenStudyImmediately(
-               actionIdentifier: actionIdentifier,
-               applicationState: UIApplication.shared.applicationState
-           ) {
+        let shouldOpenStudy = StudyNotificationRouting.shouldOpenStudyImmediately(
+            actionIdentifier: actionIdentifier
+        )
+        let payloadKeySummary = StudyNotificationPayload.keySummary(from: userInfo)
+        Task { @MainActor in
+            StudyNotificationDelegate.shared.logEvent(
+                "push_response_received action=\(actionIdentifier), openStudy=\(shouldOpenStudy), recordID=\(recordID ?? "-"), keys=\(payloadKeySummary)"
+            )
+        }
+
+        if !StudyNotificationRouting.isIgnored(actionIdentifier), shouldOpenStudy {
             Task { @MainActor in
                 if let route = StudyNotificationPayload.appRoute(from: userInfo) {
                     StudyNotificationDelegate.shared.enqueueAppRoute(route)
-                } else if StudyNotificationPayload.backendRecordID(from: userInfo) != nil {
+                } else if recordID != nil {
                     StudyRemoteNotificationBridge.shared.enqueueNotificationResponse(
                         userInfo: userInfo,
                         actionIdentifier: actionIdentifier,
-                        replyText: replyText
+                        replyText: replyText,
+                        openStudy: true
+                    )
+                } else {
+                    StudyNotificationDelegate.shared.enqueueLocalResponse(
+                        actionIdentifier: actionIdentifier,
+                        recordID: recordID,
+                        questionCreatedAt: questionCreatedAt,
+                        replyText: replyText,
+                        openStudy: true
                     )
                 }
             }
@@ -843,10 +887,6 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
         }
 
         Task { @MainActor in
-            let shouldOpenStudy = StudyNotificationRouting.shouldOpenStudyImmediately(
-                actionIdentifier: actionIdentifier,
-                applicationState: UIApplication.shared.applicationState
-            )
             StudyNotificationDelegate.shared.enqueueLocalResponse(
                 actionIdentifier: actionIdentifier,
                 recordID: recordID,
@@ -985,7 +1025,8 @@ final class StudyRemoteNotificationBridge {
     func enqueueNotificationResponse(
         userInfo: [AnyHashable: Any],
         actionIdentifier: String,
-        replyText: String?
+        replyText: String?,
+        openStudy: Bool? = nil
     ) {
         guard !StudyNotificationRouting.isIgnored(actionIdentifier) else {
             appState?.logRemoteNotificationEvent(
@@ -994,10 +1035,8 @@ final class StudyRemoteNotificationBridge {
             return
         }
 
-        let applicationState = UIApplication.shared.applicationState
-        let shouldOpenStudy = StudyNotificationRouting.shouldOpenStudyImmediately(
-            actionIdentifier: actionIdentifier,
-            applicationState: applicationState
+        let shouldOpenStudy = openStudy ?? StudyNotificationRouting.shouldOpenStudyImmediately(
+            actionIdentifier: actionIdentifier
         )
 
         pendingNotifications.append(
@@ -1009,7 +1048,7 @@ final class StudyRemoteNotificationBridge {
             )
         )
         appState?.logRemoteNotificationEvent(
-            "CloudKit push 알림 응답을 큐에 저장했습니다. action=\(actionIdentifier), openStudy=\(shouldOpenStudy), appState=\(Self.applicationStateName(applicationState))"
+            "push_response_queued action=\(actionIdentifier), openStudy=\(shouldOpenStudy), appState=\(Self.applicationStateName(UIApplication.shared.applicationState))"
         )
         processPendingNotificationsIfActive()
     }
@@ -1094,8 +1133,7 @@ final class StudyRemoteNotificationBridge {
         }
 
         let shouldOpenStudy = StudyNotificationRouting.shouldOpenStudyImmediately(
-            actionIdentifier: actionIdentifier,
-            applicationState: UIApplication.shared.applicationState
+            actionIdentifier: actionIdentifier
         )
 
         return await handleNotificationResponse(

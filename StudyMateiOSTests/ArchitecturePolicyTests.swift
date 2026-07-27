@@ -1776,6 +1776,24 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertEqual(StudyNotificationPayload.questionCreatedAt(from: payload), 100.25)
     }
 
+    func testExplicitNotificationTapIsNavigationIntentRegardlessOfActivationTiming() {
+        XCTAssertTrue(
+            StudyNotificationRouting.shouldOpenStudyImmediately(
+                actionIdentifier: UNNotificationDefaultActionIdentifier
+            )
+        )
+        XCTAssertFalse(
+            StudyNotificationRouting.shouldOpenStudyImmediately(
+                actionIdentifier: StudyNotificationAction.reply
+            )
+        )
+        XCTAssertFalse(
+            StudyNotificationRouting.shouldOpenStudyImmediately(
+                actionIdentifier: UNNotificationDismissActionIdentifier
+            )
+        )
+    }
+
     func testAPIValidationDecodesBackendValidFieldName() throws {
         let payload = Data(#"{"openaiKeyConfigured":true,"valid":true,"openaiModel":"gpt-5.4"}"#.utf8)
 

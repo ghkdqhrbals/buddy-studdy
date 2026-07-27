@@ -73,7 +73,7 @@ private struct StudyMateiOSBootstrapView: View {
 
             #if DEBUG
             if let appState {
-                FloatingAPIDebugOverlay()
+                FloatingDebugLogOverlay()
                     .environmentObject(appState)
                     .zIndex(2)
             }
@@ -97,12 +97,21 @@ private struct StudyMateiOSBootstrapView: View {
 }
 
 #if DEBUG
-private struct FloatingAPIDebugOverlay: View {
+private enum DebugLogTab: String, CaseIterable, Identifiable {
+    case app = "APP"
+    case api = "API"
+
+    var id: String { rawValue }
+}
+
+private struct FloatingDebugLogOverlay: View {
     @EnvironmentObject private var appState: AppState
     @State private var isExpanded = false
     @State private var committedOffset = CGSize(width: 12, height: 74)
     @State private var suppressTapAction = false
-    @State private var selectedLogID: APITrafficLogEntry.ID?
+    @State private var selectedLogTab = DebugLogTab.app
+    @State private var selectedAPILogID: APITrafficLogEntry.ID?
+    @State private var selectedAppLogID: AppLogEntry.ID?
     @State private var showsLogResetConfirmation = false
     @GestureState private var dragTranslation: CGSize = .zero
 
@@ -110,21 +119,38 @@ private struct FloatingAPIDebugOverlay: View {
         AppStrings(language: appState.settings.appLanguage)
     }
 
-    private var recentLogs: [APITrafficLogEntry] {
+    private var recentAPILogs: [APITrafficLogEntry] {
         Array(appState.apiTrafficLogs.prefix(100))
     }
 
-    private var selectedLog: APITrafficLogEntry? {
-        if let selectedLogID,
-           let selectedLog = recentLogs.first(where: { $0.id == selectedLogID }) {
+    private var recentAppLogs: [AppLogEntry] {
+        Array(appState.appLogs.prefix(50))
+    }
+
+    private var selectedAPILog: APITrafficLogEntry? {
+        if let selectedAPILogID,
+           let selectedLog = recentAPILogs.first(where: { $0.id == selectedAPILogID }) {
             return selectedLog
         }
 
-        return recentLogs.first
+        return recentAPILogs.first
     }
 
-    private var latestLog: APITrafficLogEntry? {
+    private var selectedAppLog: AppLogEntry? {
+        if let selectedAppLogID,
+           let selectedLog = recentAppLogs.first(where: { $0.id == selectedAppLogID }) {
+            return selectedLog
+        }
+
+        return recentAppLogs.first
+    }
+
+    private var latestAPILog: APITrafficLogEntry? {
         appState.apiTrafficLogs.first
+    }
+
+    private var latestAppLog: AppLogEntry? {
+        appState.appLogs.first
     }
 
     var body: some View {
@@ -155,7 +181,8 @@ private struct FloatingAPIDebugOverlay: View {
             titleVisibility: .visible
         ) {
             Button(strings.resetDebugLogs, role: .destructive) {
-                selectedLogID = nil
+                selectedAPILogID = nil
+                selectedAppLogID = nil
                 appState.resetDebugLogs()
             }
             Button(strings.cancel, role: .cancel) {}
@@ -179,7 +206,7 @@ private struct FloatingAPIDebugOverlay: View {
                         isExpanded.toggle()
                     }
                 } label: {
-                    Text("API")
+                    Text(selectedLogTab.rawValue)
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 7)
@@ -251,7 +278,24 @@ private struct FloatingAPIDebugOverlay: View {
 
             if isExpanded {
                 Divider()
-                apiLogContent
+                Picker("Log type", selection: $selectedLogTab) {
+                    ForEach(DebugLogTab.allCases) { tab in
+                        Text(tab.rawValue).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: selectedLogTab) { _, tab in
+                    if tab == .app {
+                        appState.loadAppLogPage(0)
+                    }
+                }
+
+                switch selectedLogTab {
+                case .app:
+                    appLogContent
+                case .api:
+                    apiLogContent
+                }
             }
         }
         .padding(10)
@@ -265,7 +309,7 @@ private struct FloatingAPIDebugOverlay: View {
 
     @ViewBuilder
     private var apiLogContent: some View {
-        if recentLogs.isEmpty {
+        if recentAPILogs.isEmpty {
             Text("아직 API 요청이 없습니다.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -279,18 +323,18 @@ private struct FloatingAPIDebugOverlay: View {
 
                     Spacer()
 
-                    Text("\(recentLogs.count)/100")
+                    Text("\(recentAPILogs.count)/100")
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: apiLogRowSpacing) {
-                        ForEach(recentLogs) { log in
+                        ForEach(recentAPILogs) { log in
                             Button {
-                                selectedLogID = log.id
+                                selectedAPILogID = log.id
                             } label: {
-                                apiLogRow(log, isSelected: selectedLog?.id == log.id)
+                                apiLogRow(log, isSelected: selectedAPILog?.id == log.id)
                             }
                             .buttonStyle(.plain)
                         }
@@ -299,19 +343,70 @@ private struct FloatingAPIDebugOverlay: View {
                 }
                 .frame(height: apiLogListHeight, alignment: .top)
 
-                if let selectedLog {
+                if let selectedAPILog {
                     Divider()
 
                     ScrollView {
                         VStack(alignment: .leading, spacing: 8) {
-                            debugSection(title: "Request", value: requestText(for: selectedLog))
-                            debugSection(title: "Response", value: responseText(for: selectedLog))
+                            debugSection(title: "Request", value: requestText(for: selectedAPILog))
+                            debugSection(title: "Response", value: responseText(for: selectedAPILog))
 
-                            if let error = selectedLog.error, !error.isEmpty {
+                            if let error = selectedAPILog.error, !error.isEmpty {
                                 debugSection(title: "Error", value: error, isError: true)
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 220)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var appLogContent: some View {
+        if recentAppLogs.isEmpty {
+            Text("아직 APP 로그가 없습니다.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Recent APP")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Text("\(appState.appLogPageStart)-\(appState.appLogPageEnd) / \(appState.appLogTotalCount)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: apiLogRowSpacing) {
+                        ForEach(recentAppLogs) { log in
+                            Button {
+                                selectedAppLogID = log.id
+                            } label: {
+                                appLogRow(log, isSelected: selectedAppLog?.id == log.id)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(height: appLogListHeight, alignment: .top)
+
+                if let selectedAppLog {
+                    Divider()
+                    ScrollView {
+                        debugSection(
+                            title: "\(selectedAppLog.level.rawValue.uppercased()) · \(selectedAppLog.createdAt.formatted(date: .numeric, time: .standard))",
+                            value: selectedAppLog.message,
+                            isError: selectedAppLog.level == .error
+                        )
                     }
                     .frame(maxHeight: 220)
                 }
@@ -370,12 +465,57 @@ private struct FloatingAPIDebugOverlay: View {
         .contentShape(Rectangle())
     }
 
+    private func appLogRow(_ entry: AppLogEntry, isSelected: Bool) -> some View {
+        HStack(spacing: 7) {
+            Circle()
+                .fill(statusColor(for: entry))
+                .frame(width: 8, height: 8)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(entry.message)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+
+                Text("\(entry.level.rawValue.uppercased()) · \(entry.createdAt.formatted(date: .omitted, time: .standard))")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isSelected ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.04))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(isSelected ? Color.accentColor.opacity(0.35) : Color.clear, lineWidth: 1)
+        }
+        .frame(minHeight: apiLogRowHeight)
+        .contentShape(Rectangle())
+    }
+
     private var apiLogListHeight: CGFloat {
-        guard !recentLogs.isEmpty else {
+        guard !recentAPILogs.isEmpty else {
             return 0
         }
 
-        let visibleRows = min(recentLogs.count, 3)
+        let visibleRows = min(recentAPILogs.count, 3)
+        let contentHeight = (CGFloat(visibleRows) * apiLogRowHeight)
+            + (CGFloat(max(0, visibleRows - 1)) * apiLogRowSpacing)
+        return min(apiLogListMaxHeight, contentHeight)
+    }
+
+    private var appLogListHeight: CGFloat {
+        guard !recentAppLogs.isEmpty else {
+            return 0
+        }
+
+        let visibleRows = min(recentAppLogs.count, 3)
         let contentHeight = (CGFloat(visibleRows) * apiLogRowHeight)
             + (CGFloat(max(0, visibleRows - 1)) * apiLogRowSpacing)
         return min(apiLogListMaxHeight, contentHeight)
@@ -471,28 +611,46 @@ private struct FloatingAPIDebugOverlay: View {
     }
 
     private var latestTitle: String {
-        guard let selectedLog = selectedLog ?? latestLog else {
-            return "대기 중"
+        switch selectedLogTab {
+        case .app:
+            return (selectedAppLog ?? latestAppLog)?.message ?? "APP 로그 대기 중"
+        case .api:
+            guard let selectedLog = selectedAPILog ?? latestAPILog else {
+                return "API 로그 대기 중"
+            }
+            return "\(selectedLog.method) \(shortURL(selectedLog.url))"
         }
-
-        return "\(selectedLog.method) \(shortURL(selectedLog.url))"
     }
 
     private var latestSubtitle: String {
-        guard let selectedLog = selectedLog ?? latestLog else {
-            return "최근 요청/응답 없음"
+        switch selectedLogTab {
+        case .app:
+            guard let log = selectedAppLog ?? latestAppLog else {
+                return "최근 APP 로그 없음"
+            }
+            return "\(log.level.rawValue.uppercased()) · \(log.createdAt.formatted(date: .omitted, time: .standard))"
+        case .api:
+            guard let selectedLog = selectedAPILog ?? latestAPILog else {
+                return "최근 API 요청/응답 없음"
+            }
+            let status = selectedLog.statusCode.map(String.init) ?? "pending"
+            return "\(status) · \(selectedLog.durationText) · \(recentAPILogs.count) logs"
         }
-
-        let status = selectedLog.statusCode.map(String.init) ?? "pending"
-        return "\(status) · \(selectedLog.durationText) · \(recentLogs.count) logs"
     }
 
     private var statusColor: Color {
-        guard let selectedLog = selectedLog ?? latestLog else {
-            return .secondary
+        switch selectedLogTab {
+        case .app:
+            guard let log = selectedAppLog ?? latestAppLog else {
+                return .secondary
+            }
+            return statusColor(for: log)
+        case .api:
+            guard let log = selectedAPILog ?? latestAPILog else {
+                return .secondary
+            }
+            return statusColor(for: log)
         }
-
-        return statusColor(for: selectedLog)
     }
 
     private func statusColor(for entry: APITrafficLogEntry) -> Color {
@@ -514,9 +672,21 @@ private struct FloatingAPIDebugOverlay: View {
         }
     }
 
+    private func statusColor(for entry: AppLogEntry) -> Color {
+        switch entry.level {
+        case .info:
+            return .blue
+        case .warning:
+            return .orange
+        case .error:
+            return .red
+        }
+    }
+
     private func requestText(for entry: APITrafficLogEntry) -> String {
         [
             "\(entry.method) \(entry.url)",
+            entry.requestHeaders.isEmpty ? "" : entry.requestHeaders,
             entry.requestBody.isEmpty ? "" : entry.requestBody,
         ]
         .filter { !$0.isEmpty }
