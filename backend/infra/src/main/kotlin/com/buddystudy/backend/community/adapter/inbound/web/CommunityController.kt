@@ -16,6 +16,7 @@ import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.tags.Tag
+import jakarta.validation.Valid
 import org.springframework.security.core.Authentication
 import org.springframework.stereotype.Component
 import org.springframework.web.bind.annotation.DeleteMapping
@@ -97,7 +98,7 @@ class CommunityController(
     suspend fun createComment(
         @Parameter(description = "Public question id.", example = "42")
         @PathVariable id: Long,
-        @RequestBody body: CommunityCommentRequest,
+        @Valid @RequestBody body: CommunityCommentRequest,
         authentication: Authentication,
     ): Any = community.createComment(id, body, authentication)
 
@@ -118,14 +119,14 @@ class CommunityController(
     suspend fun reportQuestion(
         @Parameter(description = "Public question id.", example = "42")
         @PathVariable id: Long,
-        @RequestBody body: ReportQuestionRequest,
+        @Valid @RequestBody body: ReportQuestionRequest,
         authentication: Authentication,
     ): ReportQuestionResponse = community.reportQuestion(id, body, authentication)
 
     @Operation(summary = "Submit app feedback", description = "Stores product feedback from either a member or a registered device.")
     @PostMapping("/feedback")
     suspend fun submitFeedback(
-        @RequestBody body: SubmitFeedbackRequest,
+        @Valid @RequestBody body: SubmitFeedbackRequest,
         @RequestHeader("X-Device-Id", required = false) deviceId: String?,
         authentication: Authentication?,
     ): ReportQuestionResponse = community.submitFeedback(body, deviceId, authentication)

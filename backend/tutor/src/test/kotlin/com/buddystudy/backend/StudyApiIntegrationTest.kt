@@ -572,6 +572,58 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         assertAuthRequired(postJson("/api/v1/public/questions/${publicQuestion.id}/report", """{"reason":"spam"}"""))
     }
 
+    @Test
+    fun `authenticated user can create and immediately read a public question comment`(): Unit = runBlocking {
+        val owner = registerActiveUser("comment-owner")
+        val commenter = registerActiveUser("comment-author")
+        val study = createStudy(owner, "Comment Flow")
+        val publicQuestion = questions.save(
+            gradedQuestion(
+                deviceId = owner.deviceId,
+                userId = study.userId,
+                studyId = study.id,
+                topic = "Comment Flow",
+                question = "Can this question receive comments?",
+                createdAt = Instant.parse("2026-06-09T06:00:00Z"),
+                publicQuestion = true,
+            )
+        )
+
+        val blank = postJson(
+            "/api/v1/public/questions/${publicQuestion.id}/comments",
+            """{"body":"   "}""",
+            commenter.accessToken,
+            commenter.deviceId,
+            commenter.clientSecret,
+        )
+        assertThat(blank.statusCode()).isEqualTo(422)
+
+        val created = postJson(
+            "/api/v1/public/questions/${publicQuestion.id}/comments",
+            """{"body":"The comment should be returned immediately."}""",
+            commenter.accessToken,
+            commenter.deviceId,
+            commenter.clientSecret,
+        )
+        assertThat(created.statusCode()).isEqualTo(200)
+        val createdBody = created.json()
+        assertThat(createdBody["questionId"].asText()).isEqualTo(publicQuestion.id.toString())
+        assertThat(createdBody["body"].asText()).isEqualTo("The comment should be returned immediately.")
+        assertThat(createdBody["author"]["id"].asLong()).isPositive()
+        assertThat(createdBody["createdAt"].asText()).isNotBlank()
+
+        val listed = getJson(
+            "/api/v1/public/questions/${publicQuestion.id}/comments?limit=30&offset=0",
+            commenter.accessToken,
+            commenter.deviceId,
+            commenter.clientSecret,
+        )
+        assertThat(listed.statusCode()).isEqualTo(200)
+        assertThat(listed.json()["comments"]).hasSize(1)
+        assertThat(listed.json()["comments"][0]["id"].asText()).isEqualTo(createdBody["id"].asText())
+        assertThat(listed.json()["totalCount"].asInt()).isEqualTo(1)
+    }
+
     private fun postJson(
         path: String,
         body: String,

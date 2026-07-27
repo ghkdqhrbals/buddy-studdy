@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.bind.support.WebExchangeBindException
 import org.springframework.web.reactive.resource.NoResourceFoundException
 import org.springframework.web.server.ServerWebExchange
+import org.springframework.web.server.ServerWebInputException
 import java.util.UUID
 
 data class ApiErrorEnvelope(val error: ApiError)
@@ -111,6 +112,13 @@ class ErrorHandler(
 
     @ExceptionHandler(WebExchangeBindException::class)
     fun validation(error: WebExchangeBindException, exchange: ServerWebExchange): ResponseEntity<ApiErrorEnvelope> =
+        json(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            errorResponseFactory.envelope(ApiErrorCode.VALIDATION_ERROR, HttpStatus.UNPROCESSABLE_ENTITY, exchange),
+        )
+
+    @ExceptionHandler(ServerWebInputException::class)
+    fun invalidInput(error: ServerWebInputException, exchange: ServerWebExchange): ResponseEntity<ApiErrorEnvelope> =
         json(
             HttpStatus.UNPROCESSABLE_ENTITY,
             errorResponseFactory.envelope(ApiErrorCode.VALIDATION_ERROR, HttpStatus.UNPROCESSABLE_ENTITY, exchange),
