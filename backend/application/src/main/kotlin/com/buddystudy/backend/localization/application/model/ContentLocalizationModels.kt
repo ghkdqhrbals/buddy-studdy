@@ -1,0 +1,53 @@
+package com.buddystudy.backend.localization.application.model
+
+import java.time.Instant
+
+enum class LocalizableContentType {
+    RECORD,
+    COMMENT,
+}
+
+data class ContentTranslationRequestedEvent(
+    val eventId: String,
+    val contentType: LocalizableContentType,
+    val contentId: Long,
+    val targetLanguage: String,
+    val sourceHash: String,
+    val questionSourceHash: String? = null,
+    val answerSourceHash: String? = null,
+    val aiResponseSourceHash: String? = null,
+    val requestedAt: Instant,
+    val eventType: String = EVENT_TYPE,
+    val eventVersion: Int = 1,
+) {
+    companion object {
+        const val EVENT_TYPE = "CONTENT_TRANSLATION_REQUESTED"
+    }
+}
+
+data class TextLocalizationSnapshot(
+    val sourceLanguage: String,
+    val targetLanguage: String,
+    val sourceHash: String,
+    val status: String,
+    val fields: Map<String, String?>,
+    val provider: String? = null,
+)
+
+data class RecordSourceHashes(
+    val record: String,
+    val question: String,
+    val answer: String?,
+    val aiResponse: String?,
+)
+
+data class RecordLocalizationSnapshot(
+    val question: TextLocalizationSnapshot?,
+    val answer: TextLocalizationSnapshot?,
+    val aiResponse: TextLocalizationSnapshot?,
+)
+
+data class ContentTranslationResult(
+    val fields: Map<String, String?>,
+    val provider: String,
+)

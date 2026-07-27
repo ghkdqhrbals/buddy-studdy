@@ -103,10 +103,12 @@ buddystudy:
     key: ${BUDDYSTUDY_STREAMS_KEY:buddystudy-events-v1}
     question-generation-key: ${BUDDYSTUDY_QUESTION_GENERATION_STREAM_KEY:buddystudy-question-generation-v1}
     question-generated-key: ${BUDDYSTUDY_QUESTION_GENERATED_STREAM_KEY:buddystudy-question-generated-v1}
+    content-translation-key: ${BUDDYSTUDY_CONTENT_TRANSLATION_STREAM_KEY:buddystudy-content-translation-v1}
     push-key: ${BUDDYSTUDY_PUSH_STREAM_KEY:buddystudy-push-v1}
     domain-max-len: ${BUDDYSTUDY_DOMAIN_STREAM_MAX_LEN:${REACTION_STREAM_XADD_MAX_LEN:1000}}
     question-generation-max-len: ${BUDDYSTUDY_QUESTION_GENERATION_STREAM_MAX_LEN:1000}
     question-generated-max-len: ${BUDDYSTUDY_QUESTION_GENERATED_STREAM_MAX_LEN:1000}
+    content-translation-max-len: ${BUDDYSTUDY_CONTENT_TRANSLATION_STREAM_MAX_LEN:1000}
     push-max-len: ${BUDDYSTUDY_PUSH_STREAM_MAX_LEN:${REACTION_STREAM_XADD_MAX_LEN:1000}}
     push-consumer-concurrency: ${PUSH_CONSUMER_CONCURRENCY:10}
     view-queue-capacity: ${VIEW_EVENT_QUEUE_CAPACITY:20000}
@@ -116,7 +118,7 @@ buddystudy:
     from: ${email.google.smtpFrom:${SMTP_FROM:${email.google.smtpUsername:${SMTP_USERNAME:}}}}
   translation:
     base-url: ${BUDDYSTUDY_TRANSLATION_BASE_URL:http://localhost:5001}
-    supported-languages: ${BUDDYSTUDY_TRANSLATION_SUPPORTED_LANGUAGES:ko,en}
+    supported-languages: ${BUDDYSTUDY_TRANSLATION_SUPPORTED_LANGUAGES:ko,en,ja}
     provider-order: ${BUDDYSTUDY_TRANSLATION_PROVIDER_ORDER:openai,libretranslate}
     timeout-ms: ${BUDDYSTUDY_TRANSLATION_TIMEOUT_MS:5000}
     api-key: ${BUDDYSTUDY_TRANSLATION_API_KEY:}

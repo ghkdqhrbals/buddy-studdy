@@ -104,12 +104,20 @@ interface OpenAIPort {
 }
 
 interface QuestionTranslationPort {
+    suspend fun translate(
+        topic: String,
+        question: String,
+        hint: String?,
+        sourceLanguage: String,
+        targetLanguage: String,
+    ): TranslatedQuestionContent
+
     suspend fun translateToEnglish(
         topic: String,
         question: String,
         hint: String?,
         sourceLanguage: String,
-    ): TranslatedQuestionContent
+    ): TranslatedQuestionContent = translate(topic, question, hint, sourceLanguage, "en")
 }
 
 interface GradingPromptPreviewPort {

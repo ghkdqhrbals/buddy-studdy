@@ -9,12 +9,42 @@ import com.buddystudy.backend.community.application.model.CommunityQuestionRespo
 import com.buddystudy.backend.community.application.model.CommunityQuestionsResponse
 
 interface CommunityUseCase {
-    suspend fun getPublicQuestions(principal: Principal?, query: String?, language: String, limit: Int, offset: Int): CommunityQuestionsResponse
-    suspend fun getPublicQuestionsV2(principal: Principal?, query: String?, language: String, limit: Int, offset: Int): CommunityQuestionsResponse
-    suspend fun getPublicQuestion(principal: Principal?, id: Long, language: String): CommunityQuestionResponse
+    suspend fun getPublicQuestions(
+        principal: Principal?,
+        query: String?,
+        language: String,
+        view: String = "localized",
+        limit: Int,
+        offset: Int,
+    ): CommunityQuestionsResponse
+    suspend fun getPublicQuestionsV2(
+        principal: Principal?,
+        query: String?,
+        language: String,
+        view: String = "localized",
+        limit: Int,
+        offset: Int,
+    ): CommunityQuestionsResponse
+    suspend fun getPublicQuestion(
+        principal: Principal?,
+        id: Long,
+        language: String = "ko",
+        view: String = "localized",
+    ): CommunityQuestionResponse
     suspend fun setLike(principal: Principal, id: Long, liked: Boolean): CommunityLikeResponse
-    suspend fun getComments(id: Long, limit: Int, offset: Int): CommunityCommentsResponse
-    suspend fun createComment(principal: Principal, id: Long, body: String): CommunityCommentResponse
+    suspend fun getComments(
+        id: Long,
+        language: String = "ko",
+        view: String = "localized",
+        limit: Int,
+        offset: Int,
+    ): CommunityCommentsResponse
+    suspend fun createComment(
+        principal: Principal,
+        id: Long,
+        body: String,
+        sourceLanguage: String? = null,
+    ): CommunityCommentResponse
     suspend fun deleteComment(principal: Principal, id: Long, commentId: Long): CommunityCommentDeleteResponse
     suspend fun reportQuestion(principal: Principal, id: Long, command: ReportQuestionCommand)
     suspend fun submitFeedback(principal: Principal?, deviceId: String?, command: SubmitFeedbackCommand)

@@ -4,6 +4,7 @@ import com.buddystudy.backend.notification.application.port.inbound.Notification
 import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
 import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
 import com.buddystudy.backend.study.application.model.QuestionGenerationRequestedEvent
+import com.buddystudy.backend.localization.application.model.ContentTranslationRequestedEvent
 import java.time.Instant
 
 enum class OutboxType {
@@ -44,6 +45,7 @@ enum class RedisOutboxEventType {
     ANSWER_GRADING_REQUESTED,
     QUESTION_GENERATION_REQUESTED,
     QUESTION_GENERATED,
+    CONTENT_TRANSLATION_REQUESTED,
 }
 
 data class ClaimedRedisOutboxEvent(
@@ -67,6 +69,10 @@ interface RedisEventOutboxAppendPort {
     ): Long = error("Question generation requested outbox is not configured.")
     suspend fun appendQuestionGenerated(event: QuestionGeneratedEvent, createdAt: Instant = Instant.now()): Long =
         error("Question generated outbox is not configured.")
+    suspend fun appendContentTranslation(
+        event: ContentTranslationRequestedEvent,
+        createdAt: Instant = Instant.now(),
+    ): Long = error("Content translation outbox is not configured.")
 }
 
 interface RedisEventOutboxPort : RedisEventOutboxAppendPort {

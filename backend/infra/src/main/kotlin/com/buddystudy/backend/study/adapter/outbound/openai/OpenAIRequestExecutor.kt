@@ -77,21 +77,28 @@ class OpenAIRequestExecutor(
         )
     }
 
-    fun translateQuestionToEnglish(
+    fun translateQuestion(
         apiKey: String,
         model: String,
         topic: String,
         question: String,
         hint: String?,
         sourceLanguage: String,
+        targetLanguage: String,
     ): TranslatedQuestionContent {
+        val targetName = when (targetLanguage) {
+            "ja" -> "Japanese"
+            "ko" -> "Korean"
+            else -> "English"
+        }
         val prompt = """
-            Translate the study topic, question, and optional hint into natural, precise English.
+            Translate the study topic, question, and optional hint into natural, precise $targetName.
             Preserve technical terms, code, identifiers, Markdown, and the original difficulty.
             Do not answer, explain, simplify, or add information to the question.
             Keep the topic concise because it is displayed as a feed label.
             Translate the hint only when one is present.
             Source language: $sourceLanguage
+            Target language: $targetLanguage
 
             Topic:
             $topic
@@ -112,7 +119,7 @@ class OpenAIRequestExecutor(
         val response = chatModel(apiKey, model, json = true).call(
             Prompt(
                 listOf(
-                    SystemMessage("You are a professional Korean-to-English localization editor for a study application."),
+                    SystemMessage("You are a professional multilingual localization editor for a study application."),
                     UserMessage(prompt),
                 ),
                 options(apiKey, model, json = true),
@@ -188,7 +195,7 @@ class OpenAIRequestExecutor(
         language: String,
         count: Int,
     ): List<String> {
-        val outputLanguage = if (language.lowercase().startsWith("en")) "English" else "Korean"
+        val outputLanguage = outputLanguageName(language)
         val prompt = """
             Recommend distinct child study topics for a learning tree.
             Root topic: $rootTopic
@@ -468,7 +475,7 @@ class OpenAIRequestExecutor(
                 "answer" to answer,
                 "topic" to topic,
                 "difficultyLevel" to level.coerceIn(1, 10),
-                "outputLanguage" to if (language.lowercase().startsWith("en")) "English" else "Korean",
+                "outputLanguage" to outputLanguageName(language),
                 "rubric" to rubric,
                 "criterionEvidence" to evidence,
                 "independentCritique" to critique,
@@ -756,6 +763,13 @@ private fun Map<*, *>.doubleValue(key: String): Double? =
 
 private fun Map<*, *>.booleanValue(key: String): Boolean? =
     (this[key] as? Boolean) ?: this[key]?.toString()?.toBooleanStrictOrNull()
+
+private fun outputLanguageName(language: String): String =
+    when {
+        language.lowercase().startsWith("en") -> "English"
+        language.lowercase().startsWith("ja") -> "Japanese"
+        else -> "Korean"
+    }
 
 internal fun parseQuestionCoverageConcepts(text: String): List<OpenAIPort.QuestionCoverageConcept> {
     val parsed: Map<String, Any?> = JsonMapperProvider.mapper.readValue(text.ifBlank { "{}" })

@@ -11,7 +11,15 @@ class QuestionLanguageTest {
     fun `normalizes supported language variants`() {
         assertEquals(QuestionLanguage.ENGLISH, QuestionLanguage.normalize("en-US"))
         assertEquals(QuestionLanguage.KOREAN, QuestionLanguage.normalize("ko-KR"))
+        assertEquals(QuestionLanguage.JAPANESE, QuestionLanguage.normalize("ja-JP"))
         assertEquals(QuestionLanguage.KOREAN, QuestionLanguage.normalize(null))
+    }
+
+    @Test
+    fun `recognizes Japanese questions and labels`() {
+        assertTrue(QuestionLanguage.matches("Redis Streamのコンシューマーグループを説明してください。", "ja"))
+        assertTrue(QuestionLanguage.matchesShortLabel("分散システム", "ja"))
+        assertFalse(QuestionLanguage.matches("Redis Stream의 소비자 그룹을 설명하세요.", "ja"))
     }
 
     @Test

@@ -44,6 +44,7 @@ data class StudyRecordResponse(
     val gradingRequestId: String? = null,
     val gradingStatus: AnswerGradingStatus? = null,
     val gradingError: String? = null,
+    val localization: RecordLocalizationResponse? = null,
 )
 
 data class RecordsPageResponse(

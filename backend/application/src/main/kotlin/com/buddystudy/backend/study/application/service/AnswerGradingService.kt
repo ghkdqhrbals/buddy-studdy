@@ -54,7 +54,7 @@ class AnswerGradingService(
                 answer = answer,
                 topic = question.topic,
                 level = question.difficultyLevel,
-                language = user?.appLanguage ?: "ko",
+                language = event.responseLanguage,
                 rubric = question.gradingRubric(),
                 onProgress = { stage ->
                     writer.transition(event, AnswerGradingStatus.valueOf(stage.name), Instant.now())

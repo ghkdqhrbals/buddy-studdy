@@ -1,6 +1,7 @@
 package com.buddystudy.backend.community.adapter.outbound.stream
 
 import com.buddystudy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
+import com.buddystudy.backend.community.application.port.outbound.PublicQuestionViewLocalization
 import com.buddystudy.backend.config.BuddyStudyProperties
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -31,9 +32,13 @@ class AsyncPublicQuestionReactionPublisher(
     @Volatile
     private var queue: Channel<ViewEvent>? = null
 
-    override suspend fun publishViewed(questionId: Long, userId: Long?): Boolean {
+    override suspend fun publishViewed(
+        questionId: Long,
+        userId: Long?,
+        localization: PublicQuestionViewLocalization?,
+    ): Boolean {
         if (!properties.streams.enabled) return false
-        val accepted = queue?.trySend(ViewEvent(questionId, userId))?.isSuccess == true
+        val accepted = queue?.trySend(ViewEvent(questionId, userId, localization))?.isSuccess == true
         if (!accepted) {
             logger.warn(
                 "view_event_queue_full questionId={} userId={} capacity={}",
@@ -84,7 +89,7 @@ class AsyncPublicQuestionReactionPublisher(
         for (event in events) {
             if (!running.get()) break
             try {
-                val published = delegate.publishViewed(event.questionId, event.userId)
+                val published = delegate.publishViewed(event.questionId, event.userId, event.localization)
                 if (!published) {
                     logger.warn(
                         "view_event_publish_failed questionId={} userId={}",
@@ -98,5 +103,9 @@ class AsyncPublicQuestionReactionPublisher(
         }
     }
 
-    private data class ViewEvent(val questionId: Long, val userId: Long?)
+    private data class ViewEvent(
+        val questionId: Long,
+        val userId: Long?,
+        val localization: PublicQuestionViewLocalization?,
+    )
 }

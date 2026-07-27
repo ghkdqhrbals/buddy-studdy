@@ -133,6 +133,7 @@ interface StudyRecordWriteUseCase {
         userId: Long,
         recordId: Long,
         answer: String,
+        sourceLanguage: String,
         grade: GradedAnswer?,
         now: Instant,
     ): QuestionEntity
@@ -152,6 +153,8 @@ interface AnswerGradingWriteUseCase {
         userId: Long,
         recordId: Long,
         answer: String,
+        sourceLanguage: String,
+        aiResponseLanguage: String,
         now: Instant,
     ): QueuedAnswerGrading
 

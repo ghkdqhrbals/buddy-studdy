@@ -7648,12 +7648,18 @@ struct CommunityQuestionDetailView: View {
     @State private var commentDraft = ""
     @State private var isSendingComment = false
     @State private var deletingCommentIDs: Set<String> = []
+    @State private var isShowingOriginal = false
+    @State private var originalAvailable: Bool
     @FocusState private var isCommentInputFocused: Bool
 
     init(question: CommunityQuestion) {
         self.question = question
         _displayQuestion = State(initialValue: question)
         _commentsTotalCount = State(initialValue: question.commentCount)
+        _originalAvailable = State(
+            initialValue: question.localization?.containsTranslation == true ||
+                question.localization?.question.originalAvailable == true
+        )
     }
 
     private var strings: AppStrings {
@@ -7668,6 +7674,8 @@ struct CommunityQuestionDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 communityQuestionMeta
+
+                localizationControl
 
                 CommunityMessageBubble(role: .question) {
                     MarkdownMessageText(markdown: displayQuestion.question)
@@ -7723,8 +7731,9 @@ struct CommunityQuestionDetailView: View {
         }
         .task(id: displayQuestion.id) {
             applyCachedComments()
-            await loadQuestionDetail()
-            await loadComments()
+            async let questionLoad: Void = loadQuestionDetail()
+            async let commentsLoad: Void = loadComments()
+            _ = await (questionLoad, commentsLoad)
         }
     }
 
@@ -7795,6 +7804,27 @@ struct CommunityQuestionDetailView: View {
                 .foregroundStyle(.secondary)
 
             Spacer()
+        }
+    }
+
+    @ViewBuilder
+    private var localizationControl: some View {
+        if originalAvailable || isShowingOriginal {
+            HStack(spacing: 6) {
+                if !isShowingOriginal {
+                    Text(strings.translatedIntoLanguage)
+                        .foregroundStyle(.secondary)
+                    Text("·")
+                        .foregroundStyle(.tertiary)
+                }
+                Button(isShowingOriginal ? strings.showTranslation : strings.showOriginal) {
+                    Task { await switchContentView() }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
+            }
+            .font(.caption.weight(.medium))
+            .accessibilityElement(children: .combine)
         }
     }
 
@@ -7909,6 +7939,23 @@ struct CommunityQuestionDetailView: View {
         }
 
         applyComments(response)
+        guard response.comments.contains(where: { $0.localization?.isPending == true }) else {
+            return
+        }
+        for delay in [1, 2, 4] {
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled,
+                  let retried = await appState.loadCommunityQuestionComments(
+                    questionID: displayQuestion.id,
+                    refresh: true
+                  ) else {
+                return
+            }
+            applyComments(retried)
+            if !retried.comments.contains(where: { $0.localization?.isPending == true }) {
+                return
+            }
+        }
     }
 
     private func applyCachedComments() {
@@ -7930,6 +7977,44 @@ struct CommunityQuestionDetailView: View {
             return
         }
         displayQuestion = question
+        originalAvailable = originalAvailable ||
+            question.localization?.containsTranslation == true ||
+            question.localization?.question.originalAvailable == true
+        guard question.localization?.containsPendingTranslation == true else {
+            return
+        }
+        for delay in [1, 2, 4] {
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled,
+                  let retried = await appState.loadCommunityQuestionDetail(questionID: displayQuestion.id) else {
+                return
+            }
+            displayQuestion = retried
+            originalAvailable = originalAvailable || retried.localization?.containsTranslation == true
+            if retried.localization?.containsPendingTranslation != true {
+                return
+            }
+        }
+    }
+
+    private func switchContentView() async {
+        let target: LocalizedContentView = isShowingOriginal ? .localized : .original
+        guard let loaded = await appState.loadCommunityQuestionDetail(
+            questionID: displayQuestion.id,
+            view: target
+        ) else {
+            return
+        }
+        displayQuestion = loaded
+        if let response = await appState.loadCommunityQuestionComments(
+            questionID: loaded.id,
+            refresh: true,
+            view: target
+        ) {
+            applyComments(response)
+        }
+        isShowingOriginal = target == .original
+        originalAvailable = true
     }
 
     private func sendComment() {

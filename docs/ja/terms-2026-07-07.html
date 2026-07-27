@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="BuddyStudy利用規約。">
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="icon" href="../assets/buddystudy-icon.png" type="image/png">
+  <link rel="apple-touch-icon" href="../assets/buddystudy-icon.png">
+  <title>利用規約 - BuddyStudy</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #fafafa;
+      --fg: #1f2328;
+      --muted: #6b7280;
+      --line: rgba(31, 35, 40, 0.14);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #141414;
+        --fg: #f5f5f5;
+        --muted: #a1a1aa;
+        --line: rgba(255, 255, 255, 0.14);
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+      line-height: 1.6;
+    }
+
+    a {
+      color: inherit;
+      text-underline-offset: 3px;
+    }
+
+    main {
+      width: min(760px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 48px 0 44px;
+    }
+
+    nav {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    header {
+      padding: 64px 0 34px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 28px;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(38px, 7vw, 64px);
+      line-height: 1.04;
+      letter-spacing: 0;
+    }
+
+    .updated {
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .toc {
+      display: grid;
+      gap: 8px;
+      padding: 22px 0;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .toc a {
+      text-decoration: none;
+    }
+
+    section {
+      padding: 24px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h2 {
+      margin: 0 0 10px;
+      font-size: 18px;
+    }
+
+    p {
+      margin: 0 0 12px;
+      color: var(--muted);
+    }
+
+    p:last-child {
+      margin-bottom: 0;
+    }
+
+    ul {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      color: var(--muted);
+      list-style: none;
+    }
+
+    li::before {
+      content: "- ";
+    }
+
+    footer {
+      padding-top: 20px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <nav aria-label="Navigation">
+      <a href="./">BuddyStudy</a>
+      <a href="../terms-2026-07-07.html" lang="ko">한국어</a>
+    </nav>
+
+    <header>
+      <div class="brand">
+        <span>BuddyStudy</span>
+      </div>
+      <h1>利用規約</h1>
+      <p class="updated">発効日：2026年7月7日</p>
+    </header>
+
+    <div class="toc" aria-label="Table of contents">
+      <a href="#service">1. サービス概要</a>
+      <a href="#account">2. アカウントとサインイン</a>
+      <a href="#content">3. 研究データと一般質問</a>
+      <a href="#ai">4. AI の結果とユーザーの責任</a>
+      <a href="#limits">5. 許容される使用</a>
+      <a href="#availability">6. サービスの変更と可用性</a>
+      <a href="#liability">7. 免責事項と責任の制限</a>
+      <a href="#contact">8. 連絡先</a>
+    </div>
+
+    <section id="service">
+      <h2>1. サービス概要</h2>
+      <p>BuddyStudy は、ユーザーが選択したトピックとレベルに基づいて短い学習問題を生成し、学習記録を保存し、学習統計を表示する iOS 学習アプリです。一部の機能では、BuddyStudy バックエンド AI ルーティング、Apple プッシュ通知サービス、Google ログイン、または電子メール ログインを使用する場合があります。</p>
+      <p>これらの規約は、BuddyStudy アプリ、バックエンド同期、公開質問、サインイン ベースの機能、および関連サービスを使用するときに適用されます。</p>
+    </section>
+
+    <section id="account">
+      <h2>2. アカウントとサインイン</h2>
+      <ul>
+        <li>主要な研究機能はアプリ アカウントなしで利用できる場合がありますが、同期、統計、公開質問、コメント、その他のユーザー固有の機能にはサインインが必要な場合があります。</li>
+        <li>自分が管理する Google アカウントまたは電子メール アカウントを使用してサインインする必要があります。そのアカウントへのアクセスを安全に保つのは自分の責任です。</li>
+        <li>デバイスの資格情報が無効である場合、トークンの有効期限が切れている場合、またはアカウントが削除されている場合、アプリは再度サインインすることを要求する場合があります。</li>
+      </ul>
+    </section>
+
+    <section id="content">
+      <h2>3. 研究データと一般質問</h2>
+      <ul>
+        <li>学習エクスペリエンスと同期機能を提供するために、回答、学習記録、設定、統計が保存される場合があります。</li>
+        <li>公開することを選択した質問やコメントは、他のユーザーに表示される場合があります。個人情報、機密情報、または他人の権利を侵害するコンテンツを公開しないでください。</li>
+        <li>不適切な公開コンテンツは報告、非表示、削除される可能性があり、またアカウントや機能の制限につながる可能性があります。</li>
+      </ul>
+    </section>
+
+    <section id="ai">
+      <h2>4. AI の結果とユーザーの責任</h2>
+      <p>AI が生成した問題、フィードバック、説明、スコアは学習の補助となります。これらは正確であること、完全であること、またはあらゆる目的に適していることは保証されません。試験、仕事、法的、医療、財務、その他の重要な決定に重要な情報を依存する前に、独立して重要な情報を確認する必要があります。</p>
+      <p>AI 機能は BuddyStudy バックエンドを通じて提供され、外部 AI プロバイダーの応答と可用性に依存する場合があります。</p>
+    </section>
+
+    <section id="limits">
+      <h2>5. 許容される使用</h2>
+      <ul>
+        <li>このサービスを使用して、攻撃、過負荷、バイパス、スパム、自動化の悪用、または許可なくシステムにアクセスすることはできません。</li>
+        <li>違法なコンテンツや他人の権利を侵害するコンテンツを作成、保存、共有することはできません。</li>
+        <li>お客様の使用がサービスの安定性を損なったり、他のユーザーに干渉したりする場合、BuddyStudy は機能やアカウントへのアクセスを制限することがあります。</li>
+      </ul>
+    </section>
+
+    <section id="availability">
+      <h2>6. サービスの変更と可用性</h2>
+      <p>BuddyStudy は、改善、セキュリティ、メンテナンス、または運用上の理由から、アプリまたはバックエンドの機能を変更または一時的に停止する場合があります。サードパーティのサービスの停止、ネットワークの問題、アカウント設定、またはデバイス構成が原因で、一部の機能が動作しない場合があります。</p>
+    </section>
+
+    <section id="liability">
+      <h2>7. 免責事項と責任の制限</h2>
+      <p>BuddyStudy は安定したサービスを提供することを目指していますが、永続的なデータ保持、AI 結果の正確さ、中断のないサードパーティ サービスを保証するものではありません。法律で認められる範囲で、BuddyStudy の責任は直接かつ合理的に予見可能な損害に限定されます。</p>
+    </section>
+
+    <section id="contact">
+      <h2>8. 連絡先</h2>
+      <p>これらの規約またはサービスに関する質問については、電子メールで開発者にお問い合わせください。 <a href="mailto:ghkdqhrbals@gmail.com">ghkdqhrbals@gmail.com</a>.</p>
+    </section>
+
+    <footer>
+      個人データの処理の詳細については、 <a href="privacy-2026-07-07.html">プライバシーポリシー</a>.
+    </footer>
+  </main>
+</body>
+</html>

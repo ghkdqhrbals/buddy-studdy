@@ -659,6 +659,7 @@ enum Difficulty: Int, CaseIterable, Codable, Identifiable {
 enum StudyLanguage: String, CaseIterable, Codable, Identifiable {
     case korean
     case english
+    case japanese
 
     var id: String { rawValue }
 
@@ -674,6 +675,8 @@ enum StudyLanguage: String, CaseIterable, Codable, Identifiable {
             "한국어"
         case .english:
             "English"
+        case .japanese:
+            "日本語"
         }
     }
 
@@ -683,6 +686,8 @@ enum StudyLanguage: String, CaseIterable, Codable, Identifiable {
             "Korean"
         case .english:
             "English"
+        case .japanese:
+            "Japanese"
         }
     }
 }
@@ -690,6 +695,7 @@ enum StudyLanguage: String, CaseIterable, Codable, Identifiable {
 enum AppLanguage: String, CaseIterable, Codable, Identifiable {
     case korean
     case english
+    case japanese
 
     var id: String { rawValue }
 
@@ -699,6 +705,8 @@ enum AppLanguage: String, CaseIterable, Codable, Identifiable {
             Locale(identifier: "ko_KR")
         case .english:
             Locale(identifier: "en_US")
+        case .japanese:
+            Locale(identifier: "ja_JP")
         }
     }
 
@@ -708,6 +716,8 @@ enum AppLanguage: String, CaseIterable, Codable, Identifiable {
             "한국어"
         case .english:
             "English"
+        case .japanese:
+            "日本語"
         }
     }
 }
@@ -752,30 +762,44 @@ enum NotificationSoundOption: String, CaseIterable, Codable, Identifiable {
             "기본음"
         case (.defaultSound, .english):
             "Default"
+        case (.defaultSound, .japanese):
+            "デフォルト"
         case (.softPing, .korean):
             "부드러운 핑"
         case (.softPing, .english):
             "Soft Ping"
+        case (.softPing, .japanese):
+            "ソフトピング"
         case (.chime, .korean):
             "차임"
         case (.chime, .english):
             "Chime"
+        case (.chime, .japanese):
+            "チャイム"
         case (.pop, .korean):
             "팝"
         case (.pop, .english):
             "Pop"
+        case (.pop, .japanese):
+            "ポップ"
         case (.bell, .korean):
             "벨"
         case (.bell, .english):
             "Bell"
+        case (.bell, .japanese):
+            "ベル"
         case (.tap, .korean):
             "탭"
         case (.tap, .english):
             "Tap"
+        case (.tap, .japanese):
+            "タップ"
         case (.none, .korean):
             "없음"
         case (.none, .english):
             "None"
+        case (.none, .japanese):
+            "なし"
         }
     }
 }
@@ -1001,6 +1025,8 @@ extension AppLanguage {
             .korean
         case .english:
             .english
+        case .japanese:
+            .japanese
         }
     }
 }
@@ -1009,15 +1035,24 @@ struct StudySettings: Codable, Equatable {
     static let defaultOpenAIModel = "gpt-5.4"
     static let fallbackTopic = "내 학습"
     static let fallbackTopicEnglish = "My Study"
+    static let fallbackTopicJapanese = "マイ学習"
     static let defaultCustomPrompt = "짧고 명확하게 질문하세요. 사용자가 답하기 좋은 한 문제만 내세요."
     private static let fallbackCategoryCreatedAt = Date(timeIntervalSince1970: 0)
     private static let fallbackTopicIDByLanguage: [AppLanguage: String] = [
         .korean: "builtin-study-category-default-ko",
-        .english: "builtin-study-category-default-en"
+        .english: "builtin-study-category-default-en",
+        .japanese: "builtin-study-category-default-ja"
     ]
 
     static func fallbackTopic(for appLanguage: AppLanguage) -> String {
-        appLanguage == .english ? fallbackTopicEnglish : fallbackTopic
+        switch appLanguage {
+        case .korean:
+            fallbackTopic
+        case .english:
+            fallbackTopicEnglish
+        case .japanese:
+            fallbackTopicJapanese
+        }
     }
 
     static func fallbackTopicID(for appLanguage: AppLanguage) -> String {
@@ -1442,6 +1477,21 @@ enum RecommendedPrompt: String, CaseIterable, Identifiable {
             case .review:
                 return "Review Focus"
             }
+        case .japanese:
+            switch self {
+            case .concept:
+                return "概念チェック"
+            case .interview:
+                return "面接形式"
+            case .practical:
+                return "実践例"
+            case .scale:
+                return "スケール設計"
+            case .enterprise:
+                return "大規模運用"
+            case .review:
+                return "復習重視"
+            }
         }
     }
 
@@ -1476,6 +1526,21 @@ enum RecommendedPrompt: String, CaseIterable, Identifiable {
                 return "Ask from a large-company production perspective. Make the user consider reliability, deployment/rollback, monitoring, security, permissions, data consistency, incident response, and cross-team collaboration."
             case .review:
                 return "Ask a review question that does not overlap with previous questions. Check common mistakes and confusing differences."
+            }
+        case .japanese:
+            switch self {
+            case .concept:
+                return "中心となる概念を正しく理解しているか確認する短い質問をしてください。一度に一つの概念だけを扱ってください。"
+            case .interview:
+                return "技術面接のように質問してください。定義だけでなく、理由、トレードオフ、実際の利用場面を説明させてください。"
+            case .practical:
+                return "実務の状況や小さな例をもとに質問し、概念を適用して答えられるようにしてください。"
+            case .scale:
+                return "スケールイン・アウトの設計観点から、トラフィック増加、ボトルネック、分割、キャッシュ、キュー、障害分離、コストを説明させてください。"
+            case .enterprise:
+                return "大規模な本番運用の観点から、信頼性、デプロイとロールバック、監視、セキュリティ、権限、整合性、障害対応、チーム連携を考慮させてください。"
+            case .review:
+                return "以前の質問と重ならない復習問題を出し、よくある間違いや混同しやすい違いを確認してください。"
             }
         }
     }
@@ -1587,6 +1652,39 @@ struct AnswerGradingProcess: Codable, Equatable {
     }
 }
 
+enum LocalizedContentView: String, Codable {
+    case localized
+    case original
+}
+
+struct ContentLocalizationMetadata: Codable, Equatable {
+    var sourceLanguage: String
+    var requestedLanguage: String
+    var displayLanguage: String
+    var translationState: String
+    var isTranslated: Bool
+    var originalAvailable: Bool
+    var translationReason: String
+
+    var isPending: Bool {
+        translationState == "PENDING"
+    }
+}
+
+struct RecordLocalizationMetadata: Codable, Equatable {
+    var question: ContentLocalizationMetadata
+    var answer: ContentLocalizationMetadata?
+    var aiResponse: ContentLocalizationMetadata?
+
+    var containsTranslation: Bool {
+        [question, answer, aiResponse].compactMap { $0 }.contains { $0.isTranslated }
+    }
+
+    var containsPendingTranslation: Bool {
+        [question, answer, aiResponse].compactMap { $0 }.contains { $0.isPending }
+    }
+}
+
 struct StudyRecord: Codable, Equatable, Identifiable {
     var id: String
     var studyID: Int?
@@ -1603,6 +1701,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
     var gradingRequestID: String?
     var gradingStatus: AnswerGradingStatus?
     var gradingError: String?
+    var localization: RecordLocalizationMetadata?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -1620,6 +1719,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         case gradingRequestID = "gradingRequestId"
         case gradingStatus
         case gradingError
+        case localization
     }
 
     private enum BackendBooleanCodingKeys: String, CodingKey {
@@ -1641,7 +1741,8 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         viewCount: Int = 0,
         gradingRequestID: String? = nil,
         gradingStatus: AnswerGradingStatus? = nil,
-        gradingError: String? = nil
+        gradingError: String? = nil,
+        localization: RecordLocalizationMetadata? = nil
     ) {
         self.id = id
         self.studyID = studyID
@@ -1658,6 +1759,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         self.gradingRequestID = gradingRequestID
         self.gradingStatus = gradingStatus
         self.gradingError = gradingError
+        self.localization = localization
     }
 
     init(from decoder: Decoder) throws {
@@ -1680,6 +1782,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         gradingRequestID = try container.decodeIfPresent(String.self, forKey: .gradingRequestID)
         gradingStatus = try container.decodeIfPresent(AnswerGradingStatus.self, forKey: .gradingStatus)
         gradingError = try container.decodeIfPresent(String.self, forKey: .gradingError)
+        localization = try container.decodeIfPresent(RecordLocalizationMetadata.self, forKey: .localization)
     }
 
     func asCommunityQuestion(author: CommunityUserProfile?) -> CommunityQuestion? {
@@ -1702,7 +1805,8 @@ struct StudyRecord: Codable, Equatable, Identifiable {
             likeCount: likeCount,
             commentCount: commentCount,
             viewCount: viewCount,
-            isLikedByMe: false
+            isLikedByMe: false,
+            localization: localization
         )
     }
 }
@@ -2064,6 +2168,8 @@ extension Difficulty {
             return displayName
         case .english:
             return "Level \(level)/10"
+        case .japanese:
+            return "レベル \(level)/10"
         }
     }
 }
@@ -2075,6 +2181,8 @@ enum AppLegalLinks {
             return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/terms-2026-07-07.html")!
         case .english:
             return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/terms-2026-07-07.html")!
+        case .japanese:
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/ja/terms-2026-07-07.html")!
         }
     }
 
@@ -2084,6 +2192,8 @@ enum AppLegalLinks {
             return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/privacy-2026-07-07.html")!
         case .english:
             return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/privacy-2026-07-07.html")!
+        case .japanese:
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/ja/privacy-2026-07-07.html")!
         }
     }
 
@@ -2093,6 +2203,8 @@ enum AppLegalLinks {
             return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/terms-2026-07-07.html#info-notification")!
         case .english:
             return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/terms-2026-07-07.html#info-notification")!
+        case .japanese:
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/ja/terms-2026-07-07.html#info-notification")!
         }
     }
 
@@ -2102,6 +2214,8 @@ enum AppLegalLinks {
             return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/terms-2026-07-07.html#marketing-notification")!
         case .english:
             return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/terms-2026-07-07.html#marketing-notification")!
+        case .japanese:
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/ja/terms-2026-07-07.html#marketing-notification")!
         }
     }
 
@@ -2111,6 +2225,8 @@ enum AppLegalLinks {
             return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/terms-2026-07-07.html#night-marketing-notification")!
         case .english:
             return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/terms-2026-07-07.html#night-marketing-notification")!
+        case .japanese:
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/ja/terms-2026-07-07.html#night-marketing-notification")!
         }
     }
 }
@@ -2118,12 +2234,25 @@ enum AppLegalLinks {
 struct AppStrings {
     var language: AppLanguage
 
-    private var isKorean: Bool {
-        language == .korean
+    private func text(_ korean: String, _ english: String, _ japanese: String? = nil) -> String {
+        switch language {
+        case .korean:
+            korean
+        case .english:
+            english
+        case .japanese:
+            japanese ?? JapaneseAppStrings.translation(for: english)
+        }
     }
 
-    private func text(_ korean: String, _ english: String) -> String {
-        isKorean ? korean : english
+    var showOriginal: String { text("원문 보기", "Show original", "原文を見る") }
+    var showTranslation: String { text("번역 보기", "View translation", "翻訳を見る") }
+    var translatedIntoLanguage: String {
+        text(
+            "한국어로 번역됨",
+            "Translated into English",
+            "日本語に翻訳済み"
+        )
     }
 
     var gradingQueued: String { text("답변을 접수했습니다.", "Answer received.") }
@@ -2288,17 +2417,18 @@ struct AppStrings {
     var monthlyQuestionQuota: String { text("월간 질문", "Monthly questions") }
     var monthlyQuotaReached: String { text("이번 달 질문 한도에 도달했습니다.", "You have reached this month's question limit.") }
     func monthlyQuotaUsage(remaining: Int, limit: Int) -> String {
-        text("\(limit)개 중 \(remaining)개 남음", "\(remaining) of \(limit) remaining")
+        text("\(limit)개 중 \(remaining)개 남음", "\(remaining) of \(limit) remaining", "残り\(remaining)件／\(limit)件")
     }
     func monthlyQuotaReset(_ resetAt: Date) -> String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: isKorean ? "ko_KR" : "en_US")
+        formatter.locale = language.locale
         formatter.timeZone = .current
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return text(
             "\(formatter.string(from: resetAt))에 초기화",
-            "Resets \(formatter.string(from: resetAt))"
+            "Resets \(formatter.string(from: resetAt))",
+            "\(formatter.string(from: resetAt))にリセット"
         )
     }
     var studyTree: String { text("학습 트리", "Study Tree") }
@@ -2309,14 +2439,15 @@ struct AppStrings {
     func deleteStudySubtree(_ topic: String) -> String {
         text(
             "\"\(topic)\" 및 모든 하위 주제를 삭제할까요?",
-            "Delete \"\(topic)\" and all of its subtopics?"
+            "Delete \"\(topic)\" and all of its subtopics?",
+            "「\(topic)」とそのすべてのサブトピックを削除しますか？"
         )
     }
     func selectedTopicCount(_ count: Int) -> String {
-        text("\(count)개 선택", "\(count) selected")
+        text("\(count)개 선택", "\(count) selected", "\(count)件選択中")
     }
     func moreStudyTopics(_ count: Int) -> String {
-        text("+ \(count)개 주제 더 보기", "+ \(count) more topics")
+        text("+ \(count)개 주제 더 보기", "+ \(count) more topics", "他\(count)件のトピック")
     }
     var viewFullStudyTree: String { text("전체 트리 보기", "View full tree") }
     var moveToParentTopic: String { text("상위로", "Up one level") }
@@ -2326,10 +2457,10 @@ struct AppStrings {
     var collapseStudyTopics: String { text("주제 목록 접기", "Collapse topics") }
     var expandStudyTopics: String { text("주제 목록 펼치기", "Expand topics") }
     func childTopicCount(_ count: Int) -> String {
-        text("하위 주제 \(count)개", "\(count) child topics")
+        text("하위 주제 \(count)개", "\(count) child topics", "サブトピック\(count)件")
     }
     func childTopicAction(_ count: Int) -> String {
-        text("하위 \(count)", "\(count) children")
+        text("하위 \(count)", "\(count) children", "下位\(count)件")
     }
     var addSubstudy: String { text("하위 주제 추가", "Add subtopic") }
     var recommendSubstudy: String { text("추천 주제", "Suggested topics") }
@@ -2367,32 +2498,35 @@ struct AppStrings {
     var duplicateStudyTopic: String { text("이미 트리에 있는 주제입니다.", "This topic already exists in the tree.") }
     var addStudyTopicFailed: String { text("하위 주제를 추가하지 못했습니다.", "Could not add the subtopic.") }
     func addSelectedSubstudies(_ count: Int) -> String {
-        text("선택한 \(count)개 추가", "Add \(count) selected")
+        text("선택한 \(count)개 추가", "Add \(count) selected", "選択した\(count)件を追加")
     }
     func sharedDifficultyDescription(_ count: Int) -> String {
         text(
             "선택한 \(count)개 주제에 같은 숫자가 적용됩니다.",
-            "The same number applies to all \(count) selected topics."
+            "The same number applies to all \(count) selected topics.",
+            "選択した\(count)件のトピックすべてに同じ数値が適用されます。"
         )
     }
     func partialSubstudyAddFailure(added: Int, failed: Int) -> String {
         text(
             "\(added)개를 추가했고 \(failed)개는 추가하지 못했습니다. 선택된 주제를 다시 시도해 주세요.",
-            "Added \(added). \(failed) could not be added; retry the selected topics."
+            "Added \(added). \(failed) could not be added; retry the selected topics.",
+            "\(added)件を追加しました。\(failed)件は追加できませんでした。選択したトピックを再試行してください。"
         )
     }
     var deleteStudy: String { text("학습 삭제", "Delete Study") }
     var openQuestions: String { text("질문 열기", "Open Questions") }
     func monthlyQuotaExceededMessage(serverMessage: String, resetAt: Date) -> String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: isKorean ? "ko_KR" : "en_US")
+        formatter.locale = language.locale
         formatter.timeZone = .current
         formatter.dateStyle = .long
         formatter.timeStyle = .short
         let resetAtText = formatter.string(from: resetAt)
         return text(
             "\(serverMessage) \(resetAtText)에 다시 사용할 수 있습니다.",
-            "\(serverMessage) You can create questions again on \(resetAtText)."
+            "\(serverMessage) You can create questions again on \(resetAtText).",
+            "\(serverMessage) \(resetAtText)から再び質問を作成できます。"
         )
     }
     func homePath(_ category: String) -> String {
@@ -2469,18 +2603,18 @@ struct AppStrings {
     var ignore: String { text("무시", "Ignore") }
     var openStudy: String { text("학습 열기...", "Open Study...") }
     var aboutStudyMate: String { text("BuddyStudy 정보", "About BuddyStudy") }
-    func timerTitle(minutes: Int) -> String { text("타이머: \(minutes)분", "Timer: \(minutes) min") }
-    func minuteLabel(_ minutes: Int) -> String { text("\(minutes)분", "\(minutes) min") }
+    func timerTitle(minutes: Int) -> String { text("타이머: \(minutes)분", "Timer: \(minutes) min", "タイマー：\(minutes)分") }
+    func minuteLabel(_ minutes: Int) -> String { text("\(minutes)분", "\(minutes) min", "\(minutes)分") }
     var languageMenu: String { text("언어", "Language") }
     var pause: String { text("일시정지", "Pause") }
     var resume: String { text("재개", "Resume") }
     var quit: String { text("BuddyStudy 종료", "Quit BuddyStudy") }
 
-    var general: String { "General" }
-    var secrets: String { "Secrets" }
-    var study: String { "Study" }
-    var records: String { "Records" }
-    var developer: String { "Developer" }
+    var general: String { text("일반", "General", "一般") }
+    var secrets: String { text("비밀 키", "Secrets", "シークレット") }
+    var study: String { text("학습", "Study", "学習") }
+    var records: String { text("기록", "Records", "履歴") }
+    var developer: String { text("개발자", "Developer", "開発者") }
 
     var checking: String { text("확인 중", "Checking") }
     var save: String { text("저장", "Save") }
@@ -2611,12 +2745,13 @@ struct AppStrings {
         )
     }
     func syncFailed(_ reason: String) -> String {
-        text("iCloud 동기화 실패: \(reason)", "iCloud sync failed: \(reason)")
+        text("iCloud 동기화 실패: \(reason)", "iCloud sync failed: \(reason)", "iCloudの同期に失敗しました：\(reason)")
     }
     func lastSyncedAt(_ date: Date) -> String {
         text(
             "마지막 동기화: \(date.formatted(date: .abbreviated, time: .shortened))",
-            "Last synced: \(date.formatted(date: .abbreviated, time: .shortened))"
+            "Last synced: \(date.formatted(date: .abbreviated, time: .shortened))",
+            "最終同期：\(date.formatted(date: .abbreviated, time: .shortened))"
         )
     }
     var unsavedAPIKeyHelp: String {
@@ -2687,7 +2822,7 @@ struct AppStrings {
         text("앱, 로컬 설정, 캐시가 삭제되고 BuddyStudy가 종료됩니다.", "The app, local settings, and caches will be deleted, then BuddyStudy will quit.")
     }
     func uninstallFailed(_ reason: String) -> String {
-        text("앱 제거 실패: \(reason)", "Uninstall failed: \(reason)")
+        text("앱 제거 실패: \(reason)", "Uninstall failed: \(reason)", "アンインストールに失敗しました：\(reason)")
     }
     var studySettings: String { text("학습 설정", "Study Settings") }
     var studyCategories: String { text("내 학습", "My Studies") }
@@ -2725,14 +2860,18 @@ struct AppStrings {
     var studyTopic: String { text("공부할 주제", "Study topic") }
     var difficulty: String { text("난이도", "Difficulty") }
     var difficultyScaleHint: String { text("1은 가장 쉬움, 10은 전문가 수준입니다.", "1 is easiest, 10 is expert-level.") }
-    func questionInterval(minutes: Int) -> String { text("질문 간격: \(minutes)분", "Question interval: \(minutes) min") }
+    func questionInterval(minutes: Int) -> String { text("질문 간격: \(minutes)분", "Question interval: \(minutes) min", "質問間隔：\(minutes)分") }
     var recommendedPrompt: String { text("추천 프롬프트", "Recommended Prompt") }
     var relatedPrompt: String { text("관련 프롬프트", "Prompt") }
 
     var maxRecordCount: String { text("기록 최대 개수", "Max records") }
     var countUnit: String { text("개", "") }
     func recordLimitHelp(limit: Int, count: Int) -> String {
-        text("저장 시 \(limit)개 범위로 정리됩니다. 현재 저장된 기록: \(count)개", "Records are trimmed to \(limit) on save. Current records: \(count)")
+        text(
+            "저장 시 \(limit)개 범위로 정리됩니다. 현재 저장된 기록: \(count)개",
+            "Records are trimmed to \(limit) on save. Current records: \(count)",
+            "保存時に\(limit)件まで整理されます。現在の履歴：\(count)件"
+        )
     }
     var deleteRecords: String { text("기록 전체삭제", "Delete All Records") }
     var deleteRecordsHelp: String { text("저장된 질문, 답변, 채점 기록을 모두 삭제합니다.", "Delete all saved questions, answers, and grading results.") }
@@ -2784,7 +2923,7 @@ struct AppStrings {
     var draftSaved: String { text("초안 자동 저장됨", "Draft auto-saved") }
     var continueOldestPending: String { text("오래된 질문 이어하기", "Continue Oldest") }
     var pendingQuestions: String { text("미제출 질문", "Pending Questions") }
-    func pendingQuestionCount(_ count: Int) -> String { text("\(count)개 대기 중", "\(count) pending") }
+    func pendingQuestionCount(_ count: Int) -> String { text("\(count)개 대기 중", "\(count) pending", "\(count)件待機中") }
     var pendingQuestionLimitTitle: String { text("답변 대기 중인 질문이 있습니다.", "A question is waiting for your answer.") }
     var pendingQuestionLimitMessage: String {
         text(
@@ -2845,7 +2984,7 @@ struct AppStrings {
     var more: String { text("더보기", "More") }
     var searchRecords: String { text("기록 검색", "Search records") }
     func filteredRecordCount(_ shown: Int, total: Int) -> String {
-        text("\(shown)/\(total)개 표시", "\(shown)/\(total) shown")
+        text("\(shown)/\(total)개 표시", "\(shown)/\(total) shown", "\(shown)/\(total)件を表示")
     }
     var noSearchResults: String { text("검색 결과 없음", "No Results") }
     var noSearchResultsDescription: String { text("다른 검색어로 기록을 찾아보세요.", "Try another search term.") }
@@ -2855,7 +2994,7 @@ struct AppStrings {
     var studyFallback: String { text("내 학습", "My Study") }
     var ungraded: String { text("미채점", "Ungraded") }
     var recordDetail: String { text("상세기록", "Record Detail") }
-    func answerPrefix(_ answer: String) -> String { text("답변: \(answer)", "Answer: \(answer)") }
+    func answerPrefix(_ answer: String) -> String { text("답변: \(answer)", "Answer: \(answer)", "回答：\(answer)") }
 
     var stats: String { text("통계", "Stats") }
     var noStatsRecords: String { text("기록이 없습니다", "No records") }
@@ -2937,14 +3076,18 @@ struct AppStrings {
         text("복습이 필요하거나 아직 측정이 부족한 학습입니다.", "Studies that may need review or more activity.")
     }
     func needsMoreAnswers(_ count: Int) -> String {
-        text("성장 측정까지 답변 \(max(6 - count, 0))개", "\(max(6 - count, 0)) more answers to measure growth")
+        text(
+            "성장 측정까지 답변 \(max(6 - count, 0))개",
+            "\(max(6 - count, 0)) more answers to measure growth",
+            "成長測定まであと\(max(6 - count, 0))件"
+        )
     }
     var partialMeasurement: String { text("일부 하위 주제 측정 중", "Some subtopics are still measuring") }
     func allStudiesCount(_ count: Int) -> String {
-        text("전체 학습 \(count)개", "All studies \(count)")
+        text("전체 학습 \(count)개", "All studies \(count)", "すべての学習 \(count)件")
     }
     func growthPositionSummary(previous: String, current: String) -> String {
-        text("이전 \(previous) → 현재 \(current)", "Previous \(previous) → Current \(current)")
+        text("이전 \(previous) → 현재 \(current)", "Previous \(previous) → Current \(current)", "以前 \(previous) → 現在 \(current)")
     }
     var currentAbility: String { text("현재", "Current") }
     var growthChange: String { text("성장", "Growth") }
@@ -2959,24 +3102,24 @@ struct AppStrings {
     var previousAbility: String { text("이전", "Previous") }
     var lastYear: String { text("최근 1년", "Last year") }
     func measuredTopics(_ measured: Int, total: Int) -> String {
-        text("\(measured)/\(total)개 주제 측정", "\(measured)/\(total) topics measured")
+        text("\(measured)/\(total)개 주제 측정", "\(measured)/\(total) topics measured", "\(measured)/\(total)件のトピックを測定")
     }
     func growthAnswerCount(_ count: Int) -> String {
-        text("답변 \(count)개", "\(count) answers")
+        text("답변 \(count)개", "\(count) answers", "回答\(count)件")
     }
     var thisMonth: String { text("이번 달", "This Month") }
     var selectedYear: String { text("선택 연도", "Selected Year") }
     var year: String { text("연도", "Year") }
     var answersUnit: String { text("개", "answers") }
     var noActivityYet: String { text("아직 활동이 없습니다", "No activity yet") }
-    func streakValue(_ days: Int) -> String { text("\(days)일", "\(days)d") }
-    func monthSummary(days: Int) -> String { text("\(days)일 학습", "\(days) active days") }
+    func streakValue(_ days: Int) -> String { text("\(days)일", "\(days)d", "\(days)日") }
+    func monthSummary(days: Int) -> String { text("\(days)일 학습", "\(days) active days", "\(days)日学習") }
     func monthSummaryWithTopic(days: Int, topic: String) -> String {
-        text("\(days)일 · \(topic)", "\(days)d · \(topic)")
+        text("\(days)일 · \(topic)", "\(days)d · \(topic)", "\(days)日 · \(topic)")
     }
-    func yearSummary(days: Int) -> String { text("\(days)일 학습", "\(days) active days") }
+    func yearSummary(days: Int) -> String { text("\(days)일 학습", "\(days) active days", "\(days)日学習") }
     func yearSummaryWithTopic(days: Int, topic: String) -> String {
-        text("\(days)일 · \(topic)", "\(days)d · \(topic)")
+        text("\(days)일 · \(topic)", "\(days)d · \(topic)", "\(days)日 · \(topic)")
     }
     var average: String { text("평균", "Avg") }
     var best: String { text("최고", "Best") }
@@ -2996,8 +3139,8 @@ struct AppStrings {
     var writeComment: String { text("댓글 쓰기", "Write a comment") }
     var signInToComment: String { text("로그인 후 댓글을 쓸 수 있습니다.", "Sign in to write a comment.") }
     var communityLogin: String { text("로그인", "Sign In") }
-    var signInWithGoogle: String { "Sign in with Google" }
-    var signInWithEmail: String { "Sign in with Email" }
+    var signInWithGoogle: String { text("Google로 로그인", "Sign in with Google", "Googleでログイン") }
+    var signInWithEmail: String { text("이메일로 로그인", "Sign in with Email", "メールでログイン") }
     var loginPageHelp: String {
         text(
             "로그인하면 기록, 통계, 내 학습 동기화 기능을 사용할 수 있습니다.",
@@ -3203,7 +3346,7 @@ struct AppStrings {
     var previousPage: String { text("이전 페이지", "Previous Page") }
     var nextPage: String { text("다음 페이지", "Next Page") }
     func topicPageStatus(start: Int, end: Int, total: Int) -> String {
-        text("\(start)-\(end)/\(total)", "\(start)-\(end)/\(total)")
+        text("\(start)-\(end)/\(total)", "\(start)-\(end)/\(total)", "\(start)-\(end)/\(total)")
     }
     var firstRecord: String { text("처음", "First") }
     var latestRecord: String { text("최근", "Latest") }
@@ -3244,16 +3387,17 @@ struct AppStrings {
     var explanation: String { text("해설", "Explanation") }
     var statsByTopic: String { text("주제별 통계", "Stats by Topic") }
     func currentTopicLevel(_ level: String) -> String {
-        text("레벨: \(level)", "Level: \(level)")
+        text("레벨: \(level)", "Level: \(level)", "レベル：\(level)")
     }
     func topicLevelRange(_ start: String, _ end: String, average: Int, count: Int) -> String {
         text(
             "범위: \(start)-\(end) · \(count)개",
-            "Range: \(start)-\(end) · \(count)"
+            "Range: \(start)-\(end) · \(count)",
+            "範囲：\(start)-\(end) · \(count)件"
         )
     }
-    func groupedTopics(_ topics: String) -> String { text("묶인 주제: \(topics)", "Grouped topics: \(topics)") }
+    func groupedTopics(_ topics: String) -> String { text("묶인 주제: \(topics)", "Grouped topics: \(topics)", "グループ化されたトピック：\(topics)") }
     var notEnoughStats: String { text("통계를 만들려면 채점 기록이 더 필요합니다.", "Grade more answers to build insights.") }
-    func itemCount(_ count: Int) -> String { text("\(count)개", "\(count)") }
+    func itemCount(_ count: Int) -> String { text("\(count)개", "\(count)", "\(count)件") }
     var correctRate: String { text("정답", "Correct") }
 }

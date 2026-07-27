@@ -519,12 +519,21 @@ class QuestionRepository(
     ): Page<QuestionEntity> {
         val condition = when {
             filter == null -> "true"
+            filter.second && language != null ->
+                "(lower(q.topic) like :pattern or lower(q.question) like :pattern " +
+                    "or lower(coalesce(q.question_en, '')) like :pattern " +
+                    "or lower(coalesce(ql.topic, '')) like :pattern " +
+                    "or lower(coalesce(ql.question, '')) like :pattern " +
+                    "or lower(coalesce(q.answer, '')) like :pattern " +
+                    "or lower(coalesce(q.feedback, '')) like :pattern " +
+                    "or lower(coalesce(q.explanation, '')) like :pattern " +
+                    "or lower(u.display_name) like :pattern)"
             filter.second -> "(lower(q.topic) like :pattern or lower(q.question) like :pattern or lower(coalesce(q.question_en, '')) like :pattern or lower(coalesce(q.answer, '')) like :pattern or lower(coalesce(q.feedback, '')) like :pattern or lower(coalesce(q.explanation, '')) like :pattern or lower(u.display_name) like :pattern)"
             else -> "lower(q.topic) like :pattern"
         }
-        var idsSpec = template.databaseClient.sql(publicSelectSql(condition, language != null))
+        var idsSpec = template.databaseClient.sql(publicSelectSql(condition, language))
             .bind("limit", pageable.pageSize).bind("offset", pageable.offset)
-        var countSpec = template.databaseClient.sql(publicCountSql(condition, language != null))
+        var countSpec = template.databaseClient.sql(publicCountSql(condition, language))
         if (language != null) {
             idsSpec = idsSpec.bind("language", language)
             countSpec = countSpec.bind("language", language)
@@ -548,7 +557,7 @@ class QuestionRepository(
         offset: Long,
         language: String? = null,
     ): List<Long> {
-        var spec = template.databaseClient.sql(publicSelectSql(condition, language != null))
+        var spec = template.databaseClient.sql(publicSelectSql(condition, language))
             .bind("value", value).bind("limit", limit).bind("offset", offset)
         if (language != null) spec = spec.bind("language", language)
         return spec
@@ -556,28 +565,30 @@ class QuestionRepository(
             .all().collectList().awaitSingle()
     }
 
-    private fun publicSelectSql(condition: String, filterLanguage: Boolean = false): String {
-        val languageCondition = if (filterLanguage) "and ${publicLanguageCondition()}" else ""
+    private fun publicSelectSql(condition: String, language: String? = null): String {
+        val localizationJoin = if (language == null) "" else {
+            "left join question_localizations ql on ql.question_id = q.id " +
+                "and ql.target_language = :language and ql.status = 'READY'"
+        }
         return """
-        select q.id from questions q join users u on u.id = q.user_id
+        select q.id from questions q join users u on u.id = q.user_id $localizationJoin
         where q.is_public = true and q.deleted_at is null and q.score is not null
-          and u.allow_public_questions = true $languageCondition and ($condition)
+          and u.allow_public_questions = true and ($condition)
         order by q.created_at desc, q.id desc limit :limit offset :offset
         """.trimIndent()
     }
 
-    private fun publicCountSql(condition: String, filterLanguage: Boolean = false): String {
-        val languageCondition = if (filterLanguage) "and ${publicLanguageCondition()}" else ""
+    private fun publicCountSql(condition: String, language: String? = null): String {
+        val localizationJoin = if (language == null) "" else {
+            "left join question_localizations ql on ql.question_id = q.id " +
+                "and ql.target_language = :language and ql.status = 'READY'"
+        }
         return """
-        select count(*) as total from questions q join users u on u.id = q.user_id
+        select count(*) as total from questions q join users u on u.id = q.user_id $localizationJoin
         where q.is_public = true and q.deleted_at is null and q.score is not null
-          and u.allow_public_questions = true $languageCondition and ($condition)
+          and u.allow_public_questions = true and ($condition)
         """.trimIndent()
     }
-
-    private fun publicLanguageCondition(): String =
-        "((:language = 'en' and q.translation_status = 'READY' and q.question_en is not null) " +
-            "or (:language <> 'en' and q.language = :language))"
 
     private suspend fun findOrdered(ids: List<Long>): List<QuestionEntity> {
         if (ids.isEmpty()) return emptyList()

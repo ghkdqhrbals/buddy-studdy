@@ -12,6 +12,7 @@ data class CommunityCommentRequest(
     @field:NotBlank
     @field:Size(max = 1_000)
     var body: String = "",
+    var sourceLanguage: String? = null,
 )
 
 data class SubmitFeedbackRequest(

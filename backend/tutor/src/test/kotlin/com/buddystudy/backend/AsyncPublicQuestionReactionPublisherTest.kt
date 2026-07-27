@@ -4,6 +4,7 @@ import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.backend.community.adapter.outbound.stream.AsyncPublicQuestionReactionPublisher
 import com.buddystudy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
+import com.buddystudy.backend.community.application.port.outbound.PublicQuestionViewLocalization
 import com.buddystudy.backend.config.BuddyStudyProperties
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
@@ -72,7 +73,11 @@ class AsyncPublicQuestionReactionPublisherTest {
         private val latch = CountDownLatch(1)
         val events = mutableListOf<ViewEvent>()
 
-        override suspend fun publishViewed(questionId: Long, userId: Long?): Boolean {
+        override suspend fun publishViewed(
+            questionId: Long,
+            userId: Long?,
+            localization: PublicQuestionViewLocalization?,
+        ): Boolean {
             if (delayMs > 0) Thread.sleep(delayMs)
             events += ViewEvent(questionId, userId)
             latch.countDown()
@@ -87,7 +92,11 @@ class AsyncPublicQuestionReactionPublisherTest {
         private val started = CountDownLatch(1)
         private val release = CountDownLatch(1)
 
-        override suspend fun publishViewed(questionId: Long, userId: Long?): Boolean {
+        override suspend fun publishViewed(
+            questionId: Long,
+            userId: Long?,
+            localization: PublicQuestionViewLocalization?,
+        ): Boolean {
             started.countDown()
             release.await()
             return true

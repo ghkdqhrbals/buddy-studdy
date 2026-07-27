@@ -89,11 +89,8 @@ final class QuestionGenerationFlowTests: XCTestCase {
             XCTAssertEqual(request.httpMethod, "GET")
             XCTAssertEqual(request.url?.path, "/api/v1/answer-processes/grading-77")
             XCTAssertEqual(
-                URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
-                    .queryItems?
-                    .first(where: { $0.name == "after" })?
-                    .value,
-                "4"
+                request.url?.absoluteString,
+                "https://example.test/api/v1/answer-processes/grading-77?after=4"
             )
             return Self.response(
                 for: request,
@@ -134,6 +131,68 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertNil(process.pollAfterMilliseconds)
         XCTAssertEqual(process.events.map(\.id), [5])
         XCTAssertEqual(process.events.first?.status, .completed)
+    }
+
+    func testJapaneseLanguageUsesJapaneseLocaleAndBackendCode() {
+        XCTAssertEqual(AppLanguage.japanese.locale.identifier, "ja_JP")
+        XCTAssertEqual(AppLanguage.japanese.backendCode, "ja")
+        XCTAssertEqual(AppLanguage.japanese.displayName, "日本語")
+        XCTAssertEqual(AppStrings(language: .japanese).showOriginal, "原文を見る")
+        XCTAssertEqual(AppStrings(language: .japanese).showTranslation, "翻訳を見る")
+        XCTAssertEqual(AppStrings(language: .japanese).translatedIntoLanguage, "日本語に翻訳済み")
+    }
+
+    func testContentLanguageRecognizerSupportsKoreanEnglishAndJapanese() {
+        XCTAssertEqual(
+            ContentLanguageRecognizer.detect("이 답변은 한국어로 작성되었습니다.", fallback: .english),
+            "ko"
+        )
+        XCTAssertEqual(
+            ContentLanguageRecognizer.detect("This answer is written in English.", fallback: .korean),
+            "en"
+        )
+        XCTAssertEqual(
+            ContentLanguageRecognizer.detect("この回答は日本語で書かれています。", fallback: .english),
+            "ja"
+        )
+        XCTAssertEqual(ContentLanguageRecognizer.detect("OK", fallback: .japanese), "ja")
+    }
+
+    func testLocalizationMetadataDecodesMixedSourceAndDisplayLanguages() throws {
+        let data = Data(
+            """
+            {
+              "question": {
+                "sourceLanguage": "en",
+                "requestedLanguage": "ja",
+                "displayLanguage": "ja",
+                "translationState": "TRANSLATED",
+                "isTranslated": true,
+                "originalAvailable": true,
+                "translationReason": "EXPLICIT_TL"
+              },
+              "answer": {
+                "sourceLanguage": "ko",
+                "requestedLanguage": "ja",
+                "displayLanguage": "ko",
+                "translationState": "PENDING",
+                "isTranslated": false,
+                "originalAvailable": true,
+                "translationReason": "EXPLICIT_TL"
+              },
+              "aiResponse": null
+            }
+            """.utf8
+        )
+
+        let metadata = try JSONDecoder().decode(RecordLocalizationMetadata.self, from: data)
+
+        XCTAssertTrue(metadata.containsTranslation)
+        XCTAssertTrue(metadata.containsPendingTranslation)
+        XCTAssertEqual(metadata.question.sourceLanguage, "en")
+        XCTAssertEqual(metadata.question.displayLanguage, "ja")
+        XCTAssertEqual(metadata.answer?.sourceLanguage, "ko")
+        XCTAssertEqual(metadata.answer?.displayLanguage, "ko")
     }
 
     func testPendingProcessSurvivesSettingsStoreRecreation() {

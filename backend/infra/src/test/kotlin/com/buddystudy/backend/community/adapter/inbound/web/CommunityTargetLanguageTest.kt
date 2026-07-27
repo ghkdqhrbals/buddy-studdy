@@ -15,6 +15,11 @@ class CommunityTargetLanguageTest {
     }
 
     @Test
+    fun `Japanese target language is preserved`() {
+        assertThat(targetLanguage("ja", "ko")).isEqualTo("ja")
+    }
+
+    @Test
     fun `missing and blank values default to Korean`() {
         assertThat(targetLanguage(" ", null)).isEqualTo("ko")
     }

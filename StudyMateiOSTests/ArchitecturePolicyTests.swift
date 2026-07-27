@@ -2,6 +2,40 @@ import XCTest
 @testable import StudyMate
 
 final class ArchitecturePolicyTests: XCTestCase {
+    func testEveryAppStringProvidesJapaneseCopy() throws {
+        let root = try repositoryRoot()
+        let source = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Models/StudyModels.swift"),
+            encoding: .utf8
+        )
+        let expression = try NSRegularExpression(
+            pattern: #"text\(\s*"(?:\\.|[^"])*"\s*,\s*"((?:\\.|[^"])*)"(?:\s*,\s*"((?:\\.|[^"])*)")?"#,
+            options: [.dotMatchesLineSeparators]
+        )
+        let range = NSRange(source.startIndex..., in: source)
+        var missing: [String] = []
+
+        for match in expression.matches(in: source, range: range) {
+            guard let englishRange = Range(match.range(at: 1), in: source) else {
+                continue
+            }
+            let hasInlineJapanese = match.range(at: 2).location != NSNotFound
+            if hasInlineJapanese {
+                continue
+            }
+            let encodedEnglish = "\"\(source[englishRange])\""
+            let english = try JSONDecoder().decode(String.self, from: Data(encodedEnglish.utf8))
+            if !JapaneseAppStrings.hasTranslation(for: english) {
+                missing.append(english)
+            }
+        }
+
+        XCTAssertTrue(
+            missing.isEmpty,
+            "Every AppStrings entry must provide Japanese copy inline or in JapaneseAppStrings: \(missing)"
+        )
+    }
+
     func testMarkdownContentRendersAndFallsBackToPlainText() {
         let source = """
         **핵심**은 `WHERE` 절입니다.

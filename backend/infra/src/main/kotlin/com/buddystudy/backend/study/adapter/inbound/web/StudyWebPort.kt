@@ -30,9 +30,16 @@ interface StudyWebPort {
         language: String,
         authentication: Authentication,
     ): StudyPageResponse
-    suspend fun records(limit: Int, offset: Int, query: String?, language: String, authentication: Authentication): RecordsPageResponse
+    suspend fun records(
+        limit: Int,
+        offset: Int,
+        query: String?,
+        language: String,
+        view: String,
+        authentication: Authentication,
+    ): RecordsPageResponse
     suspend fun clearRecords(authentication: Authentication): ResponseEntity<Unit>
-    suspend fun record(id: Long, language: String, authentication: Authentication): StudyRecordResponse
+    suspend fun record(id: Long, language: String, view: String, authentication: Authentication): StudyRecordResponse
     suspend fun saveAnswer(id: Long, body: AnswerRequest, authentication: Authentication): StudyRecordResponse
     suspend fun grade(id: Long, body: AnswerRequest, authentication: Authentication): ResponseEntity<StudyRecordResponse>
     suspend fun answerGradingProcess(

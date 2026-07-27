@@ -50,10 +50,12 @@ data class BuddyStudyProperties(
         var key: String = "buddystudy-events-v1",
         var questionGenerationKey: String = "buddystudy-question-generation-v1",
         var questionGeneratedKey: String = "buddystudy-question-generated-v1",
+        var contentTranslationKey: String = "buddystudy-content-translation-v1",
         var pushKey: String = "buddystudy-push-v1",
         var domainMaxLen: Long = 1_000,
         var questionGenerationMaxLen: Long = 1_000,
         var questionGeneratedMaxLen: Long = 1_000,
+        var contentTranslationMaxLen: Long = 1_000,
         var pushMaxLen: Long = 1_000,
         var pushConsumerConcurrency: Int = 10,
         var viewQueueCapacity: Int = 20_000,
@@ -62,7 +64,7 @@ data class BuddyStudyProperties(
     data class Email(var verificationTtlSeconds: Long = 180, var from: String = "")
     data class Translation(
         var baseUrl: String = "http://localhost:5001",
-        var supportedLanguages: List<String> = listOf("ko", "en"),
+        var supportedLanguages: List<String> = listOf("ko", "en", "ja"),
         var providerOrder: List<String> = listOf("openai", "libretranslate"),
         var timeoutMs: Long = 5_000,
         var apiKey: String = "",

@@ -7,6 +7,7 @@ data class QuestionTranslationRequest(
     val question: String,
     val hint: String?,
     val sourceLanguage: String,
+    val targetLanguage: String,
 )
 
 interface QuestionTranslationProvider {

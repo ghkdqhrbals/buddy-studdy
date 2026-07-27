@@ -383,6 +383,9 @@ struct StudyRecordDetailView: View {
     @EnvironmentObject private var appState: AppState
     var record: StudyRecord
     @State private var draftAnswer: String
+    @State private var detailRecord: StudyRecord
+    @State private var isShowingOriginal = false
+    @State private var originalAvailable: Bool
     @State private var showsHint = false
     #if os(iOS)
     @FocusState private var isAnswerEditorFocused: Bool
@@ -391,6 +394,11 @@ struct StudyRecordDetailView: View {
     init(record: StudyRecord) {
         self.record = record
         _draftAnswer = State(initialValue: record.answer ?? "")
+        _detailRecord = State(initialValue: record)
+        _originalAvailable = State(
+            initialValue: record.localization?.containsTranslation == true ||
+                record.localization?.question.originalAvailable == true
+        )
     }
 
     var body: some View {
@@ -399,6 +407,8 @@ struct StudyRecordDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 RecordDetailHeader(record: displayedRecord, strings: appState.strings, language: appState.settings.appLanguage)
+
+                localizationControl
 
                 VStack(alignment: .leading, spacing: 12) {
                     RecordChatBubble(role: .question) {
@@ -488,13 +498,78 @@ struct StudyRecordDetailView: View {
         .scrollDismissesKeyboard(.interactively)
         .keyboardDoneToolbar(appState.strings.done)
         #endif
+        .task(id: record.id) {
+            await refreshLocalizedRecord()
+        }
     }
 
     private var latestRecord: StudyRecord {
-        appState.studyRecords.first {
-            $0.id == record.id ||
-                StudyRecordIdentityPolicy.questionsMatch($0.question.question, record.question.question)
-        } ?? record
+        guard !isShowingOriginal,
+              detailRecord.gradingResult == nil,
+              let liveRecord = appState.studyRecords.first(where: {
+                  $0.id == record.id ||
+                      StudyRecordIdentityPolicy.questionsMatch($0.question.question, record.question.question)
+              }),
+              liveRecord.gradingResult != nil else {
+            return detailRecord
+        }
+        return liveRecord
+    }
+
+    @ViewBuilder
+    private var localizationControl: some View {
+        if originalAvailable || isShowingOriginal {
+            HStack(spacing: 6) {
+                if !isShowingOriginal {
+                    Text(appState.strings.translatedIntoLanguage)
+                        .foregroundStyle(.secondary)
+                    Text("·")
+                        .foregroundStyle(.tertiary)
+                }
+                Button(isShowingOriginal ? appState.strings.showTranslation : appState.strings.showOriginal) {
+                    Task { await switchContentView() }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
+            }
+            .font(.caption.weight(.medium))
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func refreshLocalizedRecord() async {
+        guard let refreshed = await appState.loadStudyRecordDetail(recordID: record.id) else {
+            return
+        }
+        detailRecord = refreshed
+        originalAvailable = originalAvailable ||
+            refreshed.localization?.containsTranslation == true ||
+            refreshed.localization?.question.originalAvailable == true
+        guard refreshed.localization?.containsPendingTranslation == true else {
+            return
+        }
+        for delay in [1, 2, 4] {
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled,
+                  let retried = await appState.loadStudyRecordDetail(recordID: record.id) else {
+                return
+            }
+            detailRecord = retried
+            originalAvailable = originalAvailable || retried.localization?.containsTranslation == true
+            if retried.localization?.containsPendingTranslation != true {
+                return
+            }
+        }
+    }
+
+    private func switchContentView() async {
+        let target: LocalizedContentView = isShowingOriginal ? .localized : .original
+        guard let loaded = await appState.loadStudyRecordDetail(recordID: record.id, view: target) else {
+            return
+        }
+        detailRecord = loaded
+        isShowingOriginal = target == .original
+        originalAvailable = true
     }
 
     private var canSubmitAnswer: Bool {

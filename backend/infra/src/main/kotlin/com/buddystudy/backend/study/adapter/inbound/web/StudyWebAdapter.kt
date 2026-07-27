@@ -54,20 +54,45 @@ class StudyWebAdapter(
         language,
     )
 
-    override suspend fun records(limit: Int, offset: Int, query: String?, language: String, authentication: Authentication) =
-        recordsUseCase.records(authentication.principalOrThrow(), safeLimit(limit, 500), max(0, offset), query, language)
+    override suspend fun records(
+        limit: Int,
+        offset: Int,
+        query: String?,
+        language: String,
+        view: String,
+        authentication: Authentication,
+    ) = recordsUseCase.records(
+        authentication.principalOrThrow(),
+        safeLimit(limit, 500),
+        max(0, offset),
+        query,
+        language,
+        view,
+    )
 
     override suspend fun clearRecords(authentication: Authentication): ResponseEntity<Unit> = ResponseEntity.noContent().build()
 
-    override suspend fun record(id: Long, language: String, authentication: Authentication) =
-        recordsUseCase.record(authentication.principalOrThrow(), id, language)
+    override suspend fun record(id: Long, language: String, view: String, authentication: Authentication) =
+        recordsUseCase.record(authentication.principalOrThrow(), id, language, view)
 
     override suspend fun saveAnswer(id: Long, body: AnswerRequest, authentication: Authentication) =
-        studyUseCase.answer(authentication.principalOrThrow(), id, body.answer, grade = false)
+        studyUseCase.answer(
+            authentication.principalOrThrow(),
+            id,
+            body.answer,
+            body.sourceLanguage,
+            grade = false,
+        )
 
     override suspend fun grade(id: Long, body: AnswerRequest, authentication: Authentication) =
         ResponseEntity.accepted().body(
-            studyUseCase.answer(authentication.principalOrThrow(), id, body.answer, grade = true),
+            studyUseCase.answer(
+                authentication.principalOrThrow(),
+                id,
+                body.answer,
+                body.sourceLanguage,
+                grade = true,
+            ),
         )
 
     override suspend fun answerGradingProcess(

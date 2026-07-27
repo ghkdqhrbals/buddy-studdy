@@ -10,6 +10,7 @@
 		D40000000000000000000001 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = D40000000000000000000002 /* MarkdownUI */; };
 		110000000000000000000101 /* StudyMateApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000001 /* StudyMateApp.swift */; };
 		110000000000000000000102 /* StudyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000002 /* StudyModels.swift */; };
+		1100000000000000000001E0 /* JapaneseAppStrings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000E0 /* JapaneseAppStrings.swift */; };
 		110000000000000000000104 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000004 /* SettingsStore.swift */; };
 		110000000000000000000105 /* OpenAIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000005 /* OpenAIClient.swift */; };
 		110000000000000000000106 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000006 /* NotificationService.swift */; };
@@ -125,6 +126,7 @@
 		120000000000000000000209 /* QuestionGenerationFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000208 /* QuestionGenerationFlowTests.swift */; };
 		120000000000000000000101 /* StudyMateiOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000001 /* StudyMateiOSApp.swift */; };
 		120000000000000000000102 /* StudyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000002 /* StudyModels.swift */; };
+		1200000000000000000001E0 /* JapaneseAppStrings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000E0 /* JapaneseAppStrings.swift */; };
 		120000000000000000000104 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000004 /* SettingsStore.swift */; };
 		120000000000000000000105 /* OpenAIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000005 /* OpenAIClient.swift */; };
 		120000000000000000000106 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000006 /* NotificationService.swift */; };
@@ -269,6 +271,7 @@
 /* Begin PBXFileReference section */
 		110000000000000000000001 /* StudyMateApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyMateApp.swift; sourceTree = "<group>"; };
 		110000000000000000000002 /* StudyModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyModels.swift; sourceTree = "<group>"; };
+		1100000000000000000000E0 /* JapaneseAppStrings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JapaneseAppStrings.swift; sourceTree = "<group>"; };
 		110000000000000000000004 /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
 		110000000000000000000005 /* OpenAIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAIClient.swift; sourceTree = "<group>"; };
 		110000000000000000000006 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
@@ -793,6 +796,7 @@
 			isa = PBXGroup;
 			children = (
 				110000000000000000000002 /* StudyModels.swift */,
+				1100000000000000000000E0 /* JapaneseAppStrings.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -1096,6 +1100,7 @@
 			files = (
 				110000000000000000000101 /* StudyMateApp.swift in Sources */,
 				110000000000000000000102 /* StudyModels.swift in Sources */,
+				1100000000000000000001E0 /* JapaneseAppStrings.swift in Sources */,
 				110000000000000000000104 /* SettingsStore.swift in Sources */,
 				110000000000000000000105 /* OpenAIClient.swift in Sources */,
 				110000000000000000000106 /* NotificationService.swift in Sources */,
@@ -1227,6 +1232,7 @@
 			files = (
 				120000000000000000000101 /* StudyMateiOSApp.swift in Sources */,
 				120000000000000000000102 /* StudyModels.swift in Sources */,
+				1200000000000000000001E0 /* JapaneseAppStrings.swift in Sources */,
 				120000000000000000000104 /* SettingsStore.swift in Sources */,
 				120000000000000000000105 /* OpenAIClient.swift in Sources */,
 				120000000000000000000106 /* NotificationService.swift in Sources */,

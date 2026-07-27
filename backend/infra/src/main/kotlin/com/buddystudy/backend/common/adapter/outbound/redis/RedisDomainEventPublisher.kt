@@ -23,6 +23,7 @@ class RedisDomainEventPublisher(
         when (eventType) {
             RedisOutboxEventType.QUESTION_GENERATION_REQUESTED -> RedisStreamTopic.QUESTION_GENERATION
             RedisOutboxEventType.QUESTION_GENERATED -> RedisStreamTopic.QUESTION_GENERATED
+            RedisOutboxEventType.CONTENT_TRANSLATION_REQUESTED -> RedisStreamTopic.CONTENT_TRANSLATION
             else -> RedisStreamTopic.DOMAIN_EVENTS
         }
 }

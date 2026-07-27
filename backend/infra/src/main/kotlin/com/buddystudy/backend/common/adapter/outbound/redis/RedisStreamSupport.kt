@@ -39,6 +39,7 @@ enum class RedisStreamTopic(val apiName: String) {
     DOMAIN_EVENTS("domain-events"),
     QUESTION_GENERATION("question-generation"),
     QUESTION_GENERATED("question-generated"),
+    CONTENT_TRANSLATION("content-translation"),
     PUSH_EVENTS("push-events"),
 }
 
@@ -124,6 +125,11 @@ class RedisStreamTopicManager(
             topic = RedisStreamTopic.QUESTION_GENERATED,
             streamKey = properties.streams.questionGeneratedKey,
             maxLength = properties.streams.questionGeneratedMaxLen.coerceAtLeast(1),
+        ),
+        RedisStreamTopicDefinition(
+            topic = RedisStreamTopic.CONTENT_TRANSLATION,
+            streamKey = properties.streams.contentTranslationKey,
+            maxLength = properties.streams.contentTranslationMaxLen.coerceAtLeast(1),
         ),
         RedisStreamTopicDefinition(
             topic = RedisStreamTopic.PUSH_EVENTS,

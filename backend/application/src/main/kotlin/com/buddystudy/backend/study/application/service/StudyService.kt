@@ -1,6 +1,7 @@
 package com.buddystudy.backend.study.application.service
 
 import com.buddystudy.backend.auth.Principal
+import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
@@ -11,6 +12,12 @@ import com.buddystudy.backend.study.application.content.QuestionNotificationCont
 import com.buddystudy.backend.study.application.model.RecordsPageResponse
 import com.buddystudy.backend.study.application.model.StudyRecordResponse
 import com.buddystudy.backend.study.application.model.toRecordResponse
+import com.buddystudy.backend.study.application.model.TranslationViewMode
+import com.buddystudy.backend.localization.application.model.RecordLocalizationSnapshot
+import com.buddystudy.backend.localization.application.port.ContentLanguageDetectionPort
+import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
+import com.buddystudy.backend.localization.application.port.RequestContentLocalizationUseCase
+import com.buddystudy.backend.localization.application.service.ContentLocalizationService
 import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.study.domain.localizedFor
 import com.buddystudy.study.domain.entity.QuestionEntity
@@ -39,13 +46,31 @@ class StudyService(
     private val recordWriter: StudyRecordWriteUseCase,
     private val gradingWriter: AnswerGradingWriteUseCase,
     private val outboxPublisher: PublishOutboxUseCase,
+    private val users: UserPort,
+    private val languageDetector: ContentLanguageDetectionPort,
+    private val contentLocalizations: ContentLocalizationPort,
+    private val localizationRequests: RequestContentLocalizationUseCase,
 ) : StudyUseCase, BrowseRecordsUseCase {
-    override suspend fun answer(principal: Principal, recordId: Long, answer: String, grade: Boolean): StudyRecordResponse {
+    override suspend fun answer(
+        principal: Principal,
+        recordId: Long,
+        answer: String,
+        sourceLanguage: String?,
+        grade: Boolean,
+    ): StudyRecordResponse {
+        val appLanguage = QuestionLanguage.normalize(users.findById(principal.userId)?.appLanguage)
+        val declaredSourceLanguage = sourceLanguage
+            ?.takeIf { QuestionLanguage.normalize(it) in QuestionLanguage.supported }
+            ?.let(QuestionLanguage::normalize)
+            ?: appLanguage
+        val normalizedSourceLanguage = languageDetector.detect(answer, declaredSourceLanguage)
         val saved = if (grade) {
             val queued = gradingWriter.queue(
                 userId = principal.userId,
                 recordId = recordId,
                 answer = answer,
+                sourceLanguage = normalizedSourceLanguage,
+                aiResponseLanguage = appLanguage,
                 now = Instant.now(),
             )
             outboxPublisher.publishNow(queued.outboxes)
@@ -55,6 +80,7 @@ class StudyService(
                 userId = principal.userId,
                 recordId = recordId,
                 answer = answer,
+                sourceLanguage = normalizedSourceLanguage,
                 grade = null,
                 now = Instant.now(),
             )
@@ -63,28 +89,34 @@ class StudyService(
     }
 
     @Transactional(readOnly = true)
-    override suspend fun records(principal: Principal, limit: Int, offset: Int, query: String?, language: String): RecordsPageResponse {
+    override suspend fun records(
+        principal: Principal,
+        limit: Int,
+        offset: Int,
+        query: String?,
+        language: String,
+        view: String,
+    ): RecordsPageResponse {
         val search = query?.trim()?.takeIf { it.isNotEmpty() }
         val normalizedLanguage = QuestionLanguage.normalize(language)
         val pageable = PageRequest.of(offset / limit, limit)
         val page = if (search == null) {
-            questions.findVisibleByUserAndLanguage(
+            questions.findVisibleByUser(
                 principal.userId,
                 includePending = false,
-                normalizedLanguage,
                 pageable,
             )
         } else {
-            questions.findVisibleByUserAndLanguageAndQuery(
+            questions.findVisibleByUserAndQuery(
                 principal.userId,
                 includePending = false,
-                normalizedLanguage,
                 search,
                 pageable,
             )
         }
+        val viewMode = translationViewMode(view)
         return RecordsPageResponse(
-            page.content.map { it.localizedFor(normalizedLanguage) }.toRecordResponses(),
+            page.content.toRecordResponses(normalizedLanguage, viewMode),
             page.totalElements,
             limit,
             offset,
@@ -98,24 +130,27 @@ class StudyService(
     }
 
     @Transactional(readOnly = true)
-    override suspend fun record(principal: Principal, id: Long, language: String): StudyRecordResponse {
+    override suspend fun record(principal: Principal, id: Long, language: String, view: String): StudyRecordResponse {
         val normalizedLanguage = QuestionLanguage.normalize(language)
+        val viewMode = translationViewMode(view)
         val question = questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
-            ?.takeIf {
-                if (normalizedLanguage == QuestionLanguage.ENGLISH) {
-                    it.translationStatus == "READY" && !it.questionEn.isNullOrBlank()
-                } else {
-                    QuestionLanguage.normalize(it.language) == QuestionLanguage.KOREAN
-                }
-            }
-            ?.localizedFor(normalizedLanguage)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
         if (question.skippedAt != null) {
             throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
         }
-        return question.toStudyRecord(questionStats.findById(id))
+        val projected = project(question, normalizedLanguage, viewMode)
+        return projected.question.toStudyRecord(questionStats.findById(id))
             .toProjection()
-            .toRecordResponse()
+            .toRecordResponse(
+                requestedLanguage = normalizedLanguage,
+                viewMode = viewMode,
+                questionDisplayLanguage = projected.questionDisplayLanguage,
+                answerDisplayLanguage = projected.answerDisplayLanguage,
+                aiResponseDisplayLanguage = projected.aiResponseDisplayLanguage,
+                questionTranslationPending = projected.questionTranslationPending,
+                answerTranslationPending = projected.answerTranslationPending,
+                aiResponseTranslationPending = projected.aiResponseTranslationPending,
+            )
     }
 
     override suspend fun skip(principal: Principal, id: Long): StudyRecordResponse {
@@ -132,15 +167,128 @@ class StudyService(
         return saved.toStudyRecord(questionStats.findById(saved.id)).toProjection().toRecordResponse()
     }
 
-    private suspend fun List<QuestionEntity>.toRecordResponses(): List<StudyRecordResponse> {
+    private suspend fun List<QuestionEntity>.toRecordResponses(
+        requestedLanguage: String? = null,
+        viewMode: TranslationViewMode = TranslationViewMode.LOCALIZED,
+    ): List<StudyRecordResponse> {
         if (isEmpty()) return emptyList()
         val statsByQuestionId = questionStats.findAllByIds(map { it.id }).associateBy { it.questionId }
         return map { question ->
-            question.toStudyRecord(statsByQuestionId[question.id])
+            val projected = project(
+                question,
+                requestedLanguage ?: question.sourceLanguage,
+                viewMode,
+            )
+            projected.question.toStudyRecord(statsByQuestionId[question.id])
                 .toProjection()
-                .toRecordResponse()
+                .toRecordResponse(
+                    requestedLanguage = requestedLanguage ?: question.sourceLanguage,
+                    viewMode = viewMode,
+                    questionDisplayLanguage = projected.questionDisplayLanguage,
+                    answerDisplayLanguage = projected.answerDisplayLanguage,
+                    aiResponseDisplayLanguage = projected.aiResponseDisplayLanguage,
+                    questionTranslationPending = projected.questionTranslationPending,
+                    answerTranslationPending = projected.answerTranslationPending,
+                    aiResponseTranslationPending = projected.aiResponseTranslationPending,
+                )
         }
     }
+
+    private suspend fun project(
+        question: QuestionEntity,
+        requestedLanguage: String,
+        viewMode: TranslationViewMode,
+    ): ProjectedRecord {
+        val target = QuestionLanguage.normalize(requestedLanguage)
+        val questionSource = QuestionLanguage.normalize(question.sourceLanguage)
+        val answerSource = QuestionLanguage.normalize(question.answerSourceLanguage ?: question.sourceLanguage)
+        val aiSource = QuestionLanguage.normalize(question.aiResponseSourceLanguage ?: question.sourceLanguage)
+        if (viewMode == TranslationViewMode.ORIGINAL) {
+            return ProjectedRecord(question, questionSource, answerSource, aiSource, false, false, false)
+        }
+        val hashes = ContentLocalizationService.recordHashes(question)
+        val snapshot = contentLocalizations.record(question.id, target)
+        val questionReady = snapshot.question.readyFor(hashes.question)
+        val answerReady = snapshot.answer.readyFor(hashes.answer)
+        val aiReady = snapshot.aiResponse.readyFor(hashes.aiResponse)
+        val hasLegacyEnglishQuestion = target == QuestionLanguage.ENGLISH &&
+            question.translationStatus == "READY" &&
+            !question.questionEn.isNullOrBlank()
+        val needsTranslation =
+            (questionSource != target && questionReady == null && !hasLegacyEnglishQuestion) ||
+                (!question.answer.isNullOrBlank() && answerSource != target && answerReady == null) ||
+                ((!question.feedback.isNullOrBlank() || !question.explanation.isNullOrBlank()) &&
+                    aiSource != target && aiReady == null)
+        if (needsTranslation) {
+            localizationRequests.requestRecord(question, target)
+        }
+        var questionDisplay = questionSource
+        var answerDisplay = answerSource
+        var aiDisplay = aiSource
+        if (questionSource != target) {
+            val localized = questionReady
+            when {
+                localized != null -> {
+                    question.topic = localized.fields["topic"] ?: question.topic
+                    question.question = localized.fields["question"] ?: question.question
+                    question.hint = localized.fields["hint"] ?: question.hint
+                    questionDisplay = target
+                }
+                hasLegacyEnglishQuestion -> {
+                    question.topic = question.topicEn ?: question.topic
+                    question.question = question.questionEn ?: question.question
+                    question.hint = question.hintEn ?: question.hint
+                    questionDisplay = target
+                }
+            }
+        }
+        if (!question.answer.isNullOrBlank() && answerSource != target) {
+            answerReady?.let {
+                question.answer = it.fields["answer"] ?: question.answer
+                answerDisplay = target
+            }
+        }
+        if ((!question.feedback.isNullOrBlank() || !question.explanation.isNullOrBlank()) && aiSource != target) {
+            aiReady?.let {
+                question.feedback = it.fields["feedback"] ?: question.feedback
+                question.explanation = it.fields["explanation"] ?: question.explanation
+                question.gradingAssessmentJson = it.fields["assessmentJson"] ?: question.gradingAssessmentJson
+                aiDisplay = target
+            }
+        }
+        return ProjectedRecord(
+            question,
+            questionDisplay,
+            answerDisplay,
+            aiDisplay,
+            questionSource != target && questionDisplay != target && snapshot.question?.status != "FAILED",
+            !question.answer.isNullOrBlank() && answerSource != target &&
+                answerDisplay != target && snapshot.answer?.status != "FAILED",
+            (!question.feedback.isNullOrBlank() || !question.explanation.isNullOrBlank()) &&
+                aiSource != target && aiDisplay != target && snapshot.aiResponse?.status != "FAILED",
+        )
+    }
+
+    private fun com.buddystudy.backend.localization.application.model.TextLocalizationSnapshot?.readyFor(
+        sourceHash: String?,
+    ) = sourceHash?.let { hash -> this?.takeIf { it.status == "READY" && it.sourceHash == hash } }
+
+    private fun translationViewMode(value: String): TranslationViewMode =
+        if (value.equals("original", ignoreCase = true)) {
+            TranslationViewMode.ORIGINAL
+        } else {
+            TranslationViewMode.LOCALIZED
+        }
+
+    private data class ProjectedRecord(
+        val question: QuestionEntity,
+        val questionDisplayLanguage: String,
+        val answerDisplayLanguage: String,
+        val aiResponseDisplayLanguage: String,
+        val questionTranslationPending: Boolean,
+        val answerTranslationPending: Boolean,
+        val aiResponseTranslationPending: Boolean,
+    )
 }
 
 internal fun QuestionEntity.applyCoverage(selection: QuestionCoverageSelection?): QuestionEntity {

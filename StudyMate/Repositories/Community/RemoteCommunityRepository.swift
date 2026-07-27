@@ -29,12 +29,14 @@ struct RemoteCommunityRepository: CommunityRepository {
     func fetchPublicQuestion(
         registration: RemotePushRegistration,
         questionID: String,
-        language: AppLanguage
+        language: AppLanguage,
+        view: LocalizedContentView
     ) async throws -> CommunityQuestion {
         try await backendClient.fetchPublicQuestion(
             registration: registration,
             questionID: questionID,
-            language: language
+            language: language,
+            view: view
         )
     }
 
@@ -166,25 +168,31 @@ struct RemoteCommunityRepository: CommunityRepository {
         registration: RemotePushRegistration,
         questionID: String,
         limit: Int,
-        offset: Int
+        offset: Int,
+        language: AppLanguage,
+        view: LocalizedContentView
     ) async throws -> CommunityCommentsResponse {
         try await backendClient.fetchCommunityQuestionComments(
             registration: registration,
             questionID: questionID,
             limit: limit,
-            offset: offset
+            offset: offset,
+            language: language,
+            view: view
         )
     }
 
     func createComment(
         registration: RemotePushRegistration,
         questionID: String,
-        body: String
+        body: String,
+        sourceLanguage: String
     ) async throws -> CommunityQuestionComment {
         try await backendClient.createCommunityQuestionComment(
             registration: registration,
             questionID: questionID,
-            body: body
+            body: body,
+            sourceLanguage: sourceLanguage
         )
     }
 

@@ -13,7 +13,8 @@ protocol RecordsRepository {
     func gradeRecord(
         registration: RemotePushRegistration,
         recordID: String,
-        answer: String
+        answer: String,
+        sourceLanguage: String
     ) async throws -> StudyRecord
 
     func fetchAnswerGradingProcess(
@@ -25,7 +26,8 @@ protocol RecordsRepository {
     func saveRecordAnswer(
         registration: RemotePushRegistration,
         recordID: String,
-        answer: String
+        answer: String,
+        sourceLanguage: String
     ) async throws -> StudyRecord
 
     func skipRecord(
@@ -48,6 +50,8 @@ protocol RecordsRepository {
 
     func fetchRecord(
         registration: RemotePushRegistration,
-        recordID: String
+        recordID: String,
+        language: AppLanguage,
+        view: LocalizedContentView
     ) async throws -> StudyRecord
 }

@@ -1,6 +1,7 @@
 package com.buddystudy.backend.community.adapter.outbound.stream
 
 import com.buddystudy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
+import com.buddystudy.backend.community.application.port.outbound.PublicQuestionViewLocalization
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishOperations
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
 import com.buddystudy.backend.config.BuddyStudyProperties
@@ -15,12 +16,29 @@ class PublicQuestionReactionRedisStreamPublisher(
 ) : PublicQuestionReactionPublishPort {
     private val logger = LoggerFactory.getLogger(javaClass)
 
-    override suspend fun publishViewed(questionId: Long, userId: Long?): Boolean {
+    override suspend fun publishViewed(
+        questionId: Long,
+        userId: Long?,
+        localization: PublicQuestionViewLocalization?,
+    ): Boolean {
         if (!properties.streams.enabled) {
             logPublishSkipped("streams_disabled", properties.streams.key, "CONTENT_VIEWED", questionId, userId)
             return false
         }
-        val fields = PublicQuestionViewedEvent(questionId = questionId, userId = userId).toStringMapWithoutNull()
+        val fields = PublicQuestionViewedEvent(
+            questionId = questionId,
+            userId = userId,
+            translationState = localization?.translationState,
+            translationLanguage = localization?.translationLanguage,
+            translationReason = localization?.translationReason,
+            requestId = localization?.requestId,
+            questionSourceLanguage = localization?.questionSourceLanguage,
+            questionDisplayLanguage = localization?.questionDisplayLanguage,
+            answerSourceLanguage = localization?.answerSourceLanguage,
+            answerDisplayLanguage = localization?.answerDisplayLanguage,
+            aiResponseSourceLanguage = localization?.aiResponseSourceLanguage,
+            aiResponseDisplayLanguage = localization?.aiResponseDisplayLanguage,
+        ).toStringMapWithoutNull()
         return publish(properties.streams.key, questionId, fields)
     }
 

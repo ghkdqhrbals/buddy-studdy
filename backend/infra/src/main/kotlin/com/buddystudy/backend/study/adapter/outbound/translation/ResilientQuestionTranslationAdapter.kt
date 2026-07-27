@@ -17,13 +17,14 @@ class ResilientQuestionTranslationAdapter(
     private val log = LoggerFactory.getLogger(javaClass)
     private val providersById = providers.associateBy { it.providerId.lowercase() }
 
-    override suspend fun translateToEnglish(
+    override suspend fun translate(
         topic: String,
         question: String,
         hint: String?,
         sourceLanguage: String,
+        targetLanguage: String,
     ): TranslatedQuestionContent {
-        val request = QuestionTranslationRequest(topic, question, hint, sourceLanguage)
+        val request = QuestionTranslationRequest(topic, question, hint, sourceLanguage, targetLanguage)
         val providerOrder = properties.translation.providerOrder
             .map(String::trim)
             .filter(String::isNotEmpty)
@@ -42,7 +43,7 @@ class ResilientQuestionTranslationAdapter(
         configuredProviders.forEach { provider ->
             try {
                 val translated = provider.translate(request)
-                validate(translated)
+                validate(translated, targetLanguage)
                 count(provider.providerId, "success")
                 return translated
             } catch (error: Exception) {
@@ -64,12 +65,12 @@ class ResilientQuestionTranslationAdapter(
         )
     }
 
-    private fun validate(content: TranslatedQuestionContent) {
-        require(QuestionLanguage.matchesShortLabel(content.topic, QuestionLanguage.ENGLISH)) {
-            "Translation provider did not return an English topic."
+    private fun validate(content: TranslatedQuestionContent, targetLanguage: String) {
+        require(QuestionLanguage.matchesShortLabel(content.topic, targetLanguage)) {
+            "Translation provider did not return a topic in $targetLanguage."
         }
-        require(QuestionLanguage.matches(content.question, QuestionLanguage.ENGLISH)) {
-            "Translation provider did not return an English question."
+        require(QuestionLanguage.matches(content.question, targetLanguage)) {
+            "Translation provider did not return a question in $targetLanguage."
         }
     }
 

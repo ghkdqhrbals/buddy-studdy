@@ -10,6 +10,7 @@ import com.buddystudy.backend.community.application.port.outbound.QuestionLikePo
 import com.buddystudy.backend.community.application.port.outbound.ReportPort
 import com.buddystudy.backend.community.application.service.CommunityService
 import com.buddystudy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
+import com.buddystudy.backend.community.application.port.outbound.PublicQuestionViewLocalization
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
@@ -19,6 +20,9 @@ import com.buddystudy.community.domain.entity.QuestionLikeEntity
 import com.buddystudy.community.domain.entity.ReportEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
+import com.buddystudy.backend.test.EmptyContentLocalizationPort
+import com.buddystudy.backend.test.PassthroughLanguageDetector
+import com.buddystudy.backend.test.RecordingLocalizationRequests
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.data.domain.Page
@@ -42,6 +46,9 @@ class CommunityServiceTest {
         reports = FakeReportPort(),
         reactions = FakeReactionPublisher(),
         notifications = notificationPublisher,
+        languageDetector = PassthroughLanguageDetector(),
+        contentLocalizations = EmptyContentLocalizationPort(),
+        localizationRequests = RecordingLocalizationRequests(),
     )
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
@@ -274,7 +281,11 @@ class CommunityServiceTest {
     }
 
     private class FakeReactionPublisher : PublicQuestionReactionPublishPort {
-        override suspend fun publishViewed(questionId: Long, userId: Long?): Boolean = true
+        override suspend fun publishViewed(
+            questionId: Long,
+            userId: Long?,
+            localization: PublicQuestionViewLocalization?,
+        ): Boolean = true
     }
 
     private class FakeNotificationPublisher : PublishNotificationUseCase {

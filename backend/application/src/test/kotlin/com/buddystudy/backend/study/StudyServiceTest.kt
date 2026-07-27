@@ -41,6 +41,9 @@ import com.buddystudy.backend.study.application.port.outbound.AnswerGradingProgr
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.study.domain.entity.StudyEntity
+import com.buddystudy.backend.test.EmptyContentLocalizationPort
+import com.buddystudy.backend.test.PassthroughLanguageDetector
+import com.buddystudy.backend.test.RecordingLocalizationRequests
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.data.domain.Page
@@ -68,6 +71,7 @@ class StudyServiceTest {
         questionCoverage,
         gradingProgress,
         notificationOutbox,
+        PassthroughLanguageDetector(),
     )
     private val service = StudyService(
         questions = questions,
@@ -75,6 +79,10 @@ class StudyServiceTest {
         recordWriter = recordWriter,
         gradingWriter = recordWriter,
         outboxPublisher = NoOpOutboxPublisher(),
+        users = users,
+        languageDetector = PassthroughLanguageDetector(),
+        contentLocalizations = EmptyContentLocalizationPort(),
+        localizationRequests = RecordingLocalizationRequests(),
     )
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
@@ -132,7 +140,7 @@ class StudyServiceTest {
         assertThat(response.gradingResult).isNull()
         assertThat(response.gradingStatus).isEqualTo(AnswerGradingStatus.QUEUED)
         assertThat(openAI.gradeCalls).isZero()
-        assertThat(users.findByIdCalls).isZero()
+        assertThat(users.findByIdCalls).isEqualTo(1)
         assertThat(questionStats.findByIdCalls).isEqualTo(1)
     }
 

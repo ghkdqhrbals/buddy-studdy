@@ -10,6 +10,8 @@ import com.buddystudy.backend.profile.application.port.outbound.AccountWithdrawa
 import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
 import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
 import com.buddystudy.backend.study.application.model.QuestionGenerationRequestedEvent
+import com.buddystudy.backend.localization.application.model.ContentTranslationRequestedEvent
+import com.buddystudy.backend.localization.application.port.ContentTranslationEventPort
 import com.fasterxml.jackson.databind.ObjectMapper
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.reactive.asFlow
@@ -25,7 +27,7 @@ import java.util.UUID
 class RedisEventOutboxRepository(
     private val jooq: JooqR2dbcExecutor,
     private val objectMapper: ObjectMapper,
-) : RedisEventOutboxPort, AccountWithdrawalEventPort {
+) : RedisEventOutboxPort, AccountWithdrawalEventPort, ContentTranslationEventPort {
     override suspend fun appendNotification(command: NotificationRequestCommand, createdAt: Instant): Long =
         append(
             eventId = command.eventId,
@@ -49,6 +51,19 @@ class RedisEventOutboxRepository(
             payloadJson = objectMapper.writeValueAsString(event),
             createdAt = createdAt,
         )
+
+    override suspend fun appendContentTranslation(
+        event: ContentTranslationRequestedEvent,
+        createdAt: Instant,
+    ): Long = append(
+        eventId = event.eventId,
+        eventType = RedisOutboxEventType.CONTENT_TRANSLATION_REQUESTED,
+        payloadJson = objectMapper.writeValueAsString(event),
+        createdAt = createdAt,
+    )
+
+    override suspend fun append(event: ContentTranslationRequestedEvent, now: Instant): Long =
+        appendContentTranslation(event, now)
 
     override suspend fun appendQuestionGenerationRequested(
         event: QuestionGenerationRequestedEvent,

@@ -12,6 +12,7 @@ class QuestionCommentEntity(
     var questionId: Long = 0,
     var userId: Long = 0,
     var body: String = "",
+    var sourceLanguage: String = "ko",
     var deletedAt: Instant? = null,
     var createdAt: Instant = Instant.now(),
     var updatedAt: Instant = Instant.now(),

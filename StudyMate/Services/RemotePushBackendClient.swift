@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 
 struct RemotePushRegistration: Codable, Equatable {
     var deviceID: String
@@ -129,6 +130,8 @@ struct AvatarCategory: Codable, Equatable, Identifiable {
             return titleKo
         case .english:
             return titleEn
+        case .japanese:
+            return titleEn
         }
     }
 }
@@ -153,6 +156,8 @@ struct AvatarCatalogItem: Codable, Equatable, Identifiable {
         case .korean:
             return displayNameKo
         case .english:
+            return displayNameEn
+        case .japanese:
             return displayNameEn
         }
     }
@@ -385,7 +390,8 @@ protocol RemotePushBackendClientProtocol {
     func fetchPublicQuestion(
         registration: RemotePushRegistration,
         questionID: String,
-        language: AppLanguage
+        language: AppLanguage,
+        view: LocalizedContentView
     ) async throws -> CommunityQuestion
 
     func loginWithGoogle(
@@ -452,13 +458,16 @@ protocol RemotePushBackendClientProtocol {
         registration: RemotePushRegistration,
         questionID: String,
         limit: Int,
-        offset: Int
+        offset: Int,
+        language: AppLanguage,
+        view: LocalizedContentView
     ) async throws -> CommunityCommentsResponse
 
     func createCommunityQuestionComment(
         registration: RemotePushRegistration,
         questionID: String,
-        body: String
+        body: String,
+        sourceLanguage: String
     ) async throws -> CommunityQuestionComment
 
     func deleteCommunityQuestionComment(
@@ -481,7 +490,8 @@ protocol RemotePushBackendClientProtocol {
     func gradeRecord(
         registration: RemotePushRegistration,
         recordID: String,
-        answer: String
+        answer: String,
+        sourceLanguage: String
     ) async throws -> StudyRecord
 
     func fetchAnswerGradingProcess(
@@ -493,7 +503,8 @@ protocol RemotePushBackendClientProtocol {
     func saveRecordAnswer(
         registration: RemotePushRegistration,
         recordID: String,
-        answer: String
+        answer: String,
+        sourceLanguage: String
     ) async throws -> StudyRecord
 
     func skipRecord(
@@ -516,7 +527,9 @@ protocol RemotePushBackendClientProtocol {
 
     func fetchRecord(
         registration: RemotePushRegistration,
-        recordID: String
+        recordID: String,
+        language: AppLanguage,
+        view: LocalizedContentView
     ) async throws -> StudyRecord
 }
 
@@ -924,7 +937,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             URLQueryItem(name: "limit", value: "\(limit)"),
             URLQueryItem(name: "offset", value: "\(offset)"),
             URLQueryItem(name: "query", value: query),
-            URLQueryItem(name: "language", value: language.backendCode)
+            URLQueryItem(name: "tl", value: language.backendCode),
+            URLQueryItem(name: "view", value: LocalizedContentView.localized.rawValue)
         ]
         guard let url = components?.url else {
             throw RemotePushBackendError.invalidResponse
@@ -1157,7 +1171,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var queryItems = [
             URLQueryItem(name: "limit", value: "\(max(1, min(limit, 100)))"),
             URLQueryItem(name: "offset", value: "\(max(0, offset))"),
-            URLQueryItem(name: "tl", value: language.backendCode)
+            URLQueryItem(name: "tl", value: language.backendCode),
+            URLQueryItem(name: "view", value: LocalizedContentView.localized.rawValue)
         ]
         if !normalizedQuery.isEmpty {
             queryItems.append(URLQueryItem(name: "query", value: normalizedQuery))
@@ -1180,14 +1195,16 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func fetchPublicQuestion(
         registration: RemotePushRegistration,
         questionID: String,
-        language: AppLanguage = .korean
+        language: AppLanguage = .korean,
+        view: LocalizedContentView = .localized
     ) async throws -> CommunityQuestion {
         var components = URLComponents(
             url: endpoint("api", "v1", "public", "questions", questionID),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [
-            URLQueryItem(name: "tl", value: language.backendCode)
+            URLQueryItem(name: "tl", value: language.backendCode),
+            URLQueryItem(name: "view", value: view.rawValue)
         ]
         guard let url = components?.url else {
             throw RemotePushBackendError.invalidResponse
@@ -1411,7 +1428,9 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         registration: RemotePushRegistration,
         questionID: String,
         limit: Int = 30,
-        offset: Int = 0
+        offset: Int = 0,
+        language: AppLanguage = .korean,
+        view: LocalizedContentView = .localized
     ) async throws -> CommunityCommentsResponse {
         var components = URLComponents(
             url: endpoint("api", "v1", "public", "questions", questionID, "comments"),
@@ -1419,7 +1438,9 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         components?.queryItems = [
             URLQueryItem(name: "limit", value: "\(max(1, min(limit, 100)))"),
-            URLQueryItem(name: "offset", value: "\(max(0, offset))")
+            URLQueryItem(name: "offset", value: "\(max(0, offset))"),
+            URLQueryItem(name: "tl", value: language.backendCode),
+            URLQueryItem(name: "view", value: view.rawValue)
         ]
         guard let url = components?.url else {
             throw RemotePushBackendError.invalidResponse
@@ -1434,7 +1455,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func createCommunityQuestionComment(
         registration: RemotePushRegistration,
         questionID: String,
-        body: String
+        body: String,
+        sourceLanguage: String
     ) async throws -> CommunityQuestionComment {
         var request = authenticatedRequest(
             registration: registration,
@@ -1442,7 +1464,9 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(CommunityCommentRequest(body: body))
+        request.httpBody = try encoder.encode(
+            CommunityCommentRequest(body: body, sourceLanguage: sourceLanguage)
+        )
         let data = try await perform(request)
         return try decoder.decode(CommunityQuestionComment.self, from: data)
     }
@@ -1491,7 +1515,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func gradeRecord(
         registration: RemotePushRegistration,
         recordID: String,
-        answer: String
+        answer: String,
+        sourceLanguage: String
     ) async throws -> StudyRecord {
         var request = authenticatedRequest(
             registration: registration,
@@ -1499,7 +1524,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(AnswerRequest(answer: answer))
+        request.httpBody = try encoder.encode(AnswerRequest(answer: answer, sourceLanguage: sourceLanguage))
         let data = try await perform(request)
         return try decoder.decode(StudyRecord.self, from: data)
     }
@@ -1526,7 +1551,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func saveRecordAnswer(
         registration: RemotePushRegistration,
         recordID: String,
-        answer: String
+        answer: String,
+        sourceLanguage: String
     ) async throws -> StudyRecord {
         var request = authenticatedRequest(
             registration: registration,
@@ -1534,7 +1560,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(AnswerRequest(answer: answer))
+        request.httpBody = try encoder.encode(AnswerRequest(answer: answer, sourceLanguage: sourceLanguage))
         let data = try await perform(request)
         return try decoder.decode(StudyRecord.self, from: data)
     }
@@ -1591,12 +1617,22 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     func fetchRecord(
         registration: RemotePushRegistration,
-        recordID: String
+        recordID: String,
+        language: AppLanguage = .korean,
+        view: LocalizedContentView = .localized
     ) async throws -> StudyRecord {
-        var request = authenticatedRequest(
-            registration: registration,
-            url: endpoint("api", "v1", "records", recordID)
+        var components = URLComponents(
+            url: endpoint("api", "v1", "records", recordID),
+            resolvingAgainstBaseURL: false
         )
+        components?.queryItems = [
+            URLQueryItem(name: "tl", value: language.backendCode),
+            URLQueryItem(name: "view", value: view.rawValue)
+        ]
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+        var request = authenticatedRequest(registration: registration, url: url)
         request.httpMethod = "GET"
         let data = try await perform(request)
         return try decoder.decode(StudyRecord.self, from: data)
@@ -1932,6 +1968,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     private struct AnswerRequest: Encodable {
         var answer: String
+        var sourceLanguage: String
     }
 
     private struct StudyTopicActivationRequest: Encodable {
@@ -1995,6 +2032,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     private struct CommunityCommentRequest: Encodable {
         var body: String
+        var sourceLanguage: String
     }
 
     private struct OpenAIModelDescriptor: Decodable {
@@ -2426,6 +2464,7 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
     var commentCount: Int
     var viewCount: Int
     var isLikedByMe: Bool
+    var localization: RecordLocalizationMetadata?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -2444,6 +2483,7 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         case viewCount
         case isLikedByMe
         case likedByMe
+        case localization
     }
 
     init(
@@ -2461,7 +2501,8 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         likeCount: Int = 0,
         commentCount: Int = 0,
         viewCount: Int = 0,
-        isLikedByMe: Bool = false
+        isLikedByMe: Bool = false,
+        localization: RecordLocalizationMetadata? = nil
     ) {
         self.id = id
         self.question = question
@@ -2478,6 +2519,7 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         self.commentCount = commentCount
         self.viewCount = viewCount
         self.isLikedByMe = isLikedByMe
+        self.localization = localization
     }
 
     init(from decoder: Decoder) throws {
@@ -2499,6 +2541,7 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         isLikedByMe = try container.decodeIfPresent(Bool.self, forKey: .isLikedByMe)
             ?? container.decodeIfPresent(Bool.self, forKey: .likedByMe)
             ?? false
+        localization = try container.decodeIfPresent(RecordLocalizationMetadata.self, forKey: .localization)
     }
 }
 
@@ -2535,6 +2578,7 @@ struct CommunityQuestionComment: Decodable, Equatable, Identifiable {
     var body: String
     var createdAt: Date
     var author: CommunityUserProfile
+    var localization: ContentLocalizationMetadata?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -2542,6 +2586,7 @@ struct CommunityQuestionComment: Decodable, Equatable, Identifiable {
         case body
         case createdAt
         case author
+        case localization
     }
 }
 
@@ -3387,13 +3432,15 @@ enum RemotePushBackendError: LocalizedError {
 
 }
 
-private extension AppLanguage {
+extension AppLanguage {
     init?(backendCode: String) {
         switch backendCode {
         case "ko":
             self = .korean
         case "en":
             self = .english
+        case "ja":
+            self = .japanese
         default:
             return nil
         }
@@ -3405,6 +3452,32 @@ private extension AppLanguage {
             return "ko"
         case .english:
             return "en"
+        case .japanese:
+            return "ja"
+        }
+    }
+}
+
+enum ContentLanguageRecognizer {
+    static func detect(_ text: String, fallback: AppLanguage) -> String {
+        let candidate = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard candidate.count >= 4 else {
+            return fallback.backendCode
+        }
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(candidate)
+        guard let language = recognizer.dominantLanguage else {
+            return fallback.backendCode
+        }
+        switch language {
+        case .korean:
+            return "ko"
+        case .english:
+            return "en"
+        case .japanese:
+            return "ja"
+        default:
+            return fallback.backendCode
         }
     }
 }

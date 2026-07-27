@@ -87,7 +87,11 @@ class QuestionPromptProvider {
         coverage: QuestionCoverageGuide? = null,
     ): QuestionGenerationPrompt {
         val resolvedTopic = topic.ifBlank { "general study" }
-        val languageName = if (language == "en") "English" else "Korean"
+        val languageName = when (language.lowercase()) {
+            "en" -> "English"
+            "ja" -> "Japanese"
+            else -> "Korean"
+        }
         val recentQuestionText = recentQuestions
             .filter { it.isNotBlank() }
             .take(30)

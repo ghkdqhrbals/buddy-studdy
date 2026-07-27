@@ -8,13 +8,19 @@ import com.buddystudy.backend.community.application.port.inbound.CommunityUseCas
 import com.buddystudy.backend.community.application.port.outbound.QuestionCommentPort
 import com.buddystudy.backend.community.application.port.outbound.QuestionLikePort
 import com.buddystudy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
+import com.buddystudy.backend.community.application.port.outbound.PublicQuestionViewLocalization
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystudy.backend.community.application.port.outbound.ReportPort
 import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.QuestionLanguage
-import com.buddystudy.study.domain.localizedFor
+import com.buddystudy.backend.study.application.model.TranslationViewMode
+import com.buddystudy.backend.localization.application.model.TextLocalizationSnapshot
+import com.buddystudy.backend.localization.application.port.ContentLanguageDetectionPort
+import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
+import com.buddystudy.backend.localization.application.port.RequestContentLocalizationUseCase
+import com.buddystudy.backend.localization.application.service.ContentLocalizationService
 import com.buddystudy.community.domain.entity.QuestionLikeEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.community.domain.entity.ReportEntity
@@ -42,6 +48,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
+import java.util.UUID
 
 @Service
 class CommunityService(
@@ -53,19 +60,37 @@ class CommunityService(
     private val reports: ReportPort,
     private val reactions: PublicQuestionReactionPublishPort,
     private val notifications: PublishNotificationUseCase,
+    private val languageDetector: ContentLanguageDetectionPort,
+    private val contentLocalizations: ContentLocalizationPort,
+    private val localizationRequests: RequestContentLocalizationUseCase,
 ) : CommunityUseCase {
     @Transactional(readOnly = true)
-    override suspend fun getPublicQuestions(principal: Principal?, query: String?, language: String, limit: Int, offset: Int): CommunityQuestionsResponse {
-        return getPublicQuestionsV2(principal, query, language, limit, offset)
+    override suspend fun getPublicQuestions(
+        principal: Principal?,
+        query: String?,
+        language: String,
+        view: String,
+        limit: Int,
+        offset: Int,
+    ): CommunityQuestionsResponse {
+        return getPublicQuestionsV2(principal, query, language, view, limit, offset)
     }
 
     @Transactional(readOnly = true)
-    override suspend fun getPublicQuestionsV2(principal: Principal?, query: String?, language: String, limit: Int, offset: Int): CommunityQuestionsResponse {
+    override suspend fun getPublicQuestionsV2(
+        principal: Principal?,
+        query: String?,
+        language: String,
+        view: String,
+        limit: Int,
+        offset: Int,
+    ): CommunityQuestionsResponse {
         val normalizedQuery = query?.trim()?.takeIf { it.isNotEmpty() }
         return publicQuestionsFromOrigin(
             principal = principal,
             query = normalizedQuery,
             language = QuestionLanguage.normalize(language),
+            view = view,
             limit = limit,
             offset = offset,
         )
@@ -75,24 +100,54 @@ class CommunityService(
         principal: Principal?,
         query: String?,
         language: String,
+        view: String,
         limit: Int,
         offset: Int,
     ): CommunityQuestionsResponse {
         val pageable = PageRequest.of(offset / limit, limit)
         val page = if (query == null) {
-            questions.findPublicAnsweredByLanguage(language, pageable)
+            questions.findPublicAnswered(pageable)
         } else {
             questions.findPublicAnsweredByLanguageAndQuery(language, query, pageable)
         }
         val context = communityContext(page.content, principal)
-        val rows = page.content.map { community(it.localizedFor(language), context) }
+        val viewMode = translationViewMode(view)
+        val rows = page.content.map { community(it, context, language, viewMode) }
         return CommunityQuestionsResponse(rows, page.totalElements, limit, offset)
     }
 
-    override suspend fun getPublicQuestion(principal: Principal?, id: Long, language: String): CommunityQuestionResponse {
-        val q = publicAnsweredQuestion(id, QuestionLanguage.normalize(language))
-        val response = community(q.localizedFor(language), communityContext(listOf(q), principal))
-        reactions.publishViewed(id, principal?.userId)
+    override suspend fun getPublicQuestion(
+        principal: Principal?,
+        id: Long,
+        language: String,
+        view: String,
+    ): CommunityQuestionResponse {
+        val q = publicAnsweredQuestion(id)
+        val viewMode = translationViewMode(view)
+        val response = community(
+            q,
+            communityContext(listOf(q), principal),
+            language,
+            viewMode,
+        )
+        response.localization?.let { localization ->
+            reactions.publishViewed(
+                id,
+                principal?.userId,
+                PublicQuestionViewLocalization(
+                    translationState = localization.question.translationState.name,
+                    translationLanguage = localization.question.requestedLanguage,
+                    translationReason = localization.question.translationReason.name,
+                    requestId = UUID.randomUUID().toString(),
+                    questionSourceLanguage = localization.question.sourceLanguage,
+                    questionDisplayLanguage = localization.question.displayLanguage,
+                    answerSourceLanguage = localization.answer?.sourceLanguage,
+                    answerDisplayLanguage = localization.answer?.displayLanguage,
+                    aiResponseSourceLanguage = localization.aiResponse?.sourceLanguage,
+                    aiResponseDisplayLanguage = localization.aiResponse?.displayLanguage,
+                ),
+            )
+        } ?: reactions.publishViewed(id, principal?.userId)
         return response
     }
 
@@ -128,9 +183,23 @@ class CommunityService(
     }
 
     @Transactional
-    override suspend fun createComment(principal: Principal, id: Long, body: String): CommunityCommentResponse {
+    override suspend fun createComment(
+        principal: Principal,
+        id: Long,
+        body: String,
+        sourceLanguage: String?,
+    ): CommunityCommentResponse {
         val question = publicAnsweredQuestion(id)
-        val saved = comments.save(QuestionCommentEntity(questionId = id, userId = principal.userId, body = body.take(1000)))
+        val fallbackLanguage = users.findById(principal.userId)?.appLanguage
+        val declaredLanguage = QuestionLanguage.normalize(sourceLanguage ?: fallbackLanguage)
+        val saved = comments.save(
+            QuestionCommentEntity(
+                questionId = id,
+                userId = principal.userId,
+                body = body.take(1000),
+                sourceLanguage = languageDetector.detect(body, declaredLanguage),
+            ),
+        )
         incrementCommentCount(id, 1)
         publishThreadNotification(
             ownerUserId = question.userId,
@@ -162,8 +231,20 @@ class CommunityService(
     }
 
     @Transactional(readOnly = true)
-    override suspend fun getComments(id: Long, limit: Int, offset: Int): CommunityCommentsResponse {
+    override suspend fun getComments(
+        id: Long,
+        language: String,
+        view: String,
+        limit: Int,
+        offset: Int,
+    ): CommunityCommentsResponse {
         publicAnsweredQuestion(id)
+        val requestedLanguage = QuestionLanguage.normalize(language)
+        val viewMode = if (view.equals("original", ignoreCase = true)) {
+            TranslationViewMode.ORIGINAL
+        } else {
+            TranslationViewMode.LOCALIZED
+        }
         val page = comments.findByQuestionIdAndDeletedAtIsNullOrderByCreatedAtAsc(id, PageRequest.of(offset / limit, limit))
         val profiles = page.content
             .map { it.userId }
@@ -172,7 +253,16 @@ class CommunityService(
             ?.let { users.findAllById(it).associateBy { user -> user.id } }
             .orEmpty()
         return CommunityCommentsResponse(
-            page.content.map { it.toResponse(profiles[it.userId]?.toProfile() ?: UserProfileResponse(0, "Buddy")) },
+            page.content.map { comment ->
+                val projected = localizedComment(comment, requestedLanguage, viewMode)
+                projected.comment.toResponse(
+                    profiles[comment.userId]?.toProfile() ?: UserProfileResponse(0, "Buddy"),
+                    requestedLanguage,
+                    viewMode,
+                    projected.displayLanguage,
+                    projected.translationPending,
+                )
+            },
             page.totalElements,
             limit,
             offset,
@@ -224,14 +314,130 @@ class CommunityService(
         )
     }
 
-    private suspend fun community(q: QuestionEntity, context: CommunityContext): CommunityQuestionResponse {
-        val author = q.userId?.let { context.authorsById[it]?.toAuthorProjection() }
-        val stats = context.statsByQuestionId[q.id]
-        val liked = q.id in context.likedQuestionIds
-        return PublicQuestion.of(q.toPublicQuestionState(), author, stats?.toPublicQuestionStats(), liked)
+    private suspend fun community(
+        q: QuestionEntity,
+        context: CommunityContext,
+        requestedLanguage: String = q.sourceLanguage,
+        viewMode: TranslationViewMode = TranslationViewMode.LOCALIZED,
+    ): CommunityQuestionResponse {
+        val projected = localizedRecord(q, requestedLanguage, viewMode)
+        val displayQuestion = projected.question
+        val author = displayQuestion.userId?.let { context.authorsById[it]?.toAuthorProjection() }
+        val stats = context.statsByQuestionId[displayQuestion.id]
+        val liked = displayQuestion.id in context.likedQuestionIds
+        return PublicQuestion.of(displayQuestion.toPublicQuestionState(), author, stats?.toPublicQuestionStats(), liked)
             .toProjection()
-            .toCommunityQuestionResponse()
+            .toCommunityQuestionResponse(
+                requestedLanguage = QuestionLanguage.normalize(requestedLanguage),
+                viewMode = viewMode,
+                questionDisplayLanguage = projected.questionDisplayLanguage,
+                answerDisplayLanguage = projected.answerDisplayLanguage,
+                aiResponseDisplayLanguage = projected.aiResponseDisplayLanguage,
+                questionTranslationPending = projected.questionTranslationPending,
+                answerTranslationPending = projected.answerTranslationPending,
+                aiResponseTranslationPending = projected.aiResponseTranslationPending,
+            )
     }
+
+    private suspend fun localizedRecord(
+        question: QuestionEntity,
+        requestedLanguage: String,
+        viewMode: TranslationViewMode,
+    ): ProjectedRecord {
+        val target = QuestionLanguage.normalize(requestedLanguage)
+        val questionSource = QuestionLanguage.normalize(question.sourceLanguage)
+        val answerSource = QuestionLanguage.normalize(question.answerSourceLanguage ?: question.sourceLanguage)
+        val aiSource = QuestionLanguage.normalize(question.aiResponseSourceLanguage ?: question.sourceLanguage)
+        if (viewMode == TranslationViewMode.ORIGINAL) {
+            return ProjectedRecord(question, questionSource, answerSource, aiSource, false, false, false)
+        }
+
+        val hashes = ContentLocalizationService.recordHashes(question)
+        val snapshot = contentLocalizations.record(question.id, target)
+        val questionReady = snapshot.question.readyFor(hashes.question)
+        val answerReady = snapshot.answer.readyFor(hashes.answer)
+        val aiReady = snapshot.aiResponse.readyFor(hashes.aiResponse)
+        val hasLegacyEnglishQuestion = target == QuestionLanguage.ENGLISH &&
+            question.translationStatus == "READY" &&
+            !question.questionEn.isNullOrBlank()
+        val needsTranslation =
+            (questionSource != target && questionReady == null && !hasLegacyEnglishQuestion) ||
+                (!question.answer.isNullOrBlank() && answerSource != target && answerReady == null) ||
+                ((!question.feedback.isNullOrBlank() || !question.explanation.isNullOrBlank()) &&
+                    aiSource != target && aiReady == null)
+        if (needsTranslation) {
+            localizationRequests.requestRecord(question, target)
+        }
+
+        var questionDisplay = questionSource
+        var answerDisplay = answerSource
+        var aiDisplay = aiSource
+        if (questionSource != target) {
+            when {
+                questionReady != null -> {
+                    question.topic = questionReady.fields["topic"] ?: question.topic
+                    question.question = questionReady.fields["question"] ?: question.question
+                    question.hint = questionReady.fields["hint"] ?: question.hint
+                    questionDisplay = target
+                }
+                hasLegacyEnglishQuestion -> {
+                    question.topic = question.topicEn ?: question.topic
+                    question.question = question.questionEn ?: question.question
+                    question.hint = question.hintEn ?: question.hint
+                    questionDisplay = target
+                }
+            }
+        }
+        if (!question.answer.isNullOrBlank() && answerSource != target) {
+            answerReady?.let {
+                question.answer = it.fields["answer"] ?: question.answer
+                answerDisplay = target
+            }
+        }
+        if ((!question.feedback.isNullOrBlank() || !question.explanation.isNullOrBlank()) && aiSource != target) {
+            aiReady?.let {
+                question.feedback = it.fields["feedback"] ?: question.feedback
+                question.explanation = it.fields["explanation"] ?: question.explanation
+                aiDisplay = target
+            }
+        }
+        return ProjectedRecord(
+            question,
+            questionDisplay,
+            answerDisplay,
+            aiDisplay,
+            questionSource != target && questionDisplay != target && snapshot.question?.status != "FAILED",
+            !question.answer.isNullOrBlank() && answerSource != target &&
+                answerDisplay != target && snapshot.answer?.status != "FAILED",
+            (!question.feedback.isNullOrBlank() || !question.explanation.isNullOrBlank()) &&
+                aiSource != target && aiDisplay != target && snapshot.aiResponse?.status != "FAILED",
+        )
+    }
+
+    private suspend fun localizedComment(
+        comment: QuestionCommentEntity,
+        requestedLanguage: String,
+        viewMode: TranslationViewMode,
+    ): ProjectedComment {
+        val target = QuestionLanguage.normalize(requestedLanguage)
+        val source = QuestionLanguage.normalize(comment.sourceLanguage)
+        if (viewMode == TranslationViewMode.ORIGINAL || source == target) {
+            return ProjectedComment(comment, source, false)
+        }
+        val sourceHash = ContentLocalizationService.sha256(comment.body)
+        val snapshot = contentLocalizations.comment(comment.id, target)
+        val ready = snapshot.readyFor(sourceHash)
+        if (ready == null) {
+            localizationRequests.requestComment(comment, target)
+            val failed = snapshot?.status == "FAILED"
+            return ProjectedComment(comment, source, !failed)
+        }
+        comment.body = ready.fields["body"] ?: comment.body
+        return ProjectedComment(comment, target, false)
+    }
+
+    private fun TextLocalizationSnapshot?.readyFor(sourceHash: String?) =
+        sourceHash?.let { hash -> this?.takeIf { it.status == "READY" && it.sourceHash == hash } }
 
     private suspend fun publicAnsweredQuestion(id: Long, language: String? = null): QuestionEntity =
         (if (language == null) {
@@ -304,10 +510,35 @@ class CommunityService(
     }
 
     private suspend fun localizedCommentTitle(ownerUserId: Long?): String {
-        val language = ownerUserId?.let { users.findById(it)?.appLanguage }.orEmpty()
-        return if (language.lowercase().startsWith("en")) "Comment" else "댓글"
+        return when (QuestionLanguage.normalize(ownerUserId?.let { users.findById(it)?.appLanguage })) {
+            QuestionLanguage.ENGLISH -> "Comment"
+            QuestionLanguage.JAPANESE -> "コメント"
+            else -> "댓글"
+        }
     }
 
+    private fun translationViewMode(value: String): TranslationViewMode =
+        if (value.equals("original", ignoreCase = true)) {
+            TranslationViewMode.ORIGINAL
+        } else {
+            TranslationViewMode.LOCALIZED
+        }
+
+    private data class ProjectedRecord(
+        val question: QuestionEntity,
+        val questionDisplayLanguage: String,
+        val answerDisplayLanguage: String,
+        val aiResponseDisplayLanguage: String,
+        val questionTranslationPending: Boolean,
+        val answerTranslationPending: Boolean,
+        val aiResponseTranslationPending: Boolean,
+    )
+
+    private data class ProjectedComment(
+        val comment: QuestionCommentEntity,
+        val displayLanguage: String,
+        val translationPending: Boolean,
+    )
 }
 
 private data class CommunityContext(
@@ -340,6 +571,9 @@ private suspend fun QuestionEntity.toPublicQuestionState() = PublicQuestionState
     source = source,
     createdAt = createdAt,
     answeredAt = answeredAt,
+    questionSourceLanguage = sourceLanguage,
+    answerSourceLanguage = answerSourceLanguage,
+    aiResponseSourceLanguage = aiResponseSourceLanguage,
 )
 
 private suspend fun QuestionStatsEntity.toPublicQuestionStats() = PublicQuestionStats(

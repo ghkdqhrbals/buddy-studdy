@@ -39,6 +39,7 @@ internal fun StudyRoomQuestionDraft.toQuestionEntity() = QuestionEntity(
     hint = hint,
     topic = topic,
     language = language,
+    sourceLanguage = language,
     difficultyLevel = difficultyLevel,
     scheduledFor = scheduledFor,
     sentAt = sentAt,
@@ -94,12 +95,16 @@ internal fun QuestionEntity.toStudyRecord(stats: QuestionStatsEntity? = null) = 
         gradingRequestId = gradingRequestId,
         gradingStatus = gradingStatus,
         gradingError = gradingError,
+        questionSourceLanguage = sourceLanguage,
+        answerSourceLanguage = answerSourceLanguage,
+        aiResponseSourceLanguage = aiResponseSourceLanguage,
     ),
     stats?.let { StudyRecordStats(it.likeCount, it.commentCount, it.viewCount) },
 )
 
 internal fun QuestionEntity.apply(update: StudyRecordAnswerUpdate) {
     answer = update.answer
+    answerSourceLanguage = update.sourceLanguage
     answeredAt = update.answeredAt
     updatedAt = update.updatedAt
 }
@@ -109,6 +114,7 @@ internal fun QuestionEntity.apply(update: StudyRecordGradeUpdate) {
     correct = update.correct
     feedback = update.feedback
     explanation = update.explanation
+    aiResponseSourceLanguage = update.sourceLanguage
     gradedAt = update.gradedAt
     status = update.status
     updatedAt = update.updatedAt

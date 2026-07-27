@@ -21,11 +21,11 @@ class LibreTranslateQuestionTranslationProvider(
         .build()
 
     override suspend fun translate(request: QuestionTranslationRequest): TranslatedQuestionContent = coroutineScope {
-        val topic = async { translateText(request.topic, request.sourceLanguage) }
-        val question = async { translateText(request.question, request.sourceLanguage) }
+        val topic = async { translateText(request.topic, request.sourceLanguage, request.targetLanguage) }
+        val question = async { translateText(request.question, request.sourceLanguage, request.targetLanguage) }
         val hint = request.hint
             ?.takeIf(String::isNotBlank)
-            ?.let { value -> async { translateText(value, request.sourceLanguage) } }
+            ?.let { value -> async { translateText(value, request.sourceLanguage, request.targetLanguage) } }
 
         TranslatedQuestionContent(
             topic = topic.await(),
@@ -34,11 +34,11 @@ class LibreTranslateQuestionTranslationProvider(
         )
     }
 
-    private suspend fun translateText(text: String, sourceLanguage: String): String {
+    private suspend fun translateText(text: String, sourceLanguage: String, targetLanguage: String): String {
         val body = linkedMapOf<String, Any>(
             "q" to text,
             "source" to sourceLanguage,
-            "target" to "en",
+            "target" to targetLanguage,
             "format" to "text",
         )
         properties.translation.apiKey.takeIf(String::isNotBlank)?.let { body["api_key"] = it }

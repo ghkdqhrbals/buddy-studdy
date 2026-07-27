@@ -11,17 +11,26 @@ class StudyRecord private constructor(
     val difficultyLevel: Int get() = question.difficultyLevel
     val prompt: String get() = question.question
 
-    fun answer(answer: String, now: Instant = Instant.now()) = StudyRecordAnswerUpdate(
+    fun answer(answer: String, sourceLanguage: String, now: Instant = Instant.now()) = StudyRecordAnswerUpdate(
         answer = answer,
+        sourceLanguage = sourceLanguage,
         answeredAt = now,
         updatedAt = now,
     )
 
-    fun grade(score: Int, isCorrect: Boolean, feedback: String, explanation: String, now: Instant = Instant.now()) = StudyRecordGradeUpdate(
+    fun grade(
+        score: Int,
+        isCorrect: Boolean,
+        feedback: String,
+        explanation: String,
+        sourceLanguage: String,
+        now: Instant = Instant.now(),
+    ) = StudyRecordGradeUpdate(
         score = score,
         correct = isCorrect,
         feedback = feedback,
         explanation = explanation,
+        sourceLanguage = sourceLanguage,
         gradedAt = now,
         status = "graded",
         updatedAt = now,
@@ -64,6 +73,9 @@ class StudyRecord private constructor(
         gradingRequestId = question.gradingRequestId,
         gradingStatus = question.gradingStatus,
         gradingError = question.gradingError,
+        questionSourceLanguage = question.questionSourceLanguage,
+        answerSourceLanguage = question.answerSourceLanguage,
+        aiResponseSourceLanguage = question.aiResponseSourceLanguage,
     )
 
     companion object {
@@ -94,6 +106,9 @@ data class StudyRecordState(
     val gradingRequestId: String? = null,
     val gradingStatus: String? = null,
     val gradingError: String? = null,
+    val questionSourceLanguage: String = "ko",
+    val answerSourceLanguage: String? = null,
+    val aiResponseSourceLanguage: String? = null,
 )
 
 data class StudyRecordStats(
@@ -104,6 +119,7 @@ data class StudyRecordStats(
 
 data class StudyRecordAnswerUpdate(
     val answer: String,
+    val sourceLanguage: String,
     val answeredAt: Instant,
     val updatedAt: Instant,
 )
@@ -113,6 +129,7 @@ data class StudyRecordGradeUpdate(
     val correct: Boolean,
     val feedback: String,
     val explanation: String,
+    val sourceLanguage: String,
     val gradedAt: Instant,
     val status: String,
     val updatedAt: Instant,
@@ -155,4 +172,7 @@ data class StudyRecordProjection(
     val gradingRequestId: String? = null,
     val gradingStatus: String? = null,
     val gradingError: String? = null,
+    val questionSourceLanguage: String = "ko",
+    val answerSourceLanguage: String? = null,
+    val aiResponseSourceLanguage: String? = null,
 )

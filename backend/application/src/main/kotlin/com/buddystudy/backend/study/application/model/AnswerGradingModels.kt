@@ -22,6 +22,7 @@ data class AnswerGradingRequestedEvent(
     val recordId: Long,
     val userId: Long,
     val requestedAt: Instant,
+    val responseLanguage: String = "ko",
 )
 
 data class AnswerGradingProgress(

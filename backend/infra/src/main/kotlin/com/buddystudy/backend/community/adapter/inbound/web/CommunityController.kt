@@ -53,24 +53,26 @@ class CommunityController(
         @RequestParam(defaultValue = "20") limit: Int,
         @Parameter(description = "Zero-based pagination offset.", example = "0")
         @RequestParam(defaultValue = "0") offset: Int,
-        @Parameter(description = "Target language for translated content. Supports ko and en.", example = "ko")
+        @Parameter(description = "Target language for translated content. Supports ko, en, and ja.", example = "ko")
         @RequestParam(required = false) tl: String?,
         @Parameter(description = "Deprecated target-language alias kept for older clients.", example = "ko", deprecated = true)
         @RequestParam(required = false) language: String?,
+        @RequestParam(defaultValue = "localized") view: String,
         authentication: Authentication?,
-    ) = community.getPublicQuestions(query ?: topic, targetLanguage(tl, language), limit, offset, authentication)
+    ) = community.getPublicQuestions(query ?: topic, targetLanguage(tl, language), view, limit, offset, authentication)
 
     @Operation(summary = "Fetch one public question", description = "Returns a single public completed question with author, answer, feedback, explanation, and current reaction statistics. Viewing may publish a view event for delayed aggregation.")
     @GetMapping("/public/questions/{id}")
     suspend fun getPublicQuestion(
         @Parameter(description = "Public question id.", example = "42")
         @PathVariable id: Long,
-        @Parameter(description = "Target language for translated content. Supports ko and en.", example = "ko")
+        @Parameter(description = "Target language for translated content. Supports ko, en, and ja.", example = "ko")
         @RequestParam(required = false) tl: String?,
         @Parameter(description = "Deprecated target-language alias kept for older clients.", example = "ko", deprecated = true)
         @RequestParam(required = false) language: String?,
+        @RequestParam(defaultValue = "localized") view: String,
         authentication: Authentication?,
-    ) = community.getPublicQuestion(id, targetLanguage(tl, language), authentication)
+    ) = community.getPublicQuestion(id, targetLanguage(tl, language), view, authentication)
 
     @Operation(summary = "Like a public question", description = "Adds the authenticated user's like. Like counts may be aggregated asynchronously.")
     @PutMapping("/public/questions/{id}/like")
@@ -93,8 +95,11 @@ class CommunityController(
         @RequestParam(defaultValue = "30") limit: Int,
         @Parameter(description = "Zero-based pagination offset.", example = "0")
         @RequestParam(defaultValue = "0") offset: Int,
+        @RequestParam(required = false) tl: String?,
+        @RequestParam(required = false) language: String?,
+        @RequestParam(defaultValue = "localized") view: String,
     ) =
-        community.getComments(id, limit, offset)
+        community.getComments(id, targetLanguage(tl, language), view, limit, offset)
 
     @Operation(summary = "Create a comment", description = "Creates a comment on a public question as the authenticated user. Comment counts may be aggregated asynchronously.")
     @PostMapping("/public/questions/{id}/comments")
@@ -155,12 +160,13 @@ class CommunitySearchV2Controller(
         @RequestParam(defaultValue = "20") limit: Int,
         @Parameter(description = "Zero-based pagination offset.", example = "0")
         @RequestParam(defaultValue = "0") offset: Int,
-        @Parameter(description = "Target language for translated search results. Supports ko and en.", example = "ko")
+        @Parameter(description = "Target language for translated search results. Supports ko, en, and ja.", example = "ko")
         @RequestParam(required = false) tl: String?,
         @Parameter(description = "Deprecated target-language alias kept for older clients.", example = "ko", deprecated = true)
         @RequestParam(required = false) language: String?,
+        @RequestParam(defaultValue = "localized") view: String,
         authentication: Authentication?,
-    ) = community.getPublicQuestionsV2(query, targetLanguage(tl, language), limit, offset, authentication)
+    ) = community.getPublicQuestionsV2(query, targetLanguage(tl, language), view, limit, offset, authentication)
 }
 
 internal fun targetLanguage(tl: String?, legacyLanguage: String?): String =
@@ -169,12 +175,12 @@ internal fun targetLanguage(tl: String?, legacyLanguage: String?): String =
         ?: "ko"
 
 interface CommunityWebPort {
-    suspend fun getPublicQuestions(query: String?, language: String, limit: Int, offset: Int, authentication: Authentication?): Any
-    suspend fun getPublicQuestionsV2(query: String?, language: String, limit: Int, offset: Int, authentication: Authentication?): Any
-    suspend fun getPublicQuestion(id: Long, language: String, authentication: Authentication?): Any
+    suspend fun getPublicQuestions(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication?): Any
+    suspend fun getPublicQuestionsV2(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication?): Any
+    suspend fun getPublicQuestion(id: Long, language: String, view: String, authentication: Authentication?): Any
     suspend fun likePublicQuestion(id: Long, authentication: Authentication): Any
     suspend fun unlikePublicQuestion(id: Long, authentication: Authentication): Any
-    suspend fun getComments(id: Long, limit: Int, offset: Int): Any
+    suspend fun getComments(id: Long, language: String, view: String, limit: Int, offset: Int): Any
     suspend fun createComment(id: Long, body: CommunityCommentRequest, authentication: Authentication): Any
     suspend fun deleteComment(id: Long, commentId: Long, authentication: Authentication): Any
     suspend fun reportQuestion(id: Long, body: ReportQuestionRequest, authentication: Authentication): ReportQuestionResponse
@@ -185,24 +191,24 @@ interface CommunityWebPort {
 class CommunityWebAdapter(
     private val community: CommunityUseCase,
 ) : CommunityWebPort {
-    override suspend fun getPublicQuestions(query: String?, language: String, limit: Int, offset: Int, authentication: Authentication?) =
-        community.getPublicQuestions(authentication.optionalPrincipal(), query, language, safeLimit(limit, 100), max(0, offset))
+    override suspend fun getPublicQuestions(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication?) =
+        community.getPublicQuestions(authentication.optionalPrincipal(), query, language, view, safeLimit(limit, 100), max(0, offset))
 
-    override suspend fun getPublicQuestionsV2(query: String?, language: String, limit: Int, offset: Int, authentication: Authentication?) =
-        community.getPublicQuestionsV2(authentication.optionalPrincipal(), query, language, safeLimit(limit, 100), max(0, offset))
+    override suspend fun getPublicQuestionsV2(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication?) =
+        community.getPublicQuestionsV2(authentication.optionalPrincipal(), query, language, view, safeLimit(limit, 100), max(0, offset))
 
-    override suspend fun getPublicQuestion(id: Long, language: String, authentication: Authentication?) =
-        community.getPublicQuestion(authentication.optionalPrincipal(), id, language)
+    override suspend fun getPublicQuestion(id: Long, language: String, view: String, authentication: Authentication?) =
+        community.getPublicQuestion(authentication.optionalPrincipal(), id, language, view)
 
     override suspend fun likePublicQuestion(id: Long, authentication: Authentication) = community.setLike(authentication.principalOrThrow(), id, true)
 
     override suspend fun unlikePublicQuestion(id: Long, authentication: Authentication) = community.setLike(authentication.principalOrThrow(), id, false)
 
-    override suspend fun getComments(id: Long, limit: Int, offset: Int) =
-        community.getComments(id, safeLimit(limit, 100), max(0, offset))
+    override suspend fun getComments(id: Long, language: String, view: String, limit: Int, offset: Int) =
+        community.getComments(id, language, view, safeLimit(limit, 100), max(0, offset))
 
     override suspend fun createComment(id: Long, body: CommunityCommentRequest, authentication: Authentication) =
-        community.createComment(authentication.principalOrThrow(), id, body.body)
+        community.createComment(authentication.principalOrThrow(), id, body.body, body.sourceLanguage)
 
     override suspend fun deleteComment(id: Long, commentId: Long, authentication: Authentication) =
         community.deleteComment(authentication.principalOrThrow(), id, commentId)

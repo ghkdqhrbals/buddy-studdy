@@ -21,6 +21,7 @@ class QuestionCommentPersistenceAdapter(
     private val repository: QuestionCommentRepository,
 ) : QuestionCommentPort {
     override suspend fun save(entity: QuestionCommentEntity) = repository.save(entity)
+    override suspend fun findById(id: Long) = repository.findById(id)
     override suspend fun findByIdAndQuestionIdAndDeletedAtIsNull(id: Long, questionId: Long) =
         repository.findByIdAndQuestionIdAndDeletedAtIsNull(id, questionId)
     override suspend fun findByQuestionIdAndDeletedAtIsNullOrderByCreatedAtAsc(

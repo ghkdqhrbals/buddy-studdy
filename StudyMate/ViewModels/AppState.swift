@@ -3601,9 +3601,10 @@ final class AppState: ObservableObject {
         questionID: String,
         limit: Int = 30,
         offset: Int = 0,
-        refresh: Bool = false
+        refresh: Bool = false,
+        view: LocalizedContentView = .localized
     ) async -> CommunityCommentsResponse? {
-        if !refresh, offset == 0, let cached = communityCommentsCache[questionID] {
+        if view == .localized, !refresh, offset == 0, let cached = communityCommentsCache[questionID] {
             return cached
         }
 
@@ -3618,11 +3619,13 @@ final class AppState: ObservableObject {
                     registration: registration,
                     questionID: questionID,
                     limit: limit,
-                    offset: offset
+                    offset: offset,
+                    language: settings.appLanguage,
+                    view: view
                 )
             },
             onSuccess: { response in
-                if offset == 0 {
+                if view == .localized, offset == 0 {
                     communityCommentsCache[questionID] = response
                 }
             },
@@ -3633,7 +3636,10 @@ final class AppState: ObservableObject {
         )
     }
 
-    func loadCommunityQuestionDetail(questionID: String) async -> CommunityQuestion? {
+    func loadCommunityQuestionDetail(
+        questionID: String,
+        view: LocalizedContentView = .localized
+    ) async -> CommunityQuestion? {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-question-detail") else {
             clearCommunityErrorForMissingRegistration(reason: "community-question-detail")
             return nil
@@ -3644,17 +3650,42 @@ final class AppState: ObservableObject {
                 try await communityUseCase.fetchPublicQuestion(
                     registration: registration,
                     questionID: questionID,
-                    language: settings.appLanguage
+                    language: settings.appLanguage,
+                    view: view
                 )
             },
             onSuccess: { question in
-                if let index = communityQuestions.firstIndex(where: { $0.id == questionID }) {
+                if view == .localized,
+                   let index = communityQuestions.firstIndex(where: { $0.id == questionID }) {
                     communityQuestions[index] = question
                 }
             },
             onFailure: { error in
                 handleCommunityError(error)
                 log(.warning, "공개 질문 상세 로드 실패: \(error.localizedDescription)")
+            }
+        )
+    }
+
+    func loadStudyRecordDetail(
+        recordID: String,
+        view: LocalizedContentView = .localized
+    ) async -> StudyRecord? {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "record-detail") else {
+            return nil
+        }
+        return await actionRunner.run(
+            operation: {
+                try await recordsUseCase.fetchRecord(
+                    registration: registration,
+                    recordID: recordID,
+                    language: settings.appLanguage,
+                    view: view
+                )
+            },
+            onSuccess: { _ in },
+            onFailure: { error in
+                log(.warning, "기록 상세 로드 실패: \(error.localizedDescription)")
             }
         )
     }
@@ -3674,7 +3705,11 @@ final class AppState: ObservableObject {
                 try await communityUseCase.createComment(
                     registration: registration,
                     questionID: questionID,
-                    body: body
+                    body: body,
+                    sourceLanguage: ContentLanguageRecognizer.detect(
+                        body,
+                        fallback: settings.appLanguage
+                    )
                 )
             },
             onSuccess: { comment in
@@ -4599,7 +4634,11 @@ final class AppState: ObservableObject {
                 let queued = try await recordsUseCase.gradeRecord(
                     registration: registration,
                     recordID: record.id,
-                    answer: trimmedAnswer
+                    answer: trimmedAnswer,
+                    sourceLanguage: ContentLanguageRecognizer.detect(
+                        trimmedAnswer,
+                        fallback: settings.appLanguage
+                    )
                 )
                 return try await awaitGradingResult(
                     queued,
@@ -5716,7 +5755,11 @@ final class AppState: ObservableObject {
                 let queued = try await recordsUseCase.gradeRecord(
                     registration: registration,
                     recordID: record.id,
-                    answer: trimmedAnswer
+                    answer: trimmedAnswer,
+                    sourceLanguage: ContentLanguageRecognizer.detect(
+                        trimmedAnswer,
+                        fallback: settings.appLanguage
+                    )
                 )
                 return try await awaitGradingResult(
                     queued,
@@ -5801,7 +5844,11 @@ final class AppState: ObservableObject {
                 let queued = try await recordsUseCase.gradeRecord(
                     registration: registration,
                     recordID: record.id,
-                    answer: trimmedAnswer
+                    answer: trimmedAnswer,
+                    sourceLanguage: ContentLanguageRecognizer.detect(
+                        trimmedAnswer,
+                        fallback: settings.appLanguage
+                    )
                 )
                 return try await awaitGradingResult(
                     queued,
@@ -5879,7 +5926,9 @@ final class AppState: ObservableObject {
                     case .completed:
                         return try await recordsUseCase.fetchRecord(
                             registration: registration,
-                            recordID: queuedRecord.id
+                            recordID: queuedRecord.id,
+                            language: settings.appLanguage,
+                            view: .localized
                         )
                     case .failed:
                         throw AnswerGradingProcessError.failed(
@@ -5897,7 +5946,9 @@ final class AppState: ObservableObject {
                     if process.status == .completed {
                         return try await recordsUseCase.fetchRecord(
                             registration: registration,
-                            recordID: process.recordID
+                            recordID: process.recordID,
+                            language: settings.appLanguage,
+                            view: .localized
                         )
                     }
                     throw AnswerGradingProcessError.failed(
@@ -6279,7 +6330,9 @@ final class AppState: ObservableObject {
 
         var record = try await recordsUseCase.fetchRecord(
             registration: registration,
-            recordID: recordID
+            recordID: recordID,
+            language: settings.appLanguage,
+            view: .localized
         )
 
         let trimmedReply = replyText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -6287,7 +6340,11 @@ final class AppState: ObservableObject {
             record = try await recordsUseCase.saveRecordAnswer(
                 registration: registration,
                 recordID: recordID,
-                answer: trimmedReply
+                answer: trimmedReply,
+                sourceLanguage: ContentLanguageRecognizer.detect(
+                    trimmedReply,
+                    fallback: settings.appLanguage
+                )
             )
         }
 

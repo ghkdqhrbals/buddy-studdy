@@ -22,6 +22,9 @@ data class CreateStudyTopicRequest(
     var activeForQuestions: Boolean = true,
 )
 
-data class AnswerRequest(var answer: String = "")
+data class AnswerRequest(
+    var answer: String = "",
+    var sourceLanguage: String? = null,
+)
 data class RecordPublicityRequest(var isPublic: Boolean = true)
 data class StudyTopicActivationRequest(var active: Boolean = true)

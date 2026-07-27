@@ -124,13 +124,14 @@ class SystemOpenAIClient(
     override suspend fun translate(
         request: QuestionTranslationRequest,
     ): TranslatedQuestionContent =
-        executor.translateQuestionToEnglish(
+        executor.translateQuestion(
             apiKey = systemApiKey(),
             model = properties.openai.model,
             topic = request.topic,
             question = request.question,
             hint = request.hint,
             sourceLanguage = request.sourceLanguage,
+            targetLanguage = request.targetLanguage,
         )
 
     override suspend fun compare(command: GradingPromptPreviewCommand): GradingPromptPreviewResponse =

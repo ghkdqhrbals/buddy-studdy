@@ -27,9 +27,15 @@ struct RemoteRecordsRepository: RecordsRepository {
     func gradeRecord(
         registration: RemotePushRegistration,
         recordID: String,
-        answer: String
+        answer: String,
+        sourceLanguage: String
     ) async throws -> StudyRecord {
-        try await backendClient.gradeRecord(registration: registration, recordID: recordID, answer: answer)
+        try await backendClient.gradeRecord(
+            registration: registration,
+            recordID: recordID,
+            answer: answer,
+            sourceLanguage: sourceLanguage
+        )
     }
 
     func fetchAnswerGradingProcess(
@@ -47,9 +53,15 @@ struct RemoteRecordsRepository: RecordsRepository {
     func saveRecordAnswer(
         registration: RemotePushRegistration,
         recordID: String,
-        answer: String
+        answer: String,
+        sourceLanguage: String
     ) async throws -> StudyRecord {
-        try await backendClient.saveRecordAnswer(registration: registration, recordID: recordID, answer: answer)
+        try await backendClient.saveRecordAnswer(
+            registration: registration,
+            recordID: recordID,
+            answer: answer,
+            sourceLanguage: sourceLanguage
+        )
     }
 
     func skipRecord(
@@ -84,8 +96,15 @@ struct RemoteRecordsRepository: RecordsRepository {
 
     func fetchRecord(
         registration: RemotePushRegistration,
-        recordID: String
+        recordID: String,
+        language: AppLanguage,
+        view: LocalizedContentView
     ) async throws -> StudyRecord {
-        try await backendClient.fetchRecord(registration: registration, recordID: recordID)
+        try await backendClient.fetchRecord(
+            registration: registration,
+            recordID: recordID,
+            language: language,
+            view: view
+        )
     }
 }

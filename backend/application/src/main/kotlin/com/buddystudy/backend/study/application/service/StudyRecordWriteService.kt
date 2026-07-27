@@ -5,6 +5,7 @@ import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.common.application.outbox.OutboxType
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxAppendPort
+import com.buddystudy.backend.localization.application.port.ContentLanguageDetectionPort
 import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
 import com.buddystudy.backend.study.application.model.AnswerGradingStatus
 import com.buddystudy.backend.study.application.port.outbound.AnswerGradingProgressPort
@@ -27,26 +28,33 @@ class StudyRecordWriteService(
     private val questionCoverage: QuestionCoveragePort,
     private val gradingProgress: AnswerGradingProgressPort,
     private val redisOutbox: RedisEventOutboxAppendPort,
+    private val languageDetector: ContentLanguageDetectionPort,
 ) : StudyRecordWriteUseCase, AnswerGradingWriteUseCase {
     @Transactional
     override suspend fun answer(
         userId: Long,
         recordId: Long,
         answer: String,
+        sourceLanguage: String,
         grade: GradedAnswer?,
         now: Instant,
     ): QuestionEntity {
         val question = lockRecord(recordId, userId)
         val record = question.toStudyRecord()
-        question.apply(record.answer(answer))
+        question.apply(record.answer(answer, sourceLanguage))
         if (grade != null && question.score == null) {
             question.applyGradingMetadata(grade)
+            val aiResponseLanguage = languageDetector.detect(
+                "${grade.feedback}\n${grade.explanation}",
+                sourceLanguage,
+            )
             question.apply(
                 record.grade(
                     grade.score,
                     grade.isCorrect,
                     grade.feedback,
                     grade.explanation,
+                    aiResponseLanguage,
                     now,
                 ),
             )
@@ -89,6 +97,8 @@ class StudyRecordWriteService(
         userId: Long,
         recordId: Long,
         answer: String,
+        sourceLanguage: String,
+        aiResponseLanguage: String,
         now: Instant,
     ): QueuedAnswerGrading {
         val question = lockRecord(recordId, userId)
@@ -106,8 +116,9 @@ class StudyRecordWriteService(
             recordId = recordId,
             userId = userId,
             requestedAt = now,
+            responseLanguage = aiResponseLanguage,
         )
-        question.apply(question.toStudyRecord().answer(answer, now))
+        question.apply(question.toStudyRecord().answer(answer, sourceLanguage, now))
         question.gradingRequestId = requestId
         question.gradingStatus = AnswerGradingStatus.QUEUED.name
         question.gradingError = null
@@ -148,7 +159,20 @@ class StudyRecordWriteService(
         if (question.score != null && question.gradingStatus == AnswerGradingStatus.COMPLETED.name) return true
         val record = question.toStudyRecord()
         question.applyGradingMetadata(grade)
-        question.apply(record.grade(grade.score, grade.isCorrect, grade.feedback, grade.explanation, now))
+        val aiResponseLanguage = languageDetector.detect(
+            "${grade.feedback}\n${grade.explanation}",
+            event.responseLanguage,
+        )
+        question.apply(
+            record.grade(
+                grade.score,
+                grade.isCorrect,
+                grade.feedback,
+                grade.explanation,
+                aiResponseLanguage,
+                now,
+            ),
+        )
         question.gradingStatus = AnswerGradingStatus.COMPLETED.name
         question.gradingError = null
         questions.save(question)

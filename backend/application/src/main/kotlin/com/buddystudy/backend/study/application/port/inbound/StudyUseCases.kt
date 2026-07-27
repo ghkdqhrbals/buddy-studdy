@@ -11,7 +11,13 @@ import com.buddystudy.backend.study.application.model.QuestionGenerationProcessR
 import com.buddystudy.backend.study.application.model.QuestionGenerationRequestedEvent
 
 interface StudyUseCase {
-    suspend fun answer(principal: Principal, recordId: Long, answer: String, grade: Boolean): StudyRecordResponse
+    suspend fun answer(
+        principal: Principal,
+        recordId: Long,
+        answer: String,
+        sourceLanguage: String? = null,
+        grade: Boolean,
+    ): StudyRecordResponse
     suspend fun skip(principal: Principal, id: Long): StudyRecordResponse
     suspend fun delete(principal: Principal, id: Long)
     suspend fun publicity(principal: Principal, id: Long, isPublic: Boolean): StudyRecordResponse
@@ -34,9 +40,21 @@ interface ProcessQuestionGenerationUseCase {
 }
 
 interface BrowseRecordsUseCase {
-    suspend fun records(principal: Principal, limit: Int, offset: Int, query: String? = null, language: String = "ko"): RecordsPageResponse
+    suspend fun records(
+        principal: Principal,
+        limit: Int,
+        offset: Int,
+        query: String? = null,
+        language: String = "ko",
+        view: String = "localized",
+    ): RecordsPageResponse
     suspend fun pending(principal: Principal, limit: Int, offset: Int): RecordsPageResponse
-    suspend fun record(principal: Principal, id: Long, language: String = "ko"): StudyRecordResponse
+    suspend fun record(
+        principal: Principal,
+        id: Long,
+        language: String = "ko",
+        view: String = "localized",
+    ): StudyRecordResponse
 }
 
 interface StudySyncUseCase {

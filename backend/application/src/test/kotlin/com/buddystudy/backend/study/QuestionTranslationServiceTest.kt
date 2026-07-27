@@ -188,11 +188,12 @@ class QuestionTranslationServiceTest {
     private class RecordingTranslationPort : QuestionTranslationPort {
         val calls = mutableListOf<String>()
 
-        override suspend fun translateToEnglish(
+        override suspend fun translate(
             topic: String,
             question: String,
             hint: String?,
             sourceLanguage: String,
+            targetLanguage: String,
         ): TranslatedQuestionContent {
             calls += topic
             return TranslatedQuestionContent(

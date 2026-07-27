@@ -39,6 +39,7 @@ dependencies {
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
+    implementation("com.github.pemistahl:lingua:1.2.2")
     implementation("org.jooq:jooq:3.21.6")
     implementation("org.jooq:jooq-kotlin-coroutines:3.21.6")
 
