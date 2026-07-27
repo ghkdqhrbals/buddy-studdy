@@ -3975,6 +3975,27 @@ final class AppState: ObservableObject {
             .max { $0.question.createdAt < $1.question.createdAt }
     }
 
+    func studyRoomRecordForDisplay(categoryID: String?) -> StudyRecord? {
+        if let pendingRecord = pendingStudyRecord(categoryID: categoryID) {
+            return pendingRecord
+        }
+
+        guard let category = studyCategoryForRoom(categoryID),
+              let currentRecord = studyRecord(matching: currentQuestion),
+              currentRecord.gradingResult != nil else {
+            return nil
+        }
+
+        if let studyID = Int(category.id) {
+            return currentRecord.studyID == studyID ? currentRecord : nil
+        }
+
+        return Self.normalizedCategoryText(for: currentRecord.topic) ==
+            Self.normalizedCategoryText(for: category.title)
+            ? currentRecord
+            : nil
+    }
+
     func backendStudyRoom(categoryID: String?) -> BackendStudyRoom? {
         studyRoomState.room(categoryID: categoryID, settings: settings)
     }
@@ -5180,6 +5201,14 @@ final class AppState: ObservableObject {
         localStudyRecordUseCase.replaceRecords(mergeBackendRecord(record, into: studyRecords))
         reloadStudyRecordsFromStore()
         studyRoomState.applyAnsweredRecord(record)
+        currentQuestion = record.question
+        lastAnswer = answer
+        gradingResult = record.gradingResult
+        currentStudySessionUseCase.saveCurrentQuestionState(
+            question: record.question,
+            lastAnswer: answer,
+            gradingResult: record.gradingResult
+        )
         notificationService.cancelQuestionNotification(for: record.question)
         hasAPIKeyError = false
         statusMessage = "채점이 완료됐습니다."

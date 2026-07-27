@@ -145,7 +145,7 @@ struct StudyView: View {
     }
 
     private var selectedStudyRecord: StudyRecord? {
-        appState.pendingStudyRecord(categoryID: preferredCategoryID)
+        appState.studyRoomRecordForDisplay(categoryID: preferredCategoryID)
     }
 
     private var selectedDifficulty: Difficulty {

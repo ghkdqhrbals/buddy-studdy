@@ -3574,6 +3574,62 @@ final class StudyMateTests: XCTestCase {
     }
 
     @MainActor
+    func testGradeStudyRoomAnswerKeepsGradingResultVisible() async {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let settings = StudySettings(
+            topic: "운영체제",
+            difficulty: .intermediate,
+            customPrompt: "짧게",
+            intervalMinutes: 15
+        )
+        store.saveSettings(settings)
+        let question = QuestionItem(
+            question: "프로세스와 스레드의 차이는?",
+            expectedAnswerHint: nil,
+            createdAt: Date()
+        )
+        store.appendStudyRecord(question: question, settings: settings)
+        let record = store.loadStudyRecords()[0]
+
+        let backend = FakeRemotePushBackendClient()
+        backend.gradeRecordResult = StudyRecord(
+            id: record.id,
+            question: question,
+            answer: "프로세스는 자원을 소유하고 스레드는 실행 흐름입니다.",
+            gradingResult: GradingResult(
+                score: 92,
+                isCorrect: true,
+                feedback: "핵심을 잘 설명했습니다.",
+                explanation: "프로세스와 스레드의 자원 소유 관계가 정확합니다."
+            ),
+            topic: settings.topic,
+            difficulty: settings.difficulty,
+            answeredAt: Date()
+        )
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
+
+        await appState.gradeStudyRoomRecord(
+            record,
+            answer: "프로세스는 자원을 소유하고 스레드는 실행 흐름입니다."
+        )
+
+        let displayedRecord = appState.studyRoomRecordForDisplay(
+            categoryID: appState.settings.selectedStudyCategoryID
+        )
+        XCTAssertEqual(displayedRecord?.id, record.id)
+        XCTAssertEqual(displayedRecord?.gradingResult?.score, 92)
+        XCTAssertEqual(appState.currentQuestion, question)
+        XCTAssertEqual(appState.gradingResult?.score, 92)
+        XCTAssertEqual(appState.lastAnswer, "프로세스는 자원을 소유하고 스레드는 실행 흐름입니다.")
+    }
+
+    @MainActor
     func testRefreshVisibleDataReloadsPersistedStudyState() async {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
