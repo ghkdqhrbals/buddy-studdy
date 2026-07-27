@@ -2322,10 +2322,16 @@ struct AppStrings {
             "The system topic tree supports five levels. Continue studying here or add a topic to an earlier level."
         )
     }
-    var questionTopicActive: String { text("질문 대상", "Question topic") }
-    var questionTopicInactive: String { text("질문 대상 아님", "Not in rotation") }
+    var questionTopicToggle: String {
+        text("이 주제에서 질문 받기", "Receive questions from this topic")
+    }
+    var questionTopicActive: String { text("질문 받기 켜짐", "Questions enabled") }
+    var questionTopicInactive: String { text("질문 받기 꺼짐", "Questions disabled") }
     var questionRotationHelp: String {
-        text("선택한 주제들은 예약 질문마다 순서대로 사용됩니다.", "Selected topics rotate across scheduled questions.")
+        text(
+            "켜 둔 주제에서는 예약 질문이 순서대로 도착합니다.",
+            "Scheduled questions rotate through the topics you enable."
+        )
     }
     var duplicateStudyTopic: String { text("이미 트리에 있는 주제입니다.", "This topic already exists in the tree.") }
     var addStudyTopicFailed: String { text("하위 학습을 추가하지 못했습니다.", "Could not add the sub-study.") }

@@ -4032,7 +4032,7 @@ private struct StudyTopicLevelSheet: View {
                 }
 
                 Section {
-                    Toggle(strings.questionTopicActive, isOn: $isActive)
+                    Toggle(strings.questionTopicToggle, isOn: $isActive)
 
                     Text(strings.questionRotationHelp)
                         .font(.footnote)
