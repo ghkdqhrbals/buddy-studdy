@@ -186,9 +186,16 @@ internal object StudyTreeSelector {
         return reversed.asReversed()
     }
 
-    fun nextActiveTopic(root: StudyEntity, allStudies: Collection<StudyEntity>): StudyEntity? {
-        return subtreeFor(root, allStudies)
-            .filter { it.activeForQuestions }
+    fun activeTopics(root: StudyEntity, allStudies: Collection<StudyEntity>): List<StudyEntity> =
+        subtreeFor(root, allStudies).filter { it.activeForQuestions }
+
+    fun nextActiveTopic(
+        root: StudyEntity,
+        allStudies: Collection<StudyEntity>,
+        excludedStudyIds: Set<Long> = emptySet(),
+    ): StudyEntity? {
+        return activeTopics(root, allStudies)
+            .filterNot { it.id in excludedStudyIds }
             .minWithOrNull(
                 compareBy<StudyEntity> { it.lastSentAt != null }
                     .thenBy { it.lastSentAt }

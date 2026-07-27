@@ -77,14 +77,22 @@ class ScheduledQuestionService(
         while (true) {
             val dueStudies = studies.claimDue(now, batchSize)
             if (dueStudies.isEmpty()) break
-            val scheduledTopics = mutableListOf<Pair<StudyEntity, StudyEntity>>()
-            dueStudies.forEach { scheduleStudy ->
+            val dueContexts = dueStudies.map { scheduleStudy ->
                 val userStudies = studiesByUserId[scheduleStudy.userId]
                     ?: studies.findAllByUserId(scheduleStudy.userId).also {
                         studiesByUserId[scheduleStudy.userId] = it
                     }
-                val topicStudy = StudyTreeSelector.nextActiveTopic(scheduleStudy, userStudies)
-                if (topicStudy == null) {
+                ScheduledStudyContext(
+                    scheduleStudy = scheduleStudy,
+                    userStudies = userStudies,
+                    activeTopics = StudyTreeSelector.activeTopics(scheduleStudy, userStudies),
+                )
+            }
+            val pendingCounts = pendingCounts(dueContexts.flatMap { context -> context.activeTopics.map { it.id } })
+            val maxPendingPerTopic = properties.scheduler.maxPendingPerStudy.coerceAtLeast(1)
+            dueContexts.forEach { context ->
+                val scheduleStudy = context.scheduleStudy
+                if (context.activeTopics.isEmpty()) {
                     writer.deferUntilNextInterval(scheduleStudy, now)
                     log.info(
                         "scheduled_question_skipped_no_active_topic deviceId={} userId={} rootStudyId={}",
@@ -94,10 +102,32 @@ class ScheduledQuestionService(
                     )
                     return@forEach
                 }
-                scheduledTopics += scheduleStudy to topicStudy
-            }
-            val pendingCounts = pendingCounts(scheduledTopics.map { it.second.id })
-            scheduledTopics.forEach { (scheduleStudy, topicStudy) ->
+                val blockedTopicIds = context.activeTopics
+                    .filter { topic -> (pendingCounts[topic.id] ?: 0L) >= maxPendingPerTopic }
+                    .mapTo(mutableSetOf()) { it.id }
+                val topicStudy = StudyTreeSelector.nextActiveTopic(
+                    root = scheduleStudy,
+                    allStudies = context.userStudies,
+                    excludedStudyIds = blockedTopicIds,
+                )
+                if (topicStudy == null) {
+                    writer.fail(
+                        study = scheduleStudy,
+                        questionKey = null,
+                        error = "Pending question limit reached for all active topics.",
+                        retryAt = backoffPolicy.pendingLimitNextDueAt(now),
+                        now = now,
+                    )
+                    log.info(
+                        "scheduled_question_skipped_all_topics_pending deviceId={} userId={} rootStudyId={} activeTopics={} blockedTopics={}",
+                        scheduleStudy.deviceId,
+                        scheduleStudy.userId,
+                        scheduleStudy.id,
+                        context.activeTopics.size,
+                        blockedTopicIds.size,
+                    )
+                    return@forEach
+                }
                 creator.createIfReady(
                     scheduleStudy = scheduleStudy,
                     topicStudy = topicStudy,
@@ -117,9 +147,19 @@ class ScheduledQuestionService(
 
     private suspend fun pendingCounts(studyIds: List<Long>): Map<Long, Long> {
         if (studyIds.isEmpty()) return emptyMap()
-        return questions.countPendingByStudyIds(studyIds)
+        return studyIds
+            .distinct()
+            .chunked(PENDING_COUNT_BATCH_SIZE)
+            .flatMap { questions.countPendingByStudyIds(it).entries }
+            .associate { it.toPair() }
     }
 }
+
+private data class ScheduledStudyContext(
+    val scheduleStudy: StudyEntity,
+    val userStudies: List<StudyEntity>,
+    val activeTopics: List<StudyEntity>,
+)
 
 class ScheduledQuestionCreator(
     private val properties: BuddyStudyProperties,
@@ -367,3 +407,4 @@ private suspend fun String.normalizedQuestionKey(): String =
         .trim()
 
 private const val RECENT_EMBEDDING_LIMIT = 200
+private const val PENDING_COUNT_BATCH_SIZE = 500

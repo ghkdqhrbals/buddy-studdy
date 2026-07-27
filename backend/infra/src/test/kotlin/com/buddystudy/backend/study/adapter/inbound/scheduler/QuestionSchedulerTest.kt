@@ -182,6 +182,59 @@ class QuestionSchedulerTest {
     }
 
     @Test
+    fun `scheduled tree skips a blocked oldest topic and rotates to the next eligible topic`(): Unit = runBlocking {
+        val now = Instant.parse("2026-06-10T00:00:00Z")
+        users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
+        studies.rows += study(id = 101, userId = 7, topic = "Backend", now = now).apply {
+            activeForQuestions = false
+        }
+        studies.rows += study(id = 102, userId = 7, topic = "Redis", now = now).apply {
+            parentStudyId = 101
+            nextDueAt = null
+            lastSentAt = now.minusSeconds(120)
+        }
+        studies.rows += study(id = 103, userId = 7, topic = "Kafka", now = now).apply {
+            parentStudyId = 101
+            nextDueAt = null
+            lastSentAt = now.minusSeconds(60)
+        }
+        questions.pendingRows += pendingQuestion(id = 901, studyId = 102, topic = "Redis", now = now)
+
+        scheduler.runDueQuestions()
+
+        assertThat(questions.savedRows.map { it.studyId }).containsExactly(103)
+        assertThat(notifications.commands.map { it.body }).containsExactly("Question for Kafka")
+        assertThat(studies.rows.single { it.id == 102L }.lastSentAt).isEqualTo(now.minusSeconds(120))
+        assertThat(studies.rows.single { it.id == 103L }.lastSentAt).isNotNull()
+    }
+
+    @Test
+    fun `scheduled tree backs off only when every active topic is blocked`(): Unit = runBlocking {
+        val dueAt = Instant.now().minusSeconds(1)
+        users.rows += UserEntity(id = 7, providerId = "u7", status = "ACTIVE", appLanguage = "en")
+        val root = study(id = 101, userId = 7, topic = "Backend", now = dueAt).apply {
+            activeForQuestions = false
+        }
+        studies.rows += root
+        studies.rows += study(id = 102, userId = 7, topic = "Redis", now = dueAt).apply {
+            parentStudyId = 101
+            nextDueAt = null
+        }
+        studies.rows += study(id = 103, userId = 7, topic = "Kafka", now = dueAt).apply {
+            parentStudyId = 101
+            nextDueAt = null
+        }
+        questions.pendingRows += pendingQuestion(id = 901, studyId = 102, topic = "Redis", now = dueAt)
+        questions.pendingRows += pendingQuestion(id = 902, studyId = 103, topic = "Kafka", now = dueAt)
+
+        scheduler.runDueQuestions()
+
+        assertThat(questions.savedRows).isEmpty()
+        assertThat(root.lastError).isEqualTo("Pending question limit reached for all active topics.")
+        assertThat(Duration.between(Instant.now(), root.nextDueAt).seconds).isBetween(250, 310)
+    }
+
+    @Test
     fun `scheduled run drains all due studies across multiple batches`(): Unit = runBlocking {
         properties.scheduler.batchSize = 2
         val now = Instant.parse("2026-06-10T00:00:00Z")
