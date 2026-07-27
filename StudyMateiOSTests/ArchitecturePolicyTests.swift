@@ -999,6 +999,43 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testRequiredTermsGatePrioritizesAllAgreementsAndKeepsRequiredOnlyChoiceSecondary() throws {
+        let root = try repositoryRoot()
+        let viewFile = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let stringsFile = root.appendingPathComponent("StudyMate/Models/StudyModels.swift")
+        let viewContent = try String(contentsOf: viewFile, encoding: .utf8)
+        let stringsContent = try String(contentsOf: stringsFile, encoding: .utf8)
+
+        XCTAssertTrue(
+            viewContent.contains("await agreeTerms(includeMarketing: marketingTerms != nil)"),
+            "The primary terms action must include active marketing consent."
+        )
+        XCTAssertTrue(
+            viewContent.contains("Text(marketingTerms == nil ? strings.agreeAndStart : strings.agreeAllAndStart)"),
+            "The primary terms action must clearly say that it agrees to all available terms."
+        )
+        XCTAssertTrue(
+            viewContent.contains("await agreeTerms(includeMarketing: false)"),
+            "Users must retain a required-terms-only path."
+        )
+        XCTAssertTrue(
+            viewContent.contains("Text(strings.agreeRequiredOnlyAndStart)\n                        .font(.footnote)\n                        .foregroundStyle(.secondary)"),
+            "The required-only path should remain available as a visually secondary action."
+        )
+        XCTAssertFalse(
+            viewContent.contains("Button(strings.nextTime)"),
+            "The required terms gate should start the app through an explicit consent choice instead of a generic later action."
+        )
+        XCTAssertTrue(
+            stringsContent.contains("\"필수 약관만 동의하고 시작하기\""),
+            "The secondary required-only action must use explicit localized consent copy."
+        )
+        XCTAssertTrue(
+            stringsContent.contains("마케팅 정보 수신 동의는 선택입니다."),
+            "The marketing nudge must still state that marketing consent is optional."
+        )
+    }
+
     func testMobileLoginSurfacesUseAppLogo() throws {
         let root = try repositoryRoot()
         let viewFile = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")

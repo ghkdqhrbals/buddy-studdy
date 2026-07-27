@@ -2777,17 +2777,22 @@ struct AppStrings {
     var optionalTermsBadge: String { text("선택", "Optional") }
     var agreeAndStart: String { text("동의하고 시작하기", "Agree and Start") }
     var agreeAllAndStart: String { text("모두 동의하고 시작하기", "Agree All and Start") }
-    var nextTime: String { text("다음에", "Later") }
+    var agreeRequiredOnlyAndStart: String {
+        text(
+            "필수 약관만 동의하고 시작하기",
+            "Continue with required terms only"
+        )
+    }
     var requiredTermsGateTitle: String {
         text(
-            "BuddyStudy 사용을 위해 꼭 필요한 동의만 추렸어요",
-            "Only the required BuddyStudy agreements are shown"
+            "BuddyStudy를 시작해볼까요?",
+            "Ready to start BuddyStudy?"
         )
     }
     var requiredTermsGateSubtitle: String {
         text(
-            "필수 약관은 서비스 이용에 필요하며, 마케팅 정보 수신 동의는 선택입니다.",
-            "Required terms are needed to use the service. Marketing consent is optional."
+            "모두 동의하면 이벤트와 새로운 기능 소식도 함께 받아볼 수 있어요. 마케팅 정보 수신 동의는 선택입니다.",
+            "Agree to all to receive event and new feature updates too. Marketing consent is optional."
         )
     }
     var marketingNotifications: String { text("마케팅 정보 수신 동의", "Marketing communications") }

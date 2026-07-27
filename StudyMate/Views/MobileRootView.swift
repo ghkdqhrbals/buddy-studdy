@@ -784,7 +784,7 @@ private struct MobileRequiredTermsGateSheet: View {
 
                 Button {
                     Task {
-                        await agreeRequiredTerms()
+                        await agreeTerms(includeMarketing: marketingTerms != nil)
                     }
                 } label: {
                     HStack {
@@ -793,7 +793,7 @@ private struct MobileRequiredTermsGateSheet: View {
                             ProgressView()
                                 .tint(.white)
                         } else {
-                            Text(strings.agreeAllAndStart)
+                            Text(marketingTerms == nil ? strings.agreeAndStart : strings.agreeAllAndStart)
                                 .font(.headline.weight(.bold))
                         }
                         Spacer()
@@ -805,13 +805,18 @@ private struct MobileRequiredTermsGateSheet: View {
                 .buttonStyle(.plain)
                 .disabled(isSavingAgreements)
 
-                Button(strings.nextTime) {
-                    appState.isRequiredTermsGatePresented = false
-                    dismiss()
+                Button {
+                    Task {
+                        await agreeTerms(includeMarketing: false)
+                    }
+                } label: {
+                    Text(strings.agreeRequiredOnlyAndStart)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity)
+                .buttonStyle(.plain)
+                .disabled(isSavingAgreements)
             }
             .padding(24)
             .navigationTitle(strings.operatingTerms)
@@ -873,7 +878,7 @@ private struct MobileRequiredTermsGateSheet: View {
     }
 
     @MainActor
-    private func agreeRequiredTerms() async {
+    private func agreeTerms(includeMarketing: Bool) async {
         guard !isSavingAgreements else {
             return
         }
@@ -888,7 +893,7 @@ private struct MobileRequiredTermsGateSheet: View {
                 return
             }
         }
-        if marketingAgreed {
+        if includeMarketing, marketingTerms != nil {
             guard await appState.saveTermsAgreement(
                 type: .marketingNotification,
                 isAgreed: true,
@@ -896,6 +901,7 @@ private struct MobileRequiredTermsGateSheet: View {
             ) else {
                 return
             }
+            marketingAgreed = true
         }
         appState.isRequiredTermsGatePresented = false
         dismiss()
