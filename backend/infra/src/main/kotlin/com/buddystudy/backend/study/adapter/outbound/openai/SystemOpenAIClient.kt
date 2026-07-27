@@ -12,9 +12,10 @@ import com.buddystudy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystudy.backend.study.application.port.outbound.GradingPromptPreviewPort
 import com.buddystudy.backend.study.application.port.outbound.OpenAIPort
-import com.buddystudy.backend.study.application.port.outbound.QuestionTranslationPort
 import com.buddystudy.backend.study.application.port.outbound.StudyTopicSuggestionPort
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
+import com.buddystudy.backend.study.adapter.outbound.translation.QuestionTranslationProvider
+import com.buddystudy.backend.study.adapter.outbound.translation.QuestionTranslationRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 
@@ -22,7 +23,8 @@ import org.springframework.stereotype.Component
 class SystemOpenAIClient(
     private val executor: OpenAIRequestExecutor,
     private val properties: BuddyStudyProperties,
-) : OpenAIPort, StudyTopicSuggestionPort, QuestionTranslationPort, GradingPromptPreviewPort {
+) : OpenAIPort, StudyTopicSuggestionPort, QuestionTranslationProvider, GradingPromptPreviewPort {
+    override val providerId: String = "openai"
     suspend fun validate() {
         validate(systemApiKey())
     }
@@ -119,17 +121,16 @@ class SystemOpenAIClient(
             count = count,
         )
 
-    override suspend fun translateToEnglish(
-        question: String,
-        hint: String?,
-        sourceLanguage: String,
+    override suspend fun translate(
+        request: QuestionTranslationRequest,
     ): TranslatedQuestionContent =
         executor.translateQuestionToEnglish(
             apiKey = systemApiKey(),
             model = properties.openai.model,
-            question = question,
-            hint = hint,
-            sourceLanguage = sourceLanguage,
+            topic = request.topic,
+            question = request.question,
+            hint = request.hint,
+            sourceLanguage = request.sourceLanguage,
         )
 
     override suspend fun compare(command: GradingPromptPreviewCommand): GradingPromptPreviewResponse =

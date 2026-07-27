@@ -101,6 +101,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - Root studies own schedule state and question-generation settings. Descendants own topic, difficulty, ordering, and `active_for_questions`; scheduled claims never target descendants directly.
   - Keeps three write boundaries explicit: `POST /api/v1/studies` creates a root, `POST /api/v1/studies/{parentStudyId}/topics` creates a descendant without generating a question or consuming quota, and `POST /api/v1/studies/{topicId}/questions` generates a question.
   - Question generation is an asynchronous Choreography Saga. Submission reserves quota and stores the `QUEUED` Saga plus `QUESTION_GENERATION_REQUESTED` outbox in one transaction, then returns `202 Accepted` with a correlation ID. Generation and translation use separate Redis consumer groups and `(event_id, consumer_group)` Inbox leases; the canonical Saga advances through compare-and-set transitions. The iOS client polls `GET /api/v1/question-processes/{correlationId}` and resumes a persisted process after restart. See [`QUESTION_GENERATION_SAGA.md`](QUESTION_GENERATION_SAGA.md).
+  - English delivery localizes the topic, question, and hint as one derived snapshot. Translation uses a configurable provider chain (`OpenAI`, then local `LibreTranslate` by default); one provider failure immediately falls through to the next, while event-level retries remain owned by the Redis consumer. A managed, lock-protected backfill fills missing English topic labels for existing translated questions. See [`QUESTION_LOCALIZATION.md`](QUESTION_LOCALIZATION.md).
   - Selects the next eligible active node from the complete root subtree by oldest `last_sent_at`, with never-selected nodes first and stable `sort_order`/`id` tie-breaking. Nodes already at their per-topic pending-question limit are excluded before selection, preventing one unanswered branch from starving the rest of the tree; the root backs off only when every active node is blocked.
   - Stores both manual and scheduled questions with the root study ID while copying the selected node's topic and difficulty into the question. Inactive nodes remain available for manual generation.
   - `POST /api/v1/studies/{id}/topic-suggestions` requests unique GPT suggestions for a parent node, and `PATCH /api/v1/studies/{id}/question-activation` changes only rotation participation.
@@ -144,7 +145,8 @@ Manual action / backend scheduled interval
 -> generation consumer claims its Inbox row and advances Saga to GENERATING
 -> OpenAI runs outside the database transaction
 -> generated question + QUESTION_GENERATED outbox advance Saga to TRANSLATING
--> translation consumer persists localization and delivery outboxes
+-> translation consumer resolves topic/question/hint through the configured provider chain
+-> localization snapshot and delivery outboxes are persisted in one transaction
 -> Saga advances to COMPLETED
 -> iOS polls by correlationId and caches the returned StudyRecord
 -> current question updates only when it will not replace an active ungraded draft

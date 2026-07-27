@@ -80,16 +80,21 @@ class OpenAIRequestExecutor(
     fun translateQuestionToEnglish(
         apiKey: String,
         model: String,
+        topic: String,
         question: String,
         hint: String?,
         sourceLanguage: String,
     ): TranslatedQuestionContent {
         val prompt = """
-            Translate the study question into natural, precise English.
+            Translate the study topic, question, and optional hint into natural, precise English.
             Preserve technical terms, code, identifiers, Markdown, and the original difficulty.
             Do not answer, explain, simplify, or add information to the question.
+            Keep the topic concise because it is displayed as a feed label.
             Translate the hint only when one is present.
             Source language: $sourceLanguage
+
+            Topic:
+            $topic
 
             Question:
             $question
@@ -99,6 +104,7 @@ class OpenAIRequestExecutor(
 
             Return JSON only:
             {
+              "topic": "translated topic",
               "question": "translated question",
               "hint": "translated hint or null"
             }
@@ -114,9 +120,12 @@ class OpenAIRequestExecutor(
         )
         val text = response.result?.output?.text ?: "{}"
         val parsed: Map<String, Any?> = mapper.readValue(text.ifBlank { "{}" })
+        val translatedTopic = parsed["topic"]?.toString()?.trim().orEmpty()
         val translatedQuestion = parsed["question"]?.toString()?.trim().orEmpty()
+        require(translatedTopic.isNotBlank()) { "Question translation returned an empty topic." }
         require(translatedQuestion.isNotBlank()) { "Question translation returned an empty question." }
         return TranslatedQuestionContent(
+            topic = translatedTopic,
             question = translatedQuestion,
             hint = parsed["hint"]?.toString()?.trim()?.takeIf { it.isNotBlank() && it != "null" },
         )

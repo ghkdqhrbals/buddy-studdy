@@ -63,6 +63,12 @@ data class BuddyStudyProperties(
     data class Translation(
         var baseUrl: String = "http://localhost:5001",
         var supportedLanguages: List<String> = listOf("ko", "en"),
+        var providerOrder: List<String> = listOf("openai", "libretranslate"),
+        var timeoutMs: Long = 5_000,
+        var apiKey: String = "",
+        var backfillEnabled: Boolean = true,
+        var backfillBatchSize: Int = 20,
+        var backfillPollMs: Long = 60_000,
     )
     data class OpenApi(var enabled: Boolean = false, var accessToken: String = "")
     data class Admin(var username: String = "admin", var password: String = "admin", var tokenHours: Long = 12)

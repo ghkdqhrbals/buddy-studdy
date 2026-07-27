@@ -18,6 +18,8 @@ class QuestionLanguageTest {
     fun `rejects untranslated Korean content for English delivery`() {
         assertFalse(QuestionLanguage.matches("Redis Stream의 소비자 그룹을 설명하세요.", "en"))
         assertTrue(QuestionLanguage.matches("Explain how Redis Stream consumer groups distribute messages.", "en"))
+        assertFalse(QuestionLanguage.matchesShortLabel("프록시 생성 방식", "en"))
+        assertTrue(QuestionLanguage.matchesShortLabel("Spring 4.x", "en"))
     }
 
     @Test
@@ -27,11 +29,14 @@ class QuestionLanguageTest {
             hint = "pending entry를 포함하세요.",
             questionEn = "Explain Redis Stream consumer groups.",
             hintEn = "Include pending entries.",
+            topic = "메시지 큐",
+            topicEn = "Message queues",
         )
 
         val english = question.localizedFor("en-US")
 
         assertEquals("Explain Redis Stream consumer groups.", english.question)
         assertEquals("Include pending entries.", english.hint)
+        assertEquals("Message queues", english.topic)
     }
 }

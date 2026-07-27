@@ -28,6 +28,7 @@ class QuestionRepository(
 
     override suspend fun saveEnglishTranslation(
         questionId: Long,
+        topic: String,
         question: String,
         hint: String?,
         now: Instant,
@@ -35,10 +36,39 @@ class QuestionRepository(
         template.update(QuestionEntity::class.java)
             .matching(Query.query(Criteria.where("id").`is`(questionId).and("deleted_at").isNull))
             .apply(
-                Update.update("question_en", question)
+                Update.update("topic_en", topic)
+                    .set("question_en", question)
                     .set("hint_en", hint)
                     .set("translation_status", "READY")
                     .set("translation_error", null)
+                    .set("updated_at", now),
+            )
+            .awaitSingle() > 0
+
+    override suspend fun findEnglishTopicBackfillCandidates(limit: Int): List<QuestionEntity> =
+        template.select(
+            Query.query(
+                Criteria.where("deleted_at").isNull
+                    .and("translation_status").`is`("READY")
+                    .and("question_en").isNotNull
+                    .and("topic_en").isNull,
+            )
+                .sort(Sort.by(Sort.Direction.ASC, "id"))
+                .limit(limit.coerceIn(1, 100)),
+            QuestionEntity::class.java,
+        ).collectList().awaitSingle()
+
+    override suspend fun saveEnglishTopicTranslation(questionId: Long, topic: String, now: Instant): Boolean =
+        template.update(QuestionEntity::class.java)
+            .matching(
+                Query.query(
+                    Criteria.where("id").`is`(questionId)
+                        .and("deleted_at").isNull
+                        .and("topic_en").isNull,
+                ),
+            )
+            .apply(
+                Update.update("topic_en", topic)
                     .set("updated_at", now),
             )
             .awaitSingle() > 0

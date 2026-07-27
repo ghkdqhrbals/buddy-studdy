@@ -105,6 +105,7 @@ interface OpenAIPort {
 
 interface QuestionTranslationPort {
     suspend fun translateToEnglish(
+        topic: String,
         question: String,
         hint: String?,
         sourceLanguage: String,

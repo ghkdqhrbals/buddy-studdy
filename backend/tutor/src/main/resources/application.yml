@@ -114,6 +114,15 @@ buddystudy:
   email:
     verification-ttl-seconds: ${EMAIL_VERIFICATION_TTL_SECONDS:180}
     from: ${email.google.smtpFrom:${SMTP_FROM:${email.google.smtpUsername:${SMTP_USERNAME:}}}}
+  translation:
+    base-url: ${BUDDYSTUDY_TRANSLATION_BASE_URL:http://localhost:5001}
+    supported-languages: ${BUDDYSTUDY_TRANSLATION_SUPPORTED_LANGUAGES:ko,en}
+    provider-order: ${BUDDYSTUDY_TRANSLATION_PROVIDER_ORDER:openai,libretranslate}
+    timeout-ms: ${BUDDYSTUDY_TRANSLATION_TIMEOUT_MS:5000}
+    api-key: ${BUDDYSTUDY_TRANSLATION_API_KEY:}
+    backfill-enabled: ${BUDDYSTUDY_TRANSLATION_BACKFILL_ENABLED:true}
+    backfill-batch-size: ${BUDDYSTUDY_TRANSLATION_BACKFILL_BATCH_SIZE:20}
+    backfill-poll-ms: ${BUDDYSTUDY_TRANSLATION_BACKFILL_POLL_MS:60000}
   profile-photo:
     directory: ${PROFILE_PHOTO_DIRECTORY:/app/profile-photos}
     public-base-url: ${PROFILE_PHOTO_PUBLIC_BASE_URL:https://api.ghkdqhrbals.org}

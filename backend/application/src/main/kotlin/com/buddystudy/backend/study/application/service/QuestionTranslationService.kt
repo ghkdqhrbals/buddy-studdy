@@ -42,10 +42,13 @@ class QuestionTranslationService(
                 "Question topic does not belong to the event root study."
             }
             val translation = translatedContent(
+                topic = question.topic,
                 question = question.question,
                 hint = question.hint,
                 sourceLanguage = event.sourceLanguage,
-                alreadyReady = question.translationStatus == READY && !question.questionEn.isNullOrBlank(),
+                alreadyReady = question.translationStatus == READY &&
+                    !question.topicEn.isNullOrBlank() &&
+                    !question.questionEn.isNullOrBlank(),
             )
             val result = writer.complete(
                 event = event,
@@ -89,6 +92,7 @@ class QuestionTranslationService(
     }
 
     private suspend fun translatedContent(
+        topic: String,
         question: String,
         hint: String?,
         sourceLanguage: String,
@@ -97,9 +101,12 @@ class QuestionTranslationService(
         if (alreadyReady) return null
         val normalizedSource = QuestionLanguage.normalize(sourceLanguage)
         val translated = if (normalizedSource == QuestionLanguage.ENGLISH) {
-            TranslatedQuestionContent(question, hint)
+            TranslatedQuestionContent(topic, question, hint)
         } else {
-            translations.translateToEnglish(question, hint, normalizedSource)
+            translations.translateToEnglish(topic, question, hint, normalizedSource)
+        }
+        check(QuestionLanguage.matchesShortLabel(translated.topic, QuestionLanguage.ENGLISH)) {
+            "Question translation did not produce an English topic."
         }
         check(QuestionLanguage.matches(translated.question, QuestionLanguage.ENGLISH)) {
             "Question translation did not produce English content."

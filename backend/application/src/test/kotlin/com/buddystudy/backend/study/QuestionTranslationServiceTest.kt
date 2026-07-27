@@ -37,6 +37,7 @@ class QuestionTranslationServiceTest {
             studyId = 12,
             question = "Redis Stream의 consumer group을 설명하세요.",
             hint = "pending entry를 포함하세요.",
+            topic = "메시지 큐",
             language = "ko",
         )
         val translated = QuestionEntity(
@@ -47,6 +48,8 @@ class QuestionTranslationServiceTest {
             hint = original.hint,
             questionEn = "Explain how Redis Stream consumer groups work.",
             hintEn = "Include pending entries.",
+            topic = original.topic,
+            topicEn = "Message queues",
             translationStatus = "READY",
             language = "ko",
         )
@@ -80,11 +83,13 @@ class QuestionTranslationServiceTest {
             publisher = publisher,
         ).process(event)
 
-        assertThat(translations.calls).containsExactly(original.question)
+        assertThat(translations.calls).containsExactly(original.topic)
+        assertThat(delivery.translation?.topic).isEqualTo("Message queues")
         assertThat(delivery.translation?.question).isEqualTo("Explain how Redis Stream consumer groups work.")
         assertThat(delivery.translation?.hint).isEqualTo("Include pending entries.")
         assertThat(delivery.question?.question).isEqualTo(translated.questionEn)
         assertThat(delivery.question?.hint).isEqualTo(translated.hintEn)
+        assertThat(delivery.question?.topic).isEqualTo(translated.topicEn)
         assertThat(delivery.rootStudy?.id).isEqualTo(rootStudy.id)
         assertThat(delivery.appLanguage).isEqualTo("en")
         assertThat(publisher.references).containsExactly(
@@ -103,6 +108,8 @@ class QuestionTranslationServiceTest {
             hint = "Include recovery.",
             questionEn = "Explain Redis Stream pending entries.",
             hintEn = "Include recovery.",
+            topic = "Redis",
+            topicEn = "Redis",
             translationStatus = "READY",
             language = "en",
         )
@@ -146,16 +153,19 @@ class QuestionTranslationServiceTest {
         private var reads = 0
         var savedQuestionEn: String? = null
         var savedHintEn: String? = null
+        var savedTopicEn: String? = null
 
         override suspend fun findQuestionById(id: Long): QuestionEntity? =
             if (reads++ == 0) original else translated
 
         override suspend fun saveEnglishTranslation(
             questionId: Long,
+            topic: String,
             question: String,
             hint: String?,
             now: Instant,
         ): Boolean {
+            savedTopicEn = topic
             savedQuestionEn = question
             savedHintEn = hint
             return questionId == original.id
@@ -179,12 +189,14 @@ class QuestionTranslationServiceTest {
         val calls = mutableListOf<String>()
 
         override suspend fun translateToEnglish(
+            topic: String,
             question: String,
             hint: String?,
             sourceLanguage: String,
         ): TranslatedQuestionContent {
-            calls += question
+            calls += topic
             return TranslatedQuestionContent(
+                topic = "Message queues",
                 question = "Explain how Redis Stream consumer groups work.",
                 hint = "Include pending entries.",
             )

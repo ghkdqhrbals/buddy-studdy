@@ -19,6 +19,7 @@ class QuestionEntity(
     var hint: String? = null,
     var questionEn: String? = null,
     var hintEn: String? = null,
+    var topicEn: String? = null,
     var translationStatus: String = "PENDING",
     var translationError: String? = null,
     var topic: String = "",

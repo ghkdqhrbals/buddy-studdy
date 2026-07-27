@@ -60,15 +60,26 @@ interface QuestionPort {
     suspend fun save(entity: QuestionEntity): QuestionEntity
     suspend fun saveEnglishTranslation(
         questionId: Long,
+        topic: String,
         question: String,
         hint: String?,
         now: Instant,
     ): Boolean {
         val entity = findQuestionById(questionId) ?: return false
+        entity.topicEn = topic
         entity.questionEn = question
         entity.hintEn = hint
         entity.translationStatus = "READY"
         entity.translationError = null
+        entity.updatedAt = now
+        save(entity)
+        return true
+    }
+    suspend fun findEnglishTopicBackfillCandidates(limit: Int): List<QuestionEntity> = emptyList()
+    suspend fun saveEnglishTopicTranslation(questionId: Long, topic: String, now: Instant): Boolean {
+        val entity = findQuestionById(questionId) ?: return false
+        if (!entity.topicEn.isNullOrBlank()) return true
+        entity.topicEn = topic
         entity.updatedAt = now
         save(entity)
         return true

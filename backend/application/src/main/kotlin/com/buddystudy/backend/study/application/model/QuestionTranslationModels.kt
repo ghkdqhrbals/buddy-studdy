@@ -23,6 +23,7 @@ data class QuestionGeneratedEvent(
 }
 
 data class TranslatedQuestionContent(
+    val topic: String,
     val question: String,
     val hint: String?,
 )

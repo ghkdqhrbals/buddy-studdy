@@ -69,6 +69,7 @@ class QuestionTranslationExecutionWriteService(
             check(
                 questions.saveEnglishTranslation(
                     questionId = event.questionId,
+                    topic = translation.topic,
                     question = translation.question,
                     hint = translation.hint,
                     now = now,
