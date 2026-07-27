@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicLong
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
 class RequestLoggingFilter(
+    private val loggingPolicy: ApiLoggingPolicy,
     objectMapper: ObjectMapper = JsonMapperProvider.mapper,
 ) : WebFilter {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -33,33 +34,15 @@ class RequestLoggingFilter(
 
     override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
         val requestId = UUID.randomUUID().toString()
-        val requestCapture = BodyCapture(MAX_BODY_BYTES)
-        val responseCapture = BodyCapture(MAX_BODY_BYTES)
+        val requestCapture = BodyCapture(if (loggingPolicy.capturesBodies) MAX_BODY_BYTES else 0)
+        val responseCapture = BodyCapture(if (loggingPolicy.capturesBodies) MAX_BODY_BYTES else 0)
         val started = System.nanoTime()
         val logged = AtomicBoolean(false)
 
         exchange.attributes[REQUEST_ID_ATTRIBUTE] = requestId
         exchange.response.headers.set(REQUEST_ID_HEADER, requestId)
 
-        val request = object : ServerHttpRequestDecorator(exchange.request) {
-            override fun getBody(): Flux<DataBuffer> =
-                super.getBody().doOnNext(requestCapture::capture)
-        }
-        val response = object : ServerHttpResponseDecorator(exchange.response) {
-            override fun writeWith(body: Publisher<out DataBuffer>): Mono<Void> =
-                super.writeWith(Flux.from(body).doOnNext(responseCapture::capture))
-
-            override fun writeAndFlushWith(body: Publisher<out Publisher<out DataBuffer>>): Mono<Void> =
-                super.writeAndFlushWith(
-                    Flux.from(body).map { publisher ->
-                        Flux.from(publisher).doOnNext(responseCapture::capture)
-                    }
-                )
-        }
-        val decorated = object : ServerWebExchangeDecorator(exchange) {
-            override fun getRequest() = request
-            override fun getResponse() = response
-        }
+        val decorated = if (loggingPolicy.capturesBodies) decorate(exchange, requestCapture, responseCapture) else exchange
 
         return chain.filter(decorated)
             .doFinally {
@@ -75,6 +58,32 @@ class RequestLoggingFilter(
             }
     }
 
+    private fun decorate(
+        exchange: ServerWebExchange,
+        requestCapture: BodyCapture,
+        responseCapture: BodyCapture,
+    ): ServerWebExchange {
+        val request = object : ServerHttpRequestDecorator(exchange.request) {
+            override fun getBody(): Flux<DataBuffer> =
+                super.getBody().doOnNext(requestCapture::capture)
+        }
+        val response = object : ServerHttpResponseDecorator(exchange.response) {
+            override fun writeWith(body: Publisher<out DataBuffer>): Mono<Void> =
+                super.writeWith(Flux.from(body).doOnNext(responseCapture::capture))
+
+            override fun writeAndFlushWith(body: Publisher<out Publisher<out DataBuffer>>): Mono<Void> =
+                super.writeAndFlushWith(
+                    Flux.from(body).map { publisher ->
+                        Flux.from(publisher).doOnNext(responseCapture::capture)
+                    }
+                )
+        }
+        return object : ServerWebExchangeDecorator(exchange) {
+            override fun getRequest() = request
+            override fun getResponse() = response
+        }
+    }
+
     private fun logExchange(
         requestId: String,
         exchange: ServerWebExchange,
@@ -84,37 +93,49 @@ class RequestLoggingFilter(
     ) {
         val status = exchange.response.statusCode?.value() ?: 200
         try {
-            MDC.put("requestId", requestId)
+            if (loggingPolicy.includesRequestIdInMdc) {
+                MDC.put("requestId", requestId)
+            }
             if (exchange.request.path.value().startsWith("/api/")) {
                 logApiExchange(
-                    formatter.apiExchangeJson(
-                        requestId,
-                        exchange.getAttribute<Long>(AUTHENTICATED_USER_ID_ATTRIBUTE)?.toString() ?: ANONYMOUS_USER_ID,
-                        exchange.request,
-                        exchange.response,
-                        requestBody,
-                        responseBody,
-                        durationMs,
-                    ),
+                    if (loggingPolicy.capturesBodies) {
+                        formatter.apiExchangeJson(
+                            requestId,
+                            exchange.getAttribute<Long>(AUTHENTICATED_USER_ID_ATTRIBUTE)?.toString() ?: ANONYMOUS_USER_ID,
+                            exchange.request,
+                            exchange.response,
+                            requestBody,
+                            responseBody,
+                            durationMs,
+                        )
+                    } else {
+                        formatter.compactApiExchangeJson(exchange.request, exchange.response, durationMs)
+                    },
                     status,
                 )
             } else {
                 logApiResponse(
-                    formatter.apiResponseJson(
-                        requestId,
-                        exchange.request,
-                        exchange.response,
-                        responseBody,
-                        durationMs,
-                        includeBody = false,
-                    ),
+                    if (loggingPolicy.capturesBodies) {
+                        formatter.apiResponseJson(
+                            requestId,
+                            exchange.request,
+                            exchange.response,
+                            responseBody,
+                            durationMs,
+                            includeBody = false,
+                        )
+                    } else {
+                        formatter.compactApiResponseJson(exchange.request, exchange.response, durationMs)
+                    },
                     status,
                 )
             }
         } catch (error: Exception) {
-            log.warn("api_exchange_logging_failed requestId={} message={}", requestId, error.message)
+            log.warn("api_exchange_logging_failed {}", loggingPolicy.loggingFailure(requestId, error.message))
         } finally {
-            MDC.remove("requestId")
+            if (loggingPolicy.includesRequestIdInMdc) {
+                MDC.remove("requestId")
+            }
         }
     }
 

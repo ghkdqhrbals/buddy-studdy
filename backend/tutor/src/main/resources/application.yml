@@ -71,6 +71,9 @@ management:
         include: health,info
 
 buddystudy:
+  logging:
+    api:
+      detail: ${API_LOG_DETAIL:detailed}
   auth:
     jwt-secret: ${AUTH_JWT_SECRET:${BACKEND_MASTER_KEY:dev-buddystudy-secret-must-be-overridden}}
     access-token-days: ${ACCESS_TOKEN_DAYS:90}

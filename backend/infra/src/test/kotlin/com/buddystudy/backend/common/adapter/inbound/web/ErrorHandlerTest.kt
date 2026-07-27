@@ -36,7 +36,9 @@ class ErrorHandlerTest {
         addMessage("error.validation", Locale.ENGLISH, "Invalid request.")
         addMessage("error.server.busy", Locale.ENGLISH, "Server is temporarily busy.")
     }
-    private val handler = ErrorHandler(ApiErrorResponseFactory(messageSource))
+    private val responseFactory = ApiErrorResponseFactory(messageSource)
+    private val handler = ErrorHandler(responseFactory, ApiLoggingPolicy("detailed"))
+    private val compactHandler = ErrorHandler(responseFactory, ApiLoggingPolicy("compact"))
     private val mapper = ObjectMapper().registerKotlinModule().findAndRegisterModules()
 
     @Test
@@ -102,6 +104,27 @@ class ErrorHandlerTest {
         assertThat(output.all).contains("exceptionType=IllegalStateException")
         assertThat(output.all).contains("rootCauseType=ExceptionInInitializerError")
         assertThat(output.all).contains("origin=org.jooq.impl.DSL.using(DSL.java:918)")
+    }
+
+    @Test
+    fun `compact error log omits request identity and full stack trace`(output: CapturedOutput) = runBlocking {
+        val exchange = exchange(
+            method = "POST",
+            path = "/api/v1/devices/register",
+            requestId = "req-compact",
+            forwardedFor = "203.0.113.10",
+        )
+        val error = IllegalStateException("jwt init failed")
+
+        compactHandler.fallback(error, exchange)
+
+        assertThat(output.all).contains(
+            "api_error method=POST path=/api/v1/devices/register status=500 code=INTERNAL_SERVER_ERROR",
+        )
+        assertThat(output.all).contains("cause=IllegalStateException:jwt init failed")
+        assertThat(output.all).doesNotContain("requestId=req-compact")
+        assertThat(output.all).doesNotContain("clientIp=203.0.113.10")
+        assertThat(output.all).doesNotContain("\tat ")
     }
 
     @Test

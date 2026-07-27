@@ -74,6 +74,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - Topic-level statistics calculation is separated into `backend/application/src/main/kotlin/com/buddystudy/backend/stats/StatsService.kt` and is consumed by study application services.
   - Public base URL: `https://api.ghkdqhrbals.org`.
   - Runs behind Nginx on host port `443`.
+  - API request, exception, and authentication logs share `ApiLoggingPolicy`. The `dev` profile emits compact method/path/status/duration logs without body capture, request IDs, IP addresses, headers, or full stack traces; production keeps detailed structured logs for operations.
   - Uses a private Dockerized MySQL container with a persistent named volume.
   - Calls OpenAI for API-key validation, question generation, and answer grading.
   - Stores generated questions in MySQL before sending APNs notifications.

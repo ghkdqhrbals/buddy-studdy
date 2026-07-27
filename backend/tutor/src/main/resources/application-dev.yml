@@ -37,6 +37,9 @@ springdoc:
     url: /v3/api-docs
 
 buddystudy:
+  logging:
+    api:
+      detail: ${API_LOG_DETAIL:compact}
   apns:
     team-id: ${APNS_TEAM_ID:${local-secret.APNS_TEAM_ID:}}
     key-id: ${APNS_KEY_ID:${local-secret.APNS_KEY_ID:}}

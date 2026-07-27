@@ -18,6 +18,9 @@ spring:
         region: ${AWS_REGION:ap-northeast-2}
 
 buddystudy:
+  logging:
+    api:
+      detail: ${API_LOG_DETAIL:detailed}
   scheduler:
     enabled: ${SCHEDULER_ENABLED:true}
   streams:

@@ -18,7 +18,8 @@ import reactor.core.publisher.Mono
 
 @ExtendWith(OutputCaptureExtension::class)
 class RequestLoggingFilterTest {
-    private val filter = RequestLoggingFilter()
+    private val filter = RequestLoggingFilter(ApiLoggingPolicy("detailed"))
+    private val compactFilter = RequestLoggingFilter(ApiLoggingPolicy("compact"))
 
     @Test
     fun `response body is preserved after reactive logging`(): Unit = runBlocking {
@@ -136,12 +137,46 @@ class RequestLoggingFilterTest {
         assertThat(output.all).contains("\"status\":500")
     }
 
+    @Test
+    fun `compact api log omits request metadata headers and bodies`(output: CapturedOutput) = runBlocking {
+        val requestBody = """{"topic":"Redis"}"""
+        val exchange = execute(
+            request = MockServerHttpRequest.post("/api/v1/studies")
+                .contentType(MediaType.APPLICATION_JSON)
+                .header("Authorization", "Bearer access-token")
+                .header("CF-Connecting-IP", "203.0.113.10")
+                .body(requestBody),
+            activeFilter = compactFilter,
+        ) { current ->
+            current.attributes[RequestLoggingFilter.AUTHENTICATED_USER_ID_ATTRIBUTE] = 42L
+            readBody(current).flatMap { body ->
+                assertThat(body).isEqualTo(requestBody)
+                writeJson(current, """{"id":10}""")
+            }
+        }
+
+        assertThat(exchange.response.bodyAsString.block()).isEqualTo("""{"id":10}""")
+        assertThat(output.out).containsPattern(
+            """api_exchange \{"method":"POST","path":"/api/v1/studies","status":200,"durationMs":"\d+\.\d{2}"}""",
+        )
+        assertThat(output.out).doesNotContain("requestId")
+        assertThat(output.out).doesNotContain("clientIp")
+        assertThat(output.out).doesNotContain("userId")
+        assertThat(output.out).doesNotContain("requestHeaders")
+        assertThat(output.out).doesNotContain("requestBody")
+        assertThat(output.out).doesNotContain("responseHeaders")
+        assertThat(output.out).doesNotContain("responseBody")
+        assertThat(output.out).doesNotContain("203.0.113.10")
+        assertThat(output.out).doesNotContain("Redis")
+    }
+
     private fun execute(
         request: MockServerHttpRequest,
+        activeFilter: RequestLoggingFilter = filter,
         handler: (ServerWebExchange) -> Mono<Void>,
     ): MockServerWebExchange {
         val exchange = MockServerWebExchange.from(request)
-        filter.filter(exchange, WebFilterChain(handler)).block()
+        activeFilter.filter(exchange, WebFilterChain(handler)).block()
         return exchange
     }
 

@@ -80,6 +80,7 @@ class ApiErrorResponseFactory(
 @RestControllerAdvice
 class ErrorHandler(
     private val errorResponseFactory: ApiErrorResponseFactory,
+    private val loggingPolicy: ApiLoggingPolicy,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -96,14 +97,14 @@ class ErrorHandler(
             metadata = error.metadata,
         )
         log.warn(
-            "api_error requestId={} clientIp={} method={} path={} status={} code={} message={}",
-            body.error.requestId,
-            ClientIpResolver.resolve(exchange.request),
-            exchange.request.method,
-            exchange.request.path.value(),
-            error.status.value(),
-            error.errorCode.name,
-            error.message,
+            "api_error {}",
+            loggingPolicy.apiError(
+                exchange = exchange,
+                requestId = body.error.requestId,
+                status = error.status,
+                code = error.errorCode.name,
+                message = error.message,
+            ),
         )
         return json(error.status, body)
     }
@@ -130,14 +131,14 @@ class ErrorHandler(
             exchange,
         )
         log.warn(
-            "api_error requestId={} clientIp={} method={} path={} status={} code={} message={}",
-            body.error.requestId,
-            ClientIpResolver.resolve(exchange.request),
-            exchange.request.method,
-            exchange.request.path.value(),
-            HttpStatus.SERVICE_UNAVAILABLE.value(),
-            ApiErrorCode.SERVER_BUSY.name,
-            error.message,
+            "api_error {}",
+            loggingPolicy.apiError(
+                exchange = exchange,
+                requestId = body.error.requestId,
+                status = HttpStatus.SERVICE_UNAVAILABLE,
+                code = ApiErrorCode.SERVER_BUSY.name,
+                message = error.message,
+            ),
         )
         return json(HttpStatus.SERVICE_UNAVAILABLE, body)
     }
@@ -158,22 +159,19 @@ class ErrorHandler(
             exchange,
             details.reason,
         )
-        log.error(
-            "api_error requestId={} clientIp={} method={} path={} status={} code={} message={} exceptionType={} exceptionMessage={} rootCauseType={} rootCauseMessage={} origin={}",
-            body.error.requestId,
-            ClientIpResolver.resolve(exchange.request),
-            exchange.request.method,
-            exchange.request.path.value(),
-            HttpStatus.INTERNAL_SERVER_ERROR.value(),
-            ApiErrorCode.INTERNAL_SERVER_ERROR.name,
-            body.error.message,
-            details.exceptionType,
-            details.exceptionMessage,
-            details.rootCauseType,
-            details.rootCauseMessage,
-            details.origin,
-            error,
+        val message = loggingPolicy.unexpectedApiError(
+            exchange = exchange,
+            requestId = body.error.requestId,
+            status = HttpStatus.INTERNAL_SERVER_ERROR,
+            code = ApiErrorCode.INTERNAL_SERVER_ERROR.name,
+            message = body.error.message,
+            details = details.toLogDetails(),
         )
+        if (loggingPolicy.includesStackTrace) {
+            log.error("api_error {}", message, error)
+        } else {
+            log.error("api_error {}", message)
+        }
         return json(HttpStatus.INTERNAL_SERVER_ERROR, body)
     }
 
@@ -231,7 +229,16 @@ class ErrorHandler(
         val rootCauseMessage: String,
         val origin: String,
         val reason: String,
-    )
+    ) {
+        fun toLogDetails(): ApiErrorLogDetails =
+            ApiErrorLogDetails(
+                exceptionType = exceptionType,
+                exceptionMessage = exceptionMessage,
+                rootCauseType = rootCauseType,
+                rootCauseMessage = rootCauseMessage,
+                origin = origin,
+            )
+    }
 
     private companion object {
         private const val MAX_CAUSE_DEPTH = 32
