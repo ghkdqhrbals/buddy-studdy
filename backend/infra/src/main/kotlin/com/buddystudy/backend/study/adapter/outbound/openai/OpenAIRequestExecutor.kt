@@ -163,8 +163,8 @@ class OpenAIRequestExecutor(
         onProgress: suspend (AiGradingStage) -> Unit = {},
     ): GradedAnswer = withContext(Dispatchers.IO) {
         val startedAt = System.nanoTime()
-        val resolvedRubric = rubric ?: generateRubric(apiKey, model, question, topic, level, language)
         onProgress(AiGradingStage.ANALYZING_EVIDENCE)
+        val resolvedRubric = rubric ?: generateRubric(apiKey, model, question, topic, level, language)
         val evidenceDeferred = async { analyzeEvidence(apiKey, model, question, answer, resolvedRubric) }
         onProgress(AiGradingStage.CRITIQUING)
         val critiqueDeferred = async { critiqueAnswer(apiKey, model, question, answer, resolvedRubric) }

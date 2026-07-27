@@ -4078,20 +4078,27 @@ final class AppState: ObservableObject {
 
     func updateStudyTreeCategory(
         roomID: Int,
+        title: String,
         difficulty: Difficulty
     ) {
-        guard let room = backendStudyRoom(id: roomID) else {
+        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedTitle.isEmpty,
+              let room = backendStudyRoom(id: roomID) else {
             return
         }
         let questionSettings = rootStudyRoom(for: roomID) ?? room
         let updatedCategory = StudyCategory(
             id: String(roomID),
-            title: room.topic,
+            title: normalizedTitle,
             difficulty: difficulty,
             customPrompt: questionSettings.customPrompt,
             openAIModel: questionSettings.openAIModel,
             createdAt: room.createdAt
         )
+        var optimisticRoom = room
+        optimisticRoom.topic = normalizedTitle
+        optimisticRoom.difficultyLevel = difficulty.level
+        studyRoomState.upsertStudy(optimisticRoom)
         updateStudyCategory(
             id: updatedCategory.id,
             title: updatedCategory.title,

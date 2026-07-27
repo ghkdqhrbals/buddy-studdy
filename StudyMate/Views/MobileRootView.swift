@@ -1410,9 +1410,10 @@ private struct MobileHomeView: View {
                 onDelete: {
                     appState.deleteStudyCategory(id: String(room.id))
                 }
-            ) { difficulty, isActive in
+            ) { title, difficulty, isActive in
                 appState.updateStudyTreeCategory(
                     roomID: room.id,
+                    title: title,
                     difficulty: difficulty
                 )
                 if isActive != room.activeForQuestions {
@@ -1616,35 +1617,10 @@ private struct MobileHomeView: View {
                     pendingQuestionCount: { room in
                         appState.pendingQuestionCount(categoryID: String(room.id))
                     },
-                    onOpenTopic: { room in
-                        appState.openStudyCategory(String(room.id))
-                    },
-                    onConfigureTopic: { room in
-                        editingStudyRoom = room
+                    onAction: { action in
+                        handleStudyOutlineAction(action, category: category)
                     }
                 )
-                .contextMenu {
-                    Button {
-                        editingStudyCategory = category
-                    } label: {
-                        Label(strings.edit, systemImage: "pencil")
-                    }
-
-                    Button {
-                        appState.openStudyTree(category.id)
-                    } label: {
-                        Label(
-                            strings.viewFullStudyTree,
-                            systemImage: "point.3.connected.trianglepath.dotted"
-                        )
-                    }
-
-                    Button(role: .destructive) {
-                        deletionStudyCategory = category
-                    } label: {
-                        Label(strings.deleteStudy, systemImage: "trash")
-                    }
-                }
             } else {
                 Button {
                     appState.openStudyTree(category.id)
@@ -1679,6 +1655,26 @@ private struct MobileHomeView: View {
                     }
                 }
             }
+        }
+    }
+
+    private func handleStudyOutlineAction(
+        _ action: MobileHomeStudyOutlineAction,
+        category: StudyCategory
+    ) {
+        switch action {
+        case let .openTopic(room):
+            appState.openStudyCategory(String(room.id))
+        case let .configureTopic(room):
+            editingStudyRoom = room
+        case let .deleteTopic(room):
+            deletionStudyCategory = appState.studyCategory(for: room)
+        case .configureRoot:
+            editingStudyCategory = category
+        case .deleteRoot:
+            deletionStudyCategory = category
+        case .openTree:
+            appState.openStudyTree(category.id)
         }
     }
 
@@ -2785,9 +2781,10 @@ private struct MobileStudyTreeView: View {
                 onDelete: {
                     appState.deleteStudyCategory(id: String(room.id))
                 }
-            ) { difficulty, isActive in
+            ) { title, difficulty, isActive in
                 appState.updateStudyTreeCategory(
                     roomID: room.id,
+                    title: title,
                     difficulty: difficulty
                 )
                 if isActive != room.activeForQuestions {
@@ -3584,13 +3581,6 @@ private struct StudyTreeNode: View {
                     Button(action: onAddManualChild) {
                         Label(strings.addTopicManually, systemImage: "square.and.pencil")
                     }
-                    Divider()
-                    Button(action: onEdit) {
-                        Label(strings.editStudyCategory, systemImage: "pencil")
-                    }
-                    Button(role: .destructive, action: onDelete) {
-                        Label(strings.deleteStudy, systemImage: "trash")
-                    }
                 } label: {
                     Image(systemName: "plus")
                         .font(.caption.weight(.bold))
@@ -3605,15 +3595,18 @@ private struct StudyTreeNode: View {
             width: StudyTreeLayoutSnapshot.nodeSize.width,
             height: StudyTreeLayoutSnapshot.nodeSize.height
         )
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 0.55, maximumDistance: 10)
-                .onEnded { _ in
-                    guard !isSelectionMode else {
-                        return
-                    }
-                    onEdit()
+        .contextMenu {
+            if !isSelectionMode {
+                Button(action: onEdit) {
+                    Label(strings.editStudyCategory, systemImage: "pencil")
                 }
-        )
+                Button(role: .destructive, action: onDelete) {
+                    Label(strings.deleteStudy, systemImage: "trash")
+                }
+            }
+        }
+        .accessibilityAction(named: strings.editStudyCategory, onEdit)
+        .accessibilityAction(named: strings.deleteStudy, onDelete)
     }
 }
 
@@ -3990,8 +3983,9 @@ private struct StudyTopicLevelSheet: View {
     var room: BackendStudyRoom
     var strings: AppStrings
     var onDelete: () -> Void
-    var onSave: (Difficulty, Bool) -> Void
+    var onSave: (String, Difficulty, Bool) -> Void
 
+    @State private var title: String
     @State private var difficultyLevel: Double
     @State private var isActive: Bool
     @State private var showsDeleteConfirmation = false
@@ -4000,22 +3994,26 @@ private struct StudyTopicLevelSheet: View {
         room: BackendStudyRoom,
         strings: AppStrings,
         onDelete: @escaping () -> Void,
-        onSave: @escaping (Difficulty, Bool) -> Void
+        onSave: @escaping (String, Difficulty, Bool) -> Void
     ) {
         self.room = room
         self.strings = strings
         self.onDelete = onDelete
         self.onSave = onSave
+        _title = State(initialValue: room.topic)
         _difficultyLevel = State(initialValue: Double(room.difficultyLevel))
         _isActive = State(initialValue: room.activeForQuestions)
+    }
+
+    private var canSave: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    Text(room.topic)
-                        .font(.headline)
+                    TextField(strings.studyTopic, text: $title)
 
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
@@ -4052,9 +4050,14 @@ private struct StudyTopicLevelSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(strings.save) {
-                        onSave(Difficulty(level: resolvedDifficulty), isActive)
+                        onSave(
+                            title.trimmingCharacters(in: .whitespacesAndNewlines),
+                            Difficulty(level: resolvedDifficulty),
+                            isActive
+                        )
                         dismiss()
                     }
+                    .disabled(!canSave)
                 }
             }
             .confirmationDialog(strings.deleteStudy, isPresented: $showsDeleteConfirmation) {
@@ -6640,6 +6643,15 @@ private struct MobileHomeStudyTopicItem {
     var room: BackendStudyRoom
 }
 
+private enum MobileHomeStudyOutlineAction {
+    case openTopic(BackendStudyRoom)
+    case configureTopic(BackendStudyRoom)
+    case deleteTopic(BackendStudyRoom)
+    case configureRoot
+    case deleteRoot
+    case openTree
+}
+
 private struct MobileHomeStudyOutlineSnapshot {
     var root: BackendStudyRoom
     var roomsByID: [Int: BackendStudyRoom]
@@ -6669,8 +6681,7 @@ private struct MobileHomeStudyOutlineRow: View {
     var snapshot: MobileHomeStudyOutlineSnapshot
     var strings: AppStrings
     var pendingQuestionCount: (BackendStudyRoom) -> Int
-    var onOpenTopic: (BackendStudyRoom) -> Void
-    var onConfigureTopic: (BackendStudyRoom) -> Void
+    var onAction: (MobileHomeStudyOutlineAction) -> Void
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @State private var currentBranchID: Int?
     @State private var isExpanded = true
@@ -6709,6 +6720,26 @@ private struct MobileHomeStudyOutlineRow: View {
                     isExpanded.toggle()
                 }
             )
+            .contextMenu {
+                Button {
+                    onAction(.configureRoot)
+                } label: {
+                    Label(strings.editStudyCategory, systemImage: "pencil")
+                }
+                Button {
+                    onAction(.openTree)
+                } label: {
+                    Label(
+                        strings.viewFullStudyTree,
+                        systemImage: "point.3.connected.trianglepath.dotted"
+                    )
+                }
+                Button(role: .destructive) {
+                    onAction(.deleteRoot)
+                } label: {
+                    Label(strings.deleteStudy, systemImage: "trash")
+                }
+            }
 
             if isExpanded && hasRootChildren {
                 Group {
@@ -6765,11 +6796,7 @@ private struct MobileHomeStudyOutlineRow: View {
                     }
             )
             .contextMenu {
-                Button {
-                    onConfigureTopic(room)
-                } label: {
-                    Label(strings.editStudyCategory, systemImage: "slider.horizontal.3")
-                }
+                topicActions(for: room)
             }
             .opacity(isBranchContentRevealed ? 1 : 0.72)
             .offset(
@@ -6838,7 +6865,7 @@ private struct MobileHomeStudyOutlineRow: View {
                 .padding(.leading, 50)
 
             Button {
-                onOpenTopic(room)
+                onAction(.openTopic(room))
             } label: {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(snapshot.path(to: room.id).dropLast().map(\.topic).joined(separator: "  ›  "))
@@ -6859,12 +6886,23 @@ private struct MobileHomeStudyOutlineRow: View {
             }
             .buttonStyle(.plain)
             .contextMenu {
-                Button {
-                    onConfigureTopic(room)
-                } label: {
-                    Label(strings.editStudyCategory, systemImage: "slider.horizontal.3")
-                }
+                topicActions(for: room)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func topicActions(for room: BackendStudyRoom) -> some View {
+        Button {
+            onAction(.configureTopic(room))
+        } label: {
+            Label(strings.editStudyCategory, systemImage: "pencil")
+        }
+
+        Button(role: .destructive) {
+            onAction(.deleteTopic(room))
+        } label: {
+            Label(strings.deleteStudy, systemImage: "trash")
         }
     }
 
@@ -6878,7 +6916,7 @@ private struct MobileHomeStudyOutlineRow: View {
 
         return HStack(spacing: 8) {
             Button {
-                onOpenTopic(room)
+                onAction(.openTopic(room))
             } label: {
                 studyDestinationContent(
                     room: room,
