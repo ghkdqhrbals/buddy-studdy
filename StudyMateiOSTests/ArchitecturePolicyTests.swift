@@ -916,6 +916,35 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testStudyGrowthDetailUsesOneAlwaysExpandedScoreTree() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/StatisticsView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+        let detailStart = try XCTUnwrap(
+            content.range(of: "private struct StudyGrowthDetailView: View")
+        )
+        let detailEnd = try XCTUnwrap(
+            content.range(
+                of: "private struct StudyGrowthTreeItem",
+                range: detailStart.upperBound..<content.endIndex
+            )
+        )
+        let detail = String(content[detailStart.lowerBound..<detailEnd.lowerBound])
+
+        XCTAssertTrue(
+            detail.contains("StudyGrowthTreeCard("),
+            "Study growth detail should present the combined root and individual descendants in one score tree."
+        )
+        XCTAssertFalse(
+            detail.contains("StudyGrowthAttentionCard("),
+            "Review candidates should be visible in the tree instead of a separate priority card."
+        )
+        XCTAssertFalse(
+            detail.contains("isShowingAllStudies"),
+            "The complete score tree should be visible without another disclosure control."
+        )
+    }
+
     func testProtectedMobileTabsNavigateToDedicatedLoginPage() throws {
         let root = try repositoryRoot()
         let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")

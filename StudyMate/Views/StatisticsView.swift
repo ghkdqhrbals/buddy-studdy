@@ -1788,8 +1788,6 @@ private struct StudyGrowthDetailView: View {
     var rootStudyID: Int
     var strings: AppStrings
 
-    @State private var isShowingAllStudies = false
-
     private var root: BackendStudyGrowthRoot? {
         growth.roots.first { $0.studyId == rootStudyID }
     }
@@ -1828,114 +1826,23 @@ private struct StudyGrowthDetailView: View {
         return result
     }
 
-    private var attentionNodes: [BackendStudyGrowthNode] {
-        nodes
-            .filter { $0.studyId != rootStudyID && attentionPriority($0) < 4 }
-            .sorted { lhs, rhs in
-                let lhsPriority = attentionPriority(lhs)
-                let rhsPriority = attentionPriority(rhs)
-                if lhsPriority != rhsPriority {
-                    return lhsPriority < rhsPriority
-                }
-                if lhs.growth != rhs.growth {
-                    return (lhs.growth ?? 0) < (rhs.growth ?? 0)
-                }
-                return nodeOrdering(lhs, rhs)
-            }
-            .prefix(3)
-            .map { $0 }
-    }
-
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
-                if let root {
-                    StudyGrowthSummaryCard(
+                if let root, let rootNode {
+                    StudyGrowthTreeCard(
                         root: root,
-                        strings: strings
-                    )
-                }
-
-                if let rootNode {
-                    StudyGrowthHierarchyMapCard(
-                        nodes: nodes,
                         rootNode: rootNode,
+                        orderedNodes: orderedNodes,
                         strings: strings
                     )
-                }
-
-                if !attentionNodes.isEmpty {
-                    StudyGrowthAttentionCard(
-                        nodes: attentionNodes,
-                        strings: strings
+                } else {
+                    ContentUnavailableView(
+                        strings.noGrowthRecords,
+                        systemImage: "point.3.connected.trianglepath.dotted",
+                        description: Text(strings.noGrowthRecordsDescription)
                     )
-                }
-
-                VStack(spacing: 0) {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.22)) {
-                            isShowingAllStudies.toggle()
-                        }
-                    } label: {
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(strings.allStudiesCount(orderedNodes.count))
-                                    .font(.headline)
-                                    .foregroundStyle(.primary)
-                                Text(strings.allStudiesDescription)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .multilineTextAlignment(.leading)
-                            }
-
-                            Spacer(minLength: 8)
-
-                            Image(systemName: "chevron.down")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.secondary)
-                                .rotationEffect(.degrees(isShowingAllStudies ? 180 : 0))
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .padding(16)
-
-                    if isShowingAllStudies {
-                        Divider()
-                            .padding(.leading, 14)
-
-                        if orderedNodes.isEmpty {
-                            Text(strings.noGrowthRecordsDescription)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, minHeight: 92)
-                                .padding(.horizontal, 18)
-                        } else {
-                            ForEach(Array(orderedNodes.enumerated()), id: \.element.studyId) { index, node in
-                                if index > 0 {
-                                    Divider()
-                                        .padding(.leading, 44 + CGFloat(min(node.depth, 5)) * 14)
-                                }
-
-                                NavigationLink {
-                                    StudyGrowthNodeDetailView(node: node, strings: strings)
-                                } label: {
-                                    StudyGrowthFlatNodeRow(node: node, strings: strings)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                }
-                .background(
-                    Color(.secondarySystemBackground),
-                    in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(Color.primary.opacity(0.04), lineWidth: 1)
+                    .frame(maxWidth: .infinity, minHeight: 240)
                 }
             }
             .padding(.vertical, 12)
@@ -1946,22 +1853,6 @@ private struct StudyGrowthDetailView: View {
         #endif
     }
 
-    private func attentionPriority(_ node: BackendStudyGrowthNode) -> Int {
-        if let growth = node.growth, growth < -0.15 {
-            return 0
-        }
-        if node.currentLevel == nil {
-            return 1
-        }
-        if node.answerCount < 6 {
-            return 2
-        }
-        if node.measuredTopicCount < node.totalTopicCount {
-            return 3
-        }
-        return 4
-    }
-
     private func nodeOrdering(
         _ lhs: BackendStudyGrowthNode,
         _ rhs: BackendStudyGrowthNode
@@ -1970,6 +1861,322 @@ private struct StudyGrowthDetailView: View {
             return lhs.sortOrder < rhs.sortOrder
         }
         return lhs.studyId < rhs.studyId
+    }
+}
+
+private struct StudyGrowthTreeItem: Identifiable {
+    var node: BackendStudyGrowthNode
+    var localDepth: Int
+    var continuingAncestorDepths: Set<Int>
+    var isLastSibling: Bool
+
+    var id: Int { node.studyId }
+}
+
+private struct StudyGrowthTreeCard: View {
+    var root: BackendStudyGrowthRoot
+    var rootNode: BackendStudyGrowthNode
+    var orderedNodes: [BackendStudyGrowthNode]
+    var strings: AppStrings
+
+    private var childrenByID: [Int: [BackendStudyGrowthNode]] {
+        Dictionary(grouping: orderedNodes.filter { $0.parentStudyId != nil }) {
+            $0.parentStudyId ?? -1
+        }
+        .mapValues {
+            $0.sorted {
+                if $0.sortOrder != $1.sortOrder {
+                    return $0.sortOrder < $1.sortOrder
+                }
+                return $0.studyId < $1.studyId
+            }
+        }
+    }
+
+    private var treeItems: [StudyGrowthTreeItem] {
+        var result: [StudyGrowthTreeItem] = []
+        var visited = Set<Int>()
+
+        func append(
+            _ node: BackendStudyGrowthNode,
+            depth: Int,
+            continuingAncestorDepths: Set<Int>,
+            isLastSibling: Bool
+        ) {
+            guard visited.insert(node.studyId).inserted else {
+                return
+            }
+            result.append(
+                StudyGrowthTreeItem(
+                    node: node,
+                    localDepth: depth,
+                    continuingAncestorDepths: continuingAncestorDepths,
+                    isLastSibling: isLastSibling
+                )
+            )
+
+            var descendantContinuations = continuingAncestorDepths
+            if depth > 0, !isLastSibling {
+                descendantContinuations.insert(depth - 1)
+            }
+            let children = childrenByID[node.studyId] ?? []
+            for (index, child) in children.enumerated() {
+                append(
+                    child,
+                    depth: depth + 1,
+                    continuingAncestorDepths: descendantContinuations,
+                    isLastSibling: index == children.count - 1
+                )
+            }
+        }
+
+        append(
+            rootNode,
+            depth: 0,
+            continuingAncestorDepths: [],
+            isLastSibling: true
+        )
+
+        let disconnectedNodes = orderedNodes.filter { !visited.contains($0.studyId) }
+        for (index, node) in disconnectedNodes.enumerated() {
+            append(
+                node,
+                depth: 1,
+                continuingAncestorDepths: [],
+                isLastSibling: index == disconnectedNodes.count - 1
+            )
+        }
+        return result
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(strings.studyStatusTree)
+                            .font(.headline)
+                        Text(strings.studyStatusTreeDescription)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Text(strings.abilityScale)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 8) {
+                    StudyGrowthSummaryMetric(
+                        value: "\(root.measuredTopicCount)/\(root.totalTopicCount)",
+                        label: strings.measuredStudyShort
+                    )
+                    StudyGrowthSummaryMetric(
+                        value: strings.growthCompletionValue(root.profile?.completion),
+                        label: strings.completion
+                    )
+                    StudyGrowthSummaryMetric(
+                        value: "\(root.answerCount)",
+                        label: strings.answersUnit
+                    )
+                }
+            }
+            .padding(18)
+
+            Divider()
+                .padding(.leading, 18)
+
+            ForEach(treeItems) { item in
+                NavigationLink {
+                    StudyGrowthNodeDetailView(node: item.node, strings: strings)
+                } label: {
+                    StudyGrowthTreeNodeRow(
+                        item: item,
+                        currentLevel: item.node.studyId == root.studyId
+                            ? root.currentLevel
+                            : item.node.currentLevel,
+                        growth: item.node.studyId == root.studyId
+                            ? root.growth
+                            : item.node.growth,
+                        answerCount: item.node.studyId == root.studyId
+                            ? root.answerCount
+                            : item.node.answerCount,
+                        measuredTopicCount: item.node.studyId == root.studyId
+                            ? root.measuredTopicCount
+                            : item.node.measuredTopicCount,
+                        totalTopicCount: item.node.studyId == root.studyId
+                            ? root.totalTopicCount
+                            : item.node.totalTopicCount,
+                        isRoot: item.node.studyId == root.studyId,
+                        strings: strings
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .background(Color(.secondarySystemBackground))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.secondary.opacity(0.08), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+private struct StudyGrowthTreeNodeRow: View {
+    var item: StudyGrowthTreeItem
+    var currentLevel: Double?
+    var growth: Double?
+    var answerCount: Int
+    var measuredTopicCount: Int
+    var totalTopicCount: Int
+    var isRoot: Bool
+    var strings: AppStrings
+
+    private var scoreColor: Color {
+        guard currentLevel != nil else {
+            return .secondary
+        }
+        if let growth, growth < -0.15 {
+            return .orange
+        }
+        return .accentColor
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            StudyGrowthTreeConnector(
+                item: item,
+                isMeasured: currentLevel != nil,
+                needsReview: growth.map { $0 < -0.15 } ?? false
+            )
+            .frame(
+                width: CGFloat(min(item.localDepth, 6) + 1) * 16,
+                height: 70
+            )
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Text(item.node.topic)
+                        .font(.subheadline.weight(isRoot ? .bold : .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+
+                    if isRoot {
+                        Text(strings.comprehensive)
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Color.accentColor)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.accentColor.opacity(0.11), in: Capsule())
+                    }
+                }
+
+                Text(
+                    "\(strings.growthAnswerCount(answerCount)) · "
+                        + strings.measuredTopics(measuredTopicCount, total: totalTopicCount)
+                )
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+
+            Spacer(minLength: 6)
+
+            VStack(alignment: .trailing, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text(StudyGrowthFormat.level(currentLevel))
+                        .font(.system(size: isRoot ? 23 : 19, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                    Text("/10")
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+                .foregroundStyle(scoreColor)
+
+                StudyGrowthDeltaLabel(growth: growth, strings: strings)
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.trailing, 14)
+        .frame(minHeight: 70)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(item.node.topic), \(isRoot ? strings.comprehensive : ""), "
+                + "\(strings.currentAbility) \(StudyGrowthFormat.level(currentLevel)), "
+                + "\(StudyGrowthFormat.delta(growth))"
+        )
+    }
+}
+
+private struct StudyGrowthTreeConnector: View {
+    var item: StudyGrowthTreeItem
+    var isMeasured: Bool
+    var needsReview: Bool
+
+    private let maximumVisibleDepth = 6
+    private let columnWidth: CGFloat = 16
+
+    private var visibleDepth: Int {
+        min(item.localDepth, maximumVisibleDepth)
+    }
+
+    private var nodeColor: Color {
+        if !isMeasured {
+            return .secondary.opacity(0.55)
+        }
+        return needsReview ? .orange : .accentColor
+    }
+
+    var body: some View {
+        Canvas { context, size in
+            let middleY = size.height / 2
+            let lineColor = Color.secondary.opacity(0.23)
+
+            for depth in item.continuingAncestorDepths where depth < visibleDepth {
+                let x = CGFloat(min(depth, maximumVisibleDepth)) * columnWidth + columnWidth / 2
+                var path = Path()
+                path.move(to: CGPoint(x: x, y: 0))
+                path.addLine(to: CGPoint(x: x, y: size.height))
+                context.stroke(path, with: .color(lineColor), lineWidth: 1)
+            }
+
+            let nodeX = CGFloat(visibleDepth) * columnWidth + columnWidth / 2
+            if visibleDepth > 0 {
+                let parentX = CGFloat(visibleDepth - 1) * columnWidth + columnWidth / 2
+                var branch = Path()
+                branch.move(to: CGPoint(x: parentX, y: 0))
+                branch.addLine(
+                    to: CGPoint(
+                        x: parentX,
+                        y: item.isLastSibling ? middleY : size.height
+                    )
+                )
+                branch.move(to: CGPoint(x: parentX, y: middleY))
+                branch.addLine(to: CGPoint(x: nodeX, y: middleY))
+                context.stroke(branch, with: .color(lineColor), lineWidth: 1)
+            }
+
+            let nodeSize: CGFloat = item.localDepth == 0 ? 10 : 8
+            context.fill(
+                Path(
+                    ellipseIn: CGRect(
+                        x: nodeX - nodeSize / 2,
+                        y: middleY - nodeSize / 2,
+                        width: nodeSize,
+                        height: nodeSize
+                    )
+                ),
+                with: .color(nodeColor)
+            )
+        }
+        .accessibilityHidden(true)
     }
 }
 

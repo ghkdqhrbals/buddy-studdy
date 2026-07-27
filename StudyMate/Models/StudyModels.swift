@@ -2783,6 +2783,14 @@ struct AppStrings {
     var studyGrowthSummary: String {
         text("선택한 기간의 전체 하위 학습 요약", "Summary of all child studies in the selected period")
     }
+    var studyStatusTree: String { text("학습 상태 트리", "Study status tree") }
+    var studyStatusTreeDescription: String {
+        text(
+            "루트는 모든 하위 학습의 종합 점수이며, 각 행은 개별 점수입니다.",
+            "The root is the combined score for all descendants; each row shows an individual score."
+        )
+    }
+    var comprehensive: String { text("종합", "Overall") }
     var measuredStudyShort: String { text("측정 학습", "Measured") }
     func growthCompletionValue(_ value: Double?) -> String {
         guard let value else {
