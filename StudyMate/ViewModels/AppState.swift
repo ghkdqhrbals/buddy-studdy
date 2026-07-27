@@ -5644,7 +5644,10 @@ final class AppState: ObservableObject {
                     guard event.status != displayedStatus else {
                         continue
                     }
-                    try await keepGradingStatusVisible(since: displayedAt)
+                    try await keepGradingStatusVisible(
+                        displayedStatus,
+                        since: displayedAt
+                    )
                     displayedStatus = event.status
                     displayedAt = ContinuousClock.now
                     let progressMessage = gradingMessage(for: event.status)
@@ -5697,12 +5700,26 @@ final class AppState: ObservableObject {
     }
 
     private func keepGradingStatusVisible(
+        _ status: AnswerGradingStatus,
         since displayedAt: ContinuousClock.Instant
     ) async throws {
         let elapsed = displayedAt.duration(to: ContinuousClock.now)
-        let minimumDuration = Duration.seconds(1)
+        let minimumDuration = minimumGradingStatusDuration(for: status)
         if elapsed < minimumDuration {
             try await Task.sleep(for: minimumDuration - elapsed)
+        }
+    }
+
+    private func minimumGradingStatusDuration(
+        for status: AnswerGradingStatus
+    ) -> Duration {
+        switch status {
+        case .queued:
+            .seconds(1)
+        case .analyzingEvidence, .critiquing, .judging, .adjudicating:
+            .seconds(2)
+        case .completed, .failed:
+            .zero
         }
     }
 
