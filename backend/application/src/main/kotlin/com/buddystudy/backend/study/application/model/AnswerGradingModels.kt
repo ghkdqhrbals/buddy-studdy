@@ -36,16 +36,27 @@ data class AnswerGradingProgress(
 data class AnswerGradingProgressResponse(
     val id: Long,
     val recordId: String,
-    val requestId: String,
+    val correlationId: String,
     val status: AnswerGradingStatus,
     val errorMessage: String? = null,
     val occurredAt: Instant,
 )
 
+data class AnswerGradingProcessResponse(
+    val correlationId: String,
+    val recordId: String,
+    val status: AnswerGradingStatus,
+    val terminal: Boolean,
+    val pollAfterMs: Long?,
+    val events: List<AnswerGradingProgressResponse>,
+    val errorMessage: String? = null,
+    val updatedAt: Instant,
+)
+
 fun AnswerGradingProgress.toResponse() = AnswerGradingProgressResponse(
     id = id,
     recordId = recordId.toString(),
-    requestId = requestId,
+    correlationId = requestId,
     status = status,
     errorMessage = errorMessage,
     occurredAt = occurredAt,

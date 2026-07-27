@@ -484,11 +484,11 @@ protocol RemotePushBackendClientProtocol {
         answer: String
     ) async throws -> StudyRecord
 
-    func gradingEvents(
+    func fetchAnswerGradingProcess(
         registration: RemotePushRegistration,
-        recordID: String,
+        correlationID: String,
         afterEventID: Int64
-    ) -> AsyncThrowingStream<AnswerGradingProgressEvent, Error>
+    ) async throws -> AnswerGradingProcess
 
     func saveRecordAnswer(
         registration: RemotePushRegistration,
@@ -1504,63 +1504,23 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return try decoder.decode(StudyRecord.self, from: data)
     }
 
-    func gradingEvents(
+    func fetchAnswerGradingProcess(
         registration: RemotePushRegistration,
-        recordID: String,
+        correlationID: String,
         afterEventID: Int64
-    ) -> AsyncThrowingStream<AnswerGradingProgressEvent, Error> {
-        AsyncThrowingStream { continuation in
-            let task = Task { @MainActor [weak self] in
-                guard let self else {
-                    continuation.finish()
-                    return
-                }
-                do {
-                    var components = URLComponents(
-                        url: endpoint("api", "v1", "records", recordID, "grading-events"),
-                        resolvingAgainstBaseURL: false
-                    )
-                    components?.queryItems = [URLQueryItem(name: "after", value: String(afterEventID))]
-                    guard let url = components?.url else {
-                        throw RemotePushBackendError.invalidResponse
-                    }
-                    var request = authenticatedRequest(registration: registration, url: url)
-                    request.httpMethod = "GET"
-                    request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-                    let (bytes, response) = try await session.bytes(for: request)
-                    guard let httpResponse = response as? HTTPURLResponse else {
-                        throw RemotePushBackendError.invalidResponse
-                    }
-                    guard (200..<300).contains(httpResponse.statusCode) else {
-                        throw RemotePushBackendError.httpStatus(httpResponse.statusCode, "", nil)
-                    }
-
-                    var dataLines: [String] = []
-                    for try await line in bytes.lines {
-                        try Task.checkCancellation()
-                        if line.isEmpty {
-                            if !dataLines.isEmpty {
-                                let payload = dataLines.joined(separator: "\n")
-                                let event = try decoder.decode(
-                                    AnswerGradingProgressEvent.self,
-                                    from: Data(payload.utf8)
-                                )
-                                continuation.yield(event)
-                                dataLines.removeAll(keepingCapacity: true)
-                            }
-                        } else if line.hasPrefix("data:") {
-                            dataLines.append(String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces))
-                        }
-                    }
-                    continuation.finish()
-                } catch is CancellationError {
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
+    ) async throws -> AnswerGradingProcess {
+        var components = URLComponents(
+            url: endpoint("api", "v1", "answer-processes", correlationID),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [URLQueryItem(name: "after", value: String(afterEventID))]
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
         }
+        var request = authenticatedRequest(registration: registration, url: url)
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(AnswerGradingProcess.self, from: data)
     }
 
     func saveRecordAnswer(

@@ -574,6 +574,11 @@ final class StudyMateTests: XCTestCase {
             recordID: "record-1",
             answer: "answer"
         )
+        _ = try await useCase.fetchAnswerGradingProcess(
+            registration: backendClient.registration,
+            correlationID: "grading-1",
+            afterEventID: 7
+        )
         _ = try await useCase.saveRecordAnswer(
             registration: backendClient.registration,
             recordID: "record-2",
@@ -589,6 +594,8 @@ final class StudyMateTests: XCTestCase {
 
         XCTAssertEqual(backendClient.fetchRecordsRequests.map(\.query), ["queue"])
         XCTAssertEqual(backendClient.gradedAnswers, ["answer"])
+        XCTAssertEqual(backendClient.answerGradingProcessRequests.map(\.correlationID), ["grading-1"])
+        XCTAssertEqual(backendClient.answerGradingProcessRequests.map(\.afterEventID), [7])
         XCTAssertEqual(backendClient.savedRecordAnswers, ["record-2:draft"])
         XCTAssertEqual(backendClient.updatedRecordPublicity, ["record-3:false"])
         XCTAssertEqual(backendClient.deletedRecordIDs, ["record-4"])
@@ -3720,6 +3727,109 @@ final class StudyMateTests: XCTestCase {
     }
 
     @MainActor
+    func testGradeRecordPollsByCorrelationIDAndAdvancesEventCursor() async {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let backend = FakeRemotePushBackendClient()
+        store.saveRemotePushRegistration(backend.registration)
+        let submittedAt = Date(timeIntervalSince1970: 1_000)
+        let question = QuestionItem(
+            question: "이벤트 기반 채점의 장점은?",
+            expectedAnswerHint: nil,
+            createdAt: submittedAt
+        )
+        let record = StudyRecord(
+            id: "record-77",
+            question: question,
+            topic: "분산 시스템",
+            difficulty: .intermediate
+        )
+        backend.gradeRecordResult = StudyRecord(
+            id: record.id,
+            question: question,
+            answer: "장애 복구와 느슨한 결합입니다.",
+            topic: record.topic,
+            difficulty: record.difficulty,
+            gradingRequestID: "grading-77",
+            gradingStatus: .queued
+        )
+        backend.answerGradingProcesses = [
+            AnswerGradingProcess(
+                correlationID: "grading-77",
+                recordID: record.id,
+                status: .analyzingEvidence,
+                terminal: false,
+                pollAfterMilliseconds: 250,
+                events: [
+                    AnswerGradingProgressEvent(
+                        id: 4,
+                        recordID: record.id,
+                        correlationID: "grading-77",
+                        status: .analyzingEvidence,
+                        errorMessage: nil,
+                        occurredAt: submittedAt
+                    )
+                ],
+                errorMessage: nil,
+                updatedAt: submittedAt
+            ),
+            AnswerGradingProcess(
+                correlationID: "grading-77",
+                recordID: record.id,
+                status: .completed,
+                terminal: true,
+                pollAfterMilliseconds: nil,
+                events: [
+                    AnswerGradingProgressEvent(
+                        id: 5,
+                        recordID: record.id,
+                        correlationID: "grading-77",
+                        status: .completed,
+                        errorMessage: nil,
+                        occurredAt: submittedAt.addingTimeInterval(1)
+                    )
+                ],
+                errorMessage: nil,
+                updatedAt: submittedAt.addingTimeInterval(1)
+            )
+        ]
+        backend.fetchRecordResult = StudyRecord(
+            id: record.id,
+            question: question,
+            answer: "장애 복구와 느슨한 결합입니다.",
+            gradingResult: GradingResult(
+                score: 91,
+                isCorrect: true,
+                feedback: "핵심을 설명했습니다.",
+                explanation: "처리 단계 분리와 재시도가 가능합니다."
+            ),
+            topic: record.topic,
+            difficulty: record.difficulty,
+            answeredAt: submittedAt.addingTimeInterval(1),
+            gradingRequestID: "grading-77",
+            gradingStatus: .completed
+        )
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: backend,
+            appSleepProvider: ImmediateAppSleepProvider()
+        )
+
+        await appState.gradeRecord(record, answer: "장애 복구와 느슨한 결합입니다.")
+
+        XCTAssertEqual(backend.answerGradingProcessRequests.count, 2)
+        XCTAssertEqual(backend.answerGradingProcessRequests.map(\.correlationID), ["grading-77", "grading-77"])
+        XCTAssertEqual(backend.answerGradingProcessRequests.map(\.afterEventID), [0, 4])
+        XCTAssertEqual(backend.fetchedRecordIDs, [record.id])
+        XCTAssertEqual(appState.gradingResult?.score, 91)
+    }
+
+    @MainActor
     func testRefreshVisibleDataReloadsPersistedStudyState() async {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -4785,6 +4895,9 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var gradeRecordCallCount = 0
     var gradedAnswers: [String] = []
     var gradeRecordResult: StudyRecord?
+    var fetchRecordResult: StudyRecord?
+    var answerGradingProcesses: [AnswerGradingProcess] = []
+    var answerGradingProcessRequests: [(correlationID: String, afterEventID: Int64)] = []
     var savedRecordAnswers: [String] = []
     var skippedRecordIDs: [String] = []
     var deletedRecordIDs: [String] = []
@@ -5449,6 +5562,27 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         )
     }
 
+    func fetchAnswerGradingProcess(
+        registration: RemotePushRegistration,
+        correlationID: String,
+        afterEventID: Int64
+    ) async throws -> AnswerGradingProcess {
+        answerGradingProcessRequests.append((correlationID, afterEventID))
+        if !answerGradingProcesses.isEmpty {
+            return answerGradingProcesses.removeFirst()
+        }
+        return AnswerGradingProcess(
+            correlationID: correlationID,
+            recordID: "record-1",
+            status: .completed,
+            terminal: true,
+            pollAfterMilliseconds: nil,
+            events: [],
+            errorMessage: nil,
+            updatedAt: Date()
+        )
+    }
+
     func saveRecordAnswer(
         registration: RemotePushRegistration,
         recordID: String,
@@ -5520,6 +5654,9 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         recordID: String
     ) async throws -> StudyRecord {
         fetchedRecordIDs.append(recordID)
+        if let fetchRecordResult {
+            return fetchRecordResult
+        }
         let category = StudyCategory(title: "Fetched", difficulty: .beginner)
         return StudyRecord(
             id: recordID,
@@ -5528,6 +5665,10 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
             difficulty: category.difficulty
         )
     }
+}
+
+private struct ImmediateAppSleepProvider: AppSleepProviding {
+    func sleep(nanoseconds: UInt64) async throws {}
 }
 
 private final class URLRequestRecorder: @unchecked Sendable {

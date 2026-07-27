@@ -66,6 +66,16 @@ class QuestionRepository(
     override suspend fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? =
         findOne(Criteria.where("id").`is`(id).and("user_id").`is`(userId).and("deleted_at").isNull)
 
+    override suspend fun findByGradingRequestIdAndUserIdAndDeletedAtIsNull(
+        gradingRequestId: String,
+        userId: Long,
+    ): QuestionEntity? =
+        findOne(
+            Criteria.where("grading_request_id").`is`(gradingRequestId)
+                .and("user_id").`is`(userId)
+                .and("deleted_at").isNull,
+        )
+
     override suspend fun lockByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? {
         val lockedId = template.databaseClient.sql(
             """

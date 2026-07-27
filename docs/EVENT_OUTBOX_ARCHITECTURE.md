@@ -155,7 +155,7 @@ OpenAI request in the HTTP transaction:
    stale event is ignored when its request ID no longer matches the question.
 4. The worker persists `ANALYZING_EVIDENCE`, `CRITIQUING`, `JUDGING`, optional
    `ADJUDICATING`, and a terminal `COMPLETED` or `FAILED` state.
-5. The iOS client observes the current request through cursor-based SSE.
+5. The iOS client polls the current request by correlation ID and supplies the last durable grading event ID as its cursor.
    Progress is read from MySQL rather than directly from Redis, so reconnects
    do not lose state when bounded stream retention advances.
 

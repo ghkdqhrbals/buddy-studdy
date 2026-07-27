@@ -10,7 +10,7 @@ import com.buddystudy.backend.study.adapter.inbound.web.dto.CreateStudyTopicRequ
 import com.buddystudy.backend.study.adapter.inbound.web.dto.RecordPublicityRequest
 import com.buddystudy.backend.study.adapter.inbound.web.dto.StudyTopicActivationRequest
 import com.buddystudy.backend.study.application.port.inbound.BrowseRecordsUseCase
-import com.buddystudy.backend.study.application.port.inbound.ObserveAnswerGradingUseCase
+import com.buddystudy.backend.study.application.port.inbound.GetAnswerGradingProcessUseCase
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
 import com.buddystudy.backend.study.application.port.inbound.StudySyncUseCase
@@ -36,7 +36,7 @@ class StudyWebAdapter(
     private val studySyncUseCase: StudySyncUseCase,
     private val studyTreeUseCase: StudyTreeUseCase,
     private val questionQuotaUseCase: QuestionQuotaUseCase,
-    private val answerGrading: ObserveAnswerGradingUseCase,
+    private val answerGrading: GetAnswerGradingProcessUseCase,
     private val requestQuestionGeneration: RequestQuestionGenerationUseCase,
     private val getQuestionGenerationProcess: GetQuestionGenerationProcessUseCase,
 ) : StudyWebPort {
@@ -70,8 +70,11 @@ class StudyWebAdapter(
             studyUseCase.answer(authentication.principalOrThrow(), id, body.answer, grade = true),
         )
 
-    override suspend fun gradingEvents(id: Long, afterId: Long, authentication: Authentication) =
-        answerGrading.observe(authentication.principalOrThrow(), id, afterId)
+    override suspend fun answerGradingProcess(
+        correlationId: String,
+        afterId: Long,
+        authentication: Authentication,
+    ) = answerGrading.get(authentication.principalOrThrow(), correlationId, afterId)
 
     override suspend fun skip(id: Long, authentication: Authentication) =
         studyUseCase.skip(authentication.principalOrThrow(), id)

@@ -84,6 +84,58 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertEqual(process.error?.retryable, false)
     }
 
+    func testFetchAnswerGradingProcessUsesCorrelationIDAndEventCursor() async throws {
+        let client = makeClient { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/v1/answer-processes/grading-77")
+            XCTAssertEqual(
+                URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+                    .queryItems?
+                    .first(where: { $0.name == "after" })?
+                    .value,
+                "4"
+            )
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: """
+                {
+                  "correlationId": "grading-77",
+                  "recordId": "record-77",
+                  "status": "COMPLETED",
+                  "terminal": true,
+                  "pollAfterMs": null,
+                  "events": [
+                    {
+                      "id": 5,
+                      "recordId": "record-77",
+                      "correlationId": "grading-77",
+                      "status": "COMPLETED",
+                      "errorMessage": null,
+                      "occurredAt": "2026-07-27T12:00:01Z"
+                    }
+                  ],
+                  "errorMessage": null,
+                  "updatedAt": "2026-07-27T12:00:01Z"
+                }
+                """
+            )
+        }
+
+        let process = try await client.fetchAnswerGradingProcess(
+            registration: Self.registration,
+            correlationID: "grading-77",
+            afterEventID: 4
+        )
+
+        XCTAssertEqual(process.correlationID, "grading-77")
+        XCTAssertEqual(process.recordID, "record-77")
+        XCTAssertTrue(process.terminal)
+        XCTAssertNil(process.pollAfterMilliseconds)
+        XCTAssertEqual(process.events.map(\.id), [5])
+        XCTAssertEqual(process.events.first?.status, .completed)
+    }
+
     func testPendingProcessSurvivesSettingsStoreRecreation() {
         let suiteName = "QuestionGenerationFlowTests-\(UUID().uuidString)"
         guard let defaults = UserDefaults(suiteName: suiteName) else {

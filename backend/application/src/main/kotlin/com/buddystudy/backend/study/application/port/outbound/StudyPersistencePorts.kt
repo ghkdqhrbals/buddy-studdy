@@ -82,6 +82,10 @@ interface QuestionPort {
     }
     suspend fun findQuestionById(id: Long): QuestionEntity?
     suspend fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity?
+    suspend fun findByGradingRequestIdAndUserIdAndDeletedAtIsNull(
+        gradingRequestId: String,
+        userId: Long,
+    ): QuestionEntity? = null
     suspend fun lockByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? =
         findByIdAndUserIdAndDeletedAtIsNull(id, userId)
     suspend fun findGradedByUser(userId: Long, pageable: Pageable): Page<QuestionEntity>

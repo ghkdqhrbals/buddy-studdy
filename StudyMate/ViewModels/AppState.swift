@@ -10,7 +10,7 @@ private enum QuestionGenerationSkip: Error {
     case duplicateQuestion
 }
 
-private enum EventDrivenGradingError: LocalizedError {
+private enum AnswerGradingProcessError: LocalizedError {
     case failed(String)
 
     var errorDescription: String? {
@@ -5831,23 +5831,28 @@ final class AppState: ObservableObject {
         if queuedRecord.gradingResult != nil {
             return queuedRecord
         }
+        guard let correlationID = queuedRecord.gradingRequestID,
+              !correlationID.isEmpty else {
+            throw AnswerGradingProcessError.failed(strings.gradingFailed)
+        }
 
         var cursor: Int64 = 0
-        var lastConnectionError: Error?
+        var consecutiveTransportFailures = 0
         var displayedStatus = queuedRecord.gradingStatus ?? .queued
         var displayedAt = appClock.now
         let queuedMessage = gradingMessage(for: displayedStatus)
         statusMessage = queuedMessage
         answerGradingStatusMessage = queuedMessage
 
-        for attempt in 0..<4 {
+        while !Task.isCancelled {
             do {
-                let events = recordsUseCase.gradingEvents(
+                let process = try await recordsUseCase.fetchAnswerGradingProcess(
                     registration: registration,
-                    recordID: queuedRecord.id,
+                    correlationID: correlationID,
                     afterEventID: cursor
                 )
-                for try await event in events {
+                consecutiveTransportFailures = 0
+                for event in process.events {
                     cursor = max(cursor, event.id)
                     guard event.status != displayedStatus else {
                         continue
@@ -5877,49 +5882,57 @@ final class AppState: ObservableObject {
                             recordID: queuedRecord.id
                         )
                     case .failed:
-                        throw EventDrivenGradingError.failed(
+                        throw AnswerGradingProcessError.failed(
                             event.errorMessage ?? strings.gradingFailed
                         )
                     default:
                         break
                     }
                 }
+                if process.terminal {
+                    try await keepGradingStatusVisible(
+                        displayedStatus,
+                        since: displayedAt
+                    )
+                    if process.status == .completed {
+                        return try await recordsUseCase.fetchRecord(
+                            registration: registration,
+                            recordID: process.recordID
+                        )
+                    }
+                    throw AnswerGradingProcessError.failed(
+                        process.errorMessage ?? strings.gradingFailed
+                    )
+                }
+                await sleepForAnswerGrading(milliseconds: process.pollAfterMilliseconds ?? 250)
             } catch is CancellationError {
                 throw CancellationError()
-            } catch let error as EventDrivenGradingError {
+            } catch let error as AnswerGradingProcessError {
                 throw error
             } catch {
-                lastConnectionError = error
+                if appErrorHandlingUseCase.isPermanentBackendOperationError(error) {
+                    throw error
+                }
+                consecutiveTransportFailures += 1
                 log(
                     .warning,
-                    "채점 상태 연결이 끊겼습니다. recordID=\(queuedRecord.id), attempt=\(attempt + 1), error=\(error.localizedDescription)"
+                    "채점 상태 조회 실패 후 재시도합니다. correlationID=\(correlationID), failureCount=\(consecutiveTransportFailures), error=\(error.localizedDescription)"
                 )
-            }
-
-            let snapshot = try await recordsUseCase.fetchRecord(
-                registration: registration,
-                recordID: queuedRecord.id
-            )
-            if snapshot.gradingResult != nil || snapshot.gradingStatus == .completed {
-                try await keepGradingStatusVisible(
-                    displayedStatus,
-                    since: displayedAt
-                )
-                return snapshot
-            }
-            if snapshot.gradingStatus == .failed {
-                try await keepGradingStatusVisible(
-                    displayedStatus,
-                    since: displayedAt
-                )
-                throw EventDrivenGradingError.failed(snapshot.gradingError ?? strings.gradingFailed)
-            }
-            if attempt < 3 {
-                try await appSleepProvider.sleep(nanoseconds: 500_000_000)
+                await sleepForAnswerGradingRetry(failureCount: consecutiveTransportFailures)
             }
         }
 
-        throw lastConnectionError ?? EventDrivenGradingError.failed(strings.gradingFailed)
+        throw CancellationError()
+    }
+
+    private func sleepForAnswerGrading(milliseconds: Int) async {
+        let normalized = max(100, min(milliseconds, 5_000))
+        try? await appSleepProvider.sleep(nanoseconds: UInt64(normalized) * 1_000_000)
+    }
+
+    private func sleepForAnswerGradingRetry(failureCount: Int) async {
+        let delay = min(5_000, max(1_000, failureCount * 1_000))
+        await sleepForAnswerGrading(milliseconds: delay)
     }
 
     private func keepGradingStatusVisible(

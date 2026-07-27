@@ -40,9 +40,10 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 3. User can reveal the hint on demand.
 4. User submits for grading. The backend accepts and persists the answer
    immediately, then grades it asynchronously through the event outbox.
-5. The app shows persisted grading stages in real time over SSE and reconciles
-   the completed AI decision from the record API. Reconnection resumes from
-   the last received event without replacing the user's draft.
+5. The app polls grading by the persisted correlation ID returned with the
+   accepted answer. Each request includes the last received event cursor, so
+   intermediate durable stages are not skipped, and the completed AI decision
+   is reconciled from the record API without replacing the user's draft.
 6. Grading result, feedback, and explanation are stored in records.
 7. Ungraded pending questions are capped at 3.
 8. My Studies shows root studies first. Selecting one opens an unlimited-depth study tree whose orientation can be switched between vertical and horizontal.

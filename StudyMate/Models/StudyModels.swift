@@ -1550,7 +1550,7 @@ enum AnswerGradingStatus: String, Codable, Equatable {
 struct AnswerGradingProgressEvent: Codable, Equatable, Identifiable {
     var id: Int64
     var recordID: String
-    var requestID: String
+    var correlationID: String
     var status: AnswerGradingStatus
     var errorMessage: String?
     var occurredAt: Date
@@ -1558,10 +1558,32 @@ struct AnswerGradingProgressEvent: Codable, Equatable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id
         case recordID = "recordId"
-        case requestID = "requestId"
+        case correlationID = "correlationId"
         case status
         case errorMessage
         case occurredAt
+    }
+}
+
+struct AnswerGradingProcess: Codable, Equatable {
+    var correlationID: String
+    var recordID: String
+    var status: AnswerGradingStatus
+    var terminal: Bool
+    var pollAfterMilliseconds: Int?
+    var events: [AnswerGradingProgressEvent]
+    var errorMessage: String?
+    var updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case correlationID = "correlationId"
+        case recordID = "recordId"
+        case status
+        case terminal
+        case pollAfterMilliseconds = "pollAfterMs"
+        case events
+        case errorMessage
+        case updatedAt
     }
 }
 

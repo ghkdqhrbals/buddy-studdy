@@ -32,14 +32,14 @@ struct RemoteRecordsRepository: RecordsRepository {
         try await backendClient.gradeRecord(registration: registration, recordID: recordID, answer: answer)
     }
 
-    func gradingEvents(
+    func fetchAnswerGradingProcess(
         registration: RemotePushRegistration,
-        recordID: String,
+        correlationID: String,
         afterEventID: Int64
-    ) -> AsyncThrowingStream<AnswerGradingProgressEvent, Error> {
-        backendClient.gradingEvents(
+    ) async throws -> AnswerGradingProcess {
+        try await backendClient.fetchAnswerGradingProcess(
             registration: registration,
-            recordID: recordID,
+            correlationID: correlationID,
             afterEventID: afterEventID
         )
     }

@@ -15,10 +15,6 @@ import com.buddystudy.backend.study.application.model.RecordsPageResponse
 import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.StudyRecordResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
-import org.springframework.http.MediaType
-import org.springframework.http.codec.ServerSentEvent
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.responses.ApiResponse
@@ -204,7 +200,7 @@ class StudyController(
         authentication: Authentication,
     ): StudyRecordResponse = study.saveAnswer(id, body, authentication)
 
-    @Operation(summary = "Submit an answer for grading", description = "Persists the answer and queues asynchronous grading. Subscribe to the grading-events endpoint for durable progress updates.")
+    @Operation(summary = "Submit an answer for grading", description = "Persists the answer and queues asynchronous grading. The response contains gradingRequestId, which is used as the correlation id for polling.")
     @ApiResponses(
         ApiResponse(responseCode = "202", description = "Answer accepted for grading."),
         ApiResponse(responseCode = "401", description = "Authentication required."),
@@ -220,25 +216,16 @@ class StudyController(
     ): ResponseEntity<StudyRecordResponse> = study.grade(id, body, authentication)
 
     @Operation(
-        summary = "Observe answer grading",
-        description = "Streams durable grading status events. Reconnect with the last received event id through Last-Event-ID or after.",
+        summary = "Fetch answer grading status",
+        description = "Returns the current process state and durable events after the supplied cursor. Poll again after pollAfterMs until terminal is true.",
     )
-    @GetMapping("/records/{id}/grading-events", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
+    @GetMapping("/answer-processes/{correlationId}")
     @RequirePermission(Permissions.RECORD_UPDATE)
-    suspend fun gradingEvents(
-        @PathVariable id: Long,
+    suspend fun answerGradingProcess(
+        @PathVariable correlationId: String,
         @RequestParam(defaultValue = "0") after: Long,
-        @org.springframework.web.bind.annotation.RequestHeader(name = "Last-Event-ID", required = false)
-        lastEventId: Long?,
         authentication: Authentication,
-    ): Flow<ServerSentEvent<com.buddystudy.backend.study.application.model.AnswerGradingProgressResponse>> =
-        study.gradingEvents(id, maxOf(after, lastEventId ?: 0), authentication)
-            .map { event ->
-                ServerSentEvent.builder(event)
-                    .id(event.id.toString())
-                    .event("grading-status")
-                    .build()
-            }
+    ) = study.answerGradingProcess(correlationId, after, authentication)
 
     @Operation(summary = "Skip a question", description = "Marks an ungraded question as skipped and removes it from the active study-room question state.")
     @PostMapping("/records/{id}/skip")

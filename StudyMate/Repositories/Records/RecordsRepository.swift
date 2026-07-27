@@ -16,11 +16,11 @@ protocol RecordsRepository {
         answer: String
     ) async throws -> StudyRecord
 
-    func gradingEvents(
+    func fetchAnswerGradingProcess(
         registration: RemotePushRegistration,
-        recordID: String,
+        correlationID: String,
         afterEventID: Int64
-    ) -> AsyncThrowingStream<AnswerGradingProgressEvent, Error>
+    ) async throws -> AnswerGradingProcess
 
     func saveRecordAnswer(
         registration: RemotePushRegistration,
