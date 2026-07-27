@@ -114,7 +114,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - The primary tab bar exposes Home, Records, Statistics, and Notifications. Settings is a profile-hub destination so account and app preferences share one predictable entry point.
   - Public-question visibility is persisted through `PATCH /api/v1/profile` as `allowPublicQuestions`; it is independent of protected-page access policy.
   - Per-topic question generation exposes its category-scoped in-flight state so only the selected study room renders the inline loading message.
-  - The compact My Studies outline crossfades branch content without translating rows or separators. Root expand/collapse stays immediate so opening a top-level study does not create an extra vertical sliding effect.
+  - The compact My Studies outline uses one branch view and a staged fade-out/swap/fade-in. It never overlays old and new rows or translates separators. Root expand/collapse stays immediate.
   - The notification inbox calls `POST /api/v1/notifications/read-all` and updates loaded rows through `NotificationStateStore` only after the backend mutation succeeds.
 
 ## Markdown Message Contract
@@ -154,7 +154,7 @@ User answer
 My Studies root
 -> GET /api/v1/studies
 -> app builds parentStudyId adjacency map
--> compact branch navigation crossfades content while keeping row geometry fixed
+-> compact branch navigation hides the old content, swaps the branch, then reveals the new content
 -> recursive tree layout renders circular nodes with restrained level colors
 -> the user can switch orientation, pinch or button zoom, drag nodes, and reset saved positions
 -> selecting a node opens the root-owned question page with that node as the manual topic

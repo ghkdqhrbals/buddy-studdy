@@ -6566,6 +6566,7 @@ private struct MobileHomeStudyOutlineRow: View {
     @State private var currentBranchID: Int?
     @State private var isExpanded = true
     @State private var isChangingBranch = false
+    @State private var branchContentOpacity = 1.0
     @State private var branchUnlockTask: Task<Void, Never>?
 
     private var currentBranch: BackendStudyRoom {
@@ -6606,15 +6607,11 @@ private struct MobileHomeStudyOutlineRow: View {
                     if let searchResults = snapshot.searchResults {
                         searchResultRows(searchResults)
                     } else {
-                        ZStack(alignment: .top) {
-                            VStack(spacing: 0) {
-                                branchRows
-                            }
-                            .id(currentBranch.id)
-                            .transition(.opacity)
-                            .allowsHitTesting(!isChangingBranch)
+                        VStack(spacing: 0) {
+                            branchRows
                         }
-                        .clipped()
+                        .opacity(branchContentOpacity)
+                        .allowsHitTesting(!isChangingBranch)
                     }
 
                     Divider()
@@ -6663,6 +6660,9 @@ private struct MobileHomeStudyOutlineRow: View {
         }
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .onChange(of: snapshot.searchQuery) {
+            branchUnlockTask?.cancel()
+            branchContentOpacity = 1
+            isChangingBranch = false
             currentBranchID = nil
         }
         .onDisappear {
@@ -6878,16 +6878,32 @@ private struct MobileHomeStudyOutlineRow: View {
 
         branchUnlockTask?.cancel()
         isChangingBranch = true
-        let animation = accessibilityReduceMotion
-            ? Animation.linear(duration: 0.08)
-            : Animation.easeInOut(duration: 0.16)
-        withAnimation(animation) {
+
+        if accessibilityReduceMotion {
             currentBranchID = roomID
+            isChangingBranch = false
+            return
         }
+
         branchUnlockTask = Task { @MainActor in
-            try? await Task.sleep(
-                for: accessibilityReduceMotion ? .milliseconds(80) : .milliseconds(160)
-            )
+            withAnimation(.easeOut(duration: 0.07)) {
+                branchContentOpacity = 0
+            }
+            try? await Task.sleep(for: .milliseconds(70))
+            guard !Task.isCancelled else {
+                return
+            }
+
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                currentBranchID = roomID
+            }
+
+            withAnimation(.easeIn(duration: 0.09)) {
+                branchContentOpacity = 1
+            }
+            try? await Task.sleep(for: .milliseconds(90))
             guard !Task.isCancelled else {
                 return
             }

@@ -54,7 +54,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 17. Study deletion always requires an explicit destructive confirmation.
 18. Manual question generation immediately shows an inline conversation-style loading message for the selected topic until the request completes.
 19. Question, hint, grading feedback, and explanation content supports Markdown for emphasis, lists, and code while remaining backward-compatible with existing plain-text records.
-20. The compact My Studies outline uses a brief crossfade when drilling into a child topic or returning to a parent, without translating rows or separators.
+20. The compact My Studies outline fades out the current branch before swapping content and fading the new branch in, so old and new rows are never rendered on top of each other.
 
 ### Records
 
