@@ -3537,6 +3537,7 @@ private struct StudyTreeNode: View {
                         style: StrokeStyle(lineWidth: 3, lineCap: .round)
                     )
                     .rotationEffect(.degrees(-90))
+                    .padding(1.5)
             }
             .overlay {
                 if isSelected {
@@ -3545,8 +3546,20 @@ private struct StudyTreeNode: View {
                         .padding(-4)
                 }
             }
+            .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .contentShape(.contextMenuPreview, Circle())
+        .contextMenu {
+            if !isSelectionMode {
+                Button(action: onEdit) {
+                    Label(strings.editStudyCategory, systemImage: "pencil")
+                }
+                Button(role: .destructive, action: onDelete) {
+                    Label(strings.deleteStudy, systemImage: "trash")
+                }
+            }
+        }
         .overlay(alignment: .topLeading) {
             if isSelectionMode {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
@@ -3594,16 +3607,6 @@ private struct StudyTreeNode: View {
             width: StudyTreeLayoutSnapshot.nodeSize.width,
             height: StudyTreeLayoutSnapshot.nodeSize.height
         )
-        .contextMenu {
-            if !isSelectionMode {
-                Button(action: onEdit) {
-                    Label(strings.editStudyCategory, systemImage: "pencil")
-                }
-                Button(role: .destructive, action: onDelete) {
-                    Label(strings.deleteStudy, systemImage: "trash")
-                }
-            }
-        }
         .accessibilityAction(named: strings.editStudyCategory, onEdit)
         .accessibilityAction(named: strings.deleteStudy, onDelete)
     }
@@ -6794,9 +6797,6 @@ private struct MobileHomeStudyOutlineRow: View {
                         replaceBranch(with: room.id, direction: 1)
                     }
             )
-            .contextMenu {
-                topicActions(for: room)
-            }
             .opacity(isBranchContentRevealed ? 1 : 0.72)
             .offset(
                 x: isBranchContentRevealed
@@ -6884,8 +6884,15 @@ private struct MobileHomeStudyOutlineRow: View {
                 .padding(.top, 8)
             }
             .buttonStyle(.plain)
+            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 8, style: .continuous))
             .contextMenu {
                 topicActions(for: room)
+            }
+            .accessibilityAction(named: strings.editStudyCategory) {
+                onAction(.configureTopic(room))
+            }
+            .accessibilityAction(named: strings.deleteStudy) {
+                onAction(.deleteTopic(room))
             }
         }
     }
@@ -6914,19 +6921,11 @@ private struct MobileHomeStudyOutlineRow: View {
         let childCount = snapshot.children(of: room.id).count
 
         return HStack(spacing: 8) {
-            Button {
-                onAction(.openTopic(room))
-            } label: {
-                studyDestinationContent(
-                    room: room,
-                    isRoot: isRoot,
-                    childCount: childCount,
-                    showsDisclosure: childCount == 0
-                )
-            }
-            .buttonStyle(.plain)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            studyDestinationButton(
+                room: room,
+                isRoot: isRoot,
+                childCount: childCount
+            )
 
             if childCount > 0, let onOpenChildren {
                 Button(action: onOpenChildren) {
@@ -6945,6 +6944,46 @@ private struct MobileHomeStudyOutlineRow: View {
         }
         .padding(.horizontal, 14)
         .frame(minHeight: isRoot ? 70 : 64)
+    }
+
+    @ViewBuilder
+    private func studyDestinationButton(
+        room: BackendStudyRoom,
+        isRoot: Bool,
+        childCount: Int
+    ) -> some View {
+        let button = Button {
+            onAction(.openTopic(room))
+        } label: {
+            studyDestinationContent(
+                room: room,
+                isRoot: isRoot,
+                childCount: childCount,
+                showsDisclosure: childCount == 0
+            )
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+
+        if isRoot {
+            button
+        } else {
+            button
+                .contentShape(
+                    .contextMenuPreview,
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
+                .contextMenu {
+                    topicActions(for: room)
+                }
+                .accessibilityAction(named: strings.editStudyCategory) {
+                    onAction(.configureTopic(room))
+                }
+                .accessibilityAction(named: strings.deleteStudy) {
+                    onAction(.deleteTopic(room))
+                }
+        }
     }
 
     private func studyDestinationContent(
