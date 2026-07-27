@@ -1733,7 +1733,6 @@ private struct MobileHomeView: View {
             .buttonStyle(.plain)
             .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
             .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
         }
     }
 
@@ -7259,32 +7258,36 @@ private struct MobileFeedbackPromptRow: View {
     var strings: AppStrings
 
     var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "text.bubble")
-                .font(.title3.weight(.medium))
-                .foregroundStyle(.tint)
-                .frame(width: 34, height: 34)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(strings.feedbackPromptTitle)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                Text(strings.feedbackPromptBody)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 7) {
+                Text("BuddyStudy")
+                Text(strings.feedback)
+                Spacer(minLength: 0)
             }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
 
-            Spacer(minLength: 8)
+            Text(strings.feedbackPromptTitle)
+                .font(.body.weight(.medium))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .truncationMode(.tail)
 
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
+            HStack(spacing: 5) {
+                Image(systemName: "text.bubble")
+                Text(strings.feedbackPromptBody)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer(minLength: 0)
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
         }
-        .padding(14)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.accentColor.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .contentShape(Rectangle())
     }
 }
