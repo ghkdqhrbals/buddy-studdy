@@ -6673,12 +6673,9 @@ private struct MobileHomeStudyOutlineRow: View {
     private var branchPathHeader: some View {
         HStack(spacing: 10) {
             if currentBranch.id == snapshot.root.id {
-                Label(strings.childTopics, systemImage: "arrow.turn.down.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(Color(.tertiarySystemFill), in: Capsule())
+                Text(strings.childTopics)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             } else {
                 Button {
                     let parentID = snapshot.parentByID[currentBranch.id]
