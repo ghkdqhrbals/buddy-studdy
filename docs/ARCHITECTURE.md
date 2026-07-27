@@ -115,6 +115,15 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - Public-question visibility is persisted through `PATCH /api/v1/profile` as `allowPublicQuestions`; it is independent of protected-page access policy.
   - Per-topic question generation exposes its category-scoped in-flight state so only the selected study room renders the inline loading message.
 
+## Markdown Message Contract
+
+- `question`, `expectedAnswerHint`, grading `feedback`, and grading `explanation` are stored and returned as Markdown source. Existing plain text remains valid, so this contract does not require a schema migration or a parallel HTML field.
+- The backend asks the model for a restrained Markdown subset: paragraphs, emphasis, lists, inline code, and fenced code blocks. Generated HTML is not part of the contract.
+- The backend never renders or stores generated HTML. iOS parses Markdown locally and falls back to literal text when parsing fails.
+- iOS permits only `http` and `https` links from rendered Markdown. Unsupported link schemes remain visible as text without an active link.
+- Dense list rows use a plain-text projection for predictable height. Full question, hint, answer, feedback, and explanation bubbles render Markdown.
+- APNs and local notification bodies use a plain-text projection of the stored Markdown so notification surfaces do not expose formatting markers.
+
 ## Data Flow
 
 ```text

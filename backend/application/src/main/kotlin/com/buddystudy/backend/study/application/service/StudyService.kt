@@ -11,6 +11,7 @@ import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.crypto.KeyCipher
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
+import com.buddystudy.backend.study.application.content.MarkdownContentPolicy
 import com.buddystudy.backend.study.application.model.GeneratedQuestionWithEmbedding
 import com.buddystudy.backend.study.application.model.RecordsPageResponse
 import com.buddystudy.backend.study.application.model.StudyRecordResponse
@@ -388,7 +389,7 @@ internal fun QuestionEntity.toQuestionNotification(study: StudyEntity, appLangua
         userId = study.userId,
         type = "STUDY_QUESTION",
         title = questionNotificationTitle(appLanguage),
-        body = question,
+        body = MarkdownContentPolicy.plainText(question),
         threadType = "study_question",
         threadId = id.toString(),
         deepLink = "buddystudy://records/$id",
@@ -418,7 +419,7 @@ internal fun QuestionEntity.toQuestionPushRequest(study: StudyEntity, appLanguag
         sound = study.notificationSound,
         intervalMinutes = study.intervalMinutes,
         title = questionNotificationTitle(appLanguage),
-        body = question,
+        body = MarkdownContentPolicy.plainText(question),
         deepLink = "buddystudy://records/$id",
         createdAt = createdAt,
     )

@@ -537,7 +537,7 @@ final class NotificationService: NotificationServicing {
         let content = UNMutableNotificationContent()
         content.title = title
         content.subtitle = subtitle ?? ""
-        content.body = question.question
+        content.body = MarkdownContent.plainText(question.question)
         content.sound = sound.userNotificationSound
         content.categoryIdentifier = StudyNotificationAction.category
         content.threadIdentifier = "StudyMate.question"

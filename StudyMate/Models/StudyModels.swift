@@ -1,5 +1,37 @@
 import Foundation
 
+enum MarkdownContent {
+    private static let parsingOptions = AttributedString.MarkdownParsingOptions(
+        interpretedSyntax: .full,
+        failurePolicy: .returnPartiallyParsedIfPossible
+    )
+
+    static func attributedString(_ source: String) -> AttributedString {
+        var value = (try? AttributedString(markdown: source, options: parsingOptions))
+            ?? AttributedString(source)
+        let blockedLinkRanges: [Range<AttributedString.Index>] = value.runs.compactMap { run in
+            guard let link = run.link,
+                  !allowedLinkSchemes.contains(link.scheme?.lowercased() ?? "") else {
+                return nil
+            }
+            return run.range
+        }
+
+        for range in blockedLinkRanges {
+            value[range].link = nil
+        }
+        return value
+    }
+
+    static func plainText(_ source: String) -> String {
+        String(attributedString(source).characters)
+            .replacingOccurrences(of: "\u{FFFC}", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static let allowedLinkSchemes = Set(["http", "https"])
+}
+
 struct StudyTreeNodeOffset: Codable, Equatable {
     var x: CGFloat
     var y: CGFloat

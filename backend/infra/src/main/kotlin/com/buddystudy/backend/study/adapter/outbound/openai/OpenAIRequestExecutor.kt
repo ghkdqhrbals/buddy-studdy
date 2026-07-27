@@ -2,6 +2,7 @@ package com.buddystudy.backend.study.adapter.outbound.openai
 
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.study.application.content.MarkdownContentPolicy
 import com.buddystudy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystudy.backend.study.application.port.outbound.OpenAIPort
@@ -135,6 +136,7 @@ class OpenAIRequestExecutor(
             Question: $question
             Answer: $answer
             Language: ${if (language == "en") "English" else "Korean"}
+            ${MarkdownContentPolicy.GENERATION_GUIDE}
             Return JSON only with score, isCorrect, feedback, explanation.
         """.trimIndent()
         val response = chatModel(apiKey, model, json = true).call(

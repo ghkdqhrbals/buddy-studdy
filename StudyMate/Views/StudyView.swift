@@ -344,6 +344,17 @@ struct StudyView: View {
     }
 }
 
+struct MarkdownMessageText: View {
+    var markdown: String
+    var fillsWidth = true
+
+    var body: some View {
+        Text(MarkdownContent.attributedString(markdown))
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
+    }
+}
+
 private struct StudyConversationSection<AnswerEditorContent: View>: View {
     var question: QuestionItem
     @Binding var draftAnswer: String
@@ -361,11 +372,11 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
             StudyChatBubble(role: .tutor) {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .top, spacing: 10) {
-                        Text(question.question)
+                        MarkdownMessageText(markdown: question.question)
                             .font(.body)
                             .foregroundStyle(.white)
+                            .tint(.white)
                             .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
 
                         if gradingResult == nil {
                             Button {
@@ -398,11 +409,11 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                 }
             } else if !draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 StudyChatBubble(role: .learnerAnswer) {
-                    Text(draftAnswer)
+                    MarkdownMessageText(markdown: draftAnswer, fillsWidth: false)
                         .font(.body)
                         .foregroundStyle(.white)
+                        .tint(.white)
                         .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
                         .multilineTextAlignment(.leading)
                         .padding(.vertical, 10)
                         .padding(.horizontal, 13)
@@ -420,9 +431,10 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                                 .font(.headline)
                         }
 
-                        Text(gradingResult.feedback)
+                        MarkdownMessageText(markdown: gradingResult.feedback)
                             .font(.body)
-                        Text(gradingResult.explanation)
+
+                        MarkdownMessageText(markdown: gradingResult.explanation)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -447,13 +459,12 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                 .tint(.white)
 
                 if showsHint {
-                    Text(hint)
+                    MarkdownMessageText(markdown: hint)
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.85))
+                        .tint(.white)
                         .textSelection(.enabled)
                         .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .padding(.top, 4)

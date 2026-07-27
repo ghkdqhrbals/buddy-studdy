@@ -7200,7 +7200,7 @@ private struct MobileCommunityQuestionRow: View {
         VStack(alignment: .leading, spacing: 8) {
             CommunityQuestionTopMeta(question: question)
 
-            Text(question.question)
+            Text(MarkdownContent.plainText(question.question))
                 .font(.body.weight(.medium))
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -7242,11 +7242,11 @@ struct CommunityQuestionDetailView: View {
                 communityQuestionMeta
 
                 CommunityMessageBubble(role: .question) {
-                    Text(displayQuestion.question)
+                    MarkdownMessageText(markdown: displayQuestion.question)
                         .font(.body)
                         .foregroundStyle(.white)
+                        .tint(.white)
                         .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 if let answer = displayQuestion.answer?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -7264,10 +7264,10 @@ struct CommunityQuestionDetailView: View {
                                     .font(.headline)
                             }
 
-                            Text(gradingResult.feedback)
+                            MarkdownMessageText(markdown: gradingResult.feedback)
                                 .font(.body)
 
-                            Text(gradingResult.explanation)
+                            MarkdownMessageText(markdown: gradingResult.explanation)
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
@@ -7617,11 +7617,11 @@ private struct CommunityAnswerMessage: View {
         HStack(alignment: .bottom, spacing: 8) {
             Spacer(minLength: 24)
 
-            Text(answer)
+            MarkdownMessageText(markdown: answer, fillsWidth: false)
                 .font(.body)
                 .foregroundStyle(.white)
+                .tint(.white)
                 .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
                 .multilineTextAlignment(.leading)
                 .padding(.vertical, 11)
                 .padding(.horizontal, 12)

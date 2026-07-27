@@ -746,7 +746,7 @@ private struct HistoryRow: View {
                     }
                 }
 
-                Text(record.question.question)
+                Text(MarkdownContent.plainText(record.question.question))
                     .font(.body.weight(.medium))
                     .lineLimit(2)
 

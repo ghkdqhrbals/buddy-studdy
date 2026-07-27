@@ -297,9 +297,10 @@ struct StudyRecordDetailView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     RecordChatBubble(role: .question) {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(displayedRecord.question.question.breakingLongTokens())
+                            MarkdownMessageText(markdown: displayedRecord.question.question)
                                 .font(.body)
                                 .foregroundStyle(.white)
+                                .tint(.white)
                                 .textSelection(.enabled)
 
                             hintView(for: displayedRecord)
@@ -310,9 +311,10 @@ struct StudyRecordDetailView: View {
                        !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                        displayedRecord.gradingResult != nil {
                         RecordChatBubble(role: .answer) {
-                            Text(answer.breakingLongTokens())
+                            MarkdownMessageText(markdown: answer, fillsWidth: false)
                                 .font(.body)
                                 .foregroundStyle(.white)
+                                .tint(.white)
                                 .textSelection(.enabled)
                         }
                     } else if displayedRecord.gradingResult == nil {
@@ -345,10 +347,11 @@ struct StudyRecordDetailView: View {
                                         .lineLimit(1)
                                 }
 
-                                Text(result.feedback.breakingLongTokens())
+                                MarkdownMessageText(markdown: result.feedback)
                                     .font(.body)
                                     .textSelection(.enabled)
-                                Text(result.explanation.breakingLongTokens())
+
+                                MarkdownMessageText(markdown: result.explanation)
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                                     .textSelection(.enabled)
@@ -394,12 +397,12 @@ struct StudyRecordDetailView: View {
                 .tint(.white)
 
                 if showsHint {
-                    Text(hint.breakingLongTokens())
+                    MarkdownMessageText(markdown: hint)
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.85))
+                        .tint(.white)
                         .textSelection(.enabled)
                         .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .padding(.top, 4)
@@ -1867,7 +1870,7 @@ private struct ScoreRecordRow: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
 
-                Text(record.question.question)
+                Text(MarkdownContent.plainText(record.question.question))
                     .lineLimit(1)
             }
 

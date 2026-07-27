@@ -53,6 +53,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 16. A tree node with an unanswered question shows one red badge at its upper-right corner; the node action menu remains separate at the lower-right corner.
 17. Study deletion always requires an explicit destructive confirmation.
 18. Manual question generation immediately shows an inline conversation-style loading message for the selected topic until the request completes.
+19. Question, hint, grading feedback, and explanation content supports Markdown for emphasis, lists, and code while remaining backward-compatible with existing plain-text records.
 
 ### Records
 
@@ -100,6 +101,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 6. Server-scheduled APNs delivery is handled by the Spring Boot Kotlin backend. It generates each due question, stores it before push delivery, publishes a Redis stream push job, then sends the APNs alert from an `@StreamListener` consumer.
 7. Push arrival syncs data without opening a new answer page unless the user taps the notification.
 8. If APNs registration is not available yet, the app can still register a backend device and use backend questions/grading manually. Scheduled push delivery starts after the APNs token is attached to that backend device.
+9. Persisted message content keeps Markdown source, while notification previews use a plain-text projection so formatting markers are not exposed in APNs alerts.
 
 ### Internal Operations
 

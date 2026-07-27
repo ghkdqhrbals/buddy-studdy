@@ -1,5 +1,6 @@
 package com.buddystudy.backend.study.application.prompt
 
+import com.buddystudy.backend.study.application.content.MarkdownContentPolicy
 import org.springframework.stereotype.Component
 
 data class QuestionGenerationPrompt(
@@ -117,6 +118,7 @@ class QuestionPromptProvider {
                 Use a different angle, concept, trade-off, or scenario from the previous questions.
                 Extra tutor prompt: $tutorPrompt
 
+                ${MarkdownContentPolicy.GENERATION_GUIDE}
                 Return JSON only with keys question and expectedAnswerHint.
             """.trimIndent(),
         )

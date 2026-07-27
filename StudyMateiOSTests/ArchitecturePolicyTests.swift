@@ -2,6 +2,36 @@ import XCTest
 @testable import StudyMate
 
 final class ArchitecturePolicyTests: XCTestCase {
+    func testMarkdownContentRendersAndFallsBackToPlainText() {
+        let source = """
+        **핵심**은 `WHERE` 절입니다.
+
+        - 첫 번째 조건
+        - 두 번째 조건
+        """
+
+        let rendered = MarkdownContent.attributedString(source)
+        let plainText = MarkdownContent.plainText(source)
+
+        XCTAssertFalse(rendered.runs.isEmpty)
+        XCTAssertTrue(plainText.contains("핵심은 WHERE 절입니다."))
+        XCTAssertTrue(plainText.contains("첫 번째 조건"))
+        XCTAssertTrue(plainText.contains("두 번째 조건"))
+        XCTAssertFalse(plainText.contains("**"))
+        XCTAssertFalse(plainText.contains("`"))
+        XCTAssertEqual(MarkdownContent.plainText("일반 문장입니다."), "일반 문장입니다.")
+    }
+
+    func testMarkdownContentBlocksUnsafeLinks() {
+        let rendered = MarkdownContent.attributedString(
+            "[안전](https://example.com) [차단](javascript:alert(1))"
+        )
+        let links = rendered.runs.compactMap(\.link)
+
+        XCTAssertEqual(links.count, 1)
+        XCTAssertEqual(links.first?.scheme, "https")
+    }
+
     func testViewModelsDoNotReadBackendErrorPresentationExtensionsDirectly() throws {
         let root = try repositoryRoot()
         let viewModels = root.appendingPathComponent("StudyMate/ViewModels", isDirectory: true)
