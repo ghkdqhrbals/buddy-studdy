@@ -6567,6 +6567,7 @@ private struct MobileHomeStudyOutlineRow: View {
     var pendingQuestionCount: (BackendStudyRoom) -> Int
     var onOpenTree: () -> Void
     var onOpenTopic: (BackendStudyRoom) -> Void
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @State private var currentBranchID: Int?
     @State private var isExpanded = true
     @State private var isChangingBranch = false
@@ -6611,11 +6612,15 @@ private struct MobileHomeStudyOutlineRow: View {
                     if let searchResults = snapshot.searchResults {
                         searchResultRows(searchResults)
                     } else {
-                        Group {
-                            branchRows
+                        ZStack(alignment: .top) {
+                            VStack(spacing: 0) {
+                                branchRows
+                            }
+                            .id(currentBranch.id)
+                            .transition(branchTransition)
+                            .allowsHitTesting(!isChangingBranch)
                         }
-                        .id(currentBranch.id)
-                        .transition(branchTransition)
+                        .clipped()
                     }
 
                     Divider()
@@ -6873,16 +6878,20 @@ private struct MobileHomeStudyOutlineRow: View {
     }
 
     private var branchTransition: AnyTransition {
+        if accessibilityReduceMotion {
+            return .opacity
+        }
+
         switch branchDirection {
         case .deeper:
-            .asymmetric(
-                insertion: .move(edge: .trailing).combined(with: .opacity),
-                removal: .move(edge: .leading).combined(with: .opacity)
+            return AnyTransition.asymmetric(
+                insertion: AnyTransition.offset(x: 24).combined(with: .opacity),
+                removal: AnyTransition.offset(x: -24).combined(with: .opacity)
             )
         case .parent:
-            .asymmetric(
-                insertion: .move(edge: .leading).combined(with: .opacity),
-                removal: .move(edge: .trailing).combined(with: .opacity)
+            return AnyTransition.asymmetric(
+                insertion: AnyTransition.offset(x: -24).combined(with: .opacity),
+                removal: AnyTransition.offset(x: 24).combined(with: .opacity)
             )
         }
     }
@@ -6898,11 +6907,16 @@ private struct MobileHomeStudyOutlineRow: View {
         branchUnlockTask?.cancel()
         isChangingBranch = true
         branchDirection = direction
-        withAnimation(.smooth(duration: 0.28)) {
+        let animation = accessibilityReduceMotion
+            ? Animation.linear(duration: 0.12)
+            : Animation.easeOut(duration: 0.20)
+        withAnimation(animation) {
             currentBranchID = roomID
         }
         branchUnlockTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(280))
+            try? await Task.sleep(
+                for: accessibilityReduceMotion ? .milliseconds(120) : .milliseconds(200)
+            )
             guard !Task.isCancelled else {
                 return
             }
