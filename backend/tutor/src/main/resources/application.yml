@@ -119,7 +119,7 @@ buddystudy:
   translation:
     base-url: ${BUDDYSTUDY_TRANSLATION_BASE_URL:http://localhost:5001}
     supported-languages: ${BUDDYSTUDY_TRANSLATION_SUPPORTED_LANGUAGES:ko,en,ja}
-    provider-order: ${BUDDYSTUDY_TRANSLATION_PROVIDER_ORDER:openai,libretranslate}
+    provider-order: ${BUDDYSTUDY_TRANSLATION_PROVIDER_ORDER:libretranslate,openai}
     timeout-ms: ${BUDDYSTUDY_TRANSLATION_TIMEOUT_MS:5000}
     api-key: ${BUDDYSTUDY_TRANSLATION_API_KEY:}
     backfill-enabled: ${BUDDYSTUDY_TRANSLATION_BACKFILL_ENABLED:true}

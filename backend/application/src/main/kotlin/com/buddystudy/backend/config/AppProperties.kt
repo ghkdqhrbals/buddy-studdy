@@ -65,7 +65,7 @@ data class BuddyStudyProperties(
     data class Translation(
         var baseUrl: String = "http://localhost:5001",
         var supportedLanguages: List<String> = listOf("ko", "en", "ja"),
-        var providerOrder: List<String> = listOf("openai", "libretranslate"),
+        var providerOrder: List<String> = listOf("libretranslate", "openai"),
         var timeoutMs: Long = 5_000,
         var apiKey: String = "",
         var backfillEnabled: Boolean = true,

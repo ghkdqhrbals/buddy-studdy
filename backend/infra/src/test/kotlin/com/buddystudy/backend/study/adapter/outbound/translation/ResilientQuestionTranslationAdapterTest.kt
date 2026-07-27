@@ -9,6 +9,30 @@ import org.junit.jupiter.api.Test
 
 class ResilientQuestionTranslationAdapterTest {
     @Test
+    fun `prioritizes LibreTranslate by default`() = runBlocking {
+        val libre = RecordingProvider(
+            providerId = "libretranslate",
+            result = TranslatedQuestionContent(
+                topic = "Advice types",
+                question = "Explain the differences between advice types in Spring AOP.",
+                hint = null,
+            ),
+        )
+        val openAI = RecordingProvider(providerId = "openai")
+        val adapter = ResilientQuestionTranslationAdapter(
+            listOf(openAI, libre),
+            BuddyStudyProperties(),
+            SimpleMeterRegistry(),
+        )
+
+        val translated = adapter.translateToEnglish("어드바이스 종류", "Spring AOP의 차이를 설명하세요.", null, "ko")
+
+        assertThat(translated.topic).isEqualTo("Advice types")
+        assertThat(libre.calls).hasSize(1)
+        assertThat(openAI.calls).isEmpty()
+    }
+
+    @Test
     fun `uses providers in configured order`() = runBlocking {
         val openAI = RecordingProvider(
             providerId = "openai",
