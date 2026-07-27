@@ -1735,6 +1735,8 @@ private struct MobileHomeView: View {
                 MobileFeedbackPromptRow(strings: strings)
             }
             .buttonStyle(.plain)
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+            .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
         }
     }
@@ -1746,6 +1748,9 @@ private struct MobileHomeView: View {
             MobileCommunityQuestionRow(question: question)
         }
         .buttonStyle(.plain)
+        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
         .contextMenu {
             if appState.isCommunitySessionActive {
                 Button(role: .destructive) {
@@ -7230,7 +7235,7 @@ private struct MobileFeedbackPromptRow: View {
                 Text(strings.feedbackPromptBody)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(2)
             }
 
             Spacer(minLength: 8)
@@ -7239,7 +7244,14 @@ private struct MobileFeedbackPromptRow: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 14)
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemBackground))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .contentShape(Rectangle())
     }
 }
@@ -7343,17 +7355,25 @@ private struct MobileCommunityQuestionRow: View {
     var question: CommunityQuestion
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             CommunityQuestionTopMeta(question: question)
 
             Text(MarkdownContent.plainText(question.question))
                 .font(.body.weight(.medium))
                 .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(2)
+                .truncationMode(.tail)
 
             CommunityQuestionStatsMeta(question: question)
         }
-        .padding(.vertical, 8)
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemBackground))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
