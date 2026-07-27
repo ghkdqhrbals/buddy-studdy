@@ -5626,7 +5626,9 @@ final class AppState: ObservableObject {
 
         var cursor: Int64 = 0
         var lastConnectionError: Error?
-        let queuedMessage = gradingMessage(for: queuedRecord.gradingStatus ?? .queued)
+        var displayedStatus = queuedRecord.gradingStatus ?? .queued
+        var displayedAt = ContinuousClock.now
+        let queuedMessage = gradingMessage(for: displayedStatus)
         statusMessage = queuedMessage
         answerGradingStatusMessage = queuedMessage
 
@@ -5639,6 +5641,12 @@ final class AppState: ObservableObject {
                 )
                 for try await event in events {
                     cursor = max(cursor, event.id)
+                    guard event.status != displayedStatus else {
+                        continue
+                    }
+                    try await keepGradingStatusVisible(since: displayedAt)
+                    displayedStatus = event.status
+                    displayedAt = ContinuousClock.now
                     let progressMessage = gradingMessage(for: event.status)
                     statusMessage = progressMessage
                     answerGradingStatusMessage = progressMessage
@@ -5686,6 +5694,16 @@ final class AppState: ObservableObject {
         }
 
         throw lastConnectionError ?? EventDrivenGradingError.failed(strings.gradingFailed)
+    }
+
+    private func keepGradingStatusVisible(
+        since displayedAt: ContinuousClock.Instant
+    ) async throws {
+        let elapsed = displayedAt.duration(to: ContinuousClock.now)
+        let minimumDuration = Duration.seconds(1)
+        if elapsed < minimumDuration {
+            try await Task.sleep(for: minimumDuration - elapsed)
+        }
     }
 
     private func gradingMessage(for status: AnswerGradingStatus) -> String {
