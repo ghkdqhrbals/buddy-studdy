@@ -56,6 +56,11 @@ class StudyRecord private constructor(
         commentCount = stats?.commentCount ?: 0,
         viewCount = stats?.viewCount ?: 0,
         studyId = question.studyId,
+        gradingVerdict = question.gradingVerdict,
+        gradingConfidence = question.gradingConfidence,
+        gradingPolicyVersion = question.gradingPolicyVersion,
+        gradingModel = question.gradingModel,
+        gradingAssessmentJson = question.gradingAssessmentJson,
     )
 
     companion object {
@@ -78,6 +83,11 @@ data class StudyRecordState(
     val answeredAt: Instant?,
     val publicQuestion: Boolean,
     val studyId: Long? = null,
+    val gradingVerdict: String? = null,
+    val gradingConfidence: Double? = null,
+    val gradingPolicyVersion: String? = null,
+    val gradingModel: String? = null,
+    val gradingAssessmentJson: String? = null,
 )
 
 data class StudyRecordStats(
@@ -131,4 +141,9 @@ data class StudyRecordProjection(
     val commentCount: Int,
     val viewCount: Int,
     val studyId: Long? = null,
+    val gradingVerdict: String? = null,
+    val gradingConfidence: Double? = null,
+    val gradingPolicyVersion: String? = null,
+    val gradingModel: String? = null,
+    val gradingAssessmentJson: String? = null,
 )

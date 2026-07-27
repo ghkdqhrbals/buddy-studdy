@@ -8,6 +8,7 @@ import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
 import com.buddystudy.backend.study.application.model.GeneratedQuestionWithEmbedding
 import com.buddystudy.backend.study.application.port.inbound.QuestionWriteResult
 import com.buddystudy.backend.study.application.port.inbound.ScheduledQuestionWriteUseCase
+import com.buddystudy.backend.study.application.port.outbound.AiGradingRubric
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSelection
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
@@ -48,6 +49,7 @@ class ScheduledQuestionWriteService(
                 topicStudy = topicStudy,
                 question = generated.generated.question,
                 hint = generated.generated.hint,
+                rubric = generated.generated.rubric,
                 appLanguage = appLanguage,
                 now = now,
             )
@@ -110,6 +112,7 @@ private fun StudyEntity.toScheduledQuestion(
     topicStudy: StudyEntity,
     question: String,
     hint: String?,
+    rubric: AiGradingRubric?,
     appLanguage: String,
     now: Instant,
 ): QuestionEntity =
@@ -129,7 +132,7 @@ private fun StudyEntity.toScheduledQuestion(
         publicQuestion = true,
         createdAt = now,
         updatedAt = now,
-    )
+    ).applyRubric(rubric)
 
 internal fun StudyEntity.markScheduleFailed(error: String, retryAt: Instant, now: Instant) {
     nextDueAt = retryAt

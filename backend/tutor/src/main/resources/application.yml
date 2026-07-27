@@ -89,6 +89,9 @@ buddystudy:
   openai:
     api-key: ${OPENAI_API_KEY:}
     model: ${OPENAI_MODEL:gpt-5.4}
+    grading-policy: ${OPENAI_GRADING_POLICY:}
+    grading-policy-version: ${OPENAI_GRADING_POLICY_VERSION:ai-judge-v1}
+    grading-min-confidence: ${OPENAI_GRADING_MIN_CONFIDENCE:0.72}
   apns:
     team-id: ${APNS_TEAM_ID:${notificatoin.push.apns.team-id:}}
     key-id: ${APNS_KEY_ID:${notificatoin.push.apns.key-id:}}

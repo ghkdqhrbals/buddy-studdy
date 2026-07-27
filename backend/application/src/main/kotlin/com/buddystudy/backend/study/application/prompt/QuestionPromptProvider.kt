@@ -7,6 +7,8 @@ data class QuestionGenerationPrompt(
     val systemPrompt: String,
     val userPrompt: String,
     val fallbackTopic: String,
+    val level: Int = 5,
+    val language: String = "ko",
 )
 
 data class QuestionDiversityGuide(
@@ -102,6 +104,8 @@ class QuestionPromptProvider {
 
         return QuestionGenerationPrompt(
             fallbackTopic = resolvedTopic,
+            level = level.coerceIn(1, 10),
+            language = language,
             systemPrompt = DEFAULT_QUESTION_SYSTEM_PROMPT,
             userPrompt = """
                 Create one short study question.
@@ -119,7 +123,33 @@ class QuestionPromptProvider {
                 Extra tutor prompt: $tutorPrompt
 
                 ${MarkdownContentPolicy.GENERATION_GUIDE}
-                Return JSON only with keys question and expectedAnswerHint.
+                Create an immutable grading rubric at the same time. The criteria must be specific to this exact
+                question, observable in a learner answer, mutually distinct, and have integer weights totaling 100.
+                Mark only genuinely indispensable criteria as essential. Include accepted alternative reasoning and
+                concrete misconceptions without requiring exact keyword matches.
+
+                Return JSON only:
+                {
+                  "question": "...",
+                  "expectedAnswerHint": "...",
+                  "rubric": {
+                    "version": "question-rubric-v1",
+                    "assessmentType": "explanation|comparison|diagnosis|design|prediction|other",
+                    "criteria": [
+                      {
+                        "id": "stable_snake_case",
+                        "description": "...",
+                        "weight": 25,
+                        "essential": true,
+                        "expectedEvidence": ["..."],
+                        "acceptedAlternatives": ["..."],
+                        "misconceptions": ["..."]
+                      }
+                    ],
+                    "acceptedAlternatives": ["..."],
+                    "fatalMisconceptions": ["..."]
+                  }
+                }
             """.trimIndent(),
         )
     }

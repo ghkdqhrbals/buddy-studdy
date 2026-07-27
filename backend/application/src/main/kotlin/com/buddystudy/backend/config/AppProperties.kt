@@ -34,6 +34,9 @@ data class BuddyStudyProperties(
         var embeddingModel: String = "text-embedding-3-small",
         var questionSimilarityThreshold: Double = 0.86,
         var questionSimilarityMaxAttempts: Int = 3,
+        var gradingPolicy: String = "",
+        var gradingPolicyVersion: String = "ai-judge-v1",
+        var gradingMinConfidence: Double = 0.72,
     )
     data class Apns(
         var teamId: String = "",

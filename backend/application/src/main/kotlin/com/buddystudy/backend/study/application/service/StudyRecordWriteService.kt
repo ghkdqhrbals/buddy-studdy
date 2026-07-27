@@ -29,6 +29,7 @@ class StudyRecordWriteService(
         val record = question.toStudyRecord()
         question.apply(record.answer(answer))
         if (grade != null && question.score == null) {
+            question.applyGradingMetadata(grade)
             question.apply(
                 record.grade(
                     grade.score,

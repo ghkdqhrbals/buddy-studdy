@@ -7,8 +7,10 @@ import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.auth.domain.entity.DeviceEntity
 import com.buddystudy.backend.auth.adapter.outbound.persistence.DeviceRepository
 import com.buddystudy.backend.study.adapter.outbound.persistence.StudyQuestionCoveragePersistenceAdapter
+import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionRepository
 import com.buddystudy.backend.study.adapter.outbound.persistence.StudyRepository
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
+import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.StudyEntity
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -33,6 +35,7 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var devices: DeviceRepository
     @Autowired lateinit var studies: StudyRepository
+    @Autowired lateinit var questions: QuestionRepository
     @Autowired lateinit var questionCoverage: StudyQuestionCoveragePersistenceAdapter
 
     @Test
@@ -95,6 +98,32 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
 
         assertThat(devices.findByInstallationKeyHash(installationKeyHash)?.deviceId)
             .isEqualTo("flyway-installation-device")
+    }
+
+    @Test
+    fun `flyway schema persists immutable rubric and final AI grading metadata`(): Unit = runBlocking {
+        val saved = questions.save(
+            QuestionEntity(
+                deviceId = "flyway-grading-device",
+                question = "Explain Redis persistence.",
+                topic = "Redis",
+                gradingRubricJson = """{"version":"question-rubric-v1","criteria":[]}""",
+                gradingAssessmentJson = """{"criteria":[]}""",
+                gradingVerdict = "PARTIALLY_CORRECT",
+                gradingConfidence = 0.91,
+                gradingPolicyVersion = "ai-judge-v1",
+                gradingModel = "test-model",
+            )
+        )
+
+        val reloaded = questions.findById(saved.id)
+
+        assertThat(reloaded?.gradingRubricJson).contains("question-rubric-v1")
+        assertThat(reloaded?.gradingAssessmentJson).contains("criteria")
+        assertThat(reloaded?.gradingVerdict).isEqualTo("PARTIALLY_CORRECT")
+        assertThat(reloaded?.gradingConfidence).isEqualTo(0.91)
+        assertThat(reloaded?.gradingPolicyVersion).isEqualTo("ai-judge-v1")
+        assertThat(reloaded?.gradingModel).isEqualTo("test-model")
     }
 
     @Test

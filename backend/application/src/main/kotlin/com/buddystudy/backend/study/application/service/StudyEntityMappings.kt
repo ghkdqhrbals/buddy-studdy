@@ -1,5 +1,8 @@
 package com.buddystudy.backend.study.application.service
 
+import com.buddystudy.backend.common.application.json.JsonMapperProvider
+import com.buddystudy.backend.study.application.port.outbound.AiGradingRubric
+import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystudy.study.domain.StudyRecord
 import com.buddystudy.study.domain.StudyRecordAnswerUpdate
 import com.buddystudy.study.domain.StudyRecordGradeUpdate
@@ -46,6 +49,27 @@ internal fun StudyRoomQuestionDraft.toQuestionEntity() = QuestionEntity(
     updatedAt = updatedAt,
 )
 
+internal fun QuestionEntity.applyRubric(rubric: AiGradingRubric?): QuestionEntity {
+    if (rubric != null && gradingRubricJson == null) {
+        gradingRubricJson = JsonMapperProvider.mapper.writeValueAsString(rubric)
+    }
+    return this
+}
+
+internal fun QuestionEntity.gradingRubric(): AiGradingRubric? =
+    gradingRubricJson?.let { json ->
+        runCatching { JsonMapperProvider.mapper.readValue(json, AiGradingRubric::class.java) }.getOrNull()
+    }
+
+internal fun QuestionEntity.applyGradingMetadata(grade: GradedAnswer) {
+    applyRubric(grade.rubric)
+    gradingAssessmentJson = grade.assessment?.let(JsonMapperProvider.mapper::writeValueAsString)
+    gradingVerdict = grade.verdict
+    gradingConfidence = grade.confidence
+    gradingPolicyVersion = grade.policyVersion
+    gradingModel = grade.model
+}
+
 internal fun QuestionEntity.toStudyRecord(stats: QuestionStatsEntity? = null) = StudyRecord.of(
     StudyRecordState(
         id = id,
@@ -62,6 +86,11 @@ internal fun QuestionEntity.toStudyRecord(stats: QuestionStatsEntity? = null) = 
         answeredAt = answeredAt,
         publicQuestion = publicQuestion,
         studyId = studyId,
+        gradingVerdict = gradingVerdict,
+        gradingConfidence = gradingConfidence,
+        gradingPolicyVersion = gradingPolicyVersion,
+        gradingModel = gradingModel,
+        gradingAssessmentJson = gradingAssessmentJson,
     ),
     stats?.let { StudyRecordStats(it.likeCount, it.commentCount, it.viewCount) },
 )

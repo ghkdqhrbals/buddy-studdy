@@ -21,6 +21,8 @@ class QuestionPromptProviderTest {
         )
 
         assertThat(prompt.fallbackTopic).isEqualTo("Redis")
+        assertThat(prompt.level).isEqualTo(8)
+        assertThat(prompt.language).isEqualTo("en")
         assertThat(prompt.systemPrompt).isEqualTo(QuestionPromptProvider.DEFAULT_QUESTION_SYSTEM_PROMPT)
         assertThat(prompt.userPrompt).doesNotContain(QuestionPromptProvider.DEFAULT_QUESTION_SYSTEM_PROMPT)
         assertThat(prompt.userPrompt).contains("Topic: Redis")
@@ -32,6 +34,8 @@ class QuestionPromptProviderTest {
         assertThat(prompt.userPrompt).contains("never inline 'A) choice B) choice'")
         assertThat(prompt.userPrompt).contains("Do not emit HTML")
         assertThat(prompt.userPrompt).contains("Return JSON only")
+        assertThat(prompt.userPrompt).contains("\"rubric\"")
+        assertThat(prompt.userPrompt).contains("weights totaling 100")
     }
 
     @Test

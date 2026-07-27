@@ -3,6 +3,7 @@ package com.buddystudy.backend.study.adapter.outbound.openai
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.study.application.port.outbound.AiGradingRubric
 import com.buddystudy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystudy.backend.study.application.port.outbound.OpenAIPort
@@ -72,6 +73,17 @@ class SystemOpenAIClient(
 
     override suspend fun grade(apiKey: String, model: String, question: String, answer: String, topic: String, level: Int, language: String): GradedAnswer =
         executor.grade(systemApiKey(), model, question, answer, topic, level, language)
+
+    override suspend fun gradeWithRubric(
+        apiKey: String,
+        model: String,
+        question: String,
+        answer: String,
+        topic: String,
+        level: Int,
+        language: String,
+        rubric: AiGradingRubric?,
+    ): GradedAnswer = executor.grade(systemApiKey(), model, question, answer, topic, level, language, rubric)
 
     override suspend fun suggestTopics(
         rootTopic: String,

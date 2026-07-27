@@ -4,7 +4,29 @@ import com.buddystudy.backend.common.application.model.PageResponse
 import java.time.Instant
 
 data class QuestionItemResponse(val question: String, val expectedAnswerHint: String? = null, val createdAt: Instant)
-data class GradingResultResponse(val score: Int, val isCorrect: Boolean, val feedback: String, val explanation: String)
+data class GradingCriterionResponse(
+    val criterionId: String,
+    val satisfied: Boolean,
+    val evidence: List<String> = emptyList(),
+    val missing: List<String> = emptyList(),
+    val reason: String = "",
+)
+
+data class GradingResultResponse(
+    val score: Int,
+    val isCorrect: Boolean,
+    val feedback: String,
+    val explanation: String,
+    val verdict: String? = null,
+    val confidence: Double? = null,
+    val criteria: List<GradingCriterionResponse> = emptyList(),
+    val contradictions: List<String> = emptyList(),
+    val misconceptions: List<String> = emptyList(),
+    val unsupportedClaims: List<String> = emptyList(),
+    val auditReason: String? = null,
+    val policyVersion: String? = null,
+    val model: String? = null,
+)
 
 data class StudyRecordResponse(
     val id: String,

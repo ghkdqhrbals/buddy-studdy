@@ -138,6 +138,7 @@ class StudyService(
             val questionDeferred = async {
                 val question = room.createQuestion(generated.question, generated.hint, source = "manual", now = now)
                     .toQuestionEntity()
+                    .applyRubric(generated.generated.rubric)
                     .applyCoverage(coverageSelection)
                 val result = questionWriter.saveQuestionWithOutboxes(
                     embedding = generated.embedding,
@@ -168,7 +169,7 @@ class StudyService(
             val study = question.studyId?.let { studies.findByIdAndUserId(it, principal.userId) }
                 ?: studies.findByUserIdAndTopic(principal.userId, question.topic)
                 ?: studies.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId)
-            openAI.grade(
+            openAI.gradeWithRubric(
                 apiKeyFor(user),
                 openAIModelFor(study),
                 question.question,
@@ -176,6 +177,7 @@ class StudyService(
                 question.topic,
                 question.difficultyLevel,
                 user?.appLanguage ?: "ko",
+                question.gradingRubric(),
             )
         } else {
             null
