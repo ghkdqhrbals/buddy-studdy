@@ -13,6 +13,9 @@ class ApiLoggingPolicy(
     private val detail = ApiLogDetail.from(detail)
 
     val capturesBodies: Boolean
+        get() = true
+
+    val includesRequestMetadata: Boolean
         get() = detail == ApiLogDetail.DETAILED
 
     val includesRequestIdInMdc: Boolean

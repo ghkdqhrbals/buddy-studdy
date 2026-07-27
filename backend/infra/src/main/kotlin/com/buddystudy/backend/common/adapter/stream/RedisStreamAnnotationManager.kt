@@ -305,10 +305,14 @@ internal class RedisStreamHandlerMethod private constructor(
 
     suspend fun invoke(bean: Any, payload: Any, context: StreamMessageContext) {
         val arguments = if (acceptsContext) arrayOf(bean, payload, context) else arrayOf(bean, payload)
-        if (function.isSuspend) {
-            function.callSuspend(*arguments)
-        } else {
-            function.call(*arguments)
+        try {
+            if (function.isSuspend) {
+                function.callSuspend(*arguments)
+            } else {
+                function.call(*arguments)
+            }
+        } catch (error: java.lang.reflect.InvocationTargetException) {
+            throw error.targetException ?: error
         }
     }
 

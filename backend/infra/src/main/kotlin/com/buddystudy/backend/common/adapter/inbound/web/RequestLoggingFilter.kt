@@ -98,7 +98,7 @@ class RequestLoggingFilter(
             }
             if (exchange.request.path.value().startsWith("/api/")) {
                 logApiExchange(
-                    if (loggingPolicy.capturesBodies) {
+                    if (loggingPolicy.includesRequestMetadata) {
                         formatter.apiExchangeJson(
                             requestId,
                             exchange.getAttribute<Long>(AUTHENTICATED_USER_ID_ATTRIBUTE)?.toString() ?: ANONYMOUS_USER_ID,
@@ -109,13 +109,19 @@ class RequestLoggingFilter(
                             durationMs,
                         )
                     } else {
-                        formatter.compactApiExchangeJson(exchange.request, exchange.response, durationMs)
+                        formatter.compactApiExchangeJson(
+                            exchange.request,
+                            exchange.response,
+                            requestBody,
+                            responseBody,
+                            durationMs,
+                        )
                     },
                     status,
                 )
             } else {
                 logApiResponse(
-                    if (loggingPolicy.capturesBodies) {
+                    if (loggingPolicy.includesRequestMetadata) {
                         formatter.apiResponseJson(
                             requestId,
                             exchange.request,
@@ -125,7 +131,12 @@ class RequestLoggingFilter(
                             includeBody = false,
                         )
                     } else {
-                        formatter.compactApiResponseJson(exchange.request, exchange.response, durationMs)
+                        formatter.compactApiResponseJson(
+                            exchange.request,
+                            exchange.response,
+                            responseBody,
+                            durationMs,
+                        )
                     },
                     status,
                 )

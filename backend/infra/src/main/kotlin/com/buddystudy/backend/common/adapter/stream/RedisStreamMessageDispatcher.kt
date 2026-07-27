@@ -1,5 +1,6 @@
 package com.buddystudy.backend.common.adapter.stream
 
+import com.buddystudy.backend.common.adapter.inbound.web.ApiLoggingPolicy
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumerOperations
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
 import kotlinx.coroutines.CancellationException
@@ -10,6 +11,7 @@ import org.springframework.stereotype.Component
 class RedisStreamMessageDispatcher(
     private val streams: RedisStreamConsumerOperations,
     private val codec: JacksonRedisStreamCodec,
+    private val loggingPolicy: ApiLoggingPolicy,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -78,8 +80,8 @@ class RedisStreamMessageDispatcher(
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
-            logger.warn(
-                "redis_stream_handler_failed method={} stream={} redisRecordId={} eventId={} eventType={} group={} options={} claimed={} errorType={} error={}",
+            val rootError = error.unwrapReflectionFailure()
+            val arguments: Array<Any?> = arrayOf(
                 method.name,
                 message.streamKey,
                 message.recordId,
@@ -88,10 +90,14 @@ class RedisStreamMessageDispatcher(
                 group,
                 options,
                 claimed,
-                error.javaClass.name,
-                error.cause?.message ?: error.message,
-                error,
+                rootError.javaClass.name,
+                rootError.message,
             )
+            if (loggingPolicy.includesStackTrace) {
+                logger.warn(HANDLER_FAILED_LOG, *arguments, rootError)
+            } else {
+                logger.warn(HANDLER_FAILED_LOG, *arguments)
+            }
         }
     }
 
@@ -101,5 +107,19 @@ class RedisStreamMessageDispatcher(
             StreamOptions.ACK -> streams.acknowledge(message, group)
             StreamOptions.ACK_DEL -> streams.acknowledgeAndDelete(message, group)
         }
+    }
+
+    private fun Throwable.unwrapReflectionFailure(): Throwable {
+        var current = this
+        while (current is java.lang.reflect.InvocationTargetException && current.targetException != null) {
+            current = current.targetException
+        }
+        return current
+    }
+
+    private companion object {
+        const val HANDLER_FAILED_LOG =
+            "redis_stream_handler_failed method={} stream={} redisRecordId={} eventId={} eventType={} group={} " +
+                "options={} claimed={} errorType={} error={}"
     }
 }

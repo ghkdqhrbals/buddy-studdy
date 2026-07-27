@@ -47,13 +47,17 @@ internal class ApiExchangeLogFormatter(
     fun compactApiExchangeJson(
         request: ServerHttpRequest,
         response: ServerHttpResponse,
+        requestBody: CapturedBody,
+        responseBody: CapturedBody,
         durationMs: Double,
     ): String =
         buildJson(
             "method" to request.method.name(),
             "path" to request.path.value(),
+            "requestBody" to body(requestBody, request.headers),
             "status" to (response.statusCode?.value() ?: 200),
             "durationMs" to "%.2f".format(Locale.US, durationMs),
+            "responseBody" to body(responseBody, response.headers),
         )
 
     fun apiResponseJson(
@@ -80,6 +84,7 @@ internal class ApiExchangeLogFormatter(
     fun compactApiResponseJson(
         request: ServerHttpRequest,
         response: ServerHttpResponse,
+        responseBody: CapturedBody,
         durationMs: Double,
     ): String =
         buildJson(
@@ -87,6 +92,7 @@ internal class ApiExchangeLogFormatter(
             "path" to request.path.value(),
             "status" to (response.statusCode?.value() ?: 200),
             "durationMs" to "%.2f".format(Locale.US, durationMs),
+            "responseBody" to body(responseBody, response.headers),
         )
 
     private fun headers(headers: HttpHeaders): Map<String, Any?> =

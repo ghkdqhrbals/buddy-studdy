@@ -138,8 +138,8 @@ class RequestLoggingFilterTest {
     }
 
     @Test
-    fun `compact api log omits request metadata headers and bodies`(output: CapturedOutput) = runBlocking {
-        val requestBody = """{"topic":"Redis"}"""
+    fun `compact api log includes redacted bodies but omits request identity and headers`(output: CapturedOutput) = runBlocking {
+        val requestBody = """{"topic":"Redis","accessToken":"secret-token"}"""
         val exchange = execute(
             request = MockServerHttpRequest.post("/api/v1/studies")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -156,18 +156,18 @@ class RequestLoggingFilterTest {
         }
 
         assertThat(exchange.response.bodyAsString.block()).isEqualTo("""{"id":10}""")
-        assertThat(output.out).containsPattern(
-            """api_exchange \{"method":"POST","path":"/api/v1/studies","status":200,"durationMs":"\d+\.\d{2}"}""",
-        )
+        assertThat(output.out).contains("\"method\":\"POST\"")
+        assertThat(output.out).contains("\"path\":\"/api/v1/studies\"")
+        assertThat(output.out).contains("\"requestBody\":{\"topic\":\"Redis\",\"accessToken\":\"[REDACTED]\"}")
+        assertThat(output.out).contains("\"status\":200")
+        assertThat(output.out).contains("\"responseBody\":{\"id\":10}")
         assertThat(output.out).doesNotContain("requestId")
         assertThat(output.out).doesNotContain("clientIp")
         assertThat(output.out).doesNotContain("userId")
         assertThat(output.out).doesNotContain("requestHeaders")
-        assertThat(output.out).doesNotContain("requestBody")
         assertThat(output.out).doesNotContain("responseHeaders")
-        assertThat(output.out).doesNotContain("responseBody")
         assertThat(output.out).doesNotContain("203.0.113.10")
-        assertThat(output.out).doesNotContain("Redis")
+        assertThat(output.out).doesNotContain("secret-token")
     }
 
     private fun execute(

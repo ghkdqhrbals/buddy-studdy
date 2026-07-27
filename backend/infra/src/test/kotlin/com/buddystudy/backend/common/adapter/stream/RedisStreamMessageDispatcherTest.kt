@@ -4,12 +4,17 @@ import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamClaimBatc
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumerOperations
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
+import com.buddystudy.backend.common.adapter.inbound.web.ApiLoggingPolicy
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import java.time.Duration
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 
+@ExtendWith(OutputCaptureExtension::class)
 class RedisStreamMessageDispatcherTest {
     @Test
     fun `successful typed handler is acknowledged after invocation`(): Unit = runBlocking {
@@ -17,6 +22,7 @@ class RedisStreamMessageDispatcherTest {
         val dispatcher = RedisStreamMessageDispatcher(
             streams,
             JacksonRedisStreamCodec(JsonMapperProvider.mapper),
+            ApiLoggingPolicy("detailed"),
         )
         val handlerBean = SampleHandler()
 
@@ -41,6 +47,7 @@ class RedisStreamMessageDispatcherTest {
         val dispatcher = RedisStreamMessageDispatcher(
             streams,
             JacksonRedisStreamCodec(JsonMapperProvider.mapper),
+            ApiLoggingPolicy("detailed"),
         )
 
         dispatcher.dispatch(
@@ -63,6 +70,7 @@ class RedisStreamMessageDispatcherTest {
         val dispatcher = RedisStreamMessageDispatcher(
             streams,
             JacksonRedisStreamCodec(JsonMapperProvider.mapper),
+            ApiLoggingPolicy("detailed"),
         )
 
         dispatcher.dispatch(
@@ -80,11 +88,36 @@ class RedisStreamMessageDispatcherTest {
     }
 
     @Test
+    fun `compact logging reports root stream failure without reflection stack trace`(output: CapturedOutput) = runBlocking {
+        val dispatcher = RedisStreamMessageDispatcher(
+            RecordingConsumerOperations(),
+            JacksonRedisStreamCodec(JsonMapperProvider.mapper),
+            ApiLoggingPolicy("compact"),
+        )
+
+        dispatcher.dispatch(
+            bean = SampleHandler(),
+            method = handlerMethod("fail"),
+            eventType = "SAMPLE",
+            payloadType = SamplePayload::class.java,
+            group = "sample-group",
+            options = StreamOptions.ACK,
+            message = message("""{"value":31}"""),
+            claimed = true,
+        )
+
+        assertThat(output.out).contains("errorType=java.lang.IllegalStateException error=handler failed")
+        assertThat(output.out).doesNotContain("InvocationTargetException")
+        assertThat(output.out).doesNotContain("\tat ")
+    }
+
+    @Test
     fun `ack del option acknowledges and deletes after successful invocation`() = runBlocking {
         val streams = RecordingConsumerOperations()
         val dispatcher = RedisStreamMessageDispatcher(
             streams,
             JacksonRedisStreamCodec(JsonMapperProvider.mapper),
+            ApiLoggingPolicy("detailed"),
         )
 
         dispatcher.dispatch(
@@ -108,6 +141,7 @@ class RedisStreamMessageDispatcherTest {
         val dispatcher = RedisStreamMessageDispatcher(
             streams,
             JacksonRedisStreamCodec(JsonMapperProvider.mapper),
+            ApiLoggingPolicy("detailed"),
         )
 
         dispatcher.dispatch(
@@ -131,6 +165,7 @@ class RedisStreamMessageDispatcherTest {
         val dispatcher = RedisStreamMessageDispatcher(
             streams,
             JacksonRedisStreamCodec(JsonMapperProvider.mapper),
+            ApiLoggingPolicy("detailed"),
         )
         val handler = SampleHandler()
 

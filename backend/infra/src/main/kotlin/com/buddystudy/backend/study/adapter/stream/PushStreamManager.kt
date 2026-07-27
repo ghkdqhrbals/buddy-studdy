@@ -226,6 +226,12 @@ class PushStreamManager(
     }
 
     internal suspend fun deliver(payload: QuestionPushRequestedPayload, context: StreamMessageContext) {
+        val pushMessage = PushEventPayloadMapper.toPushQuestionMessage(
+            payload = payload,
+            fields = context.fields,
+            apnsToken = context.fields["apnsToken"].orEmpty(),
+            apnsEnvironment = context.fields["apnsEnvironment"] ?: "production",
+        )
         try {
             logger.info(
                 "redis_stream_consume_started stream={} redisRecordId={} eventId={} eventType={} recordId={} notificationId={} deviceId={} userId={} claimed={}",
@@ -238,12 +244,6 @@ class PushStreamManager(
                 payload.deviceId,
                 payload.userId,
                 context.claimed,
-            )
-            val pushMessage = PushEventPayloadMapper.toPushQuestionMessage(
-                payload = payload,
-                fields = context.fields,
-                apnsToken = context.fields["apnsToken"].orEmpty(),
-                apnsEnvironment = context.fields["apnsEnvironment"] ?: "production",
             )
             pushNotifications.sendQuestion(pushMessage)
             val consumedAt = Instant.now()
@@ -267,6 +267,18 @@ class PushStreamManager(
                 runCatching {
                     notifications.markPushFailed(it, error.message ?: error.javaClass.simpleName, Instant.now())
                 }
+            }
+            if (pushMessage is ApnsQuestionMessage && pushMessage.token.isBlank()) {
+                logger.warn(
+                    "redis_stream_consume_discarded reason=apns_token_missing stream={} redisRecordId={} eventId={} recordId={} notificationId={} claimed={}",
+                    context.streamKey,
+                    context.recordId,
+                    context.eventId,
+                    payload.recordId,
+                    payload.notificationId,
+                    context.claimed,
+                )
+                return
             }
             throw error
         }
