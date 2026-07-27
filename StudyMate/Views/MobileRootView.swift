@@ -1586,9 +1586,6 @@ private struct MobileHomeView: View {
 
                 ForEach(filteredStudyCategories) { category in
                     myStudyCategoryRow(category)
-                        .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
                 }
                 .onMove { offsets, destination in
                     guard trimmedHomeStudySearchText.isEmpty else {
@@ -1609,6 +1606,9 @@ private struct MobileHomeView: View {
                 hasPendingQuestion: appState.pendingQuestionCount(for: category) > 0,
                 strings: strings
             )
+            .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
         } else {
             if let snapshot = studyOutlineSnapshot(for: category) {
                 MobileHomeStudyOutlineRow(
@@ -1632,6 +1632,9 @@ private struct MobileHomeView: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
                 .contextMenu {
                     Button {
                         editingStudyCategory = category
@@ -6712,8 +6715,9 @@ private struct MobileHomeStudyOutlineRow: View {
         !snapshot.children(of: snapshot.root.id).isEmpty
     }
 
+    @ViewBuilder
     var body: some View {
-        VStack(spacing: 0) {
+        studyCard {
             studyNavigationRow(
                 room: snapshot.root,
                 isRoot: true,
@@ -6722,30 +6726,7 @@ private struct MobileHomeStudyOutlineRow: View {
                     isExpanded.toggle()
                 }
             )
-
-            if isExpanded && hasRootChildren {
-                Group {
-                    if let searchResults = snapshot.searchResults {
-                        searchResultRows(searchResults)
-                    } else {
-                        VStack(spacing: 0) {
-                            branchRows
-                        }
-                        .allowsHitTesting(!isChangingBranch)
-                    }
-                }
-            }
         }
-        .background(
-            Color(.secondarySystemBackground),
-            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.primary.opacity(0.04), lineWidth: 1)
-        }
-        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .onChange(of: snapshot.searchQuery) {
             branchUnlockTask?.cancel()
             isBranchContentRevealed = true
@@ -6755,28 +6736,35 @@ private struct MobileHomeStudyOutlineRow: View {
         .onDisappear {
             branchUnlockTask?.cancel()
         }
+
+        if isExpanded && hasRootChildren {
+            if let searchResults = snapshot.searchResults {
+                searchResultRows(searchResults)
+            } else {
+                branchRows
+            }
+        }
     }
 
     @ViewBuilder
     private var branchRows: some View {
-        Divider()
-            .padding(.leading, 14)
-
         branchPathHeader
+            .listRowInsets(EdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 4))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
 
         ForEach(Array(visibleChildren.enumerated()), id: \.element.id) { index, room in
-            Divider()
-                .padding(.leading, 50)
-
-            studyNavigationRow(
-                room: room,
-                isRoot: false,
-                onOpenChildren: snapshot.children(of: room.id).isEmpty
-                    ? nil
-                    : {
-                        replaceBranch(with: room.id, direction: 1)
-                    }
-            )
+            studyCard {
+                studyNavigationRow(
+                    room: room,
+                    isRoot: false,
+                    onOpenChildren: snapshot.children(of: room.id).isEmpty
+                        ? nil
+                        : {
+                            replaceBranch(with: room.id, direction: 1)
+                        }
+                )
+            }
             .opacity(isBranchContentRevealed ? 1 : 0.72)
             .offset(
                 x: isBranchContentRevealed
@@ -6787,8 +6775,28 @@ private struct MobileHomeStudyOutlineRow: View {
                 .easeOut(duration: 0.18).delay(Double(index) * 0.025),
                 value: isBranchContentRevealed
             )
+            .allowsHitTesting(!isChangingBranch)
         }
-        .allowsHitTesting(!isChangingBranch)
+    }
+
+    @ViewBuilder
+    private func studyCard<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .background(
+                Color(.secondarySystemBackground),
+                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.primary.opacity(0.04), lineWidth: 1)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
     }
 
     private var branchPathHeader: some View {
@@ -6822,7 +6830,7 @@ private struct MobileHomeStudyOutlineRow: View {
                 .accessibilityLabel(currentPath.map(\.topic).joined(separator: ", "))
         }
         .padding(.horizontal, 14)
-        .frame(minHeight: 54)
+        .frame(minHeight: 42)
         .opacity(isBranchContentRevealed ? 1 : 0.78)
         .offset(
             x: isBranchContentRevealed
@@ -6840,39 +6848,38 @@ private struct MobileHomeStudyOutlineRow: View {
         let visibleResults = Array(results.prefix(StudyOutlinePolicy.childPreviewLimit))
 
         ForEach(visibleResults) { room in
-            Divider()
-                .padding(.leading, 50)
+            studyCard {
+                Button {
+                    onAction(.openTopic(room))
+                } label: {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(snapshot.path(to: room.id).dropLast().map(\.topic).joined(separator: "  ›  "))
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.head)
 
-            Button {
-                onAction(.openTopic(room))
-            } label: {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(snapshot.path(to: room.id).dropLast().map(\.topic).joined(separator: "  ›  "))
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.head)
-
-                    studyDestinationContent(
-                        room: room,
-                        isRoot: false,
-                        childCount: snapshot.children(of: room.id).count,
-                        showsDisclosure: true
-                    )
+                        studyDestinationContent(
+                            room: room,
+                            isRoot: false,
+                            childCount: snapshot.children(of: room.id).count,
+                            showsDisclosure: true
+                        )
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
                 }
-                .padding(.horizontal, 14)
-                .padding(.top, 8)
-            }
-            .buttonStyle(.plain)
-            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .contextMenu {
-                topicActions(for: room)
-            }
-            .accessibilityAction(named: strings.editStudyCategory) {
-                onAction(.configureTopic(room))
-            }
-            .accessibilityAction(named: strings.deleteStudy) {
-                onAction(.deleteTopic(room))
+                .buttonStyle(.plain)
+                .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .contextMenu {
+                    topicActions(for: room)
+                }
+                .accessibilityAction(named: strings.editStudyCategory) {
+                    onAction(.configureTopic(room))
+                }
+                .accessibilityAction(named: strings.deleteStudy) {
+                    onAction(.deleteTopic(room))
+                }
             }
         }
     }
