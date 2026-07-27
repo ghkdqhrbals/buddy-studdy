@@ -1598,9 +1598,6 @@ private struct MobileHomeView: View {
                     pendingQuestionCount: { room in
                         appState.pendingQuestionCount(categoryID: String(room.id))
                     },
-                    onOpenTree: {
-                        appState.openStudyTree(category.id)
-                    },
                     onOpenTopic: { room in
                         appState.openStudyCategory(String(room.id))
                     }
@@ -6631,7 +6628,6 @@ private struct MobileHomeStudyOutlineRow: View {
     var snapshot: MobileHomeStudyOutlineSnapshot
     var strings: AppStrings
     var pendingQuestionCount: (BackendStudyRoom) -> Int
-    var onOpenTree: () -> Void
     var onOpenTopic: (BackendStudyRoom) -> Void
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @State private var currentBranchID: Int?
@@ -6657,44 +6653,6 @@ private struct MobileHomeStudyOutlineRow: View {
         Array(currentChildren.prefix(StudyOutlinePolicy.childPreviewLimit))
     }
 
-    private var hiddenItemCount: Int {
-        StudyOutlinePolicy.remainingCount(
-            totalTopicCount: snapshot.searchResults?.count ?? currentChildren.count
-        )
-    }
-
-    private var fullTreeEntryRow: some View {
-        Button(action: onOpenTree) {
-            HStack(spacing: 12) {
-                Image(systemName: "point.3.connected.trianglepath.dotted")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 24)
-
-                Text(strings.viewFullStudyTree)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                Spacer()
-
-                if hiddenItemCount > 0 {
-                    Text("+\(hiddenItemCount)")
-                        .font(.caption2.weight(.bold))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
-
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 14)
-            .frame(minHeight: 50)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             studyNavigationRow(
@@ -6716,11 +6674,6 @@ private struct MobileHomeStudyOutlineRow: View {
                         }
                         .allowsHitTesting(!isChangingBranch)
                     }
-
-                    Divider()
-                        .padding(.leading, 14)
-
-                    fullTreeEntryRow
                 }
             }
         }
