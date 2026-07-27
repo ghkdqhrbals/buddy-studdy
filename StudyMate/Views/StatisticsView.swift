@@ -405,17 +405,16 @@ struct StudyRecordDetailView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             MarkdownMessageText(markdown: displayedRecord.question.question)
                                 .font(.body)
-                                .foregroundStyle(.white)
-                                .tint(.white)
+                                .foregroundStyle(.primary)
+                                .tint(.accentColor)
                                 .textSelection(.enabled)
 
                             hintView(for: displayedRecord)
                         }
                     }
 
-                    if let answer = displayedRecord.answer,
-                       !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                       displayedRecord.gradingResult != nil {
+                    if let answer = submittedAnswer(for: displayedRecord),
+                       displayedRecord.gradingResult != nil || appState.isGradingAnswer {
                         RecordChatBubble(role: .answer) {
                             MarkdownMessageText(markdown: answer, fillsWidth: false)
                                 .font(.body)
@@ -503,6 +502,11 @@ struct StudyRecordDetailView: View {
             !draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private func submittedAnswer(for record: StudyRecord) -> String? {
+        let answer = (record.answer ?? draftAnswer).trimmingCharacters(in: .whitespacesAndNewlines)
+        return answer.isEmpty ? nil : answer
+    }
+
     @ViewBuilder
     private func hintView(for record: StudyRecord) -> some View {
         if let hint = record.question.expectedAnswerHint,
@@ -515,14 +519,14 @@ struct StudyRecordDetailView: View {
                 }
                 .buttonStyle(.borderless)
                 .font(.caption)
-                .foregroundStyle(.white)
-                .tint(.white)
+                .foregroundStyle(.secondary)
+                .tint(.accentColor)
 
                 if showsHint {
                     MarkdownMessageText(markdown: hint)
                         .font(.caption)
-                        .foregroundStyle(.white.opacity(0.85))
-                        .tint(.white)
+                        .foregroundStyle(.secondary)
+                        .tint(.accentColor)
                         .textSelection(.enabled)
                         .lineLimit(nil)
                 }
@@ -627,11 +631,11 @@ private enum RecordChatBubbleRole {
     var fill: Color {
         switch self {
         case .question:
-            Color.green.opacity(0.92)
+            Color.secondary.opacity(0.08)
         case .answer:
-            Color.accentColor.opacity(0.92)
+            Color.green.opacity(0.92)
         case .feedback:
-            Color.secondary.opacity(0.06)
+            Color.secondary.opacity(0.08)
         case .input:
             Color.clear
         }
@@ -639,7 +643,7 @@ private enum RecordChatBubbleRole {
 
     var border: Color {
         switch self {
-        case .feedback:
+        case .question, .feedback:
             Color.secondary.opacity(0.12)
         default:
             Color.clear

@@ -438,8 +438,8 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                     HStack(alignment: .top, spacing: 10) {
                         MarkdownMessageText(markdown: question.question)
                             .font(.body)
-                            .foregroundStyle(.white)
-                            .tint(.white)
+                            .foregroundStyle(.primary)
+                            .tint(.accentColor)
                             .textSelection(.enabled)
 
                         if gradingResult == nil {
@@ -448,9 +448,9 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                             } label: {
                                 Image(systemName: "forward.fill")
                                     .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.9))
+                                    .foregroundStyle(.secondary)
                                     .frame(width: 30, height: 30)
-                                    .background(.white.opacity(0.16), in: Circle())
+                                    .background(Color.secondary.opacity(0.12), in: Circle())
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel(strings.skipQuestion)
@@ -461,7 +461,7 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                 }
             }
 
-            if gradingResult == nil {
+            if gradingResult == nil && !isGradingAnswer {
                 StudyChatBubble(role: .learnerInput) {
                     MessageAnswerInput(
                         strings: strings,
@@ -481,7 +481,7 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                         .multilineTextAlignment(.leading)
                         .padding(.vertical, 10)
                         .padding(.horizontal, 13)
-                        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .background(Color.green.opacity(0.92), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
             }
 
@@ -534,14 +534,14 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                 }
                 .buttonStyle(.borderless)
                 .font(.caption)
-                .foregroundStyle(.white)
-                .tint(.white)
+                .foregroundStyle(.secondary)
+                .tint(.accentColor)
 
                 if showsHint {
                     MarkdownMessageText(markdown: hint)
                         .font(.caption)
-                        .foregroundStyle(.white.opacity(0.85))
-                        .tint(.white)
+                        .foregroundStyle(.secondary)
+                        .tint(.accentColor)
                         .textSelection(.enabled)
                         .lineLimit(nil)
                 }
@@ -569,18 +569,18 @@ private enum StudyChatBubbleRole: Equatable {
     var bubbleColor: Color {
         switch self {
         case .tutor:
-            Color.green.opacity(0.92)
+            Color.secondary.opacity(0.08)
         case .learnerInput, .learnerAnswer:
             Color.clear
         case .feedback:
-            Color.secondary.opacity(0.06)
+            Color.secondary.opacity(0.08)
         }
     }
 
     var borderColor: Color {
         switch self {
         case .tutor:
-            Color.green.opacity(0.0)
+            Color.secondary.opacity(0.12)
         case .learnerInput, .learnerAnswer:
             Color.clear
         case .feedback:

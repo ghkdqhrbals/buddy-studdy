@@ -7672,8 +7672,8 @@ struct CommunityQuestionDetailView: View {
                 CommunityMessageBubble(role: .question) {
                     MarkdownMessageText(markdown: displayQuestion.question)
                         .font(.body)
-                        .foregroundStyle(.white)
-                        .tint(.white)
+                        .foregroundStyle(.primary)
+                        .tint(.accentColor)
                         .textSelection(.enabled)
                 }
 
@@ -8108,19 +8108,19 @@ private enum CommunityMessageBubbleRole: Equatable {
     var foregroundBackground: Color {
         switch self {
         case .question:
-            Color.green.opacity(0.92)
+            Color.secondary.opacity(0.08)
         case .answer:
-            Color.accentColor
+            Color.green.opacity(0.92)
         case .feedback:
-            Color.secondary.opacity(0.06)
+            Color.secondary.opacity(0.08)
         }
     }
 
     var borderColor: Color {
         switch self {
-        case .question, .answer:
+        case .answer:
             Color.clear
-        case .feedback:
+        case .question, .feedback:
             Color.secondary.opacity(0.12)
         }
     }
