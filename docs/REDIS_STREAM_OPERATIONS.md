@@ -24,9 +24,9 @@ blocking timeout, and completion policy.
 - `ACK_DEL`: execute `XACK` and `XDEL` atomically in one Redis Lua script request.
 
 Handler or Jackson conversion failures never ACK or delete the message. The
-push listener and its idle-message recovery scheduler use `ACK_DEL` because
-the dedicated push stream has one owning consumer group and the durable
-`question_push_outbox` remains the recovery source.
+push listener and its idle-message recovery scheduler use `ACK` so successful
+push entries remain available in the bounded stream for operational
+inspection. The durable `question_push_outbox` remains the recovery source.
 
 Notification events use `ACK`: the domain stream can have multiple consumer
 groups, so one successful listener must not delete a record needed by another

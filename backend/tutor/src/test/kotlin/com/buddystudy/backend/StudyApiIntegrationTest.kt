@@ -283,7 +283,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         val apiStatus = getJson("/api/v1/api", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
-        assertThat(apiStatus["openaiKeyConfigured"].asBoolean()).isFalse()
+        assertThat(apiStatus["openaiKeyConfigured"].asBoolean()).isTrue()
 
         refreshUserStats.refreshAll(Instant.parse("2026-06-09T03:00:00Z"))
 
@@ -415,8 +415,9 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(question["topic"].asText()).isEqualTo("Kotlin Coroutines")
         assertThat(question["question"]["question"].asText()).isEqualTo("Generated question for Kotlin Coroutines")
 
-        val pendingQuestionCount = questions.countPendingForStudy(created["id"].asLong())
+        val pendingQuestionCount = questions.countPendingForStudy(child["id"].asLong())
         assertThat(pendingQuestionCount).isEqualTo(1)
+        assertThat(questions.countPendingForStudy(created["id"].asLong())).isZero()
     }
 
     @TestConfiguration

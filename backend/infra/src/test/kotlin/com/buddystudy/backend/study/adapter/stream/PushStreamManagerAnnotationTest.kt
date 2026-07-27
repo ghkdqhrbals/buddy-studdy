@@ -40,7 +40,7 @@ class PushStreamManagerAnnotationTest {
         assertThat(annotation.eventType).isEqualTo("QUESTION_PUSH_REQUESTED")
         assertThat(annotation.batchSize).isEqualTo(50)
         assertThat(annotation.concurrencyProperty).isEqualTo("buddystudy.streams.push-consumer-concurrency")
-        assertThat(annotation.options).isEqualTo(StreamOptions.ACK_DEL)
+        assertThat(annotation.options).isEqualTo(StreamOptions.ACK)
     }
 
     @Test
@@ -56,7 +56,7 @@ class PushStreamManagerAnnotationTest {
         assertThat(annotation.minIdleTimeMs).isEqualTo(300_000)
         assertThat(annotation.batchSize).isEqualTo(50)
         assertThat(annotation.fixedDelayMs).isEqualTo(30_000)
-        assertThat(annotation.options).isEqualTo(StreamOptions.ACK_DEL)
+        assertThat(annotation.options).isEqualTo(StreamOptions.ACK)
     }
 
     @Test

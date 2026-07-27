@@ -196,7 +196,7 @@ class PushStreamManager(
         concurrency = 10,
         concurrencyProperty = "buddystudy.streams.push-consumer-concurrency",
         enabledProperty = "buddystudy.streams.enabled",
-        options = StreamOptions.ACK_DEL,
+        options = StreamOptions.ACK,
     )
     private suspend fun consumePush(
         payload: QuestionPushRequestedPayload,
@@ -216,7 +216,7 @@ class PushStreamManager(
         fixedDelayMs = 30_000,
         initialDelayMs = 30_000,
         enabledProperty = "buddystudy.streams.enabled",
-        options = StreamOptions.ACK_DEL,
+        options = StreamOptions.ACK,
     )
     private suspend fun recoverIdlePush(
         payload: QuestionPushRequestedPayload,
