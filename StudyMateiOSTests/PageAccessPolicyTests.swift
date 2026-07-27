@@ -828,8 +828,36 @@ final class StudyOutlinePolicyTests: XCTestCase {
     func testTopicPreviewIsBoundedForLongTrees() {
         XCTAssertEqual(StudyOutlinePolicy.visibleCount(totalTopicCount: 0), 0)
         XCTAssertEqual(StudyOutlinePolicy.visibleCount(totalTopicCount: 2), 2)
-        XCTAssertEqual(StudyOutlinePolicy.visibleCount(totalTopicCount: 12), 3)
+        XCTAssertEqual(StudyOutlinePolicy.visibleCount(totalTopicCount: 12), 5)
         XCTAssertEqual(StudyOutlinePolicy.remainingCount(totalTopicCount: 2), 0)
-        XCTAssertEqual(StudyOutlinePolicy.remainingCount(totalTopicCount: 12), 9)
+        XCTAssertEqual(StudyOutlinePolicy.remainingCount(totalTopicCount: 12), 7)
+    }
+
+    func testAncestorPathSupportsDeepTreesWithoutGrowingIndentation() {
+        let parentByID = [
+            2: 1,
+            3: 2,
+            4: 3,
+            5: 4,
+            6: 5,
+            7: 6
+        ]
+
+        XCTAssertEqual(
+            StudyOutlinePolicy.ancestorPath(
+                rootID: 1,
+                targetID: 7,
+                parentByID: parentByID
+            ),
+            [1, 2, 3, 4, 5, 6, 7]
+        )
+        XCTAssertEqual(
+            StudyOutlinePolicy.ancestorPath(
+                rootID: 1,
+                targetID: 99,
+                parentByID: parentByID
+            ),
+            [1]
+        )
     }
 }

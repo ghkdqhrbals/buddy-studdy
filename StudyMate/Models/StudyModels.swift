@@ -61,14 +61,39 @@ enum StudyTreeNodeStylePolicy {
 }
 
 enum StudyOutlinePolicy {
-    static let previewLimit = 3
+    static let childPreviewLimit = 5
 
     static func visibleCount(totalTopicCount: Int) -> Int {
-        min(max(totalTopicCount, 0), previewLimit)
+        min(max(totalTopicCount, 0), childPreviewLimit)
     }
 
     static func remainingCount(totalTopicCount: Int) -> Int {
-        max(0, totalTopicCount - previewLimit)
+        max(0, totalTopicCount - childPreviewLimit)
+    }
+
+    static func ancestorPath(
+        rootID: Int,
+        targetID: Int,
+        parentByID: [Int: Int]
+    ) -> [Int] {
+        guard targetID != rootID else {
+            return [rootID]
+        }
+
+        var reversedPath = [targetID]
+        var visited = Set<Int>([targetID])
+        var currentID = targetID
+
+        while let parentID = parentByID[currentID],
+              visited.insert(parentID).inserted {
+            reversedPath.append(parentID)
+            if parentID == rootID {
+                return reversedPath.reversed()
+            }
+            currentID = parentID
+        }
+
+        return [rootID]
     }
 }
 
@@ -2126,6 +2151,11 @@ struct AppStrings {
     }
     func moreStudyTopics(_ count: Int) -> String {
         text("+ \(count)개 주제 더 보기", "+ \(count) more topics")
+    }
+    var viewFullStudyTree: String { text("전체 트리 보기", "View full tree") }
+    var moveToParentTopic: String { text("상위로", "Up one level") }
+    func childTopicCount(_ count: Int) -> String {
+        text("하위 주제 \(count)개", "\(count) child topics")
     }
     var addSubstudy: String { text("하위 학습 추가", "Add Sub-study") }
     var recommendSubstudy: String { text("AI 추천 주제", "AI topic suggestions") }

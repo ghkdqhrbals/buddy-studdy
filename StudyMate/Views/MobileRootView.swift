@@ -1125,20 +1125,40 @@ private struct MobileHomeView: View {
 
         let allTopics = flattenedStudyTopics(rootStudyID: rootStudyID)
         let query = trimmedHomeStudySearchText
-        let candidates: [MobileHomeStudyTopicItem]
+        let searchResults: [BackendStudyRoom]?
         if query.isEmpty || rootRoom.topic.localizedCaseInsensitiveContains(query) {
-            candidates = allTopics
+            searchResults = nil
         } else {
-            candidates = allTopics.filter {
+            searchResults = allTopics.compactMap {
                 $0.room.topic.localizedCaseInsensitiveContains(query)
+                    ? $0.room
+                    : nil
             }
         }
-        let visibleTopics = Array(candidates.prefix(StudyOutlinePolicy.previewLimit))
+        let rooms = [rootRoom] + allTopics.map(\.room)
+        let childrenByParent = Dictionary(
+            grouping: allTopics.map(\.room),
+            by: { $0.parentStudyId ?? rootStudyID }
+        ).mapValues { children in
+            children.sorted {
+                if $0.sortOrder == $1.sortOrder {
+                    return $0.id < $1.id
+                }
+                return $0.sortOrder < $1.sortOrder
+            }
+        }
 
         return MobileHomeStudyOutlineSnapshot(
             root: rootRoom,
-            visibleTopics: visibleTopics,
-            remainingCount: StudyOutlinePolicy.remainingCount(totalTopicCount: candidates.count)
+            roomsByID: Dictionary(uniqueKeysWithValues: rooms.map { ($0.id, $0) }),
+            childrenByParent: childrenByParent,
+            parentByID: Dictionary(
+                uniqueKeysWithValues: allTopics.compactMap { item in
+                    item.room.parentStudyId.map { (item.room.id, $0) }
+                }
+            ),
+            searchQuery: query,
+            searchResults: searchResults
         )
     }
 
@@ -1150,7 +1170,7 @@ private struct MobileHomeView: View {
         var result: [MobileHomeStudyTopicItem] = []
         var visited = Set<Int>([rootStudyID])
 
-        func appendChildren(parentID: Int, depth: Int) {
+        func appendChildren(parentID: Int) {
             let children = (childrenByParent[parentID] ?? []).sorted {
                 if $0.sortOrder == $1.sortOrder {
                     return $0.id < $1.id
@@ -1159,12 +1179,12 @@ private struct MobileHomeView: View {
             }
 
             for child in children where visited.insert(child.id).inserted {
-                result.append(MobileHomeStudyTopicItem(room: child, depth: depth))
-                appendChildren(parentID: child.id, depth: depth + 1)
+                result.append(MobileHomeStudyTopicItem(room: child))
+                appendChildren(parentID: child.id)
             }
         }
 
-        appendChildren(parentID: rootStudyID, depth: 1)
+        appendChildren(parentID: rootStudyID)
         return result
     }
 
@@ -6475,19 +6495,33 @@ private struct MobileCommunityEmptyState: View {
     }
 }
 
-private struct MobileHomeStudyTopicItem: Identifiable {
+private struct MobileHomeStudyTopicItem {
     var room: BackendStudyRoom
-    var depth: Int
-
-    var id: Int {
-        room.id
-    }
 }
 
 private struct MobileHomeStudyOutlineSnapshot {
     var root: BackendStudyRoom
-    var visibleTopics: [MobileHomeStudyTopicItem]
-    var remainingCount: Int
+    var roomsByID: [Int: BackendStudyRoom]
+    var childrenByParent: [Int: [BackendStudyRoom]]
+    var parentByID: [Int: Int]
+    var searchQuery: String
+    var searchResults: [BackendStudyRoom]?
+
+    func room(id: Int) -> BackendStudyRoom? {
+        roomsByID[id]
+    }
+
+    func children(of roomID: Int) -> [BackendStudyRoom] {
+        childrenByParent[roomID] ?? []
+    }
+
+    func path(to roomID: Int) -> [BackendStudyRoom] {
+        StudyOutlinePolicy.ancestorPath(
+            rootID: root.id,
+            targetID: roomID,
+            parentByID: parentByID
+        ).compactMap { roomsByID[$0] }
+    }
 }
 
 private struct MobileHomeStudyOutlineRow: View {
@@ -6496,52 +6530,83 @@ private struct MobileHomeStudyOutlineRow: View {
     var pendingQuestionCount: (BackendStudyRoom) -> Int
     var onOpenTree: () -> Void
     var onOpenTopic: (BackendStudyRoom) -> Void
+    @State private var currentBranchID: Int?
+    @State private var isExpanded = true
+
+    private var currentBranch: BackendStudyRoom {
+        currentBranchID.flatMap(snapshot.room(id:)) ?? snapshot.root
+    }
+
+    private var currentPath: [BackendStudyRoom] {
+        snapshot.path(to: currentBranch.id)
+    }
+
+    private var currentChildren: [BackendStudyRoom] {
+        snapshot.children(of: currentBranch.id)
+    }
+
+    private var visibleChildren: [BackendStudyRoom] {
+        Array(currentChildren.prefix(StudyOutlinePolicy.childPreviewLimit))
+    }
+
+    private var hiddenItemCount: Int {
+        StudyOutlinePolicy.remainingCount(
+            totalTopicCount: snapshot.searchResults?.count ?? currentChildren.count
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            Button(action: onOpenTree) {
-                topicRow(
+            Button {
+                withAnimation(.snappy(duration: 0.22)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                studyRow(
                     room: snapshot.root,
-                    depth: 0,
-                    isRoot: true
+                    isRoot: true,
+                    childCount: snapshot.children(of: snapshot.root.id).count,
+                    trailingSymbol: isExpanded ? "chevron.up" : "chevron.down"
                 )
             }
             .buttonStyle(.plain)
 
-            ForEach(snapshot.visibleTopics) { item in
-                Divider()
-                    .padding(.leading, 48)
-
-                Button {
-                    onOpenTopic(item.room)
-                } label: {
-                    topicRow(
-                        room: item.room,
-                        depth: item.depth,
-                        isRoot: false
-                    )
+            if isExpanded {
+                if let searchResults = snapshot.searchResults {
+                    searchResultRows(searchResults)
+                } else {
+                    branchRows
                 }
-                .buttonStyle(.plain)
-            }
 
-            if snapshot.remainingCount > 0 {
                 Divider()
-                    .padding(.leading, 48)
+                    .padding(.leading, 14)
 
                 Button(action: onOpenTree) {
-                    HStack(spacing: 8) {
-                        Text(strings.moreStudyTopics(snapshot.remainingCount))
-                            .font(.caption.weight(.semibold))
+                    HStack(spacing: 12) {
+                        Image(systemName: "point.3.connected.trianglepath.dotted")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24)
+
+                        Text(strings.viewFullStudyTree)
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.secondary)
 
                         Spacer()
+
+                        if hiddenItemCount > 0 {
+                            Text("+\(hiddenItemCount)")
+                                .font(.caption2.weight(.bold))
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                        }
 
                         Image(systemName: "chevron.right")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.tertiary)
                     }
                     .padding(.horizontal, 14)
-                    .frame(minHeight: 48)
+                    .frame(minHeight: 50)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -6556,29 +6621,121 @@ private struct MobileHomeStudyOutlineRow: View {
                 .stroke(Color.primary.opacity(0.04), lineWidth: 1)
         }
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .onChange(of: snapshot.searchQuery) {
+            currentBranchID = nil
+        }
     }
 
-    private func topicRow(
+    @ViewBuilder
+    private var branchRows: some View {
+        if currentBranch.id != snapshot.root.id {
+            Divider()
+                .padding(.leading, 14)
+
+            branchPathHeader
+        }
+
+        ForEach(visibleChildren) { room in
+            Divider()
+                .padding(.leading, 50)
+
+            Button {
+                let childCount = snapshot.children(of: room.id).count
+                if childCount > 0 {
+                    withAnimation(.snappy(duration: 0.22)) {
+                        currentBranchID = room.id
+                    }
+                } else {
+                    onOpenTopic(room)
+                }
+            } label: {
+                studyRow(
+                    room: room,
+                    isRoot: false,
+                    childCount: snapshot.children(of: room.id).count,
+                    trailingSymbol: "chevron.right"
+                )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var branchPathHeader: some View {
+        HStack(spacing: 10) {
+            Button {
+                withAnimation(.snappy(duration: 0.22)) {
+                    currentBranchID = snapshot.parentByID[currentBranch.id]
+                        .flatMap(snapshot.room(id:))?.id
+                }
+            } label: {
+                Label(strings.moveToParentTopic, systemImage: "chevron.left")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(Color(.tertiarySystemFill), in: Capsule())
+            }
+            .buttonStyle(.plain)
+
+            Text(currentPath.map(\.topic).joined(separator: "  ›  "))
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.head)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .accessibilityLabel(currentPath.map(\.topic).joined(separator: ", "))
+        }
+        .padding(.horizontal, 14)
+        .frame(minHeight: 54)
+    }
+
+    @ViewBuilder
+    private func searchResultRows(_ results: [BackendStudyRoom]) -> some View {
+        let visibleResults = Array(results.prefix(StudyOutlinePolicy.childPreviewLimit))
+
+        ForEach(visibleResults) { room in
+            Divider()
+                .padding(.leading, 50)
+
+            Button {
+                onOpenTopic(room)
+            } label: {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(snapshot.path(to: room.id).dropLast().map(\.topic).joined(separator: "  ›  "))
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+
+                    studyRow(
+                        room: room,
+                        isRoot: false,
+                        childCount: snapshot.children(of: room.id).count,
+                        trailingSymbol: "chevron.right"
+                    )
+                    .padding(.horizontal, -14)
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 8)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func studyRow(
         room: BackendStudyRoom,
-        depth: Int,
-        isRoot: Bool
+        isRoot: Bool,
+        childCount: Int,
+        trailingSymbol: String
     ) -> some View {
         let pendingCount = pendingQuestionCount(room)
 
         return HStack(spacing: 12) {
-            if isRoot {
-                MobileStudyActivityIndicator(
-                    isActive: room.activeForQuestions,
-                    strings: strings
-                )
-                .frame(width: 24)
-            } else {
-                MobileHomeStudyBranchGuide(
-                    depth: depth,
-                    isActive: room.activeForQuestions,
-                    strings: strings
-                )
-            }
+            MobileStudyActivityIndicator(
+                isActive: room.activeForQuestions,
+                strings: strings
+            )
+            .frame(width: 24)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(room.topic)
@@ -6593,6 +6750,11 @@ private struct MobileHomeStudyOutlineRow: View {
                     .foregroundStyle(room.activeForQuestions ? Color.green : Color.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityValue(
+                childCount > 0
+                    ? strings.childTopicCount(childCount)
+                    : StudyTreeNodeStylePolicy.levelText(room.difficultyLevel)
+            )
 
             if pendingCount > 0 {
                 Text("\(pendingCount)")
@@ -6603,7 +6765,7 @@ private struct MobileHomeStudyOutlineRow: View {
                     .accessibilityLabel(strings.pendingQuestionCount(pendingCount))
             }
 
-            Image(systemName: "chevron.right")
+            Image(systemName: trailingSymbol)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
         }
@@ -6629,37 +6791,6 @@ private struct MobileStudyActivityIndicator: View {
                 .frame(width: 8, height: 8)
         }
         .accessibilityLabel(isActive ? strings.questionTopicActive : strings.questionTopicInactive)
-    }
-}
-
-private struct MobileHomeStudyBranchGuide: View {
-    var depth: Int
-    var isActive: Bool
-    var strings: AppStrings
-
-    private var cappedDepth: Int {
-        min(max(depth, 1), 3)
-    }
-
-    var body: some View {
-        ZStack(alignment: .trailing) {
-            Canvas { context, size in
-                let end = CGPoint(x: size.width - 11, y: size.height / 2)
-                let startX = CGFloat(cappedDepth - 1) * 10 + 3
-                var path = Path()
-                path.move(to: CGPoint(x: startX, y: 0))
-                path.addLine(to: CGPoint(x: startX, y: end.y))
-                path.addLine(to: end)
-                context.stroke(
-                    path,
-                    with: .color(Color.secondary.opacity(0.32)),
-                    style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
-                )
-            }
-
-            MobileStudyActivityIndicator(isActive: isActive, strings: strings)
-        }
-        .frame(width: CGFloat(30 + (cappedDepth - 1) * 10), height: 44)
     }
 }
 
