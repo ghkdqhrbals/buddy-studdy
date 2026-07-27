@@ -125,6 +125,30 @@ class RedisStreamMessageDispatcherTest {
         assertThat(streams.acknowledgedAndDeleted).isEmpty()
     }
 
+    @Test
+    fun `unexpected event type is acknowledged without invoking the typed handler`() = runBlocking {
+        val streams = RecordingConsumerOperations()
+        val dispatcher = RedisStreamMessageDispatcher(
+            streams,
+            JacksonRedisStreamCodec(JsonMapperProvider.mapper),
+        )
+        val handler = SampleHandler()
+
+        dispatcher.dispatch(
+            bean = handler,
+            method = handlerMethod("consume"),
+            eventType = "EXPECTED",
+            payloadType = SamplePayload::class.java,
+            group = "sample-group",
+            options = StreamOptions.ACK,
+            message = message("""{"value":31}"""),
+            claimed = false,
+        )
+
+        assertThat(handler.values).isEmpty()
+        assertThat(streams.acknowledged).containsExactly("sample-group" to "1-0")
+    }
+
     private fun handlerMethod(name: String): RedisStreamHandlerMethod {
         val method = SampleHandler::class.java.getDeclaredMethod(
             name,

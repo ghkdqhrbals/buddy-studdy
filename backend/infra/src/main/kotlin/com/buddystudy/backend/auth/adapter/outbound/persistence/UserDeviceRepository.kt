@@ -24,17 +24,16 @@ interface UserDeviceRepository : CoroutineCrudRepository<UserDeviceEntity, Long>
 
     @Query(
         """
-        select exists(
-          select 1 from user_devices
-          where user_id = :userId
-            and device_id = :deviceId
-            and logged_out_at is null
-            and revoked_at is null
-            and (session_expires_at is null or session_expires_at > current_timestamp)
-        )
+        select count(*)
+        from user_devices
+        where user_id = :userId
+          and device_id = :deviceId
+          and logged_out_at is null
+          and revoked_at is null
+          and (session_expires_at is null or session_expires_at > current_timestamp)
         """
     )
-    suspend fun hasActiveSession(userId: Long, deviceId: String): Boolean
+    suspend fun countActiveSessions(userId: Long, deviceId: String): Long
 }
 
 @Component
@@ -45,5 +44,6 @@ class UserDevicePersistenceAdapter(
     override suspend fun findByUserIdAndDeviceId(userId: Long, deviceId: String) = repository.findByUserIdAndDeviceId(userId, deviceId)
     override suspend fun findByIdAndUserId(id: Long, userId: Long) = repository.findByIdAndUserId(id, userId)
     override suspend fun findActiveByUserId(userId: Long) = repository.findActiveByUserId(userId)
-    override suspend fun hasActiveSession(userId: Long, deviceId: String) = repository.hasActiveSession(userId, deviceId)
+    override suspend fun hasActiveSession(userId: Long, deviceId: String) =
+        repository.countActiveSessions(userId, deviceId) > 0
 }

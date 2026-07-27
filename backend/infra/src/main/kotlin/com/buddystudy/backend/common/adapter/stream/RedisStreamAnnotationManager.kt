@@ -134,19 +134,32 @@ class RedisStreamAnnotationManager(
                             count = annotation.batchSize.coerceAtLeast(1),
                             timeout = Duration.ofMillis(annotation.blockTimeMs.coerceAtLeast(1)),
                         )
+                        if (messages.isNotEmpty()) {
+                            logger.debug(
+                                "redis_stream_listener_batch_received bean={} method={} topic={} group={} consumer={} count={}",
+                                handler.beanName,
+                                handler.method.name,
+                                annotation.topic.apiName,
+                                annotation.group,
+                                consumer,
+                                messages.size,
+                            )
+                        }
                         messages.forEach { dispatch(handler.bean, handler.method, annotation, it, claimed = false) }
                         if (messages.isEmpty()) delay(annotation.pollDelayMs.coerceAtLeast(1))
                     } catch (error: CancellationException) {
                         throw error
                     } catch (error: Exception) {
                         logger.warn(
-                            "redis_stream_listener_poll_failed bean={} method={} topic={} group={} consumer={} error={}",
+                            "redis_stream_listener_poll_failed bean={} method={} topic={} group={} consumer={} errorType={} error={}",
                             handler.beanName,
                             handler.method.name,
                             annotation.topic.apiName,
                             annotation.group,
                             consumer,
+                            error.javaClass.name,
                             error.message,
+                            error,
                         )
                         delay(annotation.pollDelayMs.coerceAtLeast(1))
                     }
@@ -171,18 +184,32 @@ class RedisStreamAnnotationManager(
                         startId = startId,
                     )
                     startId = claimed.nextStartId
+                    if (claimed.messages.isNotEmpty()) {
+                        logger.info(
+                            "redis_stream_autoclaim_batch_received bean={} method={} topic={} group={} consumer={} count={} nextStartId={}",
+                            handler.beanName,
+                            handler.method.name,
+                            annotation.topic.apiName,
+                            annotation.group,
+                            annotation.consumer,
+                            claimed.messages.size,
+                            claimed.nextStartId,
+                        )
+                    }
                     claimed.messages.forEach { dispatch(handler.bean, handler.method, annotation, it, claimed = true) }
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Exception) {
                     logger.warn(
-                        "redis_stream_autoclaim_failed bean={} method={} topic={} group={} consumer={} error={}",
+                        "redis_stream_autoclaim_failed bean={} method={} topic={} group={} consumer={} errorType={} error={}",
                         handler.beanName,
                         handler.method.name,
                         annotation.topic.apiName,
                         annotation.group,
                         annotation.consumer,
+                        error.javaClass.name,
                         error.message,
+                        error,
                     )
                 }
                 delay(annotation.fixedDelayMs.coerceAtLeast(1))

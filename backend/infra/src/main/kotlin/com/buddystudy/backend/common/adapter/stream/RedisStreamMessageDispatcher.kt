@@ -25,6 +25,18 @@ class RedisStreamMessageDispatcher(
     ) {
         val actualEventType = message.fields[JacksonRedisStreamPublisher.EVENT_TYPE_FIELD]
         if (actualEventType != eventType) {
+            logger.warn(
+                "redis_stream_event_type_mismatch method={} stream={} redisRecordId={} eventId={} expectedEventType={} actualEventType={} group={} options={} claimed={}",
+                method.name,
+                message.streamKey,
+                message.recordId,
+                message.fields[JacksonRedisStreamPublisher.EVENT_ID_FIELD],
+                eventType,
+                actualEventType,
+                group,
+                options,
+                claimed,
+            )
             complete(message, group, options)
             return
         }
@@ -40,20 +52,45 @@ class RedisStreamMessageDispatcher(
                 fields = message.fields,
                 claimed = claimed,
             )
+            logger.debug(
+                "redis_stream_handler_started method={} stream={} redisRecordId={} eventId={} eventType={} group={} claimed={}",
+                method.name,
+                message.streamKey,
+                message.recordId,
+                context.eventId,
+                actualEventType,
+                group,
+                claimed,
+            )
             method.invoke(bean, payload, context)
             complete(message, group, options)
+            logger.debug(
+                "redis_stream_handler_completed method={} stream={} redisRecordId={} eventId={} eventType={} group={} options={} claimed={}",
+                method.name,
+                message.streamKey,
+                message.recordId,
+                context.eventId,
+                actualEventType,
+                group,
+                options,
+                claimed,
+            )
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
             logger.warn(
-                "redis_stream_handler_failed method={} stream={} redisRecordId={} eventId={} eventType={} claimed={} error={}",
+                "redis_stream_handler_failed method={} stream={} redisRecordId={} eventId={} eventType={} group={} options={} claimed={} errorType={} error={}",
                 method.name,
                 message.streamKey,
                 message.recordId,
                 message.fields[JacksonRedisStreamPublisher.EVENT_ID_FIELD],
                 actualEventType,
+                group,
+                options,
                 claimed,
+                error.javaClass.name,
                 error.cause?.message ?: error.message,
+                error,
             )
         }
     }

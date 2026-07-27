@@ -5480,14 +5480,16 @@ private struct MobileProfileEditorView: View {
                         }
 
                         Task {
-                            await appState.updateCommunityProfile(
+                            let didUpdate = await appState.updateCommunityProfile(
                                 displayName: trimmedProfileDisplayName,
                                 avatarSymbolName: draftAvatarSymbolName,
                                 avatarColorSeed: draftAvatarColorSeed,
                                 avatarMode: "PIXEL",
                                 avatarConfig: nil
                             )
-                            dismiss()
+                            if didUpdate {
+                                dismiss()
+                            }
                         }
                     } label: {
                         if appState.isUpdatingCommunityProfile {

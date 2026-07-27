@@ -2947,6 +2947,7 @@ final class AppState: ObservableObject {
         )
     }
 
+    @discardableResult
     func updateCommunityProfile(
         displayName: String,
         bio: String = "",
@@ -2955,10 +2956,28 @@ final class AppState: ObservableObject {
         avatarMode: String? = nil,
         avatarConfig: [String: String]? = nil,
         allowPublicQuestions: Bool? = nil
-    ) async {
+    ) async -> Bool {
+        logAuthTrace(
+            "community_profile_update_requested",
+            page: .profile,
+            reason: "updateCommunityProfile",
+            extra: [
+                "avatarSymbolName=\(avatarSymbolName ?? "-")",
+                "avatarColorSeed=\(avatarColorSeed ?? "-")",
+                "avatarMode=\(avatarMode ?? "-")",
+            ],
+            deduplicate: false
+        )
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-profile-update") else {
-            return
+            logAuthTrace(
+                "community_profile_update_missing_registration",
+                page: .profile,
+                reason: "updateCommunityProfile",
+                deduplicate: false
+            )
+            return false
         }
+        let previousState = communityProfileState
         applyLocalCommunityProfileDraft(
             displayName: displayName,
             avatarSymbolName: avatarSymbolName,
@@ -2968,6 +2987,7 @@ final class AppState: ObservableObject {
             allowPublicQuestions: allowPublicQuestions
         )
         isUpdatingCommunityProfile = true
+        var didSucceed = false
 
         await actionRunner.run(
             operation: {
@@ -2985,15 +3005,64 @@ final class AppState: ObservableObject {
             onSuccess: { profile in
                 communityProfileCacheUseCase.saveDisplayName(displayName)
                 applyCommunityProfile(profile)
+                let symbolMatches = avatarSymbolName == nil || profile.avatarSymbolName == avatarSymbolName
+                let colorMatches = avatarColorSeed == nil || profile.avatarColorSeed == avatarColorSeed
+                let modeMatches = avatarMode == nil
+                    || profile.avatarMode.caseInsensitiveCompare(avatarMode ?? "") == .orderedSame
+                didSucceed = symbolMatches && colorMatches && modeMatches
+                logAuthTrace(
+                    didSucceed
+                        ? "community_profile_update_succeeded"
+                        : "community_profile_update_response_mismatch",
+                    page: .profile,
+                    reason: "updateCommunityProfile",
+                    extra: [
+                        "requestedAvatarSymbolName=\(avatarSymbolName ?? "-")",
+                        "returnedAvatarSymbolName=\(profile.avatarSymbolName)",
+                        "requestedAvatarColorSeed=\(avatarColorSeed ?? "-")",
+                        "returnedAvatarColorSeed=\(profile.avatarColorSeed)",
+                        "requestedAvatarMode=\(avatarMode ?? "-")",
+                        "returnedAvatarMode=\(profile.avatarMode)",
+                    ],
+                    deduplicate: false
+                )
             },
             onFailure: { error in
-                handleCommunityError(error)
+                let handled = handleCommunityError(error)
+                if !handled {
+                    restoreCommunityProfileState(previousState)
+                }
+                logAuthTrace(
+                    "community_profile_update_failed",
+                    page: .profile,
+                    reason: "updateCommunityProfile",
+                    extra: [
+                        "avatarSymbolName=\(avatarSymbolName ?? "-")",
+                        "avatarColorSeed=\(avatarColorSeed ?? "-")",
+                        "errorType=\(String(describing: type(of: error)))",
+                        "error=\(error.localizedDescription)",
+                    ],
+                    deduplicate: false
+                )
                 log(.warning, "커뮤니티 프로필 저장 실패: \(error.localizedDescription)")
             },
             onCompletion: {
                 isUpdatingCommunityProfile = false
             }
         )
+        return didSucceed
+    }
+
+    private func restoreCommunityProfileState(_ state: CommunityProfileStateStore) {
+        communityProfileState = state
+        communityProfileCacheUseCase.saveAvatarSymbolName(state.avatarSymbolName)
+        communityProfileCacheUseCase.saveAvatarColorSeed(state.avatarColorSeed)
+        communityProfileCacheUseCase.saveAvatarConfig(state.avatarConfig)
+        if let profile = state.profile {
+            communityProfileCacheUseCase.saveDisplayName(profile.displayName)
+        } else {
+            communityProfileCacheUseCase.clearProfileIdentity()
+        }
     }
 
     private func applyLocalCommunityProfileDraft(
