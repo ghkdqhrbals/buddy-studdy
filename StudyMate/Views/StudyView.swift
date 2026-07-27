@@ -119,25 +119,38 @@ struct StudyView: View {
     }
 
     private func questionLoadingMessage(strings: AppStrings) -> some View {
-        StudyChatBubble(role: .tutor) {
-            HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color.green.opacity(0.16))
+
                 ProgressView()
                     .controlSize(.small)
-                    .tint(.accentColor)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(strings.fetchingQuestion)
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(.primary)
-
-                    Text(strings.fetchingQuestionDescription)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                    .tint(.green)
             }
+            .frame(width: 40, height: 40)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(strings.fetchingQuestion)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Text(strings.fetchingQuestionDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(.vertical, 14)
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.green.opacity(0.09))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.green.opacity(0.28), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(strings.fetchingQuestion). \(strings.fetchingQuestionDescription)")
     }

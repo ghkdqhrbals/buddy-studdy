@@ -57,10 +57,10 @@ class ContentLocalizationPersistenceAdapter(
         targetLanguage: String,
         sourceHashes: RecordSourceHashes,
         now: Instant,
-    ): Boolean {
-        var changed = false
+    ): Set<LocalizableContentType> {
+        val pendingContent = mutableSetOf<LocalizableContentType>()
         if (QuestionLanguage.normalize(question.sourceLanguage) != targetLanguage) {
-            changed = upsertPending(
+            if (upsertPending(
                 table = "question_localizations",
                 idColumn = "question_id",
                 id = question.id,
@@ -73,12 +73,14 @@ class ContentLocalizationPersistenceAdapter(
                     "hint" to question.hint,
                 ),
                 now = now,
-            ) || changed
+            )) {
+                pendingContent += LocalizableContentType.QUESTION
+            }
         }
         question.answer?.takeIf(String::isNotBlank)?.let { answer ->
             val source = question.answerSourceLanguage ?: question.sourceLanguage
             if (QuestionLanguage.normalize(source) != targetLanguage) {
-                changed = upsertPending(
+                if (upsertPending(
                     "answer_localizations",
                     "question_id",
                     question.id,
@@ -87,14 +89,16 @@ class ContentLocalizationPersistenceAdapter(
                     sourceHashes.answer ?: return@let,
                     mapOf("answer" to answer),
                     now,
-                ) || changed
+                )) {
+                    pendingContent += LocalizableContentType.ANSWER
+                }
             }
         }
         if (!question.feedback.isNullOrBlank() || !question.explanation.isNullOrBlank()) {
             val source = question.aiResponseSourceLanguage ?: question.sourceLanguage
             val aiResponseHash = sourceHashes.aiResponse
             if (QuestionLanguage.normalize(source) != targetLanguage && aiResponseHash != null) {
-                changed = upsertPending(
+                if (upsertPending(
                     "grading_localizations",
                     "question_id",
                     question.id,
@@ -107,10 +111,12 @@ class ContentLocalizationPersistenceAdapter(
                         "assessment_json" to question.gradingAssessmentJson,
                     ),
                     now,
-                ) || changed
+                )) {
+                    pendingContent += LocalizableContentType.AI_RESPONSE
+                }
             }
         }
-        return changed
+        return pendingContent
     }
 
     override suspend fun ensureCommentPending(
@@ -132,60 +138,64 @@ class ContentLocalizationPersistenceAdapter(
         )
     }
 
-    override suspend fun saveRecordReady(
+    override suspend fun saveQuestionReady(
         question: QuestionEntity,
         targetLanguage: String,
-        sourceHashes: RecordSourceHashes,
+        sourceHash: String,
         result: ContentTranslationResult,
         now: Instant,
-    ): Boolean {
-        var changed = false
-        if (result.fields.containsKey("question")) {
-            changed = updateReady(
-                "question_localizations",
-                "question_id",
-                question.id,
-                targetLanguage,
-                sourceHashes.question,
-                mapOf(
-                    "topic" to result.fields["topic"],
-                    "question" to result.fields["question"],
-                    "hint" to result.fields["hint"],
-                ),
-                result.provider,
-                now,
-            ) || changed
-        }
-        if (result.fields.containsKey("answer")) {
-            changed = updateReady(
-                "answer_localizations",
-                "question_id",
-                question.id,
-                targetLanguage,
-                sourceHashes.answer ?: return changed,
-                mapOf("answer" to result.fields["answer"]),
-                result.provider,
-                now,
-            ) || changed
-        }
-        if (result.fields.containsKey("feedback") || result.fields.containsKey("explanation")) {
-            changed = updateReady(
-                "grading_localizations",
-                "question_id",
-                question.id,
-                targetLanguage,
-                sourceHashes.aiResponse ?: return changed,
-                mapOf(
-                    "feedback" to result.fields["feedback"],
-                    "explanation" to result.fields["explanation"],
-                    "assessment_json" to result.fields["assessmentJson"],
-                ),
-                result.provider,
-                now,
-            ) || changed
-        }
-        return changed
-    }
+    ): Boolean = updateReady(
+        "question_localizations",
+        "question_id",
+        question.id,
+        targetLanguage,
+        sourceHash,
+        mapOf(
+            "topic" to result.fields["topic"],
+            "question" to result.fields["question"],
+            "hint" to result.fields["hint"],
+        ),
+        result.provider,
+        now,
+    )
+
+    override suspend fun saveAnswerReady(
+        question: QuestionEntity,
+        targetLanguage: String,
+        sourceHash: String,
+        result: ContentTranslationResult,
+        now: Instant,
+    ): Boolean = updateReady(
+        "answer_localizations",
+        "question_id",
+        question.id,
+        targetLanguage,
+        sourceHash,
+        mapOf("answer" to result.fields["answer"]),
+        result.provider,
+        now,
+    )
+
+    override suspend fun saveAiResponseReady(
+        question: QuestionEntity,
+        targetLanguage: String,
+        sourceHash: String,
+        result: ContentTranslationResult,
+        now: Instant,
+    ): Boolean = updateReady(
+        "grading_localizations",
+        "question_id",
+        question.id,
+        targetLanguage,
+        sourceHash,
+        mapOf(
+            "feedback" to result.fields["feedback"],
+            "explanation" to result.fields["explanation"],
+            "assessment_json" to result.fields["assessmentJson"],
+        ),
+        result.provider,
+        now,
+    )
 
     override suspend fun saveCommentReady(
         comment: QuestionCommentEntity,
@@ -215,6 +225,12 @@ class ContentLocalizationPersistenceAdapter(
                 event.answerSourceHash?.let { Triple("answer_localizations", "question_id", it) },
                 event.aiResponseSourceHash?.let { Triple("grading_localizations", "question_id", it) },
             )
+            LocalizableContentType.QUESTION ->
+                listOf(Triple("question_localizations", "question_id", event.sourceHash))
+            LocalizableContentType.ANSWER ->
+                listOf(Triple("answer_localizations", "question_id", event.sourceHash))
+            LocalizableContentType.AI_RESPONSE ->
+                listOf(Triple("grading_localizations", "question_id", event.sourceHash))
             LocalizableContentType.COMMENT ->
                 listOf(Triple("question_comment_localizations", "comment_id", event.sourceHash))
         }
@@ -310,7 +326,22 @@ class ContentLocalizationPersistenceAdapter(
         values.forEach { (name, value) ->
             spec = if (value == null) spec.bindNull(name, String::class.java) else spec.bind(name, value)
         }
-        return spec.fetch().rowsUpdated().awaitSingle() > 0
+        spec.fetch().rowsUpdated().awaitSingle()
+        return databaseClient.sql(
+            """
+            select status, source_hash
+            from $table
+            where $idColumn = :id and target_language = :targetLanguage
+            """.trimIndent(),
+        )
+            .bind("id", id)
+            .bind("targetLanguage", targetLanguage)
+            .map { row, _ ->
+                row.get("status", String::class.java) == "PENDING" &&
+                    row.get("source_hash", String::class.java) == sourceHash
+            }
+            .one()
+            .awaitSingleOrNull() == true
     }
 
     private suspend fun updateReady(

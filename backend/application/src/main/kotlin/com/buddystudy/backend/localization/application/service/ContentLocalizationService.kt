@@ -29,21 +29,33 @@ class ContentLocalizationService(
     override suspend fun requestRecord(question: QuestionEntity, targetLanguage: String) {
         val target = QuestionLanguage.normalize(targetLanguage)
         val hashes = recordHashes(question)
-        if (!localizations.ensureRecordPending(question, target, hashes, Instant.now())) return
-        val outboxId = events.append(
-            ContentTranslationRequestedEvent(
-                eventId = "content-translation-record-${question.id}-$target-${hashes.record}",
-                contentType = LocalizableContentType.RECORD,
-                contentId = question.id,
-                targetLanguage = target,
-                sourceHash = hashes.record,
-                questionSourceHash = hashes.question,
-                answerSourceHash = hashes.answer,
-                aiResponseSourceHash = hashes.aiResponse,
-                requestedAt = Instant.now(),
-            ),
-        )
-        publisher.publishNow(listOf(OutboxReference(OutboxType.DOMAIN_EVENT, outboxId)))
+        val requestedAt = Instant.now()
+        val pendingContent = localizations.ensureRecordPending(question, target, hashes, requestedAt)
+        if (pendingContent.isEmpty()) return
+        val outboxIds = pendingContent.mapNotNull { contentType ->
+            val sourceHash = when (contentType) {
+                LocalizableContentType.QUESTION -> hashes.question
+                LocalizableContentType.ANSWER -> hashes.answer
+                LocalizableContentType.AI_RESPONSE -> hashes.aiResponse
+                LocalizableContentType.RECORD,
+                LocalizableContentType.COMMENT,
+                -> null
+            } ?: return@mapNotNull null
+            events.append(
+                ContentTranslationRequestedEvent(
+                    eventId = "content-translation-${contentType.eventName}-${question.id}-$target-$sourceHash",
+                    contentType = contentType,
+                    contentId = question.id,
+                    targetLanguage = target,
+                    sourceHash = sourceHash,
+                    requestedAt = requestedAt,
+                ),
+                requestedAt,
+            )
+        }
+        if (outboxIds.isNotEmpty()) {
+            publisher.publishNow(outboxIds.map { OutboxReference(OutboxType.DOMAIN_EVENT, it) })
+        }
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -65,6 +77,9 @@ class ContentLocalizationService(
     }
 
     companion object {
+        private val LocalizableContentType.eventName: String
+            get() = name.lowercase().replace('_', '-')
+
         fun recordHashes(question: QuestionEntity): RecordSourceHashes {
             val questionHash = sha256(
                 listOf(

@@ -8,7 +8,7 @@ import com.buddystudy.backend.localization.application.port.ContentTranslationPo
 import com.buddystudy.backend.localization.application.port.ProcessContentTranslationUseCase
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.StreamInboxPort
-import com.buddystudy.study.domain.QuestionLanguage
+import com.buddystudy.study.domain.entity.QuestionEntity
 import org.springframework.stereotype.Service
 import java.time.Duration
 import java.time.Instant
@@ -25,13 +25,17 @@ class ContentTranslationProcessor(
         val claim = inbox.claim(
             event.eventId,
             CONSUMER_GROUP,
-            event.eventId,
+            inboxCorrelationId(event.eventId),
             Duration.ofMinutes(3),
             Instant.now(),
         ) ?: return
         try {
             when (event.contentType) {
-                LocalizableContentType.RECORD -> processRecord(event)
+                // Drain pre-separation work without translating bundled content.
+                LocalizableContentType.RECORD -> Unit
+                LocalizableContentType.QUESTION -> processQuestion(event)
+                LocalizableContentType.ANSWER -> processAnswer(event)
+                LocalizableContentType.AI_RESPONSE -> processAiResponse(event)
                 LocalizableContentType.COMMENT -> processComment(event)
             }
             check(inbox.markSucceeded(claim, Instant.now()))
@@ -45,37 +49,78 @@ class ContentTranslationProcessor(
         }
     }
 
-    private suspend fun processRecord(event: ContentTranslationRequestedEvent) {
+    private suspend fun processQuestion(event: ContentTranslationRequestedEvent) {
         val question = questions.findQuestionById(event.contentId) ?: return
-        val hashes = ContentLocalizationService.recordHashes(question)
-        if (hashes.record != event.sourceHash) return
+        processQuestion(event, question)
+    }
+
+    private suspend fun processQuestion(
+        event: ContentTranslationRequestedEvent,
+        question: QuestionEntity,
+    ) {
+        val sourceHash = ContentLocalizationService.recordHashes(question).question
+        if (sourceHash != event.sourceHash) return
         val fields = linkedMapOf<String, String?>(
             "topic" to question.topic,
             "question" to question.question,
             "hint" to question.hint,
-            "answer" to question.answer,
+        )
+        val sources = fields.keys.associateWith { question.sourceLanguage }
+        val result = translator.translate(
+            fields.filterValues { !it.isNullOrBlank() },
+            sources,
+            event.targetLanguage,
+        )
+        localizations.saveQuestionReady(question, event.targetLanguage, sourceHash, result, Instant.now())
+    }
+
+    private suspend fun processAnswer(event: ContentTranslationRequestedEvent) {
+        val question = questions.findQuestionById(event.contentId) ?: return
+        processAnswer(event, question)
+    }
+
+    private suspend fun processAnswer(
+        event: ContentTranslationRequestedEvent,
+        question: QuestionEntity,
+    ) {
+        val answer = question.answer?.takeIf(String::isNotBlank) ?: return
+        val sourceHash = ContentLocalizationService.recordHashes(question).answer
+        if (sourceHash == null || sourceHash != event.sourceHash) return
+        val sourceLanguage = question.answerSourceLanguage ?: question.sourceLanguage
+        val result = translator.translate(
+            fields = mapOf("answer" to answer),
+            sourceLanguages = mapOf("answer" to sourceLanguage),
+            targetLanguage = event.targetLanguage,
+        )
+        localizations.saveAnswerReady(question, event.targetLanguage, sourceHash, result, Instant.now())
+    }
+
+    private suspend fun processAiResponse(event: ContentTranslationRequestedEvent) {
+        val question = questions.findQuestionById(event.contentId) ?: return
+        processAiResponse(event, question)
+    }
+
+    private suspend fun processAiResponse(
+        event: ContentTranslationRequestedEvent,
+        question: QuestionEntity,
+    ) {
+        val sourceHash = ContentLocalizationService.recordHashes(question).aiResponse
+        if (sourceHash == null || sourceHash != event.sourceHash) return
+        val fields = linkedMapOf(
             "feedback" to question.feedback,
             "explanation" to question.explanation,
-            "assessmentJson" to question.gradingAssessmentJson,
+        ).filterValues { !it.isNullOrBlank() }
+        if (fields.isEmpty()) return
+        val sourceLanguage = question.aiResponseSourceLanguage ?: question.sourceLanguage
+        val translated = translator.translate(
+            fields = fields,
+            sourceLanguages = fields.keys.associateWith { sourceLanguage },
+            targetLanguage = event.targetLanguage,
         )
-        val sources = fields.keys.associateWith { field ->
-            when (field) {
-                "answer" -> question.answerSourceLanguage ?: question.sourceLanguage
-                "feedback", "explanation", "assessmentJson" ->
-                    question.aiResponseSourceLanguage ?: question.sourceLanguage
-                else -> question.sourceLanguage
-            }
-        }
-        val translatable = fields.filter { (name, value) ->
-            name != "assessmentJson" &&
-                !value.isNullOrBlank() &&
-                QuestionLanguage.normalize(sources.getValue(name)) != event.targetLanguage
-        }
-        val translated = translator.translate(translatable, sources, event.targetLanguage)
         val result = translated.copy(
             fields = translated.fields + ("assessmentJson" to question.gradingAssessmentJson),
         )
-        localizations.saveRecordReady(question, event.targetLanguage, hashes, result, Instant.now())
+        localizations.saveAiResponseReady(question, event.targetLanguage, sourceHash, result, Instant.now())
     }
 
     private suspend fun processComment(event: ContentTranslationRequestedEvent) {
@@ -93,5 +138,9 @@ class ContentTranslationProcessor(
         const val CONSUMER_GROUP = "bs-backend-content-translation"
         const val RECOVERY_MIN_IDLE_TIME_MILLIS = 210_000L
         private const val MAX_ATTEMPTS = 3
+        private const val INBOX_CORRELATION_ID_LENGTH = 36
+
+        internal fun inboxCorrelationId(eventId: String): String =
+            ContentLocalizationService.sha256(eventId).take(INBOX_CORRELATION_ID_LENGTH)
     }
 }

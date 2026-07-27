@@ -96,7 +96,7 @@ view=localized|original
 
 ## 비동기 번역
 
-번역 누락 조회는 작은 DB 트랜잭션 안에서 `PENDING` 행과 `CONTENT_TRANSLATION_REQUESTED` Outbox를 함께 저장한다. 이벤트 ID는 콘텐츠 유형, ID, 대상 언어, source hash로 결정하므로 동시 요청과 재시도가 중복 제거된다.
+번역 누락 조회는 작은 DB 트랜잭션 안에서 `PENDING` 행과 `CONTENT_TRANSLATION_REQUESTED` Outbox를 함께 저장한다. 질문, 사용자 답변, AI 응답은 각각 `QUESTION`, `ANSWER`, `AI_RESPONSE` 이벤트를 가지며 독립적으로 번역·재시도·실패 처리된다. 과거의 `RECORD` 이벤트는 배포 전 생성된 메시지를 비우기 위한 소비 호환 타입일 뿐 새로 발행하지 않는다. 이벤트 ID는 콘텐츠 유형, ID, 대상 언어, 해당 콘텐츠의 source hash로 결정하므로 동시 요청과 재시도가 중복 제거된다.
 
 ```mermaid
 sequenceDiagram
@@ -129,7 +129,7 @@ sequenceDiagram
 - 최종 실패는 번역 행만 `FAILED`로 바꾸며 원문 노출을 유지한다.
 - 번역은 질문 생성 할당량을 소비하지 않는다.
 
-질문 레코드는 질문, 답변, AI 응답 가운데 변경되거나 누락된 부분만 번역한다. 각 부분의 hash는 독립적으로 비교한다. 댓글은 댓글별 이벤트로 처리한다.
+질문 레코드는 질문, 답변, AI 응답 가운데 변경되거나 누락된 부분만 번역한다. 각 부분의 hash와 이벤트가 독립적이므로 한 부분의 번역 실패가 다른 부분의 완료나 재시도를 막지 않는다. 댓글은 댓글별 이벤트로 처리한다.
 
 ## iOS 표시
 

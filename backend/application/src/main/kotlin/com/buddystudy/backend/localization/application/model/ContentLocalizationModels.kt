@@ -3,7 +3,14 @@ package com.buddystudy.backend.localization.application.model
 import java.time.Instant
 
 enum class LocalizableContentType {
+    /**
+     * Kept only so translation requests already stored in the outbox/stream can
+     * still be drained after question, answer, and AI response were separated.
+     */
     RECORD,
+    QUESTION,
+    ANSWER,
+    AI_RESPONSE,
     COMMENT,
 }
 

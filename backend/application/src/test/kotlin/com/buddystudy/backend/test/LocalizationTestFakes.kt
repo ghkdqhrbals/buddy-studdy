@@ -2,6 +2,7 @@ package com.buddystudy.backend.test
 
 import com.buddystudy.backend.localization.application.model.ContentTranslationRequestedEvent
 import com.buddystudy.backend.localization.application.model.ContentTranslationResult
+import com.buddystudy.backend.localization.application.model.LocalizableContentType
 import com.buddystudy.backend.localization.application.model.RecordLocalizationSnapshot
 import com.buddystudy.backend.localization.application.model.RecordSourceHashes
 import com.buddystudy.backend.localization.application.model.TextLocalizationSnapshot
@@ -18,7 +19,7 @@ class PassthroughLanguageDetector : ContentLanguageDetectionPort {
         QuestionLanguage.normalize(fallbackLanguage)
 }
 
-class EmptyContentLocalizationPort : ContentLocalizationPort {
+open class EmptyContentLocalizationPort : ContentLocalizationPort {
     override suspend fun record(questionId: Long, targetLanguage: String) =
         RecordLocalizationSnapshot(null, null, null)
 
@@ -29,7 +30,11 @@ class EmptyContentLocalizationPort : ContentLocalizationPort {
         targetLanguage: String,
         sourceHashes: RecordSourceHashes,
         now: Instant,
-    ) = true
+    ) = setOf(
+        LocalizableContentType.QUESTION,
+        LocalizableContentType.ANSWER,
+        LocalizableContentType.AI_RESPONSE,
+    )
 
     override suspend fun ensureCommentPending(
         comment: QuestionCommentEntity,
@@ -38,10 +43,26 @@ class EmptyContentLocalizationPort : ContentLocalizationPort {
         now: Instant,
     ) = true
 
-    override suspend fun saveRecordReady(
+    override suspend fun saveQuestionReady(
         question: QuestionEntity,
         targetLanguage: String,
-        sourceHashes: RecordSourceHashes,
+        sourceHash: String,
+        result: ContentTranslationResult,
+        now: Instant,
+    ) = true
+
+    override suspend fun saveAnswerReady(
+        question: QuestionEntity,
+        targetLanguage: String,
+        sourceHash: String,
+        result: ContentTranslationResult,
+        now: Instant,
+    ) = true
+
+    override suspend fun saveAiResponseReady(
+        question: QuestionEntity,
+        targetLanguage: String,
+        sourceHash: String,
         result: ContentTranslationResult,
         now: Instant,
     ) = true

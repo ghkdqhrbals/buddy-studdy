@@ -2,6 +2,7 @@ package com.buddystudy.backend.localization.application.port
 
 import com.buddystudy.backend.localization.application.model.ContentTranslationRequestedEvent
 import com.buddystudy.backend.localization.application.model.ContentTranslationResult
+import com.buddystudy.backend.localization.application.model.LocalizableContentType
 import com.buddystudy.backend.localization.application.model.RecordLocalizationSnapshot
 import com.buddystudy.backend.localization.application.model.RecordSourceHashes
 import com.buddystudy.backend.localization.application.model.TextLocalizationSnapshot
@@ -17,17 +18,31 @@ interface ContentLocalizationPort {
         targetLanguage: String,
         sourceHashes: RecordSourceHashes,
         now: Instant,
-    ): Boolean
+    ): Set<LocalizableContentType>
     suspend fun ensureCommentPending(
         comment: QuestionCommentEntity,
         targetLanguage: String,
         sourceHash: String,
         now: Instant,
     ): Boolean
-    suspend fun saveRecordReady(
+    suspend fun saveQuestionReady(
         question: QuestionEntity,
         targetLanguage: String,
-        sourceHashes: RecordSourceHashes,
+        sourceHash: String,
+        result: ContentTranslationResult,
+        now: Instant,
+    ): Boolean
+    suspend fun saveAnswerReady(
+        question: QuestionEntity,
+        targetLanguage: String,
+        sourceHash: String,
+        result: ContentTranslationResult,
+        now: Instant,
+    ): Boolean
+    suspend fun saveAiResponseReady(
+        question: QuestionEntity,
+        targetLanguage: String,
+        sourceHash: String,
         result: ContentTranslationResult,
         now: Instant,
     ): Boolean

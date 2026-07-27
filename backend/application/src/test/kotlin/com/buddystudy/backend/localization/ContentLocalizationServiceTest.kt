@@ -5,6 +5,7 @@ import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
 import com.buddystudy.backend.localization.application.model.ContentTranslationRequestedEvent
 import com.buddystudy.backend.localization.application.model.ContentTranslationResult
+import com.buddystudy.backend.localization.application.model.LocalizableContentType
 import com.buddystudy.backend.localization.application.model.RecordLocalizationSnapshot
 import com.buddystudy.backend.localization.application.model.RecordSourceHashes
 import com.buddystudy.backend.localization.application.model.TextLocalizationSnapshot
@@ -40,14 +41,25 @@ class ContentLocalizationServiceTest {
 
         service.requestRecord(question, "ja")
 
-        val event = events.events.single()
-        assertThat(event.targetLanguage).isEqualTo("ja")
-        assertThat(event.questionSourceHash).isNotBlank()
-        assertThat(event.answerSourceHash).isNotBlank()
-        assertThat(event.aiResponseSourceHash).isNotBlank()
-        assertThat(event.sourceHash).doesNotContain(question.question)
+        val eventsByType = events.events.associateBy(ContentTranslationRequestedEvent::contentType)
+        assertThat(eventsByType.keys).containsExactlyInAnyOrder(
+            LocalizableContentType.QUESTION,
+            LocalizableContentType.ANSWER,
+            LocalizableContentType.AI_RESPONSE,
+        )
+        assertThat(eventsByType.values).allMatch { it.targetLanguage == "ja" }
+        assertThat(eventsByType.getValue(LocalizableContentType.QUESTION).sourceHash)
+            .isEqualTo(localizations.hashes?.question)
+        assertThat(eventsByType.getValue(LocalizableContentType.ANSWER).sourceHash)
+            .isEqualTo(localizations.hashes?.answer)
+        assertThat(eventsByType.getValue(LocalizableContentType.AI_RESPONSE).sourceHash)
+            .isEqualTo(localizations.hashes?.aiResponse)
+        assertThat(eventsByType.values).allMatch { !it.sourceHash.contains(question.question) }
+        assertThat(eventsByType.values).allMatch {
+            it.questionSourceHash == null && it.answerSourceHash == null && it.aiResponseSourceHash == null
+        }
         assertThat(localizations.hashes?.question).isNotEqualTo(localizations.hashes?.answer)
-        assertThat(publisher.references).hasSize(1)
+        assertThat(publisher.references).hasSize(3)
     }
 
     @Test
@@ -77,9 +89,13 @@ private class RecordingLocalizationPort : ContentLocalizationPort {
         targetLanguage: String,
         sourceHashes: RecordSourceHashes,
         now: Instant,
-    ): Boolean {
+    ): Set<LocalizableContentType> {
         hashes = sourceHashes
-        return true
+        return setOf(
+            LocalizableContentType.QUESTION,
+            LocalizableContentType.ANSWER,
+            LocalizableContentType.AI_RESPONSE,
+        )
     }
 
     override suspend fun ensureCommentPending(
@@ -89,10 +105,26 @@ private class RecordingLocalizationPort : ContentLocalizationPort {
         now: Instant,
     ) = true
 
-    override suspend fun saveRecordReady(
+    override suspend fun saveQuestionReady(
         question: QuestionEntity,
         targetLanguage: String,
-        sourceHashes: RecordSourceHashes,
+        sourceHash: String,
+        result: ContentTranslationResult,
+        now: Instant,
+    ) = true
+
+    override suspend fun saveAnswerReady(
+        question: QuestionEntity,
+        targetLanguage: String,
+        sourceHash: String,
+        result: ContentTranslationResult,
+        now: Instant,
+    ) = true
+
+    override suspend fun saveAiResponseReady(
+        question: QuestionEntity,
+        targetLanguage: String,
+        sourceHash: String,
         result: ContentTranslationResult,
         now: Instant,
     ) = true
