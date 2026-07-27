@@ -5391,23 +5391,6 @@ private struct MobileProfileEditorView: View {
             && hasProfileChanges
     }
 
-    private var profileAccountText: String {
-        guard let profile = appState.communityProfile else {
-            return ""
-        }
-
-        switch profile.provider.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
-        case "EMAIL":
-            let email = profile.email.trimmingCharacters(in: .whitespacesAndNewlines)
-            return email.isEmpty ? "Email" : email
-        case "GOOGLE":
-            return "Google"
-        default:
-            let provider = profile.provider.trimmingCharacters(in: .whitespacesAndNewlines)
-            return provider.isEmpty ? profile.displayName : provider.capitalized
-        }
-    }
-
     var body: some View {
         let strings = appState.strings
 
@@ -5473,26 +5456,6 @@ private struct MobileProfileEditorView: View {
                                 .padding(.horizontal, 12)
                                 .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
-                            if !profileAccountText.isEmpty {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "person.crop.circle.badge.checkmark")
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(strings.profileAccount)
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                        Text(profileAccountText)
-                                            .font(.subheadline.weight(.semibold))
-                                            .foregroundStyle(.primary)
-                                            .lineLimit(1)
-                                    }
-                                }
-                                .padding(.vertical, 9)
-                                .padding(.horizontal, 13)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                                .background(Color.secondary.opacity(0.06), in: Capsule())
-                            }
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
