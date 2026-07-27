@@ -144,6 +144,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 5. Users can report public questions. Reports are persisted by the backend and may be forwarded to the operator email when SMTP is configured.
 6. The feed is modeled as typed content rather than question-only rows, so feedback prompts and future operational content can be inserted without pretending to be questions.
 7. Feedback opens a dedicated compact form and is stored independently from question reports.
+8. Public-question list, search, and detail requests use `tl=ko|en`; translated topic, question, and hint fields are returned in the requested language. The legacy `language` query remains a temporary compatibility alias.
 
 ## Non-Goals
 

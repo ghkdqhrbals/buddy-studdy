@@ -818,6 +818,8 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(components.queryItemValue("query"), "Swift concurrency")
         XCTAssertEqual(components.queryItemValue("limit"), "100")
         XCTAssertEqual(components.queryItemValue("offset"), "0")
+        XCTAssertEqual(components.queryItemValue("tl"), "ko")
+        XCTAssertNil(components.queryItemValue("language"))
     }
 
     @MainActor
@@ -840,6 +842,27 @@ final class StudyMateTests: XCTestCase {
         XCTAssertNil(components.queryItemValue("query"))
         XCTAssertEqual(components.queryItemValue("limit"), "15")
         XCTAssertEqual(components.queryItemValue("offset"), "20")
+        XCTAssertEqual(components.queryItemValue("tl"), "ko")
+        XCTAssertNil(components.queryItemValue("language"))
+    }
+
+    @MainActor
+    func testPublicQuestionDetailUsesTargetLanguageQuery() async throws {
+        let recorder = HTTPRequestRecorder()
+        let client = makeBackendClient(recorder: recorder)
+        let registration = RemotePushRegistration(deviceID: "device-1", clientSecret: "secret-1", apnsToken: "")
+
+        _ = try await client.fetchPublicQuestion(
+            registration: registration,
+            questionID: "42",
+            language: .english
+        )
+
+        let request = try XCTUnwrap(recorder.requests.single)
+        XCTAssertEqual(request.url?.path, "/api/v1/public/questions/42")
+        let components = try XCTUnwrap(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false))
+        XCTAssertEqual(components.queryItemValue("tl"), "en")
+        XCTAssertNil(components.queryItemValue("language"))
     }
 
     func testRecordDeepLinksResolveToRecordDetailRoutes() throws {
@@ -5747,7 +5770,26 @@ private func makeBackendClient(recorder: HTTPRequestRecorder) -> RemotePushBacke
         recorder.append(request)
         let url = request.url ?? URL(string: "https://example.test")!
         let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
-        let body = #"{"questions":[],"totalCount":0,"limit":20,"offset":0}"#.data(using: .utf8)!
+        let body: Data
+        if url.path.hasPrefix("/api/v1/public/questions/") {
+            body = #"""
+            {
+              "id": "42",
+              "question": "Translated question",
+              "topic": "Translated topic",
+              "difficultyLevel": 5,
+              "status": "graded",
+              "source": "scheduled",
+              "createdAt": "2026-07-28T00:00:00Z",
+              "likeCount": 0,
+              "commentCount": 0,
+              "viewCount": 0,
+              "likedByMe": false
+            }
+            """#.data(using: .utf8)!
+        } else {
+            body = #"{"questions":[],"totalCount":0,"limit":20,"offset":0}"#.data(using: .utf8)!
+        }
         return (response, body)
     }
     return RemotePushBackendClient(

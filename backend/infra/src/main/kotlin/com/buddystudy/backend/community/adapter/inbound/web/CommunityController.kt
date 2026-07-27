@@ -53,20 +53,24 @@ class CommunityController(
         @RequestParam(defaultValue = "20") limit: Int,
         @Parameter(description = "Zero-based pagination offset.", example = "0")
         @RequestParam(defaultValue = "0") offset: Int,
-        @Parameter(description = "Response/search language code.", example = "ko")
-        @RequestParam(defaultValue = "ko") language: String,
+        @Parameter(description = "Target language for translated content. Supports ko and en.", example = "ko")
+        @RequestParam(required = false) tl: String?,
+        @Parameter(description = "Deprecated target-language alias kept for older clients.", example = "ko", deprecated = true)
+        @RequestParam(required = false) language: String?,
         authentication: Authentication?,
-    ) = community.getPublicQuestions(query ?: topic, language, limit, offset, authentication)
+    ) = community.getPublicQuestions(query ?: topic, targetLanguage(tl, language), limit, offset, authentication)
 
     @Operation(summary = "Fetch one public question", description = "Returns a single public completed question with author, answer, feedback, explanation, and current reaction statistics. Viewing may publish a view event for delayed aggregation.")
     @GetMapping("/public/questions/{id}")
     suspend fun getPublicQuestion(
         @Parameter(description = "Public question id.", example = "42")
         @PathVariable id: Long,
-        @Parameter(description = "Response language code.", example = "ko")
-        @RequestParam(defaultValue = "ko") language: String,
+        @Parameter(description = "Target language for translated content. Supports ko and en.", example = "ko")
+        @RequestParam(required = false) tl: String?,
+        @Parameter(description = "Deprecated target-language alias kept for older clients.", example = "ko", deprecated = true)
+        @RequestParam(required = false) language: String?,
         authentication: Authentication?,
-    ) = community.getPublicQuestion(id, language, authentication)
+    ) = community.getPublicQuestion(id, targetLanguage(tl, language), authentication)
 
     @Operation(summary = "Like a public question", description = "Adds the authenticated user's like. Like counts may be aggregated asynchronously.")
     @PutMapping("/public/questions/{id}/like")
@@ -151,11 +155,18 @@ class CommunitySearchV2Controller(
         @RequestParam(defaultValue = "20") limit: Int,
         @Parameter(description = "Zero-based pagination offset.", example = "0")
         @RequestParam(defaultValue = "0") offset: Int,
-        @Parameter(description = "Search and response language code.", example = "ko")
-        @RequestParam(defaultValue = "ko") language: String,
+        @Parameter(description = "Target language for translated search results. Supports ko and en.", example = "ko")
+        @RequestParam(required = false) tl: String?,
+        @Parameter(description = "Deprecated target-language alias kept for older clients.", example = "ko", deprecated = true)
+        @RequestParam(required = false) language: String?,
         authentication: Authentication?,
-    ) = community.getPublicQuestionsV2(query, language, limit, offset, authentication)
+    ) = community.getPublicQuestionsV2(query, targetLanguage(tl, language), limit, offset, authentication)
 }
+
+internal fun targetLanguage(tl: String?, legacyLanguage: String?): String =
+    tl?.trim()?.takeIf(String::isNotEmpty)
+        ?: legacyLanguage?.trim()?.takeIf(String::isNotEmpty)
+        ?: "ko"
 
 interface CommunityWebPort {
     suspend fun getPublicQuestions(query: String?, language: String, limit: Int, offset: Int, authentication: Authentication?): Any

@@ -1157,7 +1157,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var queryItems = [
             URLQueryItem(name: "limit", value: "\(max(1, min(limit, 100)))"),
             URLQueryItem(name: "offset", value: "\(max(0, offset))"),
-            URLQueryItem(name: "language", value: language.backendCode)
+            URLQueryItem(name: "tl", value: language.backendCode)
         ]
         if !normalizedQuery.isEmpty {
             queryItems.append(URLQueryItem(name: "query", value: normalizedQuery))
@@ -1187,7 +1187,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [
-            URLQueryItem(name: "language", value: language.backendCode)
+            URLQueryItem(name: "tl", value: language.backendCode)
         ]
         guard let url = components?.url else {
             throw RemotePushBackendError.invalidResponse

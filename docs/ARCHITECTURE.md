@@ -206,7 +206,10 @@ Profile > Usage appears or a quota-related request fails
 
 ```text
 Public community feed
--> GET /api/v1/public/questions
+-> GET /api/v1/public/questions?tl=ko|en
+-> GET /api/v2/public/questions/search?query=...&tl=ko|en
+-> tl takes precedence over the deprecated language alias and defaults to ko
+-> only READY translation snapshots are exposed for en
 -> app maps server questions into typed MobileHomeFeedItem values
 -> locally scheduled placement may insert non-question items such as feedback prompts
 -> feedback prompt opens a dedicated form

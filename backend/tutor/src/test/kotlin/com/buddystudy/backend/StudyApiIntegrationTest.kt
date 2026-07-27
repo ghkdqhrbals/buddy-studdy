@@ -544,7 +544,12 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
                 question = "Public boundary question",
                 createdAt = Instant.parse("2026-06-09T05:00:00Z"),
                 publicQuestion = true,
-            )
+            ).apply {
+                topicEn = "Public Boundary Topic"
+                questionEn = "Translated public boundary question"
+                hintEn = "Translated public boundary hint"
+                translationStatus = "READY"
+            }
         )
         stats.save(QuestionStatsEntity(questionId = publicQuestion.id, likeCount = 9, commentCount = 3, viewCount = 14))
 
@@ -561,11 +566,25 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(listed["commentCount"].asInt()).isEqualTo(3)
         assertThat(listed["viewCount"].asInt()).isEqualTo(14)
 
-        val detail = get("/api/v1/public/questions/${publicQuestion.id}")
+        val translatedList = get("/api/v1/public/questions?query=boundary&tl=en")
+            .also { assertThat(it.statusCode()).isEqualTo(200) }
+            .json()
+        assertThat(translatedList["questions"]).hasSize(1)
+        assertThat(translatedList["questions"][0]["topic"].asText()).isEqualTo("Public Boundary Topic")
+        assertThat(translatedList["questions"][0]["question"].asText()).isEqualTo("Translated public boundary question")
+
+        val detail = get("/api/v1/public/questions/${publicQuestion.id}?tl=en")
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
         assertThat(detail["id"].asText()).isEqualTo(publicQuestion.id.toString())
         assertThat(detail["likedByMe"].asBoolean()).isFalse()
+        assertThat(detail["topic"].asText()).isEqualTo("Public Boundary Topic")
+        assertThat(detail["question"].asText()).isEqualTo("Translated public boundary question")
+
+        val legacyDetail = get("/api/v1/public/questions/${publicQuestion.id}?language=en")
+            .also { assertThat(it.statusCode()).isEqualTo(200) }
+            .json()
+        assertThat(legacyDetail["question"].asText()).isEqualTo("Translated public boundary question")
 
         assertAuthRequired(putJson("/api/v1/public/questions/${publicQuestion.id}/like", ""))
         assertAuthRequired(postJson("/api/v1/public/questions/${publicQuestion.id}/comments", """{"body":"hello"}"""))
