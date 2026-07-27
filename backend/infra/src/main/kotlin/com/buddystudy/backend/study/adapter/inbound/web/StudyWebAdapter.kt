@@ -36,8 +36,19 @@ class StudyWebAdapter(
     private val questionQuotaUseCase: QuestionQuotaUseCase,
     private val answerGrading: ObserveAnswerGradingUseCase,
 ) : StudyWebPort {
-    override suspend fun study(limit: Int, offset: Int, query: String?, authentication: Authentication) =
-        studySyncUseCase.study(authentication.principalOrThrow(), safeLimit(limit, 1000), max(0, offset), query)
+    override suspend fun study(
+        limit: Int,
+        offset: Int,
+        query: String?,
+        language: String,
+        authentication: Authentication,
+    ) = studySyncUseCase.study(
+        authentication.principalOrThrow(),
+        safeLimit(limit, 1000),
+        max(0, offset),
+        query,
+        language,
+    )
 
     override suspend fun records(limit: Int, offset: Int, query: String?, language: String, authentication: Authentication) =
         recordsUseCase.records(authentication.principalOrThrow(), safeLimit(limit, 500), max(0, offset), query, language)

@@ -37,6 +37,7 @@ import kotlinx.coroutines.withContext
 
 enum class RedisStreamTopic(val apiName: String) {
     DOMAIN_EVENTS("domain-events"),
+    QUESTION_GENERATED("question-generated"),
     PUSH_EVENTS("push-events"),
 }
 
@@ -112,6 +113,11 @@ class RedisStreamTopicManager(
             topic = RedisStreamTopic.DOMAIN_EVENTS,
             streamKey = properties.streams.key,
             maxLength = properties.streams.domainMaxLen.coerceAtLeast(1),
+        ),
+        RedisStreamTopicDefinition(
+            topic = RedisStreamTopic.QUESTION_GENERATED,
+            streamKey = properties.streams.questionGeneratedKey,
+            maxLength = properties.streams.questionGeneratedMaxLen.coerceAtLeast(1),
         ),
         RedisStreamTopicDefinition(
             topic = RedisStreamTopic.PUSH_EVENTS,

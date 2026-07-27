@@ -288,7 +288,8 @@ protocol RemotePushBackendClientProtocol {
         registration: RemotePushRegistration,
         limit: Int,
         offset: Int,
-        query: String
+        query: String,
+        language: AppLanguage
     ) async throws -> BackendStudyPage
 
     func createStudy(
@@ -738,7 +739,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         registration: RemotePushRegistration,
         limit: Int = 500,
         offset: Int = 0,
-        query: String = ""
+        query: String = "",
+        language: AppLanguage = .korean
     ) async throws -> BackendStudyPage {
         var components = URLComponents(
             url: endpoint("api", "v1", "studies"),
@@ -747,7 +749,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         components?.queryItems = [
             URLQueryItem(name: "limit", value: "\(limit)"),
             URLQueryItem(name: "offset", value: "\(offset)"),
-            URLQueryItem(name: "query", value: query)
+            URLQueryItem(name: "query", value: query),
+            URLQueryItem(name: "language", value: language.backendCode)
         ]
         guard let url = components?.url else {
             throw RemotePushBackendError.invalidResponse

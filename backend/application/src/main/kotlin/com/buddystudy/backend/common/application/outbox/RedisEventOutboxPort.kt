@@ -2,6 +2,7 @@ package com.buddystudy.backend.common.application.outbox
 
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
+import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
 import java.time.Instant
 
 enum class OutboxType {
@@ -40,6 +41,7 @@ enum class RedisOutboxEventType {
     NOTIFICATION_REQUESTED,
     ACCOUNT_WITHDRAWN,
     ANSWER_GRADING_REQUESTED,
+    QUESTION_GENERATED,
 }
 
 data class ClaimedRedisOutboxEvent(
@@ -57,6 +59,8 @@ interface RedisEventOutboxAppendPort {
     suspend fun appendNotification(command: NotificationRequestCommand, createdAt: Instant = Instant.now()): Long
     suspend fun appendAnswerGrading(event: AnswerGradingRequestedEvent, createdAt: Instant = Instant.now()): Long =
         error("Answer grading outbox is not configured.")
+    suspend fun appendQuestionGenerated(event: QuestionGeneratedEvent, createdAt: Instant = Instant.now()): Long =
+        error("Question generated outbox is not configured.")
 }
 
 interface RedisEventOutboxPort : RedisEventOutboxAppendPort {

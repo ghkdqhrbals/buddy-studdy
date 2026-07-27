@@ -58,6 +58,28 @@ interface SystemTopicCatalogPort {
 
 interface QuestionPort {
     suspend fun save(entity: QuestionEntity): QuestionEntity
+    suspend fun saveEnglishTranslation(
+        questionId: Long,
+        question: String,
+        hint: String?,
+        now: Instant,
+    ): Boolean {
+        val entity = findQuestionById(questionId) ?: return false
+        entity.questionEn = question
+        entity.hintEn = hint
+        entity.translationStatus = "READY"
+        entity.translationError = null
+        entity.updatedAt = now
+        save(entity)
+        return true
+    }
+    suspend fun markEnglishTranslationFailed(questionId: Long, error: String, now: Instant) {
+        val entity = findQuestionById(questionId) ?: return
+        entity.translationStatus = "FAILED"
+        entity.translationError = error
+        entity.updatedAt = now
+        save(entity)
+    }
     suspend fun findQuestionById(id: Long): QuestionEntity?
     suspend fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity?
     suspend fun lockByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? =
@@ -70,16 +92,53 @@ interface QuestionPort {
     suspend fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity>
     suspend fun findPendingByStudyId(studyId: Long, pageable: Pageable): Page<QuestionEntity>
     suspend fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity>
+    suspend fun findLatestPendingByStudyIdsAndLanguage(studyIds: Collection<Long>, language: String): List<QuestionEntity> =
+        findLatestPendingByStudyIds(studyIds).filter { it.language == language }
     suspend fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity>
+    suspend fun findVisibleByUserAndLanguage(
+        userId: Long,
+        includePending: Boolean,
+        language: String,
+        pageable: Pageable,
+    ): Page<QuestionEntity> = findVisibleByUser(userId, includePending, pageable)
     suspend fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity>
+    suspend fun findVisibleByUserAndLanguageAndQuery(
+        userId: Long,
+        includePending: Boolean,
+        language: String,
+        query: String,
+        pageable: Pageable,
+    ): Page<QuestionEntity> = findVisibleByUserAndQuery(userId, includePending, query, pageable)
     suspend fun findRecentQuestionTextsByStudyIdAndTopic(studyId: Long, topic: String, pageable: Pageable): List<String>
+    suspend fun findRecentQuestionTextsByStudyIdAndTopicAndLanguage(
+        studyId: Long,
+        topic: String,
+        language: String,
+        pageable: Pageable,
+    ): List<String> = findRecentQuestionTextsByStudyIdAndTopic(studyId, topic, pageable)
     suspend fun findRecentQuestionTextsByUserIdAndTopic(userId: Long, topic: String, pageable: Pageable): List<String>
+    suspend fun findRecentQuestionTextsByUserIdAndTopicAndLanguage(
+        userId: Long,
+        topic: String,
+        language: String,
+        pageable: Pageable,
+    ): List<String> = findRecentQuestionTextsByUserIdAndTopic(userId, topic, pageable)
     suspend fun countPendingForStudy(studyId: Long): Long
+    suspend fun countPendingForStudyAndLanguage(studyId: Long, language: String): Long =
+        countPendingForStudy(studyId)
     suspend fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long>
+    suspend fun countPendingByStudyIdsAndLanguage(studyIds: Collection<Long>, language: String): Map<Long, Long> =
+        countPendingByStudyIds(studyIds)
     suspend fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity>
+    suspend fun findPublicAnsweredByLanguage(language: String, pageable: Pageable): Page<QuestionEntity> =
+        findPublicAnswered(pageable)
     suspend fun findPublicAnsweredByTopic(topic: String, pageable: Pageable): Page<QuestionEntity>
     suspend fun findPublicAnsweredByQuery(query: String, pageable: Pageable): Page<QuestionEntity>
+    suspend fun findPublicAnsweredByLanguageAndQuery(language: String, query: String, pageable: Pageable): Page<QuestionEntity> =
+        findPublicAnsweredByQuery(query, pageable)
     suspend fun findPublicAnsweredById(id: Long): QuestionEntity?
+    suspend fun findPublicAnsweredByIdAndLanguage(id: Long, language: String): QuestionEntity? =
+        findPublicAnsweredById(id)?.takeIf { it.language == language }
     suspend fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity>
     suspend fun softDelete(id: Long, userId: Long, now: Instant): Int
     suspend fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int

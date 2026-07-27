@@ -3,12 +3,10 @@ package com.buddystudy.backend.study.application.port.inbound
 import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
 import com.buddystudy.backend.study.application.model.AnswerGradingStatus
-import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.study.application.model.GeneratedQuestionWithEmbedding
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKey
 import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSelection
-import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.StudyEntity
 import java.time.Instant
@@ -24,8 +22,15 @@ interface QuestionCreationWriteUseCase {
         embedding: List<Float>,
         coverage: QuestionCoverageSelection?,
         questionKey: OpenAIQuestionKey,
-        notification: (QuestionEntity) -> NotificationRequestCommand,
-        push: (QuestionEntity) -> QuestionPushRequest,
+        now: Instant,
+    ): QuestionWriteResult
+}
+
+interface QuestionDeliveryWriteUseCase {
+    suspend fun enqueue(
+        question: QuestionEntity,
+        rootStudy: StudyEntity,
+        appLanguage: String,
         now: Instant,
     ): QuestionWriteResult
 }

@@ -6,7 +6,8 @@ protocol StudyRoomRepository {
         registration: RemotePushRegistration,
         limit: Int,
         offset: Int,
-        query: String
+        query: String,
+        language: AppLanguage
     ) async throws -> BackendStudyPage
 
     func createStudy(

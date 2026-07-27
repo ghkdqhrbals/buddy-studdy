@@ -74,8 +74,10 @@ class StudyController(
         @RequestParam(defaultValue = "0") offset: Int,
         @Parameter(description = "Optional DB-backed study search query.", example = "Swift")
         @RequestParam(required = false) query: String?,
+        @Parameter(description = "Question language code.", example = "ko")
+        @RequestParam(defaultValue = "ko") language: String,
         authentication: Authentication,
-    ): StudyPageResponse = study.study(limit, offset, query, authentication)
+    ): StudyPageResponse = study.study(limit, offset, query, language, authentication)
 
     @Operation(
         summary = "Create a study",

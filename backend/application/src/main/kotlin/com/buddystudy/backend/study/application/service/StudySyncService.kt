@@ -22,6 +22,8 @@ import com.buddystudy.study.domain.entity.StudyEntity
 import com.buddystudy.study.domain.StudyRecord
 import com.buddystudy.study.domain.StudyRecordState
 import com.buddystudy.study.domain.StudyRecordStats
+import com.buddystudy.study.domain.QuestionLanguage
+import com.buddystudy.study.domain.localizedFor
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import org.springframework.data.domain.PageRequest
@@ -37,7 +39,17 @@ class StudySyncService(
     private val questionStats: QuestionStatsPort,
 ) : StudySyncUseCase {
     @Transactional(readOnly = true)
-    override suspend fun study(principal: Principal, limit: Int, offset: Int, query: String?): StudyPageResponse {
+    override suspend fun study(principal: Principal, limit: Int, offset: Int, query: String?): StudyPageResponse =
+        study(principal, limit, offset, query, QuestionLanguage.KOREAN)
+
+    @Transactional(readOnly = true)
+    override suspend fun study(
+        principal: Principal,
+        limit: Int,
+        offset: Int,
+        query: String?,
+        language: String,
+    ): StudyPageResponse {
         val search = query?.trim()?.takeIf { it.isNotEmpty() }
         val pageable = PageRequest.of(offset / limit, limit)
         val page = if (search == null) {
@@ -46,7 +58,7 @@ class StudySyncService(
             studies.findByUserIdAndQuery(principal.userId, search, pageable)
         }
         return StudyPageResponse(
-            studies = page.content.toStudyRoomResponses(),
+            studies = page.content.toStudyRoomResponses(QuestionLanguage.normalize(language)),
             totalCount = page.totalElements,
             limit = limit,
             offset = offset,
@@ -181,9 +193,11 @@ class StudySyncService(
         }
     }
 
-    private suspend fun List<StudyEntity>.toStudyRoomResponses(): List<StudyRoomResponse> {
+    private suspend fun List<StudyEntity>.toStudyRoomResponses(language: String): List<StudyRoomResponse> {
         if (isEmpty()) return emptyList()
-        val pendingByStudyId = questions.findLatestPendingByStudyIds(map { it.id }).associateBy { it.studyId }
+        val pendingByStudyId = questions
+            .findLatestPendingByStudyIdsAndLanguage(map { it.id }, language)
+            .associateBy { it.studyId }
         val statsByQuestionId = pendingByStudyId.values
             .map { it.id }
             .takeIf { it.isNotEmpty() }
@@ -191,7 +205,7 @@ class StudySyncService(
             .orEmpty()
         return map { study ->
             study.toStudyRoomResponse(
-                pendingQuestion = pendingByStudyId[study.id],
+                pendingQuestion = pendingByStudyId[study.id]?.localizedFor(language),
                 statsByQuestionId = statsByQuestionId,
             )
         }

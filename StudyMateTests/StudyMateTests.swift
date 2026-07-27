@@ -426,7 +426,8 @@ final class StudyMateTests: XCTestCase {
             registration: backendClient.registration,
             limit: 500,
             offset: 0,
-            query: ""
+            query: "",
+            language: .english
         )
         _ = try await useCase.createQuestion(
             registration: backendClient.registration,
@@ -5060,7 +5061,8 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         registration: RemotePushRegistration,
         limit: Int,
         offset: Int,
-        query: String
+        query: String,
+        language: AppLanguage
     ) async throws -> BackendStudyPage {
         fetchStudyCallCount += 1
         BackendStudyPage(

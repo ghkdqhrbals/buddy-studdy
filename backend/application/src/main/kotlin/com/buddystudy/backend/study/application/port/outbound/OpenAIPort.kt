@@ -1,6 +1,7 @@
 package com.buddystudy.backend.study.application.port.outbound
 
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
+import com.buddystudy.backend.study.application.model.TranslatedQuestionContent
 
 data class AiGradingCriterion(
     val id: String,
@@ -98,4 +99,12 @@ interface OpenAIPort {
         val key: String,
         val name: String,
     )
+}
+
+interface QuestionTranslationPort {
+    suspend fun translateToEnglish(
+        question: String,
+        hint: String?,
+        sourceLanguage: String,
+    ): TranslatedQuestionContent
 }

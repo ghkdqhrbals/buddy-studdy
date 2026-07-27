@@ -21,6 +21,7 @@ import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
 import com.buddystudy.backend.study.application.prompt.QuestionCoverageGuide
 import com.buddystudy.backend.study.application.prompt.QuestionDiversityPolicy
 import com.buddystudy.backend.study.application.prompt.QuestionPromptProvider
+import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.StudyEntity
 import org.slf4j.Logger
@@ -88,10 +89,18 @@ class ScheduledQuestionService(
                     activeTopics = StudyTreeSelector.activeTopics(scheduleStudy, userStudies),
                 )
             }
-            val pendingCounts = pendingCounts(dueContexts.flatMap { context -> context.activeTopics.map { it.id } })
+            val languageByUserId = dueContexts
+                .map { it.scheduleStudy.userId }
+                .distinct()
+                .associateWith { userId ->
+                    val user = usersById[userId] ?: users.findById(userId).also { usersById[userId] = it }
+                    QuestionLanguage.normalize(user?.appLanguage)
+                }
+            val pendingCounts = pendingCounts(dueContexts, languageByUserId)
             val maxPendingPerTopic = properties.scheduler.maxPendingPerStudy.coerceAtLeast(1)
             dueContexts.forEach { context ->
                 val scheduleStudy = context.scheduleStudy
+                val appLanguage = languageByUserId.getValue(scheduleStudy.userId)
                 if (context.activeTopics.isEmpty()) {
                     writer.deferUntilNextInterval(scheduleStudy, now)
                     log.info(
@@ -103,7 +112,7 @@ class ScheduledQuestionService(
                     return@forEach
                 }
                 val blockedTopicIds = context.activeTopics
-                    .filter { topic -> (pendingCounts[topic.id] ?: 0L) >= maxPendingPerTopic }
+                    .filter { topic -> (pendingCounts[topic.id to appLanguage] ?: 0L) >= maxPendingPerTopic }
                     .mapTo(mutableSetOf()) { it.id }
                 val topicStudy = StudyTreeSelector.nextActiveTopic(
                     root = scheduleStudy,
@@ -132,7 +141,7 @@ class ScheduledQuestionService(
                     scheduleStudy = scheduleStudy,
                     topicStudy = topicStudy,
                     now = now,
-                    pending = pendingCounts[topicStudy.id] ?: 0L,
+                    pending = pendingCounts[topicStudy.id to appLanguage] ?: 0L,
                     usersById = usersById,
                     recentQuestionsByStudyTopic = recentQuestionsByStudyTopic,
                     recentEmbeddingsByStudyTopic = recentEmbeddingsByStudyTopic,
@@ -145,13 +154,24 @@ class ScheduledQuestionService(
         }
     }
 
-    private suspend fun pendingCounts(studyIds: List<Long>): Map<Long, Long> {
-        if (studyIds.isEmpty()) return emptyMap()
-        return studyIds
-            .distinct()
-            .chunked(PENDING_COUNT_BATCH_SIZE)
-            .flatMap { questions.countPendingByStudyIds(it).entries }
-            .associate { it.toPair() }
+    private suspend fun pendingCounts(
+        contexts: List<ScheduledStudyContext>,
+        languageByUserId: Map<Long, String>,
+    ): Map<Pair<Long, String>, Long> {
+        val studyIdsByLanguage = contexts
+            .groupBy { languageByUserId.getValue(it.scheduleStudy.userId) }
+            .mapValues { (_, groupedContexts) ->
+                groupedContexts.flatMap { context -> context.activeTopics.map { it.id } }.distinct()
+            }
+        return buildMap {
+            studyIdsByLanguage.forEach { (language, studyIds) ->
+                studyIds.chunked(PENDING_COUNT_BATCH_SIZE).forEach { chunk ->
+                    questions.countPendingByStudyIdsAndLanguage(chunk, language).forEach { (studyId, count) ->
+                        put(studyId to language, count)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -193,7 +213,7 @@ class ScheduledQuestionCreator(
             } else {
                 users.findById(userId).also { usersById[userId] = it }
             }
-            val appLanguage = user?.appLanguage ?: "ko"
+            val appLanguage = QuestionLanguage.normalize(user?.appLanguage)
             if (pending >= properties.scheduler.maxPendingPerStudy) {
                 writer.fail(
                     study = scheduleStudy,
@@ -217,7 +237,7 @@ class ScheduledQuestionCreator(
             questionKey = resolvedQuestionKey
             val studyTopicKey = StudyTopicKey(topicStudy.id, userId, topicStudy.topic.normalizedTopicKey())
             val recent = recentQuestionsByStudyTopic[studyTopicKey]
-                ?: recentQuestions(userId, topicStudy.id, topicStudy.topic)
+                ?: recentQuestions(userId, topicStudy.id, topicStudy.topic, appLanguage)
                     .also { recentQuestionsByStudyTopic[studyTopicKey] = it }
             val recentEmbeddings = recentEmbeddingsByStudyTopic[studyTopicKey]
                 ?: questionEmbeddings.findRecentByStudyIdAndTopic(topicStudy.id, topicStudy.topic, RECENT_EMBEDDING_LIMIT)
@@ -285,9 +305,24 @@ class ScheduledQuestionCreator(
         }
     }
 
-    private suspend fun recentQuestions(userId: Long, rootStudyId: Long, topic: String): List<String> {
-        val sameStudy = questions.findRecentQuestionTextsByStudyIdAndTopic(rootStudyId, topic, PageRequest.of(0, 30))
-        val sameTopic = questions.findRecentQuestionTextsByUserIdAndTopic(userId, topic, PageRequest.of(0, 30))
+    private suspend fun recentQuestions(
+        userId: Long,
+        rootStudyId: Long,
+        topic: String,
+        language: String,
+    ): List<String> {
+        val sameStudy = questions.findRecentQuestionTextsByStudyIdAndTopicAndLanguage(
+            rootStudyId,
+            topic,
+            language,
+            PageRequest.of(0, 30),
+        )
+        val sameTopic = questions.findRecentQuestionTextsByUserIdAndTopicAndLanguage(
+            userId,
+            topic,
+            language,
+            PageRequest.of(0, 30),
+        )
         return (sameStudy + sameTopic)
             .map { it.trim() }
             .filter { it.isNotBlank() }
@@ -329,6 +364,17 @@ class ScheduledQuestionCreator(
                 },
             )
             val generated = openAI.generateQuestion(apiKey, model, prompt)
+            if (!QuestionLanguage.matches(generated.question, language)) {
+                rejectedQuestions += generated.question
+                if (attempt == maxAttempts - 1) {
+                    throw ApiException(
+                        HttpStatus.UNPROCESSABLE_ENTITY,
+                        ApiErrorCode.VALIDATION_ERROR,
+                        "Generated question did not match the requested language.",
+                    )
+                }
+                return@repeat
+            }
             val embedding = openAI.embedText(apiKey, generated.question)
             val similar = similarityPolicy.findSimilar(
                 embedding = embedding,

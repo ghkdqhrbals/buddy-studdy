@@ -15,11 +15,13 @@ class StreamMaxLenMappingTest {
         withStreamMappings(
             "REACTION_STREAM_XADD_MAX_LEN=1000",
             "BUDDYSTUDY_DOMAIN_STREAM_MAX_LEN=2000",
+            "BUDDYSTUDY_QUESTION_GENERATED_STREAM_MAX_LEN=4000",
             "BUDDYSTUDY_PUSH_STREAM_MAX_LEN=8000",
         ).run { context ->
             val streams = context.getBean(BuddyStudyProperties::class.java).streams
 
             assertThat(streams.domainMaxLen).isEqualTo(2_000)
+            assertThat(streams.questionGeneratedMaxLen).isEqualTo(4_000)
             assertThat(streams.pushMaxLen).isEqualTo(8_000)
         }
     }
@@ -32,6 +34,7 @@ class StreamMaxLenMappingTest {
             val streams = context.getBean(BuddyStudyProperties::class.java).streams
 
             assertThat(streams.domainMaxLen).isEqualTo(3_000)
+            assertThat(streams.questionGeneratedMaxLen).isEqualTo(1_000)
             assertThat(streams.pushMaxLen).isEqualTo(3_000)
         }
     }
@@ -39,6 +42,7 @@ class StreamMaxLenMappingTest {
     private fun withStreamMappings(vararg values: String): ApplicationContextRunner {
         val properties = values.toMutableList()
         properties += "buddystudy.streams.domain-max-len=\${BUDDYSTUDY_DOMAIN_STREAM_MAX_LEN:\${REACTION_STREAM_XADD_MAX_LEN:1000}}"
+        properties += "buddystudy.streams.question-generated-max-len=\${BUDDYSTUDY_QUESTION_GENERATED_STREAM_MAX_LEN:1000}"
         properties += "buddystudy.streams.push-max-len=\${BUDDYSTUDY_PUSH_STREAM_MAX_LEN:\${REACTION_STREAM_XADD_MAX_LEN:1000}}"
         return contextRunner.withPropertyValues(*properties.toTypedArray())
     }

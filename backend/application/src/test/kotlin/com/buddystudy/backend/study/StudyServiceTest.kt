@@ -24,8 +24,6 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionMembership
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionQuotaStatus
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
-import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxAppendPort
-import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
@@ -38,6 +36,7 @@ import com.buddystudy.backend.study.application.service.StudyService
 import com.buddystudy.backend.study.application.model.AnswerGradingProgress
 import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
 import com.buddystudy.backend.study.application.model.AnswerGradingStatus
+import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
 import com.buddystudy.backend.study.application.port.outbound.AnswerGradingProgressPort
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
@@ -59,7 +58,6 @@ class StudyServiceTest {
     private val questionCoverage = FakeQuestionCoveragePort()
     private val serviceStudies = FakeStudyPort()
     private val memberships = FakeQuestionMembershipPort()
-    private val pushOutbox = FakeQuestionPushOutbox()
     private val properties = BuddyStudyProperties().apply { openai.apiKey = "test-api-key" }
     private val cipher = KeyCipher(BuddyStudyProperties().apply { crypto.masterKey = "test-key" })
     private val questionKeys = OpenAIQuestionKeyProvider(properties, memberships)
@@ -90,7 +88,6 @@ class StudyServiceTest {
             questionCoverage = questionCoverage,
             questionKeys = questionKeys,
             notificationOutbox = notificationOutbox,
-            pushOutbox = pushOutbox,
         ),
         recordWriter = recordWriter,
         gradingWriter = recordWriter,
@@ -181,11 +178,11 @@ class StudyServiceTest {
 
         val response = service.createQuestion(principal, studyId = 77)
 
-        assertThat(response.question.question).isEqualTo("Question")
+        assertThat(response.question.question).isEqualTo("Generated question")
         assertThat(openAI.generateCalls).isEqualTo(1)
         assertThat(users.findByIdCalls).isEqualTo(1)
-        assertThat(pushOutbox.requests.single().recordId).isEqualTo(response.id.toLong())
-        assertThat(pushOutbox.requests.single().topic).isEqualTo("Kotlin")
+        assertThat(notificationOutbox.generatedEvents.single().questionId).isEqualTo(response.id.toLong())
+        assertThat(notificationOutbox.commands).isEmpty()
     }
 
     @Test
@@ -352,7 +349,7 @@ class StudyServiceTest {
 
         val response = service.createQuestion(principal, studyId = 84)
 
-        assertThat(response.question.question).isEqualTo("Question")
+        assertThat(response.question.question).isEqualTo("Generated question")
         assertThat(openAI.coverageBlueprintCalls).isEqualTo(1)
         assertThat(questionCoverage.createdBlueprintStudyIds).containsExactly(84)
         assertThat(questions.visibleRows.single { it.id == response.id.toLong() }.conceptId).isEqualTo(1)
@@ -710,7 +707,7 @@ class StudyServiceTest {
             generatedPrompt = prompt
             assertThat(prompt.userPrompt).contains("Language: English")
             if (generatedQuestions.isNotEmpty()) return generatedQuestions.removeFirst()
-            return GeneratedQuestion("Question", null)
+            return GeneratedQuestion("Generated question", null)
         }
         val generatedQuestions = ArrayDeque<GeneratedQuestion>()
         val embeddings = mutableMapOf<String, List<Float>>()
@@ -802,6 +799,8 @@ class StudyServiceTest {
     private class FakeNotificationOutbox : RedisEventOutboxAppendPort {
         val commands = mutableListOf<NotificationRequestCommand>()
         val gradingEvents = mutableListOf<AnswerGradingRequestedEvent>()
+        val generatedEvents = mutableListOf<QuestionGeneratedEvent>()
+
         override suspend fun appendNotification(command: NotificationRequestCommand, createdAt: Instant): Long {
             commands += command
             return commands.size.toLong()
@@ -810,6 +809,11 @@ class StudyServiceTest {
         override suspend fun appendAnswerGrading(event: AnswerGradingRequestedEvent, createdAt: Instant): Long {
             gradingEvents += event
             return (commands.size + gradingEvents.size).toLong()
+        }
+
+        override suspend fun appendQuestionGenerated(event: QuestionGeneratedEvent, createdAt: Instant): Long {
+            generatedEvents += event
+            return (commands.size + gradingEvents.size + generatedEvents.size).toLong()
         }
     }
 
@@ -841,15 +845,6 @@ class StudyServiceTest {
         ): List<AnswerGradingProgress> = events
             .filter { it.recordId == recordId && it.requestId == requestId && it.id > afterId }
             .take(limit)
-    }
-
-    private class FakeQuestionPushOutbox : QuestionPushOutboxAppendPort {
-        val requests = mutableListOf<QuestionPushRequest>()
-
-        override suspend fun enqueue(request: QuestionPushRequest, now: Instant): Long {
-            requests += request
-            return requests.size.toLong()
-        }
     }
 
     private class NoOpOutboxPublisher : PublishOutboxUseCase {

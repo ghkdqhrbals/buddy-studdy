@@ -26,14 +26,13 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSe
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingCandidate
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
-import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxAppendPort
-import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPlan
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionQuotaStatus
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
+import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
 import com.buddystudy.backend.study.application.prompt.QuestionDiversityPolicy
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
 import com.buddystudy.backend.study.application.prompt.QuestionPromptProvider
@@ -60,7 +59,6 @@ class QuestionSchedulerTest {
     private val questionCoverage = FakeQuestionCoveragePort()
     private val openAI = FakeOpenAI()
     private val notifications = FakeNotificationPublisher()
-    private val pushOutbox = FakeQuestionPushOutbox()
     private val memberships = FakeQuestionMembershipPort()
     private val properties = BuddyStudyProperties(
         scheduler = BuddyStudyProperties.Scheduler(enabled = true, maxPendingPerStudy = 1),
@@ -75,7 +73,6 @@ class QuestionSchedulerTest {
         questionCoverage = questionCoverage,
         questionKeys = questionKeys,
         notificationOutbox = notifications,
-        pushOutbox = pushOutbox,
     )
     private val scheduler = ScheduledQuestionService(
         properties = properties,
@@ -127,12 +124,9 @@ class QuestionSchedulerTest {
         scheduler.runDueQuestions()
 
         assertThat(questions.savedRows).hasSize(2)
-        assertThat(notifications.commands).hasSize(2)
-        assertThat(pushOutbox.requests).hasSize(2)
-        assertThat(notifications.commands).allSatisfy { command ->
-            assertThat(command.shouldPush).isTrue()
-            assertThat(command.type).isEqualTo("STUDY_QUESTION")
-        }
+        assertThat(notifications.generatedEvents.map { it.questionId })
+            .containsExactlyElementsOf(questions.savedRows.map { it.id })
+        assertThat(notifications.commands).isEmpty()
         assertThat(studies.rows.map { it.nextDueAt }).allSatisfy { assertThat(it).isAfter(now) }
         assertThat(users.findByIdCalls).isEqualTo(1)
         assertThat(questions.findVisibleByUserCalls).isZero()
@@ -156,7 +150,9 @@ class QuestionSchedulerTest {
         scheduler.runDueQuestions()
 
         assertThat(questions.savedRows.map { it.studyId }).containsExactly(102)
-        assertThat(notifications.commands.map { it.body }).containsExactly("Question for Kotlin")
+        assertThat(notifications.generatedEvents.map { it.questionId })
+            .containsExactlyElementsOf(questions.savedRows.map { it.id })
+        assertThat(notifications.commands).isEmpty()
         assertThat(questions.countPendingForStudyCalls).isZero()
         assertThat(questions.countPendingByStudyIdsCalls).isEqualTo(1)
         assertThat(questions.findLatestPendingByStudyIdsCalls).isZero()
@@ -178,7 +174,8 @@ class QuestionSchedulerTest {
 
         assertThat(questions.savedRows.single().studyId).isEqualTo(102)
         assertThat(questionEmbeddings.savedStudyIds).containsExactly(102)
-        assertThat(notifications.commands.single().body).isEqualTo("Question for Redis")
+        assertThat(notifications.generatedEvents.single().questionId).isEqualTo(questions.savedRows.single().id)
+        assertThat(notifications.commands).isEmpty()
     }
 
     @Test
@@ -203,7 +200,8 @@ class QuestionSchedulerTest {
         scheduler.runDueQuestions()
 
         assertThat(questions.savedRows.map { it.studyId }).containsExactly(103)
-        assertThat(notifications.commands.map { it.body }).containsExactly("Question for Kafka")
+        assertThat(notifications.generatedEvents.single().questionId).isEqualTo(questions.savedRows.single().id)
+        assertThat(notifications.commands).isEmpty()
         assertThat(studies.rows.single { it.id == 102L }.lastSentAt).isEqualTo(now.minusSeconds(120))
         assertThat(studies.rows.single { it.id == 103L }.lastSentAt).isNotNull()
     }
@@ -248,13 +246,9 @@ class QuestionSchedulerTest {
         scheduler.runDueQuestions()
 
         assertThat(questions.savedRows.map { it.studyId }).containsExactly(101, 102, 103, 104, 105)
-        assertThat(notifications.commands.map { it.body }).containsExactly(
-            "Question for Swift",
-            "Question for Kotlin",
-            "Question for Redis",
-            "Question for Kafka",
-            "Question for Postgres",
-        )
+        assertThat(notifications.generatedEvents.map { it.questionId })
+            .containsExactlyElementsOf(questions.savedRows.map { it.id })
+        assertThat(notifications.commands).isEmpty()
         assertThat(studies.claimDueCalls).isEqualTo(4)
         assertThat(questions.countPendingByStudyIdsCalls).isEqualTo(3)
     }
@@ -633,18 +627,16 @@ class QuestionSchedulerTest {
 
     private class FakeNotificationPublisher : RedisEventOutboxAppendPort {
         val commands = mutableListOf<NotificationRequestCommand>()
+        val generatedEvents = mutableListOf<QuestionGeneratedEvent>()
+
         override suspend fun appendNotification(command: NotificationRequestCommand, createdAt: Instant): Long {
             commands += command
             return commands.size.toLong()
         }
-    }
 
-    private class FakeQuestionPushOutbox : QuestionPushOutboxAppendPort {
-        val requests = mutableListOf<QuestionPushRequest>()
-
-        override suspend fun enqueue(request: QuestionPushRequest, now: Instant): Long {
-            requests += request
-            return requests.size.toLong()
+        override suspend fun appendQuestionGenerated(event: QuestionGeneratedEvent, createdAt: Instant): Long {
+            generatedEvents += event
+            return (commands.size + generatedEvents.size).toLong()
         }
     }
 

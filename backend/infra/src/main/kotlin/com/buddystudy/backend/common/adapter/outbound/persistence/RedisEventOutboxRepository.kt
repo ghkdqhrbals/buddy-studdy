@@ -8,6 +8,7 @@ import com.buddystudy.backend.notification.application.port.inbound.Notification
 import com.buddystudy.backend.profile.application.model.AccountWithdrawnEvent
 import com.buddystudy.backend.profile.application.port.outbound.AccountWithdrawalEventPort
 import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
+import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
 import com.fasterxml.jackson.databind.ObjectMapper
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.reactive.asFlow
@@ -36,6 +37,14 @@ class RedisEventOutboxRepository(
         append(
             eventId = event.eventId,
             eventType = RedisOutboxEventType.ANSWER_GRADING_REQUESTED,
+            payloadJson = objectMapper.writeValueAsString(event),
+            createdAt = createdAt,
+        )
+
+    override suspend fun appendQuestionGenerated(event: QuestionGeneratedEvent, createdAt: Instant): Long =
+        append(
+            eventId = event.eventId,
+            eventType = RedisOutboxEventType.QUESTION_GENERATED,
             payloadJson = objectMapper.writeValueAsString(event),
             createdAt = createdAt,
         )

@@ -22,7 +22,13 @@ import org.springframework.security.core.Authentication
 import java.time.Instant
 
 interface StudyWebPort {
-    suspend fun study(limit: Int, offset: Int, query: String?, authentication: Authentication): StudyPageResponse
+    suspend fun study(
+        limit: Int,
+        offset: Int,
+        query: String?,
+        language: String,
+        authentication: Authentication,
+    ): StudyPageResponse
     suspend fun records(limit: Int, offset: Int, query: String?, language: String, authentication: Authentication): RecordsPageResponse
     suspend fun clearRecords(authentication: Authentication): ResponseEntity<Unit>
     suspend fun record(id: Long, language: String, authentication: Authentication): StudyRecordResponse

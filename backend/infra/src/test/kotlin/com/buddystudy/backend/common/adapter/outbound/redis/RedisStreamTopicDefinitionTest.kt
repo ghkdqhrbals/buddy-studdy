@@ -10,7 +10,7 @@ import org.springframework.data.redis.core.StringRedisTemplate
 
 class RedisStreamTopicDefinitionTest {
     @Test
-    fun `domain and push topics use independent maximum lengths`() {
+    fun `stream topics use independent keys and maximum lengths`() {
         val manager = RedisStreamTopicManager(
             redis = mock(ReactiveStringRedisTemplate::class.java),
             blockingRedis = mock(StringRedisTemplate::class.java),
@@ -18,8 +18,10 @@ class RedisStreamTopicDefinitionTest {
             properties = BuddyStudyProperties(
                 streams = BuddyStudyProperties.Streams(
                     key = "domain-stream",
+                    questionGeneratedKey = "question-generated-stream",
                     pushKey = "push-stream",
                     domainMaxLen = 2_000,
+                    questionGeneratedMaxLen = 4_000,
                     pushMaxLen = 8_000,
                 ),
             ),
@@ -31,6 +33,14 @@ class RedisStreamTopicDefinitionTest {
                     topic = RedisStreamTopic.DOMAIN_EVENTS,
                     streamKey = "domain-stream",
                     maxLength = 2_000,
+                ),
+            )
+        assertThat(manager.definition(RedisStreamTopic.QUESTION_GENERATED))
+            .isEqualTo(
+                RedisStreamTopicDefinition(
+                    topic = RedisStreamTopic.QUESTION_GENERATED,
+                    streamKey = "question-generated-stream",
+                    maxLength = 4_000,
                 ),
             )
         assertThat(manager.definition(RedisStreamTopic.PUSH_EVENTS))
@@ -52,12 +62,14 @@ class RedisStreamTopicDefinitionTest {
             properties = BuddyStudyProperties(
                 streams = BuddyStudyProperties.Streams(
                     domainMaxLen = 0,
+                    questionGeneratedMaxLen = -5,
                     pushMaxLen = -10,
                 ),
             ),
         )
 
         assertThat(manager.definition(RedisStreamTopic.DOMAIN_EVENTS).maxLength).isEqualTo(1)
+        assertThat(manager.definition(RedisStreamTopic.QUESTION_GENERATED).maxLength).isEqualTo(1)
         assertThat(manager.definition(RedisStreamTopic.PUSH_EVENTS).maxLength).isEqualTo(1)
     }
 }

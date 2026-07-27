@@ -13,6 +13,7 @@ import com.buddystudy.backend.auth.application.port.outbound.EmailVerificationSe
 import com.buddystudy.backend.auth.application.port.outbound.GoogleIdentityPort
 import com.buddystudy.backend.auth.application.port.outbound.RoleAssignmentPort
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
+import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.backend.auth.application.port.inbound.IssueDeviceTokenUseCase
 import com.buddystudy.backend.auth.application.port.inbound.LoginUseCase
 import com.buddystudy.backend.auth.application.port.inbound.RegisterDeviceUseCase
@@ -86,6 +87,9 @@ class LoginService(
                 )
             )
         val device = existingDevice ?: DeviceEntity(deviceId = deviceId, createdAt = now)
+        user.appLanguage = QuestionLanguage.normalize(command.language)
+        user.updatedAt = now
+        users.save(user)
         device.installationKeyHash = installationKeyHash
         device.clientSecretHash = sha256(secret)
         device.userId = user.id

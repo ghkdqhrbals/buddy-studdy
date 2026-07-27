@@ -12,13 +12,15 @@ struct StudyRoomUseCase {
         registration: RemotePushRegistration,
         limit: Int,
         offset: Int,
-        query: String
+        query: String,
+        language: AppLanguage
     ) async throws -> BackendStudyPage {
         try await repository.fetchStudy(
             registration: registration,
             limit: limit,
             offset: offset,
-            query: query
+            query: query,
+            language: language
         )
     }
 

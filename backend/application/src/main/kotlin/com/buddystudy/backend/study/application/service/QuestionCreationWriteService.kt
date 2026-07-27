@@ -1,19 +1,17 @@
 package com.buddystudy.backend.study.application.service
 
-import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.common.application.outbox.OutboxType
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxAppendPort
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKey
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
+import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
 import com.buddystudy.backend.study.application.port.inbound.QuestionCreationWriteUseCase
 import com.buddystudy.backend.study.application.port.inbound.QuestionWriteResult
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSelection
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
-import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxAppendPort
-import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
@@ -29,7 +27,6 @@ class QuestionCreationWriteService(
     private val questionCoverage: QuestionCoveragePort,
     private val questionKeys: OpenAIQuestionKeyProvider,
     private val notificationOutbox: RedisEventOutboxAppendPort,
-    private val pushOutbox: QuestionPushOutboxAppendPort,
 ) : QuestionCreationWriteUseCase {
     @Transactional
     override suspend fun saveQuestionWithOutboxes(
@@ -37,8 +34,6 @@ class QuestionCreationWriteService(
         embedding: List<Float>,
         coverage: QuestionCoverageSelection?,
         questionKey: OpenAIQuestionKey,
-        notification: (QuestionEntity) -> NotificationRequestCommand,
-        push: (QuestionEntity) -> QuestionPushRequest,
         now: Instant,
     ): QuestionWriteResult {
         val savedQuestion = questions.save(question)
@@ -53,14 +48,19 @@ class QuestionCreationWriteService(
             embedding = embedding,
         )
         questionKeys.markQuestionCreated(questionKey, now)
-        val notificationOutboxId = notificationOutbox.appendNotification(notification(savedQuestion), now)
-        val pushOutboxId = pushOutbox.enqueue(push(savedQuestion), now)
+        val generatedOutboxId = notificationOutbox.appendQuestionGenerated(
+            QuestionGeneratedEvent(
+                eventId = "question-generated-${savedQuestion.id}",
+                questionId = savedQuestion.id,
+                userId = checkNotNull(savedQuestion.userId) { "Created question must have a user." },
+                sourceLanguage = savedQuestion.language,
+                generatedAt = now,
+            ),
+            now,
+        )
         return QuestionWriteResult(
             question = savedQuestion,
-            outboxes = listOf(
-                OutboxReference(OutboxType.DOMAIN_EVENT, notificationOutboxId),
-                OutboxReference(OutboxType.QUESTION_PUSH, pushOutboxId),
-            ),
+            outboxes = listOf(OutboxReference(OutboxType.DOMAIN_EVENT, generatedOutboxId)),
         )
     }
 }

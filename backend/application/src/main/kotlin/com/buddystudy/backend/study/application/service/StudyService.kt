@@ -18,6 +18,8 @@ import com.buddystudy.backend.study.application.model.StudyRecordResponse
 import com.buddystudy.backend.study.application.model.toRecordResponse
 import com.buddystudy.study.domain.StudyRoom
 import com.buddystudy.study.domain.StudyRoomPendingLimitExceeded
+import com.buddystudy.study.domain.QuestionLanguage
+import com.buddystudy.study.domain.localizedFor
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.StudyEntity
 import com.buddystudy.backend.study.application.port.inbound.BrowseRecordsUseCase
@@ -81,10 +83,14 @@ class StudyService(
         val userStudies = studies.findAllByUserId(principal.userId)
         val rootStudy = StudyTreeSelector.rootFor(requestedStudy, userStudies)
         val user = userDeferred.await()
-        val appLanguage = user?.appLanguage ?: "ko"
+        val appLanguage = QuestionLanguage.normalize(user?.appLanguage)
 
-        val pendingCountDeferred = async { questions.countPendingForStudy(requestedStudy.id) }
-        val recentQuestionsDeferred = async { recentQuestions(principal, requestedStudy.id, requestedStudy.topic) }
+        val pendingCountDeferred = async {
+            questions.countPendingForStudyAndLanguage(requestedStudy.id, appLanguage)
+        }
+        val recentQuestionsDeferred = async {
+            recentQuestions(principal, requestedStudy.id, requestedStudy.topic, appLanguage)
+        }
         val room = StudyRoom.of(
             requestedStudy.toStudyRoomSchedule(
                 appLanguage = appLanguage,
@@ -145,8 +151,6 @@ class StudyService(
                     coverage = coverageSelection,
                     questionKey = questionKey,
                     question = question,
-                    notification = { saved -> saved.toQuestionNotification(rootStudy, appLanguage) },
-                    push = { saved -> saved.toQuestionPushRequest(rootStudy, appLanguage) },
                     now = now,
                 )
                 outboxPublisher.publishNow(result.outboxes)
@@ -186,13 +190,30 @@ class StudyService(
     @Transactional(readOnly = true)
     override suspend fun records(principal: Principal, limit: Int, offset: Int, query: String?, language: String): RecordsPageResponse {
         val search = query?.trim()?.takeIf { it.isNotEmpty() }
+        val normalizedLanguage = QuestionLanguage.normalize(language)
         val pageable = PageRequest.of(offset / limit, limit)
         val page = if (search == null) {
-            questions.findVisibleByUser(principal.userId, includePending = false, pageable)
+            questions.findVisibleByUserAndLanguage(
+                principal.userId,
+                includePending = false,
+                normalizedLanguage,
+                pageable,
+            )
         } else {
-            questions.findVisibleByUserAndQuery(principal.userId, includePending = false, search, pageable)
+            questions.findVisibleByUserAndLanguageAndQuery(
+                principal.userId,
+                includePending = false,
+                normalizedLanguage,
+                search,
+                pageable,
+            )
         }
-        return RecordsPageResponse(page.content.toRecordResponses(), page.totalElements, limit, offset)
+        return RecordsPageResponse(
+            page.content.map { it.localizedFor(normalizedLanguage) }.toRecordResponses(),
+            page.totalElements,
+            limit,
+            offset,
+        )
     }
 
     @Transactional(readOnly = true)
@@ -203,7 +224,16 @@ class StudyService(
 
     @Transactional(readOnly = true)
     override suspend fun record(principal: Principal, id: Long, language: String): StudyRecordResponse {
+        val normalizedLanguage = QuestionLanguage.normalize(language)
         val question = questions.findByIdAndUserIdAndDeletedAtIsNull(id, principal.userId)
+            ?.takeIf {
+                if (normalizedLanguage == QuestionLanguage.ENGLISH) {
+                    it.translationStatus == "READY" && !it.questionEn.isNullOrBlank()
+                } else {
+                    QuestionLanguage.normalize(it.language) == QuestionLanguage.KOREAN
+                }
+            }
+            ?.localizedFor(normalizedLanguage)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
         if (question.skippedAt != null) {
             throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
@@ -227,9 +257,24 @@ class StudyService(
         return saved.toStudyRecord(questionStats.findById(saved.id)).toProjection().toRecordResponse()
     }
 
-    private suspend fun recentQuestions(principal: Principal, rootStudyId: Long, topic: String): List<String> {
-        val sameStudy = questions.findRecentQuestionTextsByStudyIdAndTopic(rootStudyId, topic, PageRequest.of(0, 30))
-        val sameTopic = questions.findRecentQuestionTextsByUserIdAndTopic(principal.userId, topic, PageRequest.of(0, 30))
+    private suspend fun recentQuestions(
+        principal: Principal,
+        rootStudyId: Long,
+        topic: String,
+        language: String,
+    ): List<String> {
+        val sameStudy = questions.findRecentQuestionTextsByStudyIdAndTopicAndLanguage(
+            rootStudyId,
+            topic,
+            language,
+            PageRequest.of(0, 30),
+        )
+        val sameTopic = questions.findRecentQuestionTextsByUserIdAndTopicAndLanguage(
+            principal.userId,
+            topic,
+            language,
+            PageRequest.of(0, 30),
+        )
         return (sameStudy + sameTopic)
             .map { it.trim() }
             .filter { it.isNotBlank() }
@@ -270,6 +315,17 @@ class StudyService(
                 },
             )
             val generated = openAI.generateQuestion(apiKey, model, prompt)
+            if (!QuestionLanguage.matches(generated.question, language)) {
+                rejectedQuestions += generated.question
+                if (attempt == maxAttempts - 1) {
+                    throw ApiException(
+                        HttpStatus.UNPROCESSABLE_ENTITY,
+                        ApiErrorCode.VALIDATION_ERROR,
+                        "Generated question did not match the requested language.",
+                    )
+                }
+                return@repeat
+            }
             val embedding = openAI.embedText(apiKey, generated.question)
             val similar = questionSimilarity.findSimilar(
                 embedding = embedding,

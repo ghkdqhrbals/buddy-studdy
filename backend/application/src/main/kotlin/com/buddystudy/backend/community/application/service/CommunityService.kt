@@ -13,6 +13,8 @@ import com.buddystudy.backend.notification.application.port.inbound.PublishNotif
 import com.buddystudy.backend.community.application.port.outbound.ReportPort
 import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.QuestionLanguage
+import com.buddystudy.study.domain.localizedFor
 import com.buddystudy.community.domain.entity.QuestionLikeEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.community.domain.entity.ReportEntity
@@ -60,29 +62,36 @@ class CommunityService(
     @Transactional(readOnly = true)
     override suspend fun getPublicQuestionsV2(principal: Principal?, query: String?, language: String, limit: Int, offset: Int): CommunityQuestionsResponse {
         val normalizedQuery = query?.trim()?.takeIf { it.isNotEmpty() }
-        return publicQuestionsFromOrigin(principal, normalizedQuery, limit, offset)
+        return publicQuestionsFromOrigin(
+            principal = principal,
+            query = normalizedQuery,
+            language = QuestionLanguage.normalize(language),
+            limit = limit,
+            offset = offset,
+        )
     }
 
     private suspend fun publicQuestionsFromOrigin(
         principal: Principal?,
         query: String?,
+        language: String,
         limit: Int,
         offset: Int,
     ): CommunityQuestionsResponse {
         val pageable = PageRequest.of(offset / limit, limit)
         val page = if (query == null) {
-            questions.findPublicAnswered(pageable)
+            questions.findPublicAnsweredByLanguage(language, pageable)
         } else {
-            questions.findPublicAnsweredByQuery(query, pageable)
+            questions.findPublicAnsweredByLanguageAndQuery(language, query, pageable)
         }
         val context = communityContext(page.content, principal)
-        val rows = page.content.map { community(it, context) }
+        val rows = page.content.map { community(it.localizedFor(language), context) }
         return CommunityQuestionsResponse(rows, page.totalElements, limit, offset)
     }
 
     override suspend fun getPublicQuestion(principal: Principal?, id: Long, language: String): CommunityQuestionResponse {
-        val q = publicAnsweredQuestion(id)
-        val response = community(q, communityContext(listOf(q), principal))
+        val q = publicAnsweredQuestion(id, QuestionLanguage.normalize(language))
+        val response = community(q.localizedFor(language), communityContext(listOf(q), principal))
         reactions.publishViewed(id, principal?.userId)
         return response
     }
@@ -224,8 +233,12 @@ class CommunityService(
             .toCommunityQuestionResponse()
     }
 
-    private suspend fun publicAnsweredQuestion(id: Long): QuestionEntity =
-        questions.findPublicAnsweredById(id)
+    private suspend fun publicAnsweredQuestion(id: Long, language: String? = null): QuestionEntity =
+        (if (language == null) {
+            questions.findPublicAnsweredById(id)
+        } else {
+            questions.findPublicAnsweredByIdAndLanguage(id, language)
+        })
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Record not found.")
 
     private suspend fun incrementLikeCount(questionId: Long, delta: Int): Int {

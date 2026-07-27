@@ -19,26 +19,29 @@ import java.util.UUID
 class QuestionPushOutboxRepository(
     private val template: R2dbcEntityTemplate,
 ) : QuestionPushOutboxPort {
-    override suspend fun enqueue(request: QuestionPushRequest, now: Instant): Long = save(
-        QuestionPushOutboxEntity(
-            recordId = request.recordId,
-            studyId = request.studyId,
-            deviceId = request.deviceId,
-            userId = request.userId,
-            question = request.question,
-            expectedAnswerHint = request.expectedAnswerHint,
-            topic = request.topic,
-            difficultyLevel = request.difficultyLevel,
-            language = request.language,
-            sound = request.sound,
-            intervalMinutes = request.intervalMinutes,
-            status = PENDING,
-            attempts = 0,
-            nextAttemptAt = now,
-            createdAt = request.createdAt,
-            updatedAt = now,
-        ),
-    ).id
+    override suspend fun enqueue(request: QuestionPushRequest, now: Instant): Long {
+        findByRecordIdAndDeviceId(request.recordId, request.deviceId)?.let { return it.id }
+        return save(
+            QuestionPushOutboxEntity(
+                recordId = request.recordId,
+                studyId = request.studyId,
+                deviceId = request.deviceId,
+                userId = request.userId,
+                question = request.question,
+                expectedAnswerHint = request.expectedAnswerHint,
+                topic = request.topic,
+                difficultyLevel = request.difficultyLevel,
+                language = request.language,
+                sound = request.sound,
+                intervalMinutes = request.intervalMinutes,
+                status = PENDING,
+                attempts = 0,
+                nextAttemptAt = now,
+                createdAt = request.createdAt,
+                updatedAt = now,
+            ),
+        ).id
+    }
 
     override suspend fun claim(id: Long, now: Instant, staleBefore: Instant): ClaimedQuestionPushOutbox? {
         val claimToken = UUID.randomUUID().toString()
@@ -159,6 +162,15 @@ class QuestionPushOutboxRepository(
     suspend fun findById(id: Long): QuestionPushOutboxEntity? =
         template.selectOne(Query.query(Criteria.where("id").`is`(id)), QuestionPushOutboxEntity::class.java)
             .awaitSingleOrNull()
+
+    private suspend fun findByRecordIdAndDeviceId(recordId: Long, deviceId: String): QuestionPushOutboxEntity? =
+        template.selectOne(
+            Query.query(
+                Criteria.where("record_id").`is`(recordId)
+                    .and("device_id").`is`(deviceId),
+            ),
+            QuestionPushOutboxEntity::class.java,
+        ).awaitSingleOrNull()
 
     suspend fun save(entity: QuestionPushOutboxEntity): QuestionPushOutboxEntity = template.saveEntity(entity, entity.id)
 

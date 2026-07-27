@@ -11,6 +11,7 @@ import com.buddystudy.backend.study.application.port.outbound.AiGradingStage
 import com.buddystudy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystudy.backend.study.application.port.outbound.OpenAIPort
+import com.buddystudy.backend.study.application.model.TranslatedQuestionContent
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
 import com.fasterxml.jackson.module.kotlin.readValue
 import kotlinx.coroutines.Dispatchers
@@ -69,6 +70,51 @@ class OpenAIRequestExecutor(
             question = question,
             hint = parsed["expectedAnswerHint"]?.toString(),
             rubric = rubric,
+        )
+    }
+
+    fun translateQuestionToEnglish(
+        apiKey: String,
+        model: String,
+        question: String,
+        hint: String?,
+        sourceLanguage: String,
+    ): TranslatedQuestionContent {
+        val prompt = """
+            Translate the study question into natural, precise English.
+            Preserve technical terms, code, identifiers, Markdown, and the original difficulty.
+            Do not answer, explain, simplify, or add information to the question.
+            Translate the hint only when one is present.
+            Source language: $sourceLanguage
+
+            Question:
+            $question
+
+            Hint:
+            ${hint ?: "(none)"}
+
+            Return JSON only:
+            {
+              "question": "translated question",
+              "hint": "translated hint or null"
+            }
+        """.trimIndent()
+        val response = chatModel(apiKey, model, json = true).call(
+            Prompt(
+                listOf(
+                    SystemMessage("You are a professional Korean-to-English localization editor for a study application."),
+                    UserMessage(prompt),
+                ),
+                options(apiKey, model, json = true),
+            ),
+        )
+        val text = response.result?.output?.text ?: "{}"
+        val parsed: Map<String, Any?> = mapper.readValue(text.ifBlank { "{}" })
+        val translatedQuestion = parsed["question"]?.toString()?.trim().orEmpty()
+        require(translatedQuestion.isNotBlank()) { "Question translation returned an empty question." }
+        return TranslatedQuestionContent(
+            question = translatedQuestion,
+            hint = parsed["hint"]?.toString()?.trim()?.takeIf { it.isNotBlank() && it != "null" },
         )
     }
 

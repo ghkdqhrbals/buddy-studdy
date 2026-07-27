@@ -2277,8 +2277,8 @@ struct AppStrings {
     var deleteSelectedTopics: String { text("선택한 주제를 삭제할까요?", "Delete selected topics?") }
     func deleteStudySubtree(_ topic: String) -> String {
         text(
-            "\"\(topic)\" 및 모든 하위 학습을 삭제할까요?",
-            "Delete \"\(topic)\" and all of its sub-studies?"
+            "\"\(topic)\" 및 모든 하위 주제를 삭제할까요?",
+            "Delete \"\(topic)\" and all of its subtopics?"
         )
     }
     func selectedTopicCount(_ count: Int) -> String {
@@ -2300,7 +2300,7 @@ struct AppStrings {
     func childTopicAction(_ count: Int) -> String {
         text("하위 \(count)", "\(count) children")
     }
-    var addSubstudy: String { text("하위 학습 추가", "Add Sub-study") }
+    var addSubstudy: String { text("하위 주제 추가", "Add subtopic") }
     var recommendSubstudy: String { text("추천 주제", "Suggested topics") }
     var recommendSubstudyTab: String { text("추천", "Suggestions") }
     var recommendSubstudyDescription: String {
@@ -2334,14 +2334,14 @@ struct AppStrings {
         )
     }
     var duplicateStudyTopic: String { text("이미 트리에 있는 주제입니다.", "This topic already exists in the tree.") }
-    var addStudyTopicFailed: String { text("하위 학습을 추가하지 못했습니다.", "Could not add the sub-study.") }
+    var addStudyTopicFailed: String { text("하위 주제를 추가하지 못했습니다.", "Could not add the subtopic.") }
     func addSelectedSubstudies(_ count: Int) -> String {
         text("선택한 \(count)개 추가", "Add \(count) selected")
     }
     func sharedDifficultyDescription(_ count: Int) -> String {
         text(
-            "선택한 \(count)개 학습에 같은 숫자가 적용됩니다.",
-            "The same number applies to all \(count) selected studies."
+            "선택한 \(count)개 주제에 같은 숫자가 적용됩니다.",
+            "The same number applies to all \(count) selected topics."
         )
     }
     func partialSubstudyAddFailure(added: Int, failed: Int) -> String {
@@ -2858,11 +2858,11 @@ struct AppStrings {
             "The latest 3–5 graded answers are compared with the preceding 3–5. Fewer than 6 answers in a topic is shown as Measuring."
         )
     }
-    var growthHelpTreeTitle: String { text("상위 학습은 하위 주제를 함께 반영", "Parent studies include child topics") }
+    var growthHelpTreeTitle: String { text("상위 주제는 하위 주제를 함께 반영", "Parent topics include subtopics") }
     var growthHelpTreeBody: String {
         text(
-            "상위 학습의 값은 트리 안에서 측정 가능한 주제를 합산합니다. 답변이 많은 한 주제가 전체를 좌우하지 않도록 주제별 반영량은 최대 5개 답변으로 제한합니다.",
-            "A parent combines measurable topics in its tree. Each topic is capped at 5 answers so one high-volume topic cannot dominate."
+            "상위 주제의 값은 트리 안에서 측정 가능한 하위 주제를 합산합니다. 답변이 많은 한 주제가 전체를 좌우하지 않도록 주제별 반영량은 최대 5개 답변으로 제한합니다.",
+            "A parent topic combines measurable subtopics in its tree. Each topic is capped at 5 answers so one high-volume topic cannot dominate."
         )
     }
     var growthHelpProfileTitle: String { text("완료율은 생성된 질문을 기준으로 계산", "Completion is based on generated questions") }
@@ -2878,13 +2878,13 @@ struct AppStrings {
         text("필요할 때 펼쳐서 개별 통계를 확인합니다.", "Expand when you need individual study statistics.")
     }
     var studyGrowthSummary: String {
-        text("선택한 기간의 전체 하위 학습 요약", "Summary of all child studies in the selected period")
+        text("선택한 기간의 전체 하위 주제 요약", "Summary of all subtopics in the selected period")
     }
     var studyStatusTree: String { text("학습 상태 트리", "Study status tree") }
     var studyStatusTreeDescription: String {
         text(
-            "루트는 모든 하위 학습의 종합 점수이며, 각 행은 개별 점수입니다.",
-            "The root is the combined score for all descendants; each row shows an individual score."
+            "최상위 주제는 모든 하위 주제의 종합 점수이며, 각 행은 개별 점수입니다.",
+            "The top-level topic combines all subtopics; each row shows an individual score."
         )
     }
     var comprehensive: String { text("종합", "Overall") }
@@ -2908,7 +2908,7 @@ struct AppStrings {
     func needsMoreAnswers(_ count: Int) -> String {
         text("성장 측정까지 답변 \(max(6 - count, 0))개", "\(max(6 - count, 0)) more answers to measure growth")
     }
-    var partialMeasurement: String { text("일부 하위 학습 측정 중", "Some child studies are still measuring") }
+    var partialMeasurement: String { text("일부 하위 주제 측정 중", "Some subtopics are still measuring") }
     func allStudiesCount(_ count: Int) -> String {
         text("전체 학습 \(count)개", "All studies \(count)")
     }

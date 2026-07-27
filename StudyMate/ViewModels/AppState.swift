@@ -1916,7 +1916,8 @@ final class AppState: ObservableObject {
                             registration: recoveredRegistration,
                             limit: 500,
                             offset: 0,
-                            query: ""
+                            query: "",
+                            language: settings.appLanguage
                         )
                     }
                 )
@@ -2031,7 +2032,8 @@ final class AppState: ObservableObject {
                         registration: recoveredRegistration,
                         limit: 100,
                         offset: 0,
-                        query: trimmedQuery
+                        query: trimmedQuery,
+                        language: settings.appLanguage
                     )
                 }
             )
@@ -4420,7 +4422,7 @@ final class AppState: ObservableObject {
                     active: active
                 )
                 studyRoomState.upsertStudy(saved)
-                log(.info, "학습 트리 질문 대상을 변경했습니다. studyID=\(studyID), active=\(active)")
+                log(.info, "학습 트리 질문 받기 설정을 변경했습니다. studyID=\(studyID), active=\(active)")
             } catch {
                 studyRoomState.upsertStudy(current)
                 if handleAppError(
@@ -4434,7 +4436,7 @@ final class AppState: ObservableObject {
                 ) {
                     return
                 }
-                log(.warning, "학습 트리 질문 대상 변경 실패: studyID=\(studyID), error=\(error.localizedDescription)")
+                log(.warning, "학습 트리 질문 받기 설정 변경 실패: studyID=\(studyID), error=\(error.localizedDescription)")
             }
         }
     }
@@ -4759,7 +4761,8 @@ final class AppState: ObservableObject {
                                 registration: recoveredRegistration,
                                 limit: 500,
                                 offset: 0,
-                                query: ""
+                                query: "",
+                                language: settings.appLanguage
                             )
                         }
                     )
@@ -7046,7 +7049,7 @@ final class AppState: ObservableObject {
         ) {
             registration = resolvedRegistration
         } else {
-            log(.warning, "백엔드 등록이 없어 하위 학습 주제 추가를 건너뛰었습니다. topic=\(topic)")
+            log(.warning, "백엔드 등록이 없어 하위 주제 추가를 건너뛰었습니다. topic=\(topic)")
             return false
         }
 
@@ -7061,7 +7064,7 @@ final class AppState: ObservableObject {
             )
             log(
                 .info,
-                "백엔드 하위 학습 주제를 추가했습니다. id=\(room.id), parentStudyId=\(parentStudyID), topic=\(room.topic)"
+                "백엔드 하위 주제를 추가했습니다. id=\(room.id), parentStudyId=\(parentStudyID), topic=\(room.topic)"
             )
             if refreshAfterCreation {
                 await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
@@ -7086,7 +7089,7 @@ final class AppState: ObservableObject {
             ) {
                 return false
             }
-            log(.warning, "백엔드 하위 학습 주제 추가 실패: \(error.localizedDescription)")
+            log(.warning, "백엔드 하위 주제 추가 실패: \(error.localizedDescription)")
             return false
         }
     }

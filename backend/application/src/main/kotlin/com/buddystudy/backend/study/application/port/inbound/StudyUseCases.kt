@@ -23,6 +23,13 @@ interface BrowseRecordsUseCase {
 
 interface StudySyncUseCase {
     suspend fun study(principal: Principal, limit: Int, offset: Int, query: String? = null): StudyPageResponse
+    suspend fun study(
+        principal: Principal,
+        limit: Int,
+        offset: Int,
+        query: String? = null,
+        language: String,
+    ): StudyPageResponse = study(principal, limit, offset, query)
     suspend fun createStudy(principal: Principal, command: CreateStudyCommand): StudyRoomResponse
     suspend fun createStudyTopic(
         principal: Principal,

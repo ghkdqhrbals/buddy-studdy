@@ -9,6 +9,8 @@ import com.buddystudy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystudy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystudy.backend.study.application.port.outbound.StudyTopicSuggestionPort
+import com.buddystudy.backend.study.application.port.outbound.QuestionTranslationPort
+import com.buddystudy.backend.study.application.model.TranslatedQuestionContent
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
@@ -17,7 +19,7 @@ import org.springframework.stereotype.Component
 class SystemOpenAIClient(
     private val executor: OpenAIRequestExecutor,
     private val properties: BuddyStudyProperties,
-) : OpenAIPort, StudyTopicSuggestionPort {
+) : OpenAIPort, StudyTopicSuggestionPort, QuestionTranslationPort {
     suspend fun validate() {
         validate(systemApiKey())
     }
@@ -112,6 +114,19 @@ class SystemOpenAIClient(
             existingTopics = existingTopics,
             language = language,
             count = count,
+        )
+
+    override suspend fun translateToEnglish(
+        question: String,
+        hint: String?,
+        sourceLanguage: String,
+    ): TranslatedQuestionContent =
+        executor.translateQuestionToEnglish(
+            apiKey = systemApiKey(),
+            model = properties.openai.model,
+            question = question,
+            hint = hint,
+            sourceLanguage = sourceLanguage,
         )
 
     private fun systemApiKey(): String =

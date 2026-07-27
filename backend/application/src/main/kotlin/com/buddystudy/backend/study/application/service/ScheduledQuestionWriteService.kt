@@ -6,6 +6,7 @@ import com.buddystudy.backend.common.application.outbox.RedisEventOutboxAppendPo
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKey
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
 import com.buddystudy.backend.study.application.model.GeneratedQuestionWithEmbedding
+import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
 import com.buddystudy.backend.study.application.port.inbound.QuestionWriteResult
 import com.buddystudy.backend.study.application.port.inbound.ScheduledQuestionWriteUseCase
 import com.buddystudy.backend.study.application.port.outbound.AiGradingRubric
@@ -13,7 +14,6 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePo
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSelection
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
-import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxAppendPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.study.domain.entity.QuestionEntity
@@ -32,7 +32,6 @@ class ScheduledQuestionWriteService(
     private val questionCoverage: QuestionCoveragePort,
     private val questionKeys: OpenAIQuestionKeyProvider,
     private val notificationOutbox: RedisEventOutboxAppendPort,
-    private val pushOutbox: QuestionPushOutboxAppendPort,
 ) : ScheduledQuestionWriteUseCase {
     @Transactional
     override suspend fun complete(
@@ -74,17 +73,19 @@ class ScheduledQuestionWriteService(
             studies.save(topicStudy)
             studies.save(scheduleStudy)
         }
-        val notificationOutboxId = notificationOutbox.appendNotification(
-            saved.toQuestionNotification(scheduleStudy, appLanguage),
+        val generatedOutboxId = notificationOutbox.appendQuestionGenerated(
+            QuestionGeneratedEvent(
+                eventId = "question-generated-${saved.id}",
+                questionId = saved.id,
+                userId = scheduleStudy.userId,
+                sourceLanguage = saved.language,
+                generatedAt = now,
+            ),
             now,
         )
-        val pushOutboxId = pushOutbox.enqueue(saved.toQuestionPushRequest(scheduleStudy, appLanguage), now)
         return QuestionWriteResult(
             question = saved,
-            outboxes = listOf(
-                OutboxReference(OutboxType.DOMAIN_EVENT, notificationOutboxId),
-                OutboxReference(OutboxType.QUESTION_PUSH, pushOutboxId),
-            ),
+            outboxes = listOf(OutboxReference(OutboxType.DOMAIN_EVENT, generatedOutboxId)),
         )
     }
 
