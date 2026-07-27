@@ -2154,8 +2154,16 @@ struct AppStrings {
     }
     var viewFullStudyTree: String { text("전체 트리 보기", "View full tree") }
     var moveToParentTopic: String { text("상위로", "Up one level") }
+    var childTopics: String { text("하위 주제", "Child topics") }
+    var studyAction: String { text("학습", "Study") }
+    var openStudyPage: String { text("학습 열기", "Open study") }
+    var collapseStudyTopics: String { text("주제 목록 접기", "Collapse topics") }
+    var expandStudyTopics: String { text("주제 목록 펼치기", "Expand topics") }
     func childTopicCount(_ count: Int) -> String {
         text("하위 주제 \(count)개", "\(count) child topics")
+    }
+    func childTopicAction(_ count: Int) -> String {
+        text("하위 \(count)", "\(count) children")
     }
     var addSubstudy: String { text("하위 학습 추가", "Add Sub-study") }
     var recommendSubstudy: String { text("AI 추천 주제", "AI topic suggestions") }

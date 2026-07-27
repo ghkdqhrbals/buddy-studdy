@@ -6525,6 +6525,12 @@ private struct MobileHomeStudyOutlineSnapshot {
 }
 
 private struct MobileHomeStudyOutlineRow: View {
+    private enum RowAction {
+        case rootToggle
+        case drillDown(childCount: Int)
+        case openStudy
+    }
+
     var snapshot: MobileHomeStudyOutlineSnapshot
     var strings: AppStrings
     var pendingQuestionCount: (BackendStudyRoom) -> Int
@@ -6532,6 +6538,8 @@ private struct MobileHomeStudyOutlineRow: View {
     var onOpenTopic: (BackendStudyRoom) -> Void
     @State private var currentBranchID: Int?
     @State private var isExpanded = true
+    @State private var isChangingBranch = false
+    @State private var branchUnlockTask: Task<Void, Never>?
 
     private var currentBranch: BackendStudyRoom {
         currentBranchID.flatMap(snapshot.room(id:)) ?? snapshot.root
@@ -6566,7 +6574,7 @@ private struct MobileHomeStudyOutlineRow: View {
                     room: snapshot.root,
                     isRoot: true,
                     childCount: snapshot.children(of: snapshot.root.id).count,
-                    trailingSymbol: isExpanded ? "chevron.up" : "chevron.down"
+                    action: .rootToggle
                 )
             }
             .buttonStyle(.plain)
@@ -6624,16 +6632,17 @@ private struct MobileHomeStudyOutlineRow: View {
         .onChange(of: snapshot.searchQuery) {
             currentBranchID = nil
         }
+        .onDisappear {
+            branchUnlockTask?.cancel()
+        }
     }
 
     @ViewBuilder
     private var branchRows: some View {
-        if currentBranch.id != snapshot.root.id {
-            Divider()
-                .padding(.leading, 14)
+        Divider()
+            .padding(.leading, 14)
 
-            branchPathHeader
-        }
+        branchPathHeader
 
         ForEach(visibleChildren) { room in
             Divider()
@@ -6642,9 +6651,7 @@ private struct MobileHomeStudyOutlineRow: View {
             Button {
                 let childCount = snapshot.children(of: room.id).count
                 if childCount > 0 {
-                    withAnimation(.snappy(duration: 0.22)) {
-                        currentBranchID = room.id
-                    }
+                    replaceBranch(with: room.id)
                 } else {
                     onOpenTopic(room)
                 }
@@ -6653,29 +6660,40 @@ private struct MobileHomeStudyOutlineRow: View {
                     room: room,
                     isRoot: false,
                     childCount: snapshot.children(of: room.id).count,
-                    trailingSymbol: "chevron.right"
+                    action: snapshot.children(of: room.id).isEmpty
+                        ? .openStudy
+                        : .drillDown(childCount: snapshot.children(of: room.id).count)
                 )
             }
             .buttonStyle(.plain)
         }
+        .allowsHitTesting(!isChangingBranch)
     }
 
     private var branchPathHeader: some View {
         HStack(spacing: 10) {
-            Button {
-                withAnimation(.snappy(duration: 0.22)) {
-                    currentBranchID = snapshot.parentByID[currentBranch.id]
-                        .flatMap(snapshot.room(id:))?.id
-                }
-            } label: {
-                Label(strings.moveToParentTopic, systemImage: "chevron.left")
+            if currentBranch.id == snapshot.root.id {
+                Label(strings.childTopics, systemImage: "arrow.turn.down.right")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 7)
                     .background(Color(.tertiarySystemFill), in: Capsule())
+            } else {
+                Button {
+                    let parentID = snapshot.parentByID[currentBranch.id]
+                        .flatMap(snapshot.room(id:))?.id
+                    replaceBranch(with: parentID)
+                } label: {
+                    Label(strings.moveToParentTopic, systemImage: "chevron.left")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(Color(.tertiarySystemFill), in: Capsule())
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
 
             Text(currentPath.map(\.topic).joined(separator: "  ›  "))
                 .font(.caption.weight(.medium))
@@ -6711,7 +6729,7 @@ private struct MobileHomeStudyOutlineRow: View {
                         room: room,
                         isRoot: false,
                         childCount: snapshot.children(of: room.id).count,
-                        trailingSymbol: "chevron.right"
+                        action: .openStudy
                     )
                     .padding(.horizontal, -14)
                 }
@@ -6726,9 +6744,10 @@ private struct MobileHomeStudyOutlineRow: View {
         room: BackendStudyRoom,
         isRoot: Bool,
         childCount: Int,
-        trailingSymbol: String
+        action: RowAction
     ) -> some View {
         let pendingCount = pendingQuestionCount(room)
+        let levelText = StudyTreeNodeStylePolicy.levelText(room.difficultyLevel)
 
         return HStack(spacing: 12) {
             MobileStudyActivityIndicator(
@@ -6744,7 +6763,7 @@ private struct MobileHomeStudyOutlineRow: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text(StudyTreeNodeStylePolicy.levelText(room.difficultyLevel))
+                Text(levelText)
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(room.activeForQuestions ? Color.green : Color.secondary)
@@ -6752,8 +6771,8 @@ private struct MobileHomeStudyOutlineRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityValue(
                 childCount > 0
-                    ? strings.childTopicCount(childCount)
-                    : StudyTreeNodeStylePolicy.levelText(room.difficultyLevel)
+                    ? "\(levelText), \(strings.childTopicCount(childCount))"
+                    : "\(levelText), \(strings.openStudyPage)"
             )
 
             if pendingCount > 0 {
@@ -6765,14 +6784,70 @@ private struct MobileHomeStudyOutlineRow: View {
                     .accessibilityLabel(strings.pendingQuestionCount(pendingCount))
             }
 
-            Image(systemName: trailingSymbol)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
+            rowActionView(action)
         }
         .padding(.horizontal, 14)
         .frame(minHeight: isRoot ? 70 : 64)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+    }
+
+    private func replaceBranch(with roomID: Int?) {
+        guard !isChangingBranch else {
+            return
+        }
+
+        branchUnlockTask?.cancel()
+        isChangingBranch = true
+        currentBranchID = roomID
+        branchUnlockTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(220))
+            guard !Task.isCancelled else {
+                return
+            }
+            isChangingBranch = false
+        }
+    }
+
+    @ViewBuilder
+    private func rowActionView(_ action: RowAction) -> some View {
+        switch action {
+        case .rootToggle:
+            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .accessibilityLabel(
+                    isExpanded ? strings.collapseStudyTopics : strings.expandStudyTopics
+                )
+
+        case let .drillDown(childCount):
+            HStack(spacing: 4) {
+                Text(strings.childTopicAction(childCount))
+                    .lineLimit(1)
+
+                Image(systemName: "chevron.down")
+            }
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(Color(.tertiarySystemFill), in: Capsule())
+            .accessibilityLabel(strings.childTopicCount(childCount))
+
+        case .openStudy:
+            HStack(spacing: 4) {
+                Text(strings.studyAction)
+                    .lineLimit(1)
+
+                Image(systemName: "arrow.up.right")
+            }
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(Color(.tertiarySystemFill), in: Capsule())
+            .accessibilityLabel(strings.openStudyPage)
+        }
     }
 }
 
