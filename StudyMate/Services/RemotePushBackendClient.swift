@@ -366,6 +366,12 @@ protocol RemotePushBackendClientProtocol {
         endAt: Date?
     ) async throws -> BackendStatsActivity
 
+    func fetchStudyGrowth(
+        registration: RemotePushRegistration,
+        startAt: Date?,
+        endAt: Date?
+    ) async throws -> BackendStudyGrowth
+
     func fetchPublicQuestions(
         registration: RemotePushRegistration,
         query: String?,
@@ -1086,6 +1092,33 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.httpMethod = "GET"
         let data = try await perform(request)
         return try decoder.decode(BackendStatsActivity.self, from: data)
+    }
+
+    func fetchStudyGrowth(
+        registration: RemotePushRegistration,
+        startAt: Date? = nil,
+        endAt: Date? = nil
+    ) async throws -> BackendStudyGrowth {
+        var components = URLComponents(
+            url: endpoint("api", "v1", "stats", "studies"),
+            resolvingAgainstBaseURL: false
+        )
+        var queryItems: [URLQueryItem] = []
+        if let startAt {
+            queryItems.append(URLQueryItem(name: "startAt", value: Self.dateFormatter.string(from: startAt)))
+        }
+        if let endAt {
+            queryItems.append(URLQueryItem(name: "endAt", value: Self.dateFormatter.string(from: endAt)))
+        }
+        components?.queryItems = queryItems.isEmpty ? nil : queryItems
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+
+        var request = authenticatedRequest(registration: registration, url: url)
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(BackendStudyGrowth.self, from: data)
     }
 
     func fetchPublicQuestions(
@@ -2192,6 +2225,50 @@ struct BackendStatsActivityDay: Decodable, Equatable, Identifiable {
     var bestLevel: Double?
 
     var id: Date { date }
+}
+
+struct BackendStudyGrowth: Decodable, Equatable {
+    var roots: [BackendStudyGrowthRoot]
+    var nodes: [BackendStudyGrowthNode]
+    var startAt: Date
+    var endAt: Date
+    var generatedAt: Date
+}
+
+struct BackendStudyGrowthRoot: Decodable, Equatable, Identifiable {
+    var studyId: Int
+    var topic: String
+    var activeForQuestions: Bool
+    var currentLevel: Double?
+    var previousLevel: Double?
+    var growth: Double?
+    var answerCount: Int
+    var measuredTopicCount: Int
+    var totalTopicCount: Int
+    var trend: [Double]
+
+    var id: Int { studyId }
+}
+
+struct BackendStudyGrowthNode: Decodable, Equatable, Identifiable {
+    var studyId: Int
+    var parentStudyId: Int?
+    var rootStudyId: Int
+    var topic: String
+    var sortOrder: Int
+    var depth: Int
+    var childCount: Int
+    var activeForQuestions: Bool
+    var currentLevel: Double?
+    var previousLevel: Double?
+    var growth: Double?
+    var answerCount: Int
+    var measuredTopicCount: Int
+    var totalTopicCount: Int
+    var latestAt: Date?
+    var trend: [Double]
+
+    var id: Int { studyId }
 }
 
 struct CommunityQuestion: Decodable, Equatable, Identifiable {

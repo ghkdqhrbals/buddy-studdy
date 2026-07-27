@@ -5105,6 +5105,21 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         BackendStatsActivity(days: [], streakDays: 0, monthAnswerCount: 0, generatedAt: Date())
     }
 
+    func fetchStudyGrowth(
+        registration: RemotePushRegistration,
+        startAt: Date?,
+        endAt: Date?
+    ) async throws -> BackendStudyGrowth {
+        let now = Date()
+        return BackendStudyGrowth(
+            roots: [],
+            nodes: [],
+            startAt: startAt ?? now.addingTimeInterval(-90 * 24 * 60 * 60),
+            endAt: endAt ?? now,
+            generatedAt: now
+        )
+    }
+
     func fetchPublicQuestions(
         registration: RemotePushRegistration,
         query: String?,

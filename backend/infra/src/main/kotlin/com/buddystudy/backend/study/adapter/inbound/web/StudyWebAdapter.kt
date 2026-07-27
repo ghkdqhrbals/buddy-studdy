@@ -3,6 +3,7 @@ package com.buddystudy.backend.study.adapter.inbound.web
 import com.buddystudy.backend.common.adapter.inbound.web.principalOrThrow
 import com.buddystudy.backend.stats.application.model.StatsQuery
 import com.buddystudy.backend.stats.application.port.inbound.GetStudyStatsUseCase
+import com.buddystudy.backend.stats.application.port.inbound.GetStudyGrowthUseCase
 import com.buddystudy.backend.study.adapter.inbound.web.dto.AnswerRequest
 import com.buddystudy.backend.study.adapter.inbound.web.dto.CreateStudyRequest
 import com.buddystudy.backend.study.adapter.inbound.web.dto.CreateStudyTopicRequest
@@ -28,6 +29,7 @@ class StudyWebAdapter(
     private val studyUseCase: StudyUseCase,
     private val recordsUseCase: BrowseRecordsUseCase,
     private val statsUseCase: GetStudyStatsUseCase,
+    private val studyGrowthUseCase: GetStudyGrowthUseCase,
     private val studySyncUseCase: StudySyncUseCase,
     private val studyTreeUseCase: StudyTreeUseCase,
     private val questionQuotaUseCase: QuestionQuotaUseCase,
@@ -65,6 +67,9 @@ class StudyWebAdapter(
 
     override suspend fun statsActivity(startAt: Instant?, endAt: Instant?, authentication: Authentication) =
         statsUseCase.activity(authentication.principalOrThrow(), startAt, endAt)
+
+    override suspend fun studyGrowth(startAt: Instant?, endAt: Instant?, authentication: Authentication) =
+        studyGrowthUseCase.growth(authentication.principalOrThrow(), startAt, endAt)
 
     override suspend fun createQuestion(studyId: Long, authentication: Authentication) =
         studyUseCase.createQuestion(authentication.principalOrThrow(), studyId)

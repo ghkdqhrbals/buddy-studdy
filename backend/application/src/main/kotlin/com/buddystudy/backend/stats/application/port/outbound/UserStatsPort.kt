@@ -1,6 +1,7 @@
 package com.buddystudy.backend.stats.application.port.outbound
 
 import com.buddystudy.stats.domain.entity.UserStatsEntity
+import java.time.Instant
 import java.time.LocalDate
 
 interface UserStatsPort {
@@ -28,4 +29,19 @@ interface UserStatsPort {
 data class UserStatsOverview(
     val totalResponses: Int,
     val totalTopics: Long,
+)
+
+interface StudyGrowthStatsPort {
+    suspend fun findByUser(
+        userId: Long,
+        startAt: Instant,
+        endAt: Instant,
+    ): List<StudyGrowthRecord>
+}
+
+data class StudyGrowthRecord(
+    val studyId: Long,
+    val difficultyLevel: Int,
+    val score: Int,
+    val answeredAt: Instant,
 )

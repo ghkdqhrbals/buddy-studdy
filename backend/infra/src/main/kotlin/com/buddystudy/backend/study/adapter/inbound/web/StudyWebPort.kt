@@ -8,6 +8,7 @@ import com.buddystudy.backend.study.adapter.inbound.web.dto.StudyTopicActivation
 import com.buddystudy.backend.stats.application.model.StatsQuery
 import com.buddystudy.backend.stats.application.model.StatsActivityResponse
 import com.buddystudy.backend.stats.application.model.StatsResponse
+import com.buddystudy.backend.stats.application.model.StudyGrowthResponse
 import com.buddystudy.backend.study.application.model.RecordsPageResponse
 import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.StudyRecordResponse
@@ -30,6 +31,7 @@ interface StudyWebPort {
     suspend fun publicity(id: Long, body: RecordPublicityRequest, authentication: Authentication): StudyRecordResponse
     suspend fun stats(limit: Int, offset: Int, query: StatsQuery, authentication: Authentication): StatsResponse
     suspend fun statsActivity(startAt: Instant?, endAt: Instant?, authentication: Authentication): StatsActivityResponse
+    suspend fun studyGrowth(startAt: Instant?, endAt: Instant?, authentication: Authentication): StudyGrowthResponse
     suspend fun createQuestion(studyId: Long, authentication: Authentication): StudyRecordResponse
     suspend fun questionQuota(authentication: Authentication): QuestionQuotaResponse
     suspend fun createStudy(body: CreateStudyRequest, authentication: Authentication): StudyRoomResponse

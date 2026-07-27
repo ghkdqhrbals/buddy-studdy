@@ -108,7 +108,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
 - `Views`
   - `StudyView`: active question and pending question workflow.
   - `HistoryView`: record search, pagination, detail, and deletion.
-  - `StatisticsView`: topic-level statistics, period filtering, trend charts, and grouped topic stats.
+  - `StatisticsView`: root-study growth cards, period filtering, branch-at-a-time growth navigation, trend charts, and a compatibility projection for servers that do not yet expose tree growth.
   - `SettingsView`: macOS settings.
 - `MobileRootView`: iOS tabs, onboarding, profile category hub, settings, notification inbox, and study-tree interaction.
   - The primary tab bar exposes Home, Records, Statistics, and Notifications. Settings is a profile-hub destination so account and app preferences share one predictable entry point.
@@ -148,6 +148,9 @@ User answer
 -> SettingsStore updates StudyRecord
 -> StatisticsView recalculates topic ranges from records
 -> backend stats are refreshed from MySQL records
+-> GET /api/v1/stats/studies joins graded question study IDs to the current study tree
+-> root and parent nodes aggregate capped descendant weights
+-> iOS shows root cards, then navigates one child branch at a time
 ```
 
 ```text
@@ -238,6 +241,10 @@ Public community feed
 - Refresh claims dirty rows with `FOR UPDATE SKIP LOCKED`; if the process crashes before commit, the transaction rolls back and the dirty rows remain for the next run.
 - Refresh deletes a dirty row only when its `updated_at` still matches the claimed value. If a new answer/delete updates the same bucket during refresh, the dirty row is kept and retried in a later batch.
 - H2/test environments fall back to a full rebuild path; production MySQL uses incremental dirty-key refresh.
+- Tree growth does not rewrite `user_stats`. `StudyGrowthStatsPort` reads graded question samples by stable `study_id`, and `StudyGrowthService` joins those samples to the current `StudyPort` tree.
+- A direct node needs six graded answers for growth. The previous and recent windows never overlap and contain three to five samples each.
+- Parent and root estimates include descendant nodes, cap each node's weight at five answers, and report measured-node coverage separately from total subtree size.
+- `GET /api/v1/stats/studies` returns root summaries plus a flat node list containing `studyId`, `parentStudyId`, and `rootStudyId`; iOS reconstructs only the current branch instead of rendering an unbounded expanded list.
 
 ## Internal Membership Administration
 

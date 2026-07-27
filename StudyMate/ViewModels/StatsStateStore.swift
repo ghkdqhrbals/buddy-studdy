@@ -4,22 +4,30 @@ import Foundation
 struct StatsStateStore {
     private(set) var stats: BackendStats?
     private(set) var activity: BackendStatsActivity?
+    private(set) var studyGrowth: BackendStudyGrowth?
     private(set) var isLoading = false
     private(set) var isActivityLoading = false
+    private(set) var isStudyGrowthLoading = false
     private(set) var errorMessage: String?
     private(set) var activityErrorMessage: String?
+    private(set) var studyGrowthErrorMessage: String?
     private(set) var requestID = UUID()
     private(set) var activityRequestID = UUID()
+    private(set) var studyGrowthRequestID = UUID()
 
     mutating func reset() {
         stats = nil
         activity = nil
+        studyGrowth = nil
         isLoading = false
         isActivityLoading = false
+        isStudyGrowthLoading = false
         errorMessage = nil
         activityErrorMessage = nil
+        studyGrowthErrorMessage = nil
         requestID = UUID()
         activityRequestID = UUID()
+        studyGrowthRequestID = UUID()
     }
 
     mutating func beginRequest() -> UUID {
@@ -86,5 +94,38 @@ struct StatsStateStore {
             return
         }
         activityErrorMessage = message
+    }
+
+    mutating func beginStudyGrowthRequest() -> UUID {
+        let nextRequestID = UUID()
+        studyGrowthRequestID = nextRequestID
+        studyGrowthErrorMessage = nil
+        isStudyGrowthLoading = true
+        return nextRequestID
+    }
+
+    func isCurrentStudyGrowthRequest(_ candidate: UUID) -> Bool {
+        studyGrowthRequestID == candidate
+    }
+
+    mutating func finishStudyGrowthRequest(_ candidate: UUID) {
+        guard isCurrentStudyGrowthRequest(candidate) else {
+            return
+        }
+        isStudyGrowthLoading = false
+    }
+
+    mutating func applyStudyGrowth(_ growth: BackendStudyGrowth, requestID candidate: UUID) {
+        guard isCurrentStudyGrowthRequest(candidate) else {
+            return
+        }
+        studyGrowth = growth
+    }
+
+    mutating func applyStudyGrowthError(_ message: String, requestID candidate: UUID) {
+        guard isCurrentStudyGrowthRequest(candidate) else {
+            return
+        }
+        studyGrowthErrorMessage = message
     }
 }

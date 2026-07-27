@@ -275,6 +275,19 @@ class StudyController(
     ): StatsActivityResponse =
         study.statsActivity(startAt, endAt, authentication)
 
+    @Operation(
+        summary = "Fetch study-tree growth",
+        description = "Returns root-study growth summaries and flat tree nodes. Growth compares non-overlapping recent and previous answer windows and keeps activation separate from growth.",
+    )
+    @GetMapping("/stats/studies")
+    suspend fun studyGrowth(
+        @Parameter(description = "Optional inclusive UTC start timestamp. Defaults to 90 days before endAt.")
+        @RequestParam(required = false) startAt: Instant?,
+        @Parameter(description = "Optional exclusive UTC end timestamp. Defaults to now.")
+        @RequestParam(required = false) endAt: Instant?,
+        authentication: Authentication,
+    ) = study.studyGrowth(startAt, endAt, authentication)
+
     @Operation(summary = "Create a new study question", description = "Creates one new question for the requested study room. The backend enforces the per-study pending-question limit and uses the user's stored OpenAI settings.")
     @PostMapping("/studies/{studyId}/questions")
     suspend fun createQuestion(

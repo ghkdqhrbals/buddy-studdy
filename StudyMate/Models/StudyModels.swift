@@ -2718,6 +2718,25 @@ struct AppStrings {
     var streakKeepGoing: String { text("오늘도 이어가세요", "Keep it going today") }
     var streakStartToday: String { text("오늘 시작해보세요", "Start today") }
     var topicGrowth: String { text("성장 주제", "Growth") }
+    var studyGrowth: String { text("학습별 성장", "Growth by study") }
+    var currentAbility: String { text("현재", "Current") }
+    var growthChange: String { text("성장", "Growth") }
+    var measuringGrowth: String { text("측정 중", "Measuring") }
+    var noGrowthRecords: String { text("아직 성장 기록이 없습니다", "No growth data yet") }
+    var noGrowthRecordsDescription: String {
+        text("같은 주제에서 답변을 6개 이상 채점하면 이전 구간과 최근 구간을 비교합니다.", "Grade at least 6 answers in a topic to compare previous and recent progress.")
+    }
+    var needsReview: String { text("복습 필요", "Review") }
+    var includesChildTopics: String { text("하위 포함", "Includes children") }
+    var growthDetails: String { text("성장 상세", "Growth details") }
+    var previousAbility: String { text("이전", "Previous") }
+    var lastYear: String { text("최근 1년", "Last year") }
+    func measuredTopics(_ measured: Int, total: Int) -> String {
+        text("\(measured)/\(total)개 주제 측정", "\(measured)/\(total) topics measured")
+    }
+    func growthAnswerCount(_ count: Int) -> String {
+        text("답변 \(count)개", "\(count) answers")
+    }
     var thisMonth: String { text("이번 달", "This Month") }
     var selectedYear: String { text("선택 연도", "Selected Year") }
     var year: String { text("연도", "Year") }

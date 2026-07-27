@@ -17,4 +17,10 @@ protocol StatsRepository {
         startAt: Date?,
         endAt: Date?
     ) async throws -> BackendStatsActivity
+
+    func fetchStudyGrowth(
+        registration: RemotePushRegistration,
+        startAt: Date?,
+        endAt: Date?
+    ) async throws -> BackendStudyGrowth
 }

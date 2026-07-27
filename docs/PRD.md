@@ -74,6 +74,12 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 5. Similar topic aliases are visible in the selected topic detail when multiple labels were merged.
 6. Before sign-in, the tab uses a subdued sample summary to explain topic progress and keeps the login invitation as a consistent bottom action.
 7. Growth-topic labels wrap to show their full value instead of being truncated with an ellipsis.
+8. Growth is presented root-study first. Each root card summarizes its full subtree with current 1-10 ability, period growth, measured-topic coverage, answer count, and a compact trend.
+9. Root cards drill into one tree branch at a time so unlimited-depth studies remain scannable. The topic row opens growth detail, while the separate child control navigates deeper.
+10. Growth compares non-overlapping previous and recent answer windows of three to five graded answers. A topic needs at least six answers before a delta is claimed; otherwise it is shown as measuring.
+11. Parent growth includes its subtree and caps each measured node's weight so one high-volume topic cannot dominate the result.
+12. Question activation remains green. Positive growth uses the app accent color, decline uses orange, and insufficient or stable data uses secondary gray.
+13. Growth supports recent 30-day, 90-day, and one-year periods, with 90 days as the default.
 
 ### Settings
 

@@ -202,6 +202,10 @@ final class AppState: ObservableObject {
         statsState.activity
     }
 
+    var backendStudyGrowth: BackendStudyGrowth? {
+        statsState.studyGrowth
+    }
+
     var isBackendStatsLoading: Bool {
         statsState.isLoading
     }
@@ -210,12 +214,20 @@ final class AppState: ObservableObject {
         statsState.isActivityLoading
     }
 
+    var isBackendStudyGrowthLoading: Bool {
+        statsState.isStudyGrowthLoading
+    }
+
     var backendStatsErrorMessage: String? {
         statsState.errorMessage
     }
 
     var backendStatsActivityErrorMessage: String? {
         statsState.activityErrorMessage
+    }
+
+    var backendStudyGrowthErrorMessage: String? {
+        statsState.studyGrowthErrorMessage
     }
 
     var backendAccessState: BackendAccessState {
@@ -2104,6 +2116,35 @@ final class AppState: ObservableObject {
         statsState = nextState
     }
 
+    private func beginBackendStudyGrowthRequest() -> UUID {
+        var nextState = statsState
+        let requestID = nextState.beginStudyGrowthRequest()
+        statsState = nextState
+        return requestID
+    }
+
+    private func isCurrentBackendStudyGrowthRequest(_ requestID: UUID) -> Bool {
+        statsState.isCurrentStudyGrowthRequest(requestID)
+    }
+
+    private func finishBackendStudyGrowthRequest(_ requestID: UUID) {
+        var nextState = statsState
+        nextState.finishStudyGrowthRequest(requestID)
+        statsState = nextState
+    }
+
+    private func applyBackendStudyGrowth(_ growth: BackendStudyGrowth, requestID: UUID) {
+        var nextState = statsState
+        nextState.applyStudyGrowth(growth, requestID: requestID)
+        statsState = nextState
+    }
+
+    private func applyBackendStudyGrowthError(_ message: String, requestID: UUID) {
+        var nextState = statsState
+        nextState.applyStudyGrowthError(message, requestID: requestID)
+        statsState = nextState
+    }
+
     func fetchBackendStats(
         period: BackendStatsPeriod = .all,
         sort: BackendStatsSort = .level,
@@ -2214,6 +2255,65 @@ final class AppState: ObservableObject {
             },
             onCompletion: {
                 finishBackendStatsActivityRequest(requestID)
+            }
+        )
+    }
+
+    func fetchBackendStudyGrowth(startAt: Date? = nil, endAt: Date? = nil) async {
+        let requestID = beginBackendStudyGrowthRequest()
+
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "study-growth") else {
+            applyBackendStudyGrowthError(
+                "백엔드 등록이 필요합니다. 네트워크 또는 설정을 확인하세요.",
+                requestID: requestID
+            )
+            finishBackendStudyGrowthRequest(requestID)
+            log(.warning, "학습 성장 조회를 위한 백엔드 등록이 없어 요청을 중단했습니다.")
+            return
+        }
+
+        await actionRunner.run(
+            operation: {
+                try await statsUseCase.fetchStudyGrowth(
+                    registration: registration,
+                    startAt: startAt,
+                    endAt: endAt
+                )
+            },
+            onSuccess: { growth in
+                guard isCurrentBackendStudyGrowthRequest(requestID) else {
+                    return
+                }
+
+                applyBackendStudyGrowth(growth, requestID: requestID)
+                log(.info, "학습 성장 조회 완료. roots=\(growth.roots.count), nodes=\(growth.nodes.count)")
+            },
+            onFailure: { error in
+                guard isCurrentBackendStudyGrowthRequest(requestID) else {
+                    return
+                }
+
+                if Self.isCancellationLikeError(error) {
+                    log(.info, "학습 성장 조회가 취소되어 화면 오류 상태에 반영하지 않습니다.")
+                    return
+                }
+
+                if handlePageAccessError(error, page: .statistics) {
+                    applyBackendStudyGrowthError(
+                        strings.pageAccessDenied(strings.tabStatistics),
+                        requestID: requestID
+                    )
+                    return
+                }
+
+                applyBackendStudyGrowthError(
+                    backendErrorDisplayMessage(error, fallback: "학습 성장 조회 실패"),
+                    requestID: requestID
+                )
+                log(.warning, "백엔드 학습 성장 조회 실패: \(error.localizedDescription)")
+            },
+            onCompletion: {
+                finishBackendStudyGrowthRequest(requestID)
             }
         )
     }
