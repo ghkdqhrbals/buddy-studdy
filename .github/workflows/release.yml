@@ -28,6 +28,9 @@ jobs:
       APPSTORE_CONNECT_KEY_ID: ${{ secrets.APPSTORE_CONNECT_KEY_ID }}
       APPSTORE_CONNECT_ISSUER_ID: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID }}
       APPSTORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APPSTORE_CONNECT_PRIVATE_KEY_BASE64 }}
+      IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64 }}
+      IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+      IOS_APP_STORE_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_APP_STORE_PROVISIONING_PROFILE_BASE64 }}
       INPUT_VERSION: ${{ inputs.version || '' }}
       UPLOAD_TO_APP_STORE_CONNECT: ${{ github.event_name != 'workflow_dispatch' || inputs.upload_to_app_store_connect }}
 
@@ -40,7 +43,14 @@ jobs:
           set -euo pipefail
 
           missing=0
-          for name in APPLE_TEAM_ID APPSTORE_CONNECT_KEY_ID APPSTORE_CONNECT_ISSUER_ID APPSTORE_CONNECT_PRIVATE_KEY_BASE64; do
+          for name in \
+            APPLE_TEAM_ID \
+            APPSTORE_CONNECT_KEY_ID \
+            APPSTORE_CONNECT_ISSUER_ID \
+            APPSTORE_CONNECT_PRIVATE_KEY_BASE64 \
+            IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64 \
+            IOS_DISTRIBUTION_CERTIFICATE_PASSWORD \
+            IOS_APP_STORE_PROVISIONING_PROFILE_BASE64; do
             if [ -z "${!name}" ]; then
               echo "Missing GitHub Actions secret: ${name}" >&2
               missing=1
@@ -60,6 +70,60 @@ jobs:
           chmod 600 "${PRIVATE_KEY_PATH}"
 
           echo "APPSTORE_CONNECT_PRIVATE_KEY_PATH=${PRIVATE_KEY_PATH}" >> "${GITHUB_ENV}"
+
+      - name: Install iOS distribution signing assets
+        run: |
+          set -euo pipefail
+
+          CERTIFICATE_PATH="${RUNNER_TEMP}/ios-distribution.p12"
+          PROFILE_PATH="${RUNNER_TEMP}/ios-app-store.mobileprovision"
+          PROFILE_PLIST_PATH="${RUNNER_TEMP}/ios-app-store-profile.plist"
+          KEYCHAIN_PATH="${RUNNER_TEMP}/ios-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+
+          echo "${IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64}" | base64 --decode > "${CERTIFICATE_PATH}"
+          echo "${IOS_APP_STORE_PROVISIONING_PROFILE_BASE64}" | base64 --decode > "${PROFILE_PATH}"
+
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security import "${CERTIFICATE_PATH}" \
+            -k "${KEYCHAIN_PATH}" \
+            -P "${IOS_DISTRIBUTION_CERTIFICATE_PASSWORD}" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "${KEYCHAIN_PASSWORD}" \
+            "${KEYCHAIN_PATH}"
+          security list-keychains -d user -s "${KEYCHAIN_PATH}"
+          security default-keychain -d user -s "${KEYCHAIN_PATH}"
+
+          security cms -D -i "${PROFILE_PATH}" > "${PROFILE_PLIST_PATH}"
+          PROFILE_UUID="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "${PROFILE_PLIST_PATH}")"
+          PROFILE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :Name' "${PROFILE_PLIST_PATH}")"
+          PROFILE_TEAM_ID="$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "${PROFILE_PLIST_PATH}")"
+          PROFILE_APP_IDENTIFIER="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "${PROFILE_PLIST_PATH}")"
+
+          if [ "${PROFILE_TEAM_ID}" != "${APPLE_TEAM_ID}" ]; then
+            echo "Provisioning profile team does not match APPLE_TEAM_ID." >&2
+            exit 1
+          fi
+
+          if [ "${PROFILE_APP_IDENTIFIER}" != "${APPLE_TEAM_ID}.io.github.ghkdqhrbals.StudyMate" ]; then
+            echo "Provisioning profile does not match the iOS app bundle identifier." >&2
+            exit 1
+          fi
+
+          mkdir -p \
+            "${HOME}/Library/MobileDevice/Provisioning Profiles" \
+            "${HOME}/Library/Developer/Xcode/UserData/Provisioning Profiles"
+          cp "${PROFILE_PATH}" "${HOME}/Library/MobileDevice/Provisioning Profiles/${PROFILE_UUID}.mobileprovision"
+          cp "${PROFILE_PATH}" "${HOME}/Library/Developer/Xcode/UserData/Provisioning Profiles/${PROFILE_UUID}.mobileprovision"
+
+          security find-identity -v -p codesigning "${KEYCHAIN_PATH}"
+          echo "IOS_PROVISIONING_PROFILE_NAME=${PROFILE_NAME}" >> "${GITHUB_ENV}"
 
       - name: Resolve release version
         run: |
@@ -108,10 +172,9 @@ jobs:
             -destination 'generic/platform=iOS' \
             -derivedDataPath build/iOSReleaseDerivedData \
             -archivePath build/StudyMateiOS.xcarchive \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "${APPSTORE_CONNECT_PRIVATE_KEY_PATH}" \
-            -authenticationKeyID "${APPSTORE_CONNECT_KEY_ID}" \
-            -authenticationKeyIssuerID "${APPSTORE_CONNECT_ISSUER_ID}" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="${IOS_PROVISIONING_PROFILE_NAME}" \
             DEVELOPMENT_TEAM="${APPLE_TEAM_ID}" \
             MARKETING_VERSION="${RELEASE_VERSION}" \
             CURRENT_PROJECT_VERSION="${RELEASE_BUILD_NUMBER}"
@@ -145,7 +208,14 @@ jobs:
             <key>method</key>
             <string>app-store-connect</string>
             <key>signingStyle</key>
-            <string>automatic</string>
+            <string>manual</string>
+            <key>signingCertificate</key>
+            <string>Apple Distribution</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>io.github.ghkdqhrbals.StudyMate</key>
+              <string>${IOS_PROVISIONING_PROFILE_NAME}</string>
+            </dict>
             <key>stripSwiftSymbols</key>
             <true/>
             <key>teamID</key>
@@ -161,11 +231,7 @@ jobs:
           xcodebuild -exportArchive \
             -archivePath build/StudyMateiOS.xcarchive \
             -exportPath dist \
-            -exportOptionsPlist build/export-options.plist \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "${APPSTORE_CONNECT_PRIVATE_KEY_PATH}" \
-            -authenticationKeyID "${APPSTORE_CONNECT_KEY_ID}" \
-            -authenticationKeyIssuerID "${APPSTORE_CONNECT_ISSUER_ID}"
+            -exportOptionsPlist build/export-options.plist
 
           IPA_PATH="$(find dist -maxdepth 1 -name '*.ipa' -print -quit)"
           if [ -z "${IPA_PATH}" ]; then
@@ -219,7 +285,14 @@ jobs:
             <key>method</key>
             <string>app-store-connect</string>
             <key>signingStyle</key>
-            <string>automatic</string>
+            <string>manual</string>
+            <key>signingCertificate</key>
+            <string>Apple Distribution</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>io.github.ghkdqhrbals.StudyMate</key>
+              <string>${IOS_PROVISIONING_PROFILE_NAME}</string>
+            </dict>
             <key>stripSwiftSymbols</key>
             <true/>
             <key>teamID</key>
