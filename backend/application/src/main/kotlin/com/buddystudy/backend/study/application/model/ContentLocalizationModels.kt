@@ -1,5 +1,7 @@
 package com.buddystudy.backend.study.application.model
 
+import com.fasterxml.jackson.annotation.JsonProperty
+
 enum class TranslationViewMode {
     LOCALIZED,
     ORIGINAL,
@@ -23,6 +25,7 @@ data class ContentLocalizationResponse(
     val requestedLanguage: String,
     val displayLanguage: String,
     val translationState: TranslationState,
+    @get:JsonProperty("isTranslated")
     val isTranslated: Boolean,
     val originalAvailable: Boolean,
     val translationReason: TranslationReason,

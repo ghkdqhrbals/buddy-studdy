@@ -195,6 +195,27 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertEqual(metadata.answer?.displayLanguage, "ko")
     }
 
+    func testLocalizationMetadataDecodesLegacyTranslatedField() throws {
+        let data = Data(
+            """
+            {
+              "sourceLanguage": "ko",
+              "requestedLanguage": "ko",
+              "displayLanguage": "ko",
+              "translationState": "ORIGINAL",
+              "translated": false,
+              "originalAvailable": false,
+              "translationReason": "EXPLICIT_TL"
+            }
+            """.utf8
+        )
+
+        let metadata = try JSONDecoder().decode(ContentLocalizationMetadata.self, from: data)
+
+        XCTAssertFalse(metadata.isTranslated)
+        XCTAssertEqual(metadata.displayLanguage, "ko")
+    }
+
     func testPendingProcessSurvivesSettingsStoreRecreation() {
         let suiteName = "QuestionGenerationFlowTests-\(UUID().uuidString)"
         guard let defaults = UserDefaults(suiteName: suiteName) else {

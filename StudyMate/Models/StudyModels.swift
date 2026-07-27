@@ -1669,6 +1669,34 @@ struct ContentLocalizationMetadata: Codable, Equatable {
     var isPending: Bool {
         translationState == "PENDING"
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case sourceLanguage
+        case requestedLanguage
+        case displayLanguage
+        case translationState
+        case isTranslated
+        case originalAvailable
+        case translationReason
+    }
+
+    private enum LegacyCodingKeys: String, CodingKey {
+        case translated
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let legacyContainer = try decoder.container(keyedBy: LegacyCodingKeys.self)
+        sourceLanguage = try container.decode(String.self, forKey: .sourceLanguage)
+        requestedLanguage = try container.decode(String.self, forKey: .requestedLanguage)
+        displayLanguage = try container.decode(String.self, forKey: .displayLanguage)
+        translationState = try container.decode(String.self, forKey: .translationState)
+        isTranslated = try container.decodeIfPresent(Bool.self, forKey: .isTranslated)
+            ?? legacyContainer.decodeIfPresent(Bool.self, forKey: .translated)
+            ?? false
+        originalAvailable = try container.decode(Bool.self, forKey: .originalAvailable)
+        translationReason = try container.decode(String.self, forKey: .translationReason)
+    }
 }
 
 struct RecordLocalizationMetadata: Codable, Equatable {
