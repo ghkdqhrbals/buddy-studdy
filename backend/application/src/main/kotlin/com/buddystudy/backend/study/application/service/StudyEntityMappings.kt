@@ -38,7 +38,6 @@ internal fun StudyRoomQuestionDraft.toQuestionEntity() = QuestionEntity(
     question = question,
     hint = hint,
     topic = topic,
-    language = language,
     sourceLanguage = language,
     difficultyLevel = difficultyLevel,
     scheduledFor = scheduledFor,

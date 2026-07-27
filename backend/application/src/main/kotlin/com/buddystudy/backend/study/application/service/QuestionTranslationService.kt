@@ -46,9 +46,7 @@ class QuestionTranslationService(
                 question = question.question,
                 hint = question.hint,
                 sourceLanguage = event.sourceLanguage,
-                alreadyReady = question.translationStatus == READY &&
-                    !question.topicEn.isNullOrBlank() &&
-                    !question.questionEn.isNullOrBlank(),
+                targetLanguage = QuestionLanguage.normalize(user.appLanguage),
             )
             val result = writer.complete(
                 event = event,
@@ -96,26 +94,28 @@ class QuestionTranslationService(
         question: String,
         hint: String?,
         sourceLanguage: String,
-        alreadyReady: Boolean,
+        targetLanguage: String,
     ): TranslatedQuestionContent? {
-        if (alreadyReady) return null
         val normalizedSource = QuestionLanguage.normalize(sourceLanguage)
-        val translated = if (normalizedSource == QuestionLanguage.ENGLISH) {
-            TranslatedQuestionContent(topic, question, hint)
-        } else {
-            translations.translateToEnglish(topic, question, hint, normalizedSource)
+        val normalizedTarget = QuestionLanguage.normalize(targetLanguage)
+        if (normalizedSource == normalizedTarget) return null
+        val translated = translations.translate(
+            topic = topic,
+            question = question,
+            hint = hint,
+            sourceLanguage = normalizedSource,
+            targetLanguage = normalizedTarget,
+        )
+        check(QuestionLanguage.matchesShortLabel(translated.topic, normalizedTarget)) {
+            "Question translation did not produce the requested topic language."
         }
-        check(QuestionLanguage.matchesShortLabel(translated.topic, QuestionLanguage.ENGLISH)) {
-            "Question translation did not produce an English topic."
-        }
-        check(QuestionLanguage.matches(translated.question, QuestionLanguage.ENGLISH)) {
-            "Question translation did not produce English content."
+        check(QuestionLanguage.matches(translated.question, normalizedTarget)) {
+            "Question translation did not produce the requested content language."
         }
         return translated
     }
 
     private companion object {
-        const val READY = "READY"
         const val MAX_ATTEMPTS = 3
     }
 }

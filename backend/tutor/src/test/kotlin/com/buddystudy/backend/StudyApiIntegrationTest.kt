@@ -16,6 +16,10 @@ import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionReposit
 import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionStatsRepository
 import com.buddystudy.backend.study.adapter.outbound.persistence.StudyRepository
 import com.buddystudy.backend.study.adapter.outbound.persistence.UserMembershipTierRepository
+import com.buddystudy.backend.community.adapter.outbound.persistence.QuestionCommentRepository
+import com.buddystudy.backend.localization.application.model.ContentTranslationResult
+import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
+import com.buddystudy.backend.localization.application.service.ContentLocalizationService
 import com.buddystudy.account.domain.entity.UserMembershipTierEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
@@ -60,6 +64,8 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var refreshUserStats: RefreshUserStatsUseCase
     @Autowired lateinit var databaseClient: DatabaseClient
     @Autowired lateinit var membershipTiers: UserMembershipTierRepository
+    @Autowired lateinit var contentLocalizations: ContentLocalizationPort
+    @Autowired lateinit var comments: QuestionCommentRepository
     @LocalServerPort var port: Int = 0
 
     private val client = HttpClient.newHttpClient()
@@ -544,12 +550,23 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
                 question = "Public boundary question",
                 createdAt = Instant.parse("2026-06-09T05:00:00Z"),
                 publicQuestion = true,
-            ).apply {
-                topicEn = "Public Boundary Topic"
-                questionEn = "Translated public boundary question"
-                hintEn = "Translated public boundary hint"
-                translationStatus = "READY"
-            }
+            )
+        )
+        val sourceHashes = ContentLocalizationService.recordHashes(publicQuestion)
+        contentLocalizations.ensureRecordPending(publicQuestion, "en", sourceHashes, publicQuestion.updatedAt)
+        contentLocalizations.saveQuestionReady(
+            question = publicQuestion,
+            targetLanguage = "en",
+            sourceHash = sourceHashes.question,
+            result = ContentTranslationResult(
+                fields = mapOf(
+                    "topic" to "Public Boundary Topic",
+                    "question" to "Translated public boundary question",
+                    "hint" to "Translated public boundary hint",
+                ),
+                provider = "test",
+            ),
+            now = publicQuestion.updatedAt,
         )
         stats.save(QuestionStatsEntity(questionId = publicQuestion.id, likeCount = 9, commentCount = 3, viewCount = 14))
 
@@ -641,6 +658,63 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(listed.json()["comments"]).hasSize(1)
         assertThat(listed.json()["comments"][0]["id"].asText()).isEqualTo(createdBody["id"].asText())
         assertThat(listed.json()["totalCount"].asInt()).isEqualTo(1)
+    }
+
+    @Test
+    fun `comment keeps its original text and reads translation from comment localizations`(): Unit = runBlocking {
+        val owner = registerActiveUser("localized-comment-owner")
+        val commenter = registerActiveUser("localized-comment-author")
+        val study = createStudy(owner, "Localized Comment")
+        val publicQuestion = questions.save(
+            gradedQuestion(
+                deviceId = owner.deviceId,
+                userId = study.userId,
+                studyId = study.id,
+                topic = "Localized Comment",
+                question = "Can comments be translated independently?",
+                createdAt = Instant.parse("2026-06-09T06:30:00Z"),
+            )
+        )
+
+        val created = postJson(
+            "/api/v1/public/questions/${publicQuestion.id}/comments",
+            """{"body":"원문 댓글입니다.","sourceLanguage":"ko"}""",
+            commenter.accessToken,
+            commenter.deviceId,
+            commenter.clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        val comment = comments.findById(created["id"].asLong())!!
+        val sourceHash = ContentLocalizationService.sha256(comment.body)
+        contentLocalizations.ensureCommentPending(comment, "en", sourceHash, comment.updatedAt)
+        contentLocalizations.saveCommentReady(
+            comment = comment,
+            targetLanguage = "en",
+            sourceHash = sourceHash,
+            result = ContentTranslationResult(
+                fields = mapOf("body" to "This is the original comment."),
+                provider = "test",
+            ),
+            now = comment.updatedAt,
+        )
+
+        val localized = getJson(
+            "/api/v1/public/questions/${publicQuestion.id}/comments?tl=en",
+            commenter.accessToken,
+            commenter.deviceId,
+            commenter.clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()["comments"][0]
+        assertThat(localized["body"].asText()).isEqualTo("This is the original comment.")
+        assertThat(localized["localization"]["sourceLanguage"].asText()).isEqualTo("ko")
+        assertThat(localized["localization"]["displayLanguage"].asText()).isEqualTo("en")
+
+        val original = getJson(
+            "/api/v1/public/questions/${publicQuestion.id}/comments?tl=en&view=original",
+            commenter.accessToken,
+            commenter.deviceId,
+            commenter.clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()["comments"][0]
+        assertThat(original["body"].asText()).isEqualTo("원문 댓글입니다.")
+        assertThat(original["localization"]["displayLanguage"].asText()).isEqualTo("ko")
     }
 
     private fun postJson(

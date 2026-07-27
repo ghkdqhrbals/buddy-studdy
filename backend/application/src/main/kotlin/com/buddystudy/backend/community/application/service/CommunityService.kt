@@ -357,11 +357,8 @@ class CommunityService(
         val questionReady = snapshot.question.readyFor(hashes.question)
         val answerReady = snapshot.answer.readyFor(hashes.answer)
         val aiReady = snapshot.aiResponse.readyFor(hashes.aiResponse)
-        val hasLegacyEnglishQuestion = target == QuestionLanguage.ENGLISH &&
-            question.translationStatus == "READY" &&
-            !question.questionEn.isNullOrBlank()
         val needsTranslation =
-            (questionSource != target && questionReady == null && !hasLegacyEnglishQuestion) ||
+            (questionSource != target && questionReady == null) ||
                 (!question.answer.isNullOrBlank() && answerSource != target && answerReady == null) ||
                 ((!question.feedback.isNullOrBlank() || !question.explanation.isNullOrBlank()) &&
                     aiSource != target && aiReady == null)
@@ -373,19 +370,11 @@ class CommunityService(
         var answerDisplay = answerSource
         var aiDisplay = aiSource
         if (questionSource != target) {
-            when {
-                questionReady != null -> {
-                    question.topic = questionReady.fields["topic"] ?: question.topic
-                    question.question = questionReady.fields["question"] ?: question.question
-                    question.hint = questionReady.fields["hint"] ?: question.hint
-                    questionDisplay = target
-                }
-                hasLegacyEnglishQuestion -> {
-                    question.topic = question.topicEn ?: question.topic
-                    question.question = question.questionEn ?: question.question
-                    question.hint = question.hintEn ?: question.hint
-                    questionDisplay = target
-                }
+            if (questionReady != null) {
+                question.topic = questionReady.fields["topic"] ?: question.topic
+                question.question = questionReady.fields["question"] ?: question.question
+                question.hint = questionReady.fields["hint"] ?: question.hint
+                questionDisplay = target
             }
         }
         if (!question.answer.isNullOrBlank() && answerSource != target) {

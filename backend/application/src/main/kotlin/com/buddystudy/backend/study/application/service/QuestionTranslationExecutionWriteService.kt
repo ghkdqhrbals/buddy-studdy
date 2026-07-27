@@ -3,6 +3,9 @@ package com.buddystudy.backend.study.application.service
 import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.common.application.outbox.OutboxType
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxAppendPort
+import com.buddystudy.backend.localization.application.model.ContentTranslationResult
+import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
+import com.buddystudy.backend.localization.application.service.ContentLocalizationService
 import com.buddystudy.backend.study.application.model.ClaimedQuestionTranslation
 import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
 import com.buddystudy.backend.study.application.model.QuestionGenerationStatus
@@ -18,7 +21,6 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutbox
 import com.buddystudy.backend.study.application.port.outbound.StreamInboxPort
 import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.study.domain.entity.StudyEntity
-import com.buddystudy.study.domain.localizedFor
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Duration
@@ -29,6 +31,7 @@ class QuestionTranslationExecutionWriteService(
     private val sagas: QuestionGenerationSagaPort,
     private val inbox: StreamInboxPort,
     private val questions: QuestionPort,
+    private val localizations: ContentLocalizationPort,
     private val notificationOutbox: RedisEventOutboxAppendPort,
     private val pushOutbox: QuestionPushOutboxAppendPort,
     private val questionKeys: OpenAIQuestionKeyProvider,
@@ -65,20 +68,33 @@ class QuestionTranslationExecutionWriteService(
         appLanguage: String,
         now: Instant,
     ): QuestionWriteResult {
+        val question = checkNotNull(questions.findQuestionById(event.questionId)) {
+            "Question disappeared before delivery."
+        }
         if (translation != null) {
+            val targetLanguage = QuestionLanguage.normalize(appLanguage)
+            val hashes = ContentLocalizationService.recordHashes(question)
+            localizations.ensureRecordPending(question, targetLanguage, hashes, now)
             check(
-                questions.saveEnglishTranslation(
-                    questionId = event.questionId,
-                    topic = translation.topic,
-                    question = translation.question,
-                    hint = translation.hint,
+                localizations.saveQuestionReady(
+                    question = question,
+                    targetLanguage = targetLanguage,
+                    sourceHash = hashes.question,
+                    result = ContentTranslationResult(
+                        fields = mapOf(
+                            "topic" to translation.topic,
+                            "question" to translation.question,
+                            "hint" to translation.hint,
+                        ),
+                        provider = "question-generation",
+                    ),
                     now = now,
                 ),
             ) { "Question disappeared while saving its translation." }
+            question.topic = translation.topic
+            question.question = translation.question
+            question.hint = translation.hint
         }
-        val question = checkNotNull(questions.findQuestionById(event.questionId)) {
-            "Question disappeared before delivery."
-        }.localizedFor(QuestionLanguage.normalize(appLanguage))
         val notificationId = notificationOutbox.appendNotification(
             question.toQuestionNotification(rootStudy, appLanguage),
             now,
@@ -118,7 +134,6 @@ class QuestionTranslationExecutionWriteService(
     ) {
         val saga = sagas.findByCorrelationId(event.correlationId)
         if (saga != null && saga.status !in setOf(QuestionGenerationStatus.COMPLETED, QuestionGenerationStatus.FAILED)) {
-            questions.markEnglishTranslationFailed(event.questionId, errorMessage, now)
             questions.softDelete(event.questionId, saga.userId, now)
             check(
                 sagas.markFailed(

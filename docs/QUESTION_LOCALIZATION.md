@@ -35,6 +35,8 @@ BuddyStudy는 앱 UI와 동적 콘텐츠 모두 한국어(`ko`), 영어(`en`), �
 
 원본과 대상 언어가 같으면 번역 행을 만들지 않는다. `ko`, `en`, `ja` 사이의 나머지 모든 방향을 지원한다.
 
+`questions`에는 원문 필드와 위 세 원본 언어 컬럼만 존재한다. `language`, `question_en`, `topic_en`, `hint_en`, 질문 행 단위의 번역 상태 컬럼은 최종 스키마에서 제거됐다. 댓글도 `question_comments.body`에는 원문만 저장하고 번역문은 `question_comment_localizations`에서만 읽는다.
+
 ## 언어 감지
 
 - iOS는 답변과 댓글을 제출하기 전에 `NLLanguageRecognizer`로 `ko/en/ja`를 감지한다.
@@ -153,17 +155,18 @@ Translated into English · Show original
 - 동적 Markdown 미리보기는 선택된 표시 언어의 파서 기반 평문 투영을 사용한다.
 - 공개 질문 조회 분석 이벤트에는 `translationState`, `translationLanguage`, `translationReason`, 요청 ID와 각 콘텐츠의 source/display language를 기록한다.
 - 분석 이벤트에는 원문이나 번역문 자체를 넣지 않는다.
-- 공개 검색 읽기 모델은 준비된 번역을 `ko/en/ja`별로 반영한다. 준비 전에는 원문으로 표시되고 해당 번역 언어 검색에는 준비 완료 후 포함된다.
+- `question_search`는 `(question_id, language)`가 키인 검색 전용 읽기 모델이다. 질문, 답변, AI 응답은 각자의 원본 언어 또는 `READY` 번역 언어 행에만 반영된다.
+- 질문이나 번역이 저장되면 같은 트랜잭션 흐름에서 해당 질문의 검색 행을 다시 만든다. 준비 전에는 원문으로 표시되며 해당 번역 언어 검색에는 준비 완료 후 포함된다.
+- 공개 여부, 삭제 여부, 작성자의 공개 설정은 검색 문서에 복제하지 않고 조회 시 원본 테이블과 조인해 판정한다.
 
 ## 마이그레이션
 
-1. 신규 원본 언어 컬럼과 번역 테이블을 먼저 추가한다.
-2. 신규 쓰기는 기존 컬럼과 신규 모델을 함께 기록한다.
-3. `questions.source_language`는 기존 `language`로 채운다.
-4. 기존 영어 번역은 `question_localizations(target_language=en)`으로 이관한다.
-5. 기존 답변, AI 응답, 댓글은 제한된 배치에서 Lingua로 감지한다. 불확실하면 질문 원본 언어, 작성자의 앱 언어 순으로 보완한다.
-6. backfill과 shadow-read 비교 후 콘텐츠 존재 시 언어 컬럼 필수 제약을 적용한다.
-7. `questions.language`, `question_en`, `topic_en`, `hint_en` 제거는 롤백 호환 기간 뒤의 별도 마이그레이션으로 진행한다.
+1. 원본 언어 컬럼과 번역 테이블을 추가하고 기존 영어 번역을 `question_localizations(target_language=en)`으로 이관했다.
+2. 기존 답변, AI 응답, 댓글의 원본 언어를 보완하고 `ko/en/ja` 제약을 적용했다.
+3. 같은 원본/대상 언어의 불필요한 번역 행을 제거했다.
+4. 원문과 준비된 번역에서 `question_search`를 전체 재구축했다.
+5. `questions.language`, `question_en`, `topic_en`, `hint_en`, `translation_status`, `translation_error`를 제거했다.
+6. 이후 쓰기는 원문 테이블과 각 localization 테이블만 사용하며 영어 전용 dual-write나 백필 작업은 실행하지 않는다.
 
 ## 검증 기준
 

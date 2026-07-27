@@ -21,67 +21,15 @@ import org.springframework.stereotype.Repository
 import java.time.Instant
 
 @Repository
+@Suppress("UNUSED_PARAMETER")
 class QuestionRepository(
     private val template: R2dbcEntityTemplate,
+    private val searchProjection: QuestionSearchProjectionManager,
 ) : QuestionPort {
-    override suspend fun save(entity: QuestionEntity): QuestionEntity = template.saveEntity(entity, entity.id)
-
-    override suspend fun saveEnglishTranslation(
-        questionId: Long,
-        topic: String,
-        question: String,
-        hint: String?,
-        now: Instant,
-    ): Boolean =
-        template.update(QuestionEntity::class.java)
-            .matching(Query.query(Criteria.where("id").`is`(questionId).and("deleted_at").isNull))
-            .apply(
-                Update.update("topic_en", topic)
-                    .set("question_en", question)
-                    .set("hint_en", hint)
-                    .set("translation_status", "READY")
-                    .set("translation_error", null)
-                    .set("updated_at", now),
-            )
-            .awaitSingle() > 0
-
-    override suspend fun findEnglishTopicBackfillCandidates(limit: Int): List<QuestionEntity> =
-        template.select(
-            Query.query(
-                Criteria.where("deleted_at").isNull
-                    .and("translation_status").`is`("READY")
-                    .and("question_en").isNotNull
-                    .and("topic_en").isNull,
-            )
-                .sort(Sort.by(Sort.Direction.ASC, "id"))
-                .limit(limit.coerceIn(1, 100)),
-            QuestionEntity::class.java,
-        ).collectList().awaitSingle()
-
-    override suspend fun saveEnglishTopicTranslation(questionId: Long, topic: String, now: Instant): Boolean =
-        template.update(QuestionEntity::class.java)
-            .matching(
-                Query.query(
-                    Criteria.where("id").`is`(questionId)
-                        .and("deleted_at").isNull
-                        .and("topic_en").isNull,
-                ),
-            )
-            .apply(
-                Update.update("topic_en", topic)
-                    .set("updated_at", now),
-            )
-            .awaitSingle() > 0
-
-    override suspend fun markEnglishTranslationFailed(questionId: Long, error: String, now: Instant) {
-        template.update(QuestionEntity::class.java)
-            .matching(Query.query(Criteria.where("id").`is`(questionId).and("deleted_at").isNull))
-            .apply(
-                Update.update("translation_status", "FAILED")
-                    .set("translation_error", error.take(2_000))
-                    .set("updated_at", now),
-            )
-            .awaitSingle()
+    override suspend fun save(entity: QuestionEntity): QuestionEntity {
+        val saved = template.saveEntity(entity, entity.id)
+        searchProjection.refresh(saved.id)
+        return saved
     }
 
     suspend fun findById(id: Long): QuestionEntity? = findQuestionById(id)
@@ -128,13 +76,7 @@ class QuestionRepository(
         page(Criteria.where("user_id").`is`(userId).and("deleted_at").isNull.and("score").isNotNull, pageable)
 
     override suspend fun findGradedByUserAndQuery(userId: Long, query: String, pageable: Pageable): Page<QuestionEntity> =
-        page(
-            Criteria.where("user_id").`is`(userId)
-                .and("deleted_at").isNull
-                .and("score").isNotNull
-                .and(textSearch(query)),
-            pageable,
-        )
+        userSearchPage(userId, includePending = false, language = null, query, pageable)
 
     override suspend fun findGradedByUserAndTopics(
         userId: Long,
@@ -187,39 +129,27 @@ class QuestionRepository(
         page(pendingCriteria().and("study_id").`is`(studyId), pageable)
 
     override suspend fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity> {
-        return findLatestPendingByStudyIds(studyIds, language = null)
+        return findLatestPendingByStudyIdsInternal(studyIds)
     }
 
     override suspend fun findLatestPendingByStudyIdsAndLanguage(
         studyIds: Collection<Long>,
         language: String,
-    ): List<QuestionEntity> = findLatestPendingByStudyIds(studyIds, QuestionLanguage.normalize(language))
+    ): List<QuestionEntity> = findLatestPendingByStudyIdsInternal(studyIds)
 
-    private suspend fun findLatestPendingByStudyIds(
-        studyIds: Collection<Long>,
-        language: String?,
-    ): List<QuestionEntity> {
+    private suspend fun findLatestPendingByStudyIdsInternal(studyIds: Collection<Long>): List<QuestionEntity> {
         if (studyIds.isEmpty()) return emptyList()
         val studyMarkers = indexedBindMarkers("studyId", studyIds.size)
-        val languageCondition = when (language) {
-            QuestionLanguage.ENGLISH ->
-                "and q.translation_status = 'READY' and q.question_en is not null"
-            null -> ""
-            else -> "and q.language = :language"
-        }
-        var spec = template.databaseClient.sql(
+        val ids = template.databaseClient.sql(
             """
             select id from (
                 select q.id, row_number() over (partition by q.study_id order by q.created_at desc, q.id desc) as study_rank
                 from questions q
                 where q.study_id in ($studyMarkers) and q.deleted_at is null
                   and q.score is null and q.skipped_at is null
-                  $languageCondition
             ) ranked where study_rank = 1
             """.trimIndent(),
         ).bindIndexed("studyId", studyIds.toList())
-        if (language != null && language != QuestionLanguage.ENGLISH) spec = spec.bind("language", language)
-        val ids = spec
             .map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }
             .all().collectList().awaitSingle()
         return findOrdered(ids)
@@ -240,24 +170,14 @@ class QuestionRepository(
         includePending: Boolean,
         language: String,
         pageable: Pageable,
-    ): Page<QuestionEntity> {
-        var criteria = Criteria.where("user_id").`is`(userId)
-            .and(languageCriteria(language))
-            .and("deleted_at").isNull
-        if (!includePending) criteria = criteria.and("score").isNotNull
-        return page(criteria, pageable)
-    }
+    ): Page<QuestionEntity> = findVisibleByUser(userId, includePending, pageable)
 
     override suspend fun findVisibleByUserAndQuery(
         userId: Long,
         includePending: Boolean,
         query: String,
         pageable: Pageable,
-    ): Page<QuestionEntity> {
-        var criteria = Criteria.where("user_id").`is`(userId).and("deleted_at").isNull.and(textSearch(query))
-        if (!includePending) criteria = criteria.and("score").isNotNull
-        return page(criteria, pageable)
-    }
+    ): Page<QuestionEntity> = userSearchPage(userId, includePending, language = null, query, pageable)
 
     override suspend fun findVisibleByUserAndLanguageAndQuery(
         userId: Long,
@@ -265,14 +185,8 @@ class QuestionRepository(
         language: String,
         query: String,
         pageable: Pageable,
-    ): Page<QuestionEntity> {
-        var criteria = Criteria.where("user_id").`is`(userId)
-            .and(languageCriteria(language))
-            .and("deleted_at").isNull
-            .and(textSearch(query))
-        if (!includePending) criteria = criteria.and("score").isNotNull
-        return page(criteria, pageable)
-    }
+    ): Page<QuestionEntity> =
+        userSearchPage(userId, includePending, QuestionLanguage.normalize(language), query, pageable)
 
     override suspend fun findRecentQuestionTextsByStudyIdAndTopic(
         studyId: Long,
@@ -305,14 +219,7 @@ class QuestionRepository(
             .awaitSingle()
 
     override suspend fun countPendingForStudyAndLanguage(studyId: Long, language: String): Long =
-        template.count(
-            Query.query(
-                pendingCriteria()
-                    .and("study_id").`is`(studyId)
-                    .and(languageCriteria(language)),
-            ),
-            QuestionEntity::class.java,
-        ).awaitSingle()
+        countPendingForStudy(studyId)
 
     override suspend fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long> {
         if (studyIds.isEmpty()) return emptyMap()
@@ -333,32 +240,7 @@ class QuestionRepository(
     override suspend fun countPendingByStudyIdsAndLanguage(
         studyIds: Collection<Long>,
         language: String,
-    ): Map<Long, Long> {
-        if (studyIds.isEmpty()) return emptyMap()
-        val studyMarkers = indexedBindMarkers("studyId", studyIds.size)
-        val normalizedLanguage = QuestionLanguage.normalize(language)
-        val languageCondition = if (normalizedLanguage == QuestionLanguage.ENGLISH) {
-            "translation_status = 'READY' and question_en is not null"
-        } else {
-            "language = :language"
-        }
-        var spec = template.databaseClient.sql(
-            """
-            select study_id, count(*) as pending_count from questions
-            where study_id in ($studyMarkers) and $languageCondition
-              and deleted_at is null and skipped_at is null and score is null
-            group by study_id
-            """.trimIndent(),
-        ).bindIndexed("studyId", studyIds.toList())
-        if (normalizedLanguage != QuestionLanguage.ENGLISH) {
-            spec = spec.bind("language", normalizedLanguage)
-        }
-        return spec
-            .map { row, _ ->
-                row.get("study_id", java.lang.Long::class.java)!!.toLong() to
-                    row.get("pending_count", java.lang.Long::class.java)!!.toLong()
-            }.all().collectList().awaitSingle().toMap()
-    }
+    ): Map<Long, Long> = countPendingByStudyIds(studyIds)
 
     override suspend fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity> = publicPage(null, pageable)
 
@@ -464,23 +346,6 @@ class QuestionRepository(
     private fun pendingCriteria(): Criteria =
         Criteria.where("deleted_at").isNull.and("score").isNull.and("skipped_at").isNull
 
-    private fun languageCriteria(language: String): Criteria =
-        if (QuestionLanguage.normalize(language) == QuestionLanguage.ENGLISH) {
-            Criteria.where("translation_status").`is`("READY").and("question_en").isNotNull
-        } else {
-            Criteria.where("language").`is`(QuestionLanguage.KOREAN)
-        }
-
-    private fun textSearch(value: String): Criteria {
-        val pattern = "%${value.lowercase()}%"
-        return Criteria.where("topic").like(pattern).ignoreCase(true)
-            .or("question").like(pattern).ignoreCase(true)
-            .or("question_en").like(pattern).ignoreCase(true)
-            .or("answer").like(pattern).ignoreCase(true)
-            .or("feedback").like(pattern).ignoreCase(true)
-            .or("explanation").like(pattern).ignoreCase(true)
-    }
-
     private suspend fun recentTexts(
         column: String,
         id: Long,
@@ -489,22 +354,26 @@ class QuestionRepository(
         language: String? = null,
     ): List<String> {
         val normalizedLanguage = language?.let(QuestionLanguage::normalize)
-        val languageCondition = when (normalizedLanguage) {
-            QuestionLanguage.ENGLISH ->
-                "and translation_status = 'READY' and question_en is not null"
-            null -> ""
-            else -> "and language = :language"
+        val localizationJoin = if (normalizedLanguage == null) "" else {
+            """
+            left join question_localizations ql
+              on ql.question_id = q.id and ql.target_language = :language and ql.status = 'READY'
+            """.trimIndent()
         }
-        val questionColumn = if (normalizedLanguage == QuestionLanguage.ENGLISH) "question_en" else "question"
+        val questionColumn = if (normalizedLanguage == null) {
+            "q.question"
+        } else {
+            "case when q.source_language = :language then q.question else coalesce(ql.question, q.question) end"
+        }
         var spec = template.databaseClient.sql(
             """
-            select $questionColumn as localized_question from questions
-            where $column = :id and deleted_at is null and lower(topic) = lower(:topic)
-              $languageCondition
-            order by created_at desc, id desc limit :limit offset :offset
+            select $questionColumn as localized_question from questions q
+            $localizationJoin
+            where q.$column = :id and q.deleted_at is null and lower(q.topic) = lower(:topic)
+            order by q.created_at desc, q.id desc limit :limit offset :offset
             """.trimIndent(),
         ).bind("id", id).bind("topic", topic).bind("limit", pageable.pageSize).bind("offset", pageable.offset)
-        if (normalizedLanguage != null && normalizedLanguage != QuestionLanguage.ENGLISH) {
+        if (normalizedLanguage != null) {
             spec = spec.bind("language", normalizedLanguage)
         }
         return spec
@@ -520,23 +389,38 @@ class QuestionRepository(
         val condition = when {
             filter == null -> "true"
             filter.second && language != null ->
-                "(lower(q.topic) like :pattern or lower(q.question) like :pattern " +
-                    "or lower(coalesce(q.question_en, '')) like :pattern " +
-                    "or lower(coalesce(ql.topic, '')) like :pattern " +
-                    "or lower(coalesce(ql.question, '')) like :pattern " +
-                    "or lower(coalesce(q.answer, '')) like :pattern " +
-                    "or lower(coalesce(q.feedback, '')) like :pattern " +
-                    "or lower(coalesce(q.explanation, '')) like :pattern " +
+                "(lower(coalesce(qs.topic, '')) like :pattern " +
+                    "or lower(coalesce(qs.question, '')) like :pattern " +
+                    "or lower(coalesce(qs.answer, '')) like :pattern " +
+                    "or lower(coalesce(qs.feedback, '')) like :pattern " +
+                    "or lower(coalesce(qs.explanation, '')) like :pattern " +
                     "or lower(u.display_name) like :pattern)"
-            filter.second -> "(lower(q.topic) like :pattern or lower(q.question) like :pattern or lower(coalesce(q.question_en, '')) like :pattern or lower(coalesce(q.answer, '')) like :pattern or lower(coalesce(q.feedback, '')) like :pattern or lower(coalesce(q.explanation, '')) like :pattern or lower(u.display_name) like :pattern)"
+            filter.second ->
+                """
+                (
+                    exists (
+                        select 1 from question_search qs
+                        where qs.question_id = q.id
+                          and (
+                            lower(coalesce(qs.topic, '')) like :pattern
+                            or lower(coalesce(qs.question, '')) like :pattern
+                            or lower(coalesce(qs.answer, '')) like :pattern
+                            or lower(coalesce(qs.feedback, '')) like :pattern
+                            or lower(coalesce(qs.explanation, '')) like :pattern
+                          )
+                    )
+                    or lower(u.display_name) like :pattern
+                )
+                """.trimIndent()
             else -> "lower(q.topic) like :pattern"
         }
-        var idsSpec = template.databaseClient.sql(publicSelectSql(condition, language))
+        val searchLanguage = language?.takeIf { filter?.second == true }
+        var idsSpec = template.databaseClient.sql(publicSelectSql(condition, searchLanguage))
             .bind("limit", pageable.pageSize).bind("offset", pageable.offset)
-        var countSpec = template.databaseClient.sql(publicCountSql(condition, language))
-        if (language != null) {
-            idsSpec = idsSpec.bind("language", language)
-            countSpec = countSpec.bind("language", language)
+        var countSpec = template.databaseClient.sql(publicCountSql(condition, searchLanguage))
+        if (searchLanguage != null) {
+            idsSpec = idsSpec.bind("language", searchLanguage)
+            countSpec = countSpec.bind("language", searchLanguage)
         }
         if (filter != null) {
             val pattern = "%${filter.first.lowercase()}%"
@@ -550,6 +434,76 @@ class QuestionRepository(
         return PageImpl(findOrdered(ids), pageable, total)
     }
 
+    private suspend fun userSearchPage(
+        userId: Long,
+        includePending: Boolean,
+        language: String?,
+        query: String,
+        pageable: Pageable,
+    ): Page<QuestionEntity> {
+        val searchJoin = if (language == null) "" else {
+            "join question_search qs on qs.question_id = q.id and qs.language = :language"
+        }
+        val searchCondition = if (language == null) {
+            """
+            exists (
+                select 1 from question_search qs
+                where qs.question_id = q.id
+                  and (
+                    lower(coalesce(qs.topic, '')) like :pattern
+                    or lower(coalesce(qs.question, '')) like :pattern
+                    or lower(coalesce(qs.answer, '')) like :pattern
+                    or lower(coalesce(qs.feedback, '')) like :pattern
+                    or lower(coalesce(qs.explanation, '')) like :pattern
+                  )
+            )
+            """.trimIndent()
+        } else {
+            """
+            (
+                lower(coalesce(qs.topic, '')) like :pattern
+                or lower(coalesce(qs.question, '')) like :pattern
+                or lower(coalesce(qs.answer, '')) like :pattern
+                or lower(coalesce(qs.feedback, '')) like :pattern
+                or lower(coalesce(qs.explanation, '')) like :pattern
+            )
+            """.trimIndent()
+        }
+        val gradedCondition = if (includePending) "" else "and q.score is not null"
+        val baseSql =
+            """
+            from questions q
+            $searchJoin
+            where q.user_id = :userId and q.deleted_at is null
+              $gradedCondition and $searchCondition
+            """.trimIndent()
+        var idsSpec = template.databaseClient.sql(
+            """
+            select q.id $baseSql
+            order by q.created_at desc, q.id desc
+            limit :limit offset :offset
+            """.trimIndent(),
+        )
+            .bind("userId", userId)
+            .bind("pattern", "%${query.lowercase()}%")
+            .bind("limit", pageable.pageSize)
+            .bind("offset", pageable.offset)
+        var countSpec = template.databaseClient.sql("select count(*) as total $baseSql")
+            .bind("userId", userId)
+            .bind("pattern", "%${query.lowercase()}%")
+        if (language != null) {
+            idsSpec = idsSpec.bind("language", language)
+            countSpec = countSpec.bind("language", language)
+        }
+        val ids = idsSpec
+            .map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }
+            .all().collectList().awaitSingle()
+        val total = countSpec
+            .map { row, _ -> row.get("total", java.lang.Long::class.java)!!.toLong() }
+            .one().awaitSingle()
+        return PageImpl(findOrdered(ids), pageable, total)
+    }
+
     private suspend fun publicIds(
         condition: String,
         value: Any,
@@ -557,34 +511,31 @@ class QuestionRepository(
         offset: Long,
         language: String? = null,
     ): List<Long> {
-        var spec = template.databaseClient.sql(publicSelectSql(condition, language))
+        var spec = template.databaseClient.sql(publicSelectSql(condition))
             .bind("value", value).bind("limit", limit).bind("offset", offset)
-        if (language != null) spec = spec.bind("language", language)
         return spec
             .map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }
             .all().collectList().awaitSingle()
     }
 
-    private fun publicSelectSql(condition: String, language: String? = null): String {
-        val localizationJoin = if (language == null) "" else {
-            "left join question_localizations ql on ql.question_id = q.id " +
-                "and ql.target_language = :language and ql.status = 'READY'"
+    private fun publicSelectSql(condition: String, searchLanguage: String? = null): String {
+        val searchJoin = if (searchLanguage == null) "" else {
+            "join question_search qs on qs.question_id = q.id and qs.language = :language"
         }
         return """
-        select q.id from questions q join users u on u.id = q.user_id $localizationJoin
+        select q.id from questions q join users u on u.id = q.user_id $searchJoin
         where q.is_public = true and q.deleted_at is null and q.score is not null
           and u.allow_public_questions = true and ($condition)
         order by q.created_at desc, q.id desc limit :limit offset :offset
         """.trimIndent()
     }
 
-    private fun publicCountSql(condition: String, language: String? = null): String {
-        val localizationJoin = if (language == null) "" else {
-            "left join question_localizations ql on ql.question_id = q.id " +
-                "and ql.target_language = :language and ql.status = 'READY'"
+    private fun publicCountSql(condition: String, searchLanguage: String? = null): String {
+        val searchJoin = if (searchLanguage == null) "" else {
+            "join question_search qs on qs.question_id = q.id and qs.language = :language"
         }
         return """
-        select count(*) as total from questions q join users u on u.id = q.user_id $localizationJoin
+        select count(*) as total from questions q join users u on u.id = q.user_id $searchJoin
         where q.is_public = true and q.deleted_at is null and q.score is not null
           and u.allow_public_questions = true and ($condition)
         """.trimIndent()

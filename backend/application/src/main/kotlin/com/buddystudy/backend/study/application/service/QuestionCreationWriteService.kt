@@ -53,7 +53,7 @@ class QuestionCreationWriteService(
                 eventId = "question-generated-${savedQuestion.id}",
                 questionId = savedQuestion.id,
                 userId = checkNotNull(savedQuestion.userId) { "Created question must have a user." },
-                sourceLanguage = savedQuestion.language,
+                sourceLanguage = savedQuestion.sourceLanguage,
                 generatedAt = now,
             ),
             now,

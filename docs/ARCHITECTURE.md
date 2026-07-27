@@ -211,7 +211,10 @@ Public community feed
 -> tl (`ko|en|ja`) takes precedence over the deprecated language alias
 -> view defaults to localized; original bypasses translation scheduling
 -> missing translations return the original plus PENDING and enqueue content-translation
--> only READY translation snapshots are exposed for en
+-> canonical questions and comments keep original text only
+-> READY question/answer/AI snapshots are projected into question_search by language
+-> comment translations remain isolated in question_comment_localizations
+-> only READY translation snapshots are exposed for the requested language
 -> app maps server questions into typed MobileHomeFeedItem values
 -> locally scheduled placement may insert non-question items such as feedback prompts
 -> feedback prompt opens a dedicated form

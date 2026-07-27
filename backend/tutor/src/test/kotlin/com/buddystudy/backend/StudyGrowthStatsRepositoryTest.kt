@@ -76,11 +76,11 @@ class StudyGrowthStatsRepositoryTest : MySqlIntegrationTestSupport() {
             """
             insert into questions (
                 device_id, user_id, study_id, question, topic, difficulty_level,
-                scheduled_for, status, source, is_public, language, source_language, created_at, updated_at,
+                scheduled_for, status, source, is_public, source_language, created_at, updated_at,
                 answered_at, score
             ) values (
                 :deviceId, :userId, :studyId, 'Question', 'Topic', 6,
-                :createdAt, :status, 'manual', true, 'ko', 'ko', :createdAt, :createdAt,
+                :createdAt, :status, 'manual', true, 'ko', :createdAt, :createdAt,
                 :answeredAt, :score
             )
             """.trimIndent(),

@@ -66,7 +66,7 @@ class QuestionCreationTransactionIntegrationTest : MySqlIntegrationTestSupport()
             studyId = study.id,
             question = "This question must be rolled back.",
             topic = study.topic,
-            language = "en",
+            sourceLanguage = "en",
             difficultyLevel = 3,
             status = "ungraded",
             source = "manual",

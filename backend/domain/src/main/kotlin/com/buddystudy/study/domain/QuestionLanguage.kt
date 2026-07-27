@@ -1,7 +1,5 @@
 package com.buddystudy.study.domain
 
-import com.buddystudy.study.domain.entity.QuestionEntity
-
 object QuestionLanguage {
     const val KOREAN = "ko"
     const val ENGLISH = "en"
@@ -43,12 +41,4 @@ object QuestionLanguage {
 
     private fun Char.isJapanese(): Boolean =
         code in 0x3040..0x30FF || code in 0x31F0..0x31FF || code in 0x4E00..0x9FFF
-}
-
-fun QuestionEntity.localizedFor(language: String): QuestionEntity {
-    if (QuestionLanguage.normalize(language) != QuestionLanguage.ENGLISH) return this
-    question = questionEn?.takeIf(String::isNotBlank) ?: question
-    hint = hintEn?.takeIf(String::isNotBlank) ?: hint
-    topic = topicEn?.takeIf(String::isNotBlank) ?: topic
-    return this
 }

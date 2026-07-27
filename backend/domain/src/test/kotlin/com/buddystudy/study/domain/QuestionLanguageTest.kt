@@ -1,6 +1,5 @@
 package com.buddystudy.study.domain
 
-import com.buddystudy.study.domain.entity.QuestionEntity
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -28,23 +27,5 @@ class QuestionLanguageTest {
         assertTrue(QuestionLanguage.matches("Explain how Redis Stream consumer groups distribute messages.", "en"))
         assertFalse(QuestionLanguage.matchesShortLabel("프록시 생성 방식", "en"))
         assertTrue(QuestionLanguage.matchesShortLabel("Spring 4.x", "en"))
-    }
-
-    @Test
-    fun `uses persisted English translation without changing Korean content`() {
-        val question = QuestionEntity(
-            question = "Redis Stream의 소비자 그룹을 설명하세요.",
-            hint = "pending entry를 포함하세요.",
-            questionEn = "Explain Redis Stream consumer groups.",
-            hintEn = "Include pending entries.",
-            topic = "메시지 큐",
-            topicEn = "Message queues",
-        )
-
-        val english = question.localizedFor("en-US")
-
-        assertEquals("Explain Redis Stream consumer groups.", english.question)
-        assertEquals("Include pending entries.", english.hint)
-        assertEquals("Message queues", english.topic)
     }
 }

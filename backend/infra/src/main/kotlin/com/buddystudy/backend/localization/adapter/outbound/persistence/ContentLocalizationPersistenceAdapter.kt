@@ -7,6 +7,7 @@ import com.buddystudy.backend.localization.application.model.RecordLocalizationS
 import com.buddystudy.backend.localization.application.model.RecordSourceHashes
 import com.buddystudy.backend.localization.application.model.TextLocalizationSnapshot
 import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
+import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionSearchProjectionManager
 import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.study.domain.entity.QuestionEntity
@@ -19,6 +20,7 @@ import java.time.Instant
 @Repository
 class ContentLocalizationPersistenceAdapter(
     private val databaseClient: DatabaseClient,
+    private val searchProjection: QuestionSearchProjectionManager,
 ) : ContentLocalizationPort {
     override suspend fun record(questionId: Long, targetLanguage: String) = RecordLocalizationSnapshot(
         question = snapshot(
@@ -144,19 +146,22 @@ class ContentLocalizationPersistenceAdapter(
         sourceHash: String,
         result: ContentTranslationResult,
         now: Instant,
-    ): Boolean = updateReady(
-        "question_localizations",
-        "question_id",
+    ): Boolean = saveReadyAndRefreshQuestion(
         question.id,
-        targetLanguage,
-        sourceHash,
-        mapOf(
-            "topic" to result.fields["topic"],
-            "question" to result.fields["question"],
-            "hint" to result.fields["hint"],
+        updateReady(
+            "question_localizations",
+            "question_id",
+            question.id,
+            targetLanguage,
+            sourceHash,
+            mapOf(
+                "topic" to result.fields["topic"],
+                "question" to result.fields["question"],
+                "hint" to result.fields["hint"],
+            ),
+            result.provider,
+            now,
         ),
-        result.provider,
-        now,
     )
 
     override suspend fun saveAnswerReady(
@@ -165,15 +170,18 @@ class ContentLocalizationPersistenceAdapter(
         sourceHash: String,
         result: ContentTranslationResult,
         now: Instant,
-    ): Boolean = updateReady(
-        "answer_localizations",
-        "question_id",
+    ): Boolean = saveReadyAndRefreshQuestion(
         question.id,
-        targetLanguage,
-        sourceHash,
-        mapOf("answer" to result.fields["answer"]),
-        result.provider,
-        now,
+        updateReady(
+            "answer_localizations",
+            "question_id",
+            question.id,
+            targetLanguage,
+            sourceHash,
+            mapOf("answer" to result.fields["answer"]),
+            result.provider,
+            now,
+        ),
     )
 
     override suspend fun saveAiResponseReady(
@@ -182,19 +190,22 @@ class ContentLocalizationPersistenceAdapter(
         sourceHash: String,
         result: ContentTranslationResult,
         now: Instant,
-    ): Boolean = updateReady(
-        "grading_localizations",
-        "question_id",
+    ): Boolean = saveReadyAndRefreshQuestion(
         question.id,
-        targetLanguage,
-        sourceHash,
-        mapOf(
-            "feedback" to result.fields["feedback"],
-            "explanation" to result.fields["explanation"],
-            "assessment_json" to result.fields["assessmentJson"],
+        updateReady(
+            "grading_localizations",
+            "question_id",
+            question.id,
+            targetLanguage,
+            sourceHash,
+            mapOf(
+                "feedback" to result.fields["feedback"],
+                "explanation" to result.fields["explanation"],
+                "assessment_json" to result.fields["assessmentJson"],
+            ),
+            result.provider,
+            now,
         ),
-        result.provider,
-        now,
     )
 
     override suspend fun saveCommentReady(
@@ -373,6 +384,11 @@ class ContentLocalizationPersistenceAdapter(
             spec = if (value == null) spec.bindNull(name, String::class.java) else spec.bind(name, value)
         }
         return spec.fetch().rowsUpdated().awaitSingle() > 0
+    }
+
+    private suspend fun saveReadyAndRefreshQuestion(questionId: Long, saved: Boolean): Boolean {
+        if (saved) searchProjection.refresh(questionId)
+        return saved
     }
 
     private fun String.camelKey(): String =

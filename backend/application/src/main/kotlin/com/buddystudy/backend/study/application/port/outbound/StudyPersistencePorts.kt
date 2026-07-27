@@ -58,39 +58,6 @@ interface SystemTopicCatalogPort {
 
 interface QuestionPort {
     suspend fun save(entity: QuestionEntity): QuestionEntity
-    suspend fun saveEnglishTranslation(
-        questionId: Long,
-        topic: String,
-        question: String,
-        hint: String?,
-        now: Instant,
-    ): Boolean {
-        val entity = findQuestionById(questionId) ?: return false
-        entity.topicEn = topic
-        entity.questionEn = question
-        entity.hintEn = hint
-        entity.translationStatus = "READY"
-        entity.translationError = null
-        entity.updatedAt = now
-        save(entity)
-        return true
-    }
-    suspend fun findEnglishTopicBackfillCandidates(limit: Int): List<QuestionEntity> = emptyList()
-    suspend fun saveEnglishTopicTranslation(questionId: Long, topic: String, now: Instant): Boolean {
-        val entity = findQuestionById(questionId) ?: return false
-        if (!entity.topicEn.isNullOrBlank()) return true
-        entity.topicEn = topic
-        entity.updatedAt = now
-        save(entity)
-        return true
-    }
-    suspend fun markEnglishTranslationFailed(questionId: Long, error: String, now: Instant) {
-        val entity = findQuestionById(questionId) ?: return
-        entity.translationStatus = "FAILED"
-        entity.translationError = error
-        entity.updatedAt = now
-        save(entity)
-    }
     suspend fun findQuestionById(id: Long): QuestionEntity?
     suspend fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity?
     suspend fun findByGradingRequestIdAndUserIdAndDeletedAtIsNull(
@@ -108,7 +75,7 @@ interface QuestionPort {
     suspend fun findPendingByStudyId(studyId: Long, pageable: Pageable): Page<QuestionEntity>
     suspend fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity>
     suspend fun findLatestPendingByStudyIdsAndLanguage(studyIds: Collection<Long>, language: String): List<QuestionEntity> =
-        findLatestPendingByStudyIds(studyIds).filter { it.language == language }
+        findLatestPendingByStudyIds(studyIds)
     suspend fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity>
     suspend fun findVisibleByUserAndLanguage(
         userId: Long,
@@ -153,7 +120,7 @@ interface QuestionPort {
         findPublicAnsweredByQuery(query, pageable)
     suspend fun findPublicAnsweredById(id: Long): QuestionEntity?
     suspend fun findPublicAnsweredByIdAndLanguage(id: Long, language: String): QuestionEntity? =
-        findPublicAnsweredById(id)?.takeIf { it.language == language }
+        findPublicAnsweredById(id)
     suspend fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity>
     suspend fun softDelete(id: Long, userId: Long, now: Instant): Int
     suspend fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int

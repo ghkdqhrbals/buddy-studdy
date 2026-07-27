@@ -145,6 +145,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 6. The feed is modeled as typed content rather than question-only rows, so feedback prompts and future operational content can be inserted without pretending to be questions.
 7. Feedback opens a dedicated compact form and is stored independently from question reports.
 8. Record, pending-question, public-question, and comment requests use `tl=ko|en|ja` with `view=localized|original`. Question, answer, AI response, and comment source languages are tracked independently; missing translations return the original immediately and enqueue an asynchronous translation. The legacy `language` query remains a temporary compatibility alias.
+9. Canonical question and comment rows contain original text only. Translations are stored exclusively in per-content localization tables, and localized search uses the `(content ID, display language)` search read model rather than language-specific columns on the canonical row.
 
 ## Non-Goals
 

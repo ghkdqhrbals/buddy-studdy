@@ -1,6 +1,7 @@
 package com.buddystudy.backend
 
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.reactive.awaitSingle
 
 import com.buddystudy.backend.auth.adapter.outbound.persistence.UserRepository
 import com.buddystudy.account.domain.entity.UserEntity
@@ -17,6 +18,7 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.test.context.TestPropertySource
 
 @SpringBootTest
@@ -37,6 +39,58 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var studies: StudyRepository
     @Autowired lateinit var questions: QuestionRepository
     @Autowired lateinit var questionCoverage: StudyQuestionCoveragePersistenceAdapter
+    @Autowired lateinit var databaseClient: DatabaseClient
+
+    @Test
+    fun `final localization schema keeps originals separate from translations`(): Unit = runBlocking {
+        val columns = databaseClient.sql(
+            """
+            select column_name
+            from information_schema.columns
+            where table_schema = database() and table_name = 'questions'
+            """.trimIndent(),
+        )
+            .map { row, _ -> row.get("column_name", String::class.java)!! }
+            .all()
+            .collectList()
+            .awaitSingle()
+
+        assertThat(columns).contains("source_language", "answer_source_language", "ai_response_source_language")
+        assertThat(columns).doesNotContain(
+            "language",
+            "question_en",
+            "topic_en",
+            "hint_en",
+            "translation_status",
+            "translation_error",
+        )
+
+        val tables = databaseClient.sql(
+            """
+            select table_name
+            from information_schema.tables
+            where table_schema = database()
+              and table_name in (
+                'question_localizations',
+                'answer_localizations',
+                'grading_localizations',
+                'question_comment_localizations',
+                'question_search'
+              )
+            """.trimIndent(),
+        )
+            .map { row, _ -> row.get("table_name", String::class.java)!! }
+            .all()
+            .collectList()
+            .awaitSingle()
+        assertThat(tables).containsExactlyInAnyOrder(
+            "question_localizations",
+            "answer_localizations",
+            "grading_localizations",
+            "question_comment_localizations",
+            "question_search",
+        )
+    }
 
     @Test
     fun `flyway schema supports user openai settings`(): Unit = runBlocking {

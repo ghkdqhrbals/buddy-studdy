@@ -19,7 +19,6 @@ import com.buddystudy.backend.localization.application.port.ContentLocalizationP
 import com.buddystudy.backend.localization.application.port.RequestContentLocalizationUseCase
 import com.buddystudy.backend.localization.application.service.ContentLocalizationService
 import com.buddystudy.study.domain.QuestionLanguage
-import com.buddystudy.study.domain.localizedFor
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.StudyEntity
 import com.buddystudy.backend.study.application.port.inbound.BrowseRecordsUseCase
@@ -211,11 +210,8 @@ class StudyService(
         val questionReady = snapshot.question.readyFor(hashes.question)
         val answerReady = snapshot.answer.readyFor(hashes.answer)
         val aiReady = snapshot.aiResponse.readyFor(hashes.aiResponse)
-        val hasLegacyEnglishQuestion = target == QuestionLanguage.ENGLISH &&
-            question.translationStatus == "READY" &&
-            !question.questionEn.isNullOrBlank()
         val needsTranslation =
-            (questionSource != target && questionReady == null && !hasLegacyEnglishQuestion) ||
+            (questionSource != target && questionReady == null) ||
                 (!question.answer.isNullOrBlank() && answerSource != target && answerReady == null) ||
                 ((!question.feedback.isNullOrBlank() || !question.explanation.isNullOrBlank()) &&
                     aiSource != target && aiReady == null)
@@ -227,19 +223,11 @@ class StudyService(
         var aiDisplay = aiSource
         if (questionSource != target) {
             val localized = questionReady
-            when {
-                localized != null -> {
-                    question.topic = localized.fields["topic"] ?: question.topic
-                    question.question = localized.fields["question"] ?: question.question
-                    question.hint = localized.fields["hint"] ?: question.hint
-                    questionDisplay = target
-                }
-                hasLegacyEnglishQuestion -> {
-                    question.topic = question.topicEn ?: question.topic
-                    question.question = question.questionEn ?: question.question
-                    question.hint = question.hintEn ?: question.hint
-                    questionDisplay = target
-                }
+            if (localized != null) {
+                question.topic = localized.fields["topic"] ?: question.topic
+                question.question = localized.fields["question"] ?: question.question
+                question.hint = localized.fields["hint"] ?: question.hint
+                questionDisplay = target
             }
         }
         if (!question.answer.isNullOrBlank() && answerSource != target) {

@@ -30,10 +30,11 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.study.application.model.toRecordResponse
+import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
+import com.buddystudy.backend.localization.application.service.applyReadyQuestionLocalization
 import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.study.domain.StudyRoom
 import com.buddystudy.study.domain.StudyRoomPendingLimitExceeded
-import com.buddystudy.study.domain.localizedFor
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -267,6 +268,7 @@ class QuestionGenerationProcessService(
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
     private val users: UserPort,
+    private val contentLocalizations: ContentLocalizationPort,
 ) : GetQuestionGenerationProcessUseCase {
     @Transactional(readOnly = true)
     override suspend fun get(principal: Principal, correlationId: String): QuestionGenerationProcessResponse {
@@ -277,7 +279,10 @@ class QuestionGenerationProcessService(
         val question = saga.questionId
             ?.let { questions.findByIdAndUserIdAndDeletedAtIsNull(it, principal.userId) }
             ?.let { entity ->
-                entity.localizedFor(language)
+                entity.applyReadyQuestionLocalization(
+                    contentLocalizations.record(entity.id, language),
+                    language,
+                )
                     .toStudyRecord(questionStats.findById(entity.id))
                     .toProjection()
                     .toRecordResponse()

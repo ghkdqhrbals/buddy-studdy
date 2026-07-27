@@ -10,6 +10,7 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.study.application.service.StudySyncService
+import com.buddystudy.backend.test.EmptyContentLocalizationPort
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.study.domain.entity.StudyEntity
@@ -26,7 +27,7 @@ class StudySyncServiceTest {
     private val studies = FakeStudyPort()
     private val questions = FakeQuestionPort()
     private val questionStats = FakeQuestionStatsPort()
-    private val service = StudySyncService(studies, questions, questionStats)
+    private val service = StudySyncService(studies, questions, questionStats, EmptyContentLocalizationPort())
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
     @Test

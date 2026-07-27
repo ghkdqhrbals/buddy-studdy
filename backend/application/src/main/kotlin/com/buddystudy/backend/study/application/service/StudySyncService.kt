@@ -14,6 +14,8 @@ import com.buddystudy.backend.study.application.port.inbound.StudySyncUseCase
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
+import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
+import com.buddystudy.backend.localization.application.service.applyReadyQuestionLocalization
 import com.buddystudy.study.domain.StudyRoomSettings
 import com.buddystudy.study.domain.StudyRoomSettingsCommand
 import com.buddystudy.study.domain.StudyRoomSettingsState
@@ -23,7 +25,6 @@ import com.buddystudy.study.domain.StudyRecord
 import com.buddystudy.study.domain.StudyRecordState
 import com.buddystudy.study.domain.StudyRecordStats
 import com.buddystudy.study.domain.QuestionLanguage
-import com.buddystudy.study.domain.localizedFor
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import org.springframework.data.domain.PageRequest
@@ -37,6 +38,7 @@ class StudySyncService(
     private val studies: StudyPort,
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
+    private val contentLocalizations: ContentLocalizationPort,
 ) : StudySyncUseCase {
     @Transactional(readOnly = true)
     override suspend fun study(principal: Principal, limit: Int, offset: Int, query: String?): StudyPageResponse =
@@ -204,8 +206,14 @@ class StudySyncService(
             ?.let { questionStats.findAllByIds(it).associateBy { stats -> stats.questionId } }
             .orEmpty()
         return map { study ->
+            val pendingQuestion = pendingByStudyId[study.id]?.let { question ->
+                question.applyReadyQuestionLocalization(
+                    contentLocalizations.record(question.id, language),
+                    language,
+                )
+            }
             study.toStudyRoomResponse(
-                pendingQuestion = pendingByStudyId[study.id]?.localizedFor(language),
+                pendingQuestion = pendingQuestion,
                 statsByQuestionId = statsByQuestionId,
             )
         }
