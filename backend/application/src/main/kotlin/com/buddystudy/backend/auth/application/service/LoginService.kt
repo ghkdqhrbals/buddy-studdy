@@ -193,7 +193,7 @@ class LoginService(
                 throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.AUTH_EMAIL_VERIFICATION_REQUIRED, "Invalid or expired email verification code.")
             }
         } else if (existingUser.passwordHash != passwordHash) {
-            throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_DEVICE_CREDENTIALS, "Invalid email or password.")
+            throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_EMAIL_CREDENTIALS, "Invalid email or password.")
         }
         return authenticatedLogins.attachEmailIdentity(principal, normalized, passwordHash, Instant.now())
     }

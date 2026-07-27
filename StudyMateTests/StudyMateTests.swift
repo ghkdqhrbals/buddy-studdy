@@ -312,11 +312,66 @@ final class StudyMateTests: XCTestCase {
     func testBackendIdentityRecoverySeparatesAccessTokenAndDeviceCredentials() {
         let accessTokenError = Self.backendError(code: "AUTH_INVALID_ACCESS_TOKEN", status: 401)
         let deviceCredentialsError = Self.backendError(code: "AUTH_INVALID_DEVICE_CREDENTIALS", status: 401)
+        let emailCredentialsError = Self.backendError(
+            code: "AUTH_INVALID_EMAIL_CREDENTIALS",
+            status: 401,
+            message: "이메일 또는 비밀번호가 올바르지 않습니다."
+        )
 
         XCTAssertTrue(BackendErrorPresentationPolicy.shouldRefreshBackendAccessToken(after: accessTokenError))
         XCTAssertFalse(BackendErrorPresentationPolicy.shouldResetBackendIdentity(after: accessTokenError))
         XCTAssertFalse(BackendErrorPresentationPolicy.shouldRefreshBackendAccessToken(after: deviceCredentialsError))
         XCTAssertTrue(BackendErrorPresentationPolicy.shouldResetBackendIdentity(after: deviceCredentialsError))
+        XCTAssertFalse(BackendErrorPresentationPolicy.shouldRefreshBackendAccessToken(after: emailCredentialsError))
+        XCTAssertFalse(BackendErrorPresentationPolicy.shouldResetBackendIdentity(after: emailCredentialsError))
+
+        let resolution = AppErrorHandlingPolicy.resolve(emailCredentialsError, fallback: "fallback")
+        XCTAssertEqual(resolution.featureMessage, "이메일 또는 비밀번호가 올바르지 않습니다.")
+        XCTAssertFalse(resolution.requiresLogin)
+        XCTAssertFalse(resolution.shouldShowPopup)
+        XCTAssertFalse(resolution.isPageAccessDenied)
+    }
+
+    @MainActor
+    func testEmailLoginRecoversInvalidDeviceCredentialsAndRetriesOnce() async {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        store.saveRemotePushRegistration(
+            RemotePushRegistration(
+                deviceID: "stale-device",
+                clientSecret: "stale-secret",
+                apnsToken: "push-token",
+                accessToken: "stale-access-token",
+                accessTokenExpiresAt: Date().addingTimeInterval(3600)
+            )
+        )
+        let backend = FakeRemotePushBackendClient()
+        backend.registration = RemotePushRegistration(
+            deviceID: "fresh-device",
+            clientSecret: "fresh-secret",
+            apnsToken: ""
+        )
+        backend.emailLoginErrors = [
+            Self.backendError(code: "AUTH_INVALID_DEVICE_CREDENTIALS", status: 401)
+        ]
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
+
+        let result = await appState.signInToCommunity(
+            email: "tester@example.com",
+            password: "password"
+        )
+
+        XCTAssertEqual(result, .signedIn)
+        XCTAssertEqual(backend.emailLoginRegistrations.map(\.deviceID), ["stale-device", "fresh-device"])
+        XCTAssertEqual(backend.registeredAPNSTokens, ["push-token"])
+        XCTAssertEqual(store.loadRemotePushRegistration()?.deviceID, "fresh-device")
+        XCTAssertEqual(store.loadRemotePushRegistration()?.accessToken, "email-access-token")
+        XCTAssertTrue(appState.isCommunitySignedIn)
     }
 
     func testBackendAPIErrorUsesDescriptionWhenMessageIsMissing() throws {
@@ -4763,6 +4818,8 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var googleLoginIDTokens: [String] = []
     var emailVerificationRequests: [String] = []
     var emailLoginRequests: [(email: String, password: String, verificationCode: String?)] = []
+    var emailLoginRegistrations: [RemotePushRegistration] = []
+    var emailLoginErrors: [Error] = []
     var fetchMyProfileCallCount = 0
     var fetchAvatarCatalogCallCount = 0
     var updatedProfileDisplayNames: [String] = []
@@ -5197,6 +5254,10 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         verificationCode: String?
     ) async throws -> CommunityLoginResult {
         emailLoginRequests.append((email: email, password: password, verificationCode: verificationCode))
+        emailLoginRegistrations.append(registration)
+        if !emailLoginErrors.isEmpty {
+            throw emailLoginErrors.removeFirst()
+        }
         let updatedRegistration = RemotePushRegistration(
             deviceID: registration.deviceID,
             clientSecret: registration.clientSecret,

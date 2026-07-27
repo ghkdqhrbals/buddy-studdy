@@ -16,6 +16,7 @@ enum class ApiErrorCode(
     AUTH_INVALID_ACCESS_TOKEN(HttpStatus.UNAUTHORIZED, 105, "error.auth.invalid_access_token", "Access token is invalid."),
     AUTH_INVALID_DEVICE_CREDENTIALS(HttpStatus.UNAUTHORIZED, 106, "error.auth.invalid_device_credentials", "Device credentials are invalid."),
     DEVICE_NOT_FOUND(HttpStatus.NOT_FOUND, 107, "error.device.not_found", "Device registration was not found."),
+    AUTH_INVALID_EMAIL_CREDENTIALS(HttpStatus.UNAUTHORIZED, 108, "error.auth.invalid_email_credentials", "Email credentials are invalid."),
 
     OPENAI_API_KEY_MISSING(HttpStatus.BAD_REQUEST, 200, "error.openai.api_key_missing", "OpenAI API key is missing."),
     STUDY_SETTINGS_MISSING(HttpStatus.NOT_FOUND, 201, "error.study.settings_missing", "Study settings are missing."),

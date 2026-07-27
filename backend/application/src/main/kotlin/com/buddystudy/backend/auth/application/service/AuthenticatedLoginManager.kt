@@ -67,7 +67,7 @@ class AuthenticatedLoginManager(
         if (user.passwordHash != passwordHash) {
             throw ApiException(
                 HttpStatus.UNAUTHORIZED,
-                ApiErrorCode.AUTH_INVALID_DEVICE_CREDENTIALS,
+                ApiErrorCode.AUTH_INVALID_EMAIL_CREDENTIALS,
                 "Invalid email or password.",
             )
         }

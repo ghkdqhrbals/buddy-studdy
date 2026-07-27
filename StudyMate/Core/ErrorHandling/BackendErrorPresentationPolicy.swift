@@ -183,6 +183,9 @@ enum BackendErrorPresentationPolicy {
     static func requiresLogin(_ error: RemotePushBackendError) -> Bool {
         switch error {
         case .httpStatus(let statusCode, _, let apiError):
+            if apiError?.code == "AUTH_INVALID_EMAIL_CREDENTIALS" {
+                return false
+            }
             if statusCode == 401 {
                 return true
             }
@@ -195,6 +198,9 @@ enum BackendErrorPresentationPolicy {
     static func isPageAccessDenied(_ error: RemotePushBackendError) -> Bool {
         switch error {
         case .httpStatus(let statusCode, _, let apiError):
+            if apiError?.code == "AUTH_INVALID_EMAIL_CREDENTIALS" {
+                return false
+            }
             return statusCode == 401
                 || requiresLogin(error)
                 || apiError?.code == "PAGE_ACCESS_DENIED"
@@ -259,6 +265,9 @@ enum BackendErrorPresentationPolicy {
     static func shouldShowInlineError(for error: RemotePushBackendError) -> Bool {
         switch error {
         case .httpStatus(let statusCode, _, let apiError):
+            if apiError?.code == "AUTH_INVALID_EMAIL_CREDENTIALS" {
+                return true
+            }
             if statusCode == 401 {
                 return false
             }
@@ -398,7 +407,10 @@ enum BackendErrorPresentationPolicy {
     }
 
     private static func suppressesUserMessage(_ apiError: BackendAPIError) -> Bool {
-        suppressedPopupCodes.contains(apiError.code) ||
+        if apiError.code == "AUTH_INVALID_EMAIL_CREDENTIALS" {
+            return false
+        }
+        return suppressedPopupCodes.contains(apiError.code) ||
             isAuthNumericCode(apiError.numericCode)
     }
 

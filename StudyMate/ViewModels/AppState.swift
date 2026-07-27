@@ -2960,12 +2960,17 @@ final class AppState: ObservableObject {
         communityErrorMessage = nil
         let result = await actionRunner.run(
             operation: {
-                try await communityUseCase.loginWithEmail(
+                try await performWithBackendIdentityRecovery(
                     registration: registration,
-                    email: normalizedEmail,
-                    password: password,
-                    verificationCode: verificationCode
-                )
+                    reason: "email-login"
+                ) { recoveredRegistration in
+                    try await communityUseCase.loginWithEmail(
+                        registration: recoveredRegistration,
+                        email: normalizedEmail,
+                        password: password,
+                        verificationCode: verificationCode
+                    )
+                }
             },
             onSuccess: { result in
                 applyCommunityProfile(result.profile)

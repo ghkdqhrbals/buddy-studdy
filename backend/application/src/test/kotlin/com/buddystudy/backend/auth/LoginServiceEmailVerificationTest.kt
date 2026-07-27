@@ -249,6 +249,36 @@ class LoginServiceEmailVerificationTest {
     }
 
     @Test
+    fun `existing email user with wrong password returns email credential error`(): Unit = runBlocking {
+        val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
+        val principal = Principal(userId = 1, deviceId = device.deviceId, sessionId = 1, anonymous = true)
+        login.emailCode("existing@example.com")
+        login.emailLogin(
+            principal,
+            EmailLoginCommand(
+                email = "existing@example.com",
+                password = "correct-password",
+                verificationCode = emailCodes.savedCode,
+            ),
+        )
+
+        assertThatThrownBy {
+            runBlocking {
+                login.emailLogin(
+                    principal,
+                    EmailLoginCommand(
+                        email = "existing@example.com",
+                        password = "wrong-password",
+                    ),
+                )
+            }
+        }
+            .isInstanceOf(ApiException::class.java)
+            .extracting("code")
+            .isEqualTo(ApiErrorCode.AUTH_INVALID_EMAIL_CREDENTIALS)
+    }
+
+    @Test
     fun `google login uses identity returned by verifier`(): Unit = runBlocking {
         val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
 
