@@ -1609,13 +1609,15 @@ private struct MobileHomeView: View {
                         Label(strings.edit, systemImage: "pencil")
                     }
 
-                    Button {
-                        appState.openStudyTree(category.id)
-                    } label: {
-                        Label(
-                            strings.viewFullStudyTree,
-                            systemImage: "point.3.connected.trianglepath.dotted"
-                        )
+                    if !snapshot.children(of: snapshot.root.id).isEmpty {
+                        Button {
+                            appState.openStudyTree(category.id)
+                        } label: {
+                            Label(
+                                strings.viewFullStudyTree,
+                                systemImage: "point.3.connected.trianglepath.dotted"
+                            )
+                        }
                     }
 
                     Button(role: .destructive) {
@@ -1640,15 +1642,6 @@ private struct MobileHomeView: View {
                         editingStudyCategory = category
                     } label: {
                         Label(strings.edit, systemImage: "pencil")
-                    }
-
-                    Button {
-                        appState.openStudyTree(category.id)
-                    } label: {
-                        Label(
-                            strings.viewFullStudyTree,
-                            systemImage: "point.3.connected.trianglepath.dotted"
-                        )
                     }
 
                     Button(role: .destructive) {
@@ -6653,6 +6646,10 @@ private struct MobileHomeStudyOutlineRow: View {
         Array(currentChildren.prefix(StudyOutlinePolicy.childPreviewLimit))
     }
 
+    private var hasRootChildren: Bool {
+        !snapshot.children(of: snapshot.root.id).isEmpty
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             studyNavigationRow(
@@ -6664,7 +6661,7 @@ private struct MobileHomeStudyOutlineRow: View {
                 }
             )
 
-            if isExpanded {
+            if isExpanded && hasRootChildren {
                 Group {
                     if let searchResults = snapshot.searchResults {
                         searchResultRows(searchResults)
