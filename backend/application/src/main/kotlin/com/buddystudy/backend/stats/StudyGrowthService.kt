@@ -2,6 +2,7 @@ package com.buddystudy.backend.stats
 
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.stats.application.model.StudyGrowthNodeResponse
+import com.buddystudy.backend.stats.application.model.StudyGrowthProfileResponse
 import com.buddystudy.backend.stats.application.model.StudyGrowthResponse
 import com.buddystudy.backend.stats.application.model.StudyGrowthRootResponse
 import com.buddystudy.backend.stats.application.port.inbound.GetStudyGrowthUseCase
@@ -77,10 +78,16 @@ class StudyGrowthAssembler {
         val roots = studies
             .filter { it.parentStudyId == null || !byId.containsKey(it.parentStudyId) }
             .sortedWith(studyOrdering)
-        val recordsByStudy = records
-            .filter { byId.containsKey(it.studyId) }
+        val relevantRecords = records.filter { byId.containsKey(it.studyId) }
+        val recordsByStudy = relevantRecords
+            .filter {
+                it.completed &&
+                    !it.answeredAt.isBefore(startAt) &&
+                    it.answeredAt.isBefore(endAt)
+            }
             .groupBy { it.studyId }
             .mapValues { (_, samples) -> samples.sortedBy { it.answeredAt } }
+        val allRecordsByStudy = relevantRecords.groupBy { it.studyId }
         val directGrowthByStudy = studies.associate { study ->
             study.id to directGrowth(recordsByStudy[study.id].orEmpty())
         }
@@ -142,6 +149,51 @@ class StudyGrowthAssembler {
             )
         }
 
+        fun profile(studyId: Long): StudyGrowthProfileResponse {
+            val subtree = subtreeIDs(studyId)
+            val answered = subtree
+                .flatMap { recordsByStudy[it].orEmpty() }
+            val generated = subtree
+                .flatMap { allRecordsByStudy[it].orEmpty() }
+                .filter { !it.createdAt.isBefore(startAt) && it.createdAt.isBefore(endAt) }
+            val completedGenerated = generated.count {
+                it.completed && it.answeredAt.isBefore(endAt)
+            }
+            val rootDepth = byId[studyId]?.let(::depth) ?: 0
+            val deepestTreeLevel = subtree
+                .mapNotNull(byId::get)
+                .maxOfOrNull(::depth)
+                ?.minus(rootDepth)
+                ?.plus(1)
+                ?: 1
+            val deepestAnsweredLevel = answered
+                .mapNotNull { byId[it.studyId] }
+                .maxOfOrNull(::depth)
+                ?.minus(rootDepth)
+                ?.plus(1)
+
+            return StudyGrowthProfileResponse(
+                achievement = answered
+                    .takeIf { it.isNotEmpty() }
+                    ?.map { it.score.coerceIn(0, 100).toDouble() / 100.0 }
+                    ?.average(),
+                challenge = answered
+                    .takeIf { it.isNotEmpty() }
+                    ?.map { it.difficultyLevel.coerceIn(1, 10).toDouble() / 10.0 }
+                    ?.average(),
+                completion = generated
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { completedGenerated.toDouble() / it.size.toDouble() },
+                breadth = answered
+                    .map { it.studyId }
+                    .distinct()
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { it.size.toDouble() / subtree.size.coerceAtLeast(1).toDouble() },
+                depth = deepestAnsweredLevel
+                    ?.let { it.toDouble() / deepestTreeLevel.coerceAtLeast(1).toDouble() },
+            )
+        }
+
         val nodes = studies
             .sortedWith(
                 compareBy<StudyEntity>({ rootID(it) }, { depth(it) }, { it.sortOrder }, { it.id }),
@@ -181,6 +233,7 @@ class StudyGrowthAssembler {
                     measuredTopicCount = node.measuredTopicCount,
                     totalTopicCount = node.totalTopicCount,
                     trend = node.trend,
+                    profile = profile(root.id),
                 )
             }
         }

@@ -41,6 +41,7 @@ final class AppState: ObservableObject {
     static let developerLogPageSize = 50
     static let maxPendingQuestionCount = 1
     static let communityQuestionPageSize = 20
+    static let recordPageSize = 30
     static let maxAPITrafficLogs = 120
     private static let clipboardQuickReadAttempts = 10
     private static let clipboardFallbackAttempts = 70
@@ -193,6 +194,30 @@ final class AppState: ObservableObject {
 
     var recordSearchResults: [StudyRecord]? {
         searchState.recordResults
+    }
+
+    var recordTotalCount: Int {
+        max(recordsState.totalCount, studyRecords.filter { $0.gradingResult != nil }.count)
+    }
+
+    var isLoadingRecordPage: Bool {
+        recordsState.isLoadingPage
+    }
+
+    var canLoadMoreRecords: Bool {
+        recordsState.canLoadMore
+    }
+
+    var recordSearchTotalCount: Int {
+        max(searchState.recordTotalCount, recordSearchResults?.count ?? 0)
+    }
+
+    var isLoadingRecordSearchPage: Bool {
+        searchState.isLoadingRecordPage
+    }
+
+    var canLoadMoreRecordSearchResults: Bool {
+        searchState.canLoadMoreRecordResults
     }
 
     var backendStats: BackendStats? {
@@ -1444,12 +1469,31 @@ final class AppState: ObservableObject {
     }
 
     func refreshBackendRecords() async {
+        await loadBackendRecordsPage(reset: true)
+    }
+
+    func loadMoreBackendRecords() async {
+        guard recordsState.canLoadMore else {
+            return
+        }
+        await loadBackendRecordsPage(reset: false)
+    }
+
+    private func loadBackendRecordsPage(reset: Bool) async {
+        var loadingState = recordsState
+        guard loadingState.beginPageLoad() else {
+            return
+        }
+        recordsState = loadingState
+
         guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "records") else {
+            finishBackendRecordPageLoad()
             log(.warning, "백엔드 등록이 없어 기록 새로고침을 건너뛰었습니다.")
             return
         }
 
+        let offset = reset ? 0 : recordsState.loadedBackendCount
         await actionRunner.run(
             operation: {
                 try await performWithBackendIdentityRecovery(
@@ -1458,8 +1502,8 @@ final class AppState: ObservableObject {
                     operation: { recoveredRegistration in
                         try await recordsUseCase.fetchRecords(
                             registration: recoveredRegistration,
-                            limit: settings.sanitizedMaxHistoryCount,
-                            offset: 0,
+                            limit: Self.recordPageSize,
+                            offset: offset,
                             query: "",
                             language: settings.appLanguage
                         )
@@ -1472,8 +1516,12 @@ final class AppState: ObservableObject {
                     recordsPage,
                     pendingRecords: pendingRecords,
                     updateVisibleQuestion: false,
-                    preserveLocalQuestionState: true
+                    preserveLocalQuestionState: true,
+                    append: !reset
                 )
+                var nextState = recordsState
+                nextState.applyPage(recordsPage, reset: reset)
+                recordsState = nextState
                 log(.info, "백엔드 기록만 새로고침했습니다. records=\(recordsPage.records.count)")
             },
             onFailure: { error in
@@ -1481,8 +1529,17 @@ final class AppState: ObservableObject {
                     return
                 }
                 log(.warning, "백엔드 기록 새로고침 실패: \(error.localizedDescription)")
+            },
+            onCompletion: {
+                finishBackendRecordPageLoad()
             }
         )
+    }
+
+    private func finishBackendRecordPageLoad() {
+        var nextState = recordsState
+        nextState.finishPageLoad()
+        recordsState = nextState
     }
 
     func refreshNotificationUnreadCount() async {
@@ -1982,38 +2039,66 @@ final class AppState: ObservableObject {
         replaceHomeStudySearchResults(nil)
     }
 
-    func searchBackendRecords(query: String, limit: Int? = nil) async {
+    func searchBackendRecords(query: String, reset: Bool = true) async {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else {
             replaceRecordSearchResults(nil)
             return
         }
 
+        var loadingState = searchState
+        guard let requestID = loadingState.beginRecordPage(query: trimmedQuery, reset: reset) else {
+            return
+        }
+        searchState = loadingState
+
         guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "record-search") else {
-            replaceRecordSearchResults([])
+            finishBackendRecordSearchPage(query: trimmedQuery, requestID: requestID)
             return
         }
 
         do {
+            let offset = reset ? 0 : searchState.recordLoadedCount
             let page = try await performWithBackendIdentityRecovery(
                 registration: registration,
                 reason: "record-search",
                 operation: { recoveredRegistration in
                     try await recordsUseCase.fetchRecords(
                         registration: recoveredRegistration,
-                        limit: limit ?? settings.sanitizedMaxHistoryCount,
-                        offset: 0,
+                        limit: Self.recordPageSize,
+                        offset: offset,
                         query: trimmedQuery,
                         language: settings.appLanguage
                     )
                 }
             )
-            replaceRecordSearchResults(page.records)
+            var nextState = searchState
+            nextState.applyRecordPage(
+                page,
+                query: trimmedQuery,
+                reset: reset,
+                requestID: requestID
+            )
+            searchState = nextState
         } catch {
-            replaceRecordSearchResults([])
             log(.warning, "기록 검색 실패: \(error.localizedDescription)")
         }
+        finishBackendRecordSearchPage(query: trimmedQuery, requestID: requestID)
+    }
+
+    func loadMoreBackendRecordSearchResults() async {
+        guard searchState.canLoadMoreRecordResults,
+              !searchState.recordQuery.isEmpty else {
+            return
+        }
+        await searchBackendRecords(query: searchState.recordQuery, reset: false)
+    }
+
+    private func finishBackendRecordSearchPage(query: String, requestID: UUID) {
+        var nextState = searchState
+        nextState.finishRecordPage(query: query, requestID: requestID)
+        searchState = nextState
     }
 
     func clearBackendRecordSearchResults() {
@@ -2415,7 +2500,8 @@ final class AppState: ObservableObject {
         _ recordsPage: BackendRecordsPage,
         pendingRecords: [StudyRecord] = [],
         updateVisibleQuestion: Bool,
-        preserveLocalQuestionState: Bool = true
+        preserveLocalQuestionState: Bool = true,
+        append: Bool = false
     ) {
         guard !isEditingSettings else {
             log(.info, "설정 편집 중이어서 백엔드 기록 페이지 적용을 건너뛰었습니다.")
@@ -2426,7 +2512,13 @@ final class AppState: ObservableObject {
         let localLastAnswer = lastAnswer
         let localGradingResult = gradingResult
 
-        let mergedRecords = pendingRecords.reduce(recordsPage.records) { records, pendingRecord in
+        let existingRecords = append
+            ? studyRecords.filter { $0.gradingResult != nil }
+            : []
+        let pageRecords = recordsPage.records.reduce(existingRecords) { records, record in
+            mergeBackendRecord(record, into: records)
+        }
+        let mergedRecords = pendingRecords.reduce(pageRecords) { records, pendingRecord in
             mergeBackendRecord(pendingRecord, into: records)
         }
         localStudyRecordUseCase.replaceBackendRecords(mergedRecords)
@@ -4181,6 +4273,22 @@ final class AppState: ObservableObject {
         return current
     }
 
+    func studyTreeDepth(for studyID: Int) -> Int {
+        let roomsByID = Dictionary(uniqueKeysWithValues: backendStudyRooms.map { ($0.id, $0) })
+        guard var current = roomsByID[studyID] else {
+            return 0
+        }
+        var depth = 0
+        var visited = Set<Int>()
+        while let parentID = current.parentStudyId,
+              visited.insert(current.id).inserted,
+              let parent = roomsByID[parentID] {
+            depth += 1
+            current = parent
+        }
+        return depth
+    }
+
     func suggestChildStudyTopics(parentStudyID: Int) async -> [String] {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "suggest-study-topics") else {
             return []
@@ -4189,7 +4297,7 @@ final class AppState: ObservableObject {
             let suggestions = try await studyRoomUseCase.suggestStudyTopics(
                 registration: registration,
                 parentStudyID: parentStudyID,
-                count: 4
+                count: 10
             )
             log(.info, "학습 트리 주제를 추천했습니다. parentStudyID=\(parentStudyID), count=\(suggestions.count)")
             return suggestions
@@ -6021,6 +6129,12 @@ final class AppState: ObservableObject {
 
     func deleteStudyRecord(_ record: StudyRecord) {
         notificationService.cancelQuestionNotification(for: record.question)
+        var nextRecordsState = recordsState
+        nextRecordsState.removeLoadedBackendRecord(record)
+        recordsState = nextRecordsState
+        var nextSearchState = searchState
+        nextSearchState.removeRecordResult(id: record.id)
+        searchState = nextSearchState
         localStudyRecordUseCase.deleteRecord(record)
         reloadStudyRecordsFromStore()
         removeCommunityQuestion(id: record.id)
@@ -6049,6 +6163,11 @@ final class AppState: ObservableObject {
             onFailure: { _ in
                 self.localStudyRecordUseCase.saveRecord(record)
                 self.reloadStudyRecordsFromStore()
+                await self.refreshBackendRecords()
+                let recordQuery = self.searchState.recordQuery
+                if !recordQuery.isEmpty {
+                    await self.searchBackendRecords(query: recordQuery)
+                }
                 await self.loadCommunityQuestions(reset: true, userInitiated: false)
             },
             failureMessage: { "백엔드 학습 기록 삭제 실패: \($0.localizedDescription)" }
@@ -7272,10 +7391,6 @@ final class AppState: ObservableObject {
         mergedState.apiKey = resolvedAPIKey.key
         mergedState.apiKeyUpdatedAt = resolvedAPIKey.updatedAt
 
-        let maxHistoryCount = max(
-            remoteState.settings.sanitizedMaxHistoryCount,
-            settings.sanitizedMaxHistoryCount
-        )
         let deletedMarkers = mergedDeletedStudyRecordMarkers(
             remote: remoteState.deletedStudyRecordMarkers,
             local: localStudyRecordUseCase.loadDeletedRecordMarkers()
@@ -7288,8 +7403,7 @@ final class AppState: ObservableObject {
             remote: remoteState.studyRecords,
             local: studyRecords,
             deletedMarkers: deletedMarkers,
-            recordsClearedAt: recordsClearedAt,
-            maxCount: maxHistoryCount
+            recordsClearedAt: recordsClearedAt
         )
 
         mergedState.deletedStudyRecordMarkers = deletedMarkers
@@ -7344,11 +7458,6 @@ final class AppState: ObservableObject {
         mergedState.apiKey = resolvedAPIKey.key
         mergedState.apiKeyUpdatedAt = resolvedAPIKey.updatedAt
 
-        let maxHistoryCount = max(
-            state.settings.sanitizedMaxHistoryCount,
-            remoteState.settings.sanitizedMaxHistoryCount
-        )
-
         if previousAPIKey != resolvedAPIKey.key {
             let trimmedResolved = resolvedAPIKey.key ?? ""
             if !isEditingSettings && !trimmedResolved.isEmpty {
@@ -7393,8 +7502,7 @@ final class AppState: ObservableObject {
             remote: remoteState.studyRecords,
             local: state.studyRecords,
             deletedMarkers: deletedMarkers,
-            recordsClearedAt: recordsClearedAt,
-            maxCount: maxHistoryCount
+            recordsClearedAt: recordsClearedAt
         )
         let currentCandidate = preferredCurrentQuestion(
             local: state.currentQuestion,
@@ -7588,11 +7696,7 @@ final class AppState: ObservableObject {
             remote: remoteState.studyRecords,
             local: studyRecords,
             deletedMarkers: mergedState.deletedStudyRecordMarkers,
-            recordsClearedAt: mergedState.studyRecordsClearedAt,
-            maxCount: max(
-                remoteState.settings.sanitizedMaxHistoryCount,
-                settings.sanitizedMaxHistoryCount
-            )
+            recordsClearedAt: mergedState.studyRecordsClearedAt
         )
         mergedState.questionHistory = mergedQuestionHistory(
             remote: remoteState.questionHistory,
@@ -7628,8 +7732,7 @@ final class AppState: ObservableObject {
         remote remoteRecords: [StudyRecord],
         local localRecords: [StudyRecord],
         deletedMarkers: [DeletedStudyRecordMarker],
-        recordsClearedAt: Date?,
-        maxCount: Int
+        recordsClearedAt: Date?
     ) -> [StudyRecord] {
         var recordsByKey: [String: StudyRecord] = [:]
 
@@ -7650,10 +7753,9 @@ final class AppState: ObservableObject {
             }
         }
 
-        let sortedRecords = recordsByKey.values.sorted {
+        return recordsByKey.values.sorted {
             studyRecordSortDate($0) < studyRecordSortDate($1)
         }
-        return Array(sortedRecords.suffix(max(10, maxCount)))
     }
 
     private func mergedDeletedStudyRecordMarkers(
@@ -7762,11 +7864,7 @@ final class AppState: ObservableObject {
     private func mergeBackendRecord(_ record: StudyRecord, into records: [StudyRecord]) -> [StudyRecord] {
         var merged = records.filter { $0.id != record.id && !studyRecordMatches($0, question: record.question) }
         merged.append(record)
-        return Array(
-            merged
-                .sorted { studyRecordSortDate($0) < studyRecordSortDate($1) }
-                .suffix(settings.sanitizedMaxHistoryCount)
-        )
+        return merged.sorted { studyRecordSortDate($0) < studyRecordSortDate($1) }
     }
 
     private func cloudSyncFailureMessage(for error: Error) -> String {
@@ -7817,10 +7915,6 @@ final class AppState: ObservableObject {
         )
             ? localSynchronizedSettings
             : sanitizedSettings
-        let mergedMaxHistoryCount = max(
-            localSynchronizedSettings.sanitizedMaxHistoryCount,
-            sanitizedSettings.sanitizedMaxHistoryCount
-        )
         let mergedHasCompletedOnboarding = hasCompletedOnboarding || state.hasCompletedOnboarding
         let localCurrentQuestion = currentQuestion
         let localLastAnswer = lastAnswer
@@ -7847,8 +7941,7 @@ final class AppState: ObservableObject {
             remote: state.studyRecords,
             local: localStudyRecords,
             deletedMarkers: mergedDeletedMarkers,
-            recordsClearedAt: mergedRecordsClearedAt,
-            maxCount: mergedMaxHistoryCount
+            recordsClearedAt: mergedRecordsClearedAt
         )
         let mergedHistory = mergedQuestionHistory(
             remote: state.questionHistory,

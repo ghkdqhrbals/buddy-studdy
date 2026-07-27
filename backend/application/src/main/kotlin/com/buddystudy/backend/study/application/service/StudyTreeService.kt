@@ -10,6 +10,7 @@ import com.buddystudy.backend.study.application.port.inbound.StudyTreeUseCase
 import com.buddystudy.backend.study.application.port.inbound.UpdateStudyTopicActivationCommand
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.study.application.port.outbound.StudyTopicSuggestionPort
+import com.buddystudy.backend.study.application.port.outbound.SystemTopicCatalogPort
 import com.buddystudy.study.domain.entity.StudyEntity
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -21,6 +22,7 @@ class StudyTreeService(
     private val studies: StudyPort,
     private val users: UserPort,
     private val suggestions: StudyTopicSuggestionPort,
+    private val topicCatalog: SystemTopicCatalogPort,
 ) : StudyTreeUseCase {
     override suspend fun suggestTopics(
         principal: Principal,
@@ -33,25 +35,69 @@ class StudyTreeService(
         val root = StudyTreeSelector.rootFor(parent, allStudies)
         val existingKeys = allStudies.map { it.topic.normalizedStudyTopicKey() }.toSet()
         val language = users.findById(principal.userId)?.appLanguage ?: "ko"
-        val requestedCount = count.coerceIn(1, 8)
-        val recommended = suggestions.suggestTopics(
-            rootTopic = root.topic,
-            parentTopic = parent.topic,
-            existingTopics = allStudies.map { it.topic },
+        val requestedCount = count.coerceIn(1, MAX_CHILDREN)
+        val path = StudyTreeSelector.pathFromRoot(parent, allStudies)
+        val childDepth = path.size
+        if (childDepth > MAX_DEPTH) {
+            return StudyTopicSuggestionsResponse(
+                parentStudyId = parentStudyId,
+                suggestions = emptyList(),
+                source = "DEPTH_LIMIT",
+                depth = childDepth,
+                maxDepth = MAX_DEPTH,
+                childLimit = MAX_CHILDREN,
+            )
+        }
+
+        val rootTopicKey = root.topic.normalizedStudyTopicKey()
+        val parentPathKey = path.joinToString("/") { it.topic.normalizedStudyTopicKey() }
+        val cached = topicCatalog.findChildren(
+            rootTopicKey = rootTopicKey,
+            parentPathKey = parentPathKey,
             language = language,
-            count = requestedCount,
+            depth = childDepth,
+            limit = MAX_CHILDREN,
         )
+        val reusable = cached
+            .map { it.topic }
+            .filter { it.normalizedStudyTopicKey() !in existingKeys }
+        val missingCount = (requestedCount - reusable.size).coerceAtLeast(0)
+        val generated = if (missingCount > 0) {
+            suggestions.suggestTopics(
+                rootTopic = root.topic,
+                parentTopic = parent.topic,
+                existingTopics = allStudies.map { it.topic } + cached.map { it.topic },
+                language = language,
+                count = missingCount,
+            )
+        } else {
+            emptyList()
+        }
         val unique = linkedMapOf<String, String>()
-        recommended.forEach { raw ->
+        (reusable + generated).forEach { raw ->
             val topic = raw.trim().replace(Regex("\\s+"), " ")
             val key = topic.normalizedStudyTopicKey()
             if (topic.isNotEmpty() && key !in existingKeys) {
                 unique.putIfAbsent(key, topic)
             }
         }
+        if (generated.isNotEmpty()) {
+            topicCatalog.saveChildren(
+                rootTopicKey = rootTopicKey,
+                parentPathKey = parentPathKey,
+                language = language,
+                depth = childDepth,
+                topics = generated,
+                now = Instant.now(),
+            )
+        }
         return StudyTopicSuggestionsResponse(
             parentStudyId = parentStudyId,
             suggestions = unique.values.take(requestedCount),
+            source = if (generated.isEmpty()) "CATALOG" else if (reusable.isEmpty()) "GENERATED" else "MIXED",
+            depth = childDepth,
+            maxDepth = MAX_DEPTH,
+            childLimit = MAX_CHILDREN,
         )
     }
 
@@ -93,6 +139,11 @@ class StudyTreeService(
         }
         return savedStudy.toStudyRoomResponse()
     }
+
+    private companion object {
+        const val MAX_DEPTH = 5
+        const val MAX_CHILDREN = 10
+    }
 }
 
 internal object StudyTreeSelector {
@@ -121,6 +172,18 @@ internal object StudyTreeSelector {
                     .forEach(pending::addLast)
             }
         }
+    }
+
+    fun pathFromRoot(study: StudyEntity, allStudies: Collection<StudyEntity>): List<StudyEntity> {
+        val byId = allStudies.associateBy { it.id }
+        val reversed = mutableListOf<StudyEntity>()
+        val visited = mutableSetOf<Long>()
+        var current: StudyEntity? = study
+        while (current != null && visited.add(current.id)) {
+            reversed += current
+            current = current.parentStudyId?.let(byId::get)
+        }
+        return reversed.asReversed()
     }
 
     fun nextActiveTopic(root: StudyEntity, allStudies: Collection<StudyEntity>): StudyEntity? {

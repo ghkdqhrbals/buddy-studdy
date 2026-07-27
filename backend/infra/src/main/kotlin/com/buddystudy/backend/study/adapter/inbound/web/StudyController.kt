@@ -122,12 +122,12 @@ class StudyController(
         authentication: Authentication,
     ): ResponseEntity<Unit> = study.deleteStudy(studyId, authentication)
 
-    @Operation(summary = "Recommend child study topics", description = "Uses the system tutor model to recommend non-duplicate child topics for the selected tree node.")
+    @Operation(summary = "Recommend child study topics", description = "Reuses the system topic catalog first, generates and stores missing suggestions when needed, and supports up to 10 children through depth 5.")
     @PostMapping("/studies/{studyId}/topic-suggestions")
     @RequirePermission(Permissions.STUDY_CREATE)
     suspend fun suggestStudyTopics(
         @PathVariable studyId: Long,
-        @RequestParam(defaultValue = "4") count: Int,
+        @RequestParam(defaultValue = "10") count: Int,
         authentication: Authentication,
     ) = study.suggestStudyTopics(studyId, count, authentication)
 
@@ -277,7 +277,7 @@ class StudyController(
 
     @Operation(
         summary = "Fetch study-tree growth",
-        description = "Returns root-study growth summaries and flat tree nodes. Growth compares non-overlapping recent and previous answer windows and keeps activation separate from growth.",
+        description = "Returns root-study growth summaries, normalized radar profiles, and flat tree nodes. Growth compares non-overlapping recent and previous answer windows and keeps activation separate from growth.",
     )
     @GetMapping("/stats/studies")
     suspend fun studyGrowth(

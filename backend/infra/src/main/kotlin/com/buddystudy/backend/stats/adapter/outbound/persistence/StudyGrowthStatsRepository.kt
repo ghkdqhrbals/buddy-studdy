@@ -23,34 +23,44 @@ class StudyGrowthStatsRepository(
     ): List<StudyGrowthRecord> =
         template.databaseClient.sql(
             """
-            select study_id, difficulty_level, score, answered_at
+            select study_id, difficulty_level, score, answered_at, created_at
             from questions
             where user_id = :userId
               and deleted_at is null
               and study_id is not null
-              and score is not null
-              and answered_at >= :startAt
-              and answered_at < :endAt
-            order by answered_at asc, id asc
+              and (
+                (created_at >= :startAt and created_at < :endAt)
+                or (answered_at >= :startAt and answered_at < :endAt)
+              )
+            order by coalesce(answered_at, created_at) asc, id asc
             """.trimIndent(),
         )
             .bind("userId", userId)
             .bind("startAt", startAt)
             .bind("endAt", endAt)
             .map { row, _ ->
-            StudyGrowthRecord(
-                studyId = (row.get("study_id") as Number).toLong(),
-                difficultyLevel = (row.get("difficulty_level") as Number).toInt(),
-                score = (row.get("score") as Number).toInt(),
-                answeredAt = row.instant("answered_at"),
-            )
+                val createdAt = row.instant("created_at")
+                val answeredAt = row.instantOrNull("answered_at")
+                val score = (row.get("score") as Number?)?.toInt()
+                StudyGrowthRecord(
+                    studyId = (row.get("study_id") as Number).toLong(),
+                    difficultyLevel = (row.get("difficulty_level") as Number).toInt(),
+                    score = score ?: 0,
+                    answeredAt = answeredAt ?: createdAt,
+                    createdAt = createdAt,
+                    completed = score != null && answeredAt != null,
+                )
             }
             .all()
             .collectList()
             .awaitSingle()
 
     private fun Row.instant(name: String): Instant =
+        instantOrNull(name) ?: error("Missing timestamp value for $name")
+
+    private fun Row.instantOrNull(name: String): Instant? =
         when (val value = get(name)) {
+            null -> null
             is Instant -> value
             is OffsetDateTime -> value.toInstant()
             is ZonedDateTime -> value.toInstant()

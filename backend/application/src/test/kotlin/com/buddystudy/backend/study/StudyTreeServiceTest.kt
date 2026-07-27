@@ -7,6 +7,8 @@ import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.study.application.port.inbound.UpdateStudyTopicActivationCommand
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.study.application.port.outbound.StudyTopicSuggestionPort
+import com.buddystudy.backend.study.application.port.outbound.SystemTopicCatalogCandidate
+import com.buddystudy.backend.study.application.port.outbound.SystemTopicCatalogPort
 import com.buddystudy.backend.study.application.service.StudyTreeService
 import com.buddystudy.study.domain.entity.StudyEntity
 import kotlinx.coroutines.runBlocking
@@ -20,7 +22,9 @@ import java.time.Instant
 
 class StudyTreeServiceTest {
     private val studies = FakeStudyPort()
-    private val service = StudyTreeService(studies, NoopUserPort(), NoopSuggestionPort())
+    private val suggestions = FakeSuggestionPort()
+    private val catalog = FakeSystemTopicCatalogPort()
+    private val service = StudyTreeService(studies, NoopUserPort(), suggestions, catalog)
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
     @Test
@@ -72,6 +76,52 @@ class StudyTreeServiceTest {
         }.isInstanceOf(ApiException::class.java)
         assertThat(child.activeForQuestions).isTrue()
         assertThat(studies.saved).isEmpty()
+    }
+
+    @Test
+    fun `topic suggestions reuse the system catalog before calling AI`(): Unit = runBlocking {
+        studies.rows += study(1, null, "Database")
+        catalog.rows += SystemTopicCatalogCandidate("Indexes", 0)
+        catalog.rows += SystemTopicCatalogCandidate("Transactions", 1)
+
+        val response = service.suggestTopics(principal, parentStudyId = 1, count = 2)
+
+        assertThat(response.suggestions).containsExactly("Indexes", "Transactions")
+        assertThat(response.source).isEqualTo("CATALOG")
+        assertThat(response.depth).isEqualTo(1)
+        assertThat(response.maxDepth).isEqualTo(5)
+        assertThat(response.childLimit).isEqualTo(10)
+        assertThat(suggestions.calls).isZero()
+    }
+
+    @Test
+    fun `missing catalog topics are generated once and saved for reuse`(): Unit = runBlocking {
+        studies.rows += study(1, null, "Database")
+        suggestions.next = listOf("Indexes", "Transactions")
+
+        val response = service.suggestTopics(principal, parentStudyId = 1, count = 2)
+
+        assertThat(response.suggestions).containsExactly("Indexes", "Transactions")
+        assertThat(response.source).isEqualTo("GENERATED")
+        assertThat(suggestions.calls).isEqualTo(1)
+        assertThat(catalog.savedTopics).containsExactly("Indexes", "Transactions")
+        assertThat(catalog.savedDepth).isEqualTo(1)
+    }
+
+    @Test
+    fun `topic suggestions stop after five descendant levels`(): Unit = runBlocking {
+        studies.rows += study(1, null, "Root")
+        studies.rows += study(2, 1, "One")
+        studies.rows += study(3, 2, "Two")
+        studies.rows += study(4, 3, "Three")
+        studies.rows += study(5, 4, "Four")
+        studies.rows += study(6, 5, "Five")
+
+        val response = service.suggestTopics(principal, parentStudyId = 6, count = 10)
+
+        assertThat(response.suggestions).isEmpty()
+        assertThat(response.source).isEqualTo("DEPTH_LIMIT")
+        assertThat(suggestions.calls).isZero()
     }
 
     private fun study(id: Long, parentId: Long?, topic: String) = StudyEntity(
@@ -127,13 +177,45 @@ class StudyTreeServiceTest {
         override suspend fun findByEmailAndProvider(email: String, provider: String): UserEntity? = null
     }
 
-    private class NoopSuggestionPort : StudyTopicSuggestionPort {
+    private class FakeSuggestionPort : StudyTopicSuggestionPort {
+        var next: List<String> = emptyList()
+        var calls = 0
+
         override suspend fun suggestTopics(
             rootTopic: String,
             parentTopic: String,
             existingTopics: Collection<String>,
             language: String,
             count: Int,
-        ): List<String> = emptyList()
+        ): List<String> {
+            calls += 1
+            return next.take(count)
+        }
+    }
+
+    private class FakeSystemTopicCatalogPort : SystemTopicCatalogPort {
+        val rows = mutableListOf<SystemTopicCatalogCandidate>()
+        var savedTopics: List<String> = emptyList()
+        var savedDepth: Int? = null
+
+        override suspend fun findChildren(
+            rootTopicKey: String,
+            parentPathKey: String,
+            language: String,
+            depth: Int,
+            limit: Int,
+        ): List<SystemTopicCatalogCandidate> = rows.take(limit)
+
+        override suspend fun saveChildren(
+            rootTopicKey: String,
+            parentPathKey: String,
+            language: String,
+            depth: Int,
+            topics: List<String>,
+            now: Instant,
+        ) {
+            savedTopics = topics
+            savedDepth = depth
+        }
     }
 }

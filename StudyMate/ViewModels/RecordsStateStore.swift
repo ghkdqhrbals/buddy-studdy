@@ -3,6 +3,9 @@ import Foundation
 @MainActor
 struct RecordsStateStore {
     private(set) var records: [StudyRecord]
+    private(set) var totalCount = 0
+    private(set) var loadedBackendCount = 0
+    private(set) var isLoadingPage = false
 
     init(records: [StudyRecord] = []) {
         self.records = records
@@ -16,8 +19,42 @@ struct RecordsStateStore {
         self.records = records
     }
 
+    var canLoadMore: Bool {
+        loadedBackendCount < totalCount
+    }
+
+    mutating func beginPageLoad() -> Bool {
+        guard !isLoadingPage else {
+            return false
+        }
+        isLoadingPage = true
+        return true
+    }
+
+    mutating func applyPage(_ page: BackendRecordsPage, reset: Bool) {
+        totalCount = max(page.totalCount, reset ? page.records.count : totalCount)
+        loadedBackendCount = reset
+            ? page.records.count
+            : max(loadedBackendCount, page.offset + page.records.count)
+    }
+
+    mutating func finishPageLoad() {
+        isLoadingPage = false
+    }
+
+    mutating func removeLoadedBackendRecord(_ record: StudyRecord) {
+        guard record.gradingResult != nil else {
+            return
+        }
+        totalCount = max(totalCount - 1, 0)
+        loadedBackendCount = max(loadedBackendCount - 1, 0)
+    }
+
     mutating func clear() {
         records = []
+        totalCount = 0
+        loadedBackendCount = 0
+        isLoadingPage = false
     }
 
     mutating func updateAnswer(

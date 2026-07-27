@@ -809,7 +809,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func suggestStudyTopics(
         registration: RemotePushRegistration,
         parentStudyID: Int,
-        count: Int = 4
+        count: Int = 10
     ) async throws -> [String] {
         var components = URLComponents(
             url: endpoint("api", "v1", "studies", String(parentStudyID), "topic-suggestions"),
@@ -2246,8 +2246,17 @@ struct BackendStudyGrowthRoot: Decodable, Equatable, Identifiable {
     var measuredTopicCount: Int
     var totalTopicCount: Int
     var trend: [Double]
+    var profile: BackendStudyGrowthProfile?
 
     var id: Int { studyId }
+}
+
+struct BackendStudyGrowthProfile: Decodable, Equatable {
+    var achievement: Double?
+    var challenge: Double?
+    var completion: Double?
+    var breadth: Double?
+    var depth: Double?
 }
 
 struct BackendStudyGrowthNode: Decodable, Equatable, Identifiable {

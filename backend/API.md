@@ -486,7 +486,7 @@ GPT-5 family models receive Responses API `reasoning.effort` and `text.verbosity
 when supported. Non-reasoning models use a minimal Responses payload with
 structured JSON output only.
 
-- `maxHistoryCount`: record retention preference from 10 to 10,000.
+- `maxHistoryCount`: deprecated compatibility field. It is still accepted from older clients but does not delete or cap backend records.
 
 Response:
 
@@ -552,10 +552,40 @@ Authorization: Bearer <accessToken>
 
 Returns the authenticated user's study rooms. It does not return record history, but each study can include one `pendingQuestion` for the current unanswered study-room question.
 
+### Study Topic Suggestions
+
+```http
+POST /api/v1/studies/{studyId}/topic-suggestions?count=10
+Authorization: Bearer <accessToken>
+```
+
+The backend first reuses children from the shared system topic catalog for the
+same root, parent path, language, and depth. It calls the topic generator only
+for missing candidates and stores those candidates back in the catalog for
+later users. A parent can expose at most 10 candidates and descendants can be
+created through depth 5. User-owned study nodes are materialized only when the
+user selects a candidate, and newly created nodes are active for questions by
+default.
+
+Response:
+
+```json
+{
+  "parentStudyId": 42,
+  "suggestions": ["정규화", "인덱스", "트랜잭션"],
+  "source": "CATALOG",
+  "depth": 2,
+  "maxDepth": 5,
+  "childLimit": 10
+}
+```
+
+`source` is `CATALOG`, `GENERATED`, `MIXED`, or `DEPTH_LIMIT`.
+
 ### Records
 
 ```http
-GET /api/v1/records?limit=100&offset=0
+GET /api/v1/records?limit=30&offset=0
 GET /api/v1/records/{recordId}
 PATCH /api/v1/records/{recordId}/answer
 POST /api/v1/records/{recordId}/answer
@@ -566,9 +596,12 @@ DELETE /api/v1/records
 
 Study record `id` values are database-generated autoincrement IDs returned as strings for client compatibility.
 `PATCH .../answer` saves an answer draft without grading. `POST .../answer` grades the answer using the device's stored OpenAI API key and persists the score, feedback, and explanation. Delete endpoints immediately remove the target records and related report/public-question references.
+Records have no per-user retention cap and remain until the user deletes them or
+withdraws the account. Clients should request subsequent `offset` pages while
+scrolling instead of loading the complete history at once.
 
 ### Statistics
-ㅅ
+
 ```http
 GET /api/v1/stats?period=all&sort=level&limit=8&offset=0
 GET /api/v1/stats?startAt=2026-06-01T00:00:00Z&endAt=2026-06-02T00:00:00Z
@@ -584,6 +617,21 @@ Query fields:
 - `limit` / `offset`: topic pagination.
 
 The response is topic-first and includes total response/topic counts, topic aliases, level range, correct rate, and the records for each returned topic.
+
+Study-tree growth uses a separate endpoint:
+
+```http
+GET /api/v1/stats/studies?startAt=2026-06-01T00:00:00Z&endAt=2026-09-01T00:00:00Z
+Authorization: Bearer <accessToken>
+```
+
+It returns root summaries and a flat study-node list. Each root contains a
+`profile` with normalized `achievement`, `challenge`, `completion`, `breadth`,
+and `depth` values. Achievement is mean score, challenge is mean answered
+difficulty, completion is completed/generated questions, breadth is
+answered/all subtree studies, and depth is deepest answered/all available tree
+levels for the selected period. Ungraded generated questions affect only
+completion, not ability, growth, or trend calculations.
 
 ### Manual Question
 

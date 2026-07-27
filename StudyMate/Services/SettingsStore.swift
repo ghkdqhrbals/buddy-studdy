@@ -171,7 +171,6 @@ final class SettingsStore {
         if let data = try? encoder.encode(sanitizedSettings) {
             defaults.set(data, forKey: Keys.settings)
         }
-        trimStudyRecords(to: sanitizedSettings.sanitizedMaxHistoryCount)
     }
 
     func loadQuestion() -> QuestionItem? {
@@ -220,7 +219,7 @@ final class SettingsStore {
         let clearedAt = loadStudyRecordsClearedAt()
 
         return recordStore
-            .load(limit: loadSettings().sanitizedMaxHistoryCount)
+            .load(limit: recordStore.count)
             .filter {
                 !Self.isStudyRecordDeleted($0, markers: deletedMarkers, clearedAt: clearedAt)
             }
@@ -233,7 +232,6 @@ final class SettingsStore {
             difficulty: settings.difficulty
         )
         recordStore.append(record)
-        recordStore.trim(to: loadSettings().sanitizedMaxHistoryCount)
     }
 
     func updateStudyRecord(question: QuestionItem, answer: String, gradingResult: GradingResult) {
@@ -248,7 +246,6 @@ final class SettingsStore {
         record.answeredAt = Date()
 
         recordStore.save(record)
-        recordStore.trim(to: loadSettings().sanitizedMaxHistoryCount)
     }
 
     func updateStudyRecordAnswer(question: QuestionItem, answer: String, onlyIfUngraded: Bool = false) {
@@ -268,12 +265,10 @@ final class SettingsStore {
             recordStore.append(record)
         }
 
-        recordStore.trim(to: loadSettings().sanitizedMaxHistoryCount)
     }
 
     func saveStudyRecord(_ record: StudyRecord) {
         recordStore.save(record)
-        recordStore.trim(to: loadSettings().sanitizedMaxHistoryCount)
     }
 
     func deleteStudyRecord(_ record: StudyRecord) {
@@ -301,13 +296,13 @@ final class SettingsStore {
         let filteredRecords = records.filter {
             !Self.isStudyRecordDeleted($0, markers: deletedMarkers, clearedAt: clearedAt)
         }
-        recordStore.replaceAll(Array(filteredRecords.suffix(loadSettings().sanitizedMaxHistoryCount)))
+        recordStore.replaceAll(filteredRecords)
     }
 
     func replaceBackendStudyRecords(_ records: [StudyRecord]) {
         saveDeletedStudyRecordMarkers([])
         saveStudyRecordsClearedAt(nil)
-        recordStore.replaceAll(Array(records.suffix(loadSettings().sanitizedMaxHistoryCount)))
+        recordStore.replaceAll(records)
     }
 
     func loadDeletedStudyRecordMarkers() -> [DeletedStudyRecordMarker] {
@@ -387,10 +382,6 @@ final class SettingsStore {
 
     nonisolated static func normalizedQuestionText(_ question: String) -> String {
         StudyRecordIdentityPolicy.normalizedQuestionText(question)
-    }
-
-    private func trimStudyRecords(to limit: Int) {
-        recordStore.trim(to: limit)
     }
 
     func loadGradingResult() -> GradingResult? {
@@ -845,7 +836,7 @@ final class SettingsStore {
         }
 
         if recordStore.count == 0 {
-            recordStore.replaceAll(Array(records.suffix(loadSettings().sanitizedMaxHistoryCount)))
+            recordStore.replaceAll(records)
         }
 
         defaults.removeObject(forKey: Keys.studyRecords)

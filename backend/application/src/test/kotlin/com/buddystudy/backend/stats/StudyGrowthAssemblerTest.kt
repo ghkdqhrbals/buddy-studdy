@@ -46,6 +46,11 @@ class StudyGrowthAssemblerTest {
         assertThat(root.measuredTopicCount).isEqualTo(1)
         assertThat(root.totalTopicCount).isEqualTo(3)
         assertThat(root.growth).isCloseTo(1.0, within(0.0001))
+        assertThat(root.profile.achievement).isCloseTo(0.6125, within(0.0001))
+        assertThat(root.profile.challenge).isCloseTo(0.55, within(0.0001))
+        assertThat(root.profile.completion).isEqualTo(1.0)
+        assertThat(root.profile.breadth).isCloseTo(2.0 / 3.0, within(0.0001))
+        assertThat(root.profile.depth).isEqualTo(1.0)
         assertThat(sql.parentStudyId).isEqualTo(1)
         assertThat(sql.rootStudyId).isEqualTo(1)
         assertThat(sql.depth).isEqualTo(1)
@@ -70,6 +75,27 @@ class StudyGrowthAssemblerTest {
         assertThat(root.currentLevel).isCloseTo(5.0, within(0.0001))
         assertThat(root.growth).isNull()
         assertThat(root.measuredTopicCount).isZero()
+    }
+
+    @Test
+    fun `profile includes unfinished questions in completion without treating them as answers`() {
+        val answered = record(studyId = 20, difficulty = 8, score = 90, day = 1)
+        val unfinished = record(studyId = 20, difficulty = 3, score = 0, day = 2)
+            .copy(completed = false)
+
+        val response = assembler.assemble(
+            studies = listOf(study(id = 20, topic = "Architecture")),
+            records = listOf(answered, unfinished),
+            startAt = startAt,
+            endAt = endAt,
+            generatedAt = endAt,
+        )
+
+        val root = response.roots.single()
+        assertThat(root.answerCount).isEqualTo(1)
+        assertThat(root.profile.achievement).isEqualTo(0.9)
+        assertThat(root.profile.challenge).isEqualTo(0.8)
+        assertThat(root.profile.completion).isEqualTo(0.5)
     }
 
     private fun study(

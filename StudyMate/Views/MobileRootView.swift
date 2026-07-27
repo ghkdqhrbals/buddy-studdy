@@ -3728,14 +3728,20 @@ private struct StudyTopicAddSheet: View {
                 .frame(maxWidth: .infinity, minHeight: 100)
         } else if suggestions.isEmpty {
             VStack(spacing: 10) {
-                Text(strings.recommendedTopicsEmpty)
+                Text(
+                    appState.studyTreeDepth(for: parent.id) >= 5
+                        ? strings.studyTopicDepthLimit
+                        : strings.recommendedTopicsEmpty
+                )
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                Button(strings.retry) {
-                    Task { await loadSuggestions() }
+                if appState.studyTreeDepth(for: parent.id) < 5 {
+                    Button(strings.retry) {
+                        Task { await loadSuggestions() }
+                    }
+                    .buttonStyle(.bordered)
                 }
-                .buttonStyle(.bordered)
             }
             .frame(maxWidth: .infinity, minHeight: 100)
         } else {
@@ -3763,7 +3769,7 @@ private struct StudyTopicAddSheet: View {
                     ],
                     spacing: 8
                 ) {
-                    ForEach(suggestions.prefix(4), id: \.self) { topic in
+                    ForEach(suggestions.prefix(10), id: \.self) { topic in
                         let isSelected = selectedSuggestion == topic
                         Button {
                             selectedSuggestion = topic

@@ -2216,15 +2216,24 @@ struct AppStrings {
         text("하위 \(count)", "\(count) children")
     }
     var addSubstudy: String { text("하위 학습 추가", "Add Sub-study") }
-    var recommendSubstudy: String { text("AI 추천 주제", "AI topic suggestions") }
-    var recommendSubstudyTab: String { text("AI 추천", "AI suggestions") }
+    var recommendSubstudy: String { text("추천 주제", "Suggested topics") }
+    var recommendSubstudyTab: String { text("추천", "Suggestions") }
     var recommendSubstudyDescription: String {
-        text("선택한 주제에서 다음에 학습할 내용을 추천합니다.", "Get focused next topics based on the selected node.")
+        text(
+            "시스템 주제 목록을 먼저 사용하고, 필요한 경우 새 추천을 만들어 보완합니다.",
+            "Uses the system topic catalog first and generates missing suggestions when needed."
+        )
     }
     var refreshRecommendations: String { text("다시 추천", "Refresh suggestions") }
     var addTopicManually: String { text("직접 추가", "Add manually") }
     var recommendedTopicsEmpty: String {
         text("새 추천을 만들지 못했습니다. 다시 시도하거나 직접 추가해 주세요.", "No new suggestions were available. Retry or add one manually.")
+    }
+    var studyTopicDepthLimit: String {
+        text(
+            "시스템 주제 트리는 5단계까지 제공합니다. 현재 주제에서 학습을 진행하거나 상위 단계에 주제를 추가해 주세요.",
+            "The system topic tree supports five levels. Continue studying here or add a topic to an earlier level."
+        )
     }
     var questionTopicActive: String { text("질문 대상", "Question topic") }
     var questionTopicInactive: String { text("질문 대상 아님", "Not in rotation") }
@@ -2719,6 +2728,55 @@ struct AppStrings {
     var streakStartToday: String { text("오늘 시작해보세요", "Start today") }
     var topicGrowth: String { text("성장 주제", "Growth") }
     var studyGrowth: String { text("학습별 성장", "Growth by study") }
+    var growthCalculationHelp: String { text("성장 계산 안내", "How growth is calculated") }
+    var abilityScale: String { text("실력 위치 · 1–10", "Ability position · 1–10") }
+    var growthHelpAbilityTitle: String { text("실력을 1–10으로 환산", "Ability is placed on a 1–10 scale") }
+    var growthHelpAbilityBody: String {
+        text(
+            "문제 난이도에 ‘(점수 − 50) ÷ 30’을 더한 뒤 1–10 범위로 제한합니다. 예를 들어 난이도 6에서 80점을 받으면 실력 위치는 7입니다.",
+            "We add “(score − 50) ÷ 30” to the question difficulty, then clamp it to 1–10. For example, a score of 80 at difficulty 6 gives an ability position of 7."
+        )
+    }
+    var growthHelpComparisonTitle: String { text("겹치지 않는 두 구간 비교", "Two non-overlapping windows are compared") }
+    var growthHelpComparisonBody: String {
+        text(
+            "최근 답변 3–5개와 그 직전 답변 3–5개를 비교합니다. 같은 주제의 채점 답변이 6개보다 적으면 성장을 단정하지 않고 ‘측정 중’으로 표시합니다.",
+            "The latest 3–5 graded answers are compared with the preceding 3–5. Fewer than 6 answers in a topic is shown as Measuring."
+        )
+    }
+    var growthHelpTreeTitle: String { text("상위 학습은 하위 주제를 함께 반영", "Parent studies include child topics") }
+    var growthHelpTreeBody: String {
+        text(
+            "상위 학습의 값은 트리 안에서 측정 가능한 주제를 합산합니다. 답변이 많은 한 주제가 전체를 좌우하지 않도록 주제별 반영량은 최대 5개 답변으로 제한합니다.",
+            "A parent combines measurable topics in its tree. Each topic is capped at 5 answers so one high-volume topic cannot dominate."
+        )
+    }
+    var growthHelpProfileTitle: String { text("학습 상태를 다섯 축으로 종합", "Five dimensions summarize study health") }
+    var growthHelpProfileBody: String {
+        text(
+            "성취도는 평균 점수, 도전도는 답한 질문의 평균 난이도, 완료율은 생성된 질문 중 답변을 마친 비율입니다. 학습 범위는 답한 학습 수, 학습 깊이는 답변이 도달한 가장 깊은 단계로 계산합니다.",
+            "Achievement is average score, challenge is average answered difficulty, and completion is answered questions divided by generated questions. Breadth counts studies answered, while depth reflects the deepest answered level."
+        )
+    }
+    var studyProfile: String { text("학습 상태", "Study profile") }
+    var studyProfileDescription: String {
+        text("선택한 기간의 전체 하위 학습을 종합했습니다.", "Summarized across all child studies in the selected period.")
+    }
+    var achievement: String { text("성취도", "Achievement") }
+    var challenge: String { text("도전도", "Challenge") }
+    var completion: String { text("완료율", "Completion") }
+    var studyBreadth: String { text("학습 범위", "Breadth") }
+    var studyDepth: String { text("학습 깊이", "Depth") }
+    var insufficientProfileData: String {
+        text("아직 종합할 학습 기록이 부족합니다.", "There is not enough study activity to build this profile yet.")
+    }
+    var allStudies: String { text("전체 학습", "All studies") }
+    var allStudiesDescription: String {
+        text("루트부터 가장 깊은 하위 학습까지 한 번에 보여줍니다.", "Shows every study from the root to the deepest child.")
+    }
+    func growthPositionSummary(previous: String, current: String) -> String {
+        text("이전 \(previous) → 현재 \(current)", "Previous \(previous) → Current \(current)")
+    }
     var currentAbility: String { text("현재", "Current") }
     var growthChange: String { text("성장", "Growth") }
     var measuringGrowth: String { text("측정 중", "Measuring") }

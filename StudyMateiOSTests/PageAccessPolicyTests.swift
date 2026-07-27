@@ -898,3 +898,127 @@ final class StudyOutlinePolicyTests: XCTestCase {
         )
     }
 }
+
+final class RecordsPaginationTests: XCTestCase {
+    func testStudyRecordsAreNotTrimmedByLegacyHistoryPreference() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("StudyMateiOSTests-\(UUID().uuidString).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+
+        let store = SettingsStore(defaults: defaults, recordDatabaseURL: databaseURL)
+        let settings = StudySettings(
+            topic: "운영체제",
+            difficulty: .intermediate,
+            customPrompt: "짧게",
+            intervalMinutes: 15,
+            maxHistoryCount: 10
+        )
+
+        store.saveSettings(settings)
+        for index in 1...12 {
+            store.appendStudyRecord(
+                question: QuestionItem(
+                    question: "Question \(index)",
+                    expectedAnswerHint: nil,
+                    createdAt: Date()
+                ),
+                settings: settings
+            )
+        }
+
+        let records = store.loadStudyRecords()
+
+        XCTAssertEqual(records.count, 12)
+        XCTAssertEqual(records.first?.question.question, "Question 1")
+    }
+
+    @MainActor
+    func testRecordsStateTracksBackendPagesWithoutTreatingPageSizeAsRetention() {
+        var state = RecordsStateStore()
+        let firstRecords = (1...30).map { index in
+            StudyRecord(
+                id: "\(index)",
+                question: QuestionItem(
+                    question: "Question \(index)",
+                    expectedAnswerHint: nil,
+                    createdAt: Date()
+                ),
+                gradingResult: GradingResult(
+                    score: 80,
+                    isCorrect: true,
+                    feedback: "좋아요.",
+                    explanation: "핵심을 설명했습니다."
+                ),
+                topic: "Swift",
+                difficulty: .level5
+            )
+        }
+        let firstPage = BackendRecordsPage(
+            records: firstRecords,
+            totalCount: 75,
+            limit: 30,
+            offset: 0
+        )
+
+        XCTAssertTrue(state.beginPageLoad())
+        state.applyPage(firstPage, reset: true)
+        state.finishPageLoad()
+
+        XCTAssertEqual(state.totalCount, 75)
+        XCTAssertEqual(state.loadedBackendCount, 30)
+        XCTAssertTrue(state.canLoadMore)
+
+        let finalPage = BackendRecordsPage(
+            records: Array(firstRecords.prefix(15)),
+            totalCount: 75,
+            limit: 30,
+            offset: 60
+        )
+        XCTAssertTrue(state.beginPageLoad())
+        state.applyPage(finalPage, reset: false)
+        state.finishPageLoad()
+
+        XCTAssertEqual(state.loadedBackendCount, 75)
+        XCTAssertFalse(state.canLoadMore)
+
+        state.removeLoadedBackendRecord(firstRecords[0])
+
+        XCTAssertEqual(state.totalCount, 74)
+        XCTAssertEqual(state.loadedBackendCount, 74)
+    }
+
+    @MainActor
+    func testDeletingLoadedSearchResultUpdatesSearchPagination() throws {
+        var state = SearchStateStore()
+        let record = StudyRecord(
+            id: "42",
+            question: QuestionItem(
+                question: "검색 결과",
+                expectedAnswerHint: nil,
+                createdAt: Date()
+            ),
+            topic: "Swift",
+            difficulty: .level5
+        )
+        let requestID = try XCTUnwrap(state.beginRecordPage(query: "Swift", reset: true))
+        state.applyRecordPage(
+            BackendRecordsPage(records: [record], totalCount: 4, limit: 30, offset: 0),
+            query: "Swift",
+            reset: true,
+            requestID: requestID
+        )
+        state.finishRecordPage(query: "Swift", requestID: requestID)
+
+        state.removeRecordResult(id: record.id)
+
+        XCTAssertTrue(state.recordResults?.isEmpty == true)
+        XCTAssertEqual(state.recordTotalCount, 3)
+        XCTAssertEqual(state.recordLoadedCount, 0)
+        XCTAssertTrue(state.canLoadMoreRecordResults)
+    }
+}

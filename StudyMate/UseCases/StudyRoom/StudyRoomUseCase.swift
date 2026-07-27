@@ -55,7 +55,7 @@ struct StudyRoomUseCase {
     func suggestStudyTopics(
         registration: RemotePushRegistration,
         parentStudyID: Int,
-        count: Int = 4
+        count: Int = 10
     ) async throws -> [String] {
         try await repository.suggestStudyTopics(
             registration: registration,

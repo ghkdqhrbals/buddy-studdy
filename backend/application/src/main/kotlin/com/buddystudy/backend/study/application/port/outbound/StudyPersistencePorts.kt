@@ -32,6 +32,30 @@ interface StudyTopicSuggestionPort {
     ): List<String>
 }
 
+data class SystemTopicCatalogCandidate(
+    val topic: String,
+    val sortOrder: Int,
+)
+
+interface SystemTopicCatalogPort {
+    suspend fun findChildren(
+        rootTopicKey: String,
+        parentPathKey: String,
+        language: String,
+        depth: Int,
+        limit: Int,
+    ): List<SystemTopicCatalogCandidate>
+
+    suspend fun saveChildren(
+        rootTopicKey: String,
+        parentPathKey: String,
+        language: String,
+        depth: Int,
+        topics: List<String>,
+        now: Instant,
+    )
+}
+
 interface QuestionPort {
     suspend fun save(entity: QuestionEntity): QuestionEntity
     suspend fun findQuestionById(id: Long): QuestionEntity?

@@ -44,4 +44,6 @@ data class StudyGrowthRecord(
     val difficultyLevel: Int,
     val score: Int,
     val answeredAt: Instant,
+    val createdAt: Instant = answeredAt,
+    val completed: Boolean = true,
 )

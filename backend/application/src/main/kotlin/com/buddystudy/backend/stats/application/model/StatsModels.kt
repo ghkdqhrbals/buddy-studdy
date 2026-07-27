@@ -78,6 +78,15 @@ data class StudyGrowthRootResponse(
     val measuredTopicCount: Int,
     val totalTopicCount: Int,
     val trend: List<Double>,
+    val profile: StudyGrowthProfileResponse,
+)
+
+data class StudyGrowthProfileResponse(
+    val achievement: Double?,
+    val challenge: Double?,
+    val completion: Double?,
+    val breadth: Double?,
+    val depth: Double?,
 )
 
 data class StudyGrowthNodeResponse(

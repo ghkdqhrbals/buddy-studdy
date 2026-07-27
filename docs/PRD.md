@@ -44,26 +44,29 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 7. My Studies shows root studies first. Selecting one opens an unlimited-depth study tree whose orientation can be switched between vertical and horizontal.
 8. A root study owns the question schedule, OpenAI model, prompt, and the single question flow. Descendant nodes own only their topic, difficulty level, ordering, and question-rotation activation.
 9. Adding a tree node opens GPT topic recommendations by default. The user can select a recommendation or switch to manual topic entry, and duplicate normalized topic names are rejected across the user's studies.
-10. Any number of tree nodes can participate in scheduled questions. The backend rotates through active nodes by least-recent selection, while an inactive node can still be opened for explicit manual question generation.
-11. Generated questions are stored under the root study and retain the selected node's topic and difficulty. Level is communicated with restrained color instead of decorative icons.
-12. Tree nodes are circular. The tree supports vertical/horizontal layout, pinch and button zoom, draggable saved positions, layout reset, and multi-select activation, pause, and deletion.
-13. Root creation, descendant topic creation, and question generation are separate API/client methods. Creating a root or descendant never consumes monthly question allowance.
-14. The Profile > Usage page shows the current monthly question allowance, remaining count, and exact reset time. When the allowance is exhausted, question creation is blocked with a localized inline explanation.
-15. Root study rows omit level metadata. Level is presented only where it affects a specific tree topic.
-16. A tree node with an unanswered question shows one red badge at its upper-right corner; the node action menu remains separate at the lower-right corner.
-17. Study deletion always requires an explicit destructive confirmation.
-18. Manual question generation immediately shows an inline conversation-style loading message for the selected topic until the request completes.
-19. Question, hint, grading feedback, and explanation content supports Markdown for emphasis, lists, and code while remaining backward-compatible with existing plain-text records.
-20. The compact My Studies outline keeps the card, row geometry, and dividers fixed while newly selected branch contents settle in with a subtle direction-aware stagger; it does not blink or overlay old and new rows.
+10. Topic recommendations use a shared system catalog before generating new entries. The catalog manages up to five descendant levels and up to ten children per opened branch; missing children are generated once and become reusable suggestions.
+11. The user's study tree materializes selected catalog topics lazily so a five-level catalog never creates an exponential number of unused user nodes. New root and descendant nodes participate in question rotation by default.
+12. Any number of tree nodes can participate in scheduled questions. The backend rotates through active nodes by least-recent selection, while an inactive node can still be opened for explicit manual question generation.
+13. Generated questions are stored under the root study and retain the selected node's topic and difficulty. Level is communicated with restrained color instead of decorative icons.
+14. Tree nodes are circular. The tree supports vertical/horizontal layout, pinch and button zoom, draggable saved positions, layout reset, and multi-select activation, pause, and deletion.
+15. Root creation, descendant topic creation, and question generation are separate API/client methods. Creating a root or descendant never consumes monthly question allowance.
+16. The Profile > Usage page shows the current monthly question allowance, remaining count, and exact reset time. When the allowance is exhausted, question creation is blocked with a localized inline explanation.
+17. Root study rows omit level metadata. Level is presented only where it affects a specific tree topic.
+18. A tree node with an unanswered question shows one red badge at its upper-right corner; the node action menu remains separate at the lower-right corner.
+19. Study deletion always requires an explicit destructive confirmation.
+20. Manual question generation immediately shows an inline conversation-style loading message for the selected topic until the request completes.
+21. Question, hint, grading feedback, and explanation content supports Markdown for emphasis, lists, and code while remaining backward-compatible with existing plain-text records.
+22. The compact My Studies outline keeps the card, row geometry, and dividers fixed while newly selected branch contents settle in with a subtle direction-aware stagger; it does not blink or overlay old and new rows.
 
 ### Records
 
 1. Ungraded records appear first.
-2. Records are searchable and paginated.
-3. Record detail shows question, answer, feedback, explanation, and grading state.
-4. Ungraded records can still be answered from detail.
-5. Individual records can be deleted.
-6. Before sign-in, the tab previews the shape and value of accumulated learning records, then offers a simple bottom-aligned `로그인` action instead of presenting a blocking login wall.
+2. Graded records have no user-configurable retention limit. MySQL is the source of truth and records remain until the user deletes an individual record, clears all records, or withdraws the account.
+3. Records and record search load in 30-item pages as the user scrolls. The iOS in-memory view cache contains only pages fetched during the current session.
+4. Record detail shows question, answer, feedback, explanation, and grading state.
+5. Ungraded records can still be answered from detail.
+6. Individual records can be deleted.
+7. Before sign-in, the tab previews the shape and value of accumulated learning records, then offers a simple bottom-aligned `로그인` action instead of presenting a blocking login wall.
 
 ### Statistics
 
@@ -75,11 +78,14 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 6. Before sign-in, the tab uses a subdued sample summary to explain topic progress and keeps the login invitation as a consistent bottom action.
 7. Growth-topic labels wrap to show their full value instead of being truncated with an ellipsis.
 8. Growth is presented root-study first. Each root card summarizes its full subtree with current 1-10 ability, period growth, measured-topic coverage, answer count, and a compact trend.
-9. Root cards drill into one tree branch at a time so unlimited-depth studies remain scannable. The topic row opens growth detail, while the separate child control navigates deeper.
+9. Opening a root shows a five-axis radar summary first, then a single depth-indented list containing every study in that root tree. Each topic row opens its own trend detail.
 10. Growth compares non-overlapping previous and recent answer windows of three to five graded answers. A topic needs at least six answers before a delta is claimed; otherwise it is shown as measuring.
 11. Parent growth includes its subtree and caps each measured node's weight so one high-volume topic cannot dominate the result.
 12. Question activation remains green. Positive growth uses the app accent color, decline uses orange, and insufficient or stable data uses secondary gray.
 13. Growth supports recent 30-day, 90-day, and one-year periods, with 90 days as the default.
+14. The root-study overview uses one shared 1–10 ability axis with previous and current markers so all studies can be compared at a glance.
+15. A `?` beside Growth by Study explains ability estimation, non-overlapping answer windows, minimum sample size, subtree aggregation, and capped topic weighting in plain language.
+16. The radar summarizes achievement, answered-question challenge, generated-question completion, answered-topic breadth, and deepest answered tree level. These values are calculated by the backend for the selected period rather than inferred from whichever record page is loaded on-device.
 
 ### Settings
 
@@ -92,6 +98,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 7. The primary iOS tab bar contains Home, Records, Statistics, and Notifications. Settings is reached through Profile.
 8. The notification inbox supports marking every visible account/device notification as read in one action, independently from deletion.
 9. Profile is a compact category hub: avatar editing is labeled `Avatar`, logout sits at the bottom of the hub, and account deletion lives under `Settings > Account Settings`.
+10. Record settings provide destructive record management only; record retention is not configurable.
 
 ### Identity
 

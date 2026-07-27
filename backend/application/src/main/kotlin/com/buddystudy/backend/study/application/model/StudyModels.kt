@@ -52,6 +52,10 @@ data class StudyRoomResponse(
 data class StudyTopicSuggestionsResponse(
     val parentStudyId: Long,
     val suggestions: List<String>,
+    val source: String = "CATALOG",
+    val depth: Int = 1,
+    val maxDepth: Int = 5,
+    val childLimit: Int = 10,
 )
 
 data class StudyPageResponse(

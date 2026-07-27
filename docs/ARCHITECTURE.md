@@ -47,7 +47,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
 - `Services/SettingsStore.swift`
   - Local persistence facade.
   - Stores settings, API keys, draft state, backend metadata, and exposes an in-memory record cache for the current session.
-  - Caps records at the configured history limit.
+  - Does not trim records as a retention policy. The backend owns durable record history, while the app incrementally fills its in-memory cache from paginated responses.
   - Stores backend device registration and a stable installation identifier in the iOS Keychain. The registration request sends the identifier over TLS, request logs redact it, and the backend persists only its SHA-256 hash so repeated registration is idempotent.
 
 - `Services/OpenAIClient.swift`
@@ -99,6 +99,8 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - Selects the next active node from the complete root subtree by oldest `last_sent_at`, with never-selected nodes first and stable `sort_order`/`id` tie-breaking. This supports deterministic round-robin delivery across any number of active nodes.
   - Stores both manual and scheduled questions with the root study ID while copying the selected node's topic and difficulty into the question. Inactive nodes remain available for manual generation.
   - `POST /api/v1/studies/{id}/topic-suggestions` requests unique GPT suggestions for a parent node, and `PATCH /api/v1/studies/{id}/question-activation` changes only rotation participation.
+  - `system_topic_catalog` is the shared source for reusable topic suggestions. A lookup is keyed by normalized root plus the hashed ancestor path, language, and child depth. A cache miss invokes the system model, then idempotently stores the generated children.
+  - The managed catalog supports five descendant levels and up to ten children per opened branch. User study rows are materialized lazily from selected suggestions instead of eagerly cloning a combinatorial tree; newly created nodes remain active for question rotation by default.
   - Rejects duplicate topics using a trim, case-fold, and repeated-whitespace normalized key across all studies owned by the user.
   - Resolves monthly question allowance from the active membership tier and an optional per-user override. `GET /api/v1/questions/quota` returns usage, allowance, remaining count, and the next UTC reset instant.
   - Provides authenticated admin APIs for paginated user search, tier allowance updates, and per-user tier/override assignment. Payment-plan metadata is never returned by the consumer quota endpoint.
@@ -107,8 +109,8 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
 
 - `Views`
   - `StudyView`: active question and pending question workflow.
-  - `HistoryView`: record search, pagination, detail, and deletion.
-  - `StatisticsView`: root-study growth cards, period filtering, branch-at-a-time growth navigation, trend charts, and a compatibility projection for servers that do not yet expose tree growth.
+  - `HistoryView`: 30-row incremental record/search pagination, detail, and deletion.
+  - `StatisticsView`: shared-axis root-study growth comparison, calculation help, period filtering, a backend-calculated radar profile, a depth-indented full-tree list, trend charts, and a compatibility projection for older servers.
   - `SettingsView`: macOS settings.
 - `MobileRootView`: iOS tabs, onboarding, profile category hub, settings, notification inbox, and study-tree interaction.
   - The primary tab bar exposes Home, Records, Statistics, and Notifications. Settings is a profile-hub destination so account and app preferences share one predictable entry point.
@@ -203,6 +205,7 @@ Public community feed
 ## Sync Model
 
 - Backend sync stores settings, records, answer drafts, generated questions, grading results, and topic statistics.
+- Backend record rows are retained without a per-user maximum. `GET /api/v1/records` and its search variant are bounded offset pages; iOS requests the next 30 rows only when the last loaded row approaches the viewport.
 - API key backend sync is supported for the regular OpenAI key; admin keys are not supported.
 - Backend settings sync uploads the regular OpenAI API key only when it changes or when backend settings need to be initialized.
 - A backend device registration can be created without an APNs token so manual question generation, grading, settings, records, and stats can work before notification permission/token delivery.
@@ -243,10 +246,12 @@ Public community feed
 - Refresh claims dirty rows with `FOR UPDATE SKIP LOCKED`; if the process crashes before commit, the transaction rolls back and the dirty rows remain for the next run.
 - Refresh deletes a dirty row only when its `updated_at` still matches the claimed value. If a new answer/delete updates the same bucket during refresh, the dirty row is kept and retried in a later batch.
 - H2/test environments fall back to a full rebuild path; production MySQL uses incremental dirty-key refresh.
-- Tree growth does not rewrite `user_stats`. `StudyGrowthStatsPort` reads graded question samples by stable `study_id`, and `StudyGrowthService` joins those samples to the current `StudyPort` tree.
+- Tree growth does not rewrite `user_stats`. `StudyGrowthStatsPort` reads questions created or answered in the requested period by stable `study_id`, and `StudyGrowthService` joins them to the current `StudyPort` tree. Only graded answers feed ability and trend calculations; ungraded questions remain available for the completion denominator.
 - A direct node needs six graded answers for growth. The previous and recent windows never overlap and contain three to five samples each.
 - Parent and root estimates include descendant nodes, cap each node's weight at five answers, and report measured-node coverage separately from total subtree size.
-- `GET /api/v1/stats/studies` returns root summaries plus a flat node list containing `studyId`, `parentStudyId`, and `rootStudyId`; iOS reconstructs only the current branch instead of rendering an unbounded expanded list.
+- `GET /api/v1/stats/studies` returns root summaries plus a flat node list containing `studyId`, `parentStudyId`, and `rootStudyId`. Each root also carries a normalized five-axis profile: mean score, mean answered difficulty, completed/generated ratio, answered-topic coverage, and deepest answered tree coverage.
+- iOS reconstructs a stable pre-order list for the selected root. It lazily renders that full depth-indented list below the radar instead of requiring repeated branch navigation.
+- The iOS root overview maps every study's previous and current estimates onto the same 1–10 axis. The help sheet documents the exact window and weighting rules instead of asking users to infer them from the chart.
 
 ## Internal Membership Administration
 
