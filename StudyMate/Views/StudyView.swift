@@ -375,6 +375,49 @@ struct MarkdownMessageText: View {
     }
 }
 
+struct CompactMessageLayout: Layout {
+    var minimumWidth: CGFloat = 44
+    var maximumWidth: CGFloat = 280
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        guard let subview = subviews.first else {
+            return .zero
+        }
+
+        let availableWidth = max(0, min(proposal.width ?? maximumWidth, maximumWidth))
+        let intrinsicSize = subview.sizeThatFits(.unspecified)
+        let resolvedWidth = min(
+            max(intrinsicSize.width, minimumWidth),
+            availableWidth
+        )
+        let resolvedSize = subview.sizeThatFits(
+            ProposedViewSize(width: resolvedWidth, height: proposal.height)
+        )
+        return CGSize(width: resolvedWidth, height: resolvedSize.height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        guard let subview = subviews.first else {
+            return
+        }
+
+        subview.place(
+            at: bounds.origin,
+            anchor: .topLeading,
+            proposal: ProposedViewSize(width: bounds.width, height: bounds.height)
+        )
+    }
+}
+
 private struct StudyConversationSection<AnswerEditorContent: View>: View {
     var question: QuestionItem
     @Binding var draftAnswer: String
@@ -560,8 +603,9 @@ private struct StudyChatBubble<Content: View>: View {
                 content()
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else if role == .learnerAnswer {
-                content()
-                    .frame(minWidth: 44, maxWidth: 280, alignment: .trailing)
+                CompactMessageLayout {
+                    content()
+                }
             } else {
                 content()
                     .padding(.vertical, 11)

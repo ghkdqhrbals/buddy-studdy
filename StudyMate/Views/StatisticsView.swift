@@ -661,12 +661,13 @@ private struct RecordChatBubble<Content: View>: View {
                 content()
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else if role == .answer {
-                content()
-                    .padding(.vertical, 11)
-                    .padding(.horizontal, 12)
-                    .frame(minWidth: 44, maxWidth: 280, alignment: .trailing)
-                    .background(role.fill)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                CompactMessageLayout {
+                    content()
+                        .padding(.vertical, 11)
+                        .padding(.horizontal, 12)
+                        .background(role.fill)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
             } else {
                 content()
                     .padding(.vertical, 11)

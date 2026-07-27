@@ -5657,6 +5657,11 @@ final class AppState: ObservableObject {
                         .info,
                         "채점 상태를 수신했습니다. recordID=\(event.recordID), status=\(event.status.rawValue), eventID=\(event.id)"
                     )
+                    await Task.yield()
+                    try await keepGradingStatusVisible(
+                        displayedStatus,
+                        since: displayedAt
+                    )
                     switch event.status {
                     case .completed:
                         return try await recordsUseCase.fetchRecord(
@@ -5671,6 +5676,8 @@ final class AppState: ObservableObject {
                         break
                     }
                 }
+            } catch is CancellationError {
+                throw CancellationError()
             } catch let error as EventDrivenGradingError {
                 throw error
             } catch {
@@ -5686,9 +5693,17 @@ final class AppState: ObservableObject {
                 recordID: queuedRecord.id
             )
             if snapshot.gradingResult != nil || snapshot.gradingStatus == .completed {
+                try await keepGradingStatusVisible(
+                    displayedStatus,
+                    since: displayedAt
+                )
                 return snapshot
             }
             if snapshot.gradingStatus == .failed {
+                try await keepGradingStatusVisible(
+                    displayedStatus,
+                    since: displayedAt
+                )
                 throw EventDrivenGradingError.failed(snapshot.gradingError ?? strings.gradingFailed)
             }
             if attempt < 3 {
@@ -5714,12 +5729,8 @@ final class AppState: ObservableObject {
         for status: AnswerGradingStatus
     ) -> Duration {
         switch status {
-        case .queued:
+        case .queued, .analyzingEvidence, .critiquing, .judging, .adjudicating, .completed, .failed:
             .seconds(1)
-        case .analyzingEvidence, .critiquing, .judging, .adjudicating:
-            .seconds(2)
-        case .completed, .failed:
-            .zero
         }
     }
 
