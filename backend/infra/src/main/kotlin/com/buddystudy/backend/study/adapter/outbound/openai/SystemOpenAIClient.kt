@@ -3,14 +3,17 @@ package com.buddystudy.backend.study.adapter.outbound.openai
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.study.application.model.GradingPromptPreviewCommand
+import com.buddystudy.backend.study.application.model.GradingPromptPreviewResponse
+import com.buddystudy.backend.study.application.model.TranslatedQuestionContent
 import com.buddystudy.backend.study.application.port.outbound.AiGradingRubric
 import com.buddystudy.backend.study.application.port.outbound.AiGradingStage
 import com.buddystudy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
+import com.buddystudy.backend.study.application.port.outbound.GradingPromptPreviewPort
 import com.buddystudy.backend.study.application.port.outbound.OpenAIPort
-import com.buddystudy.backend.study.application.port.outbound.StudyTopicSuggestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionTranslationPort
-import com.buddystudy.backend.study.application.model.TranslatedQuestionContent
+import com.buddystudy.backend.study.application.port.outbound.StudyTopicSuggestionPort
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
@@ -19,7 +22,7 @@ import org.springframework.stereotype.Component
 class SystemOpenAIClient(
     private val executor: OpenAIRequestExecutor,
     private val properties: BuddyStudyProperties,
-) : OpenAIPort, StudyTopicSuggestionPort, QuestionTranslationPort {
+) : OpenAIPort, StudyTopicSuggestionPort, QuestionTranslationPort, GradingPromptPreviewPort {
     suspend fun validate() {
         validate(systemApiKey())
     }
@@ -127,6 +130,13 @@ class SystemOpenAIClient(
             question = question,
             hint = hint,
             sourceLanguage = sourceLanguage,
+        )
+
+    override suspend fun compare(command: GradingPromptPreviewCommand): GradingPromptPreviewResponse =
+        executor.compareGradingResponses(
+            apiKey = systemApiKey(),
+            model = properties.openai.model,
+            command = command,
         )
 
     private fun systemApiKey(): String =

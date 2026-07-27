@@ -37,6 +37,7 @@ data class BuddyStudyProperties(
         var gradingPolicy: String = "",
         var gradingPolicyVersion: String = "ai-judge-v1",
         var gradingMinConfidence: Double = 0.72,
+        var gradingResponseStyle: String = "structured-brief-v1",
     )
     data class Apns(
         var teamId: String = "",

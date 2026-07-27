@@ -92,6 +92,7 @@ buddystudy:
     grading-policy: ${OPENAI_GRADING_POLICY:}
     grading-policy-version: ${OPENAI_GRADING_POLICY_VERSION:ai-judge-v1}
     grading-min-confidence: ${OPENAI_GRADING_MIN_CONFIDENCE:0.72}
+    grading-response-style: ${OPENAI_GRADING_RESPONSE_STYLE:structured-brief-v1}
   apns:
     team-id: ${APNS_TEAM_ID:${notificatoin.push.apns.team-id:}}
     key-id: ${APNS_KEY_ID:${notificatoin.push.apns.key-id:}}

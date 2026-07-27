@@ -1,7 +1,8 @@
 package com.buddystudy.backend.study.adapter.outbound.openai
 
+import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.study.application.model.GradingResponseStyle
 import kotlinx.coroutines.runBlocking
-
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -89,5 +90,66 @@ class OpenAIRequestExecutorTest {
         )
 
         assertThat(rubric).isNull()
+    }
+
+    @Test
+    fun `grading response style falls back to structured brief`() {
+        assertThat(GradingResponseStyle.from(null)).isEqualTo(GradingResponseStyle.STRUCTURED_BRIEF)
+        assertThat(GradingResponseStyle.from("unknown")).isEqualTo(GradingResponseStyle.STRUCTURED_BRIEF)
+        assertThat(GradingResponseStyle.from("ACTION-COACH-V1")).isEqualTo(GradingResponseStyle.ACTION_COACH)
+    }
+
+    @Test
+    fun `judge prompt requests concise reusable response parts`() {
+        val executor = OpenAIRequestExecutor(BuddyStudyProperties())
+
+        val prompt = executor.buildJudgeSystemPrompt(false)
+
+        assertThat(prompt)
+            .contains("\"summary\":\"...\"")
+            .contains("\"strongPoint\":\"...\"")
+            .contains("\"improvement\":\"...\"")
+            .contains("\"nextAction\":\"...\"")
+            .contains("summary within 60 characters")
+    }
+
+    @Test
+    fun `response styles render the same judgement with distinct layouts`() {
+        val values = mapOf(
+            "summary" to "핵심 차이를 정확히 구분했습니다.",
+            "strongPoint" to "Sentinel은 HA, Cluster는 샤딩으로 구분했습니다.",
+            "improvement" to "Sentinel의 감시 역할을 보완하세요.",
+            "nextAction" to "마스터 선출 과정을 한 문장 추가하세요.",
+        )
+
+        val compact = renderGradingResponse(
+            GradingResponseStyle.COMPACT_SUMMARY,
+            "ko",
+            values.getValue("summary"),
+            values.getValue("strongPoint"),
+            values.getValue("improvement"),
+            values.getValue("nextAction"),
+        )
+        val structured = renderGradingResponse(
+            GradingResponseStyle.STRUCTURED_BRIEF,
+            "ko",
+            values.getValue("summary"),
+            values.getValue("strongPoint"),
+            values.getValue("improvement"),
+            values.getValue("nextAction"),
+        )
+        val action = renderGradingResponse(
+            GradingResponseStyle.ACTION_COACH,
+            "ko",
+            values.getValue("summary"),
+            values.getValue("strongPoint"),
+            values.getValue("improvement"),
+            values.getValue("nextAction"),
+        )
+
+        assertThat(compact.feedback).isEqualTo(values.getValue("summary"))
+        assertThat(compact.explanation).isEqualTo(values.getValue("improvement"))
+        assertThat(structured.explanation).contains("**잘한 점**", "**보완할 점**")
+        assertThat(action.explanation).contains("**판단 근거**", "**다음 답변**")
     }
 }

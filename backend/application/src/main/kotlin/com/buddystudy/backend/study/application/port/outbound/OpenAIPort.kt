@@ -1,6 +1,8 @@
 package com.buddystudy.backend.study.application.port.outbound
 
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
+import com.buddystudy.backend.study.application.model.GradingPromptPreviewCommand
+import com.buddystudy.backend.study.application.model.GradingPromptPreviewResponse
 import com.buddystudy.backend.study.application.model.TranslatedQuestionContent
 
 data class AiGradingCriterion(
@@ -107,4 +109,8 @@ interface QuestionTranslationPort {
         hint: String?,
         sourceLanguage: String,
     ): TranslatedQuestionContent
+}
+
+interface GradingPromptPreviewPort {
+    suspend fun compare(command: GradingPromptPreviewCommand): GradingPromptPreviewResponse
 }
