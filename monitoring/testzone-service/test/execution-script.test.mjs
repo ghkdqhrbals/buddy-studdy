@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { appendUniqueLiveWarning, projectForRun } from "../src/runner.mjs";
+import {
+  appendUniqueLiveWarning,
+  persistRunMetrics,
+  projectForRun,
+} from "../src/runner.mjs";
 import { DEFAULT_SCRIPT } from "../src/store.mjs";
 
 const runnerSource = await readFile(new URL("../src/runner.mjs", import.meta.url), "utf8");
@@ -40,7 +44,7 @@ test("runner resolves the run project before recording live and summary metrics"
     /Project missing was not found for run run-2/,
   );
   assert.match(runnerSource, /writeLiveSnapshot\(run,\s*project,\s*script,\s*snapshot\)/);
-  assert.match(runnerSource, /writeRunSummary\(updated,\s*project,\s*script,\s*summary\)/);
+  assert.match(runnerSource, /persistRunMetrics\(\{\s*influx:\s*this\.influx/);
 });
 
 test("runner records a repeated live metric failure only once until recovery", () => {
@@ -52,4 +56,36 @@ test("runner records a repeated live metric failure only once until recovery", (
 
   assert.equal(previous, "InfluxDB unavailable");
   assert.deepEqual(logs, ["Live metrics warning: InfluxDB unavailable"]);
+});
+
+test("summary persistence warnings do not throw after a successful k6 run", async () => {
+  const calls = [];
+  const warnings = await persistRunMetrics({
+    influx: {
+      async importK6Json() {
+        calls.push("raw");
+        throw new Error("raw write unavailable");
+      },
+      async writeRunSummary() {
+        calls.push("summary");
+        throw new Error("field type conflict");
+      },
+    },
+    metricsPath: "/tmp/metrics.jsonl",
+    run: { id: "run-1" },
+    project: { id: "project-1" },
+    script: { id: "script-1" },
+    summary: { requestRate: 30 },
+  });
+
+  assert.deepEqual(calls, ["raw", "summary"]);
+  assert.deepEqual(warnings, [
+    "Raw metrics import failed: raw write unavailable",
+    "Summary metrics write failed: field type conflict",
+  ]);
+});
+
+test("runner stores metrics warnings separately from execution failures", () => {
+  assert.match(runnerSource, /metricsWarning:\s*warnings\.join/);
+  assert.match(runnerSource, /Metrics warning: \$\{warning\}/);
 });

@@ -174,6 +174,20 @@ export class TestZoneStore {
         run.live = null;
         changed = true;
       }
+      if (!Object.hasOwn(run, "metricsWarning")) {
+        run.metricsWarning = null;
+        changed = true;
+      }
+      if (
+        run.status === "failed"
+        && run.summary
+        && String(run.error || "").startsWith("InfluxDB write failed")
+      ) {
+        run.status = "completed";
+        run.metricsWarning = run.error;
+        run.error = null;
+        changed = true;
+      }
     }
     if (changed) await this.persist();
   }
@@ -321,6 +335,7 @@ export class TestZoneStore {
       finishedAt: null,
       summary: null,
       error: null,
+      metricsWarning: null,
       logTail: [],
       live: null,
     };

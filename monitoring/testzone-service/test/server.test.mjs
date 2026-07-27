@@ -572,3 +572,34 @@ test("store migration backfills names for legacy run metadata", async (context) 
   assert.equal(migratedStore.state.runs[0].scriptName, script.name);
   assert.equal(migratedStore.state.runs[0].targetUrl, "https://legacy.example.test");
 });
+
+test("store migration recovers successful runs mislabeled by InfluxDB failures", async (context) => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "testzone-metrics-migration-"));
+  context.after(() => fs.rm(dataDir, { recursive: true, force: true }));
+  const initialStore = await new TestZoneStore(dataDir).init();
+  const script = initialStore.state.scripts[0];
+  const run = await initialStore.createRun({
+    projectId: script.projectId,
+    scriptId: script.id,
+    scriptName: script.name,
+    targetUrl: "https://api.example.test",
+    name: "Successful k6 run",
+    profile: "script",
+    options: {},
+  });
+  const influxError = "InfluxDB write failed (422): field type conflict";
+  await initialStore.patchRun(run.id, {
+    status: "failed",
+    summary: { requestRate: 30, errorRate: 0 },
+    error: influxError,
+  });
+  delete initialStore.state.runs[0].metricsWarning;
+  await initialStore.persist();
+
+  const migratedStore = await new TestZoneStore(dataDir).init();
+  const migratedRun = migratedStore.state.runs[0];
+
+  assert.equal(migratedRun.status, "completed");
+  assert.equal(migratedRun.error, null);
+  assert.equal(migratedRun.metricsWarning, influxError);
+});

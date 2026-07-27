@@ -22,6 +22,37 @@ export function appendUniqueLiveWarning(logs, error, previousMessage) {
   return message;
 }
 
+export async function persistRunMetrics({
+  influx,
+  metricsPath,
+  run,
+  project,
+  script,
+  summary,
+}) {
+  const warnings = [];
+  const persist = async (label, operation) => {
+    try {
+      await operation();
+    } catch (error) {
+      warnings.push(`${label}: ${String(error?.message || error)}`);
+    }
+  };
+
+  await persist("Raw metrics import failed", () => influx.importK6Json(metricsPath, {
+    runId: run.id,
+    projectId: project.id,
+    scriptId: script.id,
+  }));
+  await persist("Summary metrics write failed", () => influx.writeRunSummary(
+    run,
+    project,
+    script,
+    summary,
+  ));
+  return warnings;
+}
+
 export class RunManager {
   constructor({ store, influx, config, spawnImpl = spawn }) {
     this.store = store;
@@ -133,6 +164,7 @@ export class RunManager {
           finishedAt,
           summary,
           error: status === "completed" ? null : failureReason,
+          metricsWarning: null,
           logTail: tail(logs),
           live: {
             ...(this.store.state.runs.find((entry) => entry.id === run.id)?.live || {}),
@@ -141,12 +173,21 @@ export class RunManager {
           },
         });
         if (summary) {
-          await this.influx.importK6Json(metricsPath, {
-            runId: run.id,
-            projectId: project.id,
-            scriptId: script.id,
+          const warnings = await persistRunMetrics({
+            influx: this.influx,
+            metricsPath,
+            run: updated,
+            project,
+            script,
+            summary,
           });
-          await this.influx.writeRunSummary(updated, project, script, summary);
+          if (warnings.length) {
+            logs.push(...warnings.map((warning) => `Metrics warning: ${warning}`));
+            await this.store.patchRun(run.id, {
+              metricsWarning: warnings.join(" | "),
+              logTail: tail(logs),
+            });
+          }
         }
       } catch (error) {
         await this.store.patchRun(run.id, {

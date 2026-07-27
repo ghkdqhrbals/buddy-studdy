@@ -125,7 +125,7 @@ export function TestZonePage() {
       contentSelector=".testzone-content"
       removeSelector=".testzone-header"
       extraSelectors={TESTZONE_EXTRA_SELECTORS}
-      controllerUrl="/testzone.js?v=2026072704"
+      controllerUrl="/testzone.js?v=2026072705"
       className="testzone-content testzone-react-page"
     >
       <header className="testzone-header">
