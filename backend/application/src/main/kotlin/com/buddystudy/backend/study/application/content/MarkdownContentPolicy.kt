@@ -1,34 +1,19 @@
 package com.buddystudy.backend.study.application.content
 
+import org.commonmark.parser.Parser
+import org.commonmark.renderer.text.TextContentRenderer
+
 object MarkdownContentPolicy {
     const val GENERATION_GUIDE: String =
-        "Use Markdown inside text fields only when it improves clarity. " +
-            "Allowed forms are paragraphs, emphasis, lists, inline code, and fenced code blocks. " +
+        "Every question, expectedAnswerHint, feedback, and explanation value must be valid Markdown. " +
+            "Put every choice or list item on its own line. Use '- ' for bullets and '1. ' for ordered lists. " +
+            "For lettered choices use '- **A.** choice', never inline 'A) choice B) choice'. " +
+            "Use backticks for identifiers and fenced code blocks with a language when code spans multiple lines. " +
             "Do not emit HTML or wrap the entire field in a code fence."
 
     fun plainText(markdown: String): String =
-        markdown
-            .replace(FENCED_CODE, "$1")
-            .replace(IMAGE, "$1")
-            .replace(LINK, "$1")
-            .lineSequence()
-            .joinToString(" ") { line ->
-                line.replace(LEADING_BLOCK_MARKER, "")
-            }
-            .replace(INLINE_CODE, "$1")
-            .replace(BOLD_ASTERISK, "$1")
-            .replace(BOLD_UNDERSCORE, "$1")
-            .replace(STRIKETHROUGH, "$1")
-            .replace(WHITESPACE, " ")
-            .trim()
+        textRenderer.render(parser.parse(markdown)).trim()
 
-    private val FENCED_CODE = Regex("(?s)```(?:[^\\n]*)\\n?(.*?)```")
-    private val IMAGE = Regex("!\\[([^]]*)]\\([^)]*\\)")
-    private val LINK = Regex("\\[([^]]+)]\\([^)]*\\)")
-    private val LEADING_BLOCK_MARKER = Regex("^\\s{0,3}(?:#{1,6}\\s+|>\\s?|[-+]\\s+|\\d+[.)]\\s+)")
-    private val INLINE_CODE = Regex("`([^`\\n]+)`")
-    private val BOLD_ASTERISK = Regex("\\*\\*([^*\\n]+)\\*\\*")
-    private val BOLD_UNDERSCORE = Regex("__([^_\\n]+)__")
-    private val STRIKETHROUGH = Regex("~~([^~\\n]+)~~")
-    private val WHITESPACE = Regex("\\s+")
+    private val parser = Parser.builder().build()
+    private val textRenderer = TextContentRenderer.builder().build()
 }

@@ -28,7 +28,8 @@ class QuestionPromptProviderTest {
         assertThat(prompt.userPrompt).contains("Language: English")
         assertThat(prompt.userPrompt).contains("What is Redis persistence?")
         assertThat(prompt.userPrompt).contains("Ask about scale-out tradeoffs.")
-        assertThat(prompt.userPrompt).contains("Use Markdown inside text fields only when it improves clarity.")
+        assertThat(prompt.userPrompt).contains("must be valid Markdown")
+        assertThat(prompt.userPrompt).contains("never inline 'A) choice B) choice'")
         assertThat(prompt.userPrompt).contains("Do not emit HTML")
         assertThat(prompt.userPrompt).contains("Return JSON only")
     }

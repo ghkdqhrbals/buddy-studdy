@@ -19,7 +19,14 @@ class MarkdownContentPolicyTest {
         """.trimIndent()
 
         assertThat(MarkdownContentPolicy.plainText(markdown))
-            .isEqualTo("Redis 점검 INFO memory를 실행합니다. 공식 문서를 확인합니다. SELECT * FROM metrics;")
+            .isEqualTo(
+                """
+                Redis 점검
+                - "INFO memory"를 실행합니다.
+                - "공식 문서" (https://redis.io/docs)를 확인합니다.
+                SELECT * FROM metrics;
+                """.trimIndent()
+            )
     }
 
     @Test

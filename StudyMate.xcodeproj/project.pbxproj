@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D40000000000000000000001 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = D40000000000000000000002 /* MarkdownUI */; };
 		110000000000000000000101 /* StudyMateApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000001 /* StudyMateApp.swift */; };
 		110000000000000000000102 /* StudyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000002 /* StudyModels.swift */; };
 		110000000000000000000104 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000004 /* SettingsStore.swift */; };
@@ -420,6 +421,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D40000000000000000000001 /* MarkdownUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -976,6 +978,7 @@
 			);
 			name = StudyMateiOS;
 			packageProductDependencies = (
+				D40000000000000000000002 /* MarkdownUI */,
 			);
 			productName = StudyMate;
 			productReference = 120000000000000000000020 /* StudyMate.app */;
@@ -1025,6 +1028,7 @@
 			mainGroup = 110000000000000000000060;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				D40000000000000000000003 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 110000000000000000000062 /* Products */;
@@ -1708,6 +1712,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		D40000000000000000000003 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui";
+			requirement = {
+				kind = exactVersion;
+				version = 2.4.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		D40000000000000000000002 /* MarkdownUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D40000000000000000000003 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
+			productName = MarkdownUI;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 	};
 	rootObject = 110000000000000000000030 /* Project object */;

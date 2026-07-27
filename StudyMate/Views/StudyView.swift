@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS)
+import MarkdownUI
+#endif
 
 struct StudyView: View {
     @EnvironmentObject private var appState: AppState
@@ -349,9 +352,25 @@ struct MarkdownMessageText: View {
     var fillsWidth = true
 
     var body: some View {
+        #if os(iOS)
+        MarkdownUI.Markdown(markdown)
+            .markdownImageProvider(.asset)
+            .environment(
+                \.openURL,
+                OpenURLAction { url in
+                    guard ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
+                        return .discarded
+                    }
+                    return .systemAction
+                }
+            )
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
+        #else
         Text(MarkdownContent.attributedString(markdown))
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
+        #endif
     }
 }
 
