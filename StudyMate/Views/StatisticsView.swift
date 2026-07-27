@@ -2492,12 +2492,11 @@ private struct StudyGrowthHierarchyMapCard: View {
                 return 1
             }
             let nextPath = path.union([node.studyId])
-            let weight = max(
-                children.reduce(CGFloat.zero) { partial, child in
-                    partial + leafWeight(child, path: nextPath)
-                },
-                1
-            )
+            var childWeight = CGFloat.zero
+            for child in children {
+                childWeight += leafWeight(child, path: nextPath)
+            }
+            let weight = max(childWeight, 1)
             weightCache[node.studyId] = weight
             return weight
         }
