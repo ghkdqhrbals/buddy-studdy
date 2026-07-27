@@ -6566,7 +6566,8 @@ private struct MobileHomeStudyOutlineRow: View {
     @State private var currentBranchID: Int?
     @State private var isExpanded = true
     @State private var isChangingBranch = false
-    @State private var branchContentOpacity = 1.0
+    @State private var isBranchContentRevealed = true
+    @State private var branchTransitionDirection = 1.0
     @State private var branchUnlockTask: Task<Void, Never>?
 
     private var currentBranch: BackendStudyRoom {
@@ -6610,7 +6611,6 @@ private struct MobileHomeStudyOutlineRow: View {
                         VStack(spacing: 0) {
                             branchRows
                         }
-                        .opacity(branchContentOpacity)
                         .allowsHitTesting(!isChangingBranch)
                     }
 
@@ -6661,7 +6661,7 @@ private struct MobileHomeStudyOutlineRow: View {
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .onChange(of: snapshot.searchQuery) {
             branchUnlockTask?.cancel()
-            branchContentOpacity = 1
+            isBranchContentRevealed = true
             isChangingBranch = false
             currentBranchID = nil
         }
@@ -6677,7 +6677,7 @@ private struct MobileHomeStudyOutlineRow: View {
 
         branchPathHeader
 
-        ForEach(visibleChildren) { room in
+        ForEach(Array(visibleChildren.enumerated()), id: \.element.id) { index, room in
             Divider()
                 .padding(.leading, 50)
 
@@ -6687,8 +6687,18 @@ private struct MobileHomeStudyOutlineRow: View {
                 onOpenChildren: snapshot.children(of: room.id).isEmpty
                     ? nil
                     : {
-                        replaceBranch(with: room.id)
+                        replaceBranch(with: room.id, direction: 1)
                     }
+            )
+            .opacity(isBranchContentRevealed ? 1 : 0.72)
+            .offset(
+                x: isBranchContentRevealed
+                    ? 0
+                    : branchTransitionDirection * 8
+            )
+            .animation(
+                .easeOut(duration: 0.18).delay(Double(index) * 0.025),
+                value: isBranchContentRevealed
             )
         }
         .allowsHitTesting(!isChangingBranch)
@@ -6704,7 +6714,7 @@ private struct MobileHomeStudyOutlineRow: View {
                 Button {
                     let parentID = snapshot.parentByID[currentBranch.id]
                         .flatMap(snapshot.room(id:))?.id
-                    replaceBranch(with: parentID)
+                    replaceBranch(with: parentID, direction: -1)
                 } label: {
                     Label(strings.moveToParentTopic, systemImage: "chevron.left")
                         .font(.caption.weight(.semibold))
@@ -6726,6 +6736,16 @@ private struct MobileHomeStudyOutlineRow: View {
         }
         .padding(.horizontal, 14)
         .frame(minHeight: 54)
+        .opacity(isBranchContentRevealed ? 1 : 0.78)
+        .offset(
+            x: isBranchContentRevealed
+                ? 0
+                : branchTransitionDirection * 6
+        )
+        .animation(
+            .easeOut(duration: 0.16),
+            value: isBranchContentRevealed
+        )
     }
 
     @ViewBuilder
@@ -6871,7 +6891,7 @@ private struct MobileHomeStudyOutlineRow: View {
         .accessibilityLabel("\(room.topic), \(strings.openStudyPage)")
     }
 
-    private func replaceBranch(with roomID: Int?) {
+    private func replaceBranch(with roomID: Int?, direction: Double) {
         guard !isChangingBranch else {
             return
         }
@@ -6881,29 +6901,27 @@ private struct MobileHomeStudyOutlineRow: View {
 
         if accessibilityReduceMotion {
             currentBranchID = roomID
+            isBranchContentRevealed = true
             isChangingBranch = false
             return
         }
 
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            branchTransitionDirection = direction
+            isBranchContentRevealed = false
+            currentBranchID = roomID
+        }
+
         branchUnlockTask = Task { @MainActor in
-            withAnimation(.easeOut(duration: 0.07)) {
-                branchContentOpacity = 0
-            }
-            try? await Task.sleep(for: .milliseconds(70))
+            try? await Task.sleep(for: .milliseconds(16))
             guard !Task.isCancelled else {
                 return
             }
 
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                currentBranchID = roomID
-            }
-
-            withAnimation(.easeIn(duration: 0.09)) {
-                branchContentOpacity = 1
-            }
-            try? await Task.sleep(for: .milliseconds(90))
+            isBranchContentRevealed = true
+            try? await Task.sleep(for: .milliseconds(240))
             guard !Task.isCancelled else {
                 return
             }
