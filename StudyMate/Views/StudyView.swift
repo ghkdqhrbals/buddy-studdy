@@ -76,8 +76,15 @@ struct StudyView: View {
         }
         .toolbar {
             #if os(iOS)
-            ToolbarItem(placement: .topBarTrailing) {
-                toolbarNewQuestionButton(strings: strings)
+            if #available(iOS 26.0, *) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    toolbarNewQuestionButton(strings: strings)
+                }
+                .sharedBackgroundVisibility(.hidden)
+            } else {
+                ToolbarItem(placement: .topBarTrailing) {
+                    toolbarNewQuestionButton(strings: strings)
+                }
             }
             #endif
         }
@@ -237,9 +244,13 @@ struct StudyView: View {
         Button {
             requestNewQuestion()
         } label: {
+            #if os(iOS)
+            MobileToolbarIconButtonLabel(systemName: "plus")
+            #else
             Image(systemName: "plus")
-                .font(.system(size: 17, weight: .semibold))
+            #endif
         }
+        .buttonStyle(.plain)
         .disabled(appState.isGeneratingQuestion)
         .opacity(appState.isGeneratingQuestion || hasReachedPendingQuestionLimit ? 0.55 : 1)
         .accessibilityLabel(appState.isGeneratingQuestion ? strings.fetchingQuestion : strings.newQuestion)
