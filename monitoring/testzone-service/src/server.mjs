@@ -171,16 +171,11 @@ export async function createTestZoneServer(dependencies = {}) {
         if (!store.state.projects.some((entry) => entry.id === body.projectId)) {
           return sendJson(response, 404, { error: "Project not found." });
         }
-        validateScript(body.code || "", {
-          maxVus: config.maxVus,
-          maxTargetRps: config.maxTargetRps,
-          maxDurationSeconds: config.maxDurationSeconds,
-        });
         const script = await store.createScript({
           projectId: body.projectId,
           name: requireText(body.name, "Script name"),
           description: String(body.description || "").slice(0, 500),
-          code: body.code,
+          code: typeof body.code === "string" ? body.code : "",
         });
         return sendJson(response, 201, { script });
       }
@@ -191,13 +186,6 @@ export async function createTestZoneServer(dependencies = {}) {
       }
       if (match && request.method === "PATCH") {
         const body = await readJson(request);
-        if (typeof body.code === "string") {
-          validateScript(body.code, {
-            maxVus: config.maxVus,
-            maxTargetRps: config.maxTargetRps,
-            maxDurationSeconds: config.maxDurationSeconds,
-          });
-        }
         const script = await store.updateScript(match[0], {
           name: body.name ? requireText(body.name, "Script name") : undefined,
           description: body.description,

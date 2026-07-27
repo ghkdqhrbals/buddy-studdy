@@ -227,7 +227,8 @@ export class TestZoneStore {
       createdAt: timestamp,
       updatedAt: timestamp,
     };
-    await fs.writeFile(this.scriptPath(script.id), input.code || DEFAULT_SCRIPT, { mode: 0o600 });
+    const code = typeof input.code === "string" ? input.code : DEFAULT_SCRIPT;
+    await fs.writeFile(this.scriptPath(script.id), code, { mode: 0o600 });
     this.state.scripts.unshift(script);
     await this.persist();
     return this.getScript(script.id);

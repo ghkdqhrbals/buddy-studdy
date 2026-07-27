@@ -268,6 +268,42 @@ test("script workspace supports create, edit, and delete", async (context) => {
   assert.equal(await app.store.getScript(created.script.id), null);
 });
 
+test("script workspace saves empty and invalid drafts without running validation", async (context) => {
+  const app = await fixture();
+  context.after(() => app.close());
+  const project = app.store.state.projects[0];
+
+  const createResponse = await fetch(`${app.baseUrl}/api/scripts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      projectId: project.id,
+      name: "draft.js",
+      description: "",
+      code: "",
+    }),
+  });
+  assert.equal(createResponse.status, 201);
+  const created = (await createResponse.json()).script;
+  assert.equal(created.code, "");
+
+  const invalidDraft = "export default function (";
+  const updateResponse = await fetch(`${app.baseUrl}/api/scripts/${created.id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: invalidDraft }),
+  });
+  assert.equal(updateResponse.status, 200);
+  assert.equal((await updateResponse.json()).script.code, invalidDraft);
+
+  const validationResponse = await fetch(`${app.baseUrl}/api/scripts/${created.id}/validate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: invalidDraft }),
+  });
+  assert.equal(validationResponse.status, 422);
+});
+
 test("run history preserves the script name after the script is deleted", async (context) => {
   const app = await fixture();
   context.after(() => app.close());
