@@ -2751,28 +2751,44 @@ struct AppStrings {
             "A parent combines measurable topics in its tree. Each topic is capped at 5 answers so one high-volume topic cannot dominate."
         )
     }
-    var growthHelpProfileTitle: String { text("학습 상태를 다섯 축으로 종합", "Five dimensions summarize study health") }
+    var growthHelpProfileTitle: String { text("완료율은 생성된 질문을 기준으로 계산", "Completion is based on generated questions") }
     var growthHelpProfileBody: String {
         text(
-            "성취도는 평균 점수, 도전도는 답한 질문의 평균 난이도, 완료율은 생성된 질문 중 답변을 마친 비율입니다. 학습 범위는 답한 학습 수, 학습 깊이는 답변이 도달한 가장 깊은 단계로 계산합니다.",
-            "Achievement is average score, challenge is average answered difficulty, and completion is answered questions divided by generated questions. Breadth counts studies answered, while depth reflects the deepest answered level."
+            "선택한 기간에 생성된 질문 중 답변과 채점을 마친 질문의 비율입니다. 아직 질문이 생성되지 않았다면 값을 표시하지 않습니다.",
+            "Completion is the share of questions generated in the selected period that were answered and graded. No value is shown until a question has been generated."
         )
     }
-    var studyProfile: String { text("학습 상태", "Study profile") }
-    var studyProfileDescription: String {
-        text("선택한 기간의 전체 하위 학습을 종합했습니다.", "Summarized across all child studies in the selected period.")
-    }
-    var achievement: String { text("성취도", "Achievement") }
-    var challenge: String { text("도전도", "Challenge") }
     var completion: String { text("완료율", "Completion") }
-    var studyBreadth: String { text("학습 범위", "Breadth") }
-    var studyDepth: String { text("학습 깊이", "Depth") }
-    var insufficientProfileData: String {
-        text("아직 종합할 학습 기록이 부족합니다.", "There is not enough study activity to build this profile yet.")
-    }
     var allStudies: String { text("전체 학습", "All studies") }
     var allStudiesDescription: String {
-        text("루트부터 가장 깊은 하위 학습까지 한 번에 보여줍니다.", "Shows every study from the root to the deepest child.")
+        text("필요할 때 펼쳐서 개별 통계를 확인합니다.", "Expand when you need individual study statistics.")
+    }
+    var studyGrowthSummary: String {
+        text("선택한 기간의 전체 하위 학습 요약", "Summary of all child studies in the selected period")
+    }
+    var measuredStudyShort: String { text("측정 학습", "Measured") }
+    func growthCompletionValue(_ value: Double?) -> String {
+        guard let value else {
+            return "—"
+        }
+        return "\(Int((min(max(value, 0), 1) * 100).rounded()))%"
+    }
+    var studyMap: String { text("학습 지도", "Learning map") }
+    var ability: String { text("실력", "Ability") }
+    var notMeasured: String { text("미측정", "Unmeasured") }
+    var studyMapFocusHint: String {
+        text("두 번 탭하면 이 학습의 하위 지도를 확대합니다.", "Double-tap to focus the map on this study.")
+    }
+    var attentionStudies: String { text("먼저 볼 학습", "Studies to check first") }
+    var attentionStudiesDescription: String {
+        text("복습이 필요하거나 아직 측정이 부족한 학습입니다.", "Studies that may need review or more activity.")
+    }
+    func needsMoreAnswers(_ count: Int) -> String {
+        text("성장 측정까지 답변 \(max(6 - count, 0))개", "\(max(6 - count, 0)) more answers to measure growth")
+    }
+    var partialMeasurement: String { text("일부 하위 학습 측정 중", "Some child studies are still measuring") }
+    func allStudiesCount(_ count: Int) -> String {
+        text("전체 학습 \(count)개", "All studies \(count)")
     }
     func growthPositionSummary(previous: String, current: String) -> String {
         text("이전 \(previous) → 현재 \(current)", "Previous \(previous) → Current \(current)")

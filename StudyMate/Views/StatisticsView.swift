@@ -1677,11 +1677,6 @@ private struct StudyGrowthOverviewRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Circle()
-                    .fill(root.activeForQuestions ? Color.green : Color.secondary.opacity(0.38))
-                    .frame(width: 9, height: 9)
-                    .accessibilityHidden(true)
-
                 Text(root.topic)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
@@ -1788,75 +1783,12 @@ private struct StudyGrowthRangeTrack: View {
     }
 }
 
-private struct StudyGrowthRootCard: View {
-    var root: BackendStudyGrowthRoot
-    var strings: AppStrings
-    var showsDisclosure = true
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 12) {
-                Circle()
-                    .fill(root.activeForQuestions ? Color.green : Color.secondary.opacity(0.38))
-                    .frame(width: 10, height: 10)
-                    .padding(.top, 7)
-                    .accessibilityHidden(true)
-
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(root.topic)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Text("\(strings.measuredTopics(root.measuredTopicCount, total: root.totalTopicCount)) · \(strings.growthAnswerCount(root.answerCount))")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-
-                Spacer(minLength: 8)
-
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text(StudyGrowthFormat.level(root.currentLevel))
-                        .font(.system(size: 27, weight: .bold, design: .rounded))
-                        .foregroundStyle(.primary)
-                        .monospacedDigit()
-
-                    StudyGrowthDeltaLabel(
-                        growth: root.growth,
-                        strings: strings
-                    )
-                }
-            }
-
-            HStack(spacing: 12) {
-                StudyGrowthSparkline(values: root.trend)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 42)
-
-                if showsDisclosure {
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-        }
-        .padding(18)
-        .background(Color(.secondarySystemBackground))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.secondary.opacity(0.08), lineWidth: 1)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .accessibilityElement(children: .combine)
-    }
-}
-
 private struct StudyGrowthDetailView: View {
     var growth: BackendStudyGrowth
     var rootStudyID: Int
     var strings: AppStrings
+
+    @State private var isShowingAllStudies = false
 
     private var root: BackendStudyGrowthRoot? {
         growth.roots.first { $0.studyId == rootStudyID }
@@ -1896,52 +1828,103 @@ private struct StudyGrowthDetailView: View {
         return result
     }
 
+    private var attentionNodes: [BackendStudyGrowthNode] {
+        nodes
+            .filter { $0.studyId != rootStudyID && attentionPriority($0) < 4 }
+            .sorted { lhs, rhs in
+                let lhsPriority = attentionPriority(lhs)
+                let rhsPriority = attentionPriority(rhs)
+                if lhsPriority != rhsPriority {
+                    return lhsPriority < rhsPriority
+                }
+                if lhs.growth != rhs.growth {
+                    return (lhs.growth ?? 0) < (rhs.growth ?? 0)
+                }
+                return nodeOrdering(lhs, rhs)
+            }
+            .prefix(3)
+            .map { $0 }
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
                 if let root {
-                    StudyGrowthRadarCard(profile: root.profile, strings: strings)
-
-                    StudyGrowthRootCard(
+                    StudyGrowthSummaryCard(
                         root: root,
-                        strings: strings,
-                        showsDisclosure: false
+                        strings: strings
+                    )
+                }
+
+                if let rootNode {
+                    StudyGrowthHierarchyMapCard(
+                        nodes: nodes,
+                        rootNode: rootNode,
+                        strings: strings
+                    )
+                }
+
+                if !attentionNodes.isEmpty {
+                    StudyGrowthAttentionCard(
+                        nodes: attentionNodes,
+                        strings: strings
                     )
                 }
 
                 VStack(spacing: 0) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(strings.allStudies)
-                            .font(.headline)
-                        Text(strings.allStudiesDescription)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.22)) {
+                            isShowingAllStudies.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(strings.allStudiesCount(orderedNodes.count))
+                                    .font(.headline)
+                                    .foregroundStyle(.primary)
+                                Text(strings.allStudiesDescription)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.leading)
+                            }
+
+                            Spacer(minLength: 8)
+
+                            Image(systemName: "chevron.down")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.secondary)
+                                .rotationEffect(.degrees(isShowingAllStudies ? 180 : 0))
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .buttonStyle(.plain)
                     .padding(16)
 
-                    Divider()
-                        .padding(.leading, 14)
+                    if isShowingAllStudies {
+                        Divider()
+                            .padding(.leading, 14)
 
-                    if orderedNodes.isEmpty {
-                        Text(strings.noGrowthRecordsDescription)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, minHeight: 92)
-                            .padding(.horizontal, 18)
-                    } else {
-                        ForEach(Array(orderedNodes.enumerated()), id: \.element.studyId) { index, node in
-                            if index > 0 {
-                                Divider()
-                                    .padding(.leading, 44 + CGFloat(min(node.depth, 5)) * 14)
-                            }
+                        if orderedNodes.isEmpty {
+                            Text(strings.noGrowthRecordsDescription)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, minHeight: 92)
+                                .padding(.horizontal, 18)
+                        } else {
+                            ForEach(Array(orderedNodes.enumerated()), id: \.element.studyId) { index, node in
+                                if index > 0 {
+                                    Divider()
+                                        .padding(.leading, 44 + CGFloat(min(node.depth, 5)) * 14)
+                                }
 
-                            NavigationLink {
-                                StudyGrowthNodeDetailView(node: node, strings: strings)
-                            } label: {
-                                StudyGrowthFlatNodeRow(node: node, strings: strings)
+                                NavigationLink {
+                                    StudyGrowthNodeDetailView(node: node, strings: strings)
+                                } label: {
+                                    StudyGrowthFlatNodeRow(node: node, strings: strings)
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -1963,6 +1946,22 @@ private struct StudyGrowthDetailView: View {
         #endif
     }
 
+    private func attentionPriority(_ node: BackendStudyGrowthNode) -> Int {
+        if let growth = node.growth, growth < -0.15 {
+            return 0
+        }
+        if node.currentLevel == nil {
+            return 1
+        }
+        if node.answerCount < 6 {
+            return 2
+        }
+        if node.measuredTopicCount < node.totalTopicCount {
+            return 3
+        }
+        return 4
+    }
+
     private func nodeOrdering(
         _ lhs: BackendStudyGrowthNode,
         _ rhs: BackendStudyGrowthNode
@@ -1974,6 +1973,469 @@ private struct StudyGrowthDetailView: View {
     }
 }
 
+private struct StudyGrowthSummaryCard: View {
+    var root: BackendStudyGrowthRoot
+    var strings: AppStrings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(root.topic)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+
+                    Text(strings.studyGrowthSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 8)
+
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(StudyGrowthFormat.level(root.currentLevel))
+                        .font(.system(size: 29, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+
+                    StudyGrowthDeltaLabel(growth: root.growth, strings: strings)
+                }
+            }
+
+            StudyGrowthSparkline(values: root.trend)
+                .frame(height: 48)
+
+            HStack(spacing: 8) {
+                StudyGrowthSummaryMetric(
+                    value: "\(root.measuredTopicCount)/\(root.totalTopicCount)",
+                    label: strings.measuredStudyShort
+                )
+                StudyGrowthSummaryMetric(
+                    value: strings.growthCompletionValue(root.profile?.completion),
+                    label: strings.completion
+                )
+                StudyGrowthSummaryMetric(
+                    value: "\(root.answerCount)",
+                    label: strings.answersUnit
+                )
+            }
+        }
+        .padding(18)
+        .background(Color(.secondarySystemBackground))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.secondary.opacity(0.08), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct StudyGrowthSummaryMetric: View {
+    var value: String
+    var label: String
+
+    var body: some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.subheadline.weight(.bold))
+                .monospacedDigit()
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(Color.secondary.opacity(0.09), in: RoundedRectangle(cornerRadius: 11))
+    }
+}
+
+private struct StudyGrowthMapItem: Identifiable {
+    var node: BackendStudyGrowthNode
+    var localDepth: Int
+    var start: CGFloat
+    var width: CGFloat
+
+    var id: Int { node.studyId }
+}
+
+private struct StudyGrowthHierarchyMapCard: View {
+    var nodes: [BackendStudyGrowthNode]
+    var rootNode: BackendStudyGrowthNode
+    var strings: AppStrings
+
+    @State private var focusedStudyID: Int?
+
+    private let rowHeight: CGFloat = 44
+    private let rowSpacing: CGFloat = 5
+    private let depthRailWidth: CGFloat = 28
+
+    private var nodesByID: [Int: BackendStudyGrowthNode] {
+        Dictionary(uniqueKeysWithValues: nodes.map { ($0.studyId, $0) })
+    }
+
+    private var childrenByID: [Int: [BackendStudyGrowthNode]] {
+        Dictionary(grouping: nodes.filter { $0.parentStudyId != nil }) {
+            $0.parentStudyId ?? -1
+        }
+        .mapValues {
+            $0.sorted {
+                if $0.sortOrder != $1.sortOrder {
+                    return $0.sortOrder < $1.sortOrder
+                }
+                return $0.studyId < $1.studyId
+            }
+        }
+    }
+
+    private var focusNode: BackendStudyGrowthNode {
+        if let focusedStudyID, let node = nodesByID[focusedStudyID] {
+            return node
+        }
+        return rootNode
+    }
+
+    private var parentNode: BackendStudyGrowthNode? {
+        focusNode.parentStudyId.flatMap { nodesByID[$0] }
+    }
+
+    private var mapItems: [StudyGrowthMapItem] {
+        var result: [StudyGrowthMapItem] = []
+        var weightCache: [Int: CGFloat] = [:]
+
+        func leafWeight(_ node: BackendStudyGrowthNode, path: Set<Int>) -> CGFloat {
+            if let cached = weightCache[node.studyId] {
+                return cached
+            }
+            guard !path.contains(node.studyId) else {
+                return 1
+            }
+            let children = childrenByID[node.studyId] ?? []
+            guard !children.isEmpty else {
+                weightCache[node.studyId] = 1
+                return 1
+            }
+            let nextPath = path.union([node.studyId])
+            let weight = max(
+                children.reduce(CGFloat.zero) { partial, child in
+                    partial + leafWeight(child, path: nextPath)
+                },
+                1
+            )
+            weightCache[node.studyId] = weight
+            return weight
+        }
+
+        func append(
+            _ node: BackendStudyGrowthNode,
+            localDepth: Int,
+            start: CGFloat,
+            width: CGFloat,
+            path: Set<Int>
+        ) {
+            guard !path.contains(node.studyId) else {
+                return
+            }
+            result.append(
+                StudyGrowthMapItem(
+                    node: node,
+                    localDepth: localDepth,
+                    start: start,
+                    width: width
+                )
+            )
+
+            let children = childrenByID[node.studyId] ?? []
+            guard !children.isEmpty else {
+                return
+            }
+            let nextPath = path.union([node.studyId])
+            let totalWeight = max(
+                children.reduce(CGFloat.zero) {
+                    $0 + leafWeight($1, path: nextPath)
+                },
+                1
+            )
+            var nextStart = start
+            for child in children {
+                let childWidth = width * leafWeight(child, path: nextPath) / totalWeight
+                append(
+                    child,
+                    localDepth: localDepth + 1,
+                    start: nextStart,
+                    width: childWidth,
+                    path: nextPath
+                )
+                nextStart += childWidth
+            }
+        }
+
+        append(focusNode, localDepth: 0, start: 0, width: 1, path: [])
+        return result
+    }
+
+    private var visibleDepthCount: Int {
+        (mapItems.map(\.localDepth).max() ?? 0) + 1
+    }
+
+    private var mapHeight: CGFloat {
+        CGFloat(visibleDepthCount) * rowHeight
+            + CGFloat(max(visibleDepthCount - 1, 0)) * rowSpacing
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(strings.studyMap)
+                        .font(.headline)
+                    Text(focusNode.topic)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                NavigationLink {
+                    StudyGrowthNodeDetailView(node: focusNode, strings: strings)
+                } label: {
+                    Label(strings.details, systemImage: "arrow.up.right")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.borderless)
+            }
+
+            if let parentNode {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        focusedStudyID = parentNode.studyId
+                    }
+                } label: {
+                    Label(strings.moveToParentTopic, systemImage: "chevron.left")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            }
+
+            GeometryReader { proxy in
+                let mapWidth = max(proxy.size.width - depthRailWidth, 1)
+
+                ZStack(alignment: .topLeading) {
+                    ForEach(0..<visibleDepthCount, id: \.self) { depth in
+                        Text("\(focusNode.depth + depth + 1)")
+                            .font(.caption2.weight(.bold).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: depthRailWidth - 4, height: rowHeight)
+                            .offset(y: CGFloat(depth) * (rowHeight + rowSpacing))
+                            .accessibilityHidden(true)
+                    }
+
+                    ForEach(mapItems) { item in
+                        let itemWidth = max(mapWidth * item.width - 4, 2)
+
+                        Button {
+                            guard focusedStudyID != item.node.studyId else {
+                                return
+                            }
+                            withAnimation(.easeInOut(duration: 0.22)) {
+                                focusedStudyID = item.node.studyId
+                            }
+                        } label: {
+                            StudyGrowthMapNode(
+                                node: item.node,
+                                availableWidth: itemWidth,
+                                strings: strings
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .frame(width: itemWidth, height: rowHeight)
+                        .offset(
+                            x: depthRailWidth + mapWidth * item.start + 2,
+                            y: CGFloat(item.localDepth) * (rowHeight + rowSpacing)
+                        )
+                    }
+                }
+                .id(focusNode.studyId)
+                .transition(.opacity)
+            }
+            .frame(height: mapHeight)
+            .clipped()
+
+            HStack(spacing: 12) {
+                StudyGrowthMapLegend(color: .accentColor, title: strings.ability)
+                StudyGrowthMapLegend(color: .orange, title: strings.needsReview)
+                StudyGrowthMapLegend(color: .secondary.opacity(0.45), title: strings.notMeasured)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(18)
+        .background(Color(.secondarySystemBackground))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.secondary.opacity(0.08), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+private struct StudyGrowthMapNode: View {
+    var node: BackendStudyGrowthNode
+    var availableWidth: CGFloat
+    var strings: AppStrings
+
+    private var levelOpacity: Double {
+        guard let level = node.currentLevel else {
+            return 0.12
+        }
+        return 0.17 + min(max((level - 1) / 9, 0), 1) * 0.46
+    }
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(
+                    node.currentLevel == nil
+                        ? Color.secondary.opacity(0.12)
+                        : Color.accentColor.opacity(levelOpacity)
+                )
+
+            if availableWidth >= 48 {
+                Text(node.topic)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .padding(.horizontal, availableWidth >= 72 ? 10 : 6)
+            }
+
+            if let growth = node.growth, growth < -0.15 {
+                Rectangle()
+                    .fill(Color.orange)
+                    .frame(height: 3)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.primary.opacity(0.05), lineWidth: 1)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "\(node.topic), \(strings.currentAbility) \(StudyGrowthFormat.level(node.currentLevel)), \(StudyGrowthFormat.delta(node.growth))"
+        )
+        .accessibilityHint(strings.studyMapFocusHint)
+    }
+}
+
+private struct StudyGrowthMapLegend: View {
+    var color: Color
+    var title: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+            Text(title)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+    }
+}
+
+private struct StudyGrowthAttentionCard: View {
+    var nodes: [BackendStudyGrowthNode]
+    var strings: AppStrings
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(strings.attentionStudies)
+                    .font(.headline)
+                Text(strings.attentionStudiesDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+
+            Divider()
+                .padding(.leading, 14)
+
+            ForEach(Array(nodes.enumerated()), id: \.element.studyId) { index, node in
+                if index > 0 {
+                    Divider()
+                        .padding(.leading, 42)
+                }
+
+                NavigationLink {
+                    StudyGrowthNodeDetailView(node: node, strings: strings)
+                } label: {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(node.topic)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            Text(attentionReason(node))
+                                .font(.caption)
+                                .foregroundStyle(attentionColor(node))
+                        }
+
+                        Spacer(minLength: 8)
+
+                        Text(StudyGrowthFormat.level(node.currentLevel))
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.primary)
+                            .monospacedDigit()
+
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 62)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .background(
+            Color(.secondarySystemBackground),
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.primary.opacity(0.04), lineWidth: 1)
+        }
+    }
+
+    private func attentionReason(_ node: BackendStudyGrowthNode) -> String {
+        if let growth = node.growth, growth < -0.15 {
+            return strings.needsReview
+        }
+        if node.currentLevel == nil {
+            return strings.notMeasured
+        }
+        if node.answerCount < 6 {
+            return strings.needsMoreAnswers(node.answerCount)
+        }
+        return strings.partialMeasurement
+    }
+
+    private func attentionColor(_ node: BackendStudyGrowthNode) -> Color {
+        if let growth = node.growth, growth < -0.15 {
+            return .orange
+        }
+        return .secondary
+    }
+}
+
 private struct StudyGrowthFlatNodeRow: View {
     var node: BackendStudyGrowthNode
     var strings: AppStrings
@@ -1982,10 +2444,6 @@ private struct StudyGrowthFlatNodeRow: View {
         HStack(spacing: 10) {
             Color.clear
                 .frame(width: CGFloat(min(node.depth, 5)) * 14)
-
-            Circle()
-                .fill(node.activeForQuestions ? Color.green : Color.secondary.opacity(0.38))
-                .frame(width: 9, height: 9)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(node.topic)
@@ -2016,166 +2474,6 @@ private struct StudyGrowthFlatNodeRow: View {
         .frame(minHeight: 70)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-    }
-}
-
-private struct StudyGrowthRadarMetric: Identifiable {
-    let id: String
-    let title: String
-    let value: Double?
-}
-
-private struct StudyGrowthRadarCard: View {
-    var profile: BackendStudyGrowthProfile?
-    var strings: AppStrings
-
-    private var metrics: [StudyGrowthRadarMetric] {
-        [
-            .init(id: "achievement", title: strings.achievement, value: profile?.achievement),
-            .init(id: "challenge", title: strings.challenge, value: profile?.challenge),
-            .init(id: "completion", title: strings.completion, value: profile?.completion),
-            .init(id: "breadth", title: strings.studyBreadth, value: profile?.breadth),
-            .init(id: "depth", title: strings.studyDepth, value: profile?.depth),
-        ]
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(strings.studyProfile)
-                .font(.headline)
-            Text(strings.studyProfileDescription)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            StudyGrowthRadarChart(metrics: metrics)
-                .frame(height: 260)
-
-            if metrics.allSatisfy({ $0.value == nil }) {
-                Text(strings.insufficientProfileData)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-            }
-        }
-        .padding(18)
-        .background(Color(.secondarySystemBackground))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.secondary.opacity(0.08), lineWidth: 1)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-    }
-}
-
-private struct StudyGrowthRadarChart: View {
-    var metrics: [StudyGrowthRadarMetric]
-
-    var body: some View {
-        GeometryReader { proxy in
-            let center = CGPoint(x: proxy.size.width / 2, y: proxy.size.height / 2)
-            let radius = min(proxy.size.width, proxy.size.height) * 0.31
-            let points = metrics.indices.map { point(index: $0, radius: radius, center: center) }
-
-            ZStack {
-                ForEach([0.25, 0.5, 0.75, 1.0], id: \.self) { scale in
-                    polygonPath(
-                        metrics.indices.map {
-                            point(index: $0, radius: radius * scale, center: center)
-                        }
-                    )
-                    .stroke(Color.secondary.opacity(scale == 1 ? 0.24 : 0.12), lineWidth: 1)
-                }
-
-                ForEach(metrics.indices, id: \.self) { index in
-                    Path { path in
-                        path.move(to: center)
-                        path.addLine(to: points[index])
-                    }
-                    .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
-                }
-
-                polygonPath(
-                    metrics.indices.map { index in
-                        point(
-                            index: index,
-                            radius: radius * clamped(metrics[index].value),
-                            center: center
-                        )
-                    }
-                )
-                .fill(Color.accentColor.opacity(0.20))
-
-                polygonPath(
-                    metrics.indices.map { index in
-                        point(
-                            index: index,
-                            radius: radius * clamped(metrics[index].value),
-                            center: center
-                        )
-                    }
-                )
-                .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, lineJoin: .round))
-
-                ForEach(metrics.indices, id: \.self) { index in
-                    let valuePoint = point(
-                        index: index,
-                        radius: radius * clamped(metrics[index].value),
-                        center: center
-                    )
-                    Circle()
-                        .fill(metrics[index].value == nil ? Color.secondary : Color.accentColor)
-                        .frame(width: 7, height: 7)
-                        .position(valuePoint)
-
-                    VStack(spacing: 2) {
-                        Text(metrics[index].title)
-                            .font(.caption2.weight(.semibold))
-                        Text(percent(metrics[index].value))
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                    .multilineTextAlignment(.center)
-                    .frame(width: 74)
-                    .position(point(index: index, radius: radius * 1.34, center: center))
-                }
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(
-                metrics.map { "\($0.title) \(percent($0.value))" }.joined(separator: ", ")
-            )
-        }
-    }
-
-    private func point(index: Int, radius: CGFloat, center: CGPoint) -> CGPoint {
-        let angle = -CGFloat.pi / 2 + CGFloat(index) * (2 * CGFloat.pi / CGFloat(metrics.count))
-        return CGPoint(
-            x: center.x + cos(angle) * radius,
-            y: center.y + sin(angle) * radius
-        )
-    }
-
-    private func polygonPath(_ points: [CGPoint]) -> Path {
-        Path { path in
-            guard let first = points.first else {
-                return
-            }
-            path.move(to: first)
-            for point in points.dropFirst() {
-                path.addLine(to: point)
-            }
-            path.closeSubpath()
-        }
-    }
-
-    private func clamped(_ value: Double?) -> CGFloat {
-        CGFloat(min(max(value ?? 0, 0), 1))
-    }
-
-    private func percent(_ value: Double?) -> String {
-        guard let value else {
-            return "—"
-        }
-        return "\(Int((clamped(value) * 100).rounded()))%"
     }
 }
 

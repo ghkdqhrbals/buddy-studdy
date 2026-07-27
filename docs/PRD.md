@@ -78,14 +78,14 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 6. Before sign-in, the tab uses a subdued sample summary to explain topic progress and keeps the login invitation as a consistent bottom action.
 7. Growth-topic labels wrap to show their full value instead of being truncated with an ellipsis.
 8. Growth is presented root-study first. Each root card summarizes its full subtree with current 1-10 ability, period growth, measured-topic coverage, answer count, and a compact trend.
-9. Opening a root shows a five-axis radar summary first, then a single depth-indented list containing every study in that root tree. Each topic row opens its own trend detail.
+9. Opening a root shows a compact subtree summary followed by a statistics-only hierarchy map. Each depth occupies one numbered row, node width reflects its branch share, blue intensity reflects ability, orange marks review candidates, and gray marks unmeasured studies. Tapping a node focuses its branch, with an explicit parent action and separate detail action.
 10. Growth compares non-overlapping previous and recent answer windows of three to five graded answers. A topic needs at least six answers before a delta is claimed; otherwise it is shown as measuring.
 11. Parent growth includes its subtree and caps each measured node's weight so one high-volume topic cannot dominate the result.
-12. Question activation remains green. Positive growth uses the app accent color, decline uses orange, and insufficient or stable data uses secondary gray.
+12. Statistics do not expose question-activation state. Ability uses the app accent color, decline uses orange, and insufficient or stable data uses secondary gray.
 13. Growth supports recent 30-day, 90-day, and one-year periods, with 90 days as the default.
 14. The root-study overview uses one shared 1–10 ability axis with previous and current markers so all studies can be compared at a glance.
 15. A `?` beside Growth by Study explains ability estimation, non-overlapping answer windows, minimum sample size, subtree aggregation, and capped topic weighting in plain language.
-16. The radar summarizes achievement, answered-question challenge, generated-question completion, answered-topic breadth, and deepest answered tree level. These values are calculated by the backend for the selected period rather than inferred from whichever record page is loaded on-device.
+16. The root summary includes measured-study coverage, generated-question completion, answer count, current ability, growth, and trend. The hierarchy map is followed by up to three studies that need review or more measurement; the complete depth-indented list stays collapsed until requested.
 
 ### Settings
 
