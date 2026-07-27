@@ -2225,6 +2225,8 @@ struct AppStrings {
         )
     }
     var refreshRecommendations: String { text("다시 추천", "Refresh suggestions") }
+    var selectAll: String { text("전체 선택", "Select all") }
+    var deselectAll: String { text("선택 해제", "Clear") }
     var addTopicManually: String { text("직접 추가", "Add manually") }
     var recommendedTopicsEmpty: String {
         text("새 추천을 만들지 못했습니다. 다시 시도하거나 직접 추가해 주세요.", "No new suggestions were available. Retry or add one manually.")
@@ -2242,6 +2244,21 @@ struct AppStrings {
     }
     var duplicateStudyTopic: String { text("이미 트리에 있는 주제입니다.", "This topic already exists in the tree.") }
     var addStudyTopicFailed: String { text("하위 학습을 추가하지 못했습니다.", "Could not add the sub-study.") }
+    func addSelectedSubstudies(_ count: Int) -> String {
+        text("선택한 \(count)개 추가", "Add \(count) selected")
+    }
+    func sharedDifficultyDescription(_ count: Int) -> String {
+        text(
+            "선택한 \(count)개 학습에 같은 숫자가 적용됩니다.",
+            "The same number applies to all \(count) selected studies."
+        )
+    }
+    func partialSubstudyAddFailure(added: Int, failed: Int) -> String {
+        text(
+            "\(added)개를 추가했고 \(failed)개는 추가하지 못했습니다. 선택된 주제를 다시 시도해 주세요.",
+            "Added \(added). \(failed) could not be added; retry the selected topics."
+        )
+    }
     var deleteStudy: String { text("학습 삭제", "Delete Study") }
     var openQuestions: String { text("질문 열기", "Open Questions") }
     func monthlyQuotaExceededMessage(serverMessage: String, resetAt: Date) -> String {

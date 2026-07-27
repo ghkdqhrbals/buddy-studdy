@@ -4139,31 +4139,78 @@ final class AppState: ObservableObject {
         customPrompt: String,
         openAIModel: String
     ) async -> Bool {
-        let raw = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else {
-            return false
-        }
-        let topicKey = Self.normalizedCategoryText(for: raw)
-        guard !backendStudyRooms.contains(where: {
-            Self.normalizedCategoryText(for: $0.topic) == topicKey
-        }) else {
-            return false
-        }
-
-        let category = StudyCategory(
-            title: raw,
+        let addedTopics = await addChildStudyCategories(
+            [title],
+            parentStudyID: parentStudyID,
             difficulty: difficulty,
             customPrompt: customPrompt,
             openAIModel: openAIModel
         )
-        let sortOrder = childStudyRooms(parentStudyID: parentStudyID).count
-        return await createBackendStudyTopicIfPossible(
-            topic: category.normalizedTitle,
-            difficulty: category.difficulty,
-            parentStudyID: parentStudyID,
-            sortOrder: sortOrder,
-            activeForQuestions: true
+        return !addedTopics.isEmpty
+    }
+
+    @discardableResult
+    func addChildStudyCategories(
+        _ titles: [String],
+        parentStudyID: Int,
+        difficulty: Difficulty,
+        customPrompt: String,
+        openAIModel: String
+    ) async -> [String] {
+        var existingTopicKeys = Set(
+            backendStudyRooms.map { Self.normalizedCategoryText(for: $0.topic) }
         )
+        var candidates: [StudyCategory] = []
+
+        for title in titles {
+            let raw = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !raw.isEmpty else {
+                continue
+            }
+            let topicKey = Self.normalizedCategoryText(for: raw)
+            guard existingTopicKeys.insert(topicKey).inserted else {
+                continue
+            }
+            candidates.append(
+                StudyCategory(
+                    title: raw,
+                    difficulty: difficulty,
+                    customPrompt: customPrompt,
+                    openAIModel: openAIModel
+                )
+            )
+        }
+
+        guard !candidates.isEmpty,
+              let registration = await backendRegistrationForOpenAIRequests(
+                reason: "create-study-topics"
+              ) else {
+            return []
+        }
+
+        var addedTopics: [String] = []
+        var sortOrder = childStudyRooms(parentStudyID: parentStudyID).count
+        for category in candidates {
+            let saved = await createBackendStudyTopicIfPossible(
+                topic: category.normalizedTitle,
+                difficulty: category.difficulty,
+                parentStudyID: parentStudyID,
+                sortOrder: sortOrder,
+                activeForQuestions: true,
+                registration: registration,
+                refreshAfterCreation: false
+            )
+            guard saved else {
+                continue
+            }
+            addedTopics.append(category.normalizedTitle)
+            sortOrder += 1
+        }
+
+        if !addedTopics.isEmpty {
+            await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+        }
+        return addedTopics
     }
 
     func prepareStudyRoom(categoryID: String?) async {
@@ -6791,9 +6838,18 @@ final class AppState: ObservableObject {
         difficulty: Difficulty,
         parentStudyID: Int,
         sortOrder: Int,
-        activeForQuestions: Bool
+        activeForQuestions: Bool,
+        registration providedRegistration: RemotePushRegistration? = nil,
+        refreshAfterCreation: Bool = true
     ) async -> Bool {
-        guard let registration = await backendRegistrationForOpenAIRequests(reason: "create-study-topic") else {
+        let registration: RemotePushRegistration
+        if let providedRegistration {
+            registration = providedRegistration
+        } else if let resolvedRegistration = await backendRegistrationForOpenAIRequests(
+            reason: "create-study-topic"
+        ) {
+            registration = resolvedRegistration
+        } else {
             log(.warning, "백엔드 등록이 없어 하위 학습 주제 추가를 건너뛰었습니다. topic=\(topic)")
             return false
         }
@@ -6811,7 +6867,9 @@ final class AppState: ObservableObject {
                 .info,
                 "백엔드 하위 학습 주제를 추가했습니다. id=\(room.id), parentStudyId=\(parentStudyID), topic=\(room.topic)"
             )
-            await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+            if refreshAfterCreation {
+                await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+            }
             return true
         } catch {
             if handleAppError(
@@ -6825,7 +6883,8 @@ final class AppState: ObservableObject {
                         difficulty: difficulty,
                         parentStudyID: parentStudyID,
                         sortOrder: sortOrder,
-                        activeForQuestions: activeForQuestions
+                        activeForQuestions: activeForQuestions,
+                        refreshAfterCreation: true
                     )
                 }
             ) {

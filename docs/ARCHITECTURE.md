@@ -118,6 +118,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - Public-question visibility is persisted through `PATCH /api/v1/profile` as `allowPublicQuestions`; it is independent of protected-page access policy.
   - Per-topic question generation exposes its category-scoped in-flight state so only the selected study room renders the inline loading message.
   - The compact My Studies outline swaps branch data in one view, then reveals only the new row contents with a subtle direction-aware stagger. Row frames, dividers, and the card remain outside the animation, and content never becomes fully transparent or overlaps. Root expand/collapse stays immediate.
+  - Recommended child topics support multi-selection. iOS filters duplicate normalized names, creates the selected topics in stable order through the existing single-topic use case, and refreshes the study tree once after the batch so topic creation remains separate from question generation.
   - The notification inbox calls `POST /api/v1/notifications/read-all` and updates loaded rows through `NotificationStateStore` only after the backend mutation succeeds.
 
 ## Markdown Message Contract
@@ -164,7 +165,7 @@ My Studies root
 -> recursive tree layout renders circular nodes with restrained level colors
 -> the user can switch orientation, pinch or button zoom, drag nodes, and reset saved positions
 -> selecting a node opens the root-owned question page with that node as the manual topic
--> plus opens GPT recommendations first, with manual entry as an explicit alternative
+-> plus opens GPT recommendations first, supports selecting multiple suggestions with one shared difficulty, and keeps manual entry as an explicit alternative
 -> adding a root calls POST /api/v1/studies
 -> adding a child calls POST /api/v1/studies/{parentStudyId}/topics with sortOrder, topic, level, and initial question activation
 -> child creation cannot call OpenAI and cannot reserve monthly question quota

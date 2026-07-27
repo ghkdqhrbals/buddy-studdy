@@ -2465,6 +2465,11 @@ private struct StudyTopicAddRequest: Identifiable {
     var mode: StudyTopicAddMode
 }
 
+private struct StudyTopicAddOutcome {
+    var addedTopics: [String]
+    var failedTopics: [String]
+}
+
 private struct MobileStudyTreeView: View {
     @EnvironmentObject private var appState: AppState
     @State private var addRequest: StudyTopicAddRequest?
@@ -2724,9 +2729,9 @@ private struct MobileStudyTreeView: View {
                 parent: request.parent,
                 strings: strings,
                 initialMode: request.mode
-            ) { title, difficulty in
-                await addChildStudyTopic(
-                    title,
+            ) { titles, difficulty in
+                await addChildStudyTopics(
+                    titles,
                     difficulty: difficulty,
                     parent: request.parent
                 )
@@ -2976,27 +2981,32 @@ private struct MobileStudyTreeView: View {
         endSelection()
     }
 
-    private func addChildStudyTopic(
-        _ title: String,
+    private func addChildStudyTopics(
+        _ titles: [String],
         difficulty: Difficulty,
         parent: BackendStudyRoom
-    ) async -> Bool {
+    ) async -> StudyTopicAddOutcome {
         let existingRoomIDs = Set(snapshot?.placements.map(\.id) ?? [])
-        let saved = await appState.addChildStudyCategory(
-            title,
+        let addedTopics = await appState.addChildStudyCategories(
+            titles,
             parentStudyID: parent.id,
             difficulty: difficulty,
             customPrompt: StudySettings.defaultCustomPrompt,
             openAIModel: parent.openAIModel
         )
-        guard saved, let updatedSnapshot = snapshot else {
-            return saved
+        let addedTopicSet = Set(addedTopics)
+        let outcome = StudyTopicAddOutcome(
+            addedTopics: addedTopics,
+            failedTopics: titles.filter { !addedTopicSet.contains($0) }
+        )
+        guard !addedTopics.isEmpty, let updatedSnapshot = snapshot else {
+            return outcome
         }
 
         let updatedRoomIDs = Set(updatedSnapshot.placements.map(\.id))
         let newRoomIDs = updatedRoomIDs.subtracting(existingRoomIDs)
         guard !newRoomIDs.isEmpty else {
-            return true
+            return outcome
         }
         nodeOffsets = StudyTreeCanvasPolicy.offsetsPlacingNewNodesWithoutSameLevelOverlap(
             newRoomIDs: newRoomIDs,
@@ -3005,7 +3015,7 @@ private struct MobileStudyTreeView: View {
             nodeSize: StudyTreeLayoutSnapshot.nodeSize
         )
         saveNodeOffsets()
-        return true
+        return outcome
     }
 
     private func endSelection() {
@@ -3568,13 +3578,13 @@ private struct StudyTopicAddSheet: View {
     var parent: BackendStudyRoom
     var strings: AppStrings
     var initialMode: StudyTopicAddMode
-    var onAdd: (String, Difficulty) async -> Bool
+    var onAdd: ([String], Difficulty) async -> StudyTopicAddOutcome
 
     @State private var suggestions: [String] = []
     @State private var difficultyLevel: Double
     @State private var manualTopic = ""
     @State private var mode: StudyTopicAddMode
-    @State private var selectedSuggestion: String?
+    @State private var selectedSuggestions = Set<String>()
     @State private var isLoading = true
     @State private var isSaving = false
     @State private var inlineMessage: String?
@@ -3583,7 +3593,7 @@ private struct StudyTopicAddSheet: View {
         parent: BackendStudyRoom,
         strings: AppStrings,
         initialMode: StudyTopicAddMode,
-        onAdd: @escaping (String, Difficulty) async -> Bool
+        onAdd: @escaping ([String], Difficulty) async -> StudyTopicAddOutcome
     ) {
         self.parent = parent
         self.strings = strings
@@ -3627,8 +3637,8 @@ private struct StudyTopicAddSheet: View {
                                 .textInputAutocapitalization(.sentences)
                                 .submitLabel(.done)
                                 .onSubmit {
-                                    guard !selectedTopic.isEmpty, !isSaving else { return }
-                                    add(selectedTopic)
+                                    guard !selectedTopics.isEmpty, !isSaving else { return }
+                                    add(selectedTopics)
                                 }
                             .padding(.horizontal, 14)
                             .frame(height: 50)
@@ -3652,6 +3662,12 @@ private struct StudyTopicAddSheet: View {
                                 .foregroundStyle(.secondary)
                         }
                         Slider(value: $difficultyLevel, in: 1...10, step: 1)
+                        if mode == .recommendation, selectedTopics.count > 1 {
+                            Text(strings.sharedDifficultyDescription(selectedTopics.count))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
 
                     if let inlineMessage {
@@ -3663,14 +3679,18 @@ private struct StudyTopicAddSheet: View {
                     }
 
                     Button {
-                        add(selectedTopic)
+                        add(selectedTopics)
                     } label: {
                         HStack(spacing: 8) {
                             if isSaving {
                                 ProgressView()
                                     .tint(.white)
                             }
-                            Text(strings.addSubstudy)
+                            Text(
+                                mode == .recommendation
+                                    ? strings.addSelectedSubstudies(selectedTopics.count)
+                                    : strings.addSubstudy
+                            )
                                 .fontWeight(.semibold)
                         }
                         .frame(maxWidth: .infinity)
@@ -3678,7 +3698,7 @@ private struct StudyTopicAddSheet: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .buttonBorderShape(.roundedRectangle(radius: 8))
-                    .disabled(selectedTopic.isEmpty || isSaving)
+                    .disabled(selectedTopics.isEmpty || isSaving)
                 }
                 .padding(20)
             }
@@ -3712,12 +3732,13 @@ private struct StudyTopicAddSheet: View {
         min(max(Int(difficultyLevel.rounded()), 1), 10)
     }
 
-    private var selectedTopic: String {
+    private var selectedTopics: [String] {
         switch mode {
         case .recommendation:
-            return selectedSuggestion ?? ""
+            return suggestions.filter(selectedSuggestions.contains)
         case .manual:
-            return manualTopic.trimmingCharacters(in: .whitespacesAndNewlines)
+            let topic = manualTopic.trimmingCharacters(in: .whitespacesAndNewlines)
+            return topic.isEmpty ? [] : [topic]
         }
     }
 
@@ -3747,10 +3768,31 @@ private struct StudyTopicAddSheet: View {
         } else {
             VStack(spacing: 8) {
                 HStack {
-                    Text(strings.recommendSubstudy)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(strings.recommendSubstudy)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(strings.selectedTopicCount(selectedSuggestions.count))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                     Spacer()
+                    Button(
+                        selectedSuggestions.count == suggestions.count
+                            ? strings.deselectAll
+                            : strings.selectAll
+                    ) {
+                        if selectedSuggestions.count == suggestions.count {
+                            selectedSuggestions.removeAll()
+                        } else {
+                            selectedSuggestions = Set(suggestions)
+                        }
+                        inlineMessage = nil
+                    }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.plain)
+                    .disabled(isSaving)
+
                     Button {
                         Task { await loadSuggestions() }
                     } label: {
@@ -3770,9 +3812,13 @@ private struct StudyTopicAddSheet: View {
                     spacing: 8
                 ) {
                     ForEach(suggestions.prefix(10), id: \.self) { topic in
-                        let isSelected = selectedSuggestion == topic
+                        let isSelected = selectedSuggestions.contains(topic)
                         Button {
-                            selectedSuggestion = topic
+                            if isSelected {
+                                selectedSuggestions.remove(topic)
+                            } else {
+                                selectedSuggestions.insert(topic)
+                            }
                             inlineMessage = nil
                         } label: {
                             HStack(alignment: .top, spacing: 6) {
@@ -3808,6 +3854,7 @@ private struct StudyTopicAddSheet: View {
                             }
                         }
                         .buttonStyle(.plain)
+                        .disabled(isSaving)
                     }
                 }
             }
@@ -3817,23 +3864,39 @@ private struct StudyTopicAddSheet: View {
     private func loadSuggestions() async {
         isLoading = true
         inlineMessage = nil
-        suggestions = await appState.suggestChildStudyTopics(parentStudyID: parent.id)
-        selectedSuggestion = suggestions.first
+        let loadedSuggestions = await appState.suggestChildStudyTopics(parentStudyID: parent.id)
+        let retainedSelection = selectedSuggestions.intersection(loadedSuggestions)
+        suggestions = loadedSuggestions
+        selectedSuggestions = retainedSelection.isEmpty
+            ? Set(loadedSuggestions.prefix(1))
+            : retainedSelection
         isLoading = false
     }
 
-    private func add(_ rawTopic: String) {
-        let topic = rawTopic.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !topic.isEmpty else {
+    private func add(_ rawTopics: [String]) {
+        var normalizedTopics = Set<String>()
+        let topics = rawTopics.compactMap { rawTopic -> String? in
+            let topic = rawTopic.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !topic.isEmpty else {
+                return nil
+            }
+            let normalized = normalizedTopic(topic)
+            guard normalizedTopics.insert(normalized).inserted else {
+                return nil
+            }
+            return topic
+        }
+        guard !topics.isEmpty else {
             return
         }
-        let normalized = topic.lowercased().filter { !$0.isWhitespace }
-        let alreadyExists = appState.backendStudyRooms.contains {
-            $0.topic.trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased()
-                .filter { !$0.isWhitespace } == normalized
+
+        let existingTopics = Set(
+            appState.backendStudyRooms.map { normalizedTopic($0.topic) }
+        )
+        let newTopics = topics.filter {
+            !existingTopics.contains(normalizedTopic($0))
         }
-        guard !alreadyExists else {
+        guard !newTopics.isEmpty else {
             inlineMessage = strings.duplicateStudyTopic
             return
         }
@@ -3841,14 +3904,31 @@ private struct StudyTopicAddSheet: View {
         isSaving = true
         inlineMessage = nil
         Task {
-            let saved = await onAdd(topic, Difficulty(level: resolvedDifficulty))
+            let outcome = await onAdd(
+                newTopics,
+                Difficulty(level: resolvedDifficulty)
+            )
             isSaving = false
-            if saved {
+            if outcome.failedTopics.isEmpty {
                 dismiss()
             } else {
-                inlineMessage = strings.addStudyTopicFailed
+                suggestions.removeAll {
+                    outcome.addedTopics.contains($0)
+                }
+                selectedSuggestions = Set(outcome.failedTopics)
+                inlineMessage = strings.partialSubstudyAddFailure(
+                    added: outcome.addedTopics.count,
+                    failed: outcome.failedTopics.count
+                )
             }
         }
+    }
+
+    private func normalizedTopic(_ topic: String) -> String {
+        topic
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .filter { !$0.isWhitespace }
     }
 }
 

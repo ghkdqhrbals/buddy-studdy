@@ -891,6 +891,31 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testChildTopicRecommendationsSupportOrderedBatchSelection() throws {
+        let root = try repositoryRoot()
+        let viewFile = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let viewContent = try String(contentsOf: viewFile, encoding: .utf8)
+        let appStateContent = try String(contentsOf: appStateFile, encoding: .utf8)
+
+        XCTAssertTrue(
+            viewContent.contains("@State private var selectedSuggestions = Set<String>()"),
+            "Recommended child topics should keep a multi-selection set instead of one selected suggestion."
+        )
+        XCTAssertTrue(
+            viewContent.contains("return suggestions.filter(selectedSuggestions.contains)"),
+            "Selected recommendations should preserve the server-provided display order when submitted."
+        )
+        XCTAssertTrue(
+            appStateContent.contains("func addChildStudyCategories("),
+            "AppState should expose one batch-oriented child-topic action for the recommendation sheet."
+        )
+        XCTAssertTrue(
+            appStateContent.contains("refreshAfterCreation: false"),
+            "A recommendation batch should defer per-topic tree refreshes until all selected topics have been attempted."
+        )
+    }
+
     func testProtectedMobileTabsNavigateToDedicatedLoginPage() throws {
         let root = try repositoryRoot()
         let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
