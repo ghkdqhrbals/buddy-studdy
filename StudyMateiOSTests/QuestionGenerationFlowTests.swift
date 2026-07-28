@@ -206,6 +206,121 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertEqual(process.events.first?.status, .completed)
     }
 
+    func testSigningOutStopsAnswerGradingProcessPolling() async {
+        let suiteName = "QuestionGenerationFlowTests-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            XCTFail("Unable to create isolated user defaults.")
+            return
+        }
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+
+        let pollCounter = LockedRequestCounter()
+        let client = makeClient { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/api/v1/records/record-sign-out/answer"):
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "id": "record-sign-out",
+                      "question": {
+                        "question": "How should polling react to sign-out?",
+                        "expectedAnswerHint": null,
+                        "createdAt": "2026-07-28T00:00:00Z"
+                      },
+                      "answer": "It should stop.",
+                      "topic": "Concurrency",
+                      "difficulty": 5,
+                      "gradingRequestId": "grading-sign-out",
+                      "gradingStatus": "QUEUED"
+                    }
+                    """
+                )
+            case ("GET", "/api/v1/answer-processes/grading-sign-out"):
+                pollCounter.increment()
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "correlationId": "grading-sign-out",
+                      "recordId": "record-sign-out",
+                      "status": "QUEUED",
+                      "terminal": false,
+                      "pollAfterMs": 1000,
+                      "events": [],
+                      "errorMessage": null,
+                      "updatedAt": "2026-07-28T00:00:00Z"
+                    }
+                    """
+                )
+            case ("POST", "/api/v1/auth/logout"):
+                return Self.response(for: request, statusCode: 200, body: "{}")
+            default:
+                XCTFail("Unexpected request: \(request.httpMethod ?? "-") \(request.url?.path ?? "-")")
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        let store = SettingsStore(
+            defaults: defaults,
+            recordDatabaseURL: databaseURL,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveIsCommunitySignedIn(true)
+        store.saveRemotePushRegistration(
+            RemotePushRegistration(
+                deviceID: "device-1",
+                clientSecret: "client-secret",
+                apnsToken: "",
+                accessToken: "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJkZXZpY2VfaWQiOiJkZXZpY2UtMSIsImlzX2Fub255bW91cyI6ZmFsc2UsInN0YXR1cyI6IkFDVElWRSJ9.",
+                accessTokenExpiresAt: Date().addingTimeInterval(3_600)
+            )
+        )
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        let record = StudyRecord(
+            id: "record-sign-out",
+            question: QuestionItem(
+                question: "How should polling react to sign-out?",
+                expectedAnswerHint: nil,
+                createdAt: Date()
+            ),
+            topic: "Concurrency",
+            difficulty: .intermediate
+        )
+
+        let gradingTask = Task { @MainActor in
+            await appState.gradeRecord(record, answer: "It should stop.")
+        }
+        for _ in 0..<100 where pollCounter.value == 0 {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(
+            pollCounter.value,
+            1,
+            "Polling did not start. error=\(appState.errorMessage ?? "nil"), status=\(appState.statusMessage ?? "nil")"
+        )
+
+        appState.signOutFromCommunity()
+        await gradingTask.value
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertEqual(
+            pollCounter.value,
+            1,
+            "Polling continued or never started. error=\(appState.errorMessage ?? "nil"), status=\(appState.statusMessage ?? "nil")"
+        )
+        XCTAssertFalse(appState.isGradingAnswer)
+        XCTAssertNil(appState.answerGradingStatusMessage)
+    }
+
     func testJapaneseLanguageUsesJapaneseLocaleAndBackendCode() {
         XCTAssertEqual(AppLanguage.japanese.locale.identifier, "ja_JP")
         XCTAssertEqual(AppLanguage.japanese.backendCode, "ja")
@@ -457,4 +572,23 @@ private final class QuestionGenerationURLProtocol: URLProtocol {
     }
 
     override func stopLoading() {}
+}
+
+private final class LockedRequestCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+        return count
+    }
+
+    func increment() {
+        lock.lock()
+        count += 1
+        lock.unlock()
+    }
 }

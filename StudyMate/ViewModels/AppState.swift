@@ -618,6 +618,8 @@ final class AppState: ObservableObject {
     private var answerDraftSaveTask: Task<Void, Never>?
     private var protectedPageAccessRefreshTask: Task<Void, Never>?
     private var questionGenerationPollingTask: Task<Void, Never>?
+    private var answerGradingPollingTask: Task<StudyRecord, Error>?
+    private var answerGradingPollingID: UUID?
     private var maintenancePollingTask: Task<Void, Never>?
     private var pendingTermsRequirementRetry: (() async -> Void)?
     private var pendingAnswerDraft: PendingAnswerDraft?
@@ -1452,6 +1454,7 @@ final class AppState: ObservableObject {
             let answerDraftSaveTask = answerDraftSaveTask
             let protectedPageAccessRefreshTask = protectedPageAccessRefreshTask
             let questionGenerationPollingTask = questionGenerationPollingTask
+            let answerGradingPollingTask = answerGradingPollingTask
             let maintenancePollingTask = maintenancePollingTask
             let appNotificationEventCancellables = appNotificationEventCancellables
 
@@ -1460,6 +1463,7 @@ final class AppState: ObservableObject {
             answerDraftSaveTask?.cancel()
             protectedPageAccessRefreshTask?.cancel()
             questionGenerationPollingTask?.cancel()
+            answerGradingPollingTask?.cancel()
             maintenancePollingTask?.cancel()
             appNotificationEventCancellables.forEach { $0.cancel() }
         }
@@ -3302,9 +3306,6 @@ final class AppState: ObservableObject {
             draftSettings = draftSettings.withQuestionPrivacy(false)
             localStudySettingsUseCase.saveSettings(settings)
             savedSettings = normalizedSettings(settings)
-            Task {
-                await syncRemotePushScheduleIfPossible(reason: "community-logout")
-            }
         }
         statusMessage = strings.communitySignedOut
         logAuthTrace("community_sign_out_local_complete", reason: "manual", deduplicate: false)
@@ -3312,6 +3313,7 @@ final class AppState: ObservableObject {
 
     private func resetCommunitySignInState() {
         logAuthTrace("community_session_reset_start", reason: "resetCommunitySignInState", deduplicate: false)
+        cancelAnswerGradingPolling(reason: "community-session-reset")
         setCommunitySessionSignedIn(false)
         isRequiredTermsGatePresented = false
         pendingTermsRequirementRetry = nil
@@ -4914,6 +4916,7 @@ final class AppState: ObservableObject {
             errorMessage = "답변을 입력하세요."
             return
         }
+        let sessionGeneration = communitySessionState.generation
 
         isGradingAnswer = true
         answerGradingStatusMessage = strings.gradingQueued
@@ -4946,9 +4949,10 @@ final class AppState: ObservableObject {
                         fallback: settings.appLanguage
                     )
                 )
-                return try await awaitGradingResult(
+                return try await startAnswerGradingPolling(
                     queued,
-                    registration: registration
+                    registration: registration,
+                    sessionGeneration: sessionGeneration
                 )
             },
             onSuccess: { updatedRecord in
@@ -4956,6 +4960,10 @@ final class AppState: ObservableObject {
                 await syncRemotePushScheduleIfPossible(reason: "grade")
             },
             onFailure: { error in
+                guard !(error is CancellationError),
+                      isAnswerGradingSessionCurrent(sessionGeneration) else {
+                    return
+                }
                 handleOpenAIError(error)
                 statusMessage = nil
             },
@@ -6037,6 +6045,7 @@ final class AppState: ObservableObject {
             errorMessage = "답변을 입력하세요."
             return
         }
+        let sessionGeneration = communitySessionState.generation
 
         isGradingAnswer = true
         answerGradingStatusMessage = strings.gradingQueued
@@ -6077,9 +6086,10 @@ final class AppState: ObservableObject {
                         fallback: settings.appLanguage
                     )
                 )
-                return try await awaitGradingResult(
+                return try await startAnswerGradingPolling(
                     queued,
-                    registration: registration
+                    registration: registration,
+                    sessionGeneration: sessionGeneration
                 )
             },
             onSuccess: { updatedRecord in
@@ -6087,6 +6097,10 @@ final class AppState: ObservableObject {
                 await syncRemotePushScheduleIfPossible(reason: "grade")
             },
             onFailure: { error in
+                guard !(error is CancellationError),
+                      isAnswerGradingSessionCurrent(sessionGeneration) else {
+                    return
+                }
                 handleOpenAIError(error)
                 statusMessage = nil
             },
@@ -6139,6 +6153,7 @@ final class AppState: ObservableObject {
             errorMessage = "답변을 입력하세요."
             return
         }
+        let sessionGeneration = communitySessionState.generation
 
         isGradingAnswer = true
         answerGradingStatusMessage = strings.gradingQueued
@@ -6166,9 +6181,10 @@ final class AppState: ObservableObject {
                         fallback: settings.appLanguage
                     )
                 )
-                return try await awaitGradingResult(
+                return try await startAnswerGradingPolling(
                     queued,
-                    registration: registration
+                    registration: registration,
+                    sessionGeneration: sessionGeneration
                 )
             },
             onSuccess: { updatedRecord in
@@ -6177,6 +6193,10 @@ final class AppState: ObservableObject {
                 markCloudDataChanged()
             },
             onFailure: { error in
+                guard !(error is CancellationError),
+                      isAnswerGradingSessionCurrent(sessionGeneration) else {
+                    return
+                }
                 handleOpenAIError(error)
                 statusMessage = nil
             },
@@ -6187,10 +6207,42 @@ final class AppState: ObservableObject {
         )
     }
 
+    private func startAnswerGradingPolling(
+        _ queuedRecord: StudyRecord,
+        registration: RemotePushRegistration,
+        sessionGeneration: UInt64
+    ) async throws -> StudyRecord {
+        answerGradingPollingTask?.cancel()
+        let pollingID = UUID()
+        let task = Task { @MainActor [weak self] () throws -> StudyRecord in
+            guard let self else {
+                throw CancellationError()
+            }
+            return try await awaitGradingResult(
+                queuedRecord,
+                registration: registration,
+                sessionGeneration: sessionGeneration
+            )
+        }
+        answerGradingPollingID = pollingID
+        answerGradingPollingTask = task
+        defer {
+            if answerGradingPollingID == pollingID {
+                answerGradingPollingID = nil
+                answerGradingPollingTask = nil
+            }
+        }
+        return try await task.value
+    }
+
     private func awaitGradingResult(
         _ queuedRecord: StudyRecord,
-        registration: RemotePushRegistration
+        registration: RemotePushRegistration,
+        sessionGeneration: UInt64
     ) async throws -> StudyRecord {
+        guard isAnswerGradingSessionCurrent(sessionGeneration) else {
+            throw CancellationError()
+        }
         if queuedRecord.gradingResult != nil {
             return queuedRecord
         }
@@ -6207,13 +6259,17 @@ final class AppState: ObservableObject {
         statusMessage = queuedMessage
         answerGradingStatusMessage = queuedMessage
 
-        while !Task.isCancelled {
+        while !Task.isCancelled && isAnswerGradingSessionCurrent(sessionGeneration) {
             do {
                 let process = try await recordsUseCase.fetchAnswerGradingProcess(
                     registration: registration,
                     correlationID: correlationID,
                     afterEventID: cursor
                 )
+                try Task.checkCancellation()
+                guard isAnswerGradingSessionCurrent(sessionGeneration) else {
+                    throw CancellationError()
+                }
                 consecutiveTransportFailures = 0
                 for event in process.events {
                     cursor = max(cursor, event.id)
@@ -6240,6 +6296,9 @@ final class AppState: ObservableObject {
                     )
                     switch event.status {
                     case .completed:
+                        guard isAnswerGradingSessionCurrent(sessionGeneration) else {
+                            throw CancellationError()
+                        }
                         return try await recordsUseCase.fetchRecord(
                             registration: registration,
                             recordID: queuedRecord.id,
@@ -6260,6 +6319,9 @@ final class AppState: ObservableObject {
                         since: displayedAt
                     )
                     if process.status == .completed {
+                        guard isAnswerGradingSessionCurrent(sessionGeneration) else {
+                            throw CancellationError()
+                        }
                         return try await recordsUseCase.fetchRecord(
                             registration: registration,
                             recordID: process.recordID,
@@ -6290,6 +6352,23 @@ final class AppState: ObservableObject {
         }
 
         throw CancellationError()
+    }
+
+    private func cancelAnswerGradingPolling(reason: String) {
+        guard answerGradingPollingTask != nil else {
+            return
+        }
+        answerGradingPollingTask?.cancel()
+        answerGradingPollingTask = nil
+        answerGradingPollingID = nil
+        isGradingAnswer = false
+        answerGradingStatusMessage = nil
+        statusMessage = nil
+        log(.info, "로그인 세션 변경으로 채점 상태 조회를 중단했습니다. reason=\(reason)")
+    }
+
+    private func isAnswerGradingSessionCurrent(_ generation: UInt64) -> Bool {
+        communitySessionState.generation == generation
     }
 
     private func sleepForAnswerGrading(milliseconds: Int) async {
@@ -7872,6 +7951,7 @@ final class AppState: ObservableObject {
 
     private func clearStoredBackendAccessToken() {
         logAuthTrace("backend_access_token_clear_start", reason: "clearStoredBackendAccessToken", deduplicate: false)
+        cancelAnswerGradingPolling(reason: "backend-access-token-cleared")
         guard var registration = storedBackendIdentityUseCase.loadRegistration(),
               registration.accessToken != nil || registration.accessTokenExpiresAt != nil else {
             logAuthTrace("backend_access_token_clear_skipped", reason: "clearStoredBackendAccessToken", deduplicate: false)
