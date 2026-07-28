@@ -112,7 +112,8 @@ private struct StudyMateiOSRootContent: View {
 
     var body: some View {
         Group {
-            if forcesMaintenancePreview || appState.isServiceUnderMaintenance {
+            if (forcesMaintenancePreview || appState.isServiceUnderMaintenance)
+                && !appState.isMaintenanceBypassedForDeveloper {
                 ServiceMaintenanceView()
             } else {
                 MobileRootView()
@@ -124,6 +125,9 @@ private struct StudyMateiOSRootContent: View {
 
 private struct ServiceMaintenanceView: View {
     @EnvironmentObject private var appState: AppState
+    @State private var hiddenTapCount = 0
+    @State private var hiddenTapWindowStartedAt: Date?
+    @State private var showsDeveloperCodeEntry = false
 
     var body: some View {
         let strings = appState.strings
@@ -141,18 +145,23 @@ private struct ServiceMaintenanceView: View {
                     .frame(width: 88, height: 88)
                     .accessibilityHidden(true)
 
-                Text(availability.title?.nonEmpty ?? strings.maintenanceDefaultTitle)
-                    .font(.system(size: 25, weight: .bold))
-                    .multilineTextAlignment(.center)
-                    .padding(.top, 28)
+                VStack(spacing: 12) {
+                    Text(availability.title?.nonEmpty ?? strings.maintenanceDefaultTitle)
+                        .font(.system(size: 25, weight: .bold))
+                        .multilineTextAlignment(.center)
 
-                Text(availability.message?.nonEmpty ?? strings.maintenanceDefaultMessage)
-                    .font(.system(size: 15))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(4)
-                    .padding(.top, 12)
-                    .frame(maxWidth: 330)
+                    Text(availability.message?.nonEmpty ?? strings.maintenanceDefaultMessage)
+                        .font(.system(size: 15))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(4)
+                        .frame(maxWidth: 330)
+                }
+                .padding(.top, 28)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    registerHiddenDeveloperTap()
+                }
 
                 if let endsAt = availability.endsAt {
                     VStack(spacing: 6) {
@@ -203,6 +212,136 @@ private struct ServiceMaintenanceView: View {
                 .padding(.horizontal, 24)
                 .padding(.bottom, 30)
             }
+        }
+        .sheet(isPresented: $showsDeveloperCodeEntry) {
+            MaintenanceDeveloperAccessSheet()
+                .environmentObject(appState)
+        }
+    }
+
+    private func registerHiddenDeveloperTap() {
+        let now = Date()
+        if let startedAt = hiddenTapWindowStartedAt,
+           now.timeIntervalSince(startedAt) <= 2 {
+            hiddenTapCount += 1
+        } else {
+            hiddenTapWindowStartedAt = now
+            hiddenTapCount = 1
+        }
+
+        guard hiddenTapCount >= 5 else {
+            return
+        }
+        hiddenTapCount = 0
+        hiddenTapWindowStartedAt = nil
+        showsDeveloperCodeEntry = true
+    }
+}
+
+private struct MaintenanceDeveloperAccessSheet: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    @State private var code = ""
+    @State private var hasSubmitted = false
+    @FocusState private var isCodeFieldFocused: Bool
+
+    var body: some View {
+        let strings = appState.strings
+
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 20) {
+                Image(systemName: "wrench.and.screwdriver.fill")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .accessibilityHidden(true)
+
+                Text(strings.maintenanceDeveloperAccessHelp)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                TextField(
+                    strings.promotionCodePlaceholder,
+                    text: $code
+                )
+                .font(.system(.body, design: .monospaced))
+                .textInputAutocapitalization(.characters)
+                .keyboardType(.asciiCapable)
+                .autocorrectionDisabled()
+                .textContentType(.oneTimeCode)
+                .submitLabel(.done)
+                .focused($isCodeFieldFocused)
+                .onChange(of: code) { _, newValue in
+                    let formatted = DeveloperPromotionCodeVerifier.formattedInput(newValue)
+                    if formatted != code {
+                        code = formatted
+                    }
+                    hasSubmitted = false
+                }
+                .onSubmit {
+                    submitCode()
+                }
+                .padding(.horizontal, 14)
+                .frame(height: 50)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                if hasSubmitted,
+                   let message = appState.promotionCodeMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(appState.hasPromotionCodeError ? .red : .green)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Button {
+                    submitCode()
+                } label: {
+                    HStack(spacing: 8) {
+                        if appState.isRedeemingPromotionCode {
+                            ProgressView()
+                                .tint(.white)
+                        }
+                        Text(strings.applyPromotionCode)
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(code.count != 19 || appState.isRedeemingPromotionCode)
+
+                Spacer(minLength: 0)
+            }
+            .padding(24)
+            .navigationTitle(strings.maintenanceDeveloperAccessTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(strings.cancel) {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.height(340)])
+        .presentationDragIndicator(.visible)
+        .onAppear {
+            isCodeFieldFocused = true
+        }
+    }
+
+    private func submitCode() {
+        guard code.count == 19, !appState.isRedeemingPromotionCode else {
+            return
+        }
+        hasSubmitted = true
+        Task {
+            guard await appState.redeemDeveloperPromotionCode(code) else {
+                return
+            }
+            await appState.bypassMaintenanceForDeveloper()
+            dismiss()
         }
     }
 }

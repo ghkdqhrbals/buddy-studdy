@@ -9,6 +9,28 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertFalse(
             DeveloperPromotionCodeVerifier.isDeveloperCode("NOPE-NOPE-NOPE-NOPE")
         )
+        XCTAssertEqual(
+            DeveloperPromotionCodeVerifier.formattedInput("qaqaqaqaqaqaqaqa"),
+            "QAQA-QAQA-QAQA-QAQA"
+        )
+    }
+
+    func testMaintenanceScreenProvidesHiddenDeveloperBypass() throws {
+        let root = try repositoryRoot()
+        let appFile = root.appendingPathComponent("StudyMate/StudyMateiOSApp.swift")
+        let stateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let appContent = try String(contentsOf: appFile, encoding: .utf8)
+        let stateContent = try String(contentsOf: stateFile, encoding: .utf8)
+
+        XCTAssertTrue(appContent.contains("now.timeIntervalSince(startedAt) <= 2"))
+        XCTAssertTrue(appContent.contains("guard hiddenTapCount >= 5"))
+        XCTAssertTrue(appContent.contains("MaintenanceDeveloperAccessSheet()"))
+        XCTAssertTrue(appContent.contains("await appState.bypassMaintenanceForDeveloper()"))
+        XCTAssertTrue(
+            stateContent.contains(
+                "isServiceUnderMaintenance && !isMaintenanceBypassedForDeveloper"
+            )
+        )
     }
 
     func testBackendMaintenanceErrorDoesNotReplaceMonitoringServiceStatus() {

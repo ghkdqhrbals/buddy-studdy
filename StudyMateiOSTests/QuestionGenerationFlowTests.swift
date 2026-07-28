@@ -33,9 +33,8 @@ final class QuestionGenerationFlowTests: XCTestCase {
             BackendAPIError(
                 code: "SERVICE_UNDER_MAINTENANCE",
                 numericCode: 903,
-                message: "Maintenance in progress",
                 debugDescription: nil,
-                reason: nil,
+                message: "Maintenance in progress",
                 requestID: nil,
                 metadata: nil
             )

@@ -25,6 +25,23 @@ enum DeveloperPromotionCodeVerifier {
                 difference | (bytes.0 ^ bytes.1)
             } == 0
     }
+
+    static func formattedInput(_ value: String) -> String {
+        let characters = value
+            .uppercased()
+            .filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
+            .prefix(16)
+        return stride(from: 0, to: characters.count, by: 4)
+            .map { offset in
+                let start = characters.index(characters.startIndex, offsetBy: offset)
+                let end = characters.index(
+                    start,
+                    offsetBy: min(4, characters.distance(from: start, to: characters.endIndex))
+                )
+                return String(characters[start..<end])
+            }
+            .joined(separator: "-")
+    }
 }
 
 private enum QuestionGenerationSkip: Error {
@@ -122,6 +139,7 @@ final class AppState: ObservableObject {
     @Published private(set) var questionQuotaNotice: String?
     @Published private(set) var serviceAvailability = BackendServiceAvailability.operational
     @Published private(set) var isCheckingServiceAvailability = false
+    @Published private(set) var isMaintenanceBypassedForDeveloper = false
     @Published private(set) var pendingQuestionLimitCategoryID: String?
     @Published private var backendRuntimeState = BackendRuntimeStateStore()
     @Published private var communitySessionState: CommunitySessionStateStore
@@ -1454,7 +1472,7 @@ final class AppState: ObservableObject {
 
         didStart = true
         await refreshServiceAvailability()
-        guard !isServiceUnderMaintenance else {
+        guard !isMaintenanceAccessBlocked else {
             return
         }
         guard hasCompletedOnboarding else {
@@ -1466,7 +1484,7 @@ final class AppState: ObservableObject {
     }
 
     private func completeStartupTasksIfNeeded() async {
-        guard !didCompleteStartupTasks, hasCompletedOnboarding, !isServiceUnderMaintenance else {
+        guard !didCompleteStartupTasks, hasCompletedOnboarding, !isMaintenanceAccessBlocked else {
             return
         }
         didCompleteStartupTasks = true
@@ -1491,7 +1509,7 @@ final class AppState: ObservableObject {
 
     func handleAppBecameActive() async {
         await refreshServiceAvailability()
-        guard !isServiceUnderMaintenance else {
+        guard !isMaintenanceAccessBlocked else {
             return
         }
         guard hasCompletedOnboarding else {
@@ -1523,6 +1541,19 @@ final class AppState: ObservableObject {
         serviceAvailability.isUnderMaintenance
     }
 
+    private var isMaintenanceAccessBlocked: Bool {
+        isServiceUnderMaintenance && !isMaintenanceBypassedForDeveloper
+    }
+
+    func bypassMaintenanceForDeveloper() async {
+        guard canAccessDeveloperOptions else {
+            return
+        }
+        isMaintenanceBypassedForDeveloper = true
+        log(.info, "개발자 코드로 현재 점검 화면을 우회했습니다.")
+        await completeStartupTasksIfNeeded()
+    }
+
     func refreshServiceAvailability() async {
         guard !isCheckingServiceAvailability else {
             return
@@ -1551,6 +1582,9 @@ final class AppState: ObservableObject {
         source: String
     ) {
         serviceAvailability = availability
+        if !availability.isUnderMaintenance {
+            isMaintenanceBypassedForDeveloper = false
+        }
         log(
             .info,
             "서비스 상태를 반영했습니다. status=\(availability.status), source=\(source)"
@@ -1585,7 +1619,7 @@ final class AppState: ObservableObject {
     @discardableResult
     func handleBackgroundRefresh() async -> Bool {
         await refreshServiceAvailability()
-        guard !isServiceUnderMaintenance else {
+        guard !isMaintenanceAccessBlocked else {
             return false
         }
         guard hasCompletedOnboarding else {

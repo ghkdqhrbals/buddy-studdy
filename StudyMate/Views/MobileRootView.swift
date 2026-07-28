@@ -8544,7 +8544,7 @@ private struct MobileSettingsView: View {
                             .monospaced()
                             .submitLabel(.done)
                             .onChange(of: promotionCode) { _, newValue in
-                                let formatted = formattedPromotionCode(newValue)
+                                let formatted = DeveloperPromotionCodeVerifier.formattedInput(newValue)
                                 if promotionCode != formatted {
                                     promotionCode = formatted
                                 }
@@ -8723,22 +8723,6 @@ private struct MobileSettingsView: View {
         }
     }
 
-    private func formattedPromotionCode(_ value: String) -> String {
-        let characters = value
-            .uppercased()
-            .filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
-            .prefix(16)
-        return stride(from: 0, to: characters.count, by: 4)
-            .map { offset in
-                let start = characters.index(characters.startIndex, offsetBy: offset)
-                let end = characters.index(
-                    start,
-                    offsetBy: min(4, characters.distance(from: start, to: characters.endIndex))
-                )
-                return String(characters[start..<end])
-            }
-            .joined(separator: "-")
-    }
 }
 
 private struct MobileAccountSettingsView: View {

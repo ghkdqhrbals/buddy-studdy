@@ -2529,6 +2529,16 @@ struct AppStrings {
     }
     var maintenanceRetry: String { text("다시 확인", "Check again", "もう一度確認") }
     var maintenanceChecking: String { text("확인 중", "Checking", "確認中") }
+    var maintenanceDeveloperAccessTitle: String {
+        text("개발자 접근", "Developer Access", "開発者アクセス")
+    }
+    var maintenanceDeveloperAccessHelp: String {
+        text(
+            "개발자 코드를 입력하면 현재 점검 화면을 닫고 앱에 접근할 수 있습니다.",
+            "Enter the developer code to dismiss the current maintenance screen and access the app.",
+            "開発者コードを入力すると、現在のメンテナンス画面を閉じてアプリにアクセスできます。"
+        )
+    }
     var studyTree: String { text("학습 트리", "Study Tree") }
     var activateTopics: String { text("주제 활성화", "Activate topics") }
     var deleteTopics: String { text("주제 삭제", "Delete topics") }
