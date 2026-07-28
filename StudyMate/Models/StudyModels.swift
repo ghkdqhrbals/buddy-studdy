@@ -3561,10 +3561,6 @@ struct AppStrings {
     var feedbackPromptBody: String {
         text("불편했던 점이나 필요한 기능을 짧게 알려주세요.", "Tell us briefly what felt difficult or what you need.")
     }
-    var feedbackCategory: String { text("분류", "Category") }
-    var feedbackCategoryGeneral: String { text("일반", "General") }
-    var feedbackCategoryBug: String { text("오류", "Bug") }
-    var feedbackCategoryFeature: String { text("기능 제안", "Feature request") }
     var feedbackMessage: String { text("내용", "Message") }
     var feedbackMessagePlaceholder: String {
         text("어떤 점을 개선하면 좋을지 알려주세요.", "Describe what we can improve.")

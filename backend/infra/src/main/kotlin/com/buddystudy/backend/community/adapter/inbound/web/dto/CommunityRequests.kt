@@ -16,6 +16,7 @@ data class CommunityCommentRequest(
 )
 
 data class SubmitFeedbackRequest(
-    var category: String = "GENERAL",
-    @field:NotBlank var message: String = "",
+    @field:NotBlank
+    @field:Size(min = 2, max = 1_000)
+    var content: String = "",
 )

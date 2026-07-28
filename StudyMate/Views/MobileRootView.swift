@@ -7487,58 +7487,29 @@ private struct MobileFeedbackPromptRow: View {
     }
 }
 
-private enum MobileFeedbackCategory: String, CaseIterable, Identifiable {
-    case general = "GENERAL"
-    case bug = "BUG"
-    case feature = "FEATURE"
-
-    var id: String { rawValue }
-
-    func title(strings: AppStrings) -> String {
-        switch self {
-        case .general:
-            return strings.feedbackCategoryGeneral
-        case .bug:
-            return strings.feedbackCategoryBug
-        case .feature:
-            return strings.feedbackCategoryFeature
-        }
-    }
-}
-
 private struct MobileFeedbackView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
-    @State private var category: MobileFeedbackCategory = .general
-    @State private var message = ""
+    @State private var content = ""
     @State private var isSubmitting = false
 
     private var strings: AppStrings { appState.strings }
-    private var normalizedMessage: String {
-        message.trimmingCharacters(in: .whitespacesAndNewlines)
+    private var normalizedContent: String {
+        content.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var body: some View {
         Form {
-            Section(strings.feedbackCategory) {
-                Picker(strings.feedbackCategory, selection: $category) {
-                    ForEach(MobileFeedbackCategory.allCases) { category in
-                        Text(category.title(strings: strings)).tag(category)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-
             Section(strings.feedbackMessage) {
                 ZStack(alignment: .topLeading) {
-                    if normalizedMessage.isEmpty {
+                    if normalizedContent.isEmpty {
                         Text(strings.feedbackMessagePlaceholder)
                             .foregroundStyle(.tertiary)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 8)
                             .allowsHitTesting(false)
                     }
-                    TextEditor(text: $message)
+                    TextEditor(text: $content)
                         .frame(minHeight: 180)
                 }
             }
@@ -7558,22 +7529,19 @@ private struct MobileFeedbackView: View {
                         Text(strings.feedbackSubmit)
                     }
                 }
-                .disabled(isSubmitting || normalizedMessage.count < 2)
+                .disabled(isSubmitting || normalizedContent.count < 2)
             }
         }
     }
 
     private func submit() {
-        let submittedMessage = normalizedMessage
-        guard submittedMessage.count >= 2 else {
+        let submittedContent = normalizedContent
+        guard submittedContent.count >= 2 else {
             return
         }
         isSubmitting = true
         Task {
-            let submitted = await appState.submitAppFeedback(
-                category: category.rawValue,
-                message: submittedMessage
-            )
+            let submitted = await appState.submitAppFeedback(content: submittedContent)
             isSubmitting = false
             if submitted {
                 dismiss()
@@ -8383,7 +8351,6 @@ private struct MobileSettingsView: View {
     @EnvironmentObject private var appState: AppState
     @State private var promotionCode = ""
 
-    private static let feedbackURL = URL(string: "mailto:ghkdqhrbals@gmail.com?subject=BuddyStudy%20Feedback")!
     private static let kofiTipURL = URL(string: "https://ko-fi.com/gyumin")!
 
     var body: some View {
@@ -8639,7 +8606,11 @@ private struct MobileSettingsView: View {
                 }
 
                 HStack(spacing: 14) {
-                    Link(strings.feedbackLink, destination: Self.feedbackURL)
+                    NavigationLink {
+                        MobileFeedbackView()
+                    } label: {
+                        Text(strings.feedbackLink)
+                    }
 
                     Text("·")
                         .foregroundStyle(.tertiary)

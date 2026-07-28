@@ -6,6 +6,7 @@ import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.community.application.port.outbound.QuestionCommentPort
+import com.buddystudy.backend.community.application.port.outbound.FeedbackPort
 import com.buddystudy.backend.community.application.port.outbound.QuestionLikePort
 import com.buddystudy.backend.community.application.port.outbound.ReportPort
 import com.buddystudy.backend.community.application.service.CommunityService
@@ -16,6 +17,7 @@ import com.buddystudy.backend.notification.application.port.inbound.PublishNotif
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.community.domain.entity.QuestionCommentEntity
+import com.buddystudy.community.domain.entity.FeedbackEntity
 import com.buddystudy.community.domain.entity.QuestionLikeEntity
 import com.buddystudy.community.domain.entity.ReportEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
@@ -44,6 +46,7 @@ class CommunityServiceTest {
         likes = likes,
         comments = FakeQuestionCommentPort(),
         reports = FakeReportPort(),
+        feedbacks = FakeFeedbackPort(),
         reactions = FakeReactionPublisher(),
         notifications = notificationPublisher,
         languageDetector = PassthroughLanguageDetector(),
@@ -278,6 +281,10 @@ class CommunityServiceTest {
 
     private class FakeReportPort : ReportPort {
         override suspend fun save(entity: ReportEntity): ReportEntity = entity
+    }
+
+    private class FakeFeedbackPort : FeedbackPort {
+        override suspend fun save(entity: FeedbackEntity): FeedbackEntity = entity
     }
 
     private class FakeReactionPublisher : PublicQuestionReactionPublishPort {

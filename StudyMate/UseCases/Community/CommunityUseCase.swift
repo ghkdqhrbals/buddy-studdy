@@ -142,13 +142,11 @@ struct CommunityUseCase {
 
     func submitFeedback(
         registration: RemotePushRegistration,
-        category: String,
-        message: String
+        content: String
     ) async throws {
         try await repository.submitFeedback(
             registration: registration,
-            category: category,
-            message: message
+            content: content
         )
     }
 

@@ -9,6 +9,11 @@ import java.time.Instant
 
 data class ReportQuestionResponse(val ok: Boolean = true)
 
+data class FeedbackResponse(
+    val id: Long,
+    val createdAt: Instant,
+)
+
 data class CommunityQuestionResponse(
     val id: String,
     val question: String,

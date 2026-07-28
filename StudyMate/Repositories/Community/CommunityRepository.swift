@@ -70,8 +70,7 @@ protocol CommunityRepository {
 
     func submitFeedback(
         registration: RemotePushRegistration,
-        category: String,
-        message: String
+        content: String
     ) async throws
 
     func setQuestionLike(

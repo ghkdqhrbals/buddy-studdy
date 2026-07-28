@@ -1,5 +1,6 @@
 package com.buddystudy.backend.community.application.port.outbound
 
+import com.buddystudy.community.domain.entity.FeedbackEntity
 import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.community.domain.entity.QuestionLikeEntity
 import com.buddystudy.community.domain.entity.ReportEntity
@@ -22,4 +23,8 @@ interface QuestionCommentPort {
 
 interface ReportPort {
     suspend fun save(entity: ReportEntity): ReportEntity
+}
+
+interface FeedbackPort {
+    suspend fun save(entity: FeedbackEntity): FeedbackEntity
 }

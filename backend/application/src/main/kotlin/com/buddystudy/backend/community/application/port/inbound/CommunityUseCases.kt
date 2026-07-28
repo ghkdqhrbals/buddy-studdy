@@ -7,6 +7,7 @@ import com.buddystudy.backend.community.application.model.CommunityCommentsRespo
 import com.buddystudy.backend.community.application.model.CommunityLikeResponse
 import com.buddystudy.backend.community.application.model.CommunityQuestionResponse
 import com.buddystudy.backend.community.application.model.CommunityQuestionsResponse
+import com.buddystudy.backend.community.application.model.FeedbackResponse
 
 interface CommunityUseCase {
     suspend fun getPublicQuestions(
@@ -48,5 +49,5 @@ interface CommunityUseCase {
     ): CommunityCommentResponse
     suspend fun deleteComment(principal: Principal, id: Long, commentId: Long): CommunityCommentDeleteResponse
     suspend fun reportQuestion(principal: Principal, id: Long, command: ReportQuestionCommand)
-    suspend fun submitFeedback(principal: Principal?, deviceId: String?, command: SubmitFeedbackCommand)
+    suspend fun submitFeedback(principal: Principal?, deviceId: String?, command: SubmitFeedbackCommand): FeedbackResponse
 }

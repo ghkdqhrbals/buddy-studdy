@@ -6,6 +6,7 @@ import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.community.application.port.inbound.CommunityUseCase
 import com.buddystudy.backend.community.application.port.outbound.QuestionCommentPort
+import com.buddystudy.backend.community.application.port.outbound.FeedbackPort
 import com.buddystudy.backend.community.application.port.outbound.QuestionLikePort
 import com.buddystudy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
 import com.buddystudy.backend.community.application.port.outbound.PublicQuestionViewLocalization
@@ -24,6 +25,8 @@ import com.buddystudy.backend.localization.application.service.ContentLocalizati
 import com.buddystudy.community.domain.entity.QuestionLikeEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.community.domain.entity.ReportEntity
+import com.buddystudy.community.domain.entity.FeedbackEntity
+import com.buddystudy.backend.community.application.model.FeedbackResponse
 import com.buddystudy.backend.community.application.model.CommunityCommentResponse
 import com.buddystudy.backend.community.application.model.CommunityCommentDeleteResponse
 import com.buddystudy.backend.community.application.model.CommunityCommentsResponse
@@ -58,6 +61,7 @@ class CommunityService(
     private val likes: QuestionLikePort,
     private val comments: QuestionCommentPort,
     private val reports: ReportPort,
+    private val feedbacks: FeedbackPort,
     private val reactions: PublicQuestionReactionPublishPort,
     private val notifications: PublishNotificationUseCase,
     private val languageDetector: ContentLanguageDetectionPort,
@@ -287,23 +291,27 @@ class CommunityService(
     }
 
     @Transactional
-    override suspend fun submitFeedback(principal: Principal?, deviceId: String?, command: SubmitFeedbackCommand) {
-        val normalizedMessage = command.message.trim()
-        if (normalizedMessage.length !in 2..1000) {
+    override suspend fun submitFeedback(
+        principal: Principal?,
+        deviceId: String?,
+        command: SubmitFeedbackCommand,
+    ): FeedbackResponse {
+        val normalizedContent = command.content.trim()
+        if (normalizedContent.length !in 2..1000) {
             throw ApiException(
                 HttpStatus.UNPROCESSABLE_ENTITY,
                 ApiErrorCode.VALIDATION_ERROR,
                 "Feedback must contain between 2 and 1000 characters.",
             )
         }
-        reports.save(
-            ReportEntity(
-                reporterDeviceId = principal?.deviceId ?: deviceId?.trim()?.takeIf { it.isNotEmpty() },
-                reporterUserId = principal?.userId,
-                reason = "APP_FEEDBACK:${command.category.trim().uppercase().take(40).ifBlank { "GENERAL" }}",
-                message = normalizedMessage,
-            )
+        val saved = feedbacks.save(
+            FeedbackEntity(
+                userId = principal?.userId,
+                deviceId = principal?.deviceId ?: deviceId?.trim()?.takeIf { it.isNotEmpty() },
+                content = normalizedContent,
+            ),
         )
+        return FeedbackResponse(saved.id, saved.createdAt)
     }
 
     private suspend fun communityContext(questions: List<QuestionEntity>, principal: Principal?): CommunityContext {

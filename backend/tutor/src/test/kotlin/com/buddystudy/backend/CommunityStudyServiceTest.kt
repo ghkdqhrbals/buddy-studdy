@@ -10,9 +10,11 @@ import com.buddystudy.backend.auth.adapter.outbound.persistence.UserRepository
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.community.adapter.outbound.persistence.QuestionCommentRepository
+import com.buddystudy.backend.community.adapter.outbound.persistence.FeedbackRepository
 import com.buddystudy.backend.community.adapter.outbound.persistence.QuestionLikeRepository
 import com.buddystudy.backend.community.adapter.outbound.persistence.ReportRepository
 import com.buddystudy.backend.community.application.port.inbound.ReportQuestionCommand
+import com.buddystudy.backend.community.application.port.inbound.SubmitFeedbackCommand
 import com.buddystudy.backend.community.application.service.CommunityService
 import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionRepository
 import com.buddystudy.backend.study.adapter.outbound.persistence.StudyRepository
@@ -55,6 +57,7 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var likes: QuestionLikeRepository
     @Autowired lateinit var comments: QuestionCommentRepository
     @Autowired lateinit var reports: ReportRepository
+    @Autowired lateinit var feedbacks: FeedbackRepository
 
     private lateinit var author: UserEntity
     private lateinit var viewer: UserEntity
@@ -65,6 +68,7 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
     @BeforeEach
     fun setUp() = runBlocking {
         listOf(
+            "feedbacks",
             "reports",
             "question_comments",
             "question_likes",
@@ -262,6 +266,23 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
         assertThat(result.reporterUserId).isEqualTo(viewer.id)
         assertThat(result.reason).isEqualTo("spam")
         assertThat(result.message).isEqualTo("bad")
+    }
+
+    @Test
+    fun `feedback is trimmed and stored independently from reports`(): Unit = runBlocking {
+        val response = community.submitFeedback(
+            principal = principal,
+            deviceId = null,
+            command = SubmitFeedbackCommand("  검색 결과 정렬을 개선해 주세요.  "),
+        )
+
+        val feedback = feedbacks.findAll().single()
+        assertThat(response.id).isEqualTo(feedback.id)
+        assertThat(response.createdAt).isEqualTo(feedback.createdAt)
+        assertThat(feedback.userId).isEqualTo(viewer.id)
+        assertThat(feedback.deviceId).isEqualTo(principal.deviceId)
+        assertThat(feedback.content).isEqualTo("검색 결과 정렬을 개선해 주세요.")
+        assertThat(reports.count()).isZero()
     }
 
     @Test

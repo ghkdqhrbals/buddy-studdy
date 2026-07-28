@@ -233,7 +233,8 @@ Public community feed
 -> app maps server questions into typed MobileHomeFeedItem values
 -> locally scheduled placement may insert non-question items such as feedback prompts
 -> feedback prompt opens a dedicated form
--> POST /api/v1/feedback stores an APP_FEEDBACK report without requiring a question row
+-> POST /api/v1/feedback accepts only content and stores it in the dedicated feedbacks table
+-> authenticated user and registered-device identifiers are captured as server-side metadata
 ```
 
 ## Sync Model

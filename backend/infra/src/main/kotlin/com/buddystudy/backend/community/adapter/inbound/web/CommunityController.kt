@@ -11,6 +11,7 @@ import com.buddystudy.backend.community.adapter.inbound.web.dto.SubmitFeedbackRe
 import com.buddystudy.backend.community.application.port.inbound.ReportQuestionCommand
 import com.buddystudy.backend.community.application.port.inbound.SubmitFeedbackCommand
 import com.buddystudy.backend.community.application.model.ReportQuestionResponse
+import com.buddystudy.backend.community.application.model.FeedbackResponse
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.responses.ApiResponse
@@ -29,6 +30,8 @@ import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.bind.annotation.ResponseStatus
+import org.springframework.http.HttpStatus
 import kotlin.math.max
 import kotlin.math.min
 
@@ -135,11 +138,12 @@ class CommunityController(
 
     @Operation(summary = "Submit app feedback", description = "Stores product feedback from either a member or a registered device.")
     @PostMapping("/feedback")
+    @ResponseStatus(HttpStatus.CREATED)
     suspend fun submitFeedback(
         @Valid @RequestBody body: SubmitFeedbackRequest,
         @RequestHeader("X-Device-Id", required = false) deviceId: String?,
         authentication: Authentication?,
-    ): ReportQuestionResponse = community.submitFeedback(body, deviceId, authentication)
+    ): FeedbackResponse = community.submitFeedback(body, deviceId, authentication)
 }
 
 @RestController
@@ -192,7 +196,7 @@ interface CommunityWebPort {
     suspend fun createComment(id: Long, body: CommunityCommentRequest, authentication: Authentication): Any
     suspend fun deleteComment(id: Long, commentId: Long, authentication: Authentication): Any
     suspend fun reportQuestion(id: Long, body: ReportQuestionRequest, authentication: Authentication): ReportQuestionResponse
-    suspend fun submitFeedback(body: SubmitFeedbackRequest, deviceId: String?, authentication: Authentication?): ReportQuestionResponse
+    suspend fun submitFeedback(body: SubmitFeedbackRequest, deviceId: String?, authentication: Authentication?): FeedbackResponse
 }
 
 @Component
@@ -243,14 +247,12 @@ class CommunityWebAdapter(
         body: SubmitFeedbackRequest,
         deviceId: String?,
         authentication: Authentication?,
-    ): ReportQuestionResponse {
+    ): FeedbackResponse =
         community.submitFeedback(
             authentication.optionalPrincipal(),
             deviceId,
-            SubmitFeedbackCommand(body.category, body.message),
+            SubmitFeedbackCommand(body.content),
         )
-        return ReportQuestionResponse()
-    }
 
     private fun safeLimit(value: Int, max: Int) = min(max(1, value), max)
 }

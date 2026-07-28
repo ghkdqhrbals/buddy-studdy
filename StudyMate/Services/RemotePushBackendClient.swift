@@ -454,8 +454,7 @@ protocol RemotePushBackendClientProtocol {
 
     func submitAppFeedback(
         registration: RemotePushRegistration,
-        category: String,
-        message: String
+        content: String
     ) async throws
 
     func setCommunityQuestionLike(
@@ -1473,8 +1472,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     func submitAppFeedback(
         registration: RemotePushRegistration,
-        category: String,
-        message: String
+        content: String
     ) async throws {
         var request = authenticatedRequest(
             registration: registration,
@@ -1482,9 +1480,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(
-            SubmitFeedbackRequest(category: category, message: message)
-        )
+        request.httpBody = try encoder.encode(SubmitFeedbackRequest(content: content))
         _ = try await perform(request)
     }
 
@@ -2128,8 +2124,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     }
 
     private struct SubmitFeedbackRequest: Encodable {
-        var category: String
-        var message: String
+        var content: String
     }
 
     private struct CommunityCommentRequest: Encodable {

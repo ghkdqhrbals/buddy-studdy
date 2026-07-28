@@ -4385,7 +4385,7 @@ final class AppState: ObservableObject {
         )
     }
 
-    func submitAppFeedback(category: String, message: String) async -> Bool {
+    func submitAppFeedback(content: String) async -> Bool {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "app-feedback") else {
             clearCommunityErrorForMissingRegistration(reason: "app-feedback")
             return false
@@ -4396,8 +4396,7 @@ final class AppState: ObservableObject {
             operation: {
                 try await communityUseCase.submitFeedback(
                     registration: registration,
-                    category: category,
-                    message: message
+                    content: content
                 )
             },
             onSuccess: {
