@@ -1,9 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarClock, LogOut, Power, RefreshCw, Save, XCircle } from "lucide-react";
+import { CalendarClock, Power, RefreshCw, XCircle } from "lucide-react";
 import { useMemo, useState } from "react";
-import { AdminGate } from "../admin/AdminGate.jsx";
-import { adminFetch } from "../admin/adminApi.js";
-import { useAdminSession } from "../admin/AdminSessionContext.jsx";
+import { monitoringStatusFetch } from "../admin/adminApi.js";
 import {
   DataTable,
   PageHeader,
@@ -56,7 +54,7 @@ function MaintenanceForm({ onSaved }) {
     mutationFn: () => {
       const start = mode === "now" ? new Date() : new Date(startsAt);
       const end = endsAt ? new Date(endsAt) : null;
-      return adminFetch("/service-maintenance", {
+      return monitoringStatusFetch("/service-maintenance", {
         method: "POST",
         body: JSON.stringify({
           ...content,
@@ -103,7 +101,7 @@ function MaintenanceForm({ onSaved }) {
           ) : (
             <div className="maintenance-now-note">
               <Power size={18} />
-              <div><strong>Immediate activation</strong><span>App API traffic is blocked as soon as this change is saved.</span></div>
+              <div><strong>Immediate activation</strong><span>Customer apps show the maintenance screen as soon as they refresh this status.</span></div>
             </div>
           )}
           <label className="field">
@@ -153,7 +151,7 @@ function MaintenanceForm({ onSaved }) {
 function ActiveWindows({ overview, onChanged }) {
   const windows = [overview?.current, ...(overview?.upcoming || [])].filter(Boolean);
   const mutation = useMutation({
-    mutationFn: (item) => adminFetch(`/service-maintenance/${item.id}/terminate`, { method: "POST" }),
+    mutationFn: (item) => monitoringStatusFetch(`/service-maintenance/${item.id}/terminate`, { method: "POST" }),
     onSuccess: onChanged,
   });
 
@@ -171,7 +169,7 @@ function ActiveWindows({ overview, onChanged }) {
   return (
     <section className="workspace-section">
       <div className="section-heading">
-        <div><h2>Active and scheduled</h2><p>Changes are reflected by application servers within five seconds.</p></div>
+        <div><h2>Active and scheduled</h2><p>Customer apps read this status directly from monitoring.</p></div>
       </div>
       {mutation.error ? <InlineNotice tone="danger" compact>{mutation.error.message}</InlineNotice> : null}
       <div className="maintenance-window-list">
@@ -208,12 +206,12 @@ function ServiceStatusWorkspace() {
   const [offset, setOffset] = useState(0);
   const overviewQuery = useQuery({
     queryKey: ["admin", "service-maintenance", "overview"],
-    queryFn: () => adminFetch("/service-maintenance"),
+    queryFn: () => monitoringStatusFetch("/service-maintenance"),
     refetchInterval: 10_000,
   });
   const historyQuery = useQuery({
     queryKey: ["admin", "service-maintenance", "history", offset],
-    queryFn: () => adminFetch(`/service-maintenance/history?limit=${PAGE_SIZE}&offset=${offset}`),
+    queryFn: () => monitoringStatusFetch(`/service-maintenance/history?limit=${PAGE_SIZE}&offset=${offset}`),
     refetchInterval: 10_000,
   });
   const items = Array.isArray(historyQuery.data?.items) ? historyQuery.data.items : [];
@@ -262,21 +260,19 @@ function ServiceStatusWorkspace() {
 }
 
 export function ServiceStatusPage() {
-  const { authenticated, logout } = useAdminSession();
   return (
     <>
       <PageHeader
         eyebrow="Manage"
         title="Service status"
-        description="Schedule full-service maintenance, control customer-facing notices, and review operational history."
+        description="Publish customer-facing maintenance status from monitoring and review its history."
         actions={
-          <>
-            {authenticated ? <Button variant="secondary" icon={RefreshCw} onClick={() => window.location.reload()}>Refresh</Button> : null}
-            {authenticated ? <Button variant="ghost" icon={LogOut} onClick={logout}>Sign out</Button> : null}
-          </>
+          <Button variant="secondary" icon={RefreshCw} onClick={() => window.location.reload()}>
+            Refresh
+          </Button>
         }
       />
-      <AdminGate><ServiceStatusWorkspace /></AdminGate>
+      <ServiceStatusWorkspace />
     </>
   );
 }

@@ -14,8 +14,8 @@ struct BackendErrorPresentation: Equatable {
 }
 
 enum BackendErrorPresentationPolicy {
-    static func serviceAvailability(for error: Error) -> BackendServiceAvailability? {
-        (error as? RemotePushBackendError)?.maintenanceAvailability
+    static func serviceAvailability(for _: Error) -> BackendServiceAvailability? {
+        nil
     }
 
     static func presentation(

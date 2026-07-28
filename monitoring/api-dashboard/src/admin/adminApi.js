@@ -96,3 +96,23 @@ export async function adminFetch(path, options = {}) {
   }
   return body;
 }
+
+export async function monitoringStatusFetch(path, options = {}) {
+  const response = await fetch(`/status/api/v1/admin${path}`, {
+    ...options,
+    headers: {
+      Accept: "application/json",
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...options.headers,
+    },
+  });
+  const body = await jsonBody(response);
+  if (!response.ok) {
+    throw new AdminApiError(
+      errorMessage(body, `Request failed (${response.status})`),
+      response.status,
+      body,
+    );
+  }
+  return body;
+}

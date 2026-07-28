@@ -73,13 +73,10 @@ private struct StudyMateiOSBootstrapView: View {
     var body: some View {
         ZStack {
             if let appState {
-                if forcesMaintenancePreview || appState.isServiceUnderMaintenance {
-                    ServiceMaintenanceView()
-                        .environmentObject(appState)
-                } else {
-                    MobileRootView()
-                        .environmentObject(appState)
-                }
+                StudyMateiOSRootContent(
+                    appState: appState,
+                    forcesMaintenancePreview: forcesMaintenancePreview
+                )
             } else {
                 Color(.systemBackground)
             }
@@ -106,6 +103,22 @@ private struct StudyMateiOSBootstrapView: View {
             appState = state
             await state.start()
         }
+    }
+}
+
+private struct StudyMateiOSRootContent: View {
+    @ObservedObject var appState: AppState
+    let forcesMaintenancePreview: Bool
+
+    var body: some View {
+        Group {
+            if forcesMaintenancePreview || appState.isServiceUnderMaintenance {
+                ServiceMaintenanceView()
+            } else {
+                MobileRootView()
+            }
+        }
+        .environmentObject(appState)
     }
 }
 

@@ -9,6 +9,41 @@ final class QuestionGenerationFlowTests: XCTestCase {
         super.tearDown()
     }
 
+    func testServiceAvailabilityUsesMonitoringEndpointAndBackendLanguageCode() async throws {
+        let statusURL = URL(string: "https://monitoring.example/status/api/v1/service-status")!
+        let client = makeClient(serviceStatusURL: statusURL) { request in
+            XCTAssertEqual(request.url, statusURL)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept-Language"), "ko")
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: #"{"status":"OPERATIONAL","checkedAt":"2026-07-28T00:00:00Z"}"#
+            )
+        }
+
+        let availability = try await client.fetchServiceAvailability(language: .korean)
+
+        XCTAssertFalse(availability.isUnderMaintenance)
+    }
+
+    func testBackendMaintenanceErrorDoesNotReplaceMonitoringServiceStatus() {
+        let error = RemotePushBackendError.httpStatus(
+            503,
+            "",
+            BackendAPIError(
+                code: "SERVICE_UNDER_MAINTENANCE",
+                numericCode: 903,
+                message: "Maintenance in progress",
+                debugDescription: nil,
+                reason: nil,
+                requestID: nil,
+                metadata: nil
+            )
+        )
+
+        XCTAssertNil(BackendErrorPresentationPolicy.serviceAvailability(for: error))
+    }
+
     func testCreateQuestionSendsIdempotencyKeyAndDecodesAcceptedProcess() async throws {
         let client = makeClient { request in
             XCTAssertEqual(request.httpMethod, "POST")
@@ -298,6 +333,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
     }
 
     private func makeClient(
+        serviceStatusURL: URL = RemotePushBackendClient.defaultServiceStatusURL,
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> RemotePushBackendClient {
         let configuration = URLSessionConfiguration.ephemeral
@@ -305,6 +341,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         QuestionGenerationURLProtocol.requestHandler = handler
         return RemotePushBackendClient(
             baseURL: URL(string: "https://example.test")!,
+            serviceStatusURL: serviceStatusURL,
             session: URLSession(configuration: configuration)
         )
     }

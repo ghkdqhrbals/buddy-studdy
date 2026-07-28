@@ -2,7 +2,7 @@ import XCTest
 @testable import StudyMate
 
 final class ArchitecturePolicyTests: XCTestCase {
-    func testMaintenanceBackendErrorResolvesToGlobalServiceAvailability() {
+    func testBackendMaintenanceErrorDoesNotReplaceMonitoringServiceStatus() {
         let error = RemotePushBackendError.httpStatus(
             503,
             "",
@@ -18,8 +18,7 @@ final class ArchitecturePolicyTests: XCTestCase {
             fallback: "Request failed"
         )
 
-        XCTAssertTrue(resolution.serviceAvailability?.isUnderMaintenance == true)
-        XCTAssertEqual(resolution.serviceAvailability?.message, "Maintenance in progress")
+        XCTAssertNil(resolution.serviceAvailability)
     }
 
     func testTimeoutAndGenericServiceFailureDoNotResolveToMaintenance() {

@@ -562,17 +562,23 @@ extension RemotePushBackendClientProtocol {
 @MainActor
 final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     static let defaultBaseURL = URL(string: "https://api.ghkdqhrbals.org")!
+    static let defaultServiceStatusURL = URL(
+        string: "https://monitoring.lowfidev.cloud/status/api/v1/service-status"
+    )!
 
     private let baseURL: URL
+    private let serviceStatusURL: URL
     private let session: URLSession
     private let encoder = JSONEncoder()
     private let decoder: JSONDecoder
 
     init(
         baseURL: URL = RemotePushBackendClient.defaultBaseURL,
+        serviceStatusURL: URL = RemotePushBackendClient.defaultServiceStatusURL,
         session: URLSession = URLSession(configuration: .ephemeral)
     ) {
         self.baseURL = baseURL
+        self.serviceStatusURL = serviceStatusURL
         self.session = session
         self.decoder = Self.makeDecoder()
     }
@@ -584,9 +590,9 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     }
 
     func fetchServiceAvailability(language: AppLanguage) async throws -> BackendServiceAvailability {
-        var request = URLRequest(url: endpoint("api", "v1", "service-status"))
+        var request = URLRequest(url: serviceStatusURL)
         request.httpMethod = "GET"
-        request.setValue(language.locale.identifier, forHTTPHeaderField: "Accept-Language")
+        request.setValue(language.backendCode, forHTTPHeaderField: "Accept-Language")
         let data = try await perform(request)
         return try decoder.decode(BackendServiceAvailability.self, from: data)
     }
@@ -1749,13 +1755,6 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
             if !(200..<300).contains(statusCode) {
                 let backendError = Self.decodeBackendAPIError(from: data)
-                if let maintenance = backendError?.maintenanceAvailability {
-                    NotificationCenter.default.post(
-                        name: BackendServiceAvailabilityNotification.didEnterMaintenance,
-                        object: self,
-                        userInfo: [BackendServiceAvailabilityNotification.userInfoKey: maintenance]
-                    )
-                }
                 if statusCode == 401 {
                     NotificationCenter.default.post(
                         name: BackendAuthorizationNotification.didReceiveUnauthorized,
@@ -3264,26 +3263,6 @@ struct BackendAPIError: Decodable, Equatable {
         metadata = try? container.decodeIfPresent(BackendAPIErrorMetadata.self, forKey: .metadata)
     }
 
-    var maintenanceAvailability: BackendServiceAvailability? {
-        let normalizedCode = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard numericCode == 903
-                || normalizedCode == "SERVICE_UNDER_MAINTENANCE"
-                || normalizedCode == "SERVER_UNDER_MAINTENANCE" else {
-            return nil
-        }
-
-        return metadata?.maintenanceAvailability(fallbackMessage: message)
-            ?? BackendServiceAvailability(
-                status: "MAINTENANCE",
-                maintenanceID: nil,
-                title: nil,
-                message: message,
-                startsAt: nil,
-                endsAt: nil,
-                retryAfterSeconds: 60,
-                checkedAt: Date()
-            )
-    }
 }
 
 struct BackendAPIErrorMetadata: Decodable, Equatable {
@@ -3292,13 +3271,6 @@ struct BackendAPIErrorMetadata: Decodable, Equatable {
     var quotaTimeZone: String?
     var remaining: Int64?
     var required: Int64?
-    var maintenanceId: Int?
-    var title: String?
-    var message: String?
-    var startsAt: String?
-    var endsAt: String?
-    var retryAfterSeconds: Int?
-
     var quotaResetDate: Date? {
         guard let quotaResetAt else {
             return nil
@@ -3313,27 +3285,6 @@ struct BackendAPIErrorMetadata: Decodable, Equatable {
         return formatter.date(from: quotaResetAt)
     }
 
-    func maintenanceAvailability(fallbackMessage: String) -> BackendServiceAvailability {
-        BackendServiceAvailability(
-            status: "MAINTENANCE",
-            maintenanceID: maintenanceId,
-            title: title,
-            message: message ?? fallbackMessage,
-            startsAt: Self.date(startsAt),
-            endsAt: Self.date(endsAt),
-            retryAfterSeconds: retryAfterSeconds,
-            checkedAt: Date()
-        )
-    }
-
-    private static func date(_ value: String?) -> Date? {
-        guard let value else {
-            return nil
-        }
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
-    }
 }
 
 enum BackendTermsAgreementAction: String {
@@ -3519,15 +3470,6 @@ enum RemotePushBackendError: LocalizedError {
         switch self {
         case .httpStatus(_, _, let apiError):
             return apiError?.code
-        case .invalidResponse:
-            return nil
-        }
-    }
-
-    var maintenanceAvailability: BackendServiceAvailability? {
-        switch self {
-        case .httpStatus(_, _, let apiError):
-            return apiError?.maintenanceAvailability
         case .invalidResponse:
             return nil
         }

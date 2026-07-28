@@ -1,6 +1,8 @@
 # Service Maintenance
 
-BuddyStudy maintenance mode is a database-backed, full-service availability control. It is intended for planned work where the consumer API must stop accepting normal traffic while operators retain access to status, health, and administration.
+BuddyStudy maintenance mode is owned by the monitoring control plane. It is
+intended for planned work where customer apps should show a localized global
+maintenance screen independently of backend API availability.
 
 ## Operator flow
 
@@ -16,12 +18,21 @@ Every window remains in the paginated history with planned time, actual terminat
 
 ## Runtime behavior
 
-- `service_maintenance_windows` is the source of truth.
-- API servers cache the current active window for at most five seconds.
-- During an active window, normal `/api/v1/**` traffic receives HTTP 503 with `SERVICE_UNDER_MAINTENANCE`, localized content, timing metadata, and `Retry-After`.
-- `/api/v1/service-status`, `/api/v1/health/**`, and `/api/v1/admin/**` remain available.
-- The iOS app checks service status at startup, foreground entry, and every 60 seconds. During maintenance it shows one global, non-dismissible screen and checks again every 15 to 120 seconds.
+- The monitoring host persists maintenance windows in
+  `~/buddystudy/monitoring/status/data/service-maintenance.json`.
+- The monitoring status service exposes only
+  `GET https://monitoring.lowfidev.cloud/status/api/v1/service-status`
+  without operator authentication. All management routes remain behind the
+  monitoring site's Basic Auth.
+- Backend API processes and the application database do not store, publish, or
+  enforce maintenance state.
+- The iOS app checks monitoring status at startup, foreground entry, and every
+  60 seconds. During maintenance it shows one global, non-dismissible screen
+  and checks again every 15 to 120 seconds.
 - When maintenance ends, the app removes the maintenance screen and resumes deferred startup synchronization automatically.
+- A timeout, connectivity failure, or generic backend HTTP 503 does not open
+  the maintenance screen. Only an explicit monitoring `MAINTENANCE` response
+  does.
 
 ## Audit states
 

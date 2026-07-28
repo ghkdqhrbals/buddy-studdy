@@ -13,10 +13,28 @@ env:
   DEPLOY_REPO: ghkdqhrbals/personal-deploy
 
 jobs:
+  validate:
+    name: Validate Monitoring Module
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate dashboard and status service
+        run: |
+          set -euo pipefail
+          (cd monitoring/api-dashboard && npm ci && npm test)
+          (cd monitoring/status-service && npm test)
+          node --check monitoring/status-service/src/server.mjs
+          node --check monitoring/status-service/src/store.mjs
+
   dispatch:
     name: Dispatch Monitoring Module
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    needs: validate
     outputs:
       dispatched_at: ${{ steps.dispatch.outputs.dispatched_at }}
 
