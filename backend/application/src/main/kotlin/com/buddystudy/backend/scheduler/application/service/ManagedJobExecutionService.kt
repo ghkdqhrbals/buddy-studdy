@@ -11,7 +11,6 @@ import com.buddystudy.backend.scheduler.application.model.ScheduledJobStatusResp
 import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJob
 import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJobExecutionUseCase
 import com.buddystudy.backend.scheduler.application.port.outbound.JobLockPort
-import com.buddystudy.backend.scheduler.application.port.outbound.ScheduledJobAlertPort
 import com.buddystudy.backend.scheduler.application.port.outbound.ScheduledJobRunPort
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -22,7 +21,6 @@ import java.time.Instant
 class ManagedJobExecutionService(
     private val runs: ScheduledJobRunPort,
     private val locks: JobLockPort,
-    private val alerts: ScheduledJobAlertPort,
     private val properties: BuddyStudyProperties,
 ) : ManagedJobExecutionUseCase {
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -51,15 +49,18 @@ class ManagedJobExecutionService(
         } catch (error: Exception) {
             val startedRun = run ?: throw error
             val failed = runs.finish(startedRun.id, JobRunStatus.FAILED, null, error.message ?: error.javaClass.simpleName, elapsedMs(started))
-            runCatching { alerts.notifyFailed(failed) }
-                .onFailure { alertError ->
-                    logger.warn(
-                        "scheduled_job_alert_failed jobName={} runId={} error={}",
-                        failed.jobName,
-                        failed.id,
-                        alertError.message,
-                    )
-                }
+            logger.error(
+                "scheduled_job_failed jobName={} runId={} retryOfRunId={} triggerType={} createdBy={} durationMs={} errorType={} error={}",
+                failed.jobName,
+                failed.id,
+                failed.retryOfRunId,
+                failed.triggerType,
+                failed.createdBy,
+                failed.durationMs,
+                error.javaClass.name,
+                error.message,
+                error,
+            )
             failed
         } finally {
             releaseLock(job.name)
@@ -125,10 +126,12 @@ class ManagedJobExecutionService(
     private suspend fun releaseLock(jobName: String) {
         runCatching { locks.release(jobName) }
             .onFailure { error ->
-                logger.warn(
-                    "scheduled_job_lock_release_failed jobName={} error={}",
+                logger.error(
+                    "scheduled_job_lock_release_failed jobName={} errorType={} error={}",
                     jobName,
+                    error.javaClass.name,
                     error.message,
+                    error,
                 )
             }
     }

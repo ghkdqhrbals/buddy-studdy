@@ -15,18 +15,14 @@ class MonitoringConfigurationGuardTest {
         .withUserConfiguration(PropertiesConfig::class.java, MonitoringConfigurationGuard::class.java)
 
     @Test
-    fun `prod scheduler fails fast when scheduler Slack webhook is missing`(): Unit = runBlocking {
+    fun `dev scheduler can start without external monitoring configuration`(): Unit = runBlocking {
         contextRunner
             .withPropertyValues(
-                "spring.profiles.active=prod",
+                "spring.profiles.active=dev",
                 "buddystudy.scheduler.enabled=true",
-                "buddystudy.monitoring.slack-webhook-url=",
             )
             .run { context ->
-                assertThat(context).hasFailed()
-                assertThat(context.startupFailure).hasRootCauseMessage(
-                    "SLACK_WEBHOOK_URL is required when prod scheduler monitoring is enabled.",
-                )
+                assertThat(context).hasNotFailed()
             }
     }
 
@@ -36,74 +32,9 @@ class MonitoringConfigurationGuardTest {
             .withPropertyValues(
                 "spring.profiles.active=Production",
                 "buddystudy.scheduler.enabled=true",
-                "buddystudy.monitoring.slack-webhook-url=",
-            )
-            .run { context ->
-                assertThat(context).hasFailed()
-                assertThat(context.startupFailure).hasRootCauseMessage(
-                    "SLACK_WEBHOOK_URL is required when prod scheduler monitoring is enabled.",
-                )
-            }
-    }
-
-    @Test
-    fun `dev scheduler can start without scheduler Slack webhook`(): Unit = runBlocking {
-        contextRunner
-            .withPropertyValues(
-                "spring.profiles.active=dev",
-                "buddystudy.scheduler.enabled=true",
-                "buddystudy.monitoring.slack-webhook-url=",
             )
             .run { context ->
                 assertThat(context).hasNotFailed()
-            }
-    }
-
-    @Test
-    fun `prod scheduler can start when scheduler monitoring dependencies are configured`(): Unit = runBlocking {
-        contextRunner
-            .withPropertyValues(
-                "spring.profiles.active=prod",
-                "buddystudy.scheduler.enabled=true",
-                "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
-                "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
-            )
-            .run { context ->
-                assertThat(context).hasNotFailed()
-            }
-    }
-
-    @Test
-    fun `prod scheduler fails fast when admin run url is missing`(): Unit = runBlocking {
-        contextRunner
-            .withPropertyValues(
-                "spring.profiles.active=prod",
-                "buddystudy.scheduler.enabled=true",
-                "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
-                "buddystudy.monitoring.admin-base-url=",
-            )
-            .run { context ->
-                assertThat(context).hasFailed()
-                assertThat(context.startupFailure).hasRootCauseMessage(
-                    "MONITORING_ADMIN_BASE_URL must be an HTTPS URL in prod.",
-                )
-            }
-    }
-
-    @Test
-    fun `prod scheduler fails fast when admin run url is not https`(): Unit = runBlocking {
-        contextRunner
-            .withPropertyValues(
-                "spring.profiles.active=prod",
-                "buddystudy.scheduler.enabled=true",
-                "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
-                "buddystudy.monitoring.admin-base-url=http://api.ghkdqhrbals.org/admin",
-            )
-            .run { context ->
-                assertThat(context).hasFailed()
-                assertThat(context.startupFailure).hasRootCauseMessage(
-                    "MONITORING_ADMIN_BASE_URL must be an HTTPS URL in prod.",
-                )
             }
     }
 
@@ -113,8 +44,6 @@ class MonitoringConfigurationGuardTest {
             .withPropertyValues(
                 "spring.profiles.active=prod",
                 "buddystudy.scheduler.enabled=true",
-                "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
-                "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
                 "buddystudy.monitoring.scheduler-readiness-enabled=false",
             )
             .run { context ->
@@ -131,8 +60,6 @@ class MonitoringConfigurationGuardTest {
             .withPropertyValues(
                 "spring.profiles.active=prod",
                 "buddystudy.scheduler.enabled=true",
-                "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
-                "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
                 "buddystudy.monitoring.scheduler-monitored-jobs=",
             )
             .run { context ->
@@ -151,8 +78,6 @@ class MonitoringConfigurationGuardTest {
             .withPropertyValues(
                 "spring.profiles.active=prod",
                 "buddystudy.scheduler.enabled=true",
-                "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
-                "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
                 "buddystudy.monitoring.scheduler-monitored-jobs=question-schedule",
             )
             .run { context ->
@@ -167,8 +92,6 @@ class MonitoringConfigurationGuardTest {
             .withPropertyValues(
                 "spring.profiles.active=prod",
                 "buddystudy.scheduler.enabled=true",
-                "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
-                "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
                 "buddystudy.monitoring.scheduler-monitored-jobs=question-schedule,question-schedul",
             )
             .run { context ->
@@ -180,31 +103,11 @@ class MonitoringConfigurationGuardTest {
     }
 
     @Test
-    fun `prod scheduler fails fast when Slack timeout is outside supported bounds`(): Unit = runBlocking {
-        contextRunner
-            .withPropertyValues(
-                "spring.profiles.active=prod",
-                "buddystudy.scheduler.enabled=true",
-                "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
-                "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
-                "buddystudy.monitoring.slack-timeout-ms=999999",
-            )
-            .run { context ->
-                assertThat(context).hasFailed()
-                assertThat(context.startupFailure).hasRootCauseMessage(
-                    "MONITORING_SLACK_TIMEOUT_MS must be between 1000 and 25000 in prod.",
-                )
-            }
-    }
-
-    @Test
     fun `prod scheduler fails fast when scheduler stale threshold is outside supported bounds`(): Unit = runBlocking {
         contextRunner
             .withPropertyValues(
                 "spring.profiles.active=prod",
                 "buddystudy.scheduler.enabled=true",
-                "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
-                "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
                 "buddystudy.monitoring.scheduler-stale-threshold-minutes=120",
             )
             .run { context ->
@@ -221,8 +124,6 @@ class MonitoringConfigurationGuardTest {
             .withPropertyValues(
                 "spring.profiles.active=prod",
                 "buddystudy.scheduler.enabled=true",
-                "buddystudy.monitoring.slack-webhook-url=https://hooks.slack.test/scheduler",
-                "buddystudy.monitoring.admin-base-url=https://api.ghkdqhrbals.org/admin",
                 "buddystudy.monitoring.scheduler-startup-grace-minutes=120",
             )
             .run { context ->

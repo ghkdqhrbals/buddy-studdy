@@ -53,9 +53,9 @@ Response:
 ```
 
 `/health` is intentionally lightweight for container and load-balancer probes.
-Runtime uptime monitoring must not run from GitHub Actions. Use the
-Cloudflare Worker in `deploy/cloudflare-health-monitor` for scheduled external
-checks and Slack alerts. That Worker should call readiness:
+Runtime checks must not run from GitHub Actions. Production alerting is owned
+by Grafana, which evaluates Loki and the configured observability data sources.
+The readiness endpoint is available for operator diagnostics:
 
 ```http
 GET /api/v1/health/readiness
@@ -63,8 +63,8 @@ GET /api/v1/health/readiness
 
 It returns `200` when required dependencies are reachable and core scheduler
 jobs have recent successful runs, otherwise `503` with component-level check
-results. Scheduler checks include structured `details` so external monitors
-and Slack alerts can show missing jobs, disabled jobs, stale jobs, and
+results. Scheduler checks include structured `details` so dashboards and
+operator diagnostics can show missing jobs, disabled jobs, stale jobs, and
 configured thresholds without parsing free-form text. A scheduler run that
 remains `RUNNING` past its configured `timeoutSeconds` is reported as a stuck
 job.

@@ -178,40 +178,30 @@ Device credentials are used only to register a device and bootstrap or refresh `
 Spring Boot Actuator serves lightweight health checks at `/health` and
 `/api/v1/health`. Runtime uptime monitoring must not run from GitHub Actions;
 GitHub Actions is only for build, deploy dispatch, and deploy-result watching.
-External uptime monitoring should use the Cloudflare Worker in
-`deploy/cloudflare-health-monitor`, which checks `/api/v1/health/readiness`
-and sends Slack alerts. The readiness endpoint checks required backend dependencies and
+Grafana owns production alert delivery. The readiness endpoint checks required backend dependencies and
 core scheduler freshness, and returns `503` when the backend process is alive
 but not ready to serve traffic. The readiness response includes `checkedAt`,
-`service`, `environment`, and component-level `checks` so Slack alerts can
+`service`, `environment`, and component-level `checks` so Grafana alerts can
 show the failing component. Scheduler readiness is based on the most recent
 successful run for each monitored job, so repeated failed runs do not mask a
 stale scheduler. It also includes structured `details` such as `missingJobs`,
 `disabledJobs`, `failedJobs`, `stuckJobs`, `staleJobs`, `thresholdSeconds`,
 and `startupGraceSeconds` for external monitors and runbooks. Failed and stuck
-job details include `latestRunId` so Slack alerts can be traced to the matching
-admin scheduler run. Scheduler freshness is controlled by
+job details include `latestRunId` so Grafana incidents can be traced to the
+matching admin scheduler run. Scheduler freshness is controlled by
 `MONITORING_SCHEDULER_READINESS_ENABLED`,
 `MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES`,
 `MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES`, and
-`MONITORING_SCHEDULER_MONITORED_JOBS`. Backend scheduler failure Slack
-delivery is bounded by `MONITORING_SLACK_TIMEOUT_MS` so a slow webhook does
-not hold scheduler failure handling indefinitely. Repeated failure alerts for
-the same job are throttled by `MONITORING_SCHEDULER_FAILURE_ALERT_REPEAT_SECONDS`
-and default to five minutes. Set
-`MONITORING_ADMIN_BASE_URL` to the HTTPS admin frontend origin so scheduler
-Slack alerts include a direct link to the matching scheduler run list. In the
-`prod` profile, `SLACK_WEBHOOK_URL` and a valid HTTPS
-`MONITORING_ADMIN_BASE_URL` are required when
-`buddystudy.scheduler.enabled=true`; the application fails fast instead of
-silently disabling scheduler failure alerts or sending alerts without useful
-run links.
+`MONITORING_SCHEDULER_MONITORED_JOBS`. A failed scheduler run emits one
+`scheduled_job_failed` ERROR with the full throwable and safe run identifiers.
+Promtail joins that stack into one Loki event, and Grafana detects the ERROR
+and sends the Slack notification. The backend application never calls Slack.
 Production startup also verifies that every registered `ManagedJob` is listed
 in `MONITORING_SCHEDULER_MONITORED_JOBS` and that the list does not contain
-unknown job names. `MONITORING_SLACK_TIMEOUT_MS` must stay within `1000..25000`,
-`MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES` within `1..60`, and
-`MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES` within `0..60` so alert delivery
-and scheduler freshness checks cannot be delayed by a bad production setting.
+unknown job names. `MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES` must stay
+within `1..60`, and `MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES` within
+`0..60` so scheduler freshness evaluation cannot be distorted by a bad
+production setting.
 When adding a new scheduled job, add its job name to that variable and the
 Kubernetes backend config in the same change, or production startup will fail
 before the job can run unmonitored.

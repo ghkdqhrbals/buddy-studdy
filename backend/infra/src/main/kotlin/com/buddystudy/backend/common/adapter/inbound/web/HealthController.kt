@@ -23,7 +23,7 @@ class HealthController(
 
     @Operation(
         summary = "Readiness check",
-        description = "Checks required backend dependencies and scheduler freshness for external Slack monitoring.",
+        description = "Checks required backend dependencies and scheduler freshness for observability diagnostics.",
     )
     @GetMapping("/health/readiness", "/api/v1/health/readiness")
     suspend fun readiness(): ResponseEntity<ReadinessResponse> {

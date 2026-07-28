@@ -216,21 +216,17 @@ The workflow uses Let's Encrypt with the `tls-alpn-01` challenge, so only port `
 
 GitHub Actions must not call backend `/health` or readiness endpoints, must not inspect Docker `Health.Status`, must not use indirect container health gates such as `docker compose up --wait` or `docker compose wait`, and must not call the Health Monitor Worker `/check` endpoint. Runtime server-down alerts are handled by Grafana alerting. The Cloudflare Worker remains available for explicit diagnostics, but its production Cron check is disabled.
 
-Backend scheduler failure alerts are separate from server-down alerts. Set the
-deploy repository secret `SLACK_WEBHOOK_URL` when the backend should send Slack
-messages for failed managed scheduler jobs. Set the deploy repository variable
-`MONITORING_ADMIN_BASE_URL` when the admin frontend origin differs from
-`https://api.ghkdqhrbals.org/admin`; scheduler alerts use it to link directly
-to the matching run list. Repeated failed-run alerts for the same scheduler job
-are throttled by `MONITORING_SCHEDULER_FAILURE_ALERT_REPEAT_SECONDS`, which
-defaults to `300`. The template also passes `MONITORING_SLACK_TIMEOUT_MS`,
+Backend scheduler failures are emitted as `ERROR` logs with the throwable and
+run identifiers. Promtail stores the complete stack as one Loki event, and
+Grafana alone sends the Slack notification. The backend application does not
+receive `SLACK_WEBHOOK_URL`. The template passes
 `MONITORING_SCHEDULER_READINESS_ENABLED`,
 `MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES`,
 `MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES`, and
 `MONITORING_SCHEDULER_MONITORED_JOBS` into the backend so Docker deployments
 use the same scheduler readiness policy as Kubernetes. Only frequent jobs belong
-in this 15-minute readiness list. Daily correction jobs are monitored through
-their failed-run alerts and must not make readiness stale between scheduled runs.
+in this 15-minute readiness list. Daily correction jobs remain visible through
+their ERROR logs and must not make readiness stale between scheduled runs.
 Grafana alerting owns continuous server-down detection. The Cloudflare Worker
 scheduled check is disabled in production to avoid periodic KV writes.
 

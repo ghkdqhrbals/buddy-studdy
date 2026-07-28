@@ -14,10 +14,6 @@ interface ScheduledJobRunPort {
     suspend fun findSnapshots(jobNames: List<String>): List<ScheduledJobSnapshot>
 }
 
-interface ScheduledJobAlertPort {
-    suspend fun notifyFailed(run: ScheduledJobRun)
-}
-
 interface JobLockPort {
     suspend fun tryAcquire(jobName: String): Boolean
     suspend fun release(jobName: String)

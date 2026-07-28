@@ -80,12 +80,8 @@ data class BuddyStudyProperties(
     data class OpenApi(var enabled: Boolean = false, var accessToken: String = "")
     data class Admin(var username: String = "admin", var password: String = "admin", var tokenHours: Long = 12)
     data class Monitoring(
-        var slackWebhookUrl: String = "",
         var environmentName: String = "production",
         var serviceName: String = "BuddyStudy backend",
-        var adminBaseUrl: String = "",
-        var slackTimeoutMs: Long = 5_000,
-        var schedulerFailureAlertRepeatSeconds: Long = 300,
         var schedulerReadinessEnabled: Boolean = true,
         var schedulerStaleThresholdMinutes: Long = 15,
         var schedulerStartupGraceMinutes: Long = 15,

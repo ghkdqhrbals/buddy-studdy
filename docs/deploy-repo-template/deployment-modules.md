@@ -134,7 +134,8 @@ deployment.
   event, extracts `level=ERROR`, and preserves the full event for Grafana.
   Sentry receives the same ERROR and throwable through its Spring Boot 4
   Logback integration. `SENTRY_DSN` is supplied only through the backend deploy
-  secret, and PII capture remains disabled.
+  secret, and PII capture remains disabled. The backend application does not
+  receive a Slack webhook and never sends operational alerts directly.
 - The backend deploy temporarily retains the `buddystudy-profile-photos`
   volume for legacy-file cleanup. New profile-photo uploads are disabled;
   saving a pixel avatar or deleting an account removes the user's legacy file.
@@ -168,7 +169,8 @@ deployment.
   Grafana also provisions a Loki alert for backend `level=ERROR` events and
   sends it to the `BuddyStudy Slack` contact point. Slack contains the incident
   summary and a direct Grafana log link; Loki and Sentry retain the full stack
-  and diagnostic context.
+  and diagnostic context. This Grafana path is the only production path from
+  backend application errors to Slack.
   The Server Dashboard supports fixed and explicit From/To time ranges and
   reads the same structured Micrometer runtime samples as the provisioned
   Grafana Server Runtime dashboard. The same module publishes the fixed,

@@ -10,24 +10,26 @@ import com.buddystudy.backend.scheduler.application.model.ScheduledJobRunPageRes
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobSnapshot
 import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJob
 import com.buddystudy.backend.scheduler.application.port.outbound.JobLockPort
-import com.buddystudy.backend.scheduler.application.port.outbound.ScheduledJobAlertPort
 import com.buddystudy.backend.scheduler.application.port.outbound.ScheduledJobRunPort
 import com.buddystudy.backend.scheduler.application.service.ManagedJobExecutionService
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import java.time.Instant
 
+@ExtendWith(OutputCaptureExtension::class)
 class ManagedJobExecutionServiceTest {
     private val runs = FakeScheduledJobRunPort()
     private val locks = FakeJobLockPort()
-    private val alerts = FakeScheduledJobAlertPort()
     private val properties = BuddyStudyProperties(
         monitoring = BuddyStudyProperties.Monitoring(
             schedulerStaleThresholdMinutes = 15,
             schedulerMonitoredJobs = listOf("question-schedule", "user-stats-refresh"),
         ),
     )
-    private val service = ManagedJobExecutionService(runs, locks, alerts, properties)
+    private val service = ManagedJobExecutionService(runs, locks, properties)
 
     @Test
     fun `execute records successful job run`(): Unit = runBlocking {
@@ -40,25 +42,16 @@ class ManagedJobExecutionServiceTest {
     }
 
     @Test
-    fun `execute records failed job run without throwing`(): Unit = runBlocking {
+    fun `execute records failed job and emits one ERROR with the throwable`(output: CapturedOutput): Unit = runBlocking {
         val result = service.execute(FakeJob("user-stats-refresh") { error("boom") }, JobTriggerType.SCHEDULED)
 
         assertThat(result.status).isEqualTo(JobRunStatus.FAILED)
         assertThat(result.errorMessage).contains("boom")
         assertThat(runs.rows.single().status).isEqualTo(JobRunStatus.FAILED)
-        assertThat(alerts.failedRuns).containsExactly(result)
-    }
-
-    @Test
-    fun `execute records failed job run even when alert delivery fails`(): Unit = runBlocking {
-        alerts.error = IllegalStateException("slack unavailable")
-
-        val result = service.execute(FakeJob("user-stats-refresh") { error("boom") }, JobTriggerType.SCHEDULED)
-
-        assertThat(result.status).isEqualTo(JobRunStatus.FAILED)
-        assertThat(result.errorMessage).contains("boom")
-        assertThat(runs.rows.single().status).isEqualTo(JobRunStatus.FAILED)
-        assertThat(locks.released).containsExactly("user-stats-refresh")
+        assertThat(output.out).contains("ERROR")
+        assertThat(output.out).contains("scheduled_job_failed jobName=user-stats-refresh")
+        assertThat(output.out).contains("errorType=java.lang.IllegalStateException error=boom")
+        assertThat(output.out).contains("\tat ")
     }
 
     @Test
@@ -97,7 +90,7 @@ class ManagedJobExecutionServiceTest {
     }
 
     @Test
-    fun `execute skips locked job without running work or sending alerts`(): Unit = runBlocking {
+    fun `execute skips locked job without running work`(): Unit = runBlocking {
         locks.acquired = false
         var executed = false
 
@@ -106,7 +99,6 @@ class ManagedJobExecutionServiceTest {
         assertThat(executed).isFalse()
         assertThat(result.status).isEqualTo(JobRunStatus.SKIPPED)
         assertThat(result.errorMessage).isEqualTo("Job lock was not acquired.")
-        assertThat(alerts.failedRuns).isEmpty()
         assertThat(locks.released).isEmpty()
     }
 
@@ -272,16 +264,6 @@ class ManagedJobExecutionServiceTest {
         override suspend fun release(jobName: String) {
             released += jobName
             releaseError?.let { throw it }
-        }
-    }
-
-    private class FakeScheduledJobAlertPort : ScheduledJobAlertPort {
-        val failedRuns = mutableListOf<ScheduledJobRun>()
-        var error: RuntimeException? = null
-
-        override suspend fun notifyFailed(run: ScheduledJobRun) {
-            error?.let { throw it }
-            failedRuns += run
         }
     }
 

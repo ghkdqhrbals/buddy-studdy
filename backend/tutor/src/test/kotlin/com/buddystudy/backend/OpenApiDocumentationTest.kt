@@ -51,7 +51,7 @@ class OpenApiDocumentationTest : MySqlIntegrationTestSupport() {
             .contains("Each study can include one pendingQuestion")
             .contains("Record history is intentionally split into /api/v1/records")
             .contains("Maximum number of studies to include")
-            .contains("scheduler freshness for external Slack monitoring")
+            .contains("scheduler freshness for observability diagnostics")
             .contains("Runtime monitoring must use the Cloudflare Health Monitor Worker")
             .doesNotContain("deployment smoke tests")
     }
