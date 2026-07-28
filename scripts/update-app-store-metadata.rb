@@ -120,7 +120,7 @@ def list_localizations(token, version_id)
     "/v1/appStoreVersions/#{version_id}/appStoreVersionLocalizations",
     token,
     query: {
-      "fields[appStoreVersionLocalizations]" => "locale,promotionalText,description,supportUrl,marketingUrl",
+      "fields[appStoreVersionLocalizations]" => "locale,promotionalText,description,keywords,supportUrl,marketingUrl",
       "limit" => "200"
     }
   ).fetch("data")
@@ -138,6 +138,7 @@ def create_localization(token, version_id, locale, metadata)
           locale: locale,
           promotionalText: metadata.fetch("promotionalText"),
           description: metadata.fetch("description"),
+          keywords: metadata.fetch("keywords"),
           supportUrl: metadata.fetch("supportUrl"),
           marketingUrl: metadata.fetch("marketingUrl")
         },
@@ -166,6 +167,7 @@ def update_localization(token, localization_id, metadata)
         attributes: {
           promotionalText: metadata.fetch("promotionalText"),
           description: metadata.fetch("description"),
+          keywords: metadata.fetch("keywords"),
           supportUrl: metadata.fetch("supportUrl"),
           marketingUrl: metadata.fetch("marketingUrl")
         }
@@ -180,12 +182,15 @@ def validate_metadata(metadata_by_locale)
   metadata_by_locale.each do |locale, metadata|
     promotional_text = metadata.fetch("promotionalText")
     description = metadata.fetch("description")
+    keywords = metadata.fetch("keywords")
     support_url = metadata.fetch("supportUrl")
     marketing_url = metadata.fetch("marketingUrl")
     abort "#{locale} promotional text exceeds 170 characters" if promotional_text.length > 170
     abort "#{locale} description exceeds 4,000 characters" if description.length > 4_000
+    abort "#{locale} keywords exceed 100 bytes" if keywords.bytesize > 100
     abort "#{locale} promotional text is empty" if promotional_text.strip.empty?
     abort "#{locale} description is empty" if description.strip.empty?
+    abort "#{locale} keywords are empty" if keywords.strip.empty?
     abort "#{locale} support URL must use HTTPS" unless support_url.start_with?("https://")
     abort "#{locale} marketing URL must use HTTPS" unless marketing_url.start_with?("https://")
   end
@@ -216,6 +221,7 @@ pending = metadata_by_locale.filter_map do |locale, metadata|
             "create"
           elsif localization.dig("attributes", "promotionalText") != metadata.fetch("promotionalText") ||
                 localization.dig("attributes", "description") != metadata.fetch("description") ||
+                localization.dig("attributes", "keywords") != metadata.fetch("keywords") ||
                 localization.dig("attributes", "supportUrl") != metadata.fetch("supportUrl") ||
                 localization.dig("attributes", "marketingUrl") != metadata.fetch("marketingUrl")
             "update"
@@ -224,7 +230,8 @@ pending = metadata_by_locale.filter_map do |locale, metadata|
 
   puts "#{locale}: #{state} " \
        "(promotional #{metadata.fetch("promotionalText").length}/170, " \
-       "description #{metadata.fetch("description").length}/4000)"
+       "description #{metadata.fetch("description").length}/4000, " \
+       "keywords #{metadata.fetch("keywords").bytesize}/100 bytes)"
   [locale, metadata, localization]
 end
 
@@ -249,7 +256,7 @@ verified = list_localizations(token, version.fetch("id")).to_h do |localization|
 end
 metadata_by_locale.each do |locale, metadata|
   localization = verified[locale] || abort("Localization verification failed: #{locale} is missing")
-  %w[promotionalText description supportUrl marketingUrl].each do |field|
+  %w[promotionalText description keywords supportUrl marketingUrl].each do |field|
     next if localization.dig("attributes", field) == metadata.fetch(field)
 
     abort "Localization verification failed: #{locale} #{field} does not match"
