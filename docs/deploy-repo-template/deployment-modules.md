@@ -35,6 +35,14 @@ deployment.
 - A job must have a module-specific name such as `deploy_backend`,
   `deploy_admin_frontend`, or `deploy_monitoring`.
 - Backend image build remains in the app repository on GitHub-hosted runners.
+- Backend images support `native` and `jvm` runtime modes from one Dockerfile.
+  Native remains the default for tag-triggered releases. Manual image builds
+  select the runtime explicitly, stamp it into
+  `io.buddystudy.backend.runtime`, and dispatch that value with the immutable
+  runtime-qualified image reference (`<tag>-native` or `<tag>-jvm`). The
+  unqualified tag remains a compatibility alias. The deploy workflow verifies
+  the label before rollout, so changing runtime does not change the backend
+  environment or routing contract.
 - EC2 self-hosted runners are deploy-only. They pull images and restart
   containers, but must not compile backend code or build Docker images.
 - Before pulling a backend release, the backend deploy removes only Docker
@@ -101,10 +109,11 @@ deployment.
   `Configure BuddyStudy Backend Network` before publishing the Redis port; it
   removes stale Redis CIDRs, mirrors the MySQL `3306` CIDRs, and does not alter
   unrelated ports or security groups.
-- The native backend image ships MySQL Flyway scripts at
+- Both native and JVM backend images ship MySQL Flyway scripts at
   `/app/db/migration-mysql`. Both normal deployment and the one-time cutover
-  bootstrap use `filesystem:/app/db/migration-mysql` so schema discovery does
-  not depend on native-image classpath resource scanning.
+  bootstrap use `filesystem:/app/db/migration-mysql`, so schema discovery has
+  the same behavior in both runtime modes and does not depend on native-image
+  classpath resource scanning.
 - The one-time PostgreSQL cutover preserves every question row. Legacy
   questions may reference a study, user, or concept that was already deleted
   before foreign keys existed; only those missing nullable references are

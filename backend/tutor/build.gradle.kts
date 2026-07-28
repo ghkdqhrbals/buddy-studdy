@@ -49,6 +49,10 @@ tasks.named("generateResourcesConfigFile") {
     dependsOn("patchNativeReachabilityMetadata")
 }
 
+tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
+    archiveFileName.set("buddystudy-backend.jar")
+}
+
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(25)
@@ -127,6 +131,7 @@ graalvmNative {
             buildArgs.add("--no-fallback")
             buildArgs.add("--parallelism=2")
             buildArgs.add("-Ob")
+            buildArgs.add("-J-Xmx12g")
         }
     }
 }

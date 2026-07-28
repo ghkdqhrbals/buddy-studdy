@@ -10,6 +10,15 @@ on:
         description: "Image ref to deploy."
         required: true
         type: string
+      backend_runtime:
+        description: "Expected image runtime. Auto trusts the image label."
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - native
+          - jvm
 
 concurrency:
   group: deploy-backend
@@ -22,6 +31,7 @@ jobs:
     timeout-minutes: 20
     env:
       IMAGE_REF: ${{ github.event.client_payload.image || inputs.image }}
+      EXPECTED_BACKEND_RUNTIME: ${{ github.event.client_payload.backend_runtime || inputs.backend_runtime || 'auto' }}
       BACKEND_DOMAIN: api.ghkdqhrbals.org
 
     steps:
@@ -226,6 +236,33 @@ jobs:
           echo "Reclaiming disk space from Docker images unused by any container."
           docker image prune -af
           docker pull "${IMAGE_REF}"
+          BACKEND_RUNTIME="$(
+            docker image inspect \
+              --format '{{index .Config.Labels "io.buddystudy.backend.runtime"}}' \
+              "${IMAGE_REF}" 2>/dev/null || true
+          )"
+          case "${BACKEND_RUNTIME}" in
+            native|jvm)
+              ;;
+            "")
+              if [ "${EXPECTED_BACKEND_RUNTIME}" != "auto" ]; then
+                echo "Image ${IMAGE_REF} does not declare io.buddystudy.backend.runtime." >&2
+                exit 1
+              fi
+              BACKEND_RUNTIME="unknown"
+              ;;
+            *)
+              echo "Image ${IMAGE_REF} declares unsupported runtime: ${BACKEND_RUNTIME}" >&2
+              exit 1
+              ;;
+          esac
+          if [ "${EXPECTED_BACKEND_RUNTIME}" != "auto" ] && \
+             [ "${EXPECTED_BACKEND_RUNTIME}" != "${BACKEND_RUNTIME}" ]; then
+            echo "Expected ${EXPECTED_BACKEND_RUNTIME} image but received ${BACKEND_RUNTIME}." >&2
+            exit 1
+          fi
+          echo "Deploying backend runtime: ${BACKEND_RUNTIME}"
+          echo "BACKEND_RUNTIME=${BACKEND_RUNTIME}" >> "${GITHUB_ENV}"
           docker pull nginx:1.27-alpine
           docker pull mysql:8.4
           docker pull redis:7.4-alpine
@@ -622,6 +659,7 @@ jobs:
             echo ""
             echo "- Target: \`ec2\`"
             echo "- Image: \`${IMAGE_REF}\`"
+            echo "- Runtime: \`${BACKEND_RUNTIME}\`"
             echo "- Result: \`${{ job.status }}\`"
           } >> "${GITHUB_STEP_SUMMARY}"
 

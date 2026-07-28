@@ -18,8 +18,11 @@ services:
     restart: unless-stopped
 
   backend:
-    build: .
-    image: buddystudy-backend:local
+    build:
+      context: .
+      args:
+        BACKEND_RUNTIME: ${BACKEND_RUNTIME:-native}
+    image: buddystudy-backend:${BACKEND_RUNTIME:-native}-local
     depends_on:
       db:
         condition: service_healthy

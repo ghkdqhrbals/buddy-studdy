@@ -10,6 +10,14 @@ on:
         description: "Docker image tag. Leave empty to use the commit SHA."
         required: false
         type: string
+      backend_runtime:
+        description: "Backend runtime packaged in the image."
+        required: true
+        default: native
+        type: choice
+        options:
+          - native
+          - jvm
       dispatch_deploy:
         description: "Notify the deploy repository after pushing the image."
         required: true
@@ -32,6 +40,7 @@ jobs:
     outputs:
       image_ref: ${{ steps.resolve.outputs.image_ref }}
       image_tag: ${{ steps.resolve.outputs.image_tag }}
+      backend_runtime: ${{ steps.resolve.outputs.backend_runtime }}
 
     steps:
       - name: Checkout
@@ -45,10 +54,28 @@ jobs:
           if [ -z "${TAG}" ]; then
             TAG="${GITHUB_SHA}"
           fi
-          echo "IMAGE_TAG=${TAG}" >> "${GITHUB_ENV}"
-          echo "IMAGE_REF=${IMAGE_NAME}:${TAG}" >> "${GITHUB_ENV}"
-          echo "image_tag=${TAG}" >> "${GITHUB_OUTPUT}"
-          echo "image_ref=${IMAGE_NAME}:${TAG}" >> "${GITHUB_OUTPUT}"
+          RUNTIME="${{ inputs.backend_runtime }}"
+          if [ -z "${RUNTIME}" ]; then
+            RUNTIME="native"
+          fi
+          case "${RUNTIME}" in
+            native|jvm) ;;
+            *)
+              echo "Unsupported backend runtime: ${RUNTIME}" >&2
+              exit 1
+              ;;
+          esac
+          RUNTIME_TAG="${TAG}-${RUNTIME}"
+          {
+            echo "IMAGE_TAG=${RUNTIME_TAG}"
+            echo "IMAGE_REF=${IMAGE_NAME}:${RUNTIME_TAG}"
+            echo "COMPAT_IMAGE_REF=${IMAGE_NAME}:${TAG}"
+          } >> "${GITHUB_ENV}"
+          {
+            echo "image_tag=${RUNTIME_TAG}"
+            echo "image_ref=${IMAGE_NAME}:${RUNTIME_TAG}"
+            echo "backend_runtime=${RUNTIME}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -68,7 +95,13 @@ jobs:
           push: true
           tags: |
             ${{ env.IMAGE_REF }}
+            ${{ env.COMPAT_IMAGE_REF }}
             ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:latest-${{ steps.resolve.outputs.backend_runtime }}
+          build-args: |
+            BACKEND_RUNTIME=${{ steps.resolve.outputs.backend_runtime }}
+          labels: |
+            io.buddystudy.backend.runtime=${{ steps.resolve.outputs.backend_runtime }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -88,6 +121,7 @@ jobs:
           DEPLOY_REPO_DISPATCH_TOKEN: ${{ secrets.DEPLOY_REPO_DISPATCH_TOKEN }}
           IMAGE_REF: ${{ needs.build.outputs.image_ref }}
           IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+          BACKEND_RUNTIME: ${{ needs.build.outputs.backend_runtime }}
           EVENT_TYPE: backend-image-published
         run: |
           set -euo pipefail
@@ -103,6 +137,7 @@ jobs:
             --arg image "${IMAGE_REF}" \
             --arg sha "${GITHUB_SHA}" \
             --arg image_tag "${IMAGE_TAG}" \
+            --arg backend_runtime "${BACKEND_RUNTIME}" \
             --arg source_repo "${GITHUB_REPOSITORY}" \
             --arg source_run_id "${GITHUB_RUN_ID}" \
             --arg source_run_attempt "${GITHUB_RUN_ATTEMPT}" \
@@ -114,6 +149,7 @@ jobs:
                 image: $image,
                 sha: $sha,
                 image_tag: $image_tag,
+                backend_runtime: $backend_runtime,
                 source_repo: $source_repo,
                 source_run_id: $source_run_id,
                 source_run_attempt: $source_run_attempt,
@@ -125,6 +161,7 @@ jobs:
           echo "Dispatch target: ${DEPLOY_REPO}"
           echo "Dispatch event: ${EVENT_TYPE}"
           echo "Dispatch image: ${IMAGE_REF}"
+          echo "Dispatch backend runtime: ${BACKEND_RUNTIME}"
           echo "Dispatch correlation id: ${correlation_id}"
           echo "Dispatch timestamp: ${dispatched_at}"
           echo "Dispatch payload:"
@@ -166,6 +203,7 @@ jobs:
             echo "- Target: \`${DEPLOY_REPO}\`"
             echo "- Event: \`backend-image-published\`"
             echo "- Image: \`${{ needs.build.outputs.image_ref }}\`"
+            echo "- Runtime: \`${{ needs.build.outputs.backend_runtime }}\`"
             echo "- Source SHA: \`${GITHUB_SHA}\`"
             echo "- Correlation ID: \`${{ steps.dispatch.outputs.correlation_id }}\`"
           } >> "${GITHUB_STEP_SUMMARY}"

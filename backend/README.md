@@ -68,6 +68,12 @@ docker compose up --build
 ```
 
 Local runs use MySQL from `docker-compose.yml` and `SPRING_PROFILES_ACTIVE=dev`.
+The default backend runtime is GraalVM Native Image. Select the JVM without
+changing the application or infrastructure configuration:
+
+```sh
+BACKEND_RUNTIME=jvm docker compose up --build
+```
 
 For iPhone testing against a backend running on this Mac, see [Local Backend Tunnel](../docs/LOCAL_BACKEND_TUNNEL.md).
 
@@ -79,16 +85,55 @@ For iPhone testing against a backend running on this Mac, see [Local Backend Tun
 ## Docker
 
 ```sh
-docker build -t buddystudy-backend ./backend
-docker run --rm -p 8080:8080 --env-file .env -v buddystudy-data:/data buddystudy-backend
+# GraalVM Native Image, the default
+docker build \
+  --build-arg BACKEND_RUNTIME=native \
+  -t buddystudy-backend:native-local \
+  ./backend
+
+# Regular JVM executable jar
+docker build \
+  --build-arg BACKEND_RUNTIME=jvm \
+  -t buddystudy-backend:jvm-local \
+  ./backend
 ```
 
-For a local MySQL-backed stack:
+The helper script provides the same interface and can start the full local
+MySQL/Redis stack:
 
 ```sh
 cd backend
-docker compose up --build
+./scripts/backend-runtime.sh native build
+./scripts/backend-runtime.sh jvm build
+./scripts/backend-runtime.sh jvm up -d
+./scripts/backend-runtime.sh jvm down
 ```
+
+Both images:
+
+- expose port `8080`;
+- run as the non-root `app` user;
+- use the same Spring profiles, secrets, R2DBC, Redis, and Flyway variables;
+- include MySQL migrations at `/app/db/migration-mysql`;
+- report the actual runtime through the existing runtime metrics collector;
+- carry the `io.buddystudy.backend.runtime=native|jvm` image label.
+
+The JVM artifact is built with Temurin JDK 25, starts
+`buddystudy-backend.jar` on Temurin JRE 25, and accepts normal JVM tuning
+through `JAVA_TOOL_OPTIONS`. Its container default caps the heap at 50% of
+available memory and exits on an out-of-memory error; deployment configuration
+may replace those options. The native artifact is built with GraalVM 25 and
+starts the compiled `buddystudy-backend` executable. Its build heap is capped
+at 12 GiB; allocate at least 14 GiB to the native build environment. Runtime
+selection is a build concern; API and deployment configuration must not branch
+on it.
+
+The `Build Backend Image` GitHub workflow exposes the same `backend_runtime`
+choice. Tag-triggered deployments remain `native` by default. A manually
+selected JVM build is pushed and deployed through a runtime-qualified immutable
+reference such as `<commit>-jvm`; native uses `<commit>-native`. The unqualified
+tag remains a compatibility alias for the most recently built variant. The
+deploy workflow verifies the runtime label before rollout.
 
 ## Local Testing (TDD)
 
