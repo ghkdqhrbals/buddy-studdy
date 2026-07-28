@@ -255,6 +255,21 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertNil(relaunchedStore.loadPendingQuestionGenerationProcess())
     }
 
+    func testQuotaExceededStopsQuestionGenerationRetryLoop() {
+        let error = RemotePushBackendError.httpStatus(
+            403,
+            "",
+            BackendAPIError(
+                code: "QUOTA_EXCEEDED",
+                numericCode: 305,
+                message: "Monthly question limit reached.",
+                status: 403
+            )
+        )
+
+        XCTAssertTrue(AppErrorHandlingUseCase().isPermanentBackendOperationError(error))
+    }
+
     private func makeClient(
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> RemotePushBackendClient {

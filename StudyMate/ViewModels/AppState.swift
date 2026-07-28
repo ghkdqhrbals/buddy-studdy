@@ -5151,7 +5151,7 @@ final class AppState: ObservableObject {
             return
         }
 
-        guard !isGeneratingQuestion else {
+        guard !isGeneratingQuestion, questionGenerationPollingTask == nil else {
             log(.info, "이미 질문 생성 중이라 새 요청을 무시했습니다.")
             return
         }
@@ -5199,12 +5199,12 @@ final class AppState: ObservableObject {
         log(.info, "백엔드 새 질문 생성을 준비합니다. studyCategoryID=\(studyCategoryID ?? "-")")
 
         guard let studyID = await backendStudyID(for: studyCategoryID) else {
-            finishQuestionGenerationProcess()
             await handleQuestionGenerationRequestFailure(
                 AppStateError.backendStudyMissing,
                 manual: manual,
                 studyCategoryID: studyCategoryID
             )
+            finishQuestionGenerationProcess()
             return
         }
 
@@ -5215,7 +5215,6 @@ final class AppState: ObservableObject {
             studyCategoryID: studyCategoryID,
             submittedAt: appClock.now
         )
-        currentStudySessionUseCase.savePendingQuestionGenerationProcess(pending)
         startQuestionGenerationPolling(pending: pending, registration: registration, manual: manual)
     }
 
@@ -5225,8 +5224,13 @@ final class AppState: ObservableObject {
         manual: Bool
     ) {
         guard questionGenerationPollingTask == nil else {
+            let activePending = currentStudySessionUseCase.loadPendingQuestionGenerationProcess()
+            isGeneratingQuestion = true
+            generatingQuestionCategoryID = activePending?.studyCategoryID
+            log(.warning, "종료되지 않은 질문 생성 작업이 있어 중복 폴링 시작을 차단했습니다.")
             return
         }
+        currentStudySessionUseCase.savePendingQuestionGenerationProcess(pending)
         isGeneratingQuestion = true
         generatingQuestionCategoryID = pending.studyCategoryID
         statusMessage = strings.fetchingQuestion
@@ -5279,12 +5283,12 @@ final class AppState: ObservableObject {
                     await sleepForQuestionGeneration(milliseconds: accepted.pollAfterMilliseconds)
                 } catch {
                     if appErrorHandlingUseCase.isPermanentBackendOperationError(error) {
-                        finishQuestionGenerationProcess()
                         await handleQuestionGenerationRequestFailure(
                             error,
                             manual: manual,
                             studyCategoryID: pending.studyCategoryID
                         )
+                        finishQuestionGenerationProcess()
                         return
                     }
                     consecutiveTransportFailures += 1
@@ -5324,7 +5328,7 @@ final class AppState: ObservableObject {
                         )
                     }
                     finishQuestionGenerationProcess()
-                    await refreshQuestionQuota()
+                    scheduleQuestionQuotaRefresh()
                     return
                 }
 
@@ -5332,12 +5336,12 @@ final class AppState: ObservableObject {
                 await sleepForQuestionGeneration(milliseconds: process.pollAfterMilliseconds ?? 250)
             } catch {
                 if appErrorHandlingUseCase.isPermanentBackendOperationError(error) {
-                    finishQuestionGenerationProcess()
                     await handleQuestionGenerationRequestFailure(
                         error,
                         manual: manual,
                         studyCategoryID: pending.studyCategoryID
                     )
+                    finishQuestionGenerationProcess()
                     return
                 }
                 consecutiveTransportFailures += 1
@@ -5431,7 +5435,7 @@ final class AppState: ObservableObject {
             let message = resolution.featureMessage ?? strings.monthlyQuotaReached
             questionQuotaNotice = message
             errorMessage = message
-            await refreshQuestionQuota()
+            scheduleQuestionQuotaRefresh()
         }
         if resolution.isPendingQuestionConflict {
             await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
@@ -5454,6 +5458,12 @@ final class AppState: ObservableObject {
         }
         handleOpenAIError(error)
         log(.error, "백엔드 질문 생성 요청에 실패했습니다: \(error.localizedDescription)")
+    }
+
+    private func scheduleQuestionQuotaRefresh() {
+        Task { @MainActor [weak self] in
+            await self?.refreshQuestionQuota()
+        }
     }
 
     private func backendStudyID(for categoryID: String?) async -> Int? {

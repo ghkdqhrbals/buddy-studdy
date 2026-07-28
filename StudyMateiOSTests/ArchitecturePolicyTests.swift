@@ -1441,6 +1441,37 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertTrue(resolution.featureMessage?.contains("다시 사용할 수 있습니다.") == true)
     }
 
+    func testQuestionGenerationKeepsBusyStateUntilPermanentFailureHandlingCompletes() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+
+        XCTAssertTrue(
+            content.contains("guard !isGeneratingQuestion, questionGenerationPollingTask == nil else"),
+            "A previous polling task must block a rapid second question-generation request."
+        )
+        let marker = "if appErrorHandlingUseCase.isPermanentBackendOperationError(error) {"
+        var searchStart = content.startIndex
+        for _ in 0..<2 {
+            let markerRange = try XCTUnwrap(content.range(of: marker, range: searchStart..<content.endIndex))
+            let blockEnd = content.index(
+                markerRange.upperBound,
+                offsetBy: 500,
+                limitedBy: content.endIndex
+            ) ?? content.endIndex
+            let block = content[markerRange.lowerBound..<blockEnd]
+            let handlerRange = try XCTUnwrap(block.range(of: "await handleQuestionGenerationRequestFailure("))
+            let finishRange = try XCTUnwrap(block.range(of: "finishQuestionGenerationProcess()"))
+
+            XCTAssertLessThan(
+                handlerRange.lowerBound,
+                finishRange.lowerBound,
+                "Permanent failures must be presented before the generation lifecycle is released."
+            )
+            searchStart = markerRange.upperBound
+        }
+    }
+
     func testAuthRangeNumericBackendErrorsRequireLoginWithoutPopup() {
         let apiError = BackendAPIError(
             code: "101",
