@@ -119,20 +119,29 @@ class RedisEventOutboxRepository(
             .where(table.ID.eq(claimedId))
             .awaitFirst()
 
-        dsl.selectFrom(table)
+        dsl.select(
+            table.ID,
+            table.EVENT_ID,
+            table.EVENT_TYPE,
+            table.PAYLOAD_VERSION,
+            table.PAYLOAD_JSON,
+            table.ATTEMPTS,
+            table.CREATED_AT,
+        )
+            .from(table)
             .where(table.ID.eq(claimedId))
             .asFlow()
             .toList()
             .firstOrNull()
             ?.let { record ->
                 ClaimedRedisOutboxEvent(
-                    id = record.id,
-                    eventId = record.eventId,
-                    eventType = RedisOutboxEventType.valueOf(record.eventType),
-                    payloadVersion = record.payloadVersion,
-                    payloadJson = record.payloadJson,
-                    attempts = record.attempts,
-                    createdAt = record.createdAt.toInstant(ZoneOffset.UTC),
+                    id = record.get(table.ID),
+                    eventId = record.get(table.EVENT_ID),
+                    eventType = RedisOutboxEventType.valueOf(record.get(table.EVENT_TYPE)),
+                    payloadVersion = record.get(table.PAYLOAD_VERSION),
+                    payloadJson = record.get(table.PAYLOAD_JSON),
+                    attempts = record.get(table.ATTEMPTS),
+                    createdAt = record.get(table.CREATED_AT).toInstant(ZoneOffset.UTC),
                     claimToken = claimToken,
                 )
             }
@@ -174,20 +183,29 @@ class RedisEventOutboxRepository(
             .where(table.ID.`in`(ids))
             .awaitFirst()
 
-        dsl.selectFrom(table)
+        dsl.select(
+            table.ID,
+            table.EVENT_ID,
+            table.EVENT_TYPE,
+            table.PAYLOAD_VERSION,
+            table.PAYLOAD_JSON,
+            table.ATTEMPTS,
+            table.CREATED_AT,
+        )
+            .from(table)
             .where(table.ID.`in`(ids))
             .orderBy(table.CREATED_AT.asc(), table.ID.asc())
             .asFlow()
             .toList()
             .map { record ->
                 ClaimedRedisOutboxEvent(
-                    id = record.id,
-                    eventId = record.eventId,
-                    eventType = RedisOutboxEventType.valueOf(record.eventType),
-                    payloadVersion = record.payloadVersion,
-                    payloadJson = record.payloadJson,
-                    attempts = record.attempts,
-                    createdAt = record.createdAt.toInstant(ZoneOffset.UTC),
+                    id = record.get(table.ID),
+                    eventId = record.get(table.EVENT_ID),
+                    eventType = RedisOutboxEventType.valueOf(record.get(table.EVENT_TYPE)),
+                    payloadVersion = record.get(table.PAYLOAD_VERSION),
+                    payloadJson = record.get(table.PAYLOAD_JSON),
+                    attempts = record.get(table.ATTEMPTS),
+                    createdAt = record.get(table.CREATED_AT).toInstant(ZoneOffset.UTC),
                     claimToken = claimToken,
                 )
             }

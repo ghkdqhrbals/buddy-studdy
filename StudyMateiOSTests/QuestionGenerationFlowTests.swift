@@ -367,6 +367,129 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertNil(appState.answerGradingStatusMessage)
     }
 
+    func testLeavingAnswerScreenStopsThreeSecondPollingImmediately() async {
+        let suiteName = "QuestionGenerationFlowTests-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            XCTFail("Unable to create isolated user defaults.")
+            return
+        }
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+
+        let pollCounter = LockedRequestCounter()
+        let client = makeClient { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/api/v1/records/record-screen-exit/answer"):
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "id": "record-screen-exit",
+                      "question": {
+                        "question": "What should happen after leaving the screen?",
+                        "expectedAnswerHint": null,
+                        "createdAt": "2026-07-28T00:00:00Z"
+                      },
+                      "answer": "Polling should stop.",
+                      "topic": "Concurrency",
+                      "difficulty": 5,
+                      "gradingRequestId": "grading-screen-exit",
+                      "gradingStatus": "QUEUED"
+                    }
+                    """
+                )
+            case ("GET", "/api/v1/answer-processes/grading-screen-exit"):
+                pollCounter.increment()
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "correlationId": "grading-screen-exit",
+                      "recordId": "record-screen-exit",
+                      "status": "QUEUED",
+                      "terminal": false,
+                      "pollAfterMs": 250,
+                      "events": [],
+                      "errorMessage": null,
+                      "updatedAt": "2026-07-28T00:00:00Z"
+                    }
+                    """
+                )
+            default:
+                XCTFail("Unexpected request: \(request.httpMethod ?? "-") \(request.url?.path ?? "-")")
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        let store = SettingsStore(
+            defaults: defaults,
+            recordDatabaseURL: databaseURL,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveRemotePushRegistration(
+            RemotePushRegistration(
+                deviceID: "device-1",
+                clientSecret: "client-secret",
+                apnsToken: "",
+                accessToken: "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJkZXZpY2VfaWQiOiJkZXZpY2UtMSIsImlzX2Fub255bW91cyI6ZmFsc2UsInN0YXR1cyI6IkFDVElWRSJ9.",
+                accessTokenExpiresAt: Date().addingTimeInterval(3_600)
+            )
+        )
+        let sleepProvider = BlockingRecordingAppSleepProvider()
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: client,
+            appSleepProvider: sleepProvider
+        )
+        let record = StudyRecord(
+            id: "record-screen-exit",
+            question: QuestionItem(
+                question: "What should happen after leaving the screen?",
+                expectedAnswerHint: nil,
+                createdAt: Date()
+            ),
+            topic: "Concurrency",
+            difficulty: .intermediate
+        )
+        let ownerID = UUID().uuidString
+        let gradingTask = Task { @MainActor in
+            await appState.gradeRecord(
+                record,
+                answer: "Polling should stop.",
+                pollingOwnerID: ownerID
+            )
+        }
+
+        for _ in 0..<100 {
+            if !(await sleepProvider.requestedNanoseconds()).isEmpty {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        let requestedNanoseconds = await sleepProvider.requestedNanoseconds()
+        XCTAssertEqual(requestedNanoseconds, [3_000_000_000])
+        XCTAssertEqual(pollCounter.value, 1)
+
+        appState.cancelAnswerGradingPolling(
+            ownerID: ownerID,
+            reason: "test-screen-disappeared"
+        )
+        await gradingTask.value
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertEqual(pollCounter.value, 1)
+        XCTAssertFalse(appState.isGradingAnswer)
+        XCTAssertNil(appState.answerGradingStatusMessage)
+    }
+
     func testJapaneseLanguageUsesJapaneseLocaleAndBackendCode() {
         XCTAssertEqual(AppLanguage.japanese.locale.identifier, "ja_JP")
         XCTAssertEqual(AppLanguage.japanese.backendCode, "ja")
@@ -636,5 +759,18 @@ private final class LockedRequestCounter: @unchecked Sendable {
         lock.lock()
         count += 1
         lock.unlock()
+    }
+}
+
+private actor BlockingRecordingAppSleepProvider: AppSleepProviding {
+    private var values: [UInt64] = []
+
+    func sleep(nanoseconds: UInt64) async throws {
+        values.append(nanoseconds)
+        try await Task.sleep(nanoseconds: 60_000_000_000)
+    }
+
+    func requestedNanoseconds() -> [UInt64] {
+        values
     }
 }

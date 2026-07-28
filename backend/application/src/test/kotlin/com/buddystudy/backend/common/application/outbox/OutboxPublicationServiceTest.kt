@@ -65,6 +65,23 @@ class OutboxPublicationServiceTest {
         assertThat(domainOutbox.published).containsExactly(1L)
     }
 
+    @Test
+    fun `recovery claim failure is surfaced instead of reported as an empty success`(): Unit = runBlocking {
+        val failure = IllegalStateException("Could not construct new record")
+        val service = service(
+            FakeDomainOutbox(claimBatchFailure = failure),
+            FakePushOutbox(),
+            FakeDomainPublisher(),
+            FakePushPublisher(),
+        )
+
+        val error = runCatching { service.recoverPending() }.exceptionOrNull()
+
+        assertThat(error)
+            .isInstanceOf(OutboxRecoveryClaimException::class.java)
+            .hasCause(failure)
+    }
+
     private fun service(
         domainOutbox: FakeDomainOutbox,
         pushOutbox: FakePushOutbox,
@@ -78,7 +95,10 @@ class OutboxPublicationServiceTest {
         pushPublisher = pushPublisher,
     )
 
-    private class FakeDomainOutbox(vararg initial: ClaimedRedisOutboxEvent) : RedisEventOutboxPort {
+    private class FakeDomainOutbox(
+        vararg initial: ClaimedRedisOutboxEvent,
+        private val claimBatchFailure: Throwable? = null,
+    ) : RedisEventOutboxPort {
         private val available = initial.associateBy { it.id }.toMutableMap()
         val published = mutableListOf<Long>()
         val retried = mutableListOf<Long>()
@@ -94,6 +114,7 @@ class OutboxPublicationServiceTest {
             staleBefore: Instant,
             limit: Int,
         ): List<ClaimedRedisOutboxEvent> = synchronized(this) {
+            claimBatchFailure?.let { throw it }
             available.values.take(limit).also { rows -> rows.forEach { available.remove(it.id) } }
         }
 

@@ -53,7 +53,7 @@ class AnswerGradingProcessService(
     }
 
     private companion object {
-        const val POLL_INTERVAL_MS = 250L
+        const val POLL_INTERVAL_MS = 3_000L
         const val EVENT_PAGE_SIZE = 50
     }
 }

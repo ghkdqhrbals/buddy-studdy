@@ -12,6 +12,8 @@ struct StudyView: View {
     @State private var showsPendingLimitHelp = false
     @State private var editingStudyRoom: BackendStudyRoom?
     @State private var selectedTreeRootID: Int?
+    @State private var answerSubmissionTask: Task<Void, Never>?
+    @State private var answerGradingOwnerID: String?
     #if os(iOS)
     @FocusState private var isAnswerEditorFocused: Bool
     #endif
@@ -127,6 +129,15 @@ struct StudyView: View {
             _ = await (roomPreparation, quotaRefresh)
         }
         .onDisappear {
+            answerSubmissionTask?.cancel()
+            answerSubmissionTask = nil
+            if let answerGradingOwnerID {
+                appState.cancelAnswerGradingPolling(
+                    ownerID: answerGradingOwnerID,
+                    reason: "study-view-disappeared"
+                )
+                self.answerGradingOwnerID = nil
+            }
             appState.flushPendingAnswerDraftSave()
         }
         .onChange(of: draftAnswer) {
@@ -438,8 +449,20 @@ struct StudyView: View {
         isAnswerEditorFocused = false
         #endif
 
-        Task {
-            await appState.gradeStudyRoomRecord(selectedStudyRecord, answer: draftAnswer)
+        answerSubmissionTask?.cancel()
+        let ownerID = UUID().uuidString
+        answerGradingOwnerID = ownerID
+        answerSubmissionTask = Task {
+            await appState.gradeStudyRoomRecord(
+                selectedStudyRecord,
+                answer: draftAnswer,
+                pollingOwnerID: ownerID
+            )
+            guard answerGradingOwnerID == ownerID else {
+                return
+            }
+            answerSubmissionTask = nil
+            answerGradingOwnerID = nil
         }
     }
 }

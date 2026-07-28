@@ -4,6 +4,7 @@ import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.port.outbound.ClaimedQuestionPushOutbox
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushPublishPort
+import kotlinx.coroutines.CancellationException
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.time.Duration
@@ -55,12 +56,25 @@ class OutboxPublicationService(
         if (!properties.streams.enabled) return EMPTY_SUMMARY
         val now = Instant.now()
         val staleBefore = now.minus(CLAIM_LEASE)
-        val domainEvents = runCatching { domainOutbox.claimBatch(now, staleBefore, BATCH_SIZE) }
-            .onFailure { log.warn("redis_outbox_recovery_claim_failed error={}", it.message) }
-            .getOrDefault(emptyList())
-        val pushes = runCatching { pushOutbox.claimBatch(now, staleBefore, BATCH_SIZE) }
-            .onFailure { log.warn("question_push_outbox_recovery_claim_failed error={}", it.message) }
-            .getOrDefault(emptyList())
+        val claimFailures = mutableListOf<Throwable>()
+        val domainEvents = try {
+            domainOutbox.claimBatch(now, staleBefore, BATCH_SIZE)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            log.error("redis_outbox_recovery_claim_failed", error)
+            claimFailures += error
+            emptyList()
+        }
+        val pushes = try {
+            pushOutbox.claimBatch(now, staleBefore, BATCH_SIZE)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            log.error("question_push_outbox_recovery_claim_failed", error)
+            claimFailures += error
+            emptyList()
+        }
         val outcomes = domainEvents.map { event ->
             runCatching { publishDomain(event) }
                 .onFailure { log.warn("redis_outbox_recovery_publish_failed outboxId={} error={}", event.id, it.message) }
@@ -71,6 +85,9 @@ class OutboxPublicationService(
                     log.warn("question_push_outbox_recovery_publish_failed outboxId={} error={}", item.id, it.message)
                 }
                 .getOrDefault(PublishOutcome.NOT_CLAIMED)
+        }
+        if (claimFailures.isNotEmpty()) {
+            throw OutboxRecoveryClaimException(claimFailures)
         }
         return outcomes.toSummary()
     }
@@ -208,5 +225,16 @@ class OutboxPublicationService(
         const val SUPPORTED_PAYLOAD_VERSION = 1
         const val MAX_BACKOFF_EXPONENT = 8
         const val MAX_RETRY_DELAY_SECONDS = 300L
+    }
+}
+
+internal class OutboxRecoveryClaimException(
+    failures: List<Throwable>,
+) : IllegalStateException(
+    "Failed to claim ${failures.size} outbox source(s).",
+    failures.first(),
+) {
+    init {
+        failures.drop(1).forEach(::addSuppressed)
     }
 }

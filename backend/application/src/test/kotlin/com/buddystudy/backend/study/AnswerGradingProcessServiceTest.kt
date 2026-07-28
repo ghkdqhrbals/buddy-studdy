@@ -15,6 +15,50 @@ import java.time.Instant
 
 class AnswerGradingProcessServiceTest {
     @Test
+    fun `non-terminal process tells clients to poll every three seconds`() = runBlocking<Unit> {
+        val questions = Mockito.mock(QuestionPort::class.java)
+        Mockito.`when`(
+            questions.findByGradingRequestIdAndUserIdAndDeletedAtIsNull("queued-request", 7),
+        ).thenReturn(
+            QuestionEntity(
+                id = 10,
+                userId = 7,
+                gradingRequestId = "queued-request",
+                gradingStatus = AnswerGradingStatus.QUEUED.name,
+                updatedAt = Instant.parse("2026-07-27T00:00:00Z"),
+            ),
+        )
+        val progress = object : AnswerGradingProgressPort {
+            override suspend fun append(
+                recordId: Long,
+                userId: Long,
+                requestId: String,
+                status: AnswerGradingStatus,
+                errorMessage: String?,
+                occurredAt: Instant,
+            ): AnswerGradingProgress = error("Not used")
+
+            override suspend fun findAfter(
+                recordId: Long,
+                userId: Long,
+                requestId: String,
+                afterId: Long,
+                limit: Int,
+            ): List<AnswerGradingProgress> = emptyList()
+        }
+        val service = AnswerGradingProcessService(questions, progress)
+
+        val process = service.get(
+            principal = Principal(userId = 7, deviceId = "device-1", sessionId = 1, anonymous = false),
+            correlationId = "queued-request",
+            afterId = 0,
+        )
+
+        assertThat(process.terminal).isFalse()
+        assertThat(process.pollAfterMs).isEqualTo(3_000)
+    }
+
+    @Test
     fun `poll returns only durable events after the client cursor`() = runBlocking<Unit> {
         val questions = Mockito.mock(QuestionPort::class.java)
         Mockito.`when`(

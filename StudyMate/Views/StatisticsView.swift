@@ -397,6 +397,8 @@ struct StudyRecordDetailView: View {
     @State private var isShowingOriginal = false
     @State private var originalAvailable: Bool
     @State private var showsHint = false
+    @State private var answerSubmissionTask: Task<Void, Never>?
+    @State private var answerGradingOwnerID: String?
     #if os(iOS)
     @FocusState private var isAnswerEditorFocused: Bool
     #endif
@@ -510,6 +512,17 @@ struct StudyRecordDetailView: View {
         #endif
         .task(id: record.id) {
             await refreshLocalizedRecord()
+        }
+        .onDisappear {
+            answerSubmissionTask?.cancel()
+            answerSubmissionTask = nil
+            if let answerGradingOwnerID {
+                appState.cancelAnswerGradingPolling(
+                    ownerID: answerGradingOwnerID,
+                    reason: "record-detail-disappeared"
+                )
+                self.answerGradingOwnerID = nil
+            }
         }
     }
 
@@ -629,8 +642,20 @@ struct StudyRecordDetailView: View {
         isAnswerEditorFocused = false
         #endif
 
-        Task {
-            await appState.gradeRecord(record, answer: draftAnswer)
+        answerSubmissionTask?.cancel()
+        let ownerID = UUID().uuidString
+        answerGradingOwnerID = ownerID
+        answerSubmissionTask = Task {
+            await appState.gradeRecord(
+                record,
+                answer: draftAnswer,
+                pollingOwnerID: ownerID
+            )
+            guard answerGradingOwnerID == ownerID else {
+                return
+            }
+            answerSubmissionTask = nil
+            answerGradingOwnerID = nil
         }
     }
 
