@@ -2036,10 +2036,6 @@ private struct StudyGrowthTreeCard: View {
                 }
 
                 Spacer(minLength: 8)
-
-                Text(strings.abilityScale)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
             }
 
             HStack(spacing: 8) {
