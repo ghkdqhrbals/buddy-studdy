@@ -168,9 +168,10 @@ deployment.
   Grafana Live origin checks aligned with its public HTTPS `root_url`.
   Grafana also provisions a Loki alert for backend `level=ERROR` events and
   sends it to the `BuddyStudy Slack` contact point. Slack contains the incident
-  summary and a direct Grafana log link; Loki and Sentry retain the full stack
-  and diagnostic context. This Grafana path is the only production path from
-  backend application errors to Slack.
+  summary and a direct Grafana Explore link with the exact Loki ERROR query;
+  Loki and Sentry retain the full stack and diagnostic context. The link does
+  not depend on the Logs Drilldown volume API. This Grafana path is the only
+  production path from backend application errors to Slack.
   The Server Dashboard supports fixed and explicit From/To time ranges and
   reads the same structured Micrometer runtime samples as the provisioned
   Grafana Server Runtime dashboard. The same module publishes the fixed,

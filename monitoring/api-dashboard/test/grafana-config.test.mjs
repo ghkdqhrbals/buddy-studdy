@@ -257,7 +257,21 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
   assert.match(alert, /type: slack/);
   assert.match(alert, /level="ERROR"/);
   assert.match(alert, /receiver: BuddyStudy Slack/);
-  assert.match(alert, /logs_url: https:\/\/grafana\.lowfidev\.cloud/);
+  const logsUrlValue = alert.match(/^\s+logs_url: (\S+)$/m)?.[1];
+  assert.ok(logsUrlValue, "Slack alert must include a Grafana logs URL");
+  const logsUrl = new URL(logsUrlValue);
+  assert.equal(logsUrl.origin, "https://grafana.lowfidev.cloud");
+  assert.equal(logsUrl.pathname, "/explore");
+  assert.equal(logsUrl.searchParams.get("schemaVersion"), "1");
+  assert.equal(logsUrl.searchParams.get("orgId"), "1");
+  const panes = JSON.parse(logsUrl.searchParams.get("panes"));
+  assert.deepEqual(panes.backendErrors.range, { from: "now-15m", to: "now" });
+  assert.equal(panes.backendErrors.datasource, "buddystudy-loki");
+  assert.equal(
+    panes.backendErrors.queries[0].expr,
+    '{app="buddystudy", level="ERROR"}',
+  );
+  assert.doesNotMatch(logsUrl.pathname, /grafana-lokiexplore-app/);
 });
 
 test("TestZone dashboard separates server, database, and Redis runtime signals", async () => {
