@@ -122,7 +122,7 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
 - `Views`
   - `StudyView`: active question and pending question workflow.
   - `HistoryView`: 30-row incremental record/search pagination, detail, and deletion.
-  - `StatisticsView`: shared-axis root-study growth comparison, calculation help, period filtering, a pinch-zoomable circular score tree without separate zoom buttons that reuses the My Studies layout and saved node positions, trend charts, and a compatibility projection for older servers.
+  - `StatisticsView`: shared-axis root-study growth comparison, calculation help, period filtering, a pinch-zoomable circular score tree without separate zoom buttons that reuses the My Studies layout and saved node positions, trend charts, and a compatibility projection for older servers. Selecting a tree node keeps the growth summary visible and appends an independently paginated 30-row record list for that exact `studyId`; selecting a row reuses the standard record detail.
   - `SettingsView`: macOS settings.
 - `MobileRootView`: iOS tabs, onboarding, profile category hub, settings, notification inbox, and study-tree interaction.
   - The primary tab bar exposes Home, Records, Statistics, and Notifications. Settings is a profile-hub destination so account and app preferences share one predictable entry point.
@@ -231,6 +231,7 @@ Public community feed
 
 - Backend sync stores settings, records, answer drafts, generated questions, grading results, and topic statistics.
 - Backend record rows are retained without a per-user maximum. `GET /api/v1/records` and its search variant are bounded offset pages; iOS requests the next 30 rows only when the last loaded row approaches the viewport.
+- `GET /api/v1/records?studyId={nodeId}` applies the node filter in MySQL before counting and paging. Statistics node detail uses this additive filter so deep study trees never require downloading or client-filtering the user's full record history.
 - API key backend sync is supported for the regular OpenAI key; admin keys are not supported.
 - Backend settings sync uploads the regular OpenAI API key only when it changes or when backend settings need to be initialized.
 - A backend device registration can be created without an APNs token so manual question generation, grading, settings, records, and stats can work before notification permission/token delivery.

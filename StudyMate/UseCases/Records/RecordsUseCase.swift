@@ -24,6 +24,22 @@ struct RecordsUseCase {
         )
     }
 
+    func fetchRecordsForStudy(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        limit: Int,
+        offset: Int,
+        language: AppLanguage
+    ) async throws -> BackendRecordsPage {
+        try await repository.fetchRecordsForStudy(
+            registration: registration,
+            studyID: studyID,
+            limit: limit,
+            offset: offset,
+            language: language
+        )
+    }
+
     func gradeRecord(
         registration: RemotePushRegistration,
         recordID: String,

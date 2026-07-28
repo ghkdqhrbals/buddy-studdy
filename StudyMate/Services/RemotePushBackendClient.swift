@@ -350,6 +350,14 @@ protocol RemotePushBackendClientProtocol {
         language: AppLanguage
     ) async throws -> BackendRecordsPage
 
+    func fetchRecordsForStudy(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        limit: Int,
+        offset: Int,
+        language: AppLanguage
+    ) async throws -> BackendRecordsPage
+
     func fetchSettings(registration: RemotePushRegistration) async throws -> BackendStudySettings
 
     func fetchAPIStatus(registration: RemotePushRegistration) async throws -> BackendAPIStatus
@@ -538,6 +546,16 @@ protocol RemotePushBackendClientProtocol {
 extension RemotePushBackendClientProtocol {
     func fetchServiceAvailability(language: AppLanguage) async throws -> BackendServiceAvailability {
         .operational
+    }
+
+    func fetchRecordsForStudy(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        limit: Int,
+        offset: Int,
+        language: AppLanguage
+    ) async throws -> BackendRecordsPage {
+        throw RemotePushBackendError.invalidResponse
     }
 }
 
@@ -953,6 +971,34 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             URLQueryItem(name: "limit", value: "\(limit)"),
             URLQueryItem(name: "offset", value: "\(offset)"),
             URLQueryItem(name: "query", value: query),
+            URLQueryItem(name: "tl", value: language.backendCode),
+            URLQueryItem(name: "view", value: LocalizedContentView.localized.rawValue)
+        ]
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+
+        var request = authenticatedRequest(registration: registration, url: url)
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(BackendRecordsPage.self, from: data)
+    }
+
+    func fetchRecordsForStudy(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        limit: Int = 30,
+        offset: Int = 0,
+        language: AppLanguage = .korean
+    ) async throws -> BackendRecordsPage {
+        var components = URLComponents(
+            url: endpoint("api", "v1", "records"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "limit", value: "\(limit)"),
+            URLQueryItem(name: "offset", value: "\(offset)"),
+            URLQueryItem(name: "studyId", value: "\(studyID)"),
             URLQueryItem(name: "tl", value: language.backendCode),
             URLQueryItem(name: "view", value: LocalizedContentView.localized.rawValue)
         ]

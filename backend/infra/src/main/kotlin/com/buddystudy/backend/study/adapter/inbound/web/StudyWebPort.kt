@@ -34,6 +34,7 @@ interface StudyWebPort {
         limit: Int,
         offset: Int,
         query: String?,
+        studyId: Long?,
         language: String,
         view: String,
         authentication: Authentication,

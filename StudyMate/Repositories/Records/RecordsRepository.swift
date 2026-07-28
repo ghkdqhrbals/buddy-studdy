@@ -10,6 +10,14 @@ protocol RecordsRepository {
         language: AppLanguage
     ) async throws -> BackendRecordsPage
 
+    func fetchRecordsForStudy(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        limit: Int,
+        offset: Int,
+        language: AppLanguage
+    ) async throws -> BackendRecordsPage
+
     func gradeRecord(
         registration: RemotePushRegistration,
         recordID: String,

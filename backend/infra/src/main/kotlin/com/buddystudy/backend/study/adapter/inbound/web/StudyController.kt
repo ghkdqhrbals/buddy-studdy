@@ -159,13 +159,15 @@ class StudyController(
         @RequestParam(defaultValue = "0") offset: Int,
         @Parameter(description = "Optional DB-backed record search query.", example = "actor")
         @RequestParam(required = false) query: String?,
+        @Parameter(description = "Optional study-tree node ID. When present, only records generated for that topic node are returned.", example = "42")
+        @RequestParam(required = false) studyId: Long?,
         @RequestParam(required = false) tl: String?,
         @Parameter(description = "Deprecated response/search language alias.", example = "ko", deprecated = true)
         @RequestParam(required = false) language: String?,
         @RequestParam(defaultValue = "localized") view: String,
         authentication: Authentication,
     ): RecordsPageResponse =
-        study.records(limit, offset, query, resolveTargetLanguage(tl, language), view, authentication)
+        study.records(limit, offset, query, studyId, resolveTargetLanguage(tl, language), view, authentication)
 
     @Operation(summary = "Clear all my records", description = "Reserved endpoint for deleting all records owned by the authenticated user.")
     @ApiResponses(

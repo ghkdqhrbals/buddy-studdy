@@ -58,6 +58,7 @@ class StudyWebAdapter(
         limit: Int,
         offset: Int,
         query: String?,
+        studyId: Long?,
         language: String,
         view: String,
         authentication: Authentication,
@@ -66,6 +67,7 @@ class StudyWebAdapter(
         safeLimit(limit, 500),
         max(0, offset),
         query,
+        studyId,
         language,
         view,
     )

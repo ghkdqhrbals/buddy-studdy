@@ -188,6 +188,31 @@ class QuestionRepository(
     ): Page<QuestionEntity> =
         userSearchPage(userId, includePending, QuestionLanguage.normalize(language), query, pageable)
 
+    override suspend fun findVisibleByUserAndStudyId(
+        userId: Long,
+        includePending: Boolean,
+        studyId: Long,
+        query: String?,
+        pageable: Pageable,
+    ): Page<QuestionEntity> {
+        val normalizedQuery = query?.trim()?.takeIf(String::isNotEmpty)
+        if (normalizedQuery != null) {
+            return userSearchPage(
+                userId = userId,
+                includePending = includePending,
+                language = null,
+                query = normalizedQuery,
+                pageable = pageable,
+                studyId = studyId,
+            )
+        }
+        var criteria = Criteria.where("user_id").`is`(userId)
+            .and("study_id").`is`(studyId)
+            .and("deleted_at").isNull
+        if (!includePending) criteria = criteria.and("score").isNotNull
+        return page(criteria, pageable)
+    }
+
     override suspend fun findRecentQuestionTextsByStudyIdAndTopic(
         studyId: Long,
         topic: String,
@@ -440,6 +465,7 @@ class QuestionRepository(
         language: String?,
         query: String,
         pageable: Pageable,
+        studyId: Long? = null,
     ): Page<QuestionEntity> {
         val searchJoin = if (language == null) "" else {
             "join question_search qs on qs.question_id = q.id and qs.language = :language"
@@ -470,12 +496,13 @@ class QuestionRepository(
             """.trimIndent()
         }
         val gradedCondition = if (includePending) "" else "and q.score is not null"
+        val studyCondition = if (studyId == null) "" else "and q.study_id = :studyId"
         val baseSql =
             """
             from questions q
             $searchJoin
             where q.user_id = :userId and q.deleted_at is null
-              $gradedCondition and $searchCondition
+              $gradedCondition $studyCondition and $searchCondition
             """.trimIndent()
         var idsSpec = template.databaseClient.sql(
             """
@@ -494,6 +521,10 @@ class QuestionRepository(
         if (language != null) {
             idsSpec = idsSpec.bind("language", language)
             countSpec = countSpec.bind("language", language)
+        }
+        if (studyId != null) {
+            idsSpec = idsSpec.bind("studyId", studyId)
+            countSpec = countSpec.bind("studyId", studyId)
         }
         val ids = idsSpec
             .map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }

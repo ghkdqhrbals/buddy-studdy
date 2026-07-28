@@ -3190,6 +3190,31 @@ struct AppStrings {
     var noGrowthRecordsDescription: String {
         text("같은 주제에서 답변을 6개 이상 채점하면 이전 구간과 최근 구간을 비교합니다.", "Grade at least 6 answers in a topic to compare previous and recent progress.")
     }
+    var topicLearningRecords: String {
+        text("이 주제의 학습 기록", "Learning records for this topic", "このトピックの学習履歴")
+    }
+    func topicRecordCount(_ shown: Int, total: Int) -> String {
+        text("\(shown)/\(total)개", "\(shown)/\(total)", "\(shown)/\(total)件")
+    }
+    var loadingTopicRecords: String {
+        text("학습 기록을 불러오고 있어요", "Loading learning records", "学習履歴を読み込んでいます")
+    }
+    var topicRecordsLoadFailed: String {
+        text("기록을 불러오지 못했습니다", "Couldn’t load records", "履歴を読み込めませんでした")
+    }
+    var topicRecordsLoadFailedDescription: String {
+        text("잠시 후 다시 시도해 주세요.", "Please try again shortly.", "しばらくしてからもう一度お試しください。")
+    }
+    var noTopicRecords: String {
+        text("아직 기록이 없습니다", "No records yet", "まだ履歴がありません")
+    }
+    var noTopicRecordsDescription: String {
+        text(
+            "이 주제의 질문에 답변하고 채점을 완료하면 여기에 표시됩니다.",
+            "Completed answers for this topic will appear here.",
+            "このトピックの回答と採点が完了すると、ここに表示されます。"
+        )
+    }
     var needsReview: String { text("복습 필요", "Review") }
     var includesChildTopics: String { text("하위 포함", "Includes children") }
     var growthDetails: String { text("성장 상세", "Growth details") }

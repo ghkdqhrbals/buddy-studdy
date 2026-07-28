@@ -1034,6 +1034,34 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testStudyGrowthNodeDetailPaginatesTopicRecords() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/StatisticsView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+        let detailStart = try XCTUnwrap(
+            content.range(of: "private struct StudyGrowthNodeDetailView: View")
+        )
+        let detailEnd = try XCTUnwrap(
+            content.range(
+                of: "private struct StudyGrowthDeltaLabel",
+                range: detailStart.upperBound..<content.endIndex
+            )
+        )
+        let detail = String(content[detailStart.lowerBound..<detailEnd.lowerBound])
+
+        XCTAssertTrue(
+            detail.contains("LazyVStack")
+                && detail.contains("appState.fetchBackendRecords(")
+                && detail.contains("loadNextPageIfNeeded"),
+            "Selecting a statistics node should show its details and lazily page that node's records."
+        )
+        XCTAssertTrue(
+            detail.contains("HistoryRow(")
+                && detail.contains("selectedRecord = record"),
+            "Topic records should reuse the record row and open the existing record detail."
+        )
+    }
+
     func testProtectedMobileTabsNavigateToDedicatedLoginPage() throws {
         let root = try repositoryRoot()
         let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")

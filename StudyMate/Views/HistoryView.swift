@@ -670,7 +670,7 @@ private struct RecordSettingsSheet: View {
     }
 }
 
-private struct HistoryRow: View {
+struct HistoryRow: View {
     var record: StudyRecord
     var strings: AppStrings
     var isSelected: Bool

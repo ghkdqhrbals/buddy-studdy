@@ -94,13 +94,22 @@ class StudyService(
         limit: Int,
         offset: Int,
         query: String?,
+        studyId: Long?,
         language: String,
         view: String,
     ): RecordsPageResponse {
         val search = query?.trim()?.takeIf { it.isNotEmpty() }
         val normalizedLanguage = QuestionLanguage.normalize(language)
         val pageable = PageRequest.of(offset / limit, limit)
-        val page = if (search == null) {
+        val page = if (studyId != null) {
+            questions.findVisibleByUserAndStudyId(
+                principal.userId,
+                includePending = false,
+                studyId,
+                search,
+                pageable,
+            )
+        } else if (search == null) {
             questions.findVisibleByUser(
                 principal.userId,
                 includePending = false,

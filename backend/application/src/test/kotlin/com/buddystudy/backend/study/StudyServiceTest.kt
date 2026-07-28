@@ -103,6 +103,26 @@ class StudyServiceTest {
     }
 
     @Test
+    fun `records can be paged for one study tree node`(): Unit = runBlocking {
+        questions.visibleRows += gradedQuestion(id = 101, topic = "Swift").apply { studyId = 11 }
+        questions.visibleRows += gradedQuestion(id = 102, topic = "Kotlin").apply { studyId = 12 }
+        questions.visibleRows += gradedQuestion(id = 103, topic = "Swift concurrency").apply { studyId = 11 }
+
+        val response = service.records(
+            principal,
+            limit = 1,
+            offset = 0,
+            query = null,
+            studyId = 11,
+        )
+
+        assertThat(response.records.map { it.studyId }).containsExactly(11)
+        assertThat(response.totalCount).isEqualTo(2)
+        assertThat(response.limit).isEqualTo(1)
+        assertThat(response.offset).isZero()
+    }
+
+    @Test
     fun `pending records load question stats in one batch`(): Unit = runBlocking {
         questions.pendingRows += pendingQuestion(id = 201, topic = "Redis")
         questions.pendingRows += pendingQuestion(id = 202, topic = "Postgres")
@@ -231,6 +251,23 @@ class StudyServiceTest {
         override suspend fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity> = pendingRows.filter { it.studyId in studyIds }
         override suspend fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity> = PageImpl(visibleRows, pageable, visibleRows.size.toLong())
         override suspend fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity> = PageImpl(visibleRows.filter { it.topic.contains(query, ignoreCase = true) }, pageable, visibleRows.size.toLong())
+        override suspend fun findVisibleByUserAndStudyId(
+            userId: Long,
+            includePending: Boolean,
+            studyId: Long,
+            query: String?,
+            pageable: Pageable,
+        ): Page<QuestionEntity> {
+            val matches = visibleRows.filter {
+                it.userId == userId &&
+                    it.studyId == studyId &&
+                    (includePending || it.score != null) &&
+                    (query.isNullOrBlank() || it.topic.contains(query, ignoreCase = true))
+            }
+            val fromIndex = pageable.offset.toInt().coerceAtMost(matches.size)
+            val toIndex = (fromIndex + pageable.pageSize).coerceAtMost(matches.size)
+            return PageImpl(matches.subList(fromIndex, toIndex), pageable, matches.size.toLong())
+        }
         var findRecentQuestionTextsByStudyIdAndTopicCalls = 0
         var findRecentQuestionTextsByUserIdAndTopicCalls = 0
         override suspend fun findRecentQuestionTextsByStudyIdAndTopic(studyId: Long, topic: String, pageable: Pageable): List<String> {

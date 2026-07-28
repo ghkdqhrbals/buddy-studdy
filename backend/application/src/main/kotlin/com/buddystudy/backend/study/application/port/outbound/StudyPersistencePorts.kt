@@ -91,6 +91,13 @@ interface QuestionPort {
         query: String,
         pageable: Pageable,
     ): Page<QuestionEntity> = findVisibleByUserAndQuery(userId, includePending, query, pageable)
+    suspend fun findVisibleByUserAndStudyId(
+        userId: Long,
+        includePending: Boolean,
+        studyId: Long,
+        query: String?,
+        pageable: Pageable,
+    ): Page<QuestionEntity> = Page.empty(pageable)
     suspend fun findRecentQuestionTextsByStudyIdAndTopic(studyId: Long, topic: String, pageable: Pageable): List<String>
     suspend fun findRecentQuestionTextsByStudyIdAndTopicAndLanguage(
         studyId: Long,

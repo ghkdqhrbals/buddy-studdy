@@ -1605,6 +1605,34 @@ final class AppState: ObservableObject {
         await loadBackendRecordsPage(reset: false)
     }
 
+    func fetchBackendRecords(
+        studyID: Int,
+        limit: Int = 30,
+        offset: Int
+    ) async throws -> BackendRecordsPage {
+        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
+              let registration = await registrationWithAccessToken(
+                storedRegistration,
+                reason: "study-records"
+              ) else {
+            throw RemotePushBackendError.invalidResponse
+        }
+
+        return try await performWithBackendIdentityRecovery(
+            registration: registration,
+            reason: "study-records",
+            operation: { recoveredRegistration in
+                try await recordsUseCase.fetchRecordsForStudy(
+                    registration: recoveredRegistration,
+                    studyID: studyID,
+                    limit: max(1, min(limit, 100)),
+                    offset: max(0, offset),
+                    language: settings.appLanguage
+                )
+            }
+        )
+    }
+
     private func loadBackendRecordsPage(reset: Bool) async {
         var loadingState = recordsState
         guard loadingState.beginPageLoad() else {

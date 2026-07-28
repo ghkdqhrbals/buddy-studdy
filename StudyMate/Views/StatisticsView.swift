@@ -2131,7 +2131,6 @@ private struct StudyGrowthTreeCard: View {
                             if let node = nodesByID[placement.id] {
                                 NavigationLink {
                                     StudyGrowthNodeDetailView(node: node, strings: strings)
-                                        .padding(.horizontal, 16)
                                 } label: {
                                     StudyGrowthScoreTreeNode(
                                         topic: node.topic,
@@ -2985,12 +2984,26 @@ private struct StudyGrowthFlatNodeRow: View {
 }
 
 private struct StudyGrowthNodeDetailView: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var records: [StudyRecord] = []
+    @State private var totalRecordCount = 0
+    @State private var isLoadingRecords = false
+    @State private var didLoadRecords = false
+    @State private var recordsLoadFailed = false
+    @State private var selectedRecord: StudyRecord?
+
     var node: BackendStudyGrowthNode
     var strings: AppStrings
 
+    private static let pageSize = 30
+
+    private var canLoadMoreRecords: Bool {
+        records.count < totalRecordCount
+    }
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            LazyVStack(alignment: .leading, spacing: 18) {
                 HStack(spacing: 12) {
                     metric(strings.previousAbility, StudyGrowthFormat.level(node.previousLevel))
                     metric(strings.currentAbility, StudyGrowthFormat.level(node.currentLevel))
@@ -3027,13 +3040,102 @@ private struct StudyGrowthNodeDetailView: View {
                     Color(.secondarySystemBackground),
                     in: RoundedRectangle(cornerRadius: 18, style: .continuous)
                 )
+
+                topicRecordsSection
             }
+            .padding(.horizontal, 16)
             .padding(.vertical, 16)
         }
         .navigationTitle(node.topic)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .recordDetailPresentation(selectedRecord: $selectedRecord, strings: strings)
+        .task(id: node.studyId) {
+            await loadRecords(reset: true)
+        }
+    }
+
+    @ViewBuilder
+    private var topicRecordsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(strings.topicLearningRecords)
+                    .font(.title3.weight(.bold))
+
+                Spacer()
+
+                if didLoadRecords {
+                    Text(strings.topicRecordCount(records.count, total: totalRecordCount))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+
+            if isLoadingRecords && records.isEmpty {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(strings.loadingTopicRecords)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 80)
+            } else if recordsLoadFailed && records.isEmpty {
+                ContentUnavailableView {
+                    Label(strings.topicRecordsLoadFailed, systemImage: "arrow.clockwise")
+                } description: {
+                    Text(strings.topicRecordsLoadFailedDescription)
+                } actions: {
+                    Button(strings.retry) {
+                        Task {
+                            await loadRecords(reset: true)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 180)
+            } else if records.isEmpty {
+                ContentUnavailableView(
+                    strings.noTopicRecords,
+                    systemImage: "clock.arrow.circlepath",
+                    description: Text(strings.noTopicRecordsDescription)
+                )
+                .frame(maxWidth: .infinity, minHeight: 180)
+            } else {
+                ForEach(records) { record in
+                    Button {
+                        selectedRecord = record
+                    } label: {
+                        HistoryRow(
+                            record: record,
+                            strings: strings,
+                            isSelected: false
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .onAppear {
+                        loadNextPageIfNeeded(record)
+                    }
+                }
+
+                if isLoadingRecords && canLoadMoreRecords {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                } else if recordsLoadFailed {
+                    Button(strings.retry) {
+                        Task {
+                            await loadRecords(reset: false)
+                        }
+                    }
+                    .font(.caption.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                }
+            }
+        }
     }
 
     private func metric(_ title: String, _ value: String) -> some View {
@@ -3051,6 +3153,54 @@ private struct StudyGrowthNodeDetailView: View {
             Color(.secondarySystemBackground),
             in: RoundedRectangle(cornerRadius: 16, style: .continuous)
         )
+    }
+
+    private func loadNextPageIfNeeded(_ record: StudyRecord) {
+        guard record.id == records.last?.id,
+              canLoadMoreRecords,
+              !isLoadingRecords else {
+            return
+        }
+        Task {
+            await loadRecords(reset: false)
+        }
+    }
+
+    @MainActor
+    private func loadRecords(reset: Bool) async {
+        guard !isLoadingRecords else {
+            return
+        }
+        if reset {
+            records = []
+            totalRecordCount = 0
+            didLoadRecords = false
+        } else {
+            guard canLoadMoreRecords else {
+                return
+            }
+        }
+
+        isLoadingRecords = true
+        recordsLoadFailed = false
+        defer {
+            isLoadingRecords = false
+            didLoadRecords = true
+        }
+
+        do {
+            let page = try await appState.fetchBackendRecords(
+                studyID: node.studyId,
+                limit: Self.pageSize,
+                offset: reset ? 0 : records.count
+            )
+            var seenIDs = reset ? Set<String>() : Set(records.map(\.id))
+            let newRecords = page.records.filter { seenIDs.insert($0.id).inserted }
+            records = reset ? newRecords : records + newRecords
+            totalRecordCount = max(page.totalCount, records.count)
+        } catch {
+            recordsLoadFailed = true
+        }
     }
 }
 

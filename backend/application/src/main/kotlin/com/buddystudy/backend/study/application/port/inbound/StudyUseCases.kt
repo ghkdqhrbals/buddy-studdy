@@ -45,6 +45,7 @@ interface BrowseRecordsUseCase {
         limit: Int,
         offset: Int,
         query: String? = null,
+        studyId: Long? = null,
         language: String = "ko",
         view: String = "localized",
     ): RecordsPageResponse
