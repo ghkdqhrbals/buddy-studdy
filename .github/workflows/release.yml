@@ -173,9 +173,10 @@ jobs:
             -destination 'generic/platform=iOS' \
             -derivedDataPath build/iOSReleaseDerivedData \
             -archivePath build/StudyMateiOS.xcarchive \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
-            PROVISIONING_PROFILE_SPECIFIER="${IOS_PROVISIONING_PROFILE_NAME}" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "${APPSTORE_CONNECT_PRIVATE_KEY_PATH}" \
+            -authenticationKeyID "${APPSTORE_CONNECT_KEY_ID}" \
+            -authenticationKeyIssuerID "${APPSTORE_CONNECT_ISSUER_ID}" \
             DEVELOPMENT_TEAM="${APPLE_TEAM_ID}" \
             POSTHOG_PROJECT_TOKEN="${POSTHOG_PROJECT_TOKEN}" \
             MARKETING_VERSION="${RELEASE_VERSION}" \
