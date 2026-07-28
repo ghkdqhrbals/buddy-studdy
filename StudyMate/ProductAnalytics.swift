@@ -22,8 +22,21 @@ enum ProductAnalytics {
         config.captureScreenViews = false
         config.captureElementInteractions = false
         config.rageClickConfig.enabled = false
-        config.enableSwizzling = false
-        config.sessionReplay = false
+        config.enableSwizzling = true
+        config.sessionReplay = true
+        config.sessionReplayConfig.screenshotMode = true
+        config.sessionReplayConfig.maskAllTextInputs = true
+        config.sessionReplayConfig.maskAllImages = true
+        config.sessionReplayConfig.maskAllSandboxedViews = true
+        config.sessionReplayConfig.captureLogs = false
+        config.sessionReplayConfig.captureNetworkTelemetry = false
+        let sessionReplaySampleRate: Double
+        #if DEBUG
+        sessionReplaySampleRate = processInfo.environment[debugTestEventEnvironmentKey] == "1" ? 1.0 : 0.1
+        #else
+        sessionReplaySampleRate = 0.1
+        #endif
+        config.sessionReplayConfig.sampleRate = NSNumber(value: sessionReplaySampleRate)
         config.surveys = false
         config.errorTrackingConfig.autoCapture = false
         config.preloadFeatureFlags = false
@@ -41,6 +54,7 @@ enum ProductAnalytics {
 
         #if DEBUG
         if processInfo.environment[debugTestEventEnvironmentKey] == "1" {
+            PostHogSDK.shared.startSessionRecording(resumeCurrent: false)
             capture("analytics connection tested")
             PostHogSDK.shared.flush()
         }
