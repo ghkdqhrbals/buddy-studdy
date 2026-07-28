@@ -123,6 +123,10 @@ struct MobileRootView: View {
                 .background(Color(.systemBackground))
                 .onAppear {
                     appState.normalizeSelectedTabForMobile()
+                    ProductAnalytics.screenViewed(appState.mobileVisibleTab)
+                }
+                .onChange(of: appState.mobileVisibleTab) { _, tab in
+                    ProductAnalytics.screenViewed(tab)
                 }
                 .background {
                     AppDebugSettingsTabLongPressBridge {

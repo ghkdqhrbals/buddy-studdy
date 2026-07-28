@@ -3618,6 +3618,7 @@ final class AppState: ObservableObject {
                 applyCommunityProfile(result.profile)
                 storedBackendIdentityUseCase.saveRegistration(result.registration)
                 communityErrorMessage = nil
+                ProductAnalytics.capture("user signed in", properties: ["method": "google"])
                 logAuthTrace("community_sign_in_success", reason: "google-login", deduplicate: false)
                 refreshCommunitySignInDataInBackground(registration: result.registration, reason: "google-login")
             },
@@ -3756,6 +3757,7 @@ final class AppState: ObservableObject {
             onSuccess: { result in
                 applyCommunityProfile(result.profile)
                 storedBackendIdentityUseCase.saveRegistration(result.registration)
+                ProductAnalytics.capture("user signed in", properties: ["method": "email"])
                 logAuthTrace("community_sign_in_success", reason: "email-login", deduplicate: false)
             },
             onFailure: { error in
@@ -3790,6 +3792,8 @@ final class AppState: ObservableObject {
 
     func signOutFromCommunity() {
         logAuthTrace("community_sign_out_start", reason: "manual", deduplicate: false)
+        ProductAnalytics.capture("user signed out")
+        ProductAnalytics.resetAfterSignOut()
         questionGenerationPollingTask?.cancel()
         questionGenerationPollingTask = nil
         finishQuestionGenerationProcess()
@@ -4298,6 +4302,11 @@ final class AppState: ObservableObject {
             )
         }
         applyProfilePageAccess(resolvedProfile)
+        ProductAnalytics.identify(
+            userID: resolvedProfile.id,
+            provider: resolvedProfile.provider,
+            appLanguage: settings.appLanguage
+        )
         logAuthTrace(
             "community_profile_apply_end",
             page: .profile,
@@ -6177,6 +6186,10 @@ final class AppState: ObservableObject {
                 if process.terminal {
                     if process.status == .completed, let record = process.question {
                         applyCompletedQuestionGeneration(record, fallbackStudyID: pending.studyID)
+                        ProductAnalytics.capture(
+                            "question generated",
+                            properties: ["source": manual ? "manual" : "scheduled"]
+                        )
                     } else {
                         let message = process.error?.message ?? strings.communityRequestFailed
                         errorMessage = message
@@ -6677,6 +6690,7 @@ final class AppState: ObservableObject {
         reloadStudyRecordsFromStore()
         hasAPIKeyError = false
         statusMessage = "채점이 완료됐습니다."
+        ProductAnalytics.capture("answer graded", properties: ["surface": "current_or_records"])
         log(.info, "백엔드에서 답변을 채점했습니다. score=\(record.gradingResult?.score ?? 0)")
     }
 
@@ -6696,6 +6710,7 @@ final class AppState: ObservableObject {
         notificationService.cancelQuestionNotification(for: record.question)
         hasAPIKeyError = false
         statusMessage = "채점이 완료됐습니다."
+        ProductAnalytics.capture("answer graded", properties: ["surface": "study_room"])
         log(.info, "학습룸 답변을 채점했습니다. recordID=\(record.id), score=\(record.gradingResult?.score ?? 0)")
     }
 
@@ -8294,6 +8309,7 @@ final class AppState: ObservableObject {
                 category: category,
                 settings: settings
             )
+            ProductAnalytics.capture("study created")
             log(.info, "백엔드 학습을 추가했습니다. id=\(room.id), topic=\(room.topic)")
             await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
             return true
@@ -8348,6 +8364,7 @@ final class AppState: ObservableObject {
                 sortOrder: sortOrder,
                 activeForQuestions: activeForQuestions
             )
+            ProductAnalytics.capture("study topic created")
             log(
                 .info,
                 "백엔드 하위 주제를 추가했습니다. id=\(room.id), parentStudyId=\(parentStudyID), topic=\(room.topic)"

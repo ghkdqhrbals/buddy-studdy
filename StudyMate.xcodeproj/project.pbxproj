@@ -10,6 +10,8 @@
 		D40000000000000000000001 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = D40000000000000000000002 /* MarkdownUI */; };
 		E50000000000000000000001 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = E50000000000000000000002 /* Sentry */; };
 		E50000000000000000000003 /* SentryMonitoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = E50000000000000000000004 /* SentryMonitoring.swift */; };
+		F60000000000000000000001 /* PostHog in Frameworks */ = {isa = PBXBuildFile; productRef = F60000000000000000000002 /* PostHog */; };
+		F60000000000000000000003 /* ProductAnalytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000004 /* ProductAnalytics.swift */; };
 		110000000000000000000101 /* StudyMateApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000001 /* StudyMateApp.swift */; };
 		110000000000000000000102 /* StudyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000002 /* StudyModels.swift */; };
 		1100000000000000000001E0 /* JapaneseAppStrings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000E0 /* JapaneseAppStrings.swift */; };
@@ -272,6 +274,7 @@
 
 /* Begin PBXFileReference section */
 		E50000000000000000000004 /* SentryMonitoring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentryMonitoring.swift; sourceTree = "<group>"; };
+		F60000000000000000000004 /* ProductAnalytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductAnalytics.swift; sourceTree = "<group>"; };
 		110000000000000000000001 /* StudyMateApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyMateApp.swift; sourceTree = "<group>"; };
 		110000000000000000000002 /* StudyModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyModels.swift; sourceTree = "<group>"; };
 		1100000000000000000000E0 /* JapaneseAppStrings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JapaneseAppStrings.swift; sourceTree = "<group>"; };
@@ -431,6 +434,7 @@
 			files = (
 				D40000000000000000000001 /* MarkdownUI in Frameworks */,
 				E50000000000000000000001 /* Sentry in Frameworks */,
+				F60000000000000000000001 /* PostHog in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -453,6 +457,7 @@
 				110000000000000000000001 /* StudyMateApp.swift */,
 				120000000000000000000001 /* StudyMateiOSApp.swift */,
 				E50000000000000000000004 /* SentryMonitoring.swift */,
+				F60000000000000000000004 /* ProductAnalytics.swift */,
 				11000000000000000000002A /* Core */,
 				11000000000000000000002F /* UseCases */,
 				11000000000000000000004D /* Repositories */,
@@ -992,6 +997,7 @@
 			packageProductDependencies = (
 				D40000000000000000000002 /* MarkdownUI */,
 				E50000000000000000000002 /* Sentry */,
+				F60000000000000000000002 /* PostHog */,
 			);
 			productName = StudyMate;
 			productReference = 120000000000000000000020 /* StudyMate.app */;
@@ -1043,6 +1049,7 @@
 			packageReferences = (
 				D40000000000000000000003 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 				E50000000000000000000005 /* XCLocalSwiftPackageReference "Packages/SentrySDK" */,
+				F60000000000000000000005 /* XCRemoteSwiftPackageReference "posthog-ios" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 110000000000000000000062 /* Products */;
@@ -1239,6 +1246,7 @@
 			files = (
 				120000000000000000000101 /* StudyMateiOSApp.swift in Sources */,
 				E50000000000000000000003 /* SentryMonitoring.swift in Sources */,
+				F60000000000000000000003 /* ProductAnalytics.swift in Sources */,
 				120000000000000000000102 /* StudyModels.swift in Sources */,
 				1200000000000000000001E0 /* JapaneseAppStrings.swift in Sources */,
 				120000000000000000000104 /* SettingsStore.swift in Sources */,
@@ -1747,6 +1755,14 @@
 				version = 2.4.1;
 			};
 		};
+		F60000000000000000000005 /* XCRemoteSwiftPackageReference "posthog-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/PostHog/posthog-ios.git";
+			requirement = {
+				kind = exactVersion;
+				version = 3.68.2;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1759,6 +1775,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = E50000000000000000000005 /* XCLocalSwiftPackageReference "Packages/SentrySDK" */;
 			productName = Sentry;
+		};
+		F60000000000000000000002 /* PostHog */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F60000000000000000000005 /* XCRemoteSwiftPackageReference "posthog-ios" */;
+			productName = PostHog;
 		};
 /* End XCSwiftPackageProductDependency section */
 
