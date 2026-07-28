@@ -1749,20 +1749,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
             if !(200..<300).contains(statusCode) {
                 let backendError = Self.decodeBackendAPIError(from: data)
-                if let backendError,
-                   backendError.code == "SERVICE_UNDER_MAINTENANCE" {
-                    let maintenance = backendError.metadata?.maintenanceAvailability(
-                        fallbackMessage: backendError.message
-                    ) ?? BackendServiceAvailability(
-                        status: "MAINTENANCE",
-                        maintenanceID: nil,
-                        title: nil,
-                        message: backendError.message,
-                        startsAt: nil,
-                        endsAt: nil,
-                        retryAfterSeconds: 60,
-                        checkedAt: Date()
-                    )
+                if let maintenance = backendError?.maintenanceAvailability {
                     NotificationCenter.default.post(
                         name: BackendServiceAvailabilityNotification.didEnterMaintenance,
                         object: self,
@@ -3276,6 +3263,27 @@ struct BackendAPIError: Decodable, Equatable {
         requiredActions = try? container.decodeIfPresent([String].self, forKey: .requiredActions)
         metadata = try? container.decodeIfPresent(BackendAPIErrorMetadata.self, forKey: .metadata)
     }
+
+    var maintenanceAvailability: BackendServiceAvailability? {
+        let normalizedCode = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard numericCode == 903
+                || normalizedCode == "SERVICE_UNDER_MAINTENANCE"
+                || normalizedCode == "SERVER_UNDER_MAINTENANCE" else {
+            return nil
+        }
+
+        return metadata?.maintenanceAvailability(fallbackMessage: message)
+            ?? BackendServiceAvailability(
+                status: "MAINTENANCE",
+                maintenanceID: nil,
+                title: nil,
+                message: message,
+                startsAt: nil,
+                endsAt: nil,
+                retryAfterSeconds: 60,
+                checkedAt: Date()
+            )
+    }
 }
 
 struct BackendAPIErrorMetadata: Decodable, Equatable {
@@ -3511,6 +3519,15 @@ enum RemotePushBackendError: LocalizedError {
         switch self {
         case .httpStatus(_, _, let apiError):
             return apiError?.code
+        case .invalidResponse:
+            return nil
+        }
+    }
+
+    var maintenanceAvailability: BackendServiceAvailability? {
+        switch self {
+        case .httpStatus(_, _, let apiError):
+            return apiError?.maintenanceAvailability
         case .invalidResponse:
             return nil
         }

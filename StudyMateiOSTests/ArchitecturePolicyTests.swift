@@ -2,6 +2,48 @@ import XCTest
 @testable import StudyMate
 
 final class ArchitecturePolicyTests: XCTestCase {
+    func testMaintenanceBackendErrorResolvesToGlobalServiceAvailability() {
+        let error = RemotePushBackendError.httpStatus(
+            503,
+            "",
+            BackendAPIError(
+                code: "SERVICE_UNDER_MAINTENANCE",
+                numericCode: 903,
+                message: "Maintenance in progress"
+            )
+        )
+
+        let resolution = AppErrorHandlingUseCase().resolve(
+            error,
+            fallback: "Request failed"
+        )
+
+        XCTAssertTrue(resolution.serviceAvailability?.isUnderMaintenance == true)
+        XCTAssertEqual(resolution.serviceAvailability?.message, "Maintenance in progress")
+    }
+
+    func testTimeoutAndGenericServiceFailureDoNotResolveToMaintenance() {
+        let timeoutResolution = AppErrorHandlingUseCase().resolve(
+            URLError(.timedOut),
+            fallback: "Request timed out"
+        )
+        let genericFailureResolution = AppErrorHandlingUseCase().resolve(
+            RemotePushBackendError.httpStatus(
+                503,
+                "",
+                BackendAPIError(
+                    code: "INTERNAL_SERVER_ERROR",
+                    numericCode: 900,
+                    message: "Service unavailable"
+                )
+            ),
+            fallback: "Request failed"
+        )
+
+        XCTAssertNil(timeoutResolution.serviceAvailability)
+        XCTAssertNil(genericFailureResolution.serviceAvailability)
+    }
+
     func testEveryAppStringProvidesJapaneseCopy() throws {
         let root = try repositoryRoot()
         let source = try String(

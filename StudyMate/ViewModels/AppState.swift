@@ -917,6 +917,13 @@ final class AppState: ObservableObject {
         termsRetry: (() async -> Void)? = nil
     ) -> Bool {
         let resolution = appErrorResolution(error, fallback: fallback)
+        if let maintenance = resolution.serviceAvailability {
+            clearErrorMessage(target)
+            pageAccessPrompt = nil
+            applyServiceAvailability(maintenance, source: "app-error")
+            return true
+        }
+
         logAuthTrace(
             "app_error_resolution",
             page: protectedPage ?? currentVisibleProtectedPage(),

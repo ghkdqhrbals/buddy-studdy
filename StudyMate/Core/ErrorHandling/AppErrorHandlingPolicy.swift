@@ -2,6 +2,7 @@ import Foundation
 
 struct AppErrorHandlingResolution: Equatable {
     var featureMessage: String?
+    var serviceAvailability: BackendServiceAvailability?
     var shouldShowPopup: Bool
     var requiresLogin: Bool
     var isPageAccessDenied: Bool
@@ -33,6 +34,7 @@ enum AppErrorHandlingPolicy {
 
         return AppErrorHandlingResolution(
             featureMessage: suppressFeatureMessage ? nil : presentation.inlineMessage,
+            serviceAvailability: BackendErrorPresentationPolicy.serviceAvailability(for: error),
             shouldShowPopup: false,
             requiresLogin: presentation.requiresLogin,
             isPageAccessDenied: presentation.isPageAccessDenied,

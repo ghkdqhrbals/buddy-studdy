@@ -217,7 +217,6 @@ private struct FloatingDebugLogOverlay: View {
     @State private var selectedLogTab = DebugLogTab.app
     @State private var selectedAPILogID: APITrafficLogEntry.ID?
     @State private var selectedAppLogID: AppLogEntry.ID?
-    @State private var showsLogResetConfirmation = false
     @GestureState private var dragTranslation: CGSize = .zero
 
     private var strings: AppStrings {
@@ -280,20 +279,6 @@ private struct FloatingDebugLogOverlay: View {
                 }
         }
         .ignoresSafeArea(.keyboard)
-        .confirmationDialog(
-            strings.resetDebugLogs,
-            isPresented: $showsLogResetConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button(strings.resetDebugLogs, role: .destructive) {
-                selectedAPILogID = nil
-                selectedAppLogID = nil
-                appState.resetDebugLogs()
-            }
-            Button(strings.cancel, role: .cancel) {}
-        } message: {
-            Text(strings.resetDebugLogsConfirmation)
-        }
     }
 
     @ViewBuilder
@@ -351,7 +336,9 @@ private struct FloatingDebugLogOverlay: View {
                 if isExpanded {
                     Button {
                         runTapAction {
-                            showsLogResetConfirmation = true
+                            selectedAPILogID = nil
+                            selectedAppLogID = nil
+                            appState.resetDebugLogs()
                         }
                     } label: {
                         Image(systemName: "trash")
