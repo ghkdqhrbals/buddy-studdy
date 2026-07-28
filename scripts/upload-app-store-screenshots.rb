@@ -299,6 +299,19 @@ if list_only
     end
     screenshots = list_screenshots(token, screenshot_set.fetch("id"))
   end
+  delete_file_names = ENV.fetch("APP_STORE_DELETE_FILE_NAMES", "")
+    .split(",")
+    .map(&:strip)
+    .reject(&:empty?)
+  unless delete_file_names.empty?
+    screenshots.select do |screenshot|
+      delete_file_names.include?(screenshot.dig("attributes", "fileName"))
+    end.each do |screenshot|
+      api_request(:delete, "/v1/appScreenshots/#{screenshot.fetch("id")}", token)
+      puts "Deleted requested screenshot: #{screenshot.dig("attributes", "fileName")}"
+    end
+    screenshots = list_screenshots(token, screenshot_set.fetch("id"))
+  end
   ordered_file_names = ENV.fetch("APP_STORE_SCREENSHOT_ORDER", "")
     .split(",")
     .map(&:strip)
