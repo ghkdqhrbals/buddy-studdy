@@ -27,6 +27,7 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
+import com.buddystudy.backend.study.application.openai.UserContentOpenAIKeyProvider
 import com.buddystudy.backend.study.application.prompt.QuestionDiversityPolicy
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
 import com.buddystudy.backend.study.application.prompt.QuestionPromptProvider
@@ -61,9 +62,9 @@ class StudyServiceTest {
     private val questionCoverage = FakeQuestionCoveragePort()
     private val serviceStudies = FakeStudyPort()
     private val memberships = FakeQuestionMembershipPort()
-    private val properties = BuddyStudyProperties().apply { openai.apiKey = "test-api-key" }
+    private val properties = BuddyStudyProperties().apply { openai.userContentApiKey = "test-api-key" }
     private val cipher = KeyCipher(BuddyStudyProperties().apply { crypto.masterKey = "test-key" })
-    private val questionKeys = OpenAIQuestionKeyProvider(properties, memberships)
+    private val questionKeys = OpenAIQuestionKeyProvider(UserContentOpenAIKeyProvider(properties), memberships)
     private val gradingProgress = FakeAnswerGradingProgressPort()
     private val notificationOutbox = FakeNotificationOutbox()
     private val recordWriter = StudyRecordWriteService(

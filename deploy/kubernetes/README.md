@@ -56,7 +56,8 @@ secrets would overwrite live cluster credentials. Create or patch
 - `BACKEND_MASTER_KEY`
 - `AUTH_JWT_SECRET`
 - `ADMIN_PASSWORD`
-- `OPENAI_API_KEY`
+- `OPENAI_USER_CONTENT_API_KEY`
+- `OPENAI_SYSTEM_API_KEY` (must be a different key)
 - APNs values when push delivery is required
 - SMTP values when email login is required
 - `SLACK_WEBHOOK_URL` for production scheduler failure alerts

@@ -100,7 +100,7 @@ class SettingsService(
         val user = users.findById(principal.userId)
         return studies.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId)
             .toSettings(user)
-            .copy(openaiKeyConfigured = properties.openai.apiKey.isNotBlank())
+            .copy(openaiKeyConfigured = properties.openai.userContentApiKey.isNotBlank())
     }
 
     @Transactional(readOnly = true)
@@ -109,7 +109,7 @@ class SettingsService(
         val study = studies.findByIdAndUserId(studyId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study settings are not configured.")
         return study.toSettings(user)
-            .copy(openaiKeyConfigured = properties.openai.apiKey.isNotBlank())
+            .copy(openaiKeyConfigured = properties.openai.userContentApiKey.isNotBlank())
     }
 
     @Transactional

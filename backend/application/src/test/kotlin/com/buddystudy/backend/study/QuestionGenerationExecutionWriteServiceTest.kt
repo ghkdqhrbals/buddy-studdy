@@ -9,6 +9,7 @@ import com.buddystudy.backend.study.application.model.QuestionGenerationStatus
 import com.buddystudy.backend.study.application.model.QuestionGenerationStep
 import com.buddystudy.backend.study.application.model.StreamInboxClaim
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
+import com.buddystudy.backend.study.application.openai.UserContentOpenAIKeyProvider
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionGenerationSagaPort
@@ -106,7 +107,9 @@ class QuestionGenerationExecutionWriteServiceTest {
         questionEmbeddings = Mockito.mock(QuestionEmbeddingPort::class.java),
         questionCoverage = Mockito.mock(QuestionCoveragePort::class.java),
         questionKeys = OpenAIQuestionKeyProvider(
-            BuddyStudyProperties(openai = BuddyStudyProperties.OpenAI(apiKey = "test-key")),
+            UserContentOpenAIKeyProvider(
+                BuddyStudyProperties(openai = BuddyStudyProperties.OpenAI(userContentApiKey = "test-key")),
+            ),
             memberships,
         ),
         outbox = Mockito.mock(RedisEventOutboxAppendPort::class.java),

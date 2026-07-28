@@ -19,29 +19,48 @@ class LocalAwsSecretMappingTest {
         .withUserConfiguration(PropertiesConfig::class.java)
 
     @Test
-    fun `local openai key is sourced from the namespaced aws secret`() {
+    fun `local OpenAI workload keys are sourced from the namespaced aws secret`() {
         contextRunner
             .withPropertyValues(
-                "local-secret.OPENAI_API_KEY=sk-from-aws",
+                "local-secret.OPENAI_USER_CONTENT_API_KEY=user-content-from-aws",
+                "local-secret.OPENAI_SYSTEM_API_KEY=system-from-aws",
             )
             .run { context ->
                 val properties = context.getBean(BuddyStudyProperties::class.java)
 
-                assertThat(properties.openai.apiKey).isEqualTo("sk-from-aws")
+                assertThat(properties.openai.userContentApiKey).isEqualTo("user-content-from-aws")
+                assertThat(properties.openai.systemApiKey).isEqualTo("system-from-aws")
             }
     }
 
     @Test
-    fun `explicit local openai key overrides the aws secret`() {
+    fun `explicit local OpenAI workload keys override the aws secret`() {
         contextRunner
             .withPropertyValues(
-                "OPENAI_API_KEY=sk-from-environment",
-                "local-secret.OPENAI_API_KEY=sk-from-aws",
+                "OPENAI_USER_CONTENT_API_KEY=user-content-from-environment",
+                "OPENAI_SYSTEM_API_KEY=system-from-environment",
+                "local-secret.OPENAI_USER_CONTENT_API_KEY=user-content-from-aws",
+                "local-secret.OPENAI_SYSTEM_API_KEY=system-from-aws",
             )
             .run { context ->
                 val properties = context.getBean(BuddyStudyProperties::class.java)
 
-                assertThat(properties.openai.apiKey).isEqualTo("sk-from-environment")
+                assertThat(properties.openai.userContentApiKey).isEqualTo("user-content-from-environment")
+                assertThat(properties.openai.systemApiKey).isEqualTo("system-from-environment")
+            }
+    }
+
+    @Test
+    fun `legacy local OpenAI key remains a user-content fallback only`() {
+        contextRunner
+            .withPropertyValues(
+                "local-secret.OPENAI_API_KEY=legacy-user-content-key",
+            )
+            .run { context ->
+                val properties = context.getBean(BuddyStudyProperties::class.java)
+
+                assertThat(properties.openai.userContentApiKey).isEqualTo("legacy-user-content-key")
+                assertThat(properties.openai.systemApiKey).isEmpty()
             }
     }
 

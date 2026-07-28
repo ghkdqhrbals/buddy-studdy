@@ -90,9 +90,18 @@ jobs:
             --secret-id "${APP_SECRET_ID}" \
             --query SecretString \
             --output text)"
-          OPENAI_API_KEY="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("OPENAI_API_KEY") or "")')"
-          if [ -z "${OPENAI_API_KEY}" ]; then
-            echo "Missing OPENAI_API_KEY in AWS Secrets Manager secret: ${APP_SECRET_ID}" >&2
+          OPENAI_USER_CONTENT_API_KEY="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("OPENAI_USER_CONTENT_API_KEY") or "")')"
+          OPENAI_SYSTEM_API_KEY="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("OPENAI_SYSTEM_API_KEY") or "")')"
+          if [ -z "${OPENAI_USER_CONTENT_API_KEY}" ]; then
+            echo "Missing OPENAI_USER_CONTENT_API_KEY in AWS Secrets Manager secret: ${APP_SECRET_ID}" >&2
+            exit 1
+          fi
+          if [ -z "${OPENAI_SYSTEM_API_KEY}" ]; then
+            echo "Missing OPENAI_SYSTEM_API_KEY in AWS Secrets Manager secret: ${APP_SECRET_ID}" >&2
+            exit 1
+          fi
+          if [ "${OPENAI_USER_CONTENT_API_KEY}" = "${OPENAI_SYSTEM_API_KEY}" ]; then
+            echo "OPENAI_USER_CONTENT_API_KEY and OPENAI_SYSTEM_API_KEY must be different." >&2
             exit 1
           fi
           APNS_AUTH_KEY_BASE64="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("APNS_AUTH_KEY_BASE64") or "")')"
@@ -172,8 +181,10 @@ jobs:
           REDIS_SSL=false
           SCHEDULER_ENABLED=true
           SCHEDULER_POLL_MS=30000
-          OPENAI_API_KEY=${OPENAI_API_KEY}
+          OPENAI_USER_CONTENT_API_KEY=${OPENAI_USER_CONTENT_API_KEY}
+          OPENAI_SYSTEM_API_KEY=${OPENAI_SYSTEM_API_KEY}
           OPENAI_MODEL=gpt-5.4
+          OPENAI_SYSTEM_MODEL=gpt-5.4
           BACKEND_MASTER_KEY=${BACKEND_MASTER_KEY}
           BACKEND_API_TOKEN=${BACKEND_API_TOKEN}
           GOOGLE_IOS_CLIENT_ID=${GOOGLE_IOS_CLIENT_ID}

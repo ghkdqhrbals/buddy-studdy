@@ -26,7 +26,7 @@ class SettingsServiceTest {
     private val properties = BuddyStudyProperties(
         crypto = BuddyStudyProperties.Crypto(masterKey = "test-master-key"),
     ).apply {
-        openai.apiKey = "system-api-key"
+        openai.userContentApiKey = "user-content-api-key"
     }
     private val service = SettingsService(
         studies = studies,

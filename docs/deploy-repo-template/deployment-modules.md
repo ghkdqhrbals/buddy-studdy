@@ -69,11 +69,15 @@ deployment.
 - Backend Kotlin/API/env changes: build backend image, then run backend deploy.
 - Backend runtime secrets are read by the backend deploy workflow from AWS
   Secrets Manager. The `buddystudy/prod` application secret owns
-  `OPENAI_API_KEY`, `REDIS_PASSWORD`, `APNS_AUTH_KEY_BASE64`, `APNS_KEY_ID`,
-  `APNS_TEAM_ID`, `APNS_BUNDLE_ID`, and `APNS_ENV`. Required values must be
-  validated before writing the container env file so an optional Spring config
-  import cannot silently start a partially configured backend. APNs
-  credentials must not be duplicated in GitHub Actions Secrets.
+  `OPENAI_USER_CONTENT_API_KEY`, `OPENAI_SYSTEM_API_KEY`, `REDIS_PASSWORD`,
+  `APNS_AUTH_KEY_BASE64`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`,
+  and `APNS_ENV`. The two OpenAI keys must be present and different:
+  post-study topic suggestions use only the system key, while question
+  generation, embeddings, translation, answer feedback, and grading use only
+  the user-content key. Required values must be validated before writing the
+  container env file so an optional Spring config import cannot silently start
+  a partially configured backend. APNs credentials must not be duplicated in
+  GitHub Actions Secrets.
 - MySQL credentials and connection URLs are owned by the
   `buddystudy/prod/mysql` secret. It contains `dbname`, `username`,
   `password`, `jdbcUrl`, and `r2dbcUrl`; the deploy workflow reads both JDBC

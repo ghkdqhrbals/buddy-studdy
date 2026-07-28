@@ -8,6 +8,7 @@ import com.buddystudy.backend.auth.application.permission.Roles
 import com.buddystudy.backend.auth.application.port.outbound.RoleAssignmentPort
 import com.buddystudy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
+import com.buddystudy.backend.study.application.port.outbound.GradingPromptPreviewPort
 import com.buddystudy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
@@ -29,6 +30,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.mockito.Mockito
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
@@ -49,7 +51,8 @@ import java.time.Instant
         "buddystudy.streams.enabled=false",
         "buddystudy.crypto.master-key=test-master-key",
         "buddystudy.auth.jwt-secret=test-jwt-secret",
-        "buddystudy.openai.api-key=test-openai-key",
+        "buddystudy.openai.user-content-api-key=test-user-content-openai-key",
+        "buddystudy.openai.system-api-key=test-system-openai-key",
         "spring.main.allow-bean-definition-overriding=true",
     ]
 )
@@ -468,6 +471,10 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
 
     @TestConfiguration
     class OpenAITestConfig {
+        @Bean
+        fun gradingPromptPreviewPort(): GradingPromptPreviewPort =
+            Mockito.mock(GradingPromptPreviewPort::class.java)
+
         @Bean("openAIClient")
         fun openAIClient(): OpenAIPort = object : OpenAIPort {
             override suspend fun validate(apiKey: String) = Unit

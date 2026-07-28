@@ -24,7 +24,7 @@ class AdminService(
     @Transactional(readOnly = true)
     override suspend fun apiStatus(principal: Principal): APIStatusResponse {
         val fallbackStudy = studies.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId)
-        return APIStatusResponse(properties.openai.apiKey.isNotBlank(), fallbackStudy?.openaiModel ?: properties.openai.model)
+        return APIStatusResponse(properties.openai.userContentApiKey.isNotBlank(), fallbackStudy?.openaiModel ?: properties.openai.model)
     }
 
     @Transactional(readOnly = true)
