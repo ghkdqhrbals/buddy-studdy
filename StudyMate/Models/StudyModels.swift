@@ -2172,6 +2172,50 @@ enum BackendAuthorizationNotification {
     static let didReceiveUnauthorized = Notification.Name("studyBackendDidReceiveUnauthorized")
 }
 
+struct BackendServiceAvailability: Codable, Equatable {
+    var status: String
+    var maintenanceID: Int?
+    var title: String?
+    var message: String?
+    var startsAt: Date?
+    var endsAt: Date?
+    var retryAfterSeconds: Int?
+    var checkedAt: Date
+
+    private enum CodingKeys: String, CodingKey {
+        case status
+        case maintenanceID = "maintenanceId"
+        case title
+        case message
+        case startsAt
+        case endsAt
+        case retryAfterSeconds
+        case checkedAt
+    }
+
+    var isUnderMaintenance: Bool {
+        status == "MAINTENANCE"
+    }
+
+    static var operational: BackendServiceAvailability {
+        BackendServiceAvailability(
+            status: "OPERATIONAL",
+            maintenanceID: nil,
+            title: nil,
+            message: nil,
+            startsAt: nil,
+            endsAt: nil,
+            retryAfterSeconds: nil,
+            checkedAt: Date()
+        )
+    }
+}
+
+enum BackendServiceAvailabilityNotification {
+    static let didEnterMaintenance = Notification.Name("studyBackendDidEnterMaintenance")
+    static let userInfoKey = "studyBackendServiceAvailability"
+}
+
 enum LogLevel: String, Codable, CaseIterable {
     case info
     case warning
@@ -2459,6 +2503,28 @@ struct AppStrings {
             "\(formatter.string(from: resetAt))にリセット"
         )
     }
+    var maintenanceDefaultTitle: String {
+        text("서비스 점검 중입니다", "Service maintenance", "サービスメンテナンス中です")
+    }
+    var maintenanceDefaultMessage: String {
+        text(
+            "더 안정적인 서비스를 위해 점검을 진행하고 있습니다. 잠시 후 다시 확인해 주세요.",
+            "BuddyStudy is undergoing maintenance for improved reliability. Please try again shortly.",
+            "より安定したサービスのため、メンテナンスを実施しています。しばらくしてからもう一度お試しください。"
+        )
+    }
+    var maintenancePlannedEnd: String {
+        text("예상 종료", "Expected completion", "終了予定")
+    }
+    var maintenanceNoPlannedEnd: String {
+        text(
+            "점검이 완료되는 대로 자동으로 다시 연결합니다.",
+            "The app will reconnect automatically when maintenance is complete.",
+            "メンテナンスが完了すると自動的に再接続します。"
+        )
+    }
+    var maintenanceRetry: String { text("다시 확인", "Check again", "もう一度確認") }
+    var maintenanceChecking: String { text("확인 중", "Checking", "確認中") }
     var studyTree: String { text("학습 트리", "Study Tree") }
     var activateTopics: String { text("주제 활성화", "Activate topics") }
     var deleteTopics: String { text("주제 삭제", "Delete topics") }

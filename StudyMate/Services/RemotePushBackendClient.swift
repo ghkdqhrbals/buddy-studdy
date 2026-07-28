@@ -229,6 +229,8 @@ struct BackendBaseURLConfiguration: Equatable {
 
 @MainActor
 protocol RemotePushBackendClientProtocol {
+    func fetchServiceAvailability(language: AppLanguage) async throws -> BackendServiceAvailability
+
     func registerDevice(
         installationIdentifier: String,
         apnsToken: String?,
@@ -533,6 +535,12 @@ protocol RemotePushBackendClientProtocol {
     ) async throws -> StudyRecord
 }
 
+extension RemotePushBackendClientProtocol {
+    func fetchServiceAvailability(language: AppLanguage) async throws -> BackendServiceAvailability {
+        .operational
+    }
+}
+
 @MainActor
 final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     static let defaultBaseURL = URL(string: "https://api.ghkdqhrbals.org")!
@@ -555,6 +563,14 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom(Self.decodeBackendDate)
         return decoder
+    }
+
+    func fetchServiceAvailability(language: AppLanguage) async throws -> BackendServiceAvailability {
+        var request = URLRequest(url: endpoint("api", "v1", "service-status"))
+        request.httpMethod = "GET"
+        request.setValue(language.locale.identifier, forHTTPHeaderField: "Accept-Language")
+        let data = try await perform(request)
+        return try decoder.decode(BackendServiceAvailability.self, from: data)
     }
 
     func registerDevice(
@@ -1679,6 +1695,26 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
             if !(200..<300).contains(statusCode) {
                 let backendError = Self.decodeBackendAPIError(from: data)
+                if let backendError,
+                   backendError.code == "SERVICE_UNDER_MAINTENANCE" {
+                    let maintenance = backendError.metadata?.maintenanceAvailability(
+                        fallbackMessage: backendError.message
+                    ) ?? BackendServiceAvailability(
+                        status: "MAINTENANCE",
+                        maintenanceID: nil,
+                        title: nil,
+                        message: backendError.message,
+                        startsAt: nil,
+                        endsAt: nil,
+                        retryAfterSeconds: 60,
+                        checkedAt: Date()
+                    )
+                    NotificationCenter.default.post(
+                        name: BackendServiceAvailabilityNotification.didEnterMaintenance,
+                        object: self,
+                        userInfo: [BackendServiceAvailabilityNotification.userInfoKey: maintenance]
+                    )
+                }
                 if statusCode == 401 {
                     NotificationCenter.default.post(
                         name: BackendAuthorizationNotification.didReceiveUnauthorized,
@@ -3194,6 +3230,12 @@ struct BackendAPIErrorMetadata: Decodable, Equatable {
     var quotaTimeZone: String?
     var remaining: Int64?
     var required: Int64?
+    var maintenanceId: Int?
+    var title: String?
+    var message: String?
+    var startsAt: String?
+    var endsAt: String?
+    var retryAfterSeconds: Int?
 
     var quotaResetDate: Date? {
         guard let quotaResetAt else {
@@ -3207,6 +3249,28 @@ struct BackendAPIErrorMetadata: Decodable, Equatable {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: quotaResetAt)
+    }
+
+    func maintenanceAvailability(fallbackMessage: String) -> BackendServiceAvailability {
+        BackendServiceAvailability(
+            status: "MAINTENANCE",
+            maintenanceID: maintenanceId,
+            title: title,
+            message: message ?? fallbackMessage,
+            startsAt: Self.date(startsAt),
+            endsAt: Self.date(endsAt),
+            retryAfterSeconds: retryAfterSeconds,
+            checkedAt: Date()
+        )
+    }
+
+    private static func date(_ value: String?) -> Date? {
+        guard let value else {
+            return nil
+        }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
     }
 }
 

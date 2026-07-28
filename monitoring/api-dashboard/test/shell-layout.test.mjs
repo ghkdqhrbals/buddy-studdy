@@ -38,6 +38,21 @@ test("all monitoring pages load the shared React application", async () => {
   assert.match(navigation, /Access & Audit/);
   assert.match(navigation, /Users & Quotas/);
   assert.match(navigation, /Redis Streams/);
+  assert.match(navigation, /Service Status/);
+});
+
+test("service status administration schedules, ends, and audits maintenance windows", async () => {
+  const app = await source("MonitoringApp.jsx");
+  const page = await source("pages/ServiceStatusPage.jsx");
+  assert.match(app, /service-status\.html/);
+  assert.match(page, /Start maintenance/);
+  assert.match(page, /Schedule maintenance/);
+  assert.match(page, /End maintenance/);
+  assert.match(page, /Maintenance history/);
+  assert.match(page, /service-maintenance\/history/);
+  assert.match(page, /titleKo/);
+  assert.match(page, /titleEn/);
+  assert.match(page, /titleJa/);
 });
 
 test("user administration is searchable, paginated, and keeps plans internal", async () => {

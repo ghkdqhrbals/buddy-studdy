@@ -1,6 +1,37 @@
 import Foundation
 
 @MainActor
+protocol ServiceAvailabilityRepository {
+    func fetch(language: AppLanguage) async throws -> BackendServiceAvailability
+}
+
+@MainActor
+struct RemoteServiceAvailabilityRepository: ServiceAvailabilityRepository {
+    private let backendClient: RemotePushBackendClientProtocol
+
+    init(backendClient: RemotePushBackendClientProtocol) {
+        self.backendClient = backendClient
+    }
+
+    func fetch(language: AppLanguage) async throws -> BackendServiceAvailability {
+        try await backendClient.fetchServiceAvailability(language: language)
+    }
+}
+
+@MainActor
+struct ServiceAvailabilityUseCase {
+    private let repository: ServiceAvailabilityRepository
+
+    init(repository: ServiceAvailabilityRepository) {
+        self.repository = repository
+    }
+
+    func fetch(language: AppLanguage) async throws -> BackendServiceAvailability {
+        try await repository.fetch(language: language)
+    }
+}
+
+@MainActor
 protocol TermsRepository {
     func fetchActiveTerms(registration: RemotePushRegistration) async throws -> [BackendTerms]
 
@@ -116,6 +147,7 @@ struct TermsUseCase {
 
 @MainActor
 struct AppUseCases {
+    let serviceAvailability: ServiceAvailabilityUseCase
     let backendIdentity: BackendIdentityUseCase
     let googleSignIn: GoogleSignInUseCase
     let studyRoom: StudyRoomUseCase
@@ -127,6 +159,7 @@ struct AppUseCases {
     let community: CommunityUseCase
 
     init(backendClient: RemotePushBackendClientProtocol) {
+        let serviceAvailabilityRepository = RemoteServiceAvailabilityRepository(backendClient: backendClient)
         let googleSignInRepository = OAuthGoogleSignInRepository()
         let identityRepository = RemoteIdentityRepository(backendClient: backendClient)
         let communityRepository = RemoteCommunityRepository(backendClient: backendClient)
@@ -136,6 +169,7 @@ struct AppUseCases {
         let notificationsRepository = RemoteNotificationsRepository(backendClient: backendClient)
         let settingsRepository = RemoteSettingsRepository(backendClient: backendClient)
         let termsRepository = RemoteTermsRepository(backendClient: backendClient)
+        serviceAvailability = ServiceAvailabilityUseCase(repository: serviceAvailabilityRepository)
         backendIdentity = BackendIdentityUseCase(repository: identityRepository)
         googleSignIn = GoogleSignInUseCase(repository: googleSignInRepository)
         studyRoom = StudyRoomUseCase(repository: studyRoomRepository)

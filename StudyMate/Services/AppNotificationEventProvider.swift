@@ -5,6 +5,9 @@ import Foundation
 protocol AppNotificationEventProviding {
     func observeAPITrafficLogs(_ handler: @MainActor @escaping (APITrafficLogEntry) -> Void) -> AnyCancellable
     func observeBackendUnauthorized(_ handler: @MainActor @escaping () -> Void) -> AnyCancellable
+    func observeBackendMaintenance(
+        _ handler: @MainActor @escaping (BackendServiceAvailability) -> Void
+    ) -> AnyCancellable
 }
 
 @MainActor
@@ -32,6 +35,24 @@ struct DefaultAppNotificationEventProvider: AppNotificationEventProviding {
         .sink { _ in
             Task { @MainActor in
                 handler()
+            }
+        }
+    }
+
+    func observeBackendMaintenance(
+        _ handler: @MainActor @escaping (BackendServiceAvailability) -> Void
+    ) -> AnyCancellable {
+        NotificationCenter.default.publisher(
+            for: BackendServiceAvailabilityNotification.didEnterMaintenance,
+            object: nil
+        )
+        .compactMap { notification in
+            notification.userInfo?[BackendServiceAvailabilityNotification.userInfoKey]
+                as? BackendServiceAvailability
+        }
+        .sink { availability in
+            Task { @MainActor in
+                handler(availability)
             }
         }
     }

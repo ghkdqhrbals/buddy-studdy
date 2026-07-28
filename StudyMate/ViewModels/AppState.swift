@@ -98,6 +98,8 @@ final class AppState: ObservableObject {
     @Published var isRequiredTermsGatePresented = false
     @Published private(set) var questionQuota: BackendQuestionQuota?
     @Published private(set) var questionQuotaNotice: String?
+    @Published private(set) var serviceAvailability = BackendServiceAvailability.operational
+    @Published private(set) var isCheckingServiceAvailability = false
     @Published private(set) var pendingQuestionLimitCategoryID: String?
     @Published private var backendRuntimeState = BackendRuntimeStateStore()
     @Published private var communitySessionState: CommunitySessionStateStore
@@ -570,10 +572,12 @@ final class AppState: ObservableObject {
     private var answerDraftSaveTask: Task<Void, Never>?
     private var protectedPageAccessRefreshTask: Task<Void, Never>?
     private var questionGenerationPollingTask: Task<Void, Never>?
+    private var maintenancePollingTask: Task<Void, Never>?
     private var pendingTermsRequirementRetry: (() async -> Void)?
     private var pendingAnswerDraft: PendingAnswerDraft?
     private var lastBackgroundQuestionPreparationAt: Date?
     private var didStart = false
+    private var didCompleteStartupTasks = false
     private var savedSettings: StudySettings
     private var savedAPIKey: String
     private var savedDebugBackendBaseURL: String
@@ -1354,6 +1358,9 @@ final class AppState: ObservableObject {
             appNotificationEventProvider.observeBackendUnauthorized { [weak self] in
                 self?.clearStoredBackendAccessToken()
             },
+            appNotificationEventProvider.observeBackendMaintenance { [weak self] availability in
+                self?.applyServiceAvailability(availability, source: "api-response")
+            },
         ]
 
         if shouldRecoverLegacyRunningState {
@@ -1380,6 +1387,7 @@ final class AppState: ObservableObject {
             let answerDraftSaveTask = answerDraftSaveTask
             let protectedPageAccessRefreshTask = protectedPageAccessRefreshTask
             let questionGenerationPollingTask = questionGenerationPollingTask
+            let maintenancePollingTask = maintenancePollingTask
             let appNotificationEventCancellables = appNotificationEventCancellables
 
             timerTask?.cancel()
@@ -1387,6 +1395,7 @@ final class AppState: ObservableObject {
             answerDraftSaveTask?.cancel()
             protectedPageAccessRefreshTask?.cancel()
             questionGenerationPollingTask?.cancel()
+            maintenancePollingTask?.cancel()
             appNotificationEventCancellables.forEach { $0.cancel() }
         }
     }
@@ -1397,10 +1406,23 @@ final class AppState: ObservableObject {
         }
 
         didStart = true
+        await refreshServiceAvailability()
+        guard !isServiceUnderMaintenance else {
+            return
+        }
         guard hasCompletedOnboarding else {
             log(.info, "온보딩 완료 전이라 시작 작업을 대기합니다.")
             return
         }
+
+        await completeStartupTasksIfNeeded()
+    }
+
+    private func completeStartupTasksIfNeeded() async {
+        guard !didCompleteStartupTasks, hasCompletedOnboarding, !isServiceUnderMaintenance else {
+            return
+        }
+        didCompleteStartupTasks = true
 
         if isCloudSyncEnabled {
             await syncCloudNow(updateVisibleQuestion: false)
@@ -1421,7 +1443,16 @@ final class AppState: ObservableObject {
     }
 
     func handleAppBecameActive() async {
+        await refreshServiceAvailability()
+        guard !isServiceUnderMaintenance else {
+            return
+        }
         guard hasCompletedOnboarding else {
+            return
+        }
+
+        if !didCompleteStartupTasks {
+            await completeStartupTasksIfNeeded()
             return
         }
 
@@ -1441,8 +1472,75 @@ final class AppState: ObservableObject {
         #endif
     }
 
+    var isServiceUnderMaintenance: Bool {
+        serviceAvailability.isUnderMaintenance
+    }
+
+    func refreshServiceAvailability() async {
+        guard !isCheckingServiceAvailability else {
+            return
+        }
+        isCheckingServiceAvailability = true
+        defer {
+            isCheckingServiceAvailability = false
+        }
+        do {
+            let availability = try await appUseCases.serviceAvailability.fetch(
+                language: settings.appLanguage
+            )
+            let wasUnderMaintenance = isServiceUnderMaintenance
+            applyServiceAvailability(availability, source: "status-endpoint")
+            if wasUnderMaintenance, !availability.isUnderMaintenance {
+                await completeStartupTasksIfNeeded()
+            }
+        } catch {
+            log(.warning, "서비스 상태를 확인하지 못했습니다: \(error.localizedDescription)")
+            startMaintenancePollingIfNeeded()
+        }
+    }
+
+    private func applyServiceAvailability(
+        _ availability: BackendServiceAvailability,
+        source: String
+    ) {
+        serviceAvailability = availability
+        log(
+            .info,
+            "서비스 상태를 반영했습니다. status=\(availability.status), source=\(source)"
+        )
+        startMaintenancePollingIfNeeded()
+    }
+
+    private func startMaintenancePollingIfNeeded() {
+        guard maintenancePollingTask == nil else {
+            return
+        }
+        maintenancePollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else {
+                    return
+                }
+                let seconds = self.serviceAvailability.isUnderMaintenance
+                    ? (self.serviceAvailability.retryAfterSeconds ?? 60)
+                    : 60
+                let interval = UInt64(min(max(seconds, 15), 120))
+                try? await self.appSleepProvider.sleep(
+                    nanoseconds: interval * 1_000_000_000
+                )
+                if Task.isCancelled {
+                    return
+                }
+                await self.refreshServiceAvailability()
+            }
+        }
+    }
+
     @discardableResult
     func handleBackgroundRefresh() async -> Bool {
+        await refreshServiceAvailability()
+        guard !isServiceUnderMaintenance else {
+            return false
+        }
         guard hasCompletedOnboarding else {
             return false
         }

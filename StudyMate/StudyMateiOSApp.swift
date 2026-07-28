@@ -65,8 +65,13 @@ private struct StudyMateiOSBootstrapView: View {
     var body: some View {
         ZStack {
             if let appState {
-                MobileRootView()
-                    .environmentObject(appState)
+                if appState.isServiceUnderMaintenance {
+                    ServiceMaintenanceView()
+                        .environmentObject(appState)
+                } else {
+                    MobileRootView()
+                        .environmentObject(appState)
+                }
             } else {
                 Color(.systemBackground)
             }
@@ -93,6 +98,98 @@ private struct StudyMateiOSBootstrapView: View {
             appState = state
             await state.start()
         }
+    }
+}
+
+private struct ServiceMaintenanceView: View {
+    @EnvironmentObject private var appState: AppState
+
+    var body: some View {
+        let strings = appState.strings
+        let availability = appState.serviceAvailability
+
+        ZStack {
+            Color(.systemBackground).ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                Spacer(minLength: 80)
+
+                Image("BuddyStudyBrandLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 88, height: 88)
+                    .accessibilityHidden(true)
+
+                Text(availability.title?.nonEmpty ?? strings.maintenanceDefaultTitle)
+                    .font(.system(size: 25, weight: .bold))
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 28)
+
+                Text(availability.message?.nonEmpty ?? strings.maintenanceDefaultMessage)
+                    .font(.system(size: 15))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(4)
+                    .padding(.top, 12)
+                    .frame(maxWidth: 330)
+
+                if let endsAt = availability.endsAt {
+                    VStack(spacing: 6) {
+                        Text(strings.maintenancePlannedEnd)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(endsAt.formatted(date: .abbreviated, time: .shortened))
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                    .padding(.top, 28)
+                } else {
+                    Text(strings.maintenanceNoPlannedEnd)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 24)
+                }
+
+                Spacer()
+
+                Button {
+                    Task {
+                        await appState.refreshServiceAvailability()
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        if appState.isCheckingServiceAvailability {
+                            ProgressView()
+                                .tint(.white)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        Text(
+                            appState.isCheckingServiceAvailability
+                                ? strings.maintenanceChecking
+                                : strings.maintenanceRetry
+                        )
+                    }
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .foregroundStyle(.white)
+                    .background(Color.accentColor)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(appState.isCheckingServiceAvailability)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 30)
+            }
+        }
+    }
+}
+
+private extension String {
+    var nonEmpty: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 

@@ -197,6 +197,7 @@ private object AnonymousRoutes {
     val routes = listOf(
         Route(null, "/api/v1/health"),
         Route(null, "/api/v1/health/**"),
+        Route(HttpMethod.GET, "/api/v1/service-status"),
         Route(HttpMethod.GET, "/docs"),
         Route(HttpMethod.GET, "/docs/**"),
         Route(HttpMethod.GET, "/swagger-ui.html"),
