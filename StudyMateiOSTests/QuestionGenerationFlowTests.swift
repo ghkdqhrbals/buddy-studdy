@@ -29,30 +29,32 @@ final class QuestionGenerationFlowTests: XCTestCase {
 
     func testServiceAvailabilityUsesValidBodyRegardlessOfHTTPStatus() async throws {
         let statusURL = URL(string: "https://monitoring.example/status/api/v1/service-status")!
-        let client = makeClient(serviceStatusURL: statusURL) { request in
-            Self.response(
-                for: request,
-                statusCode: 401,
-                body: #"{"status":"MAINTENANCE","title":"Maintenance","checkedAt":"invalid","retryAfterSeconds":"invalid"}"#
-            )
-        }
-        let unauthorizedNotifications = LockedRequestCounter()
-        let observer = NotificationCenter.default.addObserver(
-            forName: BackendAuthorizationNotification.didReceiveUnauthorized,
-            object: client,
-            queue: nil
-        ) { _ in
-            unauthorizedNotifications.increment()
-        }
-        defer {
+        let statusCodes = [200, 204, 301, 400, 401, 403, 404, 429, 500, 503]
+
+        for statusCode in statusCodes {
+            let client = makeClient(serviceStatusURL: statusURL) { request in
+                Self.response(
+                    for: request,
+                    statusCode: statusCode,
+                    body: #"{"status":"MAINTENANCE","title":"Maintenance","checkedAt":"invalid","retryAfterSeconds":"invalid"}"#
+                )
+            }
+            let unauthorizedNotifications = LockedRequestCounter()
+            let observer = NotificationCenter.default.addObserver(
+                forName: BackendAuthorizationNotification.didReceiveUnauthorized,
+                object: client,
+                queue: nil
+            ) { _ in
+                unauthorizedNotifications.increment()
+            }
+
+            let availability = await client.fetchServiceAvailability(language: .english)
+
             NotificationCenter.default.removeObserver(observer)
+            XCTAssertEqual(availability?.status, .maintenance, "HTTP \(statusCode)")
+            XCTAssertEqual(availability?.title, "Maintenance", "HTTP \(statusCode)")
+            XCTAssertEqual(unauthorizedNotifications.value, 0, "HTTP \(statusCode)")
         }
-
-        let availability = await client.fetchServiceAvailability(language: .english)
-
-        XCTAssertEqual(availability?.status, .maintenance)
-        XCTAssertEqual(availability?.title, "Maintenance")
-        XCTAssertEqual(unauthorizedNotifications.value, 0)
     }
 
     func testServiceAvailabilityIgnoresMissingOrUnknownStatus() async {

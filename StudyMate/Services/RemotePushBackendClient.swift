@@ -593,7 +593,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var request = URLRequest(url: serviceStatusURL)
         request.httpMethod = "GET"
         request.setValue(language.backendCode, forHTTPHeaderField: "Accept-Language")
-        guard let data = try? await perform(request, allowsHTTPErrorResponseBody: true) else {
+        guard let data = try? await perform(request, ignoresHTTPStatus: true) else {
             return nil
         }
         return try? decoder.decode(BackendServiceAvailability.self, from: data)
@@ -1718,7 +1718,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     private func perform(
         _ request: URLRequest,
-        allowsHTTPErrorResponseBody: Bool = false
+        ignoresHTTPStatus: Bool = false
     ) async throws -> Data {
         var request = request
         request.cachePolicy = .reloadIgnoringLocalCacheData
@@ -1758,6 +1758,27 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             let statusCode = httpResponse.statusCode
             let responseBodyText = String(data: data, encoding: .utf8) ?? ""
 
+            if ignoresHTTPStatus {
+                let entry = APITrafficLogEntry(
+                    id: requestLog.id,
+                    method: requestLog.method,
+                    url: requestLog.url,
+                    statusCode: statusCode,
+                    durationMS: durationMS,
+                    requestHeaders: requestLog.requestHeaders,
+                    requestBody: requestLog.requestBody,
+                    responseBody: Self.safeResponseBody(responseBodyText),
+                    isError: false
+                )
+                NotificationCenter.default.post(
+                    name: APITrafficNotification.didReceiveLog,
+                    object: self,
+                    userInfo: [APITrafficNotification.userInfoKey: entry]
+                )
+                didPostTrafficLog = true
+                return data
+            }
+
             if !(200..<300).contains(statusCode) {
                 let backendError = Self.decodeBackendAPIError(from: data)
                 let entry = APITrafficLogEntry(
@@ -1778,9 +1799,6 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                     userInfo: [APITrafficNotification.userInfoKey: entry]
                 )
                 didPostTrafficLog = true
-                if allowsHTTPErrorResponseBody {
-                    return data
-                }
                 if statusCode == 401 {
                     NotificationCenter.default.post(
                         name: BackendAuthorizationNotification.didReceiveUnauthorized,
