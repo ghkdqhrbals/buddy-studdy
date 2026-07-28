@@ -2544,7 +2544,7 @@ struct AppStrings {
     }
     var deleteStudy: String { text("학습 삭제", "Delete Study") }
     var openQuestions: String { text("질문 열기", "Open Questions") }
-    func monthlyQuotaExceededMessage(serverMessage: String, resetAt: Date) -> String {
+    func monthlyQuotaExceededMessage(resetAt: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = language.locale
         formatter.timeZone = .current
@@ -2552,9 +2552,9 @@ struct AppStrings {
         formatter.timeStyle = .short
         let resetAtText = formatter.string(from: resetAt)
         return text(
-            "\(serverMessage) \(resetAtText)에 다시 사용할 수 있습니다.",
-            "\(serverMessage) You can create questions again on \(resetAtText).",
-            "\(serverMessage) \(resetAtText)から再び質問を作成できます。"
+            "\(monthlyQuotaReached) \(resetAtText)에 다시 사용할 수 있습니다.",
+            "\(monthlyQuotaReached) You can create questions again on \(resetAtText).",
+            "\(monthlyQuotaReached) \(resetAtText)から再び質問を作成できます。"
         )
     }
     func homePath(_ category: String) -> String {

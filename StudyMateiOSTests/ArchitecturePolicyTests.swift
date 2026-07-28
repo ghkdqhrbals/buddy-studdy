@@ -1437,8 +1437,52 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertEqual(resetAt, expectedResetAt)
         XCTAssertEqual(response.error.metadata?.quotaPeriod, "MONTHLY")
         XCTAssertEqual(response.error.metadata?.remaining, 0)
-        XCTAssertTrue(resolution.featureMessage?.contains("월간 질문 한도에 도달했습니다.") == true)
+        XCTAssertTrue(resolution.featureMessage?.contains("이번 달 질문 한도에 도달했습니다.") == true)
         XCTAssertTrue(resolution.featureMessage?.contains("다시 사용할 수 있습니다.") == true)
+    }
+
+    func testQuotaErrorIgnoresKoreanServerMessageWhenAppLanguageIsEnglish() throws {
+        let metadata = try JSONDecoder().decode(
+            BackendAPIErrorMetadata.self,
+            from: Data(#"{"quotaResetAt":"2026-08-01T00:00:00Z"}"#.utf8)
+        )
+        let apiError = BackendAPIError(
+            code: "QUOTA_EXCEEDED",
+            numericCode: 305,
+            message: "월간 질문 한도에 도달했습니다.",
+            status: 403,
+            metadata: metadata
+        )
+        let resolution = AppErrorHandlingPolicy.resolve(
+            RemotePushBackendError.httpStatus(403, "", apiError),
+            fallback: "fallback",
+            language: .english
+        )
+
+        XCTAssertTrue(
+            resolution.featureMessage?.hasPrefix("You have reached this month's question limit.") == true
+        )
+        XCTAssertTrue(resolution.featureMessage?.contains("You can create questions again on") == true)
+        XCTAssertFalse(resolution.featureMessage?.contains("월간 질문") ?? true)
+    }
+
+    func testQuotaErrorWithoutResetTimeUsesAppLanguage() {
+        let apiError = BackendAPIError(
+            code: "QUOTA_EXCEEDED",
+            numericCode: 305,
+            message: "월간 질문 한도에 도달했습니다.",
+            status: 403
+        )
+        let resolution = AppErrorHandlingPolicy.resolve(
+            RemotePushBackendError.httpStatus(403, "", apiError),
+            fallback: "fallback",
+            language: .english
+        )
+
+        XCTAssertEqual(
+            resolution.featureMessage,
+            "You have reached this month's question limit."
+        )
     }
 
     func testQuestionGenerationKeepsBusyStateUntilPermanentFailureHandlingCompletes() throws {

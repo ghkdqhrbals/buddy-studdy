@@ -297,16 +297,17 @@ enum BackendErrorPresentationPolicy {
                 )
             }
 
+            if apiError?.code == "QUOTA_EXCEEDED",
+               let language {
+                let strings = AppStrings(language: language)
+                if let resetAt = apiError?.metadata?.quotaResetDate {
+                    return strings.monthlyQuotaExceededMessage(resetAt: resetAt)
+                }
+                return strings.monthlyQuotaReached
+            }
+
             if let message = apiError?.message.trimmingCharacters(in: .whitespacesAndNewlines),
                !message.isEmpty {
-                if apiError?.code == "QUOTA_EXCEEDED",
-                   let language,
-                   let resetAt = apiError?.metadata?.quotaResetDate {
-                    return AppStrings(language: language).monthlyQuotaExceededMessage(
-                        serverMessage: message,
-                        resetAt: resetAt
-                    )
-                }
                 return message
             }
         case .invalidResponse:
