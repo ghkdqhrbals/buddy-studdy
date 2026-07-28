@@ -26,6 +26,39 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertFalse(availability.isUnderMaintenance)
     }
 
+    func testServiceAvailabilityUnauthorizedDoesNotInvalidateBackendSession() async throws {
+        let statusURL = URL(string: "https://monitoring.example/status/api/v1/service-status")!
+        let client = makeClient(serviceStatusURL: statusURL) { request in
+            Self.response(
+                for: request,
+                statusCode: 401,
+                body: #"{"message":"monitoring authentication required"}"#
+            )
+        }
+        let unauthorizedNotifications = LockedRequestCounter()
+        let observer = NotificationCenter.default.addObserver(
+            forName: BackendAuthorizationNotification.didReceiveUnauthorized,
+            object: client,
+            queue: nil
+        ) { _ in
+            unauthorizedNotifications.increment()
+        }
+        defer {
+            NotificationCenter.default.removeObserver(observer)
+        }
+
+        do {
+            _ = try await client.fetchServiceAvailability(language: .english)
+            XCTFail("Expected the monitoring endpoint to return HTTP 401")
+        } catch let RemotePushBackendError.httpStatus(statusCode, _, _) {
+            XCTAssertEqual(statusCode, 401)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(unauthorizedNotifications.value, 0)
+    }
+
     func testDeveloperDebugModeDoesNotRequestMonitoringStatus() async throws {
         let suiteName = "DeveloperStatusBypassTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

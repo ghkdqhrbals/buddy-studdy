@@ -593,7 +593,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var request = URLRequest(url: serviceStatusURL)
         request.httpMethod = "GET"
         request.setValue(language.backendCode, forHTTPHeaderField: "Accept-Language")
-        let data = try await perform(request)
+        let data = try await perform(request, reportsBackendUnauthorized: false)
         return try decoder.decode(BackendServiceAvailability.self, from: data)
     }
 
@@ -1714,7 +1714,10 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return try decoder.decode(StudyRecord.self, from: data)
     }
 
-    private func perform(_ request: URLRequest) async throws -> Data {
+    private func perform(
+        _ request: URLRequest,
+        reportsBackendUnauthorized: Bool = true
+    ) async throws -> Data {
         var request = request
         request.cachePolicy = .reloadIgnoringLocalCacheData
         let startedAt = Date()
@@ -1755,7 +1758,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
             if !(200..<300).contains(statusCode) {
                 let backendError = Self.decodeBackendAPIError(from: data)
-                if statusCode == 401 {
+                if statusCode == 401, reportsBackendUnauthorized {
                     NotificationCenter.default.post(
                         name: BackendAuthorizationNotification.didReceiveUnauthorized,
                         object: self
