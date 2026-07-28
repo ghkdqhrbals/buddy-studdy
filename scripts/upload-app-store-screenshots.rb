@@ -186,6 +186,29 @@ def list_screenshots(token, screenshot_set_id)
   ).fetch("data")
 end
 
+def reorder_screenshots(token, screenshot_set_id, screenshots, ordered_file_names)
+  screenshots_by_name = screenshots.group_by { |screenshot| screenshot.dig("attributes", "fileName") }
+  missing_file_names = ordered_file_names.reject { |file_name| screenshots_by_name.key?(file_name) }
+  abort "Cannot reorder missing screenshots: #{missing_file_names.join(", ")}" unless missing_file_names.empty?
+
+  ordered = ordered_file_names.flat_map { |file_name| screenshots_by_name.fetch(file_name) }
+  ordered_ids = ordered.map { |screenshot| screenshot.fetch("id") }
+  remaining = screenshots.reject { |screenshot| ordered_ids.include?(screenshot.fetch("id")) }
+  api_request(
+    :patch,
+    "/v1/appScreenshotSets/#{screenshot_set_id}/relationships/appScreenshots",
+    token,
+    body: {
+      data: (ordered + remaining).map do |screenshot|
+        {
+          type: "appScreenshots",
+          id: screenshot.fetch("id")
+        }
+      end
+    }
+  )
+end
+
 def reserve_screenshot(token, screenshot_set_id, file_path)
   api_request(
     :post,
@@ -260,6 +283,34 @@ if list_only
       api_request(:delete, "/v1/appScreenshots/#{screenshot.fetch("id")}", token)
       puts "Deleted failed upload: #{screenshot.dig("attributes", "fileName")}"
     end
+    screenshots = list_screenshots(token, screenshot_set.fetch("id"))
+  end
+  if ENV["APP_STORE_DELETE_DUPLICATES"] == "1"
+    screenshots.group_by { |screenshot| screenshot.dig("attributes", "fileName") }.each_value do |group|
+      next if group.length < 2
+
+      keeper = group.find do |screenshot|
+        screenshot.dig("attributes", "assetDeliveryState", "state") == "COMPLETE"
+      end || group.first
+      group.reject { |screenshot| screenshot.fetch("id") == keeper.fetch("id") }.each do |duplicate|
+        api_request(:delete, "/v1/appScreenshots/#{duplicate.fetch("id")}", token)
+        puts "Deleted duplicate upload: #{duplicate.dig("attributes", "fileName")}"
+      end
+    end
+    screenshots = list_screenshots(token, screenshot_set.fetch("id"))
+  end
+  ordered_file_names = ENV.fetch("APP_STORE_SCREENSHOT_ORDER", "")
+    .split(",")
+    .map(&:strip)
+    .reject(&:empty?)
+  unless ordered_file_names.empty?
+    reorder_screenshots(
+      token,
+      screenshot_set.fetch("id"),
+      screenshots,
+      ordered_file_names
+    )
+    puts "Reordered screenshots: #{ordered_file_names.join(", ")}"
     screenshots = list_screenshots(token, screenshot_set.fetch("id"))
   end
   puts "Screenshots: #{screenshots.length}"
