@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		D40000000000000000000001 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = D40000000000000000000002 /* MarkdownUI */; };
+		E50000000000000000000001 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = E50000000000000000000002 /* Sentry */; };
+		E50000000000000000000003 /* SentryMonitoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = E50000000000000000000004 /* SentryMonitoring.swift */; };
 		110000000000000000000101 /* StudyMateApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000001 /* StudyMateApp.swift */; };
 		110000000000000000000102 /* StudyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000002 /* StudyModels.swift */; };
 		1100000000000000000001E0 /* JapaneseAppStrings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000E0 /* JapaneseAppStrings.swift */; };
@@ -269,6 +271,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		E50000000000000000000004 /* SentryMonitoring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentryMonitoring.swift; sourceTree = "<group>"; };
 		110000000000000000000001 /* StudyMateApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyMateApp.swift; sourceTree = "<group>"; };
 		110000000000000000000002 /* StudyModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyModels.swift; sourceTree = "<group>"; };
 		1100000000000000000000E0 /* JapaneseAppStrings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JapaneseAppStrings.swift; sourceTree = "<group>"; };
@@ -427,6 +430,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D40000000000000000000001 /* MarkdownUI in Frameworks */,
+				E50000000000000000000001 /* Sentry in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -448,6 +452,7 @@
 			children = (
 				110000000000000000000001 /* StudyMateApp.swift */,
 				120000000000000000000001 /* StudyMateiOSApp.swift */,
+				E50000000000000000000004 /* SentryMonitoring.swift */,
 				11000000000000000000002A /* Core */,
 				11000000000000000000002F /* UseCases */,
 				11000000000000000000004D /* Repositories */,
@@ -986,6 +991,7 @@
 			name = StudyMateiOS;
 			packageProductDependencies = (
 				D40000000000000000000002 /* MarkdownUI */,
+				E50000000000000000000002 /* Sentry */,
 			);
 			productName = StudyMate;
 			productReference = 120000000000000000000020 /* StudyMate.app */;
@@ -1036,6 +1042,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				D40000000000000000000003 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
+				E50000000000000000000005 /* XCLocalSwiftPackageReference "Packages/SentrySDK" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 110000000000000000000062 /* Products */;
@@ -1231,6 +1238,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				120000000000000000000101 /* StudyMateiOSApp.swift in Sources */,
+				E50000000000000000000003 /* SentryMonitoring.swift in Sources */,
 				120000000000000000000102 /* StudyModels.swift in Sources */,
 				1200000000000000000001E0 /* JapaneseAppStrings.swift in Sources */,
 				120000000000000000000104 /* SettingsStore.swift in Sources */,
@@ -1723,6 +1731,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		E50000000000000000000005 /* XCLocalSwiftPackageReference "Packages/SentrySDK" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/SentrySDK;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		D40000000000000000000003 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -1739,6 +1754,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = D40000000000000000000003 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
 			productName = MarkdownUI;
+		};
+		E50000000000000000000002 /* Sentry */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E50000000000000000000005 /* XCLocalSwiftPackageReference "Packages/SentrySDK" */;
+			productName = Sentry;
 		};
 /* End XCSwiftPackageProductDependency section */
 
