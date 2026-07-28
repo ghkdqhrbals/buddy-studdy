@@ -18,11 +18,15 @@ import com.buddystudy.backend.study.application.model.GradingResponseStyle
 import com.buddystudy.backend.study.application.model.TranslatedQuestionContent
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
 import com.fasterxml.jackson.module.kotlin.readValue
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runInterruptible
-import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import org.springframework.beans.factory.DisposableBean
 import org.springframework.ai.chat.messages.SystemMessage
 import org.springframework.ai.chat.messages.UserMessage
 import org.springframework.ai.chat.prompt.Prompt
@@ -33,14 +37,16 @@ import org.springframework.ai.openai.OpenAiEmbeddingOptions
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import java.time.Duration
+import java.util.concurrent.TimeoutException
 import kotlin.math.roundToInt
 
 @Component
 class OpenAIRequestExecutor(
     private val properties: BuddyStudyProperties,
-) {
+) : DisposableBean {
     private val mapper = JsonMapperProvider.mapper
     private val logger = LoggerFactory.getLogger(javaClass)
+    private val gradingScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val jsonResponseFormat = OpenAiChatModel.ResponseFormat.builder()
         .type(OpenAiChatModel.ResponseFormat.Type.JSON_OBJECT)
         .build()
@@ -230,7 +236,7 @@ class OpenAIRequestExecutor(
         language: String,
         rubric: AiGradingRubric? = null,
         onProgress: suspend (AiGradingStage) -> Unit = {},
-    ): GradedAnswer = withTimeout(gradingTimeoutMillis()) {
+    ): GradedAnswer = awaitGradingResult {
         withContext(Dispatchers.IO) {
             val startedAt = System.nanoTime()
             val responseStyle = configuredResponseStyle()
@@ -316,6 +322,26 @@ class OpenAIRequestExecutor(
                 model = model,
             )
         }
+    }
+
+    internal suspend fun <T> awaitGradingResult(
+        timeoutMillis: Long = gradingTimeoutMillis(),
+        block: suspend () -> T,
+    ): T {
+        val task = gradingScope.async { block() }
+        return try {
+            withTimeoutOrNull(timeoutMillis.coerceAtLeast(1)) {
+                task.await()
+            } ?: throw TimeoutException("OpenAI grading exceeded ${timeoutMillis.coerceAtLeast(1)} ms.")
+        } finally {
+            if (!task.isCompleted) {
+                task.cancel("OpenAI grading deadline exceeded.")
+            }
+        }
+    }
+
+    override fun destroy() {
+        gradingScope.cancel("Application is shutting down.")
     }
 
     suspend fun compareGradingResponses(

@@ -2,10 +2,16 @@ package com.buddystudy.backend.study.adapter.outbound.openai
 
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.model.GradingResponseStyle
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Duration
+import java.util.concurrent.TimeoutException
+import kotlin.system.measureTimeMillis
 
 class OpenAIRequestExecutorTest {
     @Test
@@ -139,6 +145,27 @@ class OpenAIRequestExecutorTest {
 
         assertThat(executor.gradingTimeoutMillis()).isEqualTo(270_000)
         assertThat(executor.gradingTimeoutMillis()).isLessThan(300_000)
+    }
+
+    @Test
+    fun `grading deadline returns without waiting for a non cooperative call`() {
+        val executor = OpenAIRequestExecutor(BuddyStudyProperties())
+        var elapsedMillis = 0L
+
+        assertThatThrownBy {
+            runBlocking {
+                elapsedMillis = measureTimeMillis {
+                    executor.awaitGradingResult(timeoutMillis = 50) {
+                        withContext(NonCancellable) {
+                            delay(5_000)
+                        }
+                    }
+                }
+            }
+        }.isInstanceOf(TimeoutException::class.java)
+
+        assertThat(elapsedMillis).isLessThan(500)
+        executor.destroy()
     }
 
     @Test

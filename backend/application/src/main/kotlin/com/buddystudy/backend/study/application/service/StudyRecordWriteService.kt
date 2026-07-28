@@ -139,6 +139,11 @@ class StudyRecordWriteService(
         require(!status.terminal) { "Terminal grading status must use complete or fail." }
         val question = lockRecord(event.recordId, event.userId)
         if (question.gradingRequestId != event.requestId || question.score != null) return false
+        if (question.gradingStatus == AnswerGradingStatus.FAILED.name ||
+            question.gradingStatus == AnswerGradingStatus.COMPLETED.name
+        ) {
+            return false
+        }
         if (question.gradingStatus == status.name) return true
         question.gradingStatus = status.name
         question.gradingStartedAt = question.gradingStartedAt ?: now
@@ -157,6 +162,7 @@ class StudyRecordWriteService(
         val question = lockRecord(event.recordId, event.userId)
         if (question.gradingRequestId != event.requestId) return false
         if (question.score != null && question.gradingStatus == AnswerGradingStatus.COMPLETED.name) return true
+        if (question.gradingStatus == AnswerGradingStatus.FAILED.name) return false
         val record = question.toStudyRecord()
         question.applyGradingMetadata(grade)
         val aiResponseLanguage = languageDetector.detect(
