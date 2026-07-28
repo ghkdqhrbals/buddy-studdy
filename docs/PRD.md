@@ -90,8 +90,8 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 13. Growth supports recent 30-day, 90-day, and one-year periods, with 90 days as the default.
 14. The root-study overview uses one shared 1–10 ability axis with previous and current markers so all studies can be compared at a glance.
 15. A `?` beside Growth by Study explains ability estimation, non-overlapping answer windows, minimum sample size, subtree aggregation, and capped topic weighting in plain language.
-16. Measured-study coverage, generated-question completion, and answer count sit above the tree. Declining and unmeasured nodes are distinguished within the circular nodes themselves; statistics do not duplicate them in a separate priority list.
-17. Selecting any node in the statistics tree opens its growth detail and a newest-first record list for that exact topic node. Records load in 30-item pages as the user scrolls and open the existing record detail flow.
+16. Total graded learning records, total topic count, and measured topic count sit above the tree. Question-workflow completion is not presented as a learning-growth statistic. Declining and unmeasured nodes are distinguished within the circular nodes themselves; statistics do not duplicate them in a separate priority list.
+17. Selecting any node in the statistics tree opens its growth detail and a newest-first record list for that exact topic node. Records load in 30-item pages as the user scrolls and open the shared question-browse detail flow.
 
 ### Settings
 

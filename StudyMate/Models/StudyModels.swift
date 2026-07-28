@@ -3133,14 +3133,19 @@ struct AppStrings {
             "A parent topic combines measurable subtopics in its tree. Each topic is capped at 5 answers so one high-volume topic cannot dominate."
         )
     }
-    var growthHelpProfileTitle: String { text("완료율은 생성된 질문을 기준으로 계산", "Completion is based on generated questions") }
-    var growthHelpProfileBody: String {
+    var growthHelpSummaryTitle: String {
+        text("요약 숫자는 실제 학습 기록을 기준으로 계산", "Summary counts use actual learning records", "概要の数値は実際の学習記録を基準に計算")
+    }
+    var growthHelpSummaryBody: String {
         text(
-            "선택한 기간에 생성된 질문 중 답변과 채점을 마친 질문의 비율입니다. 아직 질문이 생성되지 않았다면 값을 표시하지 않습니다.",
-            "Completion is the share of questions generated in the selected period that were answered and graded. No value is shown until a question has been generated."
+            "총 학습은 선택한 기간에 답변과 채점을 마친 기록 수입니다. 전체 주제에는 모든 하위 주제가 포함되고, 측정 주제는 성장 비교에 필요한 답변이 쌓인 주제 수입니다.",
+            "Total learning is the number of records answered and graded in the selected period. Topics include every descendant, while Measured counts topics with enough answers for a growth comparison.",
+            "総学習は、選択期間内に回答と採点が完了した記録数です。全トピックにはすべての下位トピックが含まれ、測定トピックは成長比較に必要な回答が蓄積されたトピック数です。"
         )
     }
-    var completion: String { text("완료율", "Completion") }
+    var totalLearningShort: String { text("총 학습 수", "Total learned", "総学習数") }
+    var totalTopicsShort: String { text("전체 주제 수", "Topics", "全トピック数") }
+    var measuredTopicsShort: String { text("측정 주제 수", "Measured", "測定トピック数") }
     var allStudies: String { text("전체 학습", "All studies") }
     var allStudiesDescription: String {
         text("필요할 때 펼쳐서 개별 통계를 확인합니다.", "Expand when you need individual study statistics.")
@@ -3156,13 +3161,6 @@ struct AppStrings {
         )
     }
     var comprehensive: String { text("종합", "Overall") }
-    var measuredStudyShort: String { text("측정 학습", "Measured") }
-    func growthCompletionValue(_ value: Double?) -> String {
-        guard let value else {
-            return "—"
-        }
-        return "\(Int((min(max(value, 0), 1) * 100).rounded()))%"
-    }
     var studyMap: String { text("학습 지도", "Learning map") }
     var ability: String { text("실력", "Ability") }
     var notMeasured: String { text("미측정", "Unmeasured") }

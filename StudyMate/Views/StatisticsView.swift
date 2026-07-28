@@ -1678,8 +1678,8 @@ private struct StudyGrowthHelpView: View {
                     )
                     growthHelpRow(
                         number: "4",
-                        title: strings.growthHelpProfileTitle,
-                        body: strings.growthHelpProfileBody
+                        title: strings.growthHelpSummaryTitle,
+                        body: strings.growthHelpSummaryBody
                     )
                 }
             }
@@ -2050,16 +2050,16 @@ private struct StudyGrowthTreeCard: View {
 
             HStack(spacing: 8) {
                 StudyGrowthSummaryMetric(
-                    value: "\(root.measuredTopicCount)/\(root.totalTopicCount)",
-                    label: strings.measuredStudyShort
-                )
-                StudyGrowthSummaryMetric(
-                    value: strings.growthCompletionValue(root.profile?.completion),
-                    label: strings.completion
-                )
-                StudyGrowthSummaryMetric(
                     value: "\(root.answerCount)",
-                    label: strings.answersUnit
+                    label: strings.totalLearningShort
+                )
+                StudyGrowthSummaryMetric(
+                    value: "\(root.totalTopicCount)",
+                    label: strings.totalTopicsShort
+                )
+                StudyGrowthSummaryMetric(
+                    value: "\(root.measuredTopicCount)",
+                    label: strings.measuredTopicsShort
                 )
             }
         }
@@ -2483,16 +2483,16 @@ private struct StudyGrowthSummaryCard: View {
 
             HStack(spacing: 8) {
                 StudyGrowthSummaryMetric(
-                    value: "\(root.measuredTopicCount)/\(root.totalTopicCount)",
-                    label: strings.measuredStudyShort
-                )
-                StudyGrowthSummaryMetric(
-                    value: strings.growthCompletionValue(root.profile?.completion),
-                    label: strings.completion
-                )
-                StudyGrowthSummaryMetric(
                     value: "\(root.answerCount)",
-                    label: strings.answersUnit
+                    label: strings.totalLearningShort
+                )
+                StudyGrowthSummaryMetric(
+                    value: "\(root.totalTopicCount)",
+                    label: strings.totalTopicsShort
+                )
+                StudyGrowthSummaryMetric(
+                    value: "\(root.measuredTopicCount)",
+                    label: strings.measuredTopicsShort
                 )
             }
         }

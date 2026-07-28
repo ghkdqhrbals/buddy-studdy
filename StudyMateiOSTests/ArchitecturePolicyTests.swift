@@ -1032,6 +1032,17 @@ final class ArchitecturePolicyTests: XCTestCase {
             detail.contains("isShowingAllStudies"),
             "The complete score tree should be visible without another disclosure control."
         )
+        XCTAssertTrue(
+            content.contains("label: strings.totalLearningShort")
+                && content.contains("label: strings.totalTopicsShort")
+                && content.contains("label: strings.measuredTopicsShort"),
+            "Growth summaries should prioritize total learning and topic counts."
+        )
+        XCTAssertFalse(
+            content.contains("growthCompletionValue(root.profile?.completion)")
+                || content.contains("label: strings.completion"),
+            "Question workflow completion should not be shown as a learning-growth statistic."
+        )
     }
 
     func testStudyGrowthNodeDetailPaginatesTopicRecords() throws {
