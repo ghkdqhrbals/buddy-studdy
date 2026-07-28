@@ -33,7 +33,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
             Self.response(
                 for: request,
                 statusCode: 401,
-                body: #"{"status":"MAINTENANCE","title":"Maintenance"}"#
+                body: #"{"status":"MAINTENANCE","title":"Maintenance","checkedAt":"invalid","retryAfterSeconds":"invalid"}"#
             )
         }
         let unauthorizedNotifications = LockedRequestCounter()

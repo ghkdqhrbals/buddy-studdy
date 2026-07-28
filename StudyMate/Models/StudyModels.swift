@@ -2202,6 +2202,38 @@ struct BackendServiceAvailability: Codable, Equatable {
         case checkedAt
     }
 
+    init(
+        status: BackendServiceStatus,
+        maintenanceID: Int?,
+        title: String?,
+        message: String?,
+        startsAt: Date?,
+        endsAt: Date?,
+        retryAfterSeconds: Int?,
+        checkedAt: Date?
+    ) {
+        self.status = status
+        self.maintenanceID = maintenanceID
+        self.title = title
+        self.message = message
+        self.startsAt = startsAt
+        self.endsAt = endsAt
+        self.retryAfterSeconds = retryAfterSeconds
+        self.checkedAt = checkedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        status = try container.decode(BackendServiceStatus.self, forKey: .status)
+        maintenanceID = try? container.decode(Int.self, forKey: .maintenanceID)
+        title = try? container.decode(String.self, forKey: .title)
+        message = try? container.decode(String.self, forKey: .message)
+        startsAt = try? container.decode(Date.self, forKey: .startsAt)
+        endsAt = try? container.decode(Date.self, forKey: .endsAt)
+        retryAfterSeconds = try? container.decode(Int.self, forKey: .retryAfterSeconds)
+        checkedAt = try? container.decode(Date.self, forKey: .checkedAt)
+    }
+
     var isUnderMaintenance: Bool {
         status == .maintenance
     }

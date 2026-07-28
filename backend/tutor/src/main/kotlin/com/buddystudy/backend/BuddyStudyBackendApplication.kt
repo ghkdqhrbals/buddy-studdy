@@ -8,9 +8,11 @@ import org.springframework.aot.hint.RuntimeHints
 import org.springframework.aot.hint.RuntimeHintsRegistrar
 import org.springframework.aot.hint.TypeReference
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider
-import org.springframework.scheduling.annotation.EnableScheduling
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver
+import org.springframework.core.type.classreading.CachingMetadataReaderFactory
 import org.springframework.core.type.filter.AnnotationTypeFilter
 import org.springframework.data.relational.core.mapping.Table
+import org.springframework.scheduling.annotation.EnableScheduling
 
 @EnableScheduling
 @ImportRuntimeHints(ApplicationRuntimeHints::class)
@@ -33,6 +35,15 @@ class ApplicationRuntimeHints : RuntimeHintsRegistrar {
             )
         }
         jacksonResponseTypes.forEach { type ->
+            hints.reflection().registerType(
+                TypeReference.of(type),
+                MemberCategory.INVOKE_DECLARED_CONSTRUCTORS,
+                MemberCategory.DECLARED_FIELDS,
+                MemberCategory.INVOKE_PUBLIC_METHODS,
+                MemberCategory.INVOKE_DECLARED_METHODS,
+            )
+        }
+        applicationModelTypes(classLoader).forEach { type ->
             hints.reflection().registerType(
                 TypeReference.of(type),
                 MemberCategory.INVOKE_DECLARED_CONSTRUCTORS,
@@ -67,6 +78,16 @@ class ApplicationRuntimeHints : RuntimeHintsRegistrar {
         classLoader?.let { scanner.resourceLoader = org.springframework.core.io.DefaultResourceLoader(it) }
         return scanner.findCandidateComponents("com.buddystudy")
             .mapNotNull { it.beanClassName }
+            .toSet()
+    }
+
+    internal fun applicationModelTypes(classLoader: ClassLoader?): Set<String> {
+        val resolver = PathMatchingResourcePatternResolver(classLoader ?: javaClass.classLoader)
+        val metadata = CachingMetadataReaderFactory(resolver)
+        return resolver
+            .getResources("classpath*:com/buddystudy/backend/**/application/model/**/*.class")
+            .map { metadata.getMetadataReader(it).classMetadata.className }
+            .filterNot { it.endsWith("\$Companion") }
             .toSet()
     }
 

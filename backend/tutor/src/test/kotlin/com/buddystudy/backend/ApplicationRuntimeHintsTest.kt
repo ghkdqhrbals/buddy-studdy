@@ -3,6 +3,11 @@ package com.buddystudy.backend
 import com.buddystudy.backend.admin.management.application.model.AdminMembershipTierResponse
 import com.buddystudy.backend.admin.management.application.model.AdminUserPageResponse
 import com.buddystudy.backend.admin.management.application.model.AdminUserSummary
+import com.buddystudy.backend.community.application.model.CommunityQuestionResponse
+import com.buddystudy.backend.community.application.model.CommunityQuestionsResponse
+import com.buddystudy.backend.notification.application.model.AppNotificationsResponse
+import com.buddystudy.backend.stats.application.model.StatsResponse
+import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.study.domain.entity.QuestionEntity
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -47,6 +52,32 @@ class ApplicationRuntimeHintsTest {
             AdminMembershipTierResponse::class.java,
             AdminUserPageResponse::class.java,
             AdminUserSummary::class.java,
+        ).forEach { responseType ->
+            assertThat(
+                RuntimeHintsPredicates.reflection()
+                    .onType(responseType)
+                    .withMemberCategories(
+                        MemberCategory.INVOKE_DECLARED_CONSTRUCTORS,
+                        MemberCategory.DECLARED_FIELDS,
+                        MemberCategory.INVOKE_PUBLIC_METHODS,
+                    )
+                    .test(hints),
+            ).isTrue()
+        }
+    }
+
+    @Test
+    fun `registers application response models for native JSON serialization`() {
+        val hints = RuntimeHints()
+
+        ApplicationRuntimeHints().registerHints(hints, javaClass.classLoader)
+
+        listOf(
+            CommunityQuestionsResponse::class.java,
+            CommunityQuestionResponse::class.java,
+            StudyPageResponse::class.java,
+            StatsResponse::class.java,
+            AppNotificationsResponse::class.java,
         ).forEach { responseType ->
             assertThat(
                 RuntimeHintsPredicates.reflection()
