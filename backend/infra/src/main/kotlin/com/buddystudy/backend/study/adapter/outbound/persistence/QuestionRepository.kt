@@ -41,6 +41,44 @@ class QuestionRepository(
 
     override suspend fun findQuestionById(id: Long): QuestionEntity? = findOne(Criteria.where("id").`is`(id))
 
+    override suspend fun findStalledGradings(cutoff: Instant, limit: Int): List<QuestionEntity> =
+        template.select(
+            Query.query(
+                Criteria.where("deleted_at").isNull
+                    .and("score").isNull
+                    .and("grading_request_id").isNotNull
+                    .and("grading_requested_at").lessThanOrEquals(cutoff)
+                    .and("grading_status").`in`(NON_TERMINAL_GRADING_STATUSES),
+            )
+                .sort(Sort.by(Sort.Direction.ASC, "grading_requested_at"))
+                .limit(limit.coerceIn(1, 500)),
+            QuestionEntity::class.java,
+        ).collectList().awaitSingle()
+
+    override suspend fun failStalledGrading(
+        id: Long,
+        requestId: String,
+        cutoff: Instant,
+        error: String,
+        now: Instant,
+    ): Boolean {
+        val updated = template.update(
+            Query.query(
+                Criteria.where("id").`is`(id)
+                    .and("deleted_at").isNull
+                    .and("score").isNull
+                    .and("grading_request_id").`is`(requestId)
+                    .and("grading_requested_at").lessThanOrEquals(cutoff)
+                    .and("grading_status").`in`(NON_TERMINAL_GRADING_STATUSES),
+            ),
+            Update.update("grading_status", "FAILED")
+                .set("grading_error", error.take(255))
+                .set("updated_at", now),
+            QuestionEntity::class.java,
+        ).awaitSingle()
+        return updated == 1L
+    }
+
     override suspend fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? =
         findOne(Criteria.where("id").`is`(id).and("user_id").`is`(userId).and("deleted_at").isNull)
 
@@ -584,4 +622,14 @@ class QuestionRepository(
             .matching(Query.query(criteria))
             .apply(Update.update("deleted_at", now).set("updated_at", now))
             .awaitSingle().toInt()
+
+    private companion object {
+        val NON_TERMINAL_GRADING_STATUSES = listOf(
+            "QUEUED",
+            "ANALYZING_EVIDENCE",
+            "CRITIQUING",
+            "JUDGING",
+            "ADJUDICATING",
+        )
+    }
 }

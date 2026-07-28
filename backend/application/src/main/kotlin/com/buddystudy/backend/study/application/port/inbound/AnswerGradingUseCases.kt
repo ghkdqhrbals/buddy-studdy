@@ -8,6 +8,10 @@ interface ProcessAnswerGradingUseCase {
     suspend fun process(event: AnswerGradingRequestedEvent)
 }
 
+interface ExpireStalledAnswerGradingsUseCase {
+    suspend fun expireStalled(now: java.time.Instant): Int
+}
+
 interface GetAnswerGradingProcessUseCase {
     suspend fun get(
         principal: Principal,

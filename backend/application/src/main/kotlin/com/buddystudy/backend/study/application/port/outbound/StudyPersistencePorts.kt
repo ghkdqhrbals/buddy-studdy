@@ -59,6 +59,14 @@ interface SystemTopicCatalogPort {
 interface QuestionPort {
     suspend fun save(entity: QuestionEntity): QuestionEntity
     suspend fun findQuestionById(id: Long): QuestionEntity?
+    suspend fun findStalledGradings(cutoff: Instant, limit: Int): List<QuestionEntity> = emptyList()
+    suspend fun failStalledGrading(
+        id: Long,
+        requestId: String,
+        cutoff: Instant,
+        error: String,
+        now: Instant,
+    ): Boolean = false
     suspend fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity?
     suspend fun findByGradingRequestIdAndUserIdAndDeletedAtIsNull(
         gradingRequestId: String,
