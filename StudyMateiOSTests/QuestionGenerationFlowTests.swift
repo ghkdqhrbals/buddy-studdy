@@ -21,18 +21,19 @@ final class QuestionGenerationFlowTests: XCTestCase {
             )
         }
 
-        let availability = try await client.fetchServiceAvailability(language: .korean)
+        let availability = await client.fetchServiceAvailability(language: .korean)
 
-        XCTAssertFalse(availability.isUnderMaintenance)
+        XCTAssertEqual(availability?.status, .operational)
+        XCTAssertFalse(try XCTUnwrap(availability).isUnderMaintenance)
     }
 
-    func testServiceAvailabilityUnauthorizedDoesNotInvalidateBackendSession() async throws {
+    func testServiceAvailabilityUsesValidBodyRegardlessOfHTTPStatus() async throws {
         let statusURL = URL(string: "https://monitoring.example/status/api/v1/service-status")!
         let client = makeClient(serviceStatusURL: statusURL) { request in
             Self.response(
                 for: request,
                 statusCode: 401,
-                body: #"{"message":"monitoring authentication required"}"#
+                body: #"{"status":"MAINTENANCE","title":"Maintenance"}"#
             )
         }
         let unauthorizedNotifications = LockedRequestCounter()
@@ -47,16 +48,26 @@ final class QuestionGenerationFlowTests: XCTestCase {
             NotificationCenter.default.removeObserver(observer)
         }
 
-        do {
-            _ = try await client.fetchServiceAvailability(language: .english)
-            XCTFail("Expected the monitoring endpoint to return HTTP 401")
-        } catch let RemotePushBackendError.httpStatus(statusCode, _, _) {
-            XCTAssertEqual(statusCode, 401)
-        } catch {
-            XCTFail("Unexpected error: \(error)")
-        }
+        let availability = await client.fetchServiceAvailability(language: .english)
 
+        XCTAssertEqual(availability?.status, .maintenance)
+        XCTAssertEqual(availability?.title, "Maintenance")
         XCTAssertEqual(unauthorizedNotifications.value, 0)
+    }
+
+    func testServiceAvailabilityIgnoresMissingOrUnknownStatus() async {
+        for body in [
+            #"{"message":"monitoring authentication required"}"#,
+            #"{"status":"DEGRADED"}"#
+        ] {
+            let client = makeClient { request in
+                Self.response(for: request, statusCode: 401, body: body)
+            }
+
+            let availability = await client.fetchServiceAvailability(language: .english)
+
+            XCTAssertNil(availability)
+        }
     }
 
     func testDeveloperDebugModeDoesNotRequestMonitoringStatus() async throws {

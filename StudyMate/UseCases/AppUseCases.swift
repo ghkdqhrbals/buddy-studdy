@@ -2,7 +2,7 @@ import Foundation
 
 @MainActor
 protocol ServiceAvailabilityRepository {
-    func fetch(language: AppLanguage) async throws -> BackendServiceAvailability
+    func fetch(language: AppLanguage) async -> BackendServiceAvailability?
 }
 
 @MainActor
@@ -13,8 +13,8 @@ struct RemoteServiceAvailabilityRepository: ServiceAvailabilityRepository {
         self.backendClient = backendClient
     }
 
-    func fetch(language: AppLanguage) async throws -> BackendServiceAvailability {
-        try await backendClient.fetchServiceAvailability(language: language)
+    func fetch(language: AppLanguage) async -> BackendServiceAvailability? {
+        await backendClient.fetchServiceAvailability(language: language)
     }
 }
 
@@ -26,8 +26,8 @@ struct ServiceAvailabilityUseCase {
         self.repository = repository
     }
 
-    func fetch(language: AppLanguage) async throws -> BackendServiceAvailability {
-        try await repository.fetch(language: language)
+    func fetch(language: AppLanguage) async -> BackendServiceAvailability? {
+        await repository.fetch(language: language)
     }
 }
 

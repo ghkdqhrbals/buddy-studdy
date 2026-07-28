@@ -229,7 +229,7 @@ struct BackendBaseURLConfiguration: Equatable {
 
 @MainActor
 protocol RemotePushBackendClientProtocol {
-    func fetchServiceAvailability(language: AppLanguage) async throws -> BackendServiceAvailability
+    func fetchServiceAvailability(language: AppLanguage) async -> BackendServiceAvailability?
 
     func registerDevice(
         installationIdentifier: String,
@@ -544,8 +544,8 @@ protocol RemotePushBackendClientProtocol {
 }
 
 extension RemotePushBackendClientProtocol {
-    func fetchServiceAvailability(language: AppLanguage) async throws -> BackendServiceAvailability {
-        .operational
+    func fetchServiceAvailability(language: AppLanguage) async -> BackendServiceAvailability? {
+        nil
     }
 
     func fetchRecordsForStudy(
@@ -589,12 +589,14 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return decoder
     }
 
-    func fetchServiceAvailability(language: AppLanguage) async throws -> BackendServiceAvailability {
+    func fetchServiceAvailability(language: AppLanguage) async -> BackendServiceAvailability? {
         var request = URLRequest(url: serviceStatusURL)
         request.httpMethod = "GET"
         request.setValue(language.backendCode, forHTTPHeaderField: "Accept-Language")
-        let data = try await perform(request, reportsBackendUnauthorized: false)
-        return try decoder.decode(BackendServiceAvailability.self, from: data)
+        guard let data = try? await perform(request, allowsHTTPErrorResponseBody: true) else {
+            return nil
+        }
+        return try? decoder.decode(BackendServiceAvailability.self, from: data)
     }
 
     func registerDevice(
@@ -1716,7 +1718,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     private func perform(
         _ request: URLRequest,
-        reportsBackendUnauthorized: Bool = true
+        allowsHTTPErrorResponseBody: Bool = false
     ) async throws -> Data {
         var request = request
         request.cachePolicy = .reloadIgnoringLocalCacheData
@@ -1758,12 +1760,6 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
             if !(200..<300).contains(statusCode) {
                 let backendError = Self.decodeBackendAPIError(from: data)
-                if statusCode == 401, reportsBackendUnauthorized {
-                    NotificationCenter.default.post(
-                        name: BackendAuthorizationNotification.didReceiveUnauthorized,
-                        object: self
-                    )
-                }
                 let entry = APITrafficLogEntry(
                     id: requestLog.id,
                     method: requestLog.method,
@@ -1782,6 +1778,15 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                     userInfo: [APITrafficNotification.userInfoKey: entry]
                 )
                 didPostTrafficLog = true
+                if allowsHTTPErrorResponseBody {
+                    return data
+                }
+                if statusCode == 401 {
+                    NotificationCenter.default.post(
+                        name: BackendAuthorizationNotification.didReceiveUnauthorized,
+                        object: self
+                    )
+                }
                 throw RemotePushBackendError.httpStatus(statusCode, responseBodyText, backendError)
             }
 

@@ -2176,15 +2176,20 @@ enum BackendAuthorizationNotification {
     static let didReceiveUnauthorized = Notification.Name("studyBackendDidReceiveUnauthorized")
 }
 
+enum BackendServiceStatus: String, Codable, Equatable {
+    case operational = "OPERATIONAL"
+    case maintenance = "MAINTENANCE"
+}
+
 struct BackendServiceAvailability: Codable, Equatable {
-    var status: String
+    var status: BackendServiceStatus
     var maintenanceID: Int?
     var title: String?
     var message: String?
     var startsAt: Date?
     var endsAt: Date?
     var retryAfterSeconds: Int?
-    var checkedAt: Date
+    var checkedAt: Date?
 
     private enum CodingKeys: String, CodingKey {
         case status
@@ -2198,12 +2203,12 @@ struct BackendServiceAvailability: Codable, Equatable {
     }
 
     var isUnderMaintenance: Bool {
-        status == "MAINTENANCE"
+        status == .maintenance
     }
 
     static var operational: BackendServiceAvailability {
         BackendServiceAvailability(
-            status: "OPERATIONAL",
+            status: .operational,
             maintenanceID: nil,
             title: nil,
             message: nil,

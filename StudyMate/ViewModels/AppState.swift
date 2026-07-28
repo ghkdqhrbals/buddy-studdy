@@ -2049,21 +2049,19 @@ final class AppState: ObservableObject {
         defer {
             isCheckingServiceAvailability = false
         }
-        do {
-            let availability = try await appUseCases.serviceAvailability.fetch(
-                language: settings.appLanguage
-            )
-            guard !shouldSkipServiceAvailabilityMonitoring else {
-                return
-            }
-            let wasUnderMaintenance = isServiceUnderMaintenance
-            applyServiceAvailability(availability, source: "status-endpoint")
-            if wasUnderMaintenance, !availability.isUnderMaintenance {
-                await completeStartupTasksIfNeeded()
-            }
-        } catch {
-            log(.warning, "서비스 상태를 확인하지 못했습니다: \(error.localizedDescription)")
+        guard let availability = await appUseCases.serviceAvailability.fetch(
+            language: settings.appLanguage
+        ) else {
             startMaintenancePollingIfNeeded()
+            return
+        }
+        guard !shouldSkipServiceAvailabilityMonitoring else {
+            return
+        }
+        let wasUnderMaintenance = isServiceUnderMaintenance
+        applyServiceAvailability(availability, source: "status-endpoint")
+        if wasUnderMaintenance, !availability.isUnderMaintenance {
+            await completeStartupTasksIfNeeded()
         }
     }
 
@@ -2080,7 +2078,7 @@ final class AppState: ObservableObject {
         }
         log(
             .info,
-            "서비스 상태를 반영했습니다. status=\(availability.status), source=\(source)"
+            "서비스 상태를 반영했습니다. status=\(availability.status.rawValue), source=\(source)"
         )
         startMaintenancePollingIfNeeded()
     }
