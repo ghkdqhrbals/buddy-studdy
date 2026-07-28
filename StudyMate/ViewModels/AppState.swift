@@ -647,7 +647,20 @@ final class AppState: ObservableObject {
     lazy var notificationLandingCoordinator = NotificationLandingCoordinator(appState: self)
 
     var strings: AppStrings {
-        AppStrings(language: settings.appLanguage)
+        #if DEBUG
+        if isAppStoreScreenshotFixtureEnabled {
+            switch ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_LANGUAGE"]?
+                .lowercased() {
+            case "ja", "jp", "japanese":
+                return AppStrings(language: .japanese)
+            case "en", "english":
+                return AppStrings(language: .english)
+            default:
+                return AppStrings(language: .korean)
+            }
+        }
+        #endif
+        return AppStrings(language: settings.appLanguage)
     }
 
     #if DEBUG
@@ -723,6 +736,12 @@ final class AppState: ObservableObject {
     func normalizeSelectedTabForMobile() {
         logAuthTrace("mobile_normalize_tab_start", reason: "normalizeSelectedTabForMobile")
         #if DEBUG
+        if ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_FIXTURE"]?
+            .lowercased() == "study-tree" {
+            selectedTab = .home
+            homeStudyRoute = HomeStudyRoute(categoryID: "101", showsTree: true)
+            return
+        }
         if selectedTab == .study,
            let debugInitialTab = ProcessInfo.processInfo.environment["BUDDYSTUDY_DEBUG_INITIAL_TAB"] {
             switch debugInitialTab.lowercased() {
@@ -1463,13 +1482,30 @@ final class AppState: ObservableObject {
             return
         }
 
-        let isKorean = ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_LANGUAGE"]?
-            .lowercased() != "en"
-        let language: AppLanguage = isKorean ? .korean : .english
+        let screenshotLanguage = ProcessInfo.processInfo
+            .environment["BUDDYSTUDY_SCREENSHOT_LANGUAGE"]?
+            .lowercased() ?? "ko"
+        let language: AppLanguage
+        switch screenshotLanguage {
+        case "ja", "jp", "japanese":
+            language = .japanese
+        case "en", "english":
+            language = .english
+        default:
+            language = .korean
+        }
+        let isKorean = language == .korean
+        let isJapanese = language == .japanese
         let now = Date()
-        let rootTitles = isKorean
-            ? ["SwiftUI 앱 개발", "자료구조와 알고리즘", "영어 회화"]
-            : ["SwiftUI App Development", "Data Structures & Algorithms", "English Conversation"]
+        let rootTitles: [String]
+        switch language {
+        case .korean:
+            rootTitles = ["SwiftUI 앱 개발", "자료구조와 알고리즘", "영어 회화"]
+        case .english:
+            rootTitles = ["SwiftUI App Development", "Data Structures & Algorithms", "English Conversation"]
+        case .japanese:
+            rootTitles = ["SwiftUIアプリ開発", "データ構造とアルゴリズム", "英会話"]
+        }
         let categories = [
             StudyCategory(id: "101", title: rootTitles[0], difficulty: Difficulty(level: 6)),
             StudyCategory(id: "201", title: rootTitles[1], difficulty: Difficulty(level: 5)),
@@ -1522,15 +1558,24 @@ final class AppState: ObservableObject {
             )
         }
 
-        let topics = isKorean
-            ? [
+        let topics: [String]
+        switch language {
+        case .korean:
+            topics = [
                 "상태 관리", "내비게이션", "비동기 처리", "Observation", "화면 구성", "애니메이션",
                 "배열과 해시", "트리 탐색", "시간 복잡도", "일상 대화", "여행 영어",
             ]
-            : [
+        case .english:
+            topics = [
                 "State Management", "Navigation", "Async Programming", "Observation", "Layout", "Animation",
                 "Arrays & Hashing", "Tree Traversal", "Time Complexity", "Daily Conversation", "Travel English",
             ]
+        case .japanese:
+            topics = [
+                "状態管理", "ナビゲーション", "非同期処理", "Observation", "画面レイアウト", "アニメーション",
+                "配列とハッシュ", "木構造の探索", "時間計算量", "日常会話", "旅行英語",
+            ]
+        }
         let rooms = [
             room(101, rootTitles[0], order: 0, level: 6),
             room(102, topics[0], parent: 101, order: 0, level: 6),
@@ -1567,9 +1612,20 @@ final class AppState: ObservableObject {
             "When would you choose DFS over BFS, and vice versa?",
             "How can you naturally ask someone about their hobbies?",
         ]
-        let questionTexts = isKorean ? questionsKO : questionsEN
-        let answers = isKorean
-            ? [
+        let questionsJA = [
+            "SwiftUIにおける@Stateと@Bindingの違いを説明してください。",
+            "async/awaitで構造化並行性が重要な理由は何ですか？",
+            "Observationは不要な画面更新をどのように減らしますか？",
+            "ハッシュテーブルの平均検索時間計算量は何ですか？",
+            "深さ優先探索と幅優先探索はどのように使い分けますか？",
+            "初対面の人に趣味を自然に尋ねる英語表現は？",
+        ]
+        let questionTexts: [String]
+        let answers: [String]
+        switch language {
+        case .korean:
+            questionTexts = questionsKO
+            answers = [
                 "@State는 뷰가 소유하는 값이고 @Binding은 다른 소유자의 값을 양방향으로 연결합니다.",
                 "자식 작업의 생명주기와 취소가 부모 작업에 묶여 안전하게 관리되기 때문입니다.",
                 "실제로 읽은 속성의 변경만 추적해 관련 뷰를 다시 계산합니다.",
@@ -1577,7 +1633,9 @@ final class AppState: ObservableObject {
                 "DFS는 깊은 경로 탐색에, BFS는 최단 단계 탐색에 적합합니다.",
                 "What do you like to do in your free time?",
             ]
-            : [
+        case .english:
+            questionTexts = questionsEN
+            answers = [
                 "@State owns local view data, while @Binding provides two-way access to data owned elsewhere.",
                 "It ties child-task lifetime and cancellation to a well-defined parent scope.",
                 "It tracks accessed properties so only dependent views are invalidated.",
@@ -1585,6 +1643,23 @@ final class AppState: ObservableObject {
                 "DFS suits deep exploration; BFS is useful for shortest paths by level.",
                 "What do you like to do in your free time?",
             ]
+        case .japanese:
+            questionTexts = questionsJA
+            answers = [
+                "@Stateはビューが所有する値で、@Bindingは別の所有者の値へ双方向にアクセスします。",
+                "子タスクの生存期間とキャンセルを親タスクのスコープで安全に管理できるためです。",
+                "実際に参照したプロパティを追跡し、依存するビューだけを更新します。",
+                "適切なハッシュ分散であれば平均O(1)です。",
+                "DFSは深い経路の探索に、BFSは階層ごとの最短経路探索に向いています。",
+                "What do you like to do in your free time?",
+            ]
+        }
+        let gradingFeedback = isKorean
+            ? "핵심 개념을 정확하게 설명했어요."
+            : (isJapanese ? "重要な概念を正確に説明できています。" : "You explained the core concept clearly.")
+        let gradingExplanation = isKorean
+            ? "개념과 사용 시점이 잘 연결되어 있습니다."
+            : (isJapanese ? "概念と利用場面が明確に結び付いています。" : "The concept and its use case are connected well.")
         let scores = [94, 88, 91, 86, 82, 97, 90, 84, 93, 89, 95, 87]
         let records = (0..<18).map { index -> StudyRecord in
             let item = index % questionTexts.count
@@ -1601,8 +1676,8 @@ final class AppState: ObservableObject {
                 gradingResult: GradingResult(
                     score: scores[index % scores.count],
                     isCorrect: scores[index % scores.count] >= 80,
-                    feedback: isKorean ? "핵심 개념을 정확하게 설명했어요." : "You explained the core concept clearly.",
-                    explanation: isKorean ? "개념과 사용 시점이 잘 연결되어 있습니다." : "The concept and its use case are connected well."
+                    feedback: gradingFeedback,
+                    explanation: gradingExplanation
                 ),
                 topic: recordTopics[item],
                 difficulty: Difficulty(level: 4 + (index % 4)),
@@ -1615,27 +1690,33 @@ final class AppState: ObservableObject {
         }
         recordsState.replace(with: records)
 
+        let authorNames = isKorean
+            ? ["꾸준한개발자", "알고리즘메이트", "영어한스푼"]
+            : (isJapanese ? ["毎日デベロッパー", "アルゴリズム仲間", "英語ひとさじ"] : ["Daily Builder", "Algorithm Mate", "English Spoon"])
+        let authorBios = isKorean
+            ? ["매일 한 개념씩 공부해요", "함께 성장하는 학습자", "오늘의 표현을 나눠요"]
+            : (isJapanese ? ["毎日一つずつ学んでいます", "一緒に成長する学習者", "今日の表現を共有します"] : ["Learning one concept every day", "Growing together", "Sharing today's phrase"])
         let authors = [
             CommunityUserProfile(
                 id: 701,
-                displayName: isKorean ? "꾸준한개발자" : "Daily Builder",
-                bio: isKorean ? "매일 한 개념씩 공부해요" : "Learning one concept every day",
+                displayName: authorNames[0],
+                bio: authorBios[0],
                 avatarURL: nil,
                 avatarSymbolName: "pixel-fox",
                 avatarColorSeed: "avatar-color-mint"
             ),
             CommunityUserProfile(
                 id: 702,
-                displayName: isKorean ? "알고리즘메이트" : "Algorithm Mate",
-                bio: isKorean ? "함께 성장하는 학습자" : "Growing together",
+                displayName: authorNames[1],
+                bio: authorBios[1],
                 avatarURL: nil,
                 avatarSymbolName: "pixel-owl",
                 avatarColorSeed: "avatar-color-blue"
             ),
             CommunityUserProfile(
                 id: 703,
-                displayName: isKorean ? "영어한스푼" : "English Spoon",
-                bio: isKorean ? "오늘의 표현을 나눠요" : "Sharing today's phrase",
+                displayName: authorNames[2],
+                bio: authorBios[2],
                 avatarURL: nil,
                 avatarSymbolName: "pixel-cat",
                 avatarColorSeed: "avatar-color-pink"
@@ -1813,6 +1894,9 @@ final class AppState: ObservableObject {
 
         homeStudyRoute = nil
         switch fixture {
+        case "study-tree", "tree":
+            selectedTab = .home
+            homeStudyRoute = HomeStudyRoute(categoryID: "101", showsTree: true)
         case "study-list", "studies":
             selectedTab = .home
             appRouteRequest = AppRouteRequest(route: .studyList)
