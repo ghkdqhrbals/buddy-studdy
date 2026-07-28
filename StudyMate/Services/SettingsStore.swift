@@ -24,6 +24,7 @@ final class SettingsStore {
         static let isDebuggingEnabled = "isDebuggingEnabled"
         static let debugBackendBaseURL = "debugBackendBaseURL"
         static let isDeveloperAccessUnlocked = "isDeveloperAccessUnlocked"
+        static let developerAccessBuildIdentifier = "developerAccessBuildIdentifier"
         static let hasCompletedOnboarding = "hasCompletedOnboarding"
         static let isCloudSyncEnabled = "isCloudSyncEnabled"
         static let isCommunitySignedIn = "isCommunitySignedIn"
@@ -673,6 +674,23 @@ final class SettingsStore {
 
     func saveDeveloperAccessUnlocked(_ isUnlocked: Bool) {
         defaults.set(isUnlocked, forKey: Keys.isDeveloperAccessUnlocked)
+        if !isUnlocked {
+            defaults.removeObject(forKey: Keys.developerAccessBuildIdentifier)
+        }
+    }
+
+    func loadDeveloperAccessBuildIdentifier() -> String? {
+        defaults.string(forKey: Keys.developerAccessBuildIdentifier)
+    }
+
+    func saveDeveloperAccessBuildIdentifier(_ buildIdentifier: String?) {
+        let trimmedIdentifier = buildIdentifier?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmedIdentifier, !trimmedIdentifier.isEmpty {
+            defaults.set(trimmedIdentifier, forKey: Keys.developerAccessBuildIdentifier)
+        } else {
+            defaults.removeObject(forKey: Keys.developerAccessBuildIdentifier)
+        }
     }
 
     func loadHasCompletedOnboarding() -> Bool {

@@ -2,6 +2,7 @@ struct DeveloperSettings {
     var isDebuggingEnabled: Bool
     var debugBackendBaseURL: String
     var isDeveloperAccessUnlocked: Bool
+    var developerAccessBuildIdentifier: String?
 }
 
 struct DeveloperFeatureAccess: Equatable {
@@ -24,4 +25,5 @@ protocol DeveloperSettingsRepository {
     func saveIsDebuggingEnabled(_ isEnabled: Bool)
     func saveDebugBackendBaseURL(_ baseURL: String)
     func saveDeveloperAccessUnlocked(_ isUnlocked: Bool)
+    func saveDeveloperAccessBuildIdentifier(_ buildIdentifier: String?)
 }

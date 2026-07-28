@@ -124,6 +124,66 @@ final class PageAccessPolicyTests: XCTestCase {
     }
 }
 
+final class DeveloperAccessPolicyTests: XCTestCase {
+    @MainActor
+    func testTestFlightRequiresDeveloperCodeAgainForEachBuild() async {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        store.saveDeveloperAccessUnlocked(true)
+        store.saveDeveloperAccessBuildIdentifier("1.0.17(48)")
+        store.saveIsDebuggingEnabled(true)
+
+        let currentBuild = AppDistributionContext(
+            isTestFlight: true,
+            buildIdentifier: "1.1.0(57)"
+        )
+        let appState = AppState(
+            settingsStore: store,
+            appDistributionContext: currentBuild
+        )
+
+        XCTAssertFalse(appState.canAccessDeveloperOptions)
+        XCTAssertFalse(appState.canShowDebugPopup)
+        XCTAssertFalse(appState.isDebuggingEnabled)
+        XCTAssertFalse(store.loadIsDeveloperAccessUnlocked())
+        XCTAssertFalse(store.loadIsDebuggingEnabled())
+        XCTAssertNil(store.loadDeveloperAccessBuildIdentifier())
+
+        let developerCodeAccepted = await appState.redeemDeveloperPromotionCode(
+            "QAQA-QAQA-QAQA-QAQA"
+        )
+
+        XCTAssertTrue(developerCodeAccepted)
+        XCTAssertTrue(appState.canAccessDeveloperOptions)
+        XCTAssertTrue(appState.canShowDebugPopup)
+        XCTAssertFalse(appState.isDebuggingEnabled)
+        XCTAssertEqual(store.loadDeveloperAccessBuildIdentifier(), "1.1.0(57)")
+
+        let restoredSameBuild = AppState(
+            settingsStore: store,
+            appDistributionContext: currentBuild
+        )
+        XCTAssertTrue(restoredSameBuild.canAccessDeveloperOptions)
+        XCTAssertFalse(restoredSameBuild.isDebuggingEnabled)
+
+        let nextBuild = AppState(
+            settingsStore: store,
+            appDistributionContext: AppDistributionContext(
+                isTestFlight: true,
+                buildIdentifier: "1.1.1(58)"
+            )
+        )
+        XCTAssertFalse(nextBuild.canAccessDeveloperOptions)
+        XCTAssertFalse(nextBuild.canShowDebugPopup)
+        XCTAssertFalse(nextBuild.isDebuggingEnabled)
+    }
+}
+
 final class NotificationStateStoreTests: XCTestCase {
     @MainActor
     func testMarkAllReadUpdatesEveryLoadedNotificationAndUnreadCount() {

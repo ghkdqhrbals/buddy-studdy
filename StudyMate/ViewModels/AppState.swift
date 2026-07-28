@@ -611,6 +611,7 @@ final class AppState: ObservableObject {
     private let appIdentifierProvider: AppIdentifierProviding
     private let appTimeZoneProvider: AppTimeZoneProviding
     private let appSleepProvider: AppSleepProviding
+    private let appDistributionContext: AppDistributionContext
     private var cloudSyncService: CloudSyncServiceProtocol?
     private var timerTask: Task<Void, Never>?
     private var cloudSyncTask: Task<Void, Never>?
@@ -1277,6 +1278,7 @@ final class AppState: ObservableObject {
         appIdentifierProvider: AppIdentifierProviding? = nil,
         appTimeZoneProvider: AppTimeZoneProviding? = nil,
         appSleepProvider: AppSleepProviding? = nil,
+        appDistributionContext: AppDistributionContext? = nil,
         appLogRepository: AppLogRepository? = nil,
         appLogUseCase: AppLogUseCase? = nil,
         remotePushRegistrationRepository: RemotePushRegistrationRepository? = nil,
@@ -1309,6 +1311,8 @@ final class AppState: ObservableObject {
         let appIdentifierProvider = appIdentifierProvider ?? runtimeDependencies.appIdentifierProvider
         let appTimeZoneProvider = appTimeZoneProvider ?? runtimeDependencies.appTimeZoneProvider
         let appSleepProvider = appSleepProvider ?? runtimeDependencies.appSleepProvider
+        let appDistributionContext = appDistributionContext
+            ?? runtimeDependencies.appDistributionContext
         let useCaseDependencies = useCaseDependencies ?? AppUseCaseDependencies.live(
             settingsStore: settingsStore,
             remotePushBackendClient: remotePushBackendClient,
@@ -1358,8 +1362,18 @@ final class AppState: ObservableObject {
         let loadedCloudLastSyncedAt = loadedCloudSyncState.stateUpdatedAt
         let loadedLocalSettingsMutationAt = loadedLocalStudySettings.localSettingsMutationAt
         let loadedDeveloperSettings = localUseCases.developerSettings.loadSettings()
+        let shouldRestoreDeveloperAccess = Self.shouldRestoreDeveloperAccess(
+            settings: loadedDeveloperSettings,
+            distribution: appDistributionContext
+        )
+        if loadedDeveloperSettings.isDeveloperAccessUnlocked && !shouldRestoreDeveloperAccess {
+            localUseCases.developerSettings.saveDeveloperAccessUnlocked(false)
+            localUseCases.developerSettings.saveIsDebuggingEnabled(false)
+        }
         let loadedDeveloperFeatureAccess: DeveloperFeatureAccess =
-            loadedDeveloperSettings.isDeveloperAccessUnlocked ? .fullyAllowed : .restricted
+            shouldRestoreDeveloperAccess ? .fullyAllowed : .restricted
+        let loadedIsDebuggingEnabled =
+            shouldRestoreDeveloperAccess && loadedDeveloperSettings.isDebuggingEnabled
         let loadedDebugBackendBaseURL = appUseCasesProvider.normalizedDebugBackendBaseURL(loadedDeveloperSettings.debugBackendBaseURL)
 
         self.appLogUseCase = localUseCases.appLog
@@ -1377,6 +1391,7 @@ final class AppState: ObservableObject {
         self.appIdentifierProvider = appIdentifierProvider
         self.appTimeZoneProvider = appTimeZoneProvider
         self.appSleepProvider = appSleepProvider
+        self.appDistributionContext = appDistributionContext
         self.settings = effectiveLoadedSettings
         self.draftSettings = effectiveLoadedSettings
         let loadedCurrentStudySession = localUseCases.currentStudySession.loadSession()
@@ -1407,8 +1422,7 @@ final class AppState: ObservableObject {
             appLogs: loadedLogPage.entries,
             appLogTotalCount: loadedLogPage.totalCount,
             appLogPage: loadedLogPage.page,
-            isDebuggingEnabled: loadedDeveloperSettings.isDeveloperAccessUnlocked
-                && loadedDeveloperSettings.isDebuggingEnabled,
+            isDebuggingEnabled: loadedIsDebuggingEnabled,
             debugBackendBaseURL: loadedDebugBackendBaseURL,
             draftDebugBackendBaseURL: loadedDebugBackendBaseURL
         )
@@ -1438,8 +1452,7 @@ final class AppState: ObservableObject {
         self.cloudSyncService = cloudSyncService
         self.appUseCasesProvider = appUseCasesProvider
         self.appUseCases = appUseCasesProvider.makeUseCases(
-            isDebuggingEnabled: loadedDeveloperSettings.isDeveloperAccessUnlocked
-                && loadedDeveloperSettings.isDebuggingEnabled,
+            isDebuggingEnabled: loadedIsDebuggingEnabled,
             debugBackendBaseURL: loadedDebugBackendBaseURL
         )
         self.hasAPIKeyError = apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -3931,10 +3944,16 @@ final class AppState: ObservableObject {
     }
 
     func refreshDeveloperFeatureAccess(reason: String = "manual") async {
-        let access: DeveloperFeatureAccess =
-            developerSettingsUseCase.loadSettings().isDeveloperAccessUnlocked
-                ? .fullyAllowed
-                : .restricted
+        let settings = developerSettingsUseCase.loadSettings()
+        let shouldRestoreAccess = Self.shouldRestoreDeveloperAccess(
+            settings: settings,
+            distribution: appDistributionContext
+        )
+        if settings.isDeveloperAccessUnlocked && !shouldRestoreAccess {
+            developerSettingsUseCase.saveDeveloperAccessUnlocked(false)
+            developerSettingsUseCase.saveIsDebuggingEnabled(false)
+        }
+        let access: DeveloperFeatureAccess = shouldRestoreAccess ? .fullyAllowed : .restricted
         applyDeveloperFeatureAccess(access, reason: reason)
     }
 
@@ -3961,10 +3980,28 @@ final class AppState: ObservableObject {
         }
 
         developerSettingsUseCase.saveDeveloperAccessUnlocked(true)
+        developerSettingsUseCase.saveDeveloperAccessBuildIdentifier(
+            appDistributionContext.isTestFlight
+                ? appDistributionContext.buildIdentifier
+                : nil
+        )
         applyDeveloperFeatureAccess(.fullyAllowed, reason: "promotion-code")
         promotionCodeMessage = strings.promotionCodeApplied
         log(.info, "이 기기에 로컬 개발자 기능 권한을 적용했습니다.")
         return true
+    }
+
+    private static func shouldRestoreDeveloperAccess(
+        settings: DeveloperSettings,
+        distribution: AppDistributionContext
+    ) -> Bool {
+        guard settings.isDeveloperAccessUnlocked else {
+            return false
+        }
+        guard distribution.isTestFlight else {
+            return true
+        }
+        return settings.developerAccessBuildIdentifier == distribution.buildIdentifier
     }
 
     private func applyDeveloperFeatureAccess(

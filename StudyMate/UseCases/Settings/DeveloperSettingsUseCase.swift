@@ -22,4 +22,8 @@ struct DeveloperSettingsUseCase {
     func saveDeveloperAccessUnlocked(_ isUnlocked: Bool) {
         repository.saveDeveloperAccessUnlocked(isUnlocked)
     }
+
+    func saveDeveloperAccessBuildIdentifier(_ buildIdentifier: String?) {
+        repository.saveDeveloperAccessBuildIdentifier(buildIdentifier)
+    }
 }
