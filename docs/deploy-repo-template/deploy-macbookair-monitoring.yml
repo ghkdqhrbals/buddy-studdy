@@ -167,6 +167,9 @@ jobs:
             "${monitoring_root}/gateway/grafana-nginx.conf"
           grep -q 'monitoring_access' \
             "${monitoring_root}/api-dashboard/nginx.conf"
+          grep -A 2 'location = /status/api/v1/service-status {' \
+            "${monitoring_root}/api-dashboard/nginx.conf" \
+            | grep -q 'auth_basic off;'
           grep -q 'job: monitoring-access' \
             "${monitoring_root}/promtail/config/promtail.yml"
 

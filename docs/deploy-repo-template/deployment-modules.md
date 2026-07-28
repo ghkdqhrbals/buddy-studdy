@@ -48,8 +48,10 @@ deployment.
 - Maintenance windows are monitoring control-plane state. The monitoring
   receiver persists their schedule and localized notices and exposes the
   unauthenticated, read-only `/status/api/v1/service-status` endpoint for
-  customer apps. Backend deployment and the application database do not own
-  this state.
+  customer apps. The monitoring deploy validates that this exact public route
+  disables Basic Auth while maintenance administration and the rest of the
+  monitoring workspace remain authenticated. Backend deployment and the
+  application database do not own this state.
 - Backend deployment has no Redis Stream Coordinator runtime dependency and
   must not provision coordinator containers, networks, routes, secrets, or
   readiness settings.

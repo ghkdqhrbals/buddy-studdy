@@ -26,6 +26,45 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertFalse(availability.isUnderMaintenance)
     }
 
+    func testDeveloperDebugModeDoesNotRequestMonitoringStatus() async throws {
+        let suiteName = "DeveloperStatusBypassTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+
+        let store = SettingsStore(
+            defaults: defaults,
+            recordDatabaseURL: databaseURL,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveDeveloperAccessUnlocked(true)
+        store.saveIsDebuggingEnabled(true)
+        store.saveHasCompletedOnboarding(false)
+        let client = makeClient(
+            serviceStatusURL: URL(
+                string: "https://monitoring.example/status/api/v1/service-status"
+            )!
+        ) { request in
+            XCTFail("Debug mode must not request monitoring status: \(request.url?.absoluteString ?? "-")")
+            return Self.response(
+                for: request,
+                statusCode: 500,
+                body: #"{"message":"unexpected request"}"#
+            )
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+
+        await appState.start()
+        await appState.refreshServiceAvailability()
+
+        XCTAssertTrue(appState.isDebuggingEnabled)
+        XCTAssertFalse(appState.isCheckingServiceAvailability)
+    }
+
     func testBackendMaintenanceErrorDoesNotReplaceMonitoringServiceStatus() {
         let error = RemotePushBackendError.httpStatus(
             503,

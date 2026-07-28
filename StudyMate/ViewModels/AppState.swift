@@ -1545,16 +1545,25 @@ final class AppState: ObservableObject {
         isServiceUnderMaintenance && !isMaintenanceBypassedForDeveloper
     }
 
+    private var shouldSkipServiceAvailabilityMonitoring: Bool {
+        isDebuggingEnabled || isMaintenanceBypassedForDeveloper
+    }
+
     func bypassMaintenanceForDeveloper() async {
         guard canAccessDeveloperOptions else {
             return
         }
         isMaintenanceBypassedForDeveloper = true
+        stopMaintenancePolling()
         log(.info, "개발자 코드로 현재 점검 화면을 우회했습니다.")
         await completeStartupTasksIfNeeded()
     }
 
     func refreshServiceAvailability() async {
+        guard !shouldSkipServiceAvailabilityMonitoring else {
+            stopMaintenancePolling()
+            return
+        }
         guard !isCheckingServiceAvailability else {
             return
         }
@@ -1566,6 +1575,9 @@ final class AppState: ObservableObject {
             let availability = try await appUseCases.serviceAvailability.fetch(
                 language: settings.appLanguage
             )
+            guard !shouldSkipServiceAvailabilityMonitoring else {
+                return
+            }
             let wasUnderMaintenance = isServiceUnderMaintenance
             applyServiceAvailability(availability, source: "status-endpoint")
             if wasUnderMaintenance, !availability.isUnderMaintenance {
@@ -1581,6 +1593,9 @@ final class AppState: ObservableObject {
         _ availability: BackendServiceAvailability,
         source: String
     ) {
+        guard !shouldSkipServiceAvailabilityMonitoring else {
+            return
+        }
         serviceAvailability = availability
         if !availability.isUnderMaintenance {
             isMaintenanceBypassedForDeveloper = false
@@ -1593,6 +1608,10 @@ final class AppState: ObservableObject {
     }
 
     private func startMaintenancePollingIfNeeded() {
+        guard !shouldSkipServiceAvailabilityMonitoring else {
+            stopMaintenancePolling()
+            return
+        }
         guard maintenancePollingTask == nil else {
             return
         }
@@ -1614,6 +1633,11 @@ final class AppState: ObservableObject {
                 await self.refreshServiceAvailability()
             }
         }
+    }
+
+    private func stopMaintenancePolling() {
+        maintenancePollingTask?.cancel()
+        maintenancePollingTask = nil
     }
 
     @discardableResult
@@ -7122,6 +7146,9 @@ final class AppState: ObservableObject {
         }
         isDebuggingEnabled = isEnabled
         developerSettingsUseCase.saveIsDebuggingEnabled(isEnabled)
+        if isEnabled {
+            stopMaintenancePolling()
+        }
         refreshRemotePushBackendClient(reason: isEnabled ? "debug-enabled" : "debug-disabled")
         log(.info, isEnabled ? "디버깅 모드를 켰습니다." : "디버깅 모드를 껐습니다.")
     }
