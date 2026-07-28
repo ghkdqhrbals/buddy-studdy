@@ -3,6 +3,7 @@ package com.buddystudy.backend
 import com.buddystudy.backend.admin.management.application.model.AdminMembershipTierResponse
 import com.buddystudy.backend.admin.management.application.model.AdminUserPageResponse
 import com.buddystudy.backend.admin.management.application.model.AdminUserSummary
+import com.buddystudy.backend.availability.adapter.inbound.web.CreateServiceMaintenanceRequest
 import com.buddystudy.study.domain.entity.QuestionEntity
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -59,6 +60,25 @@ class ApplicationRuntimeHintsTest {
                     .test(hints),
             ).isTrue()
         }
+    }
+
+    @Test
+    fun `registers service maintenance request for native JSON deserialization`() {
+        val hints = RuntimeHints()
+
+        ApplicationRuntimeHints().registerHints(hints, javaClass.classLoader)
+
+        assertThat(
+            RuntimeHintsPredicates.reflection()
+                .onType(CreateServiceMaintenanceRequest::class.java)
+                .withMemberCategories(
+                    MemberCategory.INVOKE_DECLARED_CONSTRUCTORS,
+                    MemberCategory.DECLARED_FIELDS,
+                    MemberCategory.INVOKE_PUBLIC_METHODS,
+                    MemberCategory.INVOKE_DECLARED_METHODS,
+                )
+                .test(hints),
+        ).isTrue()
     }
 
     @Test

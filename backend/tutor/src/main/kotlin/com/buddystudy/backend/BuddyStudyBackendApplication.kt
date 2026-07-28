@@ -86,6 +86,7 @@ class ApplicationRuntimeHints : RuntimeHintsRegistrar {
         "com.buddystudy.backend.admin.management.application.model.AdminMembershipTierResponse",
         "com.buddystudy.backend.admin.management.application.model.AdminUserPageResponse",
         "com.buddystudy.backend.admin.management.application.model.AdminUserSummary",
+        "com.buddystudy.backend.availability.adapter.inbound.web.CreateServiceMaintenanceRequest",
         "com.buddystudy.backend.profile.adapter.inbound.web.dto.AvatarUpdateRequest",
         "com.buddystudy.backend.profile.adapter.inbound.web.dto.ProfileUpdateRequest",
         "com.buddystudy.backend.profile.application.model.AvatarCatalogResponse",

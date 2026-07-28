@@ -9,6 +9,8 @@ import com.buddystudy.backend.availability.application.model.ServiceMaintenanceH
 import com.buddystudy.backend.availability.application.model.ServiceMaintenanceWindow
 import com.buddystudy.backend.availability.application.port.inbound.AdminServiceMaintenanceUseCase
 import com.buddystudy.backend.availability.application.port.inbound.ServiceAvailabilityUseCase
+import com.fasterxml.jackson.annotation.JsonCreator
+import com.fasterxml.jackson.annotation.JsonProperty
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size
@@ -75,21 +77,21 @@ class AdminServiceMaintenanceController(
     ): ServiceMaintenanceWindow = maintenance.terminate(authorization.bearerToken(), id)
 }
 
-data class CreateServiceMaintenanceRequest(
+data class CreateServiceMaintenanceRequest @JsonCreator constructor(
     @field:NotBlank @field:Size(max = 120)
-    val titleKo: String = "",
+    @param:JsonProperty("titleKo") val titleKo: String = "",
     @field:NotBlank @field:Size(max = 120)
-    val titleEn: String = "",
+    @param:JsonProperty("titleEn") val titleEn: String = "",
     @field:NotBlank @field:Size(max = 120)
-    val titleJa: String = "",
+    @param:JsonProperty("titleJa") val titleJa: String = "",
     @field:NotBlank @field:Size(max = 1_000)
-    val messageKo: String = "",
+    @param:JsonProperty("messageKo") val messageKo: String = "",
     @field:NotBlank @field:Size(max = 1_000)
-    val messageEn: String = "",
+    @param:JsonProperty("messageEn") val messageEn: String = "",
     @field:NotBlank @field:Size(max = 1_000)
-    val messageJa: String = "",
-    val startsAt: Instant,
-    val endsAt: Instant? = null,
+    @param:JsonProperty("messageJa") val messageJa: String = "",
+    @param:JsonProperty("startsAt") val startsAt: Instant,
+    @param:JsonProperty("endsAt") val endsAt: Instant? = null,
 )
 
 interface AdminServiceMaintenanceWebPort {
