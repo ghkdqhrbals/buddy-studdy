@@ -343,7 +343,7 @@ class QuestionRepository(
             """
             select q.id from questions q join users u on u.id = q.user_id
             where q.id in ($idMarkers) and q.is_public = true and q.deleted_at is null
-              and q.score is not null and u.allow_public_questions = true
+              and $PUBLIC_ANSWER_CONDITION and u.allow_public_questions = true
             """.trimIndent(),
         ).bindIndexed("questionId", ids.toList())
             .map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }
@@ -593,7 +593,7 @@ class QuestionRepository(
         }
         return """
         select q.id from questions q join users u on u.id = q.user_id $searchJoin
-        where q.is_public = true and q.deleted_at is null and q.score is not null
+        where q.is_public = true and q.deleted_at is null and $PUBLIC_ANSWER_CONDITION
           and u.allow_public_questions = true and ($condition)
         order by q.created_at desc, q.id desc limit :limit offset :offset
         """.trimIndent()
@@ -605,7 +605,7 @@ class QuestionRepository(
         }
         return """
         select count(*) as total from questions q join users u on u.id = q.user_id $searchJoin
-        where q.is_public = true and q.deleted_at is null and q.score is not null
+        where q.is_public = true and q.deleted_at is null and $PUBLIC_ANSWER_CONDITION
           and u.allow_public_questions = true and ($condition)
         """.trimIndent()
     }
@@ -624,6 +624,8 @@ class QuestionRepository(
             .awaitSingle().toInt()
 
     private companion object {
+        const val PUBLIC_ANSWER_CONDITION = "q.answer is not null and length(trim(q.answer)) > 0"
+
         val NON_TERMINAL_GRADING_STATUSES = listOf(
             "QUEUED",
             "ANALYZING_EVIDENCE",

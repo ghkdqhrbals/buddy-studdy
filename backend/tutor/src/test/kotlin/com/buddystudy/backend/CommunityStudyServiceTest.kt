@@ -116,6 +116,42 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
+    fun `public questions include saved answers when grading has no score`(): Unit = runBlocking {
+        val failedGrading = answeredPublicQuestion(
+            author,
+            "Async grading",
+            createdAt = now.plusSeconds(1),
+            score = null,
+            gradingStatus = "FAILED",
+        )
+        pendingPublicQuestion(author, "No answer", createdAt = now)
+
+        val response = community.getPublicQuestions(null, null, language = "ko", limit = 10, offset = 0)
+
+        assertThat(response.totalCount).isEqualTo(1)
+        val result = response.questions.single()
+        assertThat(result.id).isEqualTo(failedGrading.id.toString())
+        assertThat(result.answer).isEqualTo("Answer for Async grading")
+        assertThat(result.gradingResult).isNull()
+    }
+
+    @Test
+    fun `public detail allows saved answer when grading has no score`(): Unit = runBlocking {
+        val failedGrading = answeredPublicQuestion(
+            author,
+            "Async grading",
+            score = null,
+            gradingStatus = "FAILED",
+        )
+
+        val response = community.getPublicQuestion(principal, failedGrading.id, language = "ko")
+
+        assertThat(response.id).isEqualTo(failedGrading.id.toString())
+        assertThat(response.answer).isEqualTo("Answer for Async grading")
+        assertThat(response.gradingResult).isNull()
+    }
+
+    @Test
     fun `public questions v2 reads canonical questions and only returns public answered records`(): Unit = runBlocking {
         val newest = answeredPublicQuestion(author, "SwiftUI", createdAt = now.plusSeconds(2))
         val older = answeredPublicQuestion(author, "Kotlin", createdAt = now.plusSeconds(1))
@@ -354,6 +390,8 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
         createdAt: Instant = now,
         publicQuestion: Boolean = true,
         deletedAt: Instant? = null,
+        score: Int? = 91,
+        gradingStatus: String? = null,
     ): QuestionEntity =
         questions.save(
             QuestionEntity(
@@ -367,12 +405,13 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
                 sentAt = createdAt,
                 status = "graded",
                 answer = "Answer for $topic",
-                score = 91,
-                correct = true,
-                feedback = "Good",
-                explanation = "Because",
+                score = score,
+                correct = score?.let { true },
+                feedback = score?.let { "Good" },
+                explanation = score?.let { "Because" },
                 answeredAt = createdAt.plusSeconds(30),
-                gradedAt = createdAt.plusSeconds(40),
+                gradedAt = score?.let { createdAt.plusSeconds(40) },
+                gradingStatus = gradingStatus,
                 source = "manual",
                 publicQuestion = publicQuestion,
                 deletedAt = deletedAt,
