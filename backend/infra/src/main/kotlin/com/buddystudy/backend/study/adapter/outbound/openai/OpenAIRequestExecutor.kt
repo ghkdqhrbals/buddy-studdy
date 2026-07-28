@@ -18,14 +18,11 @@ import com.buddystudy.backend.study.application.model.GradingResponseStyle
 import com.buddystudy.backend.study.application.model.TranslatedQuestionContent
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
 import com.fasterxml.jackson.module.kotlin.readValue
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import org.springframework.beans.factory.DisposableBean
 import org.springframework.ai.chat.messages.SystemMessage
 import org.springframework.ai.chat.messages.UserMessage
@@ -37,7 +34,11 @@ import org.springframework.ai.openai.OpenAiEmbeddingOptions
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import java.time.Duration
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.roundToInt
 
 @Component
@@ -46,7 +47,12 @@ class OpenAIRequestExecutor(
 ) : DisposableBean {
     private val mapper = JsonMapperProvider.mapper
     private val logger = LoggerFactory.getLogger(javaClass)
-    private val gradingScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val gradingThreadCounter = AtomicInteger()
+    private val gradingExecutor = Executors.newFixedThreadPool(MAX_CONCURRENT_GRADINGS) { runnable ->
+        Thread(runnable, "openai-grading-${gradingThreadCounter.incrementAndGet()}").apply {
+            isDaemon = true
+        }
+    }
     private val jsonResponseFormat = OpenAiChatModel.ResponseFormat.builder()
         .type(OpenAiChatModel.ResponseFormat.Type.JSON_OBJECT)
         .build()
@@ -328,20 +334,29 @@ class OpenAIRequestExecutor(
         timeoutMillis: Long = gradingTimeoutMillis(),
         block: suspend () -> T,
     ): T {
-        val task = gradingScope.async { block() }
+        val deadlineMillis = timeoutMillis.coerceAtLeast(1)
+        val task = gradingExecutor.submit<T> {
+            runBlocking {
+                block()
+            }
+        }
         return try {
-            withTimeoutOrNull(timeoutMillis.coerceAtLeast(1)) {
-                task.await()
-            } ?: throw TimeoutException("OpenAI grading exceeded ${timeoutMillis.coerceAtLeast(1)} ms.")
+            runInterruptible(Dispatchers.IO) {
+                task.get(deadlineMillis, TimeUnit.MILLISECONDS)
+            }
+        } catch (error: ExecutionException) {
+            throw (error.cause ?: error)
+        } catch (error: TimeoutException) {
+            throw TimeoutException("OpenAI grading exceeded $deadlineMillis ms.")
         } finally {
-            if (!task.isCompleted) {
-                task.cancel("OpenAI grading deadline exceeded.")
+            if (!task.isDone) {
+                task.cancel(true)
             }
         }
     }
 
     override fun destroy() {
-        gradingScope.cancel("Application is shutting down.")
+        gradingExecutor.shutdownNow()
     }
 
     suspend fun compareGradingResponses(
@@ -649,6 +664,7 @@ class OpenAIRequestExecutor(
     )
 
     companion object {
+        private const val MAX_CONCURRENT_GRADINGS = 4
         internal const val MAX_GRADING_TIMEOUT_SECONDS = 270L
         private val VALID_VERDICTS = setOf("CORRECT", "PARTIALLY_CORRECT", "INCORRECT")
 
