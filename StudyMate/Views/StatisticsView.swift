@@ -1731,10 +1731,6 @@ private struct StudyGrowthRootSection: View {
         } else {
             VStack(spacing: 0) {
                 HStack {
-                    Text(strings.abilityScale)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
                     Spacer()
 
                     HStack(spacing: 12) {

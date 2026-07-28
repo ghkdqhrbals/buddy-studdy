@@ -650,6 +650,12 @@ final class AppState: ObservableObject {
         AppStrings(language: settings.appLanguage)
     }
 
+    #if DEBUG
+    private var isAppStoreScreenshotFixtureEnabled: Bool {
+        ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_FIXTURE"] != nil
+    }
+    #endif
+
     var settingsEditorStrings: AppStrings {
         AppStrings(language: draftSettings.appLanguage)
     }
@@ -1444,8 +1450,382 @@ final class AppState: ObservableObject {
             log(.info, "앱 상태를 불러왔습니다.")
         }
 
+        #if DEBUG
+        configureAppStoreScreenshotFixtureIfNeeded()
+        #endif
         restartTimer()
     }
+
+    #if DEBUG
+    private func configureAppStoreScreenshotFixtureIfNeeded() {
+        guard let fixture = ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_FIXTURE"]?
+            .lowercased() else {
+            return
+        }
+
+        let isKorean = ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_LANGUAGE"]?
+            .lowercased() != "en"
+        let language: AppLanguage = isKorean ? .korean : .english
+        let now = Date()
+        let rootTitles = isKorean
+            ? ["SwiftUI 앱 개발", "자료구조와 알고리즘", "영어 회화"]
+            : ["SwiftUI App Development", "Data Structures & Algorithms", "English Conversation"]
+        let categories = [
+            StudyCategory(id: "101", title: rootTitles[0], difficulty: Difficulty(level: 6)),
+            StudyCategory(id: "201", title: rootTitles[1], difficulty: Difficulty(level: 5)),
+            StudyCategory(id: "301", title: rootTitles[2], difficulty: Difficulty(level: 4)),
+        ]
+        let fixtureSettings = StudySettings(
+            topic: rootTitles[0],
+            difficulty: Difficulty(level: 6),
+            appLanguage: language,
+            language: language.studyLanguage,
+            customPrompt: StudySettings.defaultCustomPrompt,
+            intervalMinutes: 180,
+            isQuestionPublic: true,
+            studyCategories: categories,
+            selectedStudyCategoryID: "101"
+        )
+        settings = fixtureSettings
+        draftSettings = fixtureSettings
+        savedSettings = fixtureSettings
+        hasCompletedOnboarding = true
+        isCloudSyncEnabled = false
+        communitySessionState = CommunitySessionStateStore(isSignedIn: true)
+
+        func room(
+            _ id: Int,
+            _ topic: String,
+            parent: Int? = nil,
+            order: Int = 0,
+            level: Int = 5
+        ) -> BackendStudyRoom {
+            BackendStudyRoom(
+                id: id,
+                topic: topic,
+                parentStudyId: parent,
+                sortOrder: order,
+                difficultyLevel: level,
+                intervalMinutes: 180,
+                enabled: true,
+                activeForQuestions: true,
+                notificationSound: "default",
+                customPrompt: StudySettings.defaultCustomPrompt,
+                openAIModel: StudySettings.defaultOpenAIModel,
+                maxHistoryCount: 100,
+                nextDueAt: now.addingTimeInterval(7_200),
+                lastSentAt: now.addingTimeInterval(-3_600),
+                lastError: nil,
+                pendingQuestion: nil,
+                createdAt: now.addingTimeInterval(-2_592_000),
+                updatedAt: now
+            )
+        }
+
+        let topics = isKorean
+            ? [
+                "상태 관리", "내비게이션", "비동기 처리", "Observation", "화면 구성", "애니메이션",
+                "배열과 해시", "트리 탐색", "시간 복잡도", "일상 대화", "여행 영어",
+            ]
+            : [
+                "State Management", "Navigation", "Async Programming", "Observation", "Layout", "Animation",
+                "Arrays & Hashing", "Tree Traversal", "Time Complexity", "Daily Conversation", "Travel English",
+            ]
+        let rooms = [
+            room(101, rootTitles[0], order: 0, level: 6),
+            room(102, topics[0], parent: 101, order: 0, level: 6),
+            room(103, topics[1], parent: 101, order: 1, level: 5),
+            room(104, topics[2], parent: 101, order: 2, level: 7),
+            room(105, topics[3], parent: 102, order: 0, level: 6),
+            room(106, topics[4], parent: 102, order: 1, level: 5),
+            room(107, topics[5], parent: 103, order: 0, level: 7),
+            room(201, rootTitles[1], order: 1, level: 5),
+            room(202, topics[6], parent: 201, order: 0, level: 5),
+            room(203, topics[7], parent: 201, order: 1, level: 6),
+            room(204, topics[8], parent: 201, order: 2, level: 5),
+            room(301, rootTitles[2], order: 2, level: 4),
+            room(302, topics[9], parent: 301, order: 0, level: 4),
+            room(303, topics[10], parent: 301, order: 1, level: 5),
+        ]
+        studyRoomState.replace(with: rooms)
+
+        let recordTopics = [topics[0], topics[2], topics[3], topics[6], topics[7], topics[9]]
+        let studyIDs = [102, 104, 105, 202, 203, 302]
+        let questionsKO = [
+            "@State와 @Binding의 역할 차이를 설명해 보세요.",
+            "async/await에서 구조적 동시성이 중요한 이유는 무엇인가요?",
+            "Observation 프레임워크가 화면 갱신 범위를 줄이는 방법은?",
+            "해시 테이블의 평균 검색 시간 복잡도는 무엇인가요?",
+            "깊이 우선 탐색과 너비 우선 탐색은 언제 각각 유용한가요?",
+            "처음 만난 사람에게 취미를 자연스럽게 묻는 표현은?",
+        ]
+        let questionsEN = [
+            "How do @State and @Binding differ in SwiftUI?",
+            "Why does structured concurrency matter with async/await?",
+            "How does Observation reduce unnecessary view updates?",
+            "What is the average lookup complexity of a hash table?",
+            "When would you choose DFS over BFS, and vice versa?",
+            "How can you naturally ask someone about their hobbies?",
+        ]
+        let questionTexts = isKorean ? questionsKO : questionsEN
+        let answers = isKorean
+            ? [
+                "@State는 뷰가 소유하는 값이고 @Binding은 다른 소유자의 값을 양방향으로 연결합니다.",
+                "자식 작업의 생명주기와 취소가 부모 작업에 묶여 안전하게 관리되기 때문입니다.",
+                "실제로 읽은 속성의 변경만 추적해 관련 뷰를 다시 계산합니다.",
+                "충돌이 적절히 관리되면 평균 O(1)입니다.",
+                "DFS는 깊은 경로 탐색에, BFS는 최단 단계 탐색에 적합합니다.",
+                "What do you like to do in your free time?",
+            ]
+            : [
+                "@State owns local view data, while @Binding provides two-way access to data owned elsewhere.",
+                "It ties child-task lifetime and cancellation to a well-defined parent scope.",
+                "It tracks accessed properties so only dependent views are invalidated.",
+                "Average lookup is O(1) with a well-distributed hash function.",
+                "DFS suits deep exploration; BFS is useful for shortest paths by level.",
+                "What do you like to do in your free time?",
+            ]
+        let scores = [94, 88, 91, 86, 82, 97, 90, 84, 93, 89, 95, 87]
+        let records = (0..<18).map { index -> StudyRecord in
+            let item = index % questionTexts.count
+            let createdAt = now.addingTimeInterval(TimeInterval(-(index + 1) * 43_200))
+            return StudyRecord(
+                id: "screenshot-record-\(index)",
+                studyID: studyIDs[item],
+                question: QuestionItem(
+                    question: questionTexts[item],
+                    expectedAnswerHint: nil,
+                    createdAt: createdAt
+                ),
+                answer: answers[item],
+                gradingResult: GradingResult(
+                    score: scores[index % scores.count],
+                    isCorrect: scores[index % scores.count] >= 80,
+                    feedback: isKorean ? "핵심 개념을 정확하게 설명했어요." : "You explained the core concept clearly.",
+                    explanation: isKorean ? "개념과 사용 시점이 잘 연결되어 있습니다." : "The concept and its use case are connected well."
+                ),
+                topic: recordTopics[item],
+                difficulty: Difficulty(level: 4 + (index % 4)),
+                answeredAt: createdAt.addingTimeInterval(420),
+                isPublic: index % 3 != 0,
+                likeCount: 4 + index,
+                commentCount: index % 5,
+                viewCount: 28 + index * 7
+            )
+        }
+        recordsState.replace(with: records)
+
+        let authors = [
+            CommunityUserProfile(
+                id: 701,
+                displayName: isKorean ? "꾸준한개발자" : "Daily Builder",
+                bio: isKorean ? "매일 한 개념씩 공부해요" : "Learning one concept every day",
+                avatarURL: nil,
+                avatarSymbolName: "pixel-fox",
+                avatarColorSeed: "avatar-color-mint"
+            ),
+            CommunityUserProfile(
+                id: 702,
+                displayName: isKorean ? "알고리즘메이트" : "Algorithm Mate",
+                bio: isKorean ? "함께 성장하는 학습자" : "Growing together",
+                avatarURL: nil,
+                avatarSymbolName: "pixel-owl",
+                avatarColorSeed: "avatar-color-blue"
+            ),
+            CommunityUserProfile(
+                id: 703,
+                displayName: isKorean ? "영어한스푼" : "English Spoon",
+                bio: isKorean ? "오늘의 표현을 나눠요" : "Sharing today's phrase",
+                avatarURL: nil,
+                avatarSymbolName: "pixel-cat",
+                avatarColorSeed: "avatar-color-pink"
+            ),
+        ]
+        let publicQuestions = (0..<6).map { index -> CommunityQuestion in
+            let item = index % questionTexts.count
+            return CommunityQuestion(
+                id: "screenshot-community-\(index)",
+                question: questionTexts[item],
+                answer: answers[item],
+                gradingResult: records[index].gradingResult,
+                topic: recordTopics[item],
+                difficultyLevel: 4 + (index % 4),
+                status: "ANSWERED",
+                source: "STUDY",
+                createdAt: now.addingTimeInterval(TimeInterval(-(index + 1) * 5_400)),
+                answeredAt: now.addingTimeInterval(TimeInterval(-(index + 1) * 5_100)),
+                author: authors[index % authors.count],
+                likeCount: [18, 12, 27, 9, 21, 15][index],
+                commentCount: [5, 3, 8, 2, 6, 4][index],
+                viewCount: [142, 96, 211, 73, 168, 121][index],
+                isLikedByMe: index == 0
+            )
+        }
+        communityFeedState.applyPage(
+            CommunityQuestionsResponse(
+                questions: publicQuestions,
+                totalCount: 48,
+                limit: 20,
+                offset: 0
+            ),
+            offset: 0,
+            reset: true
+        )
+
+        let averages = [91, 88, 90, 85, 82, 94]
+        let bestScores = [98, 96, 99, 94, 93, 100]
+        let correctRates = [92, 86, 90, 83, 80, 95]
+        var topicStats: [BackendTopicStats] = []
+        for index in recordTopics.indices {
+            let sampleCount = 12 + index * 3
+            let centerLevel = 0.52 + Double(index) * 0.045
+            let lowerBound = 0.43 + Double(index) * 0.04
+            let upperBound = 0.61 + Double(index) * 0.04
+            let matchingRecords = records.filter { $0.topic == recordTopics[index] }
+            let stats = BackendTopicStats(
+                topicKey: "fixture-topic-\(index)",
+                topic: recordTopics[index],
+                topicAliases: [],
+                count: sampleCount,
+                average: averages[index],
+                best: bestScores[index],
+                correctRate: correctRates[index],
+                levelRange: BackendTopicLevelRange(
+                    level: 5 + (index % 3),
+                    average: averages[index],
+                    sampleCount: sampleCount,
+                    centerLevel: centerLevel,
+                    lowerBound: lowerBound,
+                    upperBound: upperBound
+                ),
+                latestAt: now.addingTimeInterval(TimeInterval(-index * 3_600)),
+                records: matchingRecords
+            )
+            topicStats.append(stats)
+        }
+        var nextStatsState = statsState
+        let statsRequestID = nextStatsState.beginRequest()
+        nextStatsState.applyStats(
+            BackendStats(
+                totalResponses: 126,
+                totalTopics: 11,
+                topics: topicStats,
+                limit: 8,
+                offset: 0,
+                generatedAt: now
+            ),
+            requestID: statsRequestID
+        )
+        nextStatsState.finishRequest(statsRequestID)
+
+        let activityDays = (0..<24).compactMap { index -> BackendStatsActivityDay? in
+            guard index % 4 != 3,
+                  let date = Calendar.current.date(byAdding: .day, value: -index, to: now) else {
+                return nil
+            }
+            return BackendStatsActivityDay(
+                date: date,
+                answerCount: 2 + (index % 5),
+                topicCount: 1 + (index % 3),
+                topics: Array(recordTopics.prefix(1 + (index % 3))),
+                bestLevel: 5.2 + Double(index % 4) * 0.45
+            )
+        }
+        let activityRequestID = nextStatsState.beginActivityRequest()
+        nextStatsState.applyActivity(
+            BackendStatsActivity(
+                days: activityDays,
+                streakDays: 12,
+                monthAnswerCount: 74,
+                generatedAt: now
+            ),
+            requestID: activityRequestID
+        )
+        nextStatsState.finishActivityRequest(activityRequestID)
+
+        let growthNodes = rooms.map { studyRoom -> BackendStudyGrowthNode in
+            let rootID: Int
+            if studyRoom.id >= 300 {
+                rootID = 301
+            } else if studyRoom.id >= 200 {
+                rootID = 201
+            } else {
+                rootID = 101
+            }
+            let level = Double(studyRoom.difficultyLevel) + Double(studyRoom.id % 3) * 0.2
+            return BackendStudyGrowthNode(
+                studyId: studyRoom.id,
+                parentStudyId: studyRoom.parentStudyId,
+                rootStudyId: rootID,
+                topic: studyRoom.topic,
+                sortOrder: studyRoom.sortOrder,
+                depth: studyRoom.parentStudyId == nil ? 0 : 1,
+                childCount: rooms.filter { $0.parentStudyId == studyRoom.id }.count,
+                activeForQuestions: true,
+                currentLevel: level,
+                previousLevel: level - 0.6,
+                growth: 0.6,
+                answerCount: 8 + (studyRoom.id % 7),
+                measuredTopicCount: studyRoom.parentStudyId == nil ? 3 : 1,
+                totalTopicCount: studyRoom.parentStudyId == nil ? 5 : 1,
+                latestAt: now.addingTimeInterval(-3_600),
+                trend: [level - 1.1, level - 0.8, level - 0.5, level - 0.2, level]
+            )
+        }
+        let roots = [101, 201, 301].compactMap { id -> BackendStudyGrowthRoot? in
+            guard let studyRoom = rooms.first(where: { $0.id == id }),
+                  let node = growthNodes.first(where: { $0.studyId == id }) else {
+                return nil
+            }
+            return BackendStudyGrowthRoot(
+                studyId: id,
+                topic: studyRoom.topic,
+                activeForQuestions: true,
+                currentLevel: node.currentLevel,
+                previousLevel: node.previousLevel,
+                growth: node.growth,
+                answerCount: id == 101 ? 68 : (id == 201 ? 37 : 21),
+                measuredTopicCount: id == 101 ? 6 : (id == 201 ? 3 : 2),
+                totalTopicCount: id == 101 ? 7 : (id == 201 ? 4 : 3),
+                trend: node.trend,
+                profile: BackendStudyGrowthProfile(
+                    achievement: id == 101 ? 0.91 : 0.86,
+                    challenge: id == 101 ? 0.72 : 0.61,
+                    completion: id == 101 ? 0.84 : 0.78,
+                    breadth: id == 101 ? 0.88 : 0.75,
+                    depth: id == 101 ? 0.79 : 0.70
+                )
+            )
+        }
+        let growthRequestID = nextStatsState.beginStudyGrowthRequest()
+        nextStatsState.applyStudyGrowth(
+            BackendStudyGrowth(
+                roots: roots,
+                nodes: growthNodes,
+                startAt: now.addingTimeInterval(-7_776_000),
+                endAt: now,
+                generatedAt: now
+            ),
+            requestID: growthRequestID
+        )
+        nextStatsState.finishStudyGrowthRequest(growthRequestID)
+        statsState = nextStatsState
+
+        homeStudyRoute = nil
+        switch fixture {
+        case "study-list", "studies":
+            selectedTab = .home
+            appRouteRequest = AppRouteRequest(route: .studyList)
+        case "statistics", "stats":
+            selectedTab = .statistics
+        case "records":
+            selectedTab = .records
+        default:
+            selectedTab = .home
+            appRouteRequest = AppRouteRequest(route: .publicQuestions)
+        }
+    }
+    #endif
 
     deinit {
         MainActor.assumeIsolated {
@@ -1475,6 +1855,11 @@ final class AppState: ObservableObject {
         }
 
         didStart = true
+        #if DEBUG
+        if isAppStoreScreenshotFixtureEnabled {
+            return
+        }
+        #endif
         await refreshServiceAvailability()
         guard !isMaintenanceAccessBlocked else {
             return
@@ -1512,6 +1897,11 @@ final class AppState: ObservableObject {
     }
 
     func handleAppBecameActive() async {
+        #if DEBUG
+        if isAppStoreScreenshotFixtureEnabled {
+            return
+        }
+        #endif
         await refreshServiceAvailability()
         guard !isMaintenanceAccessBlocked else {
             return
@@ -1704,6 +2094,11 @@ final class AppState: ObservableObject {
     }
 
     func refreshBackendRecords() async {
+        #if DEBUG
+        if isAppStoreScreenshotFixtureEnabled {
+            return
+        }
+        #endif
         await loadBackendRecordsPage(reset: true)
     }
 
@@ -2508,6 +2903,11 @@ final class AppState: ObservableObject {
         limit: Int = 8,
         offset: Int = 0
     ) async {
+        #if DEBUG
+        if isAppStoreScreenshotFixtureEnabled {
+            return
+        }
+        #endif
         let requestID = beginBackendStatsRequest()
 
         let normalizedLimit = max(1, min(limit, 100))
@@ -2565,6 +2965,11 @@ final class AppState: ObservableObject {
     }
 
     func fetchBackendStatsActivity(startAt: Date? = nil, endAt: Date? = nil) async {
+        #if DEBUG
+        if isAppStoreScreenshotFixtureEnabled {
+            return
+        }
+        #endif
         let requestID = beginBackendStatsActivityRequest()
 
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "stats-activity") else {
@@ -2615,6 +3020,11 @@ final class AppState: ObservableObject {
     }
 
     func fetchBackendStudyGrowth(startAt: Date? = nil, endAt: Date? = nil) async {
+        #if DEBUG
+        if isAppStoreScreenshotFixtureEnabled {
+            return
+        }
+        #endif
         let requestID = beginBackendStudyGrowthRequest()
 
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "study-growth") else {
@@ -2674,6 +3084,11 @@ final class AppState: ObservableObject {
     }
 
     func loadCommunityQuestions(reset: Bool = true, userInitiated: Bool = false) async {
+        #if DEBUG
+        if isAppStoreScreenshotFixtureEnabled {
+            return
+        }
+        #endif
         let trimmedTopic = communitySearchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedOffset = reset ? 0 : communityOffset
         let limit = Self.communityQuestionPageSize
