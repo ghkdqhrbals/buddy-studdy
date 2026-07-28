@@ -124,14 +124,12 @@ struct MobileRootView: View {
                 .onAppear {
                     appState.normalizeSelectedTabForMobile()
                 }
-                #if DEBUG
                 .background {
                     AppDebugSettingsTabLongPressBridge {
                         appState.requestDebugPanelIfEnabledOrEnableOnDemand()
                     }
                     .frame(width: 0, height: 0)
                 }
-                #endif
             }
         }
         .fullScreenCover(isPresented: $appState.isRequiredTermsGatePresented) {

@@ -33,6 +33,32 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testTestFlightKeepsDeveloperDebugPopupBehindPromotionCodeGate() throws {
+        let root = try repositoryRoot()
+        let appContent = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/StudyMateiOSApp.swift"),
+            encoding: .utf8
+        )
+        let mobileRootContent = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Views/MobileRootView.swift"),
+            encoding: .utf8
+        )
+        let debugControlsContent = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Debug/AppDebugControls.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(appContent.contains("FloatingDebugLogOverlay()"))
+        XCTAssertFalse(appContent.contains("#if DEBUG\nprivate enum DebugLogTab"))
+        XCTAssertTrue(
+            mobileRootContent.contains(
+                "appState.requestDebugPanelIfEnabledOrEnableOnDemand()"
+            )
+        )
+        XCTAssertFalse(debugControlsContent.contains("#if DEBUG"))
+        XCTAssertTrue(debugControlsContent.hasPrefix("#if os(iOS)"))
+    }
+
     func testBackendMaintenanceErrorDoesNotReplaceMonitoringServiceStatus() {
         let error = RemotePushBackendError.httpStatus(
             503,

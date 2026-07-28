@@ -81,13 +81,11 @@ private struct StudyMateiOSBootstrapView: View {
                 Color(.systemBackground)
             }
 
-            #if DEBUG
             if let appState {
                 FloatingDebugLogOverlay()
                     .environmentObject(appState)
                     .zIndex(2)
             }
-            #endif
         }
         .background(Color(.systemBackground))
         .task {
@@ -353,7 +351,6 @@ private extension String {
     }
 }
 
-#if DEBUG
 private enum DebugLogTab: String, CaseIterable, Identifiable {
     case app = "APP"
     case api = "API"
@@ -959,8 +956,6 @@ private struct FloatingDebugLogOverlay: View {
         return url.path.isEmpty ? value : url.path
     }
 }
-
-#endif
 
 final class StudyMateiOSAppDelegate: NSObject, UIApplicationDelegate {
     func application(
