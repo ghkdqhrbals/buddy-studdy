@@ -95,6 +95,9 @@ buddystudy:
     grading-policy-version: ${OPENAI_GRADING_POLICY_VERSION:ai-judge-v1}
     grading-min-confidence: ${OPENAI_GRADING_MIN_CONFIDENCE:0.72}
     grading-response-style: ${OPENAI_GRADING_RESPONSE_STYLE:structured-brief-v1}
+    request-timeout-seconds: ${OPENAI_REQUEST_TIMEOUT_SECONDS:60}
+    request-max-retries: ${OPENAI_REQUEST_MAX_RETRIES:1}
+    grading-timeout-seconds: ${OPENAI_GRADING_TIMEOUT_SECONDS:240}
   apns:
     team-id: ${APNS_TEAM_ID:${notificatoin.push.apns.team-id:}}
     key-id: ${APNS_KEY_ID:${notificatoin.push.apns.key-id:}}

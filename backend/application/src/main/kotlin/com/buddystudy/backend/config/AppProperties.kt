@@ -40,6 +40,9 @@ data class BuddyStudyProperties(
         var gradingPolicyVersion: String = "ai-judge-v1",
         var gradingMinConfidence: Double = 0.72,
         var gradingResponseStyle: String = "structured-brief-v1",
+        var requestTimeoutSeconds: Long = 60,
+        var requestMaxRetries: Int = 1,
+        var gradingTimeoutSeconds: Long = 240,
     )
     data class Apns(
         var teamId: String = "",

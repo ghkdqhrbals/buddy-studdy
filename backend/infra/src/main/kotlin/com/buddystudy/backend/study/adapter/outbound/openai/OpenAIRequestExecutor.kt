@@ -20,6 +20,8 @@ import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
 import com.fasterxml.jackson.module.kotlin.readValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
 import org.springframework.ai.chat.messages.SystemMessage
 import org.springframework.ai.chat.messages.UserMessage
@@ -30,6 +32,7 @@ import org.springframework.ai.openai.OpenAiEmbeddingModel
 import org.springframework.ai.openai.OpenAiEmbeddingOptions
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
+import java.time.Duration
 import kotlin.math.roundToInt
 
 @Component
@@ -227,33 +230,26 @@ class OpenAIRequestExecutor(
         language: String,
         rubric: AiGradingRubric? = null,
         onProgress: suspend (AiGradingStage) -> Unit = {},
-    ): GradedAnswer = withContext(Dispatchers.IO) {
-        val startedAt = System.nanoTime()
-        val responseStyle = configuredResponseStyle()
-        onProgress(AiGradingStage.ANALYZING_EVIDENCE)
-        val resolvedRubric = rubric ?: generateRubric(apiKey, model, question, topic, level, language)
-        val evidenceDeferred = async { analyzeEvidence(apiKey, model, question, answer, resolvedRubric) }
-        onProgress(AiGradingStage.CRITIQUING)
-        val critiqueDeferred = async { critiqueAnswer(apiKey, model, question, answer, resolvedRubric) }
-        val evidence = evidenceDeferred.await()
-        val critique = critiqueDeferred.await()
-        onProgress(AiGradingStage.JUDGING)
-        var judgement = judge(
-            apiKey = apiKey,
-            model = model,
-            question = question,
-            answer = answer,
-            topic = topic,
-            level = level,
-            language = language,
-            rubric = resolvedRubric,
-            evidence = evidence,
-            critique = critique,
-            adjudication = false,
-        )
-        if (judgement.confidence < properties.openai.gradingMinConfidence.coerceIn(0.0, 1.0)) {
-            onProgress(AiGradingStage.ADJUDICATING)
-            judgement = judge(
+    ): GradedAnswer = withTimeout(gradingTimeoutMillis()) {
+        withContext(Dispatchers.IO) {
+            val startedAt = System.nanoTime()
+            val responseStyle = configuredResponseStyle()
+            onProgress(AiGradingStage.ANALYZING_EVIDENCE)
+            val resolvedRubric = rubric ?: generateRubricInterruptibly(
+                apiKey = apiKey,
+                model = model,
+                question = question,
+                topic = topic,
+                level = level,
+                language = language,
+            )
+            val evidenceDeferred = async { analyzeEvidence(apiKey, model, question, answer, resolvedRubric) }
+            onProgress(AiGradingStage.CRITIQUING)
+            val critiqueDeferred = async { critiqueAnswer(apiKey, model, question, answer, resolvedRubric) }
+            val evidence = evidenceDeferred.await()
+            val critique = critiqueDeferred.await()
+            onProgress(AiGradingStage.JUDGING)
+            var judgement = judge(
                 apiKey = apiKey,
                 model = model,
                 question = question,
@@ -264,46 +260,62 @@ class OpenAIRequestExecutor(
                 rubric = resolvedRubric,
                 evidence = evidence,
                 critique = critique,
-                adjudication = true,
+                adjudication = false,
+            )
+            if (judgement.confidence < properties.openai.gradingMinConfidence.coerceIn(0.0, 1.0)) {
+                onProgress(AiGradingStage.ADJUDICATING)
+                judgement = judge(
+                    apiKey = apiKey,
+                    model = model,
+                    question = question,
+                    answer = answer,
+                    topic = topic,
+                    level = level,
+                    language = language,
+                    rubric = resolvedRubric,
+                    evidence = evidence,
+                    critique = critique,
+                    adjudication = true,
+                )
+            }
+            val presentation = renderGradingResponse(
+                style = responseStyle,
+                language = language,
+                summary = judgement.summary,
+                strongPoint = judgement.strongPoint,
+                improvement = judgement.improvement,
+                nextAction = judgement.nextAction,
+            )
+            val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
+            logger.info(
+                "ai_grading_completed policy={} rubric={} model={} verdict={} score={} confidence={} durationMs={}",
+                properties.openai.gradingPolicyVersion,
+                resolvedRubric.version,
+                model,
+                judgement.verdict,
+                judgement.score,
+                judgement.confidence,
+                elapsedMs,
+            )
+            GradedAnswer(
+                score = judgement.score,
+                isCorrect = judgement.verdict == "CORRECT",
+                feedback = presentation.feedback,
+                explanation = presentation.explanation,
+                verdict = judgement.verdict,
+                confidence = judgement.confidence,
+                rubric = resolvedRubric,
+                assessment = AiGradingAssessment(
+                    criteria = evidence,
+                    contradictions = critique.contradictions,
+                    misconceptions = critique.misconceptions,
+                    unsupportedClaims = critique.unsupportedClaims,
+                    judgeReason = judgement.reason,
+                ),
+                policyVersion = "${properties.openai.gradingPolicyVersion}:${responseStyle.id}",
+                model = model,
             )
         }
-        val presentation = renderGradingResponse(
-            style = responseStyle,
-            language = language,
-            summary = judgement.summary,
-            strongPoint = judgement.strongPoint,
-            improvement = judgement.improvement,
-            nextAction = judgement.nextAction,
-        )
-        val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
-        logger.info(
-            "ai_grading_completed policy={} rubric={} model={} verdict={} score={} confidence={} durationMs={}",
-            properties.openai.gradingPolicyVersion,
-            resolvedRubric.version,
-            model,
-            judgement.verdict,
-            judgement.score,
-            judgement.confidence,
-            elapsedMs,
-        )
-        GradedAnswer(
-            score = judgement.score,
-            isCorrect = judgement.verdict == "CORRECT",
-            feedback = presentation.feedback,
-            explanation = presentation.explanation,
-            verdict = judgement.verdict,
-            confidence = judgement.confidence,
-            rubric = resolvedRubric,
-            assessment = AiGradingAssessment(
-                criteria = evidence,
-                contradictions = critique.contradictions,
-                misconceptions = critique.misconceptions,
-                unsupportedClaims = critique.unsupportedClaims,
-                judgeReason = judgement.reason,
-            ),
-            policyVersion = "${properties.openai.gradingPolicyVersion}:${responseStyle.id}",
-            model = model,
-        )
     }
 
     suspend fun compareGradingResponses(
@@ -407,7 +419,33 @@ class OpenAIRequestExecutor(
             ?: error("OpenAI returned an invalid grading rubric.")
     }
 
-    private fun analyzeEvidence(
+    private suspend fun generateRubricInterruptibly(
+        apiKey: String,
+        model: String,
+        question: String,
+        topic: String,
+        level: Int,
+        language: String,
+    ): AiGradingRubric {
+        val payload = mapper.writeValueAsString(
+            mapOf(
+                "topic" to topic,
+                "level" to level.coerceIn(1, 10),
+                "language" to language,
+                "question" to question,
+            )
+        )
+        val parsed = gradingJsonCall(
+            apiKey = apiKey,
+            model = model,
+            system = RUBRIC_SYSTEM_PROMPT,
+            user = payload,
+        )
+        return parseGradingRubric(parsed["rubric"] ?: parsed)
+            ?: error("OpenAI returned an invalid grading rubric.")
+    }
+
+    private suspend fun analyzeEvidence(
         apiKey: String,
         model: String,
         question: String,
@@ -421,7 +459,7 @@ class OpenAIRequestExecutor(
                 "rubric" to rubric,
             )
         )
-        val parsed = jsonCall(apiKey, model, EVIDENCE_SYSTEM_PROMPT, payload)
+        val parsed = gradingJsonCall(apiKey, model, EVIDENCE_SYSTEM_PROMPT, payload)
         val rawCriteria = parsed["criteria"] as? List<*> ?: emptyList<Any>()
         val byId = rawCriteria.mapNotNull(::parseCriterionAssessment).associateBy { it.criterionId }
         return rubric.criteria.map { criterion ->
@@ -434,7 +472,7 @@ class OpenAIRequestExecutor(
         }
     }
 
-    private fun critiqueAnswer(
+    private suspend fun critiqueAnswer(
         apiKey: String,
         model: String,
         question: String,
@@ -448,7 +486,7 @@ class OpenAIRequestExecutor(
                 "rubric" to rubric,
             )
         )
-        val parsed = jsonCall(apiKey, model, CRITIC_SYSTEM_PROMPT, payload)
+        val parsed = gradingJsonCall(apiKey, model, CRITIC_SYSTEM_PROMPT, payload)
         return AnswerCritique(
             contradictions = parsed.stringList("contradictions"),
             misconceptions = parsed.stringList("misconceptions"),
@@ -456,7 +494,7 @@ class OpenAIRequestExecutor(
         )
     }
 
-    private fun judge(
+    private suspend fun judge(
         apiKey: String,
         model: String,
         question: String,
@@ -482,7 +520,7 @@ class OpenAIRequestExecutor(
                 "adjudication" to adjudication,
             )
         )
-        val parsed = jsonCall(
+        val parsed = gradingJsonCall(
             apiKey,
             model,
             buildJudgeSystemPrompt(adjudication),
@@ -516,6 +554,18 @@ class OpenAIRequestExecutor(
         return mapper.readValue(text.ifBlank { "{}" })
     }
 
+    private suspend fun gradingJsonCall(
+        apiKey: String,
+        model: String,
+        system: String,
+        user: String,
+    ): Map<String, Any?> = runInterruptible(Dispatchers.IO) {
+        jsonCall(apiKey, model, system, user)
+    }
+
+    internal fun gradingTimeoutMillis(): Long =
+        properties.openai.gradingTimeoutSeconds.coerceIn(30, MAX_GRADING_TIMEOUT_SECONDS) * 1_000
+
     private fun configuredResponseStyle(): GradingResponseStyle =
         GradingResponseStyle.from(properties.openai.gradingResponseStyle)
 
@@ -535,7 +585,7 @@ class OpenAIRequestExecutor(
             .options(options(apiKey, model, json))
             .build()
 
-    private fun options(
+    internal fun options(
         apiKey: String,
         model: String,
         json: Boolean,
@@ -544,6 +594,8 @@ class OpenAIRequestExecutor(
         val builder = OpenAiChatOptions.builder()
             .apiKey(apiKey)
             .model(model)
+            .timeout(Duration.ofSeconds(properties.openai.requestTimeoutSeconds.coerceIn(5, 180)))
+            .maxRetries(properties.openai.requestMaxRetries.coerceIn(0, 3))
         if (json) {
             builder.responseFormat(jsonResponseFormat)
         }
@@ -571,6 +623,7 @@ class OpenAIRequestExecutor(
     )
 
     companion object {
+        internal const val MAX_GRADING_TIMEOUT_SECONDS = 270L
         private val VALID_VERDICTS = setOf("CORRECT", "PARTIALLY_CORRECT", "INCORRECT")
 
         private val RUBRIC_SYSTEM_PROMPT = """

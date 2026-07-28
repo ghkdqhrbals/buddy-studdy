@@ -5,6 +5,7 @@ import com.buddystudy.backend.study.application.model.GradingResponseStyle
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.Duration
 
 class OpenAIRequestExecutorTest {
     @Test
@@ -113,6 +114,31 @@ class OpenAIRequestExecutorTest {
             .contains("only when it materially helps")
             .contains("score is at least 95")
             .contains("use a natural polite tone")
+    }
+
+    @Test
+    fun `OpenAI calls use bounded timeout and retries`() {
+        val properties = BuddyStudyProperties().apply {
+            openai.requestTimeoutSeconds = 45
+            openai.requestMaxRetries = 1
+        }
+        val executor = OpenAIRequestExecutor(properties)
+
+        val options = executor.options("test-key", "gpt-test", json = true)
+
+        assertThat(options.timeout).isEqualTo(Duration.ofSeconds(45))
+        assertThat(options.maxRetries).isEqualTo(1)
+    }
+
+    @Test
+    fun `grading deadline always finishes before Redis recovery`() {
+        val properties = BuddyStudyProperties().apply {
+            openai.gradingTimeoutSeconds = 600
+        }
+        val executor = OpenAIRequestExecutor(properties)
+
+        assertThat(executor.gradingTimeoutMillis()).isEqualTo(270_000)
+        assertThat(executor.gradingTimeoutMillis()).isLessThan(300_000)
     }
 
     @Test
