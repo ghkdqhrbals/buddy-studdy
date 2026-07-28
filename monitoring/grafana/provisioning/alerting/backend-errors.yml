@@ -1,0 +1,107 @@
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: BuddyStudy Slack
+    receivers:
+      - uid: buddystudy-slack-errors
+        type: slack
+        disableResolveMessage: false
+        settings:
+          url: $SLACK_WEBHOOK_URL
+          title: '{{ template "default.title" . }}'
+          text: |-
+            {{ range .Alerts.Firing }}
+            {{ .Annotations.summary }}
+            {{ .Annotations.description }}
+            Logs: {{ .Annotations.logs_url }}
+            {{ end }}
+
+groups:
+  - orgId: 1
+    name: Backend operational errors
+    folder: BuddyStudy
+    interval: 1m
+    rules:
+      - uid: buddystudy-backend-error-log
+        title: BuddyStudy backend ERROR log
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: buddystudy-loki
+            model:
+              editorMode: code
+              expr: 'sum(count_over_time({app="buddystudy", level="ERROR"}[1m]))'
+              intervalMs: 1000
+              maxDataPoints: 43200
+              queryType: range
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - B
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              expression: A
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              expression: B
+              refId: C
+              type: threshold
+        dashboardUid: ''
+        panelId: 0
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: BuddyStudy backend에서 ERROR 로그가 발생했습니다.
+          description: 최근 1분의 ERROR 로그를 확인하세요. 전체 stack trace와 진단값은 하나의 Loki 이벤트 및 Sentry Issue로 수집됩니다.
+          logs_url: https://grafana.lowfidev.cloud/a/grafana-lokiexplore-app/explore?var-ds=buddystudy-loki&from=now-15m&to=now&var-filters=app%7C%3D%7Cbuddystudy,level%7C%3D%7CERROR
+        labels:
+          service: buddystudy-backend
+          severity: error
+        isPaused: false
+        notification_settings:
+          receiver: BuddyStudy Slack
+          group_by:
+            - alertname
+          group_wait: 0s
+          group_interval: 1m
+          repeat_interval: 30m

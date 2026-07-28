@@ -74,7 +74,7 @@ class NotificationStreamListener(
         payload: NotificationRequestedPayload,
         context: StreamMessageContext,
     ) {
-        val command = payload.toCommand()
+        val command = payload.toCommand(context)
         logger.debug(
             "redis_stream_consume_started listener={} stream={} redisRecordId={} eventId={} eventType={} userId={} claimed={}",
             "buddystudy-notification-listener",
@@ -172,22 +172,6 @@ class NotificationStreamListener(
         }
     }
 
-    private fun NotificationRequestedPayload.toCommand(): NotificationRequestCommand =
-        NotificationRequestCommand(
-            eventId = eventId,
-            userId = userId,
-            deviceId = deviceId,
-            actorUserId = actorUserId,
-            type = type,
-            title = title,
-            body = body,
-            threadType = threadType,
-            threadId = threadId,
-            deepLink = deepLink,
-            metadataJson = metadataJson,
-            shouldPush = shouldPush,
-        )
-
     private companion object {
         const val GROUP = "bs-backend-notification"
         const val CONSUMER = "buddystudy-notification"
@@ -196,6 +180,26 @@ class NotificationStreamListener(
         const val DIRECT_PUSH_EVENT_TYPE = "STUDY_QUESTION"
     }
 }
+
+internal fun NotificationRequestedPayload.toCommand(context: StreamMessageContext): NotificationRequestCommand =
+    NotificationRequestCommand(
+        eventId = eventId?.takeIf(String::isNotBlank)
+            ?: context.eventId?.takeIf(String::isNotBlank)
+            ?: throw IllegalArgumentException(
+                "Notification eventId is required in the payload or Redis Stream envelope.",
+            ),
+        userId = userId,
+        deviceId = deviceId,
+        actorUserId = actorUserId,
+        type = type,
+        title = title,
+        body = body,
+        threadType = threadType,
+        threadId = threadId,
+        deepLink = deepLink,
+        metadataJson = metadataJson,
+        shouldPush = shouldPush,
+    )
 
 private data class NotificationPushMetadata(
     val recordId: Long? = null,

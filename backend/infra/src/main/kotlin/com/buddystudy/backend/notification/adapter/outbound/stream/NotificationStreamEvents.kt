@@ -23,7 +23,7 @@ data class NotificationRequestedEvent(
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class NotificationRequestedPayload(
-    val eventId: String,
+    val eventId: String? = null,
     val userId: Long? = null,
     val deviceId: String? = null,
     val actorUserId: Long? = null,

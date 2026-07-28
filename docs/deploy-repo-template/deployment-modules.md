@@ -7,11 +7,11 @@ one workflow run just because they share a host.
 
 | Module | Workflow | Trigger | Runner | Owns |
 | --- | --- | --- | --- | --- |
-| Backend API | `Deploy BuddyStudy Backend` | `backend-image-published`, manual | EC2 self-hosted | Backend app rollout, backend env, backend nginx route, log-only MySQL runtime observer |
+| Backend API | `Deploy BuddyStudy Backend` | `backend-image-published`, manual | EC2 self-hosted | Backend app rollout, backend env, backend nginx route, log-only MySQL runtime observer, backend-log multiline collection |
 | Backend network | `Configure BuddyStudy Backend Network` | manual | EC2 self-hosted | Redis administrator ingress on the backend security group |
 | Database cutover | `Migrate BuddyStudy PostgreSQL To MySQL` | manual, one-time | EC2 self-hosted | PostgreSQL backup, MySQL import, row-count and reference validation, automatic pre-cutover rollback |
 | Admin frontend | `Deploy BuddyStudy Admin Frontend` | `admin-frontend-image-published`, manual | EC2 self-hosted | Admin frontend container only |
-| Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, TestZone UI, Grafana, Loki, monitoring auth and access audit, customer-facing service status and maintenance history |
+| Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, TestZone UI, Grafana, Loki, ERROR-log Slack alerting, monitoring auth and access audit, customer-facing service status and maintenance history |
 | Monitoring routing | `Deploy BuddyStudy Monitoring Routes on MacBook Air` | manual | MacBook Air self-hosted | Routingflare routes for the monitoring UI and Grafana |
 | TestZone execution | `Deploy BuddyStudy TestZone on MacBook Air` | `testzone-image-published`, manual | MacBook Air self-hosted | k6 runner, script/project/run storage, InfluxDB, approved disposable test components |
 | Health monitor | Cloudflare Worker workflow | manual or source workflow | GitHub-hosted | Explicit diagnostic endpoint only; production scheduled checks are disabled |
@@ -43,6 +43,10 @@ deployment.
   unqualified tag remains a compatibility alias. The deploy workflow verifies
   the label before rollout, so changing runtime does not change the backend
   environment or routing contract.
+- Production may explicitly select the JVM runtime without changing the API or
+  routing contract. The backend image workflow must receive
+  `backend_runtime=jvm`; the deploy workflow verifies that runtime label before
+  replacing the container.
 - EC2 self-hosted runners are deploy-only. They pull images and restart
   containers, but must not compile backend code or build Docker images.
 - Before pulling a backend release, the backend deploy removes only Docker
@@ -125,6 +129,12 @@ deployment.
   `database_runtime` records to Loki. The observer receives its MySQL password
   through a private container environment, never logs it, and is not a
   Prometheus/exporter service.
+- Backend exceptions logged at `ERROR` include the throwable and bounded
+  operation identifiers. EC2 Promtail joins each Java stack trace into one Loki
+  event, extracts `level=ERROR`, and preserves the full event for Grafana.
+  Sentry receives the same ERROR and throwable through its Spring Boot 4
+  Logback integration. `SENTRY_DSN` is supplied only through the backend deploy
+  secret, and PII capture remains disabled.
 - The backend deploy temporarily retains the `buddystudy-profile-photos`
   volume for legacy-file cleanup. New profile-photo uploads are disabled;
   saving a pixel avatar or deleting an account removes the user's legacy file.
@@ -155,6 +165,10 @@ deployment.
   The dedicated Grafana gateway restores `grafana.lowfidev.cloud`, HTTPS, and
   port 443 after Routingflare consumes the original host header. This keeps
   Grafana Live origin checks aligned with its public HTTPS `root_url`.
+  Grafana also provisions a Loki alert for backend `level=ERROR` events and
+  sends it to the `BuddyStudy Slack` contact point. Slack contains the incident
+  summary and a direct Grafana log link; Loki and Sentry retain the full stack
+  and diagnostic context.
   The Server Dashboard supports fixed and explicit From/To time ranges and
   reads the same structured Micrometer runtime samples as the provisioned
   Grafana Server Runtime dashboard. The same module publishes the fixed,

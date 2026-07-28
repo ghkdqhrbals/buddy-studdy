@@ -32,6 +32,7 @@ jobs:
       - name: Deploy monitoring module
         env:
           GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           API_DASHBOARD_BASIC_AUTH_HTPASSWD: ${{ secrets.API_DASHBOARD_BASIC_AUTH_HTPASSWD }}
           TESTZONE_ROOT: ${{ vars.MACBOOKAIR_TESTZONE_ROOT || '$HOME/buddystudy/monitoring/testzone' }}
           TESTZONE_INFLUX_ORG: ${{ vars.TESTZONE_INFLUX_ORG || 'buddystudy' }}
@@ -45,6 +46,10 @@ jobs:
           fi
           if [ -z "${API_DASHBOARD_BASIC_AUTH_HTPASSWD}" ]; then
             echo "Missing GitHub Actions secret: API_DASHBOARD_BASIC_AUTH_HTPASSWD" >&2
+            exit 1
+          fi
+          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
+            echo "Missing GitHub Actions secret: SLACK_WEBHOOK_URL" >&2
             exit 1
           fi
 
@@ -97,7 +102,10 @@ jobs:
               "${monitoring_root}/grafana/provisioning/datasources/testzone-influx.yml" \
             || file_differs \
               "${MONITORING_SOURCE_DIR}/grafana/provisioning/dashboards/dashboards.yml" \
-              "${monitoring_root}/grafana/provisioning/dashboards/dashboards.yml"; then
+              "${monitoring_root}/grafana/provisioning/dashboards/dashboards.yml" \
+            || ! diff -qr \
+              "${MONITORING_SOURCE_DIR}/grafana/provisioning/alerting" \
+              "${monitoring_root}/grafana/provisioning/alerting" >/dev/null 2>&1; then
             grafana_config_changed=true
           fi
           if file_differs \
@@ -130,6 +138,9 @@ jobs:
             "${monitoring_root}/grafana/provisioning/datasources/"
           cp "${MONITORING_SOURCE_DIR}/grafana/provisioning/dashboards/dashboards.yml" \
             "${monitoring_root}/grafana/provisioning/dashboards/dashboards.yml"
+          find "${monitoring_root}/grafana/provisioning/alerting" -maxdepth 1 -type f -name '*.yml' -delete
+          cp "${MONITORING_SOURCE_DIR}/grafana/provisioning/alerting/"*.yml \
+            "${monitoring_root}/grafana/provisioning/alerting/"
           for source_dashboard in "${MONITORING_SOURCE_DIR}/grafana/dashboards/"*.json; do
             dashboard_name="$(basename "${source_dashboard}")"
             dashboard_target="${monitoring_root}/grafana/dashboards/${dashboard_name}"
@@ -249,6 +260,7 @@ jobs:
               -e TESTZONE_INFLUX_TOKEN="${TESTZONE_INFLUX_TOKEN}" \
               -e TESTZONE_INFLUX_ORG="${TESTZONE_INFLUX_ORG}" \
               -e TESTZONE_INFLUX_BUCKET="${TESTZONE_INFLUX_BUCKET}" \
+              -e SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL}" \
               -v "${grafana_volume}:/var/lib/grafana" \
               -v "${monitoring_root}/grafana/provisioning:/etc/grafana/provisioning:ro" \
               -v "${monitoring_root}/grafana/dashboards:/var/lib/grafana/dashboards:ro" \

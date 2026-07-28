@@ -83,6 +83,7 @@ services:
       TESTZONE_INFLUX_ORG: ${TESTZONE_INFLUX_ORG:-buddystudy}
       TESTZONE_INFLUX_BUCKET: ${TESTZONE_INFLUX_BUCKET:-testzone}
       TESTZONE_INFLUX_TOKEN: ${TESTZONE_INFLUX_TOKEN:?set TESTZONE_INFLUX_TOKEN}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:?set SLACK_WEBHOOK_URL}
     volumes:
       - ${HOME}/buddystudy/monitoring/grafana/data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro

@@ -123,7 +123,7 @@ export function safeJson(value) {
 }
 
 function extractLevel(line) {
-  return line.match(LEVEL_PATTERN)?.[1] ?? "INFO";
+  return line.match(LEVEL_PATTERN)?.[1] ?? "UNKNOWN";
 }
 
 function compactLogLine(line) {

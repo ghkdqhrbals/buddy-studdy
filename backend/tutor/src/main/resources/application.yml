@@ -70,6 +70,18 @@ management:
       exposure:
         include: health,info
 
+sentry:
+  dsn: ${SENTRY_DSN:}
+  environment: ${SENTRY_ENVIRONMENT:${SPRING_PROFILES_ACTIVE:development}}
+  release: ${SENTRY_RELEASE:}
+  in-app-packages:
+    - com.buddystudy.backend
+  send-default-pii: false
+  traces-sample-rate: 0.0
+  logging:
+    minimum-event-level: error
+    minimum-breadcrumb-level: info
+
 buddystudy:
   logging:
     api:

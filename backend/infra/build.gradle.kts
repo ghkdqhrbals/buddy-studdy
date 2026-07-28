@@ -30,6 +30,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-mail")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("io.sentry:sentry-spring-boot-4:8.50.1")
+    implementation("io.sentry:sentry-logback:8.50.1")
     implementation("org.springframework.ai:spring-ai-starter-model-openai")
     implementation("org.springframework:spring-aop")
     implementation("org.aspectj:aspectjweaver")

@@ -31,6 +31,10 @@ const databaseCollectorPath = path.resolve(
   testDirectory,
   "../../scripts/database-runtime-collector.sh",
 );
+const backendErrorAlertPath = path.resolve(
+  testDirectory,
+  "../../grafana/provisioning/alerting/backend-errors.yml",
+);
 
 test("Grafana Live accepts only the public Grafana origin", async () => {
   const [compose, deployTemplate] = await Promise.all([
@@ -232,6 +236,28 @@ test("backend deploy starts a log-only MySQL runtime collector", async () => {
   assert.match(collector, /databaseCpuPercent/);
   assert.match(collector, /databaseMaxConnections/);
   assert.doesNotMatch(collector, /POSTGRES_PASSWORD/);
+});
+
+test("backend errors are one labeled Loki event and alert Slack", async () => {
+  const [backendDeploy, monitoringDeploy, compose, alert] = await Promise.all([
+    fs.readFile(backendDeployTemplatePath, "utf8"),
+    fs.readFile(deployTemplatePath, "utf8"),
+    fs.readFile(composePath, "utf8"),
+    fs.readFile(backendErrorAlertPath, "utf8"),
+  ]);
+
+  assert.match(backendDeploy, /- multiline:/);
+  assert.match(backendDeploy, /max_lines: 1024/);
+  assert.match(backendDeploy, /\(TRACE\|DEBUG\|INFO\|WARN\|ERROR\)/);
+  assert.match(backendDeploy, /target_label: container/);
+  assert.match(backendDeploy, /level:/);
+  assert.match(monitoringDeploy, /grafana\/provisioning\/alerting/);
+  assert.match(monitoringDeploy, /SLACK_WEBHOOK_URL/);
+  assert.match(compose, /SLACK_WEBHOOK_URL: \$\{SLACK_WEBHOOK_URL:\?set SLACK_WEBHOOK_URL\}/);
+  assert.match(alert, /type: slack/);
+  assert.match(alert, /level="ERROR"/);
+  assert.match(alert, /receiver: BuddyStudy Slack/);
+  assert.match(alert, /logs_url: https:\/\/grafana\.lowfidev\.cloud/);
 });
 
 test("TestZone dashboard separates server, database, and Redis runtime signals", async () => {

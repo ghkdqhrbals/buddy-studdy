@@ -109,6 +109,15 @@ test("related logs expose a concise summary instead of the full log line", () =>
   assert.equal(parsed.rawLine, line);
 });
 
+test("stack continuation lines are not mislabeled as INFO", () => {
+  const parsed = parseRelatedLog([
+    "1783255799514000000",
+    "\tat com.buddystudy.backend.Worker.process(Worker.kt:42)",
+  ]);
+
+  assert.equal(parsed.level, "UNKNOWN");
+});
+
 test("duration and percentile helpers are stable", () => {
   assert.equal(durationLabel(4.381), "4.38ms");
   assert.equal(durationLabel(1300), "1.30s");

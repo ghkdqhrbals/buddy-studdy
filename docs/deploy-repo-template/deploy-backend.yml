@@ -53,6 +53,7 @@ jobs:
           APP_SECRET_ID: buddystudy/prod
           GOOGLE_IOS_CLIENT_ID: ${{ secrets.GOOGLE_IOS_CLIENT_ID }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           MONITORING_ENVIRONMENT_NAME: ${{ vars.MONITORING_ENVIRONMENT_NAME || 'production' }}
           MONITORING_SERVICE_NAME: ${{ vars.MONITORING_SERVICE_NAME || 'BuddyStudy backend' }}
           MONITORING_ADMIN_BASE_URL: ${{ vars.MONITORING_ADMIN_BASE_URL || 'https://api.ghkdqhrbals.org/admin' }}
@@ -70,6 +71,10 @@ jobs:
 
           if [ -z "${SLACK_WEBHOOK_URL}" ]; then
             echo "Missing GitHub Actions secret: SLACK_WEBHOOK_URL" >&2
+            exit 1
+          fi
+          if [ -z "${SENTRY_DSN}" ]; then
+            echo "Missing GitHub Actions secret: SENTRY_DSN" >&2
             exit 1
           fi
 
@@ -206,6 +211,9 @@ jobs:
           AWS_SECRET_ID=${APP_SECRET_ID}
           AWS_REGION=ap-northeast-2
           SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+          SENTRY_DSN=${SENTRY_DSN}
+          SENTRY_ENVIRONMENT=production
+          SENTRY_RELEASE=${IMAGE_REF##*:}
           MONITORING_ENVIRONMENT_NAME=${MONITORING_ENVIRONMENT_NAME}
           MONITORING_SERVICE_NAME=${MONITORING_SERVICE_NAME}
           MONITORING_ADMIN_BASE_URL=${MONITORING_ADMIN_BASE_URL}
@@ -331,6 +339,14 @@ jobs:
                   regex: '/(buddystudy-.*)'
                   action: keep
               pipeline_stages:
+                - multiline:
+                    firstline: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s'
+                    max_wait_time: 3s
+                    max_lines: 1024
+                - regex:
+                    expression: '^\S+\s+(?P<level>TRACE|DEBUG|INFO|WARN|ERROR)\s'
+                - labels:
+                    level:
                 - static_labels:
                     host: ec2
                     app: buddystudy

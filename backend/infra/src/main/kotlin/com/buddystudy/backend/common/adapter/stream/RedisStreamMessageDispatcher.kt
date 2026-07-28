@@ -1,6 +1,5 @@
 package com.buddystudy.backend.common.adapter.stream
 
-import com.buddystudy.backend.common.adapter.inbound.web.ApiLoggingPolicy
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumerOperations
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
 import kotlinx.coroutines.CancellationException
@@ -11,7 +10,6 @@ import org.springframework.stereotype.Component
 class RedisStreamMessageDispatcher(
     private val streams: RedisStreamConsumerOperations,
     private val codec: JacksonRedisStreamCodec,
-    private val loggingPolicy: ApiLoggingPolicy,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -81,7 +79,8 @@ class RedisStreamMessageDispatcher(
             throw error
         } catch (error: Exception) {
             val rootError = error.unwrapReflectionFailure()
-            val arguments: Array<Any?> = arrayOf(
+            logger.error(
+                HANDLER_FAILED_LOG,
                 method.name,
                 message.streamKey,
                 message.recordId,
@@ -92,12 +91,8 @@ class RedisStreamMessageDispatcher(
                 claimed,
                 rootError.javaClass.name,
                 rootError.message,
+                rootError,
             )
-            if (loggingPolicy.includesStackTrace) {
-                logger.warn(HANDLER_FAILED_LOG, *arguments, rootError)
-            } else {
-                logger.warn(HANDLER_FAILED_LOG, *arguments)
-            }
         }
     }
 
