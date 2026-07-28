@@ -1058,7 +1058,19 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertTrue(
             detail.contains("HistoryRow(")
                 && detail.contains("selectedRecord = record"),
-            "Topic records should reuse the record row and open the existing record detail."
+            "Topic records should reuse the existing paginated record row."
+        )
+        XCTAssertTrue(
+            content.contains("record.asQuestionBrowseQuestion(author: author)"),
+            "Statistics should project a record into the question-browse presentation model."
+        )
+        XCTAssertTrue(
+            content.contains("CommunityQuestionDetailView("),
+            "Statistics should navigate to the shared question-browse detail."
+        )
+        XCTAssertTrue(
+            content.contains("contentSource: .record(isPublic: record.isPublic)"),
+            "The question-browse detail should retain record privacy behavior."
         )
     }
 

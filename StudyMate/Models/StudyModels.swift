@@ -1814,11 +1814,15 @@ struct StudyRecord: Codable, Equatable, Identifiable {
     }
 
     func asCommunityQuestion(author: CommunityUserProfile?) -> CommunityQuestion? {
-        guard isPublic, let gradingResult else {
+        guard isPublic, gradingResult != nil else {
             return nil
         }
 
-        return CommunityQuestion(
+        return asQuestionBrowseQuestion(author: author)
+    }
+
+    func asQuestionBrowseQuestion(author: CommunityUserProfile?) -> CommunityQuestion {
+        CommunityQuestion(
             id: id,
             question: question.question,
             answer: answer,

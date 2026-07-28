@@ -7638,9 +7638,24 @@ private struct MobileCommunityQuestionRow: View {
     }
 }
 
+enum CommunityQuestionDetailContentSource: Equatable {
+    case community
+    case record(isPublic: Bool)
+
+    var showsCommunityInteractions: Bool {
+        switch self {
+        case .community:
+            true
+        case let .record(isPublic):
+            isPublic
+        }
+    }
+}
+
 struct CommunityQuestionDetailView: View {
     @EnvironmentObject private var appState: AppState
     var question: CommunityQuestion
+    var contentSource: CommunityQuestionDetailContentSource
     @State private var displayQuestion: CommunityQuestion
     @State private var comments: [CommunityQuestionComment] = []
     @State private var commentsTotalCount = 0
@@ -7652,8 +7667,12 @@ struct CommunityQuestionDetailView: View {
     @State private var originalAvailable: Bool
     @FocusState private var isCommentInputFocused: Bool
 
-    init(question: CommunityQuestion) {
+    init(
+        question: CommunityQuestion,
+        contentSource: CommunityQuestionDetailContentSource = .community
+    ) {
         self.question = question
+        self.contentSource = contentSource
         _displayQuestion = State(initialValue: question)
         _commentsTotalCount = State(initialValue: question.commentCount)
         _originalAvailable = State(
@@ -7667,7 +7686,7 @@ struct CommunityQuestionDetailView: View {
     }
 
     private var canWriteCommunityReaction: Bool {
-        appState.isCommunitySessionActive
+        contentSource.showsCommunityInteractions && appState.isCommunitySessionActive
     }
 
     var body: some View {
@@ -7710,11 +7729,13 @@ struct CommunityQuestionDetailView: View {
                     }
                 }
 
-                communityActions
+                if contentSource.showsCommunityInteractions {
+                    communityActions
 
-                Divider()
+                    Divider()
 
-                commentsSection
+                    commentsSection
+                }
             }
             .padding(16)
         }
@@ -7730,9 +7751,11 @@ struct CommunityQuestionDetailView: View {
             }
         }
         .task(id: displayQuestion.id) {
-            applyCachedComments()
+            if contentSource.showsCommunityInteractions {
+                applyCachedComments()
+            }
             async let questionLoad: Void = loadQuestionDetail()
-            async let commentsLoad: Void = loadComments()
+            async let commentsLoad: Void = loadCommentsIfAvailable()
             _ = await (questionLoad, commentsLoad)
         }
     }
@@ -7958,6 +7981,14 @@ struct CommunityQuestionDetailView: View {
         }
     }
 
+    private func loadCommentsIfAvailable() async {
+        guard contentSource.showsCommunityInteractions else {
+            hasLoadedComments = true
+            return
+        }
+        await loadComments()
+    }
+
     private func applyCachedComments() {
         guard let response = appState.cachedCommunityQuestionComments(questionID: displayQuestion.id) else {
             return
@@ -7973,7 +8004,7 @@ struct CommunityQuestionDetailView: View {
     }
 
     private func loadQuestionDetail() async {
-        guard let question = await appState.loadCommunityQuestionDetail(questionID: displayQuestion.id) else {
+        guard let question = await loadQuestion(view: .localized) else {
             return
         }
         displayQuestion = question
@@ -7986,7 +8017,7 @@ struct CommunityQuestionDetailView: View {
         for delay in [1, 2, 4] {
             try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled,
-                  let retried = await appState.loadCommunityQuestionDetail(questionID: displayQuestion.id) else {
+                  let retried = await loadQuestion(view: .localized) else {
                 return
             }
             displayQuestion = retried
@@ -7999,22 +8030,39 @@ struct CommunityQuestionDetailView: View {
 
     private func switchContentView() async {
         let target: LocalizedContentView = isShowingOriginal ? .localized : .original
-        guard let loaded = await appState.loadCommunityQuestionDetail(
-            questionID: displayQuestion.id,
-            view: target
-        ) else {
+        guard let loaded = await loadQuestion(view: target) else {
             return
         }
         displayQuestion = loaded
-        if let response = await appState.loadCommunityQuestionComments(
-            questionID: loaded.id,
-            refresh: true,
-            view: target
-        ) {
-            applyComments(response)
+        if contentSource.showsCommunityInteractions {
+            if let response = await appState.loadCommunityQuestionComments(
+                questionID: loaded.id,
+                refresh: true,
+                view: target
+            ) {
+                applyComments(response)
+            }
         }
         isShowingOriginal = target == .original
         originalAvailable = true
+    }
+
+    private func loadQuestion(view: LocalizedContentView) async -> CommunityQuestion? {
+        switch contentSource {
+        case .community:
+            return await appState.loadCommunityQuestionDetail(
+                questionID: displayQuestion.id,
+                view: view
+            )
+        case .record:
+            guard let record = await appState.loadStudyRecordDetail(
+                recordID: displayQuestion.id,
+                view: view
+            ) else {
+                return nil
+            }
+            return record.asQuestionBrowseQuestion(author: displayQuestion.author)
+        }
     }
 
     private func sendComment() {

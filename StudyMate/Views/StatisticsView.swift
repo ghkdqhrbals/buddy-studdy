@@ -235,7 +235,11 @@ struct StatisticsView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .recordDetailPresentation(selectedRecord: $selectedRecord, strings: strings)
+        .questionBrowseRecordPresentation(
+            selectedRecord: $selectedRecord,
+            strings: strings,
+            author: appState.communityProfile
+        )
         .sheet(isPresented: $isShowingGrowthHelp) {
             StudyGrowthHelpView(strings: strings)
         }
@@ -351,21 +355,27 @@ struct StatisticsView: View {
 
 private extension View {
     @ViewBuilder
-    func recordDetailPresentation(selectedRecord: Binding<StudyRecord?>, strings: AppStrings) -> some View {
+    func questionBrowseRecordPresentation(
+        selectedRecord: Binding<StudyRecord?>,
+        strings: AppStrings,
+        author: CommunityUserProfile?
+    ) -> some View {
         #if os(iOS)
-        sheet(item: selectedRecord) { record in
-            NavigationStack {
-                StudyRecordDetailView(record: record)
-                    .padding()
-                    .navigationTitle(strings.records)
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button(strings.done) {
-                                selectedRecord.wrappedValue = nil
-                            }
-                        }
+        navigationDestination(
+            isPresented: Binding(
+                get: { selectedRecord.wrappedValue != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        selectedRecord.wrappedValue = nil
                     }
+                }
+            )
+        ) {
+            if let record = selectedRecord.wrappedValue {
+                CommunityQuestionDetailView(
+                    question: record.asQuestionBrowseQuestion(author: author),
+                    contentSource: .record(isPublic: record.isPublic)
+                )
             }
         }
         #else
@@ -3046,7 +3056,11 @@ private struct StudyGrowthNodeDetailView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .recordDetailPresentation(selectedRecord: $selectedRecord, strings: strings)
+        .questionBrowseRecordPresentation(
+            selectedRecord: $selectedRecord,
+            strings: strings,
+            author: appState.communityProfile
+        )
         .task(id: node.studyId) {
             await loadRecords(reset: true)
         }
