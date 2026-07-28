@@ -11,6 +11,7 @@ object Permissions {
     const val PROFILE_WITHDRAW = "profile:withdraw"
     const val STUDY_READ = "study:read"
     const val STUDY_CREATE = "study:create"
+    const val QUESTION_CREATE = "question:create"
     const val STUDY_UPDATE = "study:update"
     const val STUDY_DELETE = "study:delete"
     const val RECORD_READ = "record:read"

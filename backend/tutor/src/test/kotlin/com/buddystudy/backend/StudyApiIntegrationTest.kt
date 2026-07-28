@@ -337,6 +337,18 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         val clientSecret = registration["clientSecret"].asText()
         val accessToken = registration["accessToken"].asText()
         activateRegisteredUser(deviceId)
+        membershipTiers.save(
+            UserMembershipTierEntity(
+                tierCode = "TIER1",
+                monthlyQuestionLimit = 0,
+                description = "No question quota for study creation regression.",
+            ),
+        )
+
+        val exhaustedQuota = getJson("/api/v1/questions/quota", accessToken, deviceId, clientSecret)
+            .also { assertThat(it.statusCode()).isEqualTo(200) }
+            .json()
+        assertThat(exhaustedQuota["remainingCount"].asInt()).isZero()
 
         val created = postJson(
             "/api/v1/studies",
@@ -410,6 +422,25 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(studyPage["studies"]).hasSize(2)
         assertThat(studyPage["studies"].map { it["id"].asLong() })
             .containsExactlyInAnyOrder(created["id"].asLong(), child["id"].asLong())
+
+        val quotaDenied = postJson(
+            "/api/v1/studies/${child["id"].asLong()}/questions",
+            "",
+            accessToken,
+            deviceId,
+            clientSecret,
+            idempotencyKey = "create-study-question-quota-denied",
+        )
+        assertThat(quotaDenied.statusCode()).isEqualTo(403)
+        assertThat(quotaDenied.json()["error"]["errorCode"].asText()).isEqualTo("QUOTA_EXCEEDED")
+
+        membershipTiers.save(
+            UserMembershipTierEntity(
+                tierCode = "TIER1",
+                monthlyQuestionLimit = 30,
+                description = "Integration test default tier.",
+            ),
+        )
 
         val accepted = postJson(
             "/api/v1/studies/${child["id"].asLong()}/questions",

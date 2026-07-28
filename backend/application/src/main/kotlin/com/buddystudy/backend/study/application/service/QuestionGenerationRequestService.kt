@@ -49,7 +49,7 @@ class QuestionGenerationRequestService(
 ) : RequestQuestionGenerationUseCase {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    @RequirePermission(Permissions.STUDY_CREATE)
+    @RequirePermission(Permissions.QUESTION_CREATE)
     override suspend fun request(
         principal: Principal,
         studyId: Long,

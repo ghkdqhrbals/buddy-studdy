@@ -193,9 +193,10 @@ class DatabasePermissionEvaluatorTest {
 
     @Test
     fun `quota shortage fails with quota exceeded metadata`(): Unit = runBlocking {
-        permissions.rows += UserPermissionProjection(Permissions.STUDY_CREATE, requiresActiveAccount = true)
+        permissions.rows += UserPermissionProjection(Permissions.QUESTION_CREATE, requiresActiveAccount = true)
         users.statusByUser[7] = "ACTIVE"
         requirements.rows += requirement(
+            permissionCode = Permissions.QUESTION_CREATE,
             type = PermissionRequirementType.QUOTA_AVAILABLE,
             key = "monthly_question",
             operator = PermissionRequirementOperator.GTE,
@@ -207,7 +208,7 @@ class DatabasePermissionEvaluatorTest {
         val result = evaluator.evaluate(
             userId = 7,
             deviceId = "dev-1",
-            permissionCode = Permissions.STUDY_CREATE,
+            permissionCode = Permissions.QUESTION_CREATE,
             context = PermissionEvaluationContext(
                 now = Instant.parse("2026-07-23T12:34:56Z"),
                 sessionId = 1,
@@ -223,6 +224,26 @@ class DatabasePermissionEvaluatorTest {
         assertThat(result.metadata["quotaPeriodStartedAt"]).isEqualTo("2026-07-07T10:00:00Z")
         assertThat(result.metadata["quotaResetAt"]).isEqualTo("2026-08-07T10:00:00Z")
         assertThat(result.metadata["quotaTimeZone"]).isEqualTo("Z")
+    }
+
+    @Test
+    fun `study creation is independent from question quota`(): Unit = runBlocking {
+        permissions.rows += UserPermissionProjection(Permissions.STUDY_CREATE, requiresActiveAccount = true)
+        permissions.rows += UserPermissionProjection(Permissions.QUESTION_CREATE, requiresActiveAccount = true)
+        users.statusByUser[7] = "ACTIVE"
+        requirements.rows += requirement(
+            permissionCode = Permissions.QUESTION_CREATE,
+            type = PermissionRequirementType.QUOTA_AVAILABLE,
+            key = "monthly_question",
+            operator = PermissionRequirementOperator.GTE,
+            value = "1",
+            failureCode = ApiErrorCode.QUOTA_EXCEEDED,
+        )
+        quotas.remaining = 0
+
+        val result = evaluator.evaluate(principal(status = "ACTIVE"), Permissions.STUDY_CREATE)
+
+        assertThat(result.granted).isTrue()
     }
 
     @Test
