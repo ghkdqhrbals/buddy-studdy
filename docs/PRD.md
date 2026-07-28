@@ -61,7 +61,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 19. Study deletion always requires an explicit destructive confirmation.
 20. Manual question generation immediately shows an inline conversation-style loading message for the selected topic until the request completes.
 21. Question, hint, grading feedback, and explanation content supports Markdown for emphasis, lists, and code while remaining backward-compatible with existing plain-text records.
-22. The compact My Studies outline keeps the card, row geometry, and dividers fixed while newly selected branch contents settle in with a subtle direction-aware stagger; it does not blink or overlay old and new rows. Long-pressing every study card presents Edit, View Full Tree, and Delete actions; View Full Tree is not duplicated as an inline list row and remains available for childless roots so the user can enter the tree and add the first child topic. Roots without children omit only the empty child-topic section. After entering any study topic, the trailing toolbar keeps New Question and a separate More menu visible; More provides Edit Study, View Full Tree for the containing root, and confirmed subtree deletion.
+22. The compact My Studies outline keeps the card, row geometry, and dividers fixed while newly selected branch contents settle in with a subtle direction-aware stagger; it does not blink or overlay old and new rows. Long-pressing every study card presents Edit, View Full Tree, and Delete actions; View Full Tree is not duplicated as an inline list row and remains available for childless roots so the user can enter the tree and add the first child topic. Roots without children omit only the empty child-topic section. After entering any study topic, the trailing toolbar keeps New Question and a separate More menu visible; More provides only Edit Study and View Full Tree for the containing root. Topic deletion remains inside the study editor.
 
 ### Records
 
@@ -99,7 +99,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 2. OpenAI API key and model are managed separately from study settings, but OpenAI requests are performed only by the backend.
 3. Notification permission opens system settings; no in-app test notification button is shown.
 4. Public-question visibility is stored as an account preference and is changed from Settings, not from the profile editor.
-5. User-facing debugging logs are not provided.
+5. Developer options and debugging popups stay hidden by default. The 4-4-4-4 promotion-code field is available before sign-in; the app compares the embedded developer code's SHA-256 hash locally and persists successful access for the current installation across sign-in and sign-out.
 6. Decorative setting-row icons are omitted so labels and controls remain the primary scan targets.
 7. The primary iOS tab bar contains Home, Records, Statistics, and Notifications. Settings is reached through Profile.
 8. The notification inbox supports marking every visible account/device notification as read in one action, independently from deletion.

@@ -2,6 +2,15 @@ import XCTest
 @testable import StudyMate
 
 final class ArchitecturePolicyTests: XCTestCase {
+    func testEmbeddedDeveloperCodeAcceptsOnlyConfiguredFourPartCode() {
+        XCTAssertTrue(
+            DeveloperPromotionCodeVerifier.isDeveloperCode("QAQA-QAQA-QAQA-QAQA")
+        )
+        XCTAssertFalse(
+            DeveloperPromotionCodeVerifier.isDeveloperCode("NOPE-NOPE-NOPE-NOPE")
+        )
+    }
+
     func testBackendMaintenanceErrorDoesNotReplaceMonitoringServiceStatus() {
         let error = RemotePushBackendError.httpStatus(
             503,
@@ -1036,7 +1045,7 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
-    func testSelectedStudyToolbarOffersEditTreeAndDeleteActions() throws {
+    func testSelectedStudyToolbarOffersOnlyEditAndTreeActions() throws {
         let root = try repositoryRoot()
         let file = root.appendingPathComponent("StudyMate/Views/StudyView.swift")
         let content = try String(contentsOf: file, encoding: .utf8)
@@ -1057,9 +1066,14 @@ final class ArchitecturePolicyTests: XCTestCase {
             content.contains("strings.viewFullStudyTree,"),
             "The selected study More menu should expose View Full Tree."
         )
+        XCTAssertFalse(
+            content.contains("@State private var deletionCandidate: BackendStudyRoom?"),
+            "The selected study screen must not offer deletion directly from its More menu."
+        )
         XCTAssertTrue(
-            content.contains("Button(role: .destructive) {\n                    deletionCandidate = room"),
-            "The selected study More menu should stage deletion through a destructive confirmation."
+            content.contains("StudyTopicLevelSheet(")
+                && content.contains("onDelete: {\n                    deleteStudyRoom(room)"),
+            "Topic deletion should remain available inside the study editor."
         )
     }
 

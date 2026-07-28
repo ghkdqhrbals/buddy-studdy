@@ -11,7 +11,6 @@ struct StudyView: View {
     @State private var draftAnswer = ""
     @State private var showsPendingLimitHelp = false
     @State private var editingStudyRoom: BackendStudyRoom?
-    @State private var deletionCandidate: BackendStudyRoom?
     @State private var selectedTreeRootID: Int?
     #if os(iOS)
     @FocusState private var isAnswerEditorFocused: Bool
@@ -111,27 +110,6 @@ struct StudyView: View {
                 if isActive != room.activeForQuestions {
                     appState.setStudyTopicActive(studyID: room.id, active: isActive)
                 }
-            }
-        }
-        .confirmationDialog(
-            deletionCandidate.map { strings.deleteStudySubtree($0.topic) } ?? strings.deleteStudy,
-            isPresented: Binding(
-                get: { deletionCandidate != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        deletionCandidate = nil
-                    }
-                }
-            ),
-            titleVisibility: .visible
-        ) {
-            if let deletionCandidate {
-                Button(strings.deleteStudy, role: .destructive) {
-                    deleteStudyRoom(deletionCandidate)
-                }
-            }
-            Button(strings.cancel, role: .cancel) {
-                deletionCandidate = nil
             }
         }
         .alert(strings.pendingQuestionLimitTitle, isPresented: $showsPendingLimitHelp) {
@@ -329,13 +307,6 @@ struct StudyView: View {
                     )
                 }
 
-                Divider()
-
-                Button(role: .destructive) {
-                    deletionCandidate = room
-                } label: {
-                    Label(strings.deleteStudy, systemImage: "trash")
-                }
             }
         } label: {
             #if os(iOS)
@@ -355,7 +326,6 @@ struct StudyView: View {
 
     private func deleteStudyRoom(_ room: BackendStudyRoom) {
         appState.deleteStudyCategory(id: String(room.id))
-        deletionCandidate = nil
         dismiss()
     }
 

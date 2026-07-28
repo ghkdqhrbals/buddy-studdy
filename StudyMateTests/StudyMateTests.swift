@@ -980,7 +980,7 @@ final class StudyMateTests: XCTestCase {
     }
 
     @MainActor
-    func testDebuggingModeStaysEnabledWithoutDeveloperAccess() async throws {
+    func testDeveloperCodeUnlocksDebuggingWhileSignedOutAndPersistsOnDevice() async throws {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer {
@@ -989,31 +989,28 @@ final class StudyMateTests: XCTestCase {
 
         let store = SettingsStore(defaults: defaults)
         let backend = FakeRemotePushBackendClient()
-        let accessToken = Self.jwt(
-            payload: [
-                "device_id": backend.registration.deviceID,
-                "is_anonymous": false,
-                "status": "ACTIVE"
-            ]
-        )
-        store.saveRemotePushRegistration(
-            RemotePushRegistration(
-                deviceID: backend.registration.deviceID,
-                clientSecret: backend.registration.clientSecret,
-                apnsToken: "",
-                accessToken: accessToken,
-                accessTokenExpiresAt: Date().addingTimeInterval(3600)
-            )
-        )
         store.saveIsDebuggingEnabled(true)
         let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
 
-        XCTAssertTrue(appState.isDebuggingEnabled)
+        XCTAssertFalse(appState.isDebuggingEnabled)
+        XCTAssertFalse(appState.canAccessDeveloperOptions)
+        XCTAssertFalse(appState.isCommunitySessionActive)
 
-        await appState.refreshPageAccess(reason: "test")
-
+        let invalidCodeAccepted = await appState.redeemDeveloperPromotionCode("NOPE-NOPE-NOPE-NOPE")
+        XCTAssertFalse(invalidCodeAccepted)
+        XCTAssertFalse(appState.canAccessDeveloperOptions)
+        let developerCodeAccepted = await appState.redeemDeveloperPromotionCode("QAQA-QAQA-QAQA-QAQA")
+        XCTAssertTrue(developerCodeAccepted)
+        XCTAssertTrue(appState.canAccessDeveloperOptions)
+        XCTAssertTrue(appState.canShowDebugPopup)
         XCTAssertTrue(appState.isDebuggingEnabled)
         XCTAssertTrue(store.loadIsDebuggingEnabled())
+        XCTAssertTrue(store.loadIsDeveloperAccessUnlocked())
+
+        let restoredAppState = AppState(settingsStore: store, remotePushBackendClient: backend)
+        XCTAssertTrue(restoredAppState.canAccessDeveloperOptions)
+        XCTAssertTrue(restoredAppState.canShowDebugPopup)
+        XCTAssertTrue(restoredAppState.isDebuggingEnabled)
     }
 
     @MainActor

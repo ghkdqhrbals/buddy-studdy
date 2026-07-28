@@ -18,4 +18,8 @@ struct DeveloperSettingsUseCase {
     func saveIsDebuggingEnabled(_ isEnabled: Bool) {
         repository.saveIsDebuggingEnabled(isEnabled)
     }
+
+    func saveDeveloperAccessUnlocked(_ isUnlocked: Bool) {
+        repository.saveDeveloperAccessUnlocked(isUnlocked)
+    }
 }

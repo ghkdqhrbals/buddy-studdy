@@ -23,6 +23,7 @@ final class SettingsStore {
         static let appLogs = "appLogs"
         static let isDebuggingEnabled = "isDebuggingEnabled"
         static let debugBackendBaseURL = "debugBackendBaseURL"
+        static let isDeveloperAccessUnlocked = "isDeveloperAccessUnlocked"
         static let hasCompletedOnboarding = "hasCompletedOnboarding"
         static let isCloudSyncEnabled = "isCloudSyncEnabled"
         static let isCommunitySignedIn = "isCommunitySignedIn"
@@ -664,6 +665,14 @@ final class SettingsStore {
         } else {
             defaults.set(trimmedURL, forKey: Keys.debugBackendBaseURL)
         }
+    }
+
+    func loadIsDeveloperAccessUnlocked() -> Bool {
+        defaults.bool(forKey: Keys.isDeveloperAccessUnlocked)
+    }
+
+    func saveDeveloperAccessUnlocked(_ isUnlocked: Bool) {
+        defaults.set(isUnlocked, forKey: Keys.isDeveloperAccessUnlocked)
     }
 
     func loadHasCompletedOnboarding() -> Bool {

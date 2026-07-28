@@ -8379,6 +8379,7 @@ private struct MobileOnboardingView: View {
 
 private struct MobileSettingsView: View {
     @EnvironmentObject private var appState: AppState
+    @State private var promotionCode = ""
 
     private static let feedbackURL = URL(string: "mailto:ghkdqhrbals@gmail.com?subject=BuddyStudy%20Feedback")!
     private static let kofiTipURL = URL(string: "https://ko-fi.com/gyumin")!
@@ -8524,47 +8525,113 @@ private struct MobileSettingsView: View {
                     .buttonStyle(.plain)
                 }
 
-                MobileSettingsCard(
-                    title: strings.developerOptions,
-                    systemImage: "hammer"
-                ) {
-                    Toggle(isOn: Binding(
-                            get: { appState.isDebuggingEnabled },
-                            set: { appState.setDebuggingEnabled($0) }
-                        )) {
-                        MobileSettingsRow(
-                            systemImage: "ladybug.fill",
-                            title: strings.debuggingMode,
-                            value: appState.isDebuggingEnabled ? strings.enabledStatus : strings.disabledStatus
-                        )
-                    }
-                    .tint(.green)
-
-                    if appState.isDebuggingEnabled {
-                        Divider()
-
-                        VStack(alignment: .leading, spacing: 6) {
+                if !appState.canAccessDeveloperOptions {
+                    MobileSettingsCard(
+                        title: strings.promotionCode,
+                        systemImage: "ticket"
+                    ) {
+                        VStack(alignment: .leading, spacing: 12) {
                             TextField(
-                                strings.debugBackendBaseURL,
-                                text: $appState.draftDebugBackendBaseURL,
-                                prompt: Text(strings.debugBackendBaseURLPlaceholder)
+                                strings.promotionCodePlaceholder,
+                                text: $promotionCode
                             )
                             #if os(iOS)
-                            .keyboardType(.URL)
-                            .textInputAutocapitalization(.never)
+                            .keyboardType(.asciiCapable)
+                            .textInputAutocapitalization(.characters)
                             .autocorrectionDisabled()
+                            .textContentType(.oneTimeCode)
                             #endif
-
-                            if !appState.isDraftDebugBackendBaseURLValid {
-                                Text(strings.debugBackendBaseURLInvalid)
-                                    .font(.caption)
-                                    .foregroundStyle(.red)
+                            .monospaced()
+                            .submitLabel(.done)
+                            .onChange(of: promotionCode) { _, newValue in
+                                let formatted = formattedPromotionCode(newValue)
+                                if promotionCode != formatted {
+                                    promotionCode = formatted
+                                }
+                            }
+                            .onSubmit {
+                                redeemPromotionCode()
                             }
 
-                            Text(strings.debugBackendBaseURLHelp)
+                            Text(strings.promotionCodeHelp)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            if let message = appState.promotionCodeMessage {
+                                Text(message)
+                                    .font(.caption)
+                                    .foregroundStyle(appState.hasPromotionCodeError ? .red : .green)
                                     .fixedSize(horizontal: false, vertical: true)
+                            }
+
+                            Button {
+                                redeemPromotionCode()
+                            } label: {
+                                HStack(spacing: 8) {
+                                    if appState.isRedeemingPromotionCode {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    }
+                                    Text(strings.applyPromotionCode)
+                                        .fontWeight(.semibold)
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.green)
+                            .disabled(
+                                promotionCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    || promotionCode.count != 19
+                                    || appState.isRedeemingPromotionCode
+                            )
+                        }
+                    }
+                }
+
+                if appState.canAccessDeveloperOptions {
+                    MobileSettingsCard(
+                        title: strings.developerOptions,
+                        systemImage: "hammer"
+                    ) {
+                        Toggle(isOn: Binding(
+                                get: { appState.isDebuggingEnabled },
+                                set: { appState.setDebuggingEnabled($0) }
+                            )) {
+                            MobileSettingsRow(
+                                systemImage: "ladybug.fill",
+                                title: strings.debuggingMode,
+                                value: appState.isDebuggingEnabled ? strings.enabledStatus : strings.disabledStatus
+                            )
+                        }
+                        .tint(.green)
+
+                        if appState.isDebuggingEnabled {
+                            Divider()
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                TextField(
+                                    strings.debugBackendBaseURL,
+                                    text: $appState.draftDebugBackendBaseURL,
+                                    prompt: Text(strings.debugBackendBaseURLPlaceholder)
+                                )
+                                #if os(iOS)
+                                .keyboardType(.URL)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                #endif
+
+                                if !appState.isDraftDebugBackendBaseURLValid {
+                                    Text(strings.debugBackendBaseURLInvalid)
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                }
+
+                                Text(strings.debugBackendBaseURLHelp)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                     }
                 }
@@ -8614,7 +8681,11 @@ private struct MobileSettingsView: View {
         .onAppear {
             appState.beginSettingsEditing()
             Task {
-                await appState.loadBackendSettingsForEditing()
+                async let settingsLoad: Void = appState.loadBackendSettingsForEditing()
+                async let featureAccessLoad: Void = appState.refreshDeveloperFeatureAccess(
+                    reason: "settings"
+                )
+                _ = await (settingsLoad, featureAccessLoad)
             }
         }
         .onDisappear {
@@ -8638,6 +8709,35 @@ private struct MobileSettingsView: View {
         }
         .buttonStyle(.plain)
         .disabled(appState.isValidatingAPIKey)
+    }
+
+    private func redeemPromotionCode() {
+        let code = promotionCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !code.isEmpty, !appState.isRedeemingPromotionCode else {
+            return
+        }
+        Task {
+            if await appState.redeemDeveloperPromotionCode(code) {
+                promotionCode = ""
+            }
+        }
+    }
+
+    private func formattedPromotionCode(_ value: String) -> String {
+        let characters = value
+            .uppercased()
+            .filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
+            .prefix(16)
+        return stride(from: 0, to: characters.count, by: 4)
+            .map { offset in
+                let start = characters.index(characters.startIndex, offsetBy: offset)
+                let end = characters.index(
+                    start,
+                    offsetBy: min(4, characters.distance(from: start, to: characters.endIndex))
+                )
+                return String(characters[start..<end])
+            }
+            .joined(separator: "-")
     }
 }
 

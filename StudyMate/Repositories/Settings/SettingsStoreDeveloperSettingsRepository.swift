@@ -8,7 +8,8 @@ struct SettingsStoreDeveloperSettingsRepository: DeveloperSettingsRepository {
     func loadDeveloperSettings() -> DeveloperSettings {
         DeveloperSettings(
             isDebuggingEnabled: settingsStore.loadIsDebuggingEnabled(),
-            debugBackendBaseURL: settingsStore.loadDebugBackendBaseURL()
+            debugBackendBaseURL: settingsStore.loadDebugBackendBaseURL(),
+            isDeveloperAccessUnlocked: settingsStore.loadIsDeveloperAccessUnlocked()
         )
     }
 
@@ -18,5 +19,9 @@ struct SettingsStoreDeveloperSettingsRepository: DeveloperSettingsRepository {
 
     func saveDebugBackendBaseURL(_ baseURL: String) {
         settingsStore.saveDebugBackendBaseURL(baseURL)
+    }
+
+    func saveDeveloperAccessUnlocked(_ isUnlocked: Bool) {
+        settingsStore.saveDeveloperAccessUnlocked(isUnlocked)
     }
 }
