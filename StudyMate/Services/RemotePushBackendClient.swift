@@ -744,6 +744,14 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return try decoder.decode(BackendNotificationPreference.self, from: data)
     }
 
+    private func customPromptOverride(_ prompt: String) -> String? {
+        let value = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, value != StudySettings.defaultCustomPrompt else {
+            return nil
+        }
+        return value
+    }
+
     func updateSchedule(
         registration: RemotePushRegistration,
         settings: StudySettings,
@@ -755,7 +763,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                 ScheduleItemRequest(
                     topic: settings.effectiveTopic,
                     difficultyLevel: settings.difficulty.level,
-                    customPrompt: settings.customPrompt,
+                    customPrompt: customPromptOverride(settings.customPrompt),
                     openAIModel: settings.sanitizedOpenAIModel
                 )
             ]
@@ -763,7 +771,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                 ScheduleItemRequest(
                     topic: category.normalizedTitle,
                     difficultyLevel: category.difficulty.level,
-                    customPrompt: category.normalizedCustomPrompt,
+                    customPrompt: customPromptOverride(category.normalizedCustomPrompt),
                     openAIModel: category.sanitizedOpenAIModel
                 )
             }
@@ -774,7 +782,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             enabled: enabled,
             openAIAPIKey: apiKey,
             notificationSound: settings.notificationSound.backendSoundName,
-            customPrompt: settings.customPrompt,
+            customPrompt: customPromptOverride(settings.customPrompt),
             appLanguage: settings.appLanguage.backendCode,
             openAIModel: settings.sanitizedOpenAIModel,
             maxHistoryCount: settings.sanitizedMaxHistoryCount,
@@ -829,7 +837,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             intervalMinutes: settings.sanitizedIntervalMinutes,
             enabled: true,
             notificationSound: settings.notificationSound.backendSoundName,
-            customPrompt: category.normalizedCustomPrompt,
+            customPrompt: customPromptOverride(category.normalizedCustomPrompt),
             openAIModel: category.sanitizedOpenAIModel,
             maxHistoryCount: settings.sanitizedMaxHistoryCount
         )
@@ -919,7 +927,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             enabled: true,
             openAIAPIKey: nil,
             notificationSound: settings.notificationSound.backendSoundName,
-            customPrompt: category.normalizedCustomPrompt,
+            customPrompt: customPromptOverride(category.normalizedCustomPrompt),
             appLanguage: settings.appLanguage.backendCode,
             openAIModel: category.sanitizedOpenAIModel,
             maxHistoryCount: settings.sanitizedMaxHistoryCount,
@@ -1984,7 +1992,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var enabled: Bool
         var openAIAPIKey: String?
         var notificationSound: String?
-        var customPrompt: String
+        var customPrompt: String?
         var appLanguage: String
         var openAIModel: String
         var maxHistoryCount: Int
@@ -2008,7 +2016,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     private struct ScheduleItemRequest: Encodable {
         var topic: String
         var difficultyLevel: Int
-        var customPrompt: String
+        var customPrompt: String?
         var openAIModel: String
 
         enum CodingKeys: String, CodingKey {
@@ -2025,7 +2033,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var intervalMinutes: Int
         var enabled: Bool
         var notificationSound: String?
-        var customPrompt: String
+        var customPrompt: String?
         var openAIModel: String
         var maxHistoryCount: Int
 

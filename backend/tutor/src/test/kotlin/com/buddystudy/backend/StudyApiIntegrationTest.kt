@@ -12,6 +12,7 @@ import com.buddystudy.backend.study.application.port.outbound.GradingPromptPrevi
 import com.buddystudy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
+import com.buddystudy.backend.study.application.prompt.QuestionPromptDefaults
 import com.buddystudy.backend.stats.application.port.inbound.RefreshUserStatsUseCase
 import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionRepository
 import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionStatsRepository
@@ -360,7 +361,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
               "topic": "Kotlin Architecture",
               "difficultyLevel": 7,
               "intervalMinutes": 30,
-              "customPrompt": "Ask practical backend architecture questions.",
+              "customPrompt": null,
               "openaiModel": "gpt-5.4",
               "maxHistoryCount": 300
             }
@@ -373,6 +374,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(created["topic"].asText()).isEqualTo("Kotlin Architecture")
         assertThat(created["difficultyLevel"].asInt()).isEqualTo(7)
         assertThat(created["intervalMinutes"].asInt()).isEqualTo(30)
+        assertThat(created["customPrompt"].asText()).isEqualTo(QuestionPromptDefaults.DEFAULT)
         assertThat(created["pendingQuestion"].isNull).isTrue()
 
         val updated = postJson(

@@ -426,7 +426,6 @@ Request:
   "enabled": true,
   "openaiApiKey": "sk-...",
   "notificationSound": "default",
-  "customPrompt": "Ask concise production-oriented questions.",
   "appLanguage": "ko",
   "openaiModel": "gpt-5.4",
   "maxHistoryCount": 100
@@ -441,7 +440,7 @@ Fields:
 - `enabled`: whether scheduled pushes are active.
 - `openaiApiKey`: optional per-device OpenAI API key. If provided, it is encrypted at rest using `BACKEND_MASTER_KEY`.
 - `notificationSound`: optional APNs sound name.
-- `customPrompt`: optional tutor instruction.
+- `customPrompt`: optional tutor-instruction override. When omitted, `null`, or blank, the backend uses its static default question prompt.
 - `appLanguage`: user-level app language, `ko` or `en`. It also controls generated question and feedback language.
 - `openaiModel`: selected model. Defaults to `gpt-5.4`.
 

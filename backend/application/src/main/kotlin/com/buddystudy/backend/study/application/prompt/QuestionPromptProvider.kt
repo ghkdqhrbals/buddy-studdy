@@ -24,6 +24,18 @@ data class QuestionCoverageGuide(
     val conceptPath: String = conceptName,
 )
 
+object QuestionPromptDefaults {
+    val DEFAULT: String = """
+        Ask one short, clear study question at a time. Keep it focused so the learner can answer it directly.
+    """.trimIndent()
+
+    fun resolve(prompt: String?): String =
+        prompt
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: DEFAULT
+}
+
 @Component
 class QuestionDiversityPolicy {
     fun choose(topic: String, studyId: Long, userId: Long, recentQuestions: List<String>): QuestionDiversityGuide {

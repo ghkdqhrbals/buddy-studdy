@@ -270,6 +270,33 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertTrue(AppErrorHandlingUseCase().isPermanentBackendOperationError(error))
     }
 
+    func testSettingsRequestOmitsClientDefaultPrompt() async throws {
+        let client = makeClient { request in
+            XCTAssertEqual(request.httpMethod, "PUT")
+            XCTAssertEqual(request.url?.path, "/api/v1/settings")
+            let bodyData = try Self.bodyData(from: request)
+            let body = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: bodyData) as? [String: Any]
+            )
+            XCTAssertNil(body["customPrompt"])
+            let schedules = try XCTUnwrap(body["schedules"] as? [[String: Any]])
+            XCTAssertNil(try XCTUnwrap(schedules.first)["customPrompt"])
+            return Self.response(for: request, statusCode: 200, body: "{}")
+        }
+
+        try await client.updateSchedule(
+            registration: Self.registration,
+            settings: StudySettings(
+                topic: "Swift",
+                difficulty: .level5,
+                customPrompt: StudySettings.defaultCustomPrompt,
+                intervalMinutes: 15
+            ),
+            apiKey: nil,
+            enabled: true
+        )
+    }
+
     private func makeClient(
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> RemotePushBackendClient {
@@ -300,6 +327,29 @@ final class QuestionGenerationFlowTests: XCTestCase {
             headerFields: ["Content-Type": "application/json"]
         )!
         return (response, Data(body.utf8))
+    }
+
+    private static func bodyData(from request: URLRequest) throws -> Data {
+        if let body = request.httpBody {
+            return body
+        }
+        let stream = try XCTUnwrap(request.httpBodyStream)
+        stream.open()
+        defer { stream.close() }
+
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4_096)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            guard count >= 0 else {
+                throw try XCTUnwrap(stream.streamError)
+            }
+            if count == 0 {
+                break
+            }
+            data.append(contentsOf: buffer.prefix(count))
+        }
+        return data
     }
 }
 

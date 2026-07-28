@@ -7,6 +7,7 @@ import com.buddystudy.backend.settings.adapter.inbound.web.dto.ScheduleRequest
 import com.buddystudy.backend.settings.application.port.inbound.ScheduleCommand
 import com.buddystudy.backend.settings.application.port.inbound.ScheduleItemCommand
 import com.buddystudy.backend.settings.application.port.inbound.SettingsUseCase
+import com.buddystudy.backend.study.application.prompt.QuestionPromptDefaults
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.responses.ApiResponses
@@ -92,7 +93,7 @@ private fun ScheduleRequest.toCommand() = ScheduleCommand(
     enabled = enabled,
     openaiApiKey = openaiApiKey,
     notificationSound = notificationSound,
-    customPrompt = customPrompt,
+    customPrompt = QuestionPromptDefaults.resolve(customPrompt),
     appLanguage = appLanguage,
     openaiModel = openaiModel,
     maxHistoryCount = maxHistoryCount,
@@ -100,7 +101,7 @@ private fun ScheduleRequest.toCommand() = ScheduleCommand(
         ScheduleItemCommand(
             topic = it.topic,
             difficultyLevel = it.difficultyLevel,
-            customPrompt = it.customPrompt,
+            customPrompt = QuestionPromptDefaults.resolve(it.customPrompt),
             openaiModel = it.openaiModel,
         )
     },

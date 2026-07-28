@@ -5,10 +5,19 @@ import kotlinx.coroutines.runBlocking
 import com.buddystudy.backend.study.application.prompt.QuestionPromptProvider
 import com.buddystudy.backend.study.application.prompt.QuestionCoverageGuide
 import com.buddystudy.backend.study.application.prompt.QuestionDiversityGuide
+import com.buddystudy.backend.study.application.prompt.QuestionPromptDefaults
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 class QuestionPromptProviderTest {
+    @Test
+    fun `request prompt fallback uses backend static default`() {
+        assertThat(QuestionPromptDefaults.resolve(null)).isEqualTo(QuestionPromptDefaults.DEFAULT)
+        assertThat(QuestionPromptDefaults.resolve("   ")).isEqualTo(QuestionPromptDefaults.DEFAULT)
+        assertThat(QuestionPromptDefaults.resolve("  Ask about failure modes.  "))
+            .isEqualTo("Ask about failure modes.")
+    }
+
     @Test
     fun `question prompt keeps service system prompt in code`(): Unit = runBlocking {
         val prompt = QuestionPromptProvider().buildQuestionGenerationPrompt(

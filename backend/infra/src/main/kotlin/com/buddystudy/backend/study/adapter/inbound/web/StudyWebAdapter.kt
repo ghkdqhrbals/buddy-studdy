@@ -20,6 +20,7 @@ import com.buddystudy.backend.study.application.port.inbound.UpdateStudyTopicAct
 import com.buddystudy.backend.study.application.port.inbound.QuestionQuotaUseCase
 import com.buddystudy.backend.study.application.port.inbound.GetQuestionGenerationProcessUseCase
 import com.buddystudy.backend.study.application.port.inbound.RequestQuestionGenerationUseCase
+import com.buddystudy.backend.study.application.prompt.QuestionPromptDefaults
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
 import org.springframework.stereotype.Component
@@ -150,7 +151,7 @@ class StudyWebAdapter(
                 intervalMinutes = body.intervalMinutes,
                 enabled = body.enabled,
                 notificationSound = body.notificationSound,
-                customPrompt = body.customPrompt,
+                customPrompt = QuestionPromptDefaults.resolve(body.customPrompt),
                 openaiModel = body.openaiModel,
                 maxHistoryCount = body.maxHistoryCount,
             ),
