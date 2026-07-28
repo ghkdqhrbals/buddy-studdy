@@ -48,8 +48,8 @@ buddystudy:
   email:
     from: ${SMTP_FROM:${local-secret.SMTP_FROM:${SMTP_USERNAME:${local-secret.SMTP_USERNAME:}}}}
   openai:
-    user-content-api-key: ${OPENAI_USER_CONTENT_API_KEY:${OPENAI_API_KEY:${local-secret.OPENAI_USER_CONTENT_API_KEY:${local-secret.OPENAI_API_KEY:}}}}
-    system-api-key: ${OPENAI_SYSTEM_API_KEY:${local-secret.OPENAI_SYSTEM_API_KEY:}}
+    user-content-api-key: ${OPENAI_API_KEY_USER:${OPENAI_USER_CONTENT_API_KEY:${OPENAI_API_KEY:${local-secret.OPENAI_API_KEY_USER:${local-secret.OPENAI_USER_CONTENT_API_KEY:${local-secret.OPENAI_API_KEY:}}}}}}
+    system-api-key: ${OPENAI_API_KEY_SYSTEM:${OPENAI_SYSTEM_API_KEY:${local-secret.OPENAI_API_KEY_SYSTEM:${local-secret.OPENAI_SYSTEM_API_KEY:}}}}
     grading-response-style: ${OPENAI_GRADING_RESPONSE_STYLE:${local-secret.OPENAI_GRADING_RESPONSE_STYLE:structured-brief-v1}}
   scheduler:
     enabled: true

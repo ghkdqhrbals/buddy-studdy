@@ -78,8 +78,8 @@ BuddyStudy is a SwiftUI app with shared domain logic across macOS and iOS. The a
   - API request, exception, and authentication logs share `ApiLoggingPolicy`. The `dev` profile emits compact method/path/status/duration logs without body capture, request IDs, IP addresses, headers, or full stack traces; production keeps detailed structured logs for operations.
   - Uses a private Dockerized MySQL container with a persistent named volume.
   - Separates OpenAI workload ownership. `SystemOpenAIClient` and
-    `OPENAI_SYSTEM_API_KEY` serve only post-study child-topic suggestions.
-    `OpenAIClient` and `OPENAI_USER_CONTENT_API_KEY` serve question generation,
+    `OPENAI_API_KEY_SYSTEM` serve only post-study child-topic suggestions.
+    `OpenAIClient` and `OPENAI_API_KEY_USER` serve question generation,
     embeddings, translation, user-answer feedback, grading, and grading
     previews. Production startup and deployment reject missing or identical
     workload keys.

@@ -17,13 +17,13 @@ class OpenAIConfigurationGuard(
         val systemApiKey = properties.openai.systemApiKey.trim()
 
         require(userContentApiKey.isNotEmpty()) {
-            "OPENAI_USER_CONTENT_API_KEY is required in production."
+            "OPENAI_API_KEY_USER is required in production."
         }
         require(systemApiKey.isNotEmpty()) {
-            "OPENAI_SYSTEM_API_KEY is required in production."
+            "OPENAI_API_KEY_SYSTEM is required in production."
         }
         require(userContentApiKey != systemApiKey) {
-            "OPENAI_USER_CONTENT_API_KEY and OPENAI_SYSTEM_API_KEY must be different in production."
+            "OPENAI_API_KEY_USER and OPENAI_API_KEY_SYSTEM must be different in production."
         }
     }
 }

@@ -22,8 +22,8 @@ class LocalAwsSecretMappingTest {
     fun `local OpenAI workload keys are sourced from the namespaced aws secret`() {
         contextRunner
             .withPropertyValues(
-                "local-secret.OPENAI_USER_CONTENT_API_KEY=user-content-from-aws",
-                "local-secret.OPENAI_SYSTEM_API_KEY=system-from-aws",
+                "local-secret.OPENAI_API_KEY_USER=user-content-from-aws",
+                "local-secret.OPENAI_API_KEY_SYSTEM=system-from-aws",
             )
             .run { context ->
                 val properties = context.getBean(BuddyStudyProperties::class.java)
@@ -34,13 +34,15 @@ class LocalAwsSecretMappingTest {
     }
 
     @Test
-    fun `explicit local OpenAI workload keys override the aws secret`() {
+    fun `canonical OpenAI workload keys override aliases and the aws secret`() {
         contextRunner
             .withPropertyValues(
-                "OPENAI_USER_CONTENT_API_KEY=user-content-from-environment",
-                "OPENAI_SYSTEM_API_KEY=system-from-environment",
-                "local-secret.OPENAI_USER_CONTENT_API_KEY=user-content-from-aws",
-                "local-secret.OPENAI_SYSTEM_API_KEY=system-from-aws",
+                "OPENAI_API_KEY_USER=user-content-from-environment",
+                "OPENAI_API_KEY_SYSTEM=system-from-environment",
+                "OPENAI_USER_CONTENT_API_KEY=legacy-user-content-from-environment",
+                "OPENAI_SYSTEM_API_KEY=legacy-system-from-environment",
+                "local-secret.OPENAI_API_KEY_USER=user-content-from-aws",
+                "local-secret.OPENAI_API_KEY_SYSTEM=system-from-aws",
             )
             .run { context ->
                 val properties = context.getBean(BuddyStudyProperties::class.java)

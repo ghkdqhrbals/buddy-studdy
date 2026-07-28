@@ -69,7 +69,7 @@ deployment.
 - Backend Kotlin/API/env changes: build backend image, then run backend deploy.
 - Backend runtime secrets are read by the backend deploy workflow from AWS
   Secrets Manager. The `buddystudy/prod` application secret owns
-  `OPENAI_USER_CONTENT_API_KEY`, `OPENAI_SYSTEM_API_KEY`, `REDIS_PASSWORD`,
+  `OPENAI_API_KEY_USER`, `OPENAI_API_KEY_SYSTEM`, `REDIS_PASSWORD`,
   `APNS_AUTH_KEY_BASE64`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`,
   and `APNS_ENV`. The two OpenAI keys must be present and different:
   post-study topic suggestions use only the system key, while question
