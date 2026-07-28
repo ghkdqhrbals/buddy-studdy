@@ -8402,26 +8402,28 @@ private struct MobileSettingsView: View {
                         title: strings.publicQuestionsPage,
                         systemImage: "person.2"
                     ) {
-                        Toggle(
-                            isOn: Binding(
-                                get: {
-                                    appState.communityProfile?.allowPublicQuestions ?? true
-                                },
-                                set: { allowed in
-                                    Task {
-                                        await appState.setPublicQuestionsAllowed(allowed)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle(
+                                isOn: Binding(
+                                    get: {
+                                        appState.communityProfile?.allowPublicQuestions ?? true
+                                    },
+                                    set: { allowed in
+                                        Task {
+                                            await appState.setPublicQuestionsAllowed(allowed)
+                                        }
                                     }
-                                }
-                            )
-                        ) {
-                            VStack(alignment: .leading, spacing: 4) {
+                                )
+                            ) {
                                 Text(strings.publicQuestionsPage)
                                     .font(.body.weight(.medium))
-                                Text(strings.publicQuestionsPageHelp)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
                             }
+
+                            Text(strings.publicQuestionsPageHelp)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .disabled(
                             appState.communityProfile == nil ||

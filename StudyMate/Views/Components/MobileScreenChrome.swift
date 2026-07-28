@@ -239,15 +239,11 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
 
 private enum MobileSearchColors {
     static var toolbarSearchFill: Color {
-        Color(uiColor: UIColor { traits in
-            traits.userInterfaceStyle == .dark ? .secondarySystemBackground : .secondarySystemFill
-        })
+        Color(uiColor: .secondarySystemFill)
     }
 
     static var toolbarSearchStroke: Color {
-        Color(uiColor: UIColor { traits in
-            traits.userInterfaceStyle == .dark ? .separator : .separator
-        })
+        Color(uiColor: .separator)
     }
 }
 
