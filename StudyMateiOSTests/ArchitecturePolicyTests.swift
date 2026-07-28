@@ -944,6 +944,33 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testSelectedStudyToolbarOffersEditTreeAndDeleteActions() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/StudyView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+
+        XCTAssertTrue(
+            content.contains("toolbarNewQuestionButton(strings: strings)\n            studyOptionsMenu(strings: strings)"),
+            "The selected study toolbar should keep New Question and place a separate More menu to its right."
+        )
+        XCTAssertTrue(
+            content.contains("Label(strings.editStudyCategory, systemImage: \"pencil\")"),
+            "The selected study More menu should expose study editing."
+        )
+        XCTAssertTrue(
+            content.contains("selectedTreeRootID = appState.rootStudyRoom(for: room.id)?.id ?? room.id"),
+            "View Full Tree should resolve a nested topic back to its containing root study."
+        )
+        XCTAssertTrue(
+            content.contains("strings.viewFullStudyTree,"),
+            "The selected study More menu should expose View Full Tree."
+        )
+        XCTAssertTrue(
+            content.contains("Button(role: .destructive) {\n                    deletionCandidate = room"),
+            "The selected study More menu should stage deletion through a destructive confirmation."
+        )
+    }
+
     func testChildTopicRecommendationsSupportOrderedBatchSelection() throws {
         let root = try repositoryRoot()
         let viewFile = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")

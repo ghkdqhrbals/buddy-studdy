@@ -5,10 +5,14 @@ import MarkdownUI
 
 struct StudyView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
     var preferredCategoryID: String? = nil
     @State private var showsHint = false
     @State private var draftAnswer = ""
     @State private var showsPendingLimitHelp = false
+    @State private var editingStudyRoom: BackendStudyRoom?
+    @State private var deletionCandidate: BackendStudyRoom?
+    @State private var selectedTreeRootID: Int?
     #if os(iOS)
     @FocusState private var isAnswerEditorFocused: Bool
     #endif
@@ -78,15 +82,57 @@ struct StudyView: View {
             #if os(iOS)
             if #available(iOS 26.0, *) {
                 ToolbarItem(placement: .topBarTrailing) {
-                    toolbarNewQuestionButton(strings: strings)
+                    toolbarActions(strings: strings)
                 }
                 .sharedBackgroundVisibility(.hidden)
             } else {
                 ToolbarItem(placement: .topBarTrailing) {
-                    toolbarNewQuestionButton(strings: strings)
+                    toolbarActions(strings: strings)
                 }
             }
             #endif
+        }
+        .navigationDestination(item: $selectedTreeRootID) { rootStudyID in
+            MobileStudyTreeView(rootStudyID: rootStudyID)
+        }
+        .sheet(item: $editingStudyRoom) { room in
+            StudyTopicLevelSheet(
+                room: room,
+                strings: strings,
+                onDelete: {
+                    deleteStudyRoom(room)
+                }
+            ) { title, difficulty, isActive in
+                appState.updateStudyTreeCategory(
+                    roomID: room.id,
+                    title: title,
+                    difficulty: difficulty
+                )
+                if isActive != room.activeForQuestions {
+                    appState.setStudyTopicActive(studyID: room.id, active: isActive)
+                }
+            }
+        }
+        .confirmationDialog(
+            deletionCandidate.map { strings.deleteStudySubtree($0.topic) } ?? strings.deleteStudy,
+            isPresented: Binding(
+                get: { deletionCandidate != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        deletionCandidate = nil
+                    }
+                }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let deletionCandidate {
+                Button(strings.deleteStudy, role: .destructive) {
+                    deleteStudyRoom(deletionCandidate)
+                }
+            }
+            Button(strings.cancel, role: .cancel) {
+                deletionCandidate = nil
+            }
         }
         .alert(strings.pendingQuestionLimitTitle, isPresented: $showsPendingLimitHelp) {
             Button(strings.done, role: .cancel) {}
@@ -240,6 +286,14 @@ struct StudyView: View {
         }
     }
 
+    private func toolbarActions(strings: AppStrings) -> some View {
+        HStack(spacing: 8) {
+            toolbarNewQuestionButton(strings: strings)
+            studyOptionsMenu(strings: strings)
+        }
+        .fixedSize()
+    }
+
     private func toolbarNewQuestionButton(strings: AppStrings) -> some View {
         Button {
             requestNewQuestion()
@@ -255,6 +309,54 @@ struct StudyView: View {
         .opacity(appState.isGeneratingQuestion || hasReachedPendingQuestionLimit ? 0.55 : 1)
         .accessibilityLabel(appState.isGeneratingQuestion ? strings.fetchingQuestion : strings.newQuestion)
         .accessibilityHint(hasReachedPendingQuestionLimit ? strings.pendingQuestionLimitMessage : "")
+    }
+
+    private func studyOptionsMenu(strings: AppStrings) -> some View {
+        Menu {
+            if let room = selectedBackendStudyRoom {
+                Button {
+                    editingStudyRoom = room
+                } label: {
+                    Label(strings.editStudyCategory, systemImage: "pencil")
+                }
+
+                Button {
+                    selectedTreeRootID = appState.rootStudyRoom(for: room.id)?.id ?? room.id
+                } label: {
+                    Label(
+                        strings.viewFullStudyTree,
+                        systemImage: "point.3.connected.trianglepath.dotted"
+                    )
+                }
+
+                Divider()
+
+                Button(role: .destructive) {
+                    deletionCandidate = room
+                } label: {
+                    Label(strings.deleteStudy, systemImage: "trash")
+                }
+            }
+        } label: {
+            #if os(iOS)
+            MobileToolbarIconButtonLabel(systemName: "ellipsis")
+            #else
+            Image(systemName: "ellipsis")
+            #endif
+        }
+        .buttonStyle(.plain)
+        .disabled(selectedBackendStudyRoom == nil)
+        .accessibilityLabel(strings.more)
+    }
+
+    private var selectedBackendStudyRoom: BackendStudyRoom? {
+        appState.backendStudyRoom(categoryID: targetCategoryID)
+    }
+
+    private func deleteStudyRoom(_ room: BackendStudyRoom) {
+        appState.deleteStudyCategory(id: String(room.id))
+        deletionCandidate = nil
+        dismiss()
     }
 
     private func requestNewQuestion() {

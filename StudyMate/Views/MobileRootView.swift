@@ -2508,7 +2508,7 @@ private struct StudyTopicAddOutcome {
     var failedTopics: [String]
 }
 
-private struct MobileStudyTreeView: View {
+struct MobileStudyTreeView: View {
     @EnvironmentObject private var appState: AppState
     @State private var addRequest: StudyTopicAddRequest?
     @State private var editingRoom: BackendStudyRoom?
@@ -3982,7 +3982,7 @@ private struct StudyTopicAddSheet: View {
     }
 }
 
-private struct StudyTopicLevelSheet: View {
+struct StudyTopicLevelSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var room: BackendStudyRoom
