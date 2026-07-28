@@ -16,7 +16,7 @@ class HealthController(
 ) {
     @Operation(
         summary = "Health check",
-        description = "Returns a lightweight health response for load balancers and local diagnostics. Runtime monitoring must use the Cloudflare Health Monitor Worker with /api/v1/health/readiness, not GitHub Actions.",
+        description = "Returns a lightweight health response for load balancers and local diagnostics. Runtime alerting belongs to Grafana, not GitHub Actions.",
     )
     @GetMapping("/health", "/api/v1/health")
     fun health() = HealthResponse()

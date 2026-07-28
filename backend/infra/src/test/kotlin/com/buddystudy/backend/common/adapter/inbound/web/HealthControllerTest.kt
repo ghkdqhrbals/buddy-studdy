@@ -6,6 +6,8 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.mock
+import org.mockito.Mockito.never
+import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
 import org.springframework.data.redis.connection.ReactiveRedisConnection
 import org.springframework.data.redis.connection.ReactiveRedisConnectionFactory
@@ -16,18 +18,21 @@ import reactor.core.publisher.Mono
 class HealthControllerTest {
     @Test
     fun `health endpoint remains lightweight`(): Unit = runBlocking {
-        val controller = HealthController(checker(healthyRedis()))
+        val controller = HealthController(checker(healthyRedis().first))
 
         assertThat(controller.health().ok).isTrue()
     }
 
     @Test
     fun `readiness returns ok when r2dbc and redis are available`(): Unit = runBlocking {
-        val response = HealthController(checker(healthyRedis())).readiness()
+        val (redis, connection) = healthyRedis()
+        val response = HealthController(checker(redis)).readiness()
 
         assertThat(response.statusCode).isEqualTo(HttpStatus.OK)
         assertThat(response.body?.checks?.get("database")?.ok).isTrue()
         assertThat(response.body?.checks?.get("redis")?.ok).isTrue()
+        verify(connection).closeLater()
+        verify(connection, never()).close()
     }
 
     @Test
@@ -36,6 +41,7 @@ class HealthControllerTest {
         val connection = mock(ReactiveRedisConnection::class.java)
         `when`(redis.reactiveConnection).thenReturn(connection)
         `when`(connection.ping()).thenReturn(Mono.error(IllegalStateException("redis unavailable")))
+        `when`(connection.closeLater()).thenReturn(Mono.empty())
 
         val response = HealthController(checker(redis)).readiness()
 
@@ -52,11 +58,12 @@ class HealthControllerTest {
             ),
         )
 
-    private fun healthyRedis(): ReactiveRedisConnectionFactory {
+    private fun healthyRedis(): Pair<ReactiveRedisConnectionFactory, ReactiveRedisConnection> {
         val redis = mock(ReactiveRedisConnectionFactory::class.java)
         val connection = mock(ReactiveRedisConnection::class.java)
         `when`(redis.reactiveConnection).thenReturn(connection)
         `when`(connection.ping()).thenReturn(Mono.just("PONG"))
-        return redis
+        `when`(connection.closeLater()).thenReturn(Mono.empty())
+        return redis to connection
     }
 }
