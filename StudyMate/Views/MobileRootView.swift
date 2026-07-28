@@ -1037,7 +1037,6 @@ private struct MobileHomeView: View {
     @State private var hasLoadedCommunityQuestions = false
     @State private var editingStudyCategory: StudyCategory?
     @State private var editingStudyRoom: BackendStudyRoom?
-    @State private var deletionStudyCategory: StudyCategory?
     @State private var isAddingStudyCategory = false
     @State private var selectedCommunityQuestionRoute: CommunityQuestionRoute?
     @State private var notificationForwardRoute: NotificationForwardRoute?
@@ -1421,28 +1420,6 @@ private struct MobileHomeView: View {
                 }
             }
         }
-        .confirmationDialog(
-            deletionStudyCategory.map { strings.deleteStudySubtree($0.title) } ?? strings.deleteStudy,
-            isPresented: Binding(
-                get: { deletionStudyCategory != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        deletionStudyCategory = nil
-                    }
-                }
-            ),
-            titleVisibility: .visible
-        ) {
-            if let deletionStudyCategory {
-                Button(strings.deleteStudy, role: .destructive) {
-                    appState.deleteStudyCategory(id: deletionStudyCategory.id)
-                    self.deletionStudyCategory = nil
-                }
-            }
-            Button(strings.cancel, role: .cancel) {
-                deletionStudyCategory = nil
-            }
-        }
         .navigationDestination(item: $selectedCommunityQuestionRoute) { route in
             NotificationCommunityQuestionDestination(questionID: route.id)
         }
@@ -1639,7 +1616,7 @@ private struct MobileHomeView: View {
                     Button {
                         editingStudyCategory = category
                     } label: {
-                        Label(strings.edit, systemImage: "pencil")
+                        Label(strings.editStudyCategory, systemImage: "pencil")
                     }
 
                     Button {
@@ -1649,12 +1626,6 @@ private struct MobileHomeView: View {
                             strings.viewFullStudyTree,
                             systemImage: "point.3.connected.trianglepath.dotted"
                         )
-                    }
-
-                    Button(role: .destructive) {
-                        deletionStudyCategory = category
-                    } label: {
-                        Label(strings.deleteStudy, systemImage: "trash")
                     }
                 }
             }
@@ -1670,12 +1641,8 @@ private struct MobileHomeView: View {
             appState.openStudyCategory(String(room.id))
         case let .configureTopic(room):
             editingStudyRoom = room
-        case let .deleteTopic(room):
-            deletionStudyCategory = appState.studyCategory(for: room)
         case .configureRoot:
             editingStudyCategory = category
-        case .deleteRoot:
-            deletionStudyCategory = category
         case .openTree:
             appState.openStudyTree(category.id)
         }
@@ -6651,9 +6618,7 @@ private struct MobileHomeStudyTopicItem {
 private enum MobileHomeStudyOutlineAction {
     case openTopic(BackendStudyRoom)
     case configureTopic(BackendStudyRoom)
-    case deleteTopic(BackendStudyRoom)
     case configureRoot
-    case deleteRoot
     case openTree
 }
 
@@ -6935,8 +6900,8 @@ private struct MobileHomeStudyOutlineRow: View {
                     .accessibilityAction(named: strings.editStudyCategory) {
                         onAction(.configureTopic(room))
                     }
-                    .accessibilityAction(named: strings.deleteStudy) {
-                        onAction(.deleteTopic(room))
+                    .accessibilityAction(named: strings.viewFullStudyTree) {
+                        onAction(.openTree)
                     }
                 }
             }
@@ -6951,10 +6916,13 @@ private struct MobileHomeStudyOutlineRow: View {
             Label(strings.editStudyCategory, systemImage: "pencil")
         }
 
-        Button(role: .destructive) {
-            onAction(.deleteTopic(room))
+        Button {
+            onAction(.openTree)
         } label: {
-            Label(strings.deleteStudy, systemImage: "trash")
+            Label(
+                strings.viewFullStudyTree,
+                systemImage: "point.3.connected.trianglepath.dotted"
+            )
         }
     }
 
@@ -6973,12 +6941,6 @@ private struct MobileHomeStudyOutlineRow: View {
                 strings.viewFullStudyTree,
                 systemImage: "point.3.connected.trianglepath.dotted"
             )
-        }
-
-        Button(role: .destructive) {
-            onAction(.deleteRoot)
-        } label: {
-            Label(strings.deleteStudy, systemImage: "trash")
         }
     }
 
@@ -7066,8 +7028,8 @@ private struct MobileHomeStudyOutlineRow: View {
                 .accessibilityAction(named: strings.editStudyCategory) {
                     onAction(.configureRoot)
                 }
-                .accessibilityAction(named: strings.deleteStudy) {
-                    onAction(.deleteRoot)
+                .accessibilityAction(named: strings.viewFullStudyTree) {
+                    onAction(.openTree)
                 }
         } else {
             button
@@ -7081,8 +7043,8 @@ private struct MobileHomeStudyOutlineRow: View {
                 .accessibilityAction(named: strings.editStudyCategory) {
                     onAction(.configureTopic(room))
                 }
-                .accessibilityAction(named: strings.deleteStudy) {
-                    onAction(.deleteTopic(room))
+                .accessibilityAction(named: strings.viewFullStudyTree) {
+                    onAction(.openTree)
                 }
         }
     }

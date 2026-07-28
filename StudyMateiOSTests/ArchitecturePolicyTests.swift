@@ -944,6 +944,57 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testMyStudyListMenusKeepDeletionInsideEditors() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+
+        let topicActions = try XCTUnwrap(
+            content.range(
+                of: "private func topicActions(for room: BackendStudyRoom) -> some View {"
+            )
+        )
+        let rootActions = try XCTUnwrap(
+            content.range(
+                of: "private var rootActions: some View {",
+                range: topicActions.upperBound..<content.endIndex
+            )
+        )
+        let navigationRow = try XCTUnwrap(
+            content.range(
+                of: "private func studyNavigationRow(",
+                range: rootActions.upperBound..<content.endIndex
+            )
+        )
+        let topicMenuSource = String(content[topicActions.lowerBound..<rootActions.lowerBound])
+        let rootMenuSource = String(content[rootActions.lowerBound..<navigationRow.lowerBound])
+
+        for menuSource in [topicMenuSource, rootMenuSource] {
+            XCTAssertTrue(
+                menuSource.contains("Label(strings.editStudyCategory, systemImage: \"pencil\")")
+            )
+            XCTAssertTrue(menuSource.contains("strings.viewFullStudyTree"))
+            XCTAssertFalse(
+                menuSource.contains("strings.deleteStudy"),
+                "My Studies list menus should expose only Edit Study and View Full Tree."
+            )
+        }
+
+        XCTAssertFalse(
+            content.contains("@State private var deletionStudyCategory"),
+            "The My Studies list should not stage direct deletion outside an editor."
+        )
+        XCTAssertTrue(
+            content.contains("if onDelete != nil {\n                    Section {\n                        Button(role: .destructive)"),
+            "Root-study deletion should remain available inside StudyCategoryEditorSheet."
+        )
+        XCTAssertTrue(
+            content.contains("struct StudyTopicLevelSheet: View")
+                && content.contains("Button(strings.deleteStudy, role: .destructive)"),
+            "Child-topic deletion should remain available inside StudyTopicLevelSheet."
+        )
+    }
+
     func testSelectedStudyToolbarOffersEditTreeAndDeleteActions() throws {
         let root = try repositoryRoot()
         let file = root.appendingPathComponent("StudyMate/Views/StudyView.swift")
