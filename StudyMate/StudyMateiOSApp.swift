@@ -62,10 +62,18 @@ private struct StudyMateiOSBootstrapView: View {
     @Binding var appState: AppState?
     @State private var didBootstrap = false
 
+    private var forcesMaintenancePreview: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.environment["BUDDYSTUDY_DEBUG_MAINTENANCE"] == "1"
+        #else
+        false
+        #endif
+    }
+
     var body: some View {
         ZStack {
             if let appState {
-                if appState.isServiceUnderMaintenance {
+                if forcesMaintenancePreview || appState.isServiceUnderMaintenance {
                     ServiceMaintenanceView()
                         .environmentObject(appState)
                 } else {
