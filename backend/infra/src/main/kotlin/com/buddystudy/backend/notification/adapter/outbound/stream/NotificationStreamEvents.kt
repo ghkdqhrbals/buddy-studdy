@@ -28,12 +28,12 @@ data class NotificationRequestedPayload(
     val deviceId: String? = null,
     val actorUserId: Long? = null,
     val type: String = "ACTIVITY",
-    val title: String,
-    val body: String,
-    val threadType: String?,
-    val threadId: String?,
-    val deepLink: String?,
-    val metadataJson: String?,
+    val title: String? = null,
+    val body: String? = null,
+    val threadType: String? = null,
+    val threadId: String? = null,
+    val deepLink: String? = null,
+    val metadataJson: String? = null,
     val shouldPush: Boolean = false,
 )
 

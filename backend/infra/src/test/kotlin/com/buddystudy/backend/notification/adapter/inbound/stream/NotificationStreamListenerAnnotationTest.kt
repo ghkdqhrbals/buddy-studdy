@@ -46,6 +46,7 @@ class NotificationStreamListenerAnnotationTest {
         val payload = JsonMapperProvider.mapper.readValue<NotificationRequestedPayload>(
             """
             {
+              "userId": 7,
               "title": "New answer",
               "body": "A user answered.",
               "threadType": "QUESTION",
@@ -64,8 +65,18 @@ class NotificationStreamListenerAnnotationTest {
             claimed = true,
         )
 
-        assertThat(payload.toCommand(context).eventId).isEqualTo("question-created-45")
-        assertThat(payload.toCommand(context).type).isEqualTo("ACTIVITY")
-        assertThat(payload.toCommand(context).shouldPush).isFalse()
+        val command = payload.toCommandOrNull(context.eventId!!)
+        assertThat(command?.eventId).isEqualTo("question-created-45")
+        assertThat(command?.type).isEqualTo("ACTIVITY")
+        assertThat(command?.shouldPush).isFalse()
+    }
+
+    @Test
+    fun `empty native payload is decoded for question notification recovery`() {
+        val payload = JsonMapperProvider.mapper.readValue<NotificationRequestedPayload>("{}")
+
+        assertThat(payload.toCommandOrNull("question-created-45")).isNull()
+        assertThat(payload.missingRequiredFields())
+            .containsExactly("eventId", "owner", "title", "body")
     }
 }

@@ -36,6 +36,10 @@ interface ProcessNotificationEventUseCase {
     suspend fun process(command: NotificationRequestCommand): Long
 }
 
+interface RecoverNotificationCommandUseCase {
+    suspend fun recover(eventId: String): NotificationRequestCommand?
+}
+
 interface PublishNotificationUseCase {
     suspend fun publish(command: NotificationRequestCommand): Boolean
 }

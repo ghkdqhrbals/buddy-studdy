@@ -11,6 +11,7 @@ import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.notification.adapter.outbound.stream.NotificationRequestedPayload
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.notification.application.port.inbound.ProcessNotificationEventUseCase
+import com.buddystudy.backend.notification.application.port.inbound.RecoverNotificationCommandUseCase
 import com.buddystudy.backend.notification.application.port.outbound.NotificationPersistencePort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushPublishPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
@@ -28,6 +29,7 @@ class NotificationStreamListener(
     private val devices: DevicePort,
     private val userDevices: UserDevicePort,
     private val pushPublisher: QuestionPushPublishPort,
+    private val notificationRecovery: RecoverNotificationCommandUseCase,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -74,7 +76,32 @@ class NotificationStreamListener(
         payload: NotificationRequestedPayload,
         context: StreamMessageContext,
     ) {
-        val command = payload.toCommand(context)
+        val eventId = payload.eventId?.takeIf(String::isNotBlank)
+            ?: context.eventId?.takeIf(String::isNotBlank)
+            ?: run {
+                discardMalformed(payload, context, "eventId")
+                return
+            }
+        val command = payload.toCommandOrNull(eventId)
+            ?: notificationRecovery.recover(eventId)?.also {
+                logger.warn(
+                    "notification_event_payload_recovered stream={} redisRecordId={} eventId={} eventType={} missingFields={} claimed={}",
+                    context.streamKey,
+                    context.recordId,
+                    eventId,
+                    context.eventType,
+                    payload.missingRequiredFields(eventIdAvailable = true),
+                    context.claimed,
+                )
+            }
+            ?: run {
+                discardMalformed(
+                    payload,
+                    context,
+                    payload.missingRequiredFields(eventIdAvailable = true).joinToString(","),
+                )
+                return
+            }
         logger.debug(
             "redis_stream_consume_started listener={} stream={} redisRecordId={} eventId={} eventType={} userId={} claimed={}",
             "buddystudy-notification-listener",
@@ -172,6 +199,26 @@ class NotificationStreamListener(
         }
     }
 
+    private fun discardMalformed(
+        payload: NotificationRequestedPayload,
+        context: StreamMessageContext,
+        missingFields: String,
+    ) {
+        val error = IllegalArgumentException(
+            "Notification event payload cannot be recovered; missing fields: ${missingFields.ifBlank { "unknown" }}",
+        )
+        logger.error(
+            "notification_event_discarded reason=malformed_payload stream={} redisRecordId={} eventId={} eventType={} missingFields={} claimed={}",
+            context.streamKey,
+            context.recordId,
+            payload.eventId ?: context.eventId,
+            context.eventType,
+            missingFields.ifBlank { "unknown" },
+            context.claimed,
+            error,
+        )
+    }
+
     private companion object {
         const val GROUP = "bs-backend-notification"
         const val CONSUMER = "buddystudy-notification"
@@ -181,25 +228,34 @@ class NotificationStreamListener(
     }
 }
 
-internal fun NotificationRequestedPayload.toCommand(context: StreamMessageContext): NotificationRequestCommand =
-    NotificationRequestCommand(
-        eventId = eventId?.takeIf(String::isNotBlank)
-            ?: context.eventId?.takeIf(String::isNotBlank)
-            ?: throw IllegalArgumentException(
-                "Notification eventId is required in the payload or Redis Stream envelope.",
-            ),
+internal fun NotificationRequestedPayload.toCommandOrNull(eventId: String): NotificationRequestCommand? {
+    val resolvedTitle = title ?: return null
+    val resolvedBody = body ?: return null
+    if (userId == null && deviceId.isNullOrBlank()) return null
+    return NotificationRequestCommand(
+        eventId = eventId,
         userId = userId,
         deviceId = deviceId,
         actorUserId = actorUserId,
         type = type,
-        title = title,
-        body = body,
+        title = resolvedTitle,
+        body = resolvedBody,
         threadType = threadType,
         threadId = threadId,
         deepLink = deepLink,
         metadataJson = metadataJson,
         shouldPush = shouldPush,
     )
+}
+
+internal fun NotificationRequestedPayload.missingRequiredFields(
+    eventIdAvailable: Boolean = !eventId.isNullOrBlank(),
+): List<String> = buildList {
+    if (!eventIdAvailable) add("eventId")
+    if (userId == null && deviceId.isNullOrBlank()) add("owner")
+    if (title == null) add("title")
+    if (body == null) add("body")
+}
 
 private data class NotificationPushMetadata(
     val recordId: Long? = null,
