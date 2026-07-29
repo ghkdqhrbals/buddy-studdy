@@ -1,4 +1,4 @@
-import { ChevronDown, Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Activity, ChevronDown, Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   NAV_COLLAPSED_KEY,
@@ -46,6 +46,10 @@ export function AppShell({ children, contentClassName = "" }) {
   const [openGroups, setOpenGroups] = useState(() => storedJson(NAV_GROUP_KEY, {}));
 
   const currentPath = useMemo(() => window.location.pathname || "/", []);
+  const compactVersion = useMemo(
+    () => UI_VERSION.split(".").slice(-2).join("."),
+    [],
+  );
 
   useEffect(() => {
     document.documentElement.classList.toggle("nav-collapsed", collapsed);
@@ -77,6 +81,15 @@ export function AppShell({ children, contentClassName = "" }) {
     <div className="react-app-shell">
       <aside className="react-side-nav" data-collapsed={collapsed ? "true" : "false"}>
         <div className="react-nav-brand">
+          <a className="react-brand-home" href="/" aria-label="BuddyStudy Monitoring home">
+            <span className="react-brand-mark">
+              <Activity size={17} strokeWidth={2} aria-hidden="true" />
+            </span>
+            <span className="react-brand-copy">
+              <strong>BuddyStudy</strong>
+              <span>Monitoring</span>
+            </span>
+          </a>
           <button
             className="icon-button nav-toggle"
             type="button"
@@ -86,10 +99,6 @@ export function AppShell({ children, contentClassName = "" }) {
           >
             {collapsed ? <PanelLeftOpen size={19} /> : <PanelLeftClose size={19} />}
           </button>
-          <div className="react-brand-copy">
-            <strong>BuddyStudy</strong>
-            <span>Monitoring</span>
-          </div>
         </div>
 
         <nav className="react-navigation" aria-label="Monitoring sections">
@@ -125,11 +134,22 @@ export function AppShell({ children, contentClassName = "" }) {
         </nav>
 
         <footer className="react-nav-footer">
-          <span>Monitoring UI</span>
+          <span>Status console</span>
           <strong className="version-full">v{UI_VERSION}</strong>
-          <strong className="version-compact" title={`Monitoring UI v${UI_VERSION}`}>v27.2</strong>
+          <strong className="version-compact" title={`Monitoring UI v${UI_VERSION}`}>
+            v{compactVersion}
+          </strong>
         </footer>
       </aside>
+
+      <button
+        className="react-nav-backdrop"
+        type="button"
+        data-visible={collapsed ? "false" : "true"}
+        onClick={() => setCollapsed(true)}
+        aria-label="Close navigation"
+        tabIndex={collapsed ? -1 : 0}
+      />
 
       <main
         className={`react-content ${contentClassName}`.trim()}

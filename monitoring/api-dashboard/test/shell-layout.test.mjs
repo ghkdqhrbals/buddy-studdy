@@ -110,11 +110,15 @@ test("navigation is fixed, collapsible, and keeps its version at the bottom", as
   const shell = await source("app/AppShell.jsx");
   assert.match(css, /\.react-side-nav\s*\{[\s\S]*position:\s*fixed/);
   assert.match(css, /background:\s*var\(--nav-bg\)/);
-  assert.match(css, /--nav-bg:\s*#000000/);
+  assert.match(css, /--nav-bg:\s*#f8fafc/);
+  assert.match(css, /\.react-nav-link\[data-current="true"\]\s*\{[\s\S]*background:\s*#eaf1ff/);
   assert.match(css, /\.react-side-nav\[data-collapsed="true"\]/);
   assert.match(css, /\.react-nav-footer\s*\{[\s\S]*position:\s*absolute/);
+  assert.match(css, /\.react-nav-backdrop\[data-visible="true"\]/);
   assert.match(shell, /PanelLeftOpen/);
   assert.match(shell, /PanelLeftClose/);
+  assert.match(shell, /react-brand-mark/);
+  assert.match(shell, /compactVersion/);
   assert.match(shell, /monitoring:nav-mode-change/);
   assert.match(shell, /navigationGroups\.map/);
 });
