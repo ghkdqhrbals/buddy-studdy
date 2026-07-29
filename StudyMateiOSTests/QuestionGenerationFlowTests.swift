@@ -692,7 +692,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
                             "answeredAt": "2025-07-28T00:01:00Z",
                             "isPublic": true,
                             "gradingRequestId": "grading-12",
-                            "gradingStatus": "QUEUED",
+                            "gradingStatus": "JUDGING",
                             "gradingError": null
                           },
                           "createdAt": "2025-07-28T00:00:00Z",
@@ -717,7 +717,48 @@ final class QuestionGenerationFlowTests: XCTestCase {
                       "status": "COMPLETED",
                       "terminal": true,
                       "pollAfterMs": null,
-                      "events": [],
+                      "events": [
+                        {
+                          "id": 1,
+                          "recordId": "record-12",
+                          "correlationId": "grading-12",
+                          "status": "QUEUED",
+                          "errorMessage": null,
+                          "occurredAt": "2025-07-28T00:01:00Z"
+                        },
+                        {
+                          "id": 2,
+                          "recordId": "record-12",
+                          "correlationId": "grading-12",
+                          "status": "ANALYZING_EVIDENCE",
+                          "errorMessage": null,
+                          "occurredAt": "2025-07-28T00:01:10Z"
+                        },
+                        {
+                          "id": 3,
+                          "recordId": "record-12",
+                          "correlationId": "grading-12",
+                          "status": "CRITIQUING",
+                          "errorMessage": null,
+                          "occurredAt": "2025-07-28T00:01:20Z"
+                        },
+                        {
+                          "id": 4,
+                          "recordId": "record-12",
+                          "correlationId": "grading-12",
+                          "status": "JUDGING",
+                          "errorMessage": null,
+                          "occurredAt": "2025-07-28T00:01:30Z"
+                        },
+                        {
+                          "id": 5,
+                          "recordId": "record-12",
+                          "correlationId": "grading-12",
+                          "status": "COMPLETED",
+                          "errorMessage": null,
+                          "occurredAt": "2025-07-28T00:02:00Z"
+                        }
+                      ],
                       "errorMessage": null,
                       "updatedAt": "2025-07-28T00:02:00Z"
                     }
@@ -758,10 +799,11 @@ final class QuestionGenerationFlowTests: XCTestCase {
                 return Self.response(for: request, statusCode: 500, body: "{}")
             }
         }
+        let sleepProvider = RecordingAppSleepProvider()
         let appState = AppState(
             settingsStore: store,
             remotePushBackendClient: client,
-            appSleepProvider: ImmediateAppSleepProvider()
+            appSleepProvider: sleepProvider
         )
 
         await appState.prepareStudyRoom(
@@ -779,6 +821,12 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertEqual(restored.gradingResult?.score, 91)
         XCTAssertEqual(restored.gradingStatus, .completed)
         XCTAssertFalse(appState.isGradingAnswer)
+        let replayDelays = await sleepProvider.requestedNanoseconds()
+        XCTAssertEqual(
+            replayDelays,
+            [],
+            "Reopening must use the process snapshot instead of replaying historical grading events."
+        )
     }
 
     func testJapaneseLanguageUsesJapaneseLocaleAndBackendCode() {
@@ -1067,6 +1115,18 @@ private actor BlockingRecordingAppSleepProvider: AppSleepProviding {
     func sleep(nanoseconds: UInt64) async throws {
         values.append(nanoseconds)
         try await Task.sleep(nanoseconds: 60_000_000_000)
+    }
+
+    func requestedNanoseconds() -> [UInt64] {
+        values
+    }
+}
+
+private actor RecordingAppSleepProvider: AppSleepProviding {
+    private var values: [UInt64] = []
+
+    func sleep(nanoseconds: UInt64) async throws {
+        values.append(nanoseconds)
     }
 
     func requestedNanoseconds() -> [UInt64] {

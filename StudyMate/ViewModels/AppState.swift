@@ -5685,7 +5685,8 @@ final class AppState: ObservableObject {
                     queuedRecord,
                     registration: registration,
                     sessionGeneration: sessionGeneration,
-                    ownerID: pollingOwnerID
+                    ownerID: pollingOwnerID,
+                    resumeFromCurrentStatus: true
                 )
             },
             onSuccess: { updatedRecord in
@@ -6969,7 +6970,8 @@ final class AppState: ObservableObject {
         _ queuedRecord: StudyRecord,
         registration: RemotePushRegistration,
         sessionGeneration: UInt64,
-        ownerID: String
+        ownerID: String,
+        resumeFromCurrentStatus: Bool = false
     ) async throws -> StudyRecord {
         guard isAnswerGradingOwnerCurrent(ownerID) else {
             throw CancellationError()
@@ -6984,7 +6986,8 @@ final class AppState: ObservableObject {
                 queuedRecord,
                 registration: registration,
                 sessionGeneration: sessionGeneration,
-                ownerID: ownerID
+                ownerID: ownerID,
+                resumeFromCurrentStatus: resumeFromCurrentStatus
             )
         }
         answerGradingPollingID = pollingID
@@ -7002,7 +7005,8 @@ final class AppState: ObservableObject {
         _ queuedRecord: StudyRecord,
         registration: RemotePushRegistration,
         sessionGeneration: UInt64,
-        ownerID: String
+        ownerID: String,
+        resumeFromCurrentStatus: Bool
     ) async throws -> StudyRecord {
         guard isAnswerGradingSessionCurrent(sessionGeneration),
               isAnswerGradingOwnerCurrent(ownerID) else {
@@ -7039,9 +7043,51 @@ final class AppState: ObservableObject {
                     throw CancellationError()
                 }
                 consecutiveTransportFailures = 0
+                if resumeFromCurrentStatus {
+                    cursor = process.events.reduce(cursor) { max($0, $1.id) }
+                    if process.status != displayedStatus {
+                        displayedStatus = process.status
+                        displayedAt = appClock.now
+                        persistAnswerGradingProgress(
+                            process.status,
+                            errorMessage: process.errorMessage,
+                            for: queuedRecord,
+                            usesAuthoritativeStatus: true
+                        )
+                        let progressMessage = gradingMessage(for: process.status)
+                        statusMessage = progressMessage
+                        answerGradingStatusMessage = progressMessage
+                        log(
+                            .info,
+                            "재개한 채점의 현재 상태를 복원했습니다. recordID=\(process.recordID), status=\(process.status.rawValue)"
+                        )
+                    }
+                    if process.terminal {
+                        if process.status == .completed {
+                            guard isAnswerGradingSessionCurrent(sessionGeneration),
+                                  isAnswerGradingOwnerCurrent(ownerID) else {
+                                throw CancellationError()
+                            }
+                            return try await recordsUseCase.fetchRecord(
+                                registration: registration,
+                                recordID: process.recordID,
+                                language: settings.appLanguage,
+                                view: .localized
+                            )
+                        }
+                        throw AnswerGradingProcessError.failed(
+                            process.errorMessage ?? strings.gradingFailed
+                        )
+                    }
+                    await sleepForAnswerGradingPoll()
+                    continue
+                }
                 for event in process.events {
                     cursor = max(cursor, event.id)
-                    guard event.status != displayedStatus else {
+                    guard shouldAdvanceGradingStatus(
+                        from: displayedStatus,
+                        to: event.status
+                    ) else {
                         continue
                     }
                     try await keepGradingStatusVisible(
@@ -7050,6 +7096,11 @@ final class AppState: ObservableObject {
                     )
                     displayedStatus = event.status
                     displayedAt = appClock.now
+                    persistAnswerGradingProgress(
+                        event.status,
+                        errorMessage: event.errorMessage,
+                        for: queuedRecord
+                    )
                     let progressMessage = gradingMessage(for: event.status)
                     statusMessage = progressMessage
                     answerGradingStatusMessage = progressMessage
@@ -7081,6 +7132,35 @@ final class AppState: ObservableObject {
                     default:
                         break
                     }
+                }
+                if !process.terminal,
+                   shouldAdvanceGradingStatus(
+                       from: displayedStatus,
+                       to: process.status
+                   ) {
+                    try await keepGradingStatusVisible(
+                        displayedStatus,
+                        since: displayedAt
+                    )
+                    displayedStatus = process.status
+                    displayedAt = appClock.now
+                    persistAnswerGradingProgress(
+                        process.status,
+                        errorMessage: process.errorMessage,
+                        for: queuedRecord
+                    )
+                    let progressMessage = gradingMessage(for: process.status)
+                    statusMessage = progressMessage
+                    answerGradingStatusMessage = progressMessage
+                    log(
+                        .info,
+                        "채점 현재 상태를 응답 스냅샷에서 복원했습니다. recordID=\(process.recordID), status=\(process.status.rawValue)"
+                    )
+                    await Task.yield()
+                    try await keepGradingStatusVisible(
+                        displayedStatus,
+                        since: displayedAt
+                    )
                 }
                 if process.terminal {
                     try await keepGradingStatusVisible(
@@ -7122,6 +7202,69 @@ final class AppState: ObservableObject {
         }
 
         throw CancellationError()
+    }
+
+    private func shouldAdvanceGradingStatus(
+        from currentStatus: AnswerGradingStatus,
+        to candidateStatus: AnswerGradingStatus
+    ) -> Bool {
+        guard candidateStatus != currentStatus else {
+            return false
+        }
+        if candidateStatus.isTerminal {
+            return true
+        }
+        return gradingStatusOrder(candidateStatus) > gradingStatusOrder(currentStatus)
+    }
+
+    private func gradingStatusOrder(_ status: AnswerGradingStatus) -> Int {
+        switch status {
+        case .queued:
+            0
+        case .analyzingEvidence:
+            1
+        case .critiquing:
+            2
+        case .judging:
+            3
+        case .adjudicating:
+            4
+        case .completed, .failed:
+            5
+        }
+    }
+
+    private func persistAnswerGradingProgress(
+        _ status: AnswerGradingStatus,
+        errorMessage: String?,
+        for queuedRecord: StudyRecord,
+        usesAuthoritativeStatus: Bool = false
+    ) {
+        guard status != .completed else {
+            return
+        }
+        let currentRecord = studyRecords.first(where: { $0.id == queuedRecord.id })
+            ?? studyRoomState.rooms
+                .compactMap(\.pendingQuestion)
+                .first(where: { $0.id == queuedRecord.id })
+            ?? queuedRecord
+        guard currentRecord.gradingResult == nil else {
+            return
+        }
+        if !usesAuthoritativeStatus,
+           let currentStatus = currentRecord.gradingStatus,
+           !shouldAdvanceGradingStatus(from: currentStatus, to: status) {
+            return
+        }
+
+        var progressedRecord = currentRecord
+        progressedRecord.gradingStatus = status
+        progressedRecord.gradingError = errorMessage
+        localStudyRecordUseCase.replaceRecords(
+            mergeBackendRecord(progressedRecord, into: studyRecords)
+        )
+        reloadStudyRecordsFromStore(refreshRooms: false)
+        _ = studyRoomState.applyIncomingRecord(progressedRecord)
     }
 
     func cancelAnswerGradingPolling(ownerID: String, reason: String) {
