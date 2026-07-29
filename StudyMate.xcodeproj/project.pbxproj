@@ -127,6 +127,10 @@
 		120000000000000000000207 /* AvatarBuilderAssetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000206 /* AvatarBuilderAssetTests.swift */; };
 		120000000000000000000209 /* QuestionGenerationFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000208 /* QuestionGenerationFlowTests.swift */; };
 		120000000000000000000101 /* StudyMateiOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000001 /* StudyMateiOSApp.swift */; };
+		F60000000000000000000001 /* AppAnalytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000002 /* AppAnalytics.swift */; };
+		F60000000000000000000003 /* AppAnalytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000002 /* AppAnalytics.swift */; };
+		F60000000000000000000004 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000005 /* GoogleService-Info.plist */; };
+		F60000000000000000000006 /* FirebaseAnalyticsCore in Frameworks */ = {isa = PBXBuildFile; productRef = F60000000000000000000007 /* FirebaseAnalyticsCore */; };
 		120000000000000000000102 /* StudyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000002 /* StudyModels.swift */; };
 		1200000000000000000001E0 /* JapaneseAppStrings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000E0 /* JapaneseAppStrings.swift */; };
 		120000000000000000000104 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000004 /* SettingsStore.swift */; };
@@ -392,6 +396,8 @@
 		110000000000000000000149 /* study_tap.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = study_tap.wav; sourceTree = "<group>"; };
 		11000000000000000000014A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		120000000000000000000001 /* StudyMateiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyMateiOSApp.swift; sourceTree = "<group>"; };
+		F60000000000000000000002 /* AppAnalytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAnalytics.swift; sourceTree = "<group>"; };
+		F60000000000000000000005 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		120000000000000000000003 /* MobileRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileRootView.swift; sourceTree = "<group>"; };
 		120000000000000000000301 /* AppDebugControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDebugControls.swift; sourceTree = "<group>"; };
 		120000000000000000000020 /* StudyMate.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StudyMate.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -429,6 +435,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F60000000000000000000006 /* FirebaseAnalyticsCore in Frameworks */,
 				D40000000000000000000001 /* MarkdownUI in Frameworks */,
 				E50000000000000000000001 /* Sentry in Frameworks */,
 			);
@@ -453,6 +460,7 @@
 				110000000000000000000001 /* StudyMateApp.swift */,
 				120000000000000000000001 /* StudyMateiOSApp.swift */,
 				E50000000000000000000004 /* SentryMonitoring.swift */,
+				F60000000000000000000002 /* AppAnalytics.swift */,
 				11000000000000000000002A /* Core */,
 				11000000000000000000002F /* UseCases */,
 				11000000000000000000004D /* Repositories */,
@@ -466,6 +474,7 @@
 				120000000000000000000017 /* StudyMateiOS.entitlements */,
 				11000000000000000000000B /* Info.plist */,
 				12000000000000000000000B /* iOSInfo.plist */,
+				F60000000000000000000005 /* GoogleService-Info.plist */,
 			);
 			path = StudyMate;
 			sourceTree = "<group>";
@@ -992,6 +1001,7 @@
 			packageProductDependencies = (
 				D40000000000000000000002 /* MarkdownUI */,
 				E50000000000000000000002 /* Sentry */,
+				F60000000000000000000007 /* FirebaseAnalyticsCore */,
 			);
 			productName = StudyMate;
 			productReference = 120000000000000000000020 /* StudyMate.app */;
@@ -1043,6 +1053,7 @@
 			packageReferences = (
 				D40000000000000000000003 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 				E50000000000000000000005 /* XCLocalSwiftPackageReference "Packages/SentrySDK" */,
+				F60000000000000000000008 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 110000000000000000000062 /* Products */;
@@ -1089,6 +1100,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F60000000000000000000004 /* GoogleService-Info.plist in Resources */,
 				120000000000000000000150 /* study_ping.wav in Resources */,
 				120000000000000000000151 /* study_chime.wav in Resources */,
 				120000000000000000000152 /* study_pop.wav in Resources */,
@@ -1106,6 +1118,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				110000000000000000000101 /* StudyMateApp.swift in Sources */,
+				F60000000000000000000003 /* AppAnalytics.swift in Sources */,
 				110000000000000000000102 /* StudyModels.swift in Sources */,
 				1100000000000000000001E0 /* JapaneseAppStrings.swift in Sources */,
 				110000000000000000000104 /* SettingsStore.swift in Sources */,
@@ -1238,6 +1251,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				120000000000000000000101 /* StudyMateiOSApp.swift in Sources */,
+				F60000000000000000000001 /* AppAnalytics.swift in Sources */,
 				E50000000000000000000003 /* SentryMonitoring.swift in Sources */,
 				120000000000000000000102 /* StudyModels.swift in Sources */,
 				1200000000000000000001E0 /* JapaneseAppStrings.swift in Sources */,
@@ -1638,7 +1652,10 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.1.0;
-				OTHER_LDFLAGS = "$(inherited)";
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.ghkdqhrbals.StudyMate;
 				PRODUCT_NAME = StudyMate;
 				SDKROOT = iphoneos;
@@ -1669,7 +1686,10 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.1.0;
-				OTHER_LDFLAGS = "$(inherited)";
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.ghkdqhrbals.StudyMate;
 				PRODUCT_NAME = StudyMate;
 				SDKROOT = iphoneos;
@@ -1747,6 +1767,14 @@
 				version = 2.4.1;
 			};
 		};
+		F60000000000000000000008 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = exactVersion;
+				version = 12.17.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1759,6 +1787,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = E50000000000000000000005 /* XCLocalSwiftPackageReference "Packages/SentrySDK" */;
 			productName = Sentry;
+		};
+		F60000000000000000000007 /* FirebaseAnalyticsCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F60000000000000000000008 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAnalyticsCore;
 		};
 /* End XCSwiftPackageProductDependency section */
 

@@ -124,6 +124,7 @@ jobs:
       IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64 }}
       IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
       IOS_APP_STORE_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_APP_STORE_PROVISIONING_PROFILE_BASE64 }}
+      GOOGLE_SERVICE_INFO_PLIST_BASE64: ${{ secrets.GOOGLE_SERVICE_INFO_PLIST_BASE64 }}
       RELEASE_VERSION: ${{ needs.plan_ios_release.outputs.release_version }}
       RELEASE_BUILD_NUMBER: ${{ needs.plan_ios_release.outputs.release_build_number }}
       ARTIFACT_NAME: ${{ needs.plan_ios_release.outputs.artifact_name }}
@@ -144,7 +145,8 @@ jobs:
             APPSTORE_CONNECT_PRIVATE_KEY_BASE64 \
             IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64 \
             IOS_DISTRIBUTION_CERTIFICATE_PASSWORD \
-            IOS_APP_STORE_PROVISIONING_PROFILE_BASE64; do
+            IOS_APP_STORE_PROVISIONING_PROFILE_BASE64 \
+            GOOGLE_SERVICE_INFO_PLIST_BASE64; do
             if [ -z "${!name}" ]; then
               echo "Missing GitHub Actions secret: ${name}" >&2
               missing=1
@@ -152,6 +154,29 @@ jobs:
           done
 
           if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Install Firebase Analytics configuration
+        run: |
+          set -euo pipefail
+
+          config_path="StudyMate/GoogleService-Info.plist"
+          echo "${GOOGLE_SERVICE_INFO_PLIST_BASE64}" | base64 --decode > "${config_path}"
+          plutil -lint "${config_path}"
+
+          bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :BUNDLE_ID' "${config_path}")"
+          app_id="$(/usr/libexec/PlistBuddy -c 'Print :GOOGLE_APP_ID' "${config_path}")"
+          api_key="$(/usr/libexec/PlistBuddy -c 'Print :API_KEY' "${config_path}")"
+          analytics_enabled="$(/usr/libexec/PlistBuddy -c 'Print :IS_ANALYTICS_ENABLED' "${config_path}")"
+          analytics_enabled="$(printf '%s' "${analytics_enabled}" | tr '[:upper:]' '[:lower:]')"
+
+          if [ "${bundle_id}" != "io.github.ghkdqhrbals.StudyMate" ]; then
+            echo "Firebase configuration has an unexpected bundle identifier." >&2
+            exit 1
+          fi
+          if [[ "${app_id}" != 1:* ]] || [ -z "${api_key}" ] || { [ "${analytics_enabled}" != "true" ] && [ "${analytics_enabled}" != "yes" ] && [ "${analytics_enabled}" != "1" ]; }; then
+            echo "Firebase Analytics configuration is incomplete or disabled." >&2
             exit 1
           fi
 

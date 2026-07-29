@@ -121,11 +121,15 @@ final class NotificationLandingCoordinator {
         }
 
         if let questionCreatedAt = StudyNotificationPayload.questionCreatedAt(from: userInfo) {
-            return appState.openRecordFromNotification(
+            let didOpen = appState.openRecordFromNotification(
                 recordID: nil,
                 questionCreatedAt: questionCreatedAt,
                 replyText: replyText
             )
+            if didOpen {
+                AppAnalytics.notificationOpened(kind: .question)
+            }
+            return didOpen
         }
 
         appState.logRemoteNotificationEvent(
@@ -142,7 +146,11 @@ final class NotificationLandingCoordinator {
         }
 
         appState.logRemoteNotificationEvent("알림 route를 열었습니다. route=\(route)")
-        return appState.openRouteFromNotification(route)
+        let didOpen = appState.openRouteFromNotification(route)
+        if didOpen {
+            AppAnalytics.notificationOpened(kind: analyticsKind(for: route))
+        }
+        return didOpen
     }
 
     @discardableResult
@@ -152,7 +160,11 @@ final class NotificationLandingCoordinator {
             appState.notificationLandingMessage = nil
             appState.statusMessage = appState.strings.openingNotificationQuestion
             appState.logRemoteNotificationEvent("알림 record route를 즉시 열었습니다. recordID=\(recordID)")
-            return appState.openRouteFromNotification(.recordDetail(recordID: recordID))
+            let didOpen = appState.openRouteFromNotification(.recordDetail(recordID: recordID))
+            if didOpen {
+                AppAnalytics.notificationOpened(kind: .question)
+            }
+            return didOpen
         }
 
         do {
@@ -163,6 +175,9 @@ final class NotificationLandingCoordinator {
                 ? (record.gradingResult == nil ? "알림에서 열린 질문입니다." : "알림에서 기록을 열었습니다.")
                 : "알림 답장을 기록에 저장했습니다."
             appState.logRemoteNotificationEvent("알림 record를 열었습니다. recordID=\(recordID), didOpen=\(didOpen)")
+            if didOpen {
+                AppAnalytics.notificationOpened(kind: .question)
+            }
             return didOpen
         } catch {
             appState.showNotificationQuestionUnavailable(preserveCurrentQuestion: true)
@@ -173,5 +188,16 @@ final class NotificationLandingCoordinator {
 
     func routeForNotificationListSelection(_ notification: BackendAppNotification) -> AppRoute {
         NotificationRouteResolver.route(for: notification)
+    }
+
+    private func analyticsKind(for route: AppRoute) -> AppAnalyticsNotificationKind {
+        switch route {
+        case .recordDetail, .studyList, .studyRoom:
+            return .question
+        case .publicQuestion, .publicQuestions:
+            return .community
+        default:
+            return .general
+        }
     }
 }

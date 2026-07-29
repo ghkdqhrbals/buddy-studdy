@@ -136,6 +136,32 @@ struct MobileRootView: View {
             MobileRequiredTermsGateSheet()
                 .environmentObject(appState)
         }
+        .onAppear {
+            AppAnalytics.setLanguage(appState.settings.appLanguage)
+            AppAnalytics.setSignedIn(appState.isCommunitySessionActive)
+            trackCurrentScreen()
+        }
+        .onChange(of: appState.hasCompletedOnboarding) { _, _ in
+            trackCurrentScreen()
+        }
+        .onChange(of: appState.mobileVisibleTab) { _, _ in
+            trackCurrentScreen()
+        }
+        .onChange(of: appState.shouldShowRecordsLoginPage) { _, _ in
+            guard appState.mobileVisibleTab == .records else {
+                return
+            }
+            trackCurrentScreen()
+        }
+        .onChange(of: appState.shouldShowStatisticsLoginPage) { _, _ in
+            guard appState.mobileVisibleTab == .statistics else {
+                return
+            }
+            trackCurrentScreen()
+        }
+        .onChange(of: appState.isCommunitySessionActive) { _, isSignedIn in
+            AppAnalytics.setSignedIn(isSignedIn)
+        }
     }
 
     private var selectedMobileTab: Binding<AppTab> {
@@ -154,6 +180,32 @@ struct MobileRootView: View {
         }
 
         return appState.strings.tabStudy
+    }
+
+    private func trackCurrentScreen() {
+        guard appState.hasCompletedOnboarding else {
+            AppAnalytics.screen(.onboarding)
+            return
+        }
+
+        switch appState.mobileVisibleTab {
+        case .home:
+            AppAnalytics.screen(.home)
+        case .study:
+            AppAnalytics.screen(.studyRoom)
+        case .settings:
+            AppAnalytics.screen(.settings)
+        case .records:
+            AppAnalytics.screen(
+                appState.shouldShowRecordsLoginPage ? .recordsLogin : .records
+            )
+        case .statistics:
+            AppAnalytics.screen(
+                appState.shouldShowStatisticsLoginPage ? .statisticsLogin : .statistics
+            )
+        case .notifications:
+            AppAnalytics.screen(.notifications)
+        }
     }
 }
 
@@ -948,6 +1000,7 @@ private struct MobileLoginPage: View {
         .navigationTitle(strings.communityLogin)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            AppAnalytics.screen(.login)
             appState.logMobileAuthView("mobile_login_page_appear", reason: "MobileLoginPage")
         }
         .onChange(of: appState.isCommunitySessionActive) { _, isSignedIn in
@@ -2758,6 +2811,9 @@ struct MobileStudyTreeView: View {
                     appState.setStudyTopicActive(studyID: room.id, active: isActive)
                 }
             }
+        }
+        .onAppear {
+            AppAnalytics.screen(.studyTree)
         }
         .task {
             loadTreeState()

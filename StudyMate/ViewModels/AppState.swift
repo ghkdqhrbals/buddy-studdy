@@ -1512,7 +1512,7 @@ final class AppState: ObservableObject {
         }
         let isKorean = language == .korean
         let isJapanese = language == .japanese
-        let now = Date()
+        let now = appClock.now
         let rootTitles: [String]
         switch language {
         case .korean:
@@ -3663,6 +3663,7 @@ final class AppState: ObservableObject {
 
     func signInToCommunity() {
         logAuthTrace("community_sign_in_start", reason: "google", deduplicate: false)
+        AppAnalytics.login(method: .google, outcome: .started)
         Task {
             #if os(iOS)
             do {
@@ -3671,14 +3672,17 @@ final class AppState: ObservableObject {
                 await signInToCommunity(idToken: idToken)
             } catch GoogleOAuthError.cancelled {
                 communityErrorMessage = nil
+                AppAnalytics.login(method: .google, outcome: .cancelled)
                 logAuthTrace("community_sign_in_cancelled", reason: "google", deduplicate: false)
                 log(.info, "Google Login이 사용자에 의해 취소되었습니다.")
             } catch GoogleOAuthError.notConfigured {
                 statusMessage = strings.googleLoginSetupRequired
+                AppAnalytics.login(method: .google, outcome: .failed)
                 logAuthTrace("community_sign_in_not_configured", reason: "google", deduplicate: false)
                 log(.warning, "Google Login 설정이 없습니다.")
             } catch {
                 handleCommunityError(error)
+                AppAnalytics.login(method: .google, outcome: .failed)
                 logAuthTrace(
                     "community_sign_in_failure",
                     reason: "google",
@@ -3696,6 +3700,7 @@ final class AppState: ObservableObject {
     func signInToCommunity(idToken: String) async {
         logAuthTrace("community_sign_in_token_exchange_start", reason: "google-login", deduplicate: false)
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "google-login") else {
+            AppAnalytics.login(method: .google, outcome: .failed)
             logAuthTrace("community_sign_in_missing_registration", reason: "google-login", deduplicate: false)
             clearCommunityErrorForMissingRegistration(reason: "google-login")
             return
@@ -3712,11 +3717,13 @@ final class AppState: ObservableObject {
                 applyCommunityProfile(result.profile)
                 storedBackendIdentityUseCase.saveRegistration(result.registration)
                 communityErrorMessage = nil
+                AppAnalytics.login(method: .google, outcome: .completed)
                 logAuthTrace("community_sign_in_success", reason: "google-login", deduplicate: false)
                 refreshCommunitySignInDataInBackground(registration: result.registration, reason: "google-login")
             },
             onFailure: { error in
                 handleCommunityError(error)
+                AppAnalytics.login(method: .google, outcome: .failed)
                 logAuthTrace(
                     "community_sign_in_token_exchange_failure",
                     reason: "google-login",
@@ -3825,8 +3832,10 @@ final class AppState: ObservableObject {
 
     func signInToCommunity(email: String, password: String, verificationCode: String? = nil) async -> EmailCommunitySignInResult {
         logAuthTrace("community_sign_in_start", reason: "email-login", deduplicate: false)
+        AppAnalytics.login(method: .email, outcome: .started)
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "email-login") else {
+            AppAnalytics.login(method: .email, outcome: .failed)
             logAuthTrace("community_sign_in_missing_registration", reason: "email-login", deduplicate: false)
             clearCommunityErrorForMissingRegistration(reason: "email-login")
             return .failed
@@ -3850,16 +3859,19 @@ final class AppState: ObservableObject {
             onSuccess: { result in
                 applyCommunityProfile(result.profile)
                 storedBackendIdentityUseCase.saveRegistration(result.registration)
+                AppAnalytics.login(method: .email, outcome: .completed)
                 logAuthTrace("community_sign_in_success", reason: "email-login", deduplicate: false)
             },
             onFailure: { error in
                 if appErrorResolution(error, fallback: strings.communityRequestFailed).requiresEmailVerification {
                     communityErrorMessage = strings.emailVerificationRequired
+                    AppAnalytics.login(method: .email, outcome: .verificationRequired)
                     logAuthTrace("community_sign_in_email_verification_required", reason: "email-login", deduplicate: false)
                     log(.info, "Email 로그인에 인증코드가 필요합니다.")
                     return
                 }
                 handleCommunityError(error)
+                AppAnalytics.login(method: .email, outcome: .failed)
                 logAuthTrace(
                     "community_sign_in_failure",
                     reason: "email-login",
@@ -5596,6 +5608,7 @@ final class AppState: ObservableObject {
                         fallback: settings.appLanguage
                     )
                 )
+                AppAnalytics.answerSubmitted()
                 try Task.checkCancellation()
                 guard isAnswerGradingOwnerCurrent(pollingOwnerID) else {
                     throw CancellationError()
@@ -5608,6 +5621,7 @@ final class AppState: ObservableObject {
                 )
             },
             onSuccess: { updatedRecord in
+                AppAnalytics.answerGradingCompleted()
                 applyStudyRoomRecord(updatedRecord, answer: submittedAnswer)
                 await syncRemotePushScheduleIfPossible(reason: "grade")
             },
@@ -5617,6 +5631,7 @@ final class AppState: ObservableObject {
                       isAnswerGradingOwnerCurrent(pollingOwnerID) else {
                     return
                 }
+                AppAnalytics.answerGradingFailed()
                 handleOpenAIError(error)
                 statusMessage = nil
             },
@@ -6148,6 +6163,7 @@ final class AppState: ObservableObject {
 
     func setAppLanguage(_ language: AppLanguage) {
         updateAppLanguage(language)
+        AppAnalytics.setLanguage(language)
         localStudySettingsUseCase.saveSettings(settings)
         savedSettings = normalizedSettings(settings)
         reloadStudyRecordsFromStore()
@@ -6233,6 +6249,7 @@ final class AppState: ObservableObject {
             studyCategoryID: studyCategoryID,
             submittedAt: appClock.now
         )
+        AppAnalytics.questionRequested(source: manual ? .manual : .scheduled)
         startQuestionGenerationPolling(pending: pending, registration: registration, manual: manual)
     }
 
@@ -6335,8 +6352,10 @@ final class AppState: ObservableObject {
                 consecutiveTransportFailures = 0
                 if process.terminal {
                     if process.status == .completed, let record = process.question {
+                        AppAnalytics.questionGenerationCompleted(source: manual ? .manual : .scheduled)
                         applyCompletedQuestionGeneration(record, fallbackStudyID: pending.studyID)
                     } else {
+                        AppAnalytics.questionGenerationFailed(source: manual ? .manual : .scheduled)
                         let message = process.error?.message ?? strings.communityRequestFailed
                         errorMessage = message
                         statusMessage = nil
@@ -6792,6 +6811,7 @@ final class AppState: ObservableObject {
                         fallback: settings.appLanguage
                     )
                 )
+                AppAnalytics.answerSubmitted()
                 try Task.checkCancellation()
                 guard isAnswerGradingOwnerCurrent(pollingOwnerID) else {
                     throw CancellationError()
@@ -6804,6 +6824,7 @@ final class AppState: ObservableObject {
                 )
             },
             onSuccess: { updatedRecord in
+                AppAnalytics.answerGradingCompleted()
                 applyGradedRecord(updatedRecord, answer: trimmedAnswer)
                 await syncRemotePushScheduleIfPossible(reason: "grade")
             },
@@ -6813,6 +6834,7 @@ final class AppState: ObservableObject {
                       isAnswerGradingOwnerCurrent(pollingOwnerID) else {
                     return
                 }
+                AppAnalytics.answerGradingFailed()
                 handleOpenAIError(error)
                 statusMessage = nil
             },
@@ -8453,6 +8475,7 @@ final class AppState: ObservableObject {
                 category: category,
                 settings: settings
             )
+            AppAnalytics.studyCreated(kind: .root)
             log(.info, "백엔드 학습을 추가했습니다. id=\(room.id), topic=\(room.topic)")
             await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
             return true
@@ -8507,6 +8530,7 @@ final class AppState: ObservableObject {
                 sortOrder: sortOrder,
                 activeForQuestions: activeForQuestions
             )
+            AppAnalytics.studyCreated(kind: .topic)
             log(
                 .info,
                 "백엔드 하위 주제를 추가했습니다. id=\(room.id), parentStudyId=\(parentStudyID), topic=\(room.topic)"

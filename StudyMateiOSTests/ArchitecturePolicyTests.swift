@@ -2,6 +2,52 @@ import XCTest
 @testable import StudyMate
 
 final class ArchitecturePolicyTests: XCTestCase {
+    func testAnalyticsConfigurationRequiresMatchingEnabledFirebaseApp() {
+        let configured: [String: Any] = [
+            "BUNDLE_ID": "io.github.ghkdqhrbals.StudyMate",
+            "GOOGLE_APP_ID": "1:1234567890:ios:abcdef",
+            "API_KEY": "configured-api-key",
+            "IS_ANALYTICS_ENABLED": true
+        ]
+
+        XCTAssertTrue(
+            AppAnalyticsConfiguration.isUsable(
+                dictionary: configured,
+                bundleIdentifier: "io.github.ghkdqhrbals.StudyMate"
+            )
+        )
+        XCTAssertFalse(
+            AppAnalyticsConfiguration.isUsable(
+                dictionary: configured,
+                bundleIdentifier: "io.github.ghkdqhrbals.Other"
+            )
+        )
+
+        var disabled = configured
+        disabled["IS_ANALYTICS_ENABLED"] = false
+        XCTAssertFalse(
+            AppAnalyticsConfiguration.isUsable(
+                dictionary: disabled,
+                bundleIdentifier: "io.github.ghkdqhrbals.StudyMate"
+            )
+        )
+    }
+
+    func testAnalyticsConfigurationRejectsRepositoryPlaceholder() throws {
+        let root = try repositoryRoot()
+        let configurationURL = root.appendingPathComponent("StudyMate/GoogleService-Info.plist")
+        let dictionary = try XCTUnwrap(
+            NSDictionary(contentsOf: configurationURL) as? [String: Any]
+        )
+
+        XCTAssertFalse(
+            AppAnalyticsConfiguration.isUsable(
+                dictionary: dictionary,
+                bundleIdentifier: "io.github.ghkdqhrbals.StudyMate"
+            )
+        )
+    }
+
     func testEmbeddedDeveloperCodeAcceptsOnlyConfiguredFourPartCode() {
         XCTAssertTrue(
             DeveloperPromotionCodeVerifier.isDeveloperCode("QAQA-QAQA-QAQA-QAQA")

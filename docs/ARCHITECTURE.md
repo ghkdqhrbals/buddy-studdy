@@ -77,6 +77,13 @@ runtime comparison or rollback does not fork application behavior.
   - Keeps ordinary Session Replay sampling at zero and uploads the masked replay buffer only for error events. Text, images, request bodies, and network headers are not recorded in Replay.
   - PostHog is not linked, initialized, or supplied through the iOS release workflow.
 
+- `AppAnalytics.swift`
+  - Owns the iOS-only Firebase Analytics integration and exposes typed product events.
+  - Uses `FirebaseAnalyticsCore`, disables advertising-network registration and automatic SwiftUI screen reporting, and never sets a Firebase user ID.
+  - Rejects missing, placeholder, disabled, or bundle-mismatched Firebase configuration instead of starting partial collection.
+  - Keeps local Debug collection disabled unless `BUDDYSTUDY_GA_DEBUG=1` is explicitly supplied.
+  - The release workflow replaces the repository placeholder with the `GOOGLE_SERVICE_INFO_PLIST_BASE64` GitHub Secret before building.
+
 - `backend/`
   - Spring Boot Kotlin APNs push backend.
   - Runs Spring WebFlux on Reactor Netty with Kotlin suspending controllers, use cases, persistence ports, and security lookups.

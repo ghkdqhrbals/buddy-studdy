@@ -37,6 +37,12 @@
 	<string>$(GOOGLE_OAUTH_CLIENT_ID)</string>
 	<key>GoogleOAuthRedirectScheme</key>
 	<string>$(GOOGLE_OAUTH_REDIRECT_SCHEME)</string>
+	<key>FirebaseAppDelegateProxyEnabled</key>
+	<false/>
+	<key>FirebaseAutomaticScreenReportingEnabled</key>
+	<false/>
+	<key>GOOGLE_ANALYTICS_REGISTRATION_WITH_AD_NETWORK_ENABLED</key>
+	<false/>
 	<key>SentryDSN</key>
 	<string>https://1f27f8ce965e634944d4b0b4dc2f4ec9@o4511814165790720.ingest.us.sentry.io/4511814175948805</string>
 	<key>CFBundleShortVersionString</key>
