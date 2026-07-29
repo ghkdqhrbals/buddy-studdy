@@ -42,6 +42,67 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var databaseClient: DatabaseClient
 
     @Test
+    fun `current legal documents match the published fixed copies`(): Unit = runBlocking {
+        data class LegalDocument(
+            val code: String,
+            val version: String,
+            val url: String,
+            val contentHash: String,
+            val required: Boolean,
+            val mutable: Boolean,
+        )
+
+        val documents = databaseClient.sql(
+            """
+            select code, version, url, content_hash, required, mutable
+            from terms
+            where version = '2026-07-30'
+            order by code
+            """.trimIndent(),
+        )
+            .map { row, _ ->
+                LegalDocument(
+                    code = row.get("code", String::class.java)!!,
+                    version = row.get("version", String::class.java)!!,
+                    url = row.get("url", String::class.java)!!,
+                    contentHash = row.get("content_hash", String::class.java)!!,
+                    required = row.get("required", java.lang.Boolean::class.java)!!.booleanValue(),
+                    mutable = row.get("mutable", java.lang.Boolean::class.java)!!.booleanValue(),
+                )
+            }
+            .all()
+            .collectList()
+            .awaitSingle()
+
+        assertThat(documents).containsExactly(
+            LegalDocument(
+                code = "MARKETING_NOTIFICATION",
+                version = "2026-07-30",
+                url = "https://ghkdqhrbals.github.io/buddy-studdy/marketing-consent-2026-07-30.html",
+                contentHash = "984adea3e746ce793405f431eb8a554419d64cc11633d697d7962adc6fa4a12e",
+                required = false,
+                mutable = true,
+            ),
+            LegalDocument(
+                code = "PRIVACY_POLICY",
+                version = "2026-07-30",
+                url = "https://ghkdqhrbals.github.io/buddy-studdy/privacy-2026-07-30.html",
+                contentHash = "f6af1a6389b4b7bb9a1221da5ce7b3671780300e3a61448273231a3d130061b6",
+                required = true,
+                mutable = false,
+            ),
+            LegalDocument(
+                code = "TERMS_OF_SERVICE",
+                version = "2026-07-30",
+                url = "https://ghkdqhrbals.github.io/buddy-studdy/terms-2026-07-30.html",
+                contentHash = "00544e21ee0921edc23d70c51d1977a57c3ddb9fb5d9d76ba7479fb4019a7edd",
+                required = true,
+                mutable = false,
+            ),
+        )
+    }
+
+    @Test
     fun `final localization schema keeps originals separate from translations`(): Unit = runBlocking {
         val columns = databaseClient.sql(
             """
