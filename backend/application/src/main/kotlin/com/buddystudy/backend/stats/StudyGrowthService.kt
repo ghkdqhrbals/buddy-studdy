@@ -5,6 +5,7 @@ import com.buddystudy.backend.stats.application.model.StudyGrowthNodeResponse
 import com.buddystudy.backend.stats.application.model.StudyGrowthProfileResponse
 import com.buddystudy.backend.stats.application.model.StudyGrowthResponse
 import com.buddystudy.backend.stats.application.model.StudyGrowthRootResponse
+import com.buddystudy.backend.stats.application.model.StudyGrowthTrendPointResponse
 import com.buddystudy.backend.stats.application.port.inbound.GetStudyGrowthUseCase
 import com.buddystudy.backend.stats.application.port.outbound.StudyGrowthRecord
 import com.buddystudy.backend.stats.application.port.outbound.StudyGrowthStatsPort
@@ -137,6 +138,7 @@ class StudyGrowthAssembler {
             val samples = subtree
                 .flatMap { recordsByStudy[it].orEmpty() }
                 .sortedBy { it.answeredAt }
+            val trendPoints = trendPoints(samples)
             return AggregateGrowth(
                 currentLevel = currentLevel,
                 previousLevel = if (currentLevel != null && growth != null) currentLevel - growth else null,
@@ -145,7 +147,8 @@ class StudyGrowthAssembler {
                 measuredTopicCount = growthValues.size,
                 totalTopicCount = subtree.size,
                 latestAt = direct.mapNotNull { it.latestAt }.maxOrNull(),
-                trend = trend(samples),
+                trend = trendPoints.map { it.level },
+                trendPoints = trendPoints,
             )
         }
 
@@ -199,7 +202,7 @@ class StudyGrowthAssembler {
                 compareBy<StudyEntity>({ rootID(it) }, { depth(it) }, { it.sortOrder }, { it.id }),
             )
             .map { study ->
-                val aggregate = aggregate(study.id)
+                val direct = directGrowth(recordsByStudy[study.id].orEmpty())
                 StudyGrowthNodeResponse(
                     studyId = study.id,
                     parentStudyId = study.parentStudyId?.takeIf(byId::containsKey),
@@ -209,30 +212,33 @@ class StudyGrowthAssembler {
                     depth = depth(study),
                     childCount = childrenByParent[study.id].orEmpty().size,
                     activeForQuestions = study.activeForQuestions,
+                    currentLevel = direct.currentLevel,
+                    previousLevel = direct.previousLevel,
+                    growth = direct.growth,
+                    answerCount = direct.answerCount,
+                    measuredTopicCount = if (direct.growth == null) 0 else 1,
+                    totalTopicCount = 1,
+                    latestAt = direct.latestAt,
+                    trend = direct.trendPoints.map { it.level },
+                    trendPoints = direct.trendPoints,
+                )
+            }
+        val nodesByID = nodes.associateBy { it.studyId }
+        val rootResponses = roots.mapNotNull { root ->
+            nodesByID[root.id]?.let { node ->
+                val aggregate = aggregate(root.id)
+                StudyGrowthRootResponse(
+                    studyId = node.studyId,
+                    topic = node.topic,
+                    activeForQuestions = node.activeForQuestions,
                     currentLevel = aggregate.currentLevel,
                     previousLevel = aggregate.previousLevel,
                     growth = aggregate.growth,
                     answerCount = aggregate.answerCount,
                     measuredTopicCount = aggregate.measuredTopicCount,
                     totalTopicCount = aggregate.totalTopicCount,
-                    latestAt = aggregate.latestAt,
                     trend = aggregate.trend,
-                )
-            }
-        val nodesByID = nodes.associateBy { it.studyId }
-        val rootResponses = roots.mapNotNull { root ->
-            nodesByID[root.id]?.let { node ->
-                StudyGrowthRootResponse(
-                    studyId = node.studyId,
-                    topic = node.topic,
-                    activeForQuestions = node.activeForQuestions,
-                    currentLevel = node.currentLevel,
-                    previousLevel = node.previousLevel,
-                    growth = node.growth,
-                    answerCount = node.answerCount,
-                    measuredTopicCount = node.measuredTopicCount,
-                    totalTopicCount = node.totalTopicCount,
-                    trend = node.trend,
+                    trendPoints = aggregate.trendPoints,
                     profile = profile(root.id),
                 )
             }
@@ -248,6 +254,7 @@ class StudyGrowthAssembler {
 
     private fun directGrowth(records: List<StudyGrowthRecord>): DirectGrowth {
         if (records.isEmpty()) return DirectGrowth()
+        val trendPoints = trendPoints(records)
         val recentSize = min(MAX_WINDOW_SIZE, records.size)
         val recent = records.takeLast(recentSize)
         val current = recent.map(::estimatedLevel).average()
@@ -256,6 +263,7 @@ class StudyGrowthAssembler {
                 currentLevel = current,
                 answerCount = records.size,
                 latestAt = records.last().answeredAt,
+                trendPoints = trendPoints,
             )
         }
         val windowSize = min(MAX_WINDOW_SIZE, records.size / 2)
@@ -269,6 +277,7 @@ class StudyGrowthAssembler {
             growth = currentLevel - previousLevel,
             answerCount = records.size,
             latestAt = records.last().answeredAt,
+            trendPoints = trendPoints,
         )
     }
 
@@ -283,12 +292,24 @@ class StudyGrowthAssembler {
             weightSum.toDouble()
     }
 
-    private fun trend(records: List<StudyGrowthRecord>): List<Double> {
-        if (records.size < 2) return records.map(::estimatedLevel)
+    private fun trendPoints(records: List<StudyGrowthRecord>): List<StudyGrowthTrendPointResponse> {
+        if (records.size < 2) {
+            return records.map {
+                StudyGrowthTrendPointResponse(
+                    measuredAt = it.answeredAt,
+                    level = estimatedLevel(it),
+                )
+            }
+        }
         val chunkSize = ceil(records.size.toDouble() / MAX_TREND_POINTS.toDouble()).toInt().coerceAtLeast(1)
         return records
             .chunked(chunkSize)
-            .map { chunk -> chunk.map(::estimatedLevel).average() }
+            .map { chunk ->
+                StudyGrowthTrendPointResponse(
+                    measuredAt = chunk.last().answeredAt,
+                    level = chunk.map(::estimatedLevel).average(),
+                )
+            }
             .takeLast(MAX_TREND_POINTS)
     }
 
@@ -304,6 +325,7 @@ class StudyGrowthAssembler {
         val growth: Double? = null,
         val answerCount: Int = 0,
         val latestAt: Instant? = null,
+        val trendPoints: List<StudyGrowthTrendPointResponse> = emptyList(),
     )
 
     private data class AggregateGrowth(
@@ -315,6 +337,7 @@ class StudyGrowthAssembler {
         val totalTopicCount: Int,
         val latestAt: Instant?,
         val trend: List<Double>,
+        val trendPoints: List<StudyGrowthTrendPointResponse>,
     )
 
     private companion object {

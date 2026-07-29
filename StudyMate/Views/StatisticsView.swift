@@ -1809,6 +1809,13 @@ private struct StudyGrowthOverviewRow: View {
                     .foregroundStyle(.primary)
                     .lineLimit(2)
 
+                Text(strings.treeSummary)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Color.accentColor.opacity(0.11), in: Capsule())
+
                 Spacer(minLength: 8)
 
                 StudyGrowthDeltaLabel(growth: root.growth, strings: strings)
@@ -2161,13 +2168,8 @@ private struct StudyGrowthTreeCard: View {
                                 } label: {
                                     StudyGrowthScoreTreeNode(
                                         topic: node.topic,
-                                        currentLevel: node.studyId == root.studyId
-                                            ? root.currentLevel
-                                            : node.currentLevel,
-                                        growth: node.studyId == root.studyId
-                                            ? root.growth
-                                            : node.growth,
-                                        isRoot: node.studyId == root.studyId,
+                                        currentLevel: node.currentLevel,
+                                        growth: node.growth,
                                         strings: strings
                                     )
                                 }
@@ -2236,7 +2238,6 @@ private struct StudyGrowthScoreTreeNode: View {
     var topic: String
     var currentLevel: Double?
     var growth: Double?
-    var isRoot: Bool
     var strings: AppStrings
 
     private var nodeColor: Color {
@@ -2263,12 +2264,6 @@ private struct StudyGrowthScoreTreeNode: View {
                 .foregroundStyle(.primary)
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
-
-            if isRoot {
-                Text(strings.comprehensive)
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(Color.accentColor)
-            }
 
             HStack(alignment: .firstTextBaseline, spacing: 2) {
                 Text(StudyGrowthFormat.level(currentLevel))
@@ -2308,8 +2303,7 @@ private struct StudyGrowthScoreTreeNode: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(topic), \(isRoot ? strings.comprehensive : ""), "
-                + "\(strings.currentAbility) \(StudyGrowthFormat.level(currentLevel)), "
+            "\(topic), \(strings.currentAbility) \(StudyGrowthFormat.level(currentLevel)), "
                 + "\(StudyGrowthFormat.delta(growth))"
         )
     }
@@ -3037,13 +3031,12 @@ private struct StudyGrowthNodeDetailView: View {
                     metric(strings.growthChange, StudyGrowthFormat.delta(node.growth))
                 }
 
-                StudyGrowthSparkline(values: node.trend)
-                    .frame(height: 120)
-                    .padding(16)
-                    .background(
-                        Color(.secondarySystemBackground),
-                        in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    )
+                StudyGrowthTimelineChart(
+                    points: node.trendPoints ?? [],
+                    fallbackValues: node.trend,
+                    latestAt: node.latestAt,
+                    strings: strings
+                )
 
                 VStack(alignment: .leading, spacing: 8) {
                     Label(
@@ -3051,8 +3044,12 @@ private struct StudyGrowthNodeDetailView: View {
                         systemImage: "point.3.connected.trianglepath.dotted"
                     )
                     Label(strings.growthAnswerCount(node.answerCount), systemImage: "checkmark.circle")
-                    if node.totalTopicCount > 1 {
-                        Label(strings.includesChildTopics, systemImage: "arrow.triangle.branch")
+                    if let latestAt = node.latestAt {
+                        Label {
+                            Text(strings.lastMeasuredAt(latestAt))
+                        } icon: {
+                            Image(systemName: "clock")
+                        }
                     }
                     if let growth = node.growth, growth < -0.15 {
                         Label(strings.needsReview, systemImage: "arrow.counterclockwise")
@@ -3281,6 +3278,172 @@ private struct StudyGrowthSparkline: View {
         }
         .accessibilityHidden(true)
     }
+}
+
+private struct StudyGrowthTimelineChart: View {
+    struct Point: Identifiable {
+        var index: Int
+        var measuredAt: Date?
+        var level: Double
+
+        var id: Int { index }
+    }
+
+    var points: [BackendStudyGrowthTrendPoint]
+    var fallbackValues: [Double]
+    var latestAt: Date?
+    var strings: AppStrings
+
+    private var displayPoints: [Point] {
+        if !points.isEmpty {
+            return points
+                .sorted { $0.measuredAt < $1.measuredAt }
+                .enumerated()
+                .map { index, point in
+                    Point(index: index, measuredAt: point.measuredAt, level: point.level)
+                }
+        }
+        return fallbackValues.enumerated().map { index, value in
+            Point(
+                index: index,
+                measuredAt: index == fallbackValues.indices.last ? latestAt : nil,
+                level: value
+            )
+        }
+    }
+
+    private var firstMeasuredAt: Date? {
+        displayPoints.compactMap(\.measuredAt).first
+    }
+
+    private var lastMeasuredAt: Date? {
+        displayPoints.compactMap(\.measuredAt).last ?? latestAt
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(strings.abilityTrend)
+                    .font(.headline)
+                Spacer(minLength: 8)
+                if let lastMeasuredAt {
+                    Text(strings.lastMeasuredAt(lastMeasuredAt))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if displayPoints.count < 2 {
+                ContentUnavailableView(
+                    strings.notEnoughTrendData,
+                    systemImage: "chart.line.uptrend.xyaxis",
+                    description: Text(strings.notEnoughTrendDataDescription)
+                )
+                .frame(maxWidth: .infinity, minHeight: 110)
+            } else {
+                GeometryReader { proxy in
+                    let chartFrame = CGRect(
+                        x: 30,
+                        y: 6,
+                        width: max(proxy.size.width - 38, 1),
+                        height: max(proxy.size.height - 34, 1)
+                    )
+                    let positioned = positionedPoints(in: chartFrame)
+
+                    ZStack(alignment: .topLeading) {
+                        Path { path in
+                            path.move(to: CGPoint(x: chartFrame.minX, y: chartFrame.minY))
+                            path.addLine(to: CGPoint(x: chartFrame.maxX, y: chartFrame.minY))
+                            path.move(to: CGPoint(x: chartFrame.minX, y: chartFrame.maxY))
+                            path.addLine(to: CGPoint(x: chartFrame.maxX, y: chartFrame.maxY))
+                        }
+                        .stroke(Color.secondary.opacity(0.16), style: StrokeStyle(lineWidth: 1, dash: [3, 4]))
+
+                        Path { path in
+                            for (index, point) in positioned.enumerated() {
+                                if index == 0 {
+                                    path.move(to: point)
+                                } else {
+                                    path.addLine(to: point)
+                                }
+                            }
+                        }
+                        .stroke(
+                            Color.accentColor,
+                            style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round)
+                        )
+
+                        ForEach(Array(positioned.enumerated()), id: \.offset) { _, point in
+                            Circle()
+                                .fill(Color.accentColor)
+                                .frame(width: 7, height: 7)
+                                .position(point)
+                        }
+
+                        Text("10")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .position(x: 12, y: chartFrame.minY + 4)
+                        Text("1")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .position(x: 12, y: chartFrame.maxY - 4)
+
+                        if let firstMeasuredAt {
+                            Text(Self.axisDateFormatter.string(from: firstMeasuredAt))
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .position(x: chartFrame.minX + 28, y: chartFrame.maxY + 19)
+                        }
+                        if let lastMeasuredAt {
+                            Text(Self.axisDateFormatter.string(from: lastMeasuredAt))
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .position(x: chartFrame.maxX - 28, y: chartFrame.maxY + 19)
+                        }
+                    }
+                }
+                .frame(height: 146)
+            }
+        }
+        .padding(16)
+        .background(
+            Color(.secondarySystemBackground),
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+        .accessibilityElement(children: .combine)
+    }
+
+    private func positionedPoints(in frame: CGRect) -> [CGPoint] {
+        let dated = displayPoints.compactMap(\.measuredAt)
+        let firstDate = dated.first
+        let lastDate = dated.last
+        let duration = firstDate.flatMap { start in
+            lastDate.map { max($0.timeIntervalSince(start), 1) }
+        }
+
+        return displayPoints.enumerated().map { index, point in
+            let xProgress: Double
+            if let measuredAt = point.measuredAt,
+               let firstDate,
+               let duration {
+                xProgress = measuredAt.timeIntervalSince(firstDate) / duration
+            } else {
+                xProgress = Double(index) / Double(max(displayPoints.count - 1, 1))
+            }
+            let levelProgress = (min(max(point.level, 1), 10) - 1) / 9
+            return CGPoint(
+                x: frame.minX + frame.width * CGFloat(min(max(xProgress, 0), 1)),
+                y: frame.maxY - frame.height * CGFloat(levelProgress)
+            )
+        }
+    }
+
+    private static let axisDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("M/d HH:mm")
+        return formatter
+    }()
 }
 
 private enum StudyGrowthFormat {

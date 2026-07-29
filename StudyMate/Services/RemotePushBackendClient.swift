@@ -2511,6 +2511,7 @@ struct BackendStudyGrowthRoot: Decodable, Equatable, Identifiable {
     var measuredTopicCount: Int
     var totalTopicCount: Int
     var trend: [Double]
+    var trendPoints: [BackendStudyGrowthTrendPoint]? = nil
     var profile: BackendStudyGrowthProfile?
 
     var id: Int { studyId }
@@ -2541,8 +2542,16 @@ struct BackendStudyGrowthNode: Decodable, Equatable, Identifiable {
     var totalTopicCount: Int
     var latestAt: Date?
     var trend: [Double]
+    var trendPoints: [BackendStudyGrowthTrendPoint]? = nil
 
     var id: Int { studyId }
+}
+
+struct BackendStudyGrowthTrendPoint: Decodable, Equatable, Identifiable {
+    var measuredAt: Date
+    var level: Double
+
+    var id: Date { measuredAt }
 }
 
 struct CommunityQuestion: Decodable, Equatable, Identifiable {

@@ -3194,11 +3194,12 @@ struct AppStrings {
             "The latest 3–5 graded answers are compared with the preceding 3–5. Fewer than 6 answers in a topic is shown as Measuring."
         )
     }
-    var growthHelpTreeTitle: String { text("상위 주제는 하위 주제를 함께 반영", "Parent topics include subtopics") }
+    var growthHelpTreeTitle: String { text("노드는 해당 주제의 기록만 표시", "Each node uses its own topic records") }
     var growthHelpTreeBody: String {
         text(
-            "상위 주제의 값은 트리 안에서 측정 가능한 하위 주제를 합산합니다. 답변이 많은 한 주제가 전체를 좌우하지 않도록 주제별 반영량은 최대 5개 답변으로 제한합니다.",
-            "A parent topic combines measurable subtopics in its tree. Each topic is capped at 5 answers so one high-volume topic cannot dominate."
+            "트리의 각 노드는 해당 주제에서 직접 답변한 기록만 보여줍니다. 하위 주제를 포함한 종합 결과는 학습 트리 상단 요약에서만 확인할 수 있습니다.",
+            "Each tree node shows only answers recorded directly for that topic. The summary above the tree is the only place that combines descendant topics.",
+            "ツリーの各ノードには、そのトピックで直接回答した履歴のみが表示されます。下位トピックを含む総合結果は、ツリー上部の概要でのみ確認できます。"
         )
     }
     var growthHelpSummaryTitle: String {
@@ -3221,11 +3222,13 @@ struct AppStrings {
     var studyGrowthSummary: String {
         text("선택한 기간의 전체 하위 주제 요약", "Summary of all subtopics in the selected period")
     }
+    var treeSummary: String { text("트리 종합", "Tree summary", "ツリー総合") }
     var studyStatusTree: String { text("학습 상태 트리", "Study status tree") }
     var studyStatusTreeDescription: String {
         text(
-            "최상위 주제는 모든 하위 주제의 종합 점수이며, 각 행은 개별 점수입니다.",
-            "The top-level topic combines all subtopics; each row shows an individual score."
+            "각 노드는 해당 주제에서 직접 답변한 기록만 반영합니다.",
+            "Each node reflects only answers recorded directly for that topic.",
+            "各ノードには、そのトピックで直接回答した履歴のみが反映されます。"
         )
     }
     var comprehensive: String { text("종합", "Overall") }
@@ -3287,6 +3290,19 @@ struct AppStrings {
     }
     var needsReview: String { text("복습 필요", "Review") }
     var includesChildTopics: String { text("하위 포함", "Includes children") }
+    var abilityTrend: String { text("실력 변화", "Ability over time", "実力の推移") }
+    func lastMeasuredAt(_ date: Date) -> String {
+        let value = date.formatted(date: .abbreviated, time: .shortened)
+        return text("최근 측정 \(value)", "Last measured \(value)", "最終測定 \(value)")
+    }
+    var notEnoughTrendData: String { text("변화 기록이 더 필요합니다", "More data needed", "推移データが不足しています") }
+    var notEnoughTrendDataDescription: String {
+        text(
+            "시간에 따른 변화를 보려면 이 주제의 채점 기록이 2개 이상 필요합니다.",
+            "At least two graded answers in this topic are needed to show change over time.",
+            "時間による変化を表示するには、このトピックで2件以上の採点済み回答が必要です。"
+        )
+    }
     var growthDetails: String { text("성장 상세", "Growth details") }
     var previousAbility: String { text("이전", "Previous") }
     var lastYear: String { text("최근 1년", "Last year") }

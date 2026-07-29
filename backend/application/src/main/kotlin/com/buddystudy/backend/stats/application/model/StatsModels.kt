@@ -78,6 +78,7 @@ data class StudyGrowthRootResponse(
     val measuredTopicCount: Int,
     val totalTopicCount: Int,
     val trend: List<Double>,
+    val trendPoints: List<StudyGrowthTrendPointResponse>,
     val profile: StudyGrowthProfileResponse,
 )
 
@@ -106,4 +107,10 @@ data class StudyGrowthNodeResponse(
     val totalTopicCount: Int,
     val latestAt: Instant?,
     val trend: List<Double>,
+    val trendPoints: List<StudyGrowthTrendPointResponse>,
+)
+
+data class StudyGrowthTrendPointResponse(
+    val measuredAt: Instant,
+    val level: Double,
 )

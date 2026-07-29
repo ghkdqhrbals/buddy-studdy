@@ -40,23 +40,30 @@ class StudyGrowthAssemblerTest {
         )
 
         val root = response.roots.single()
+        val rootNode = response.nodes.single { it.studyId == 1L }
         val sql = response.nodes.single { it.studyId == 2L }
         assertThat(root.studyId).isEqualTo(1)
         assertThat(root.answerCount).isEqualTo(8)
         assertThat(root.measuredTopicCount).isEqualTo(1)
         assertThat(root.totalTopicCount).isEqualTo(3)
         assertThat(root.growth).isCloseTo(1.0, within(0.0001))
+        assertThat(root.trendPoints).isNotEmpty()
+        assertThat(root.trendPoints.last().measuredAt).isEqualTo(Instant.parse("2026-01-08T00:00:00Z"))
         assertThat(root.profile.achievement).isCloseTo(0.6125, within(0.0001))
         assertThat(root.profile.challenge).isCloseTo(0.55, within(0.0001))
         assertThat(root.profile.completion).isEqualTo(1.0)
         assertThat(root.profile.breadth).isCloseTo(2.0 / 3.0, within(0.0001))
         assertThat(root.profile.depth).isEqualTo(1.0)
+        assertThat(rootNode.currentLevel).isNull()
+        assertThat(rootNode.answerCount).isZero()
+        assertThat(rootNode.trendPoints).isEmpty()
         assertThat(sql.parentStudyId).isEqualTo(1)
         assertThat(sql.rootStudyId).isEqualTo(1)
         assertThat(sql.depth).isEqualTo(1)
         assertThat(sql.currentLevel).isCloseTo(6.0, within(0.0001))
         assertThat(sql.previousLevel).isCloseTo(5.0, within(0.0001))
         assertThat(sql.growth).isCloseTo(1.0, within(0.0001))
+        assertThat(sql.trendPoints.last().measuredAt).isEqualTo(Instant.parse("2026-01-06T00:00:00Z"))
     }
 
     @Test
