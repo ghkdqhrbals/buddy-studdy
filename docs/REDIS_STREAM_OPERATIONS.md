@@ -35,16 +35,27 @@ same Jackson-typed handler.
 
 ## Retention
 
-The domain event and dedicated push streams use independently configurable
-exact `MAXLEN` values. Both default to `1000`. Their default physical keys are
-`buddystudy-events-v1` and `buddystudy-push-v1`.
+Every managed stream uses an independently configurable exact `MAXLEN`. The
+five defaults are `1000`:
+
+- `buddystudy-events-v1`
+- `buddystudy-question-generation-v1`
+- `buddystudy-question-generated-v1`
+- `buddystudy-content-translation-v1`
+- `buddystudy-push-v1`
 
 ```yaml
 buddystudy:
   streams:
     key: ${BUDDYSTUDY_STREAMS_KEY:buddystudy-events-v1}
+    question-generation-key: ${BUDDYSTUDY_QUESTION_GENERATION_STREAM_KEY:buddystudy-question-generation-v1}
+    question-generated-key: ${BUDDYSTUDY_QUESTION_GENERATED_STREAM_KEY:buddystudy-question-generated-v1}
+    content-translation-key: ${BUDDYSTUDY_CONTENT_TRANSLATION_STREAM_KEY:buddystudy-content-translation-v1}
     push-key: ${BUDDYSTUDY_PUSH_STREAM_KEY:buddystudy-push-v1}
     domain-max-len: ${BUDDYSTUDY_DOMAIN_STREAM_MAX_LEN:${REACTION_STREAM_XADD_MAX_LEN:1000}}
+    question-generation-max-len: ${BUDDYSTUDY_QUESTION_GENERATION_STREAM_MAX_LEN:1000}
+    question-generated-max-len: ${BUDDYSTUDY_QUESTION_GENERATED_STREAM_MAX_LEN:1000}
+    content-translation-max-len: ${BUDDYSTUDY_CONTENT_TRANSLATION_STREAM_MAX_LEN:1000}
     push-max-len: ${BUDDYSTUDY_PUSH_STREAM_MAX_LEN:${REACTION_STREAM_XADD_MAX_LEN:1000}}
 ```
 
@@ -106,7 +117,8 @@ Sources:
 
 All lists use cursor pagination with a bounded `limit` of 1 to 100.
 
-Registered streams can be searched by logical topic or physical Redis key.
+Registered streams can be searched by logical topic, physical Redis key,
+consumer group, or consumer name.
 Operators can also bypass pagination and retrieve one retained message by its
 exact Redis Stream ID. Missing IDs return `404`; malformed IDs return `422`.
 
@@ -149,7 +161,12 @@ token in browser session storage. Stream entries use cursor pagination and the
 exact-ID lookup bypasses list pagination for incident investigation.
 
 `Delivery status` refreshes every five seconds. Its overview reports one row
-per Redis consumer group:
+per managed stream before reporting one row per Redis consumer group:
+
+- **Entries**: current Redis `XLEN`.
+- **MAXLEN**: the exact configured bound used by `XADD`.
+- **Retention**: `XLEN / MAXLEN`, shown as a percentage.
+- **Inspection**: whether all stream metadata commands completed.
 
 - **Offset**: the group's last delivered Redis Stream ID.
 - **Lag**: entries not yet delivered to that group.
@@ -161,6 +178,20 @@ entry list. The overview samples at most the first 100 pending entries to avoid
 an unbounded Redis read. When a group has more pending entries, the maximum
 retry value is marked with `+` and is a sampled lower bound; the paginated
 pending list remains exact for each displayed entry.
+
+Stream, group, pending-summary, pending-range, and consumer inspection are
+isolated operations. A failure in one command is returned as `Partial data`
+with its operation instead of replacing the whole stream with false zeroes.
+
+The application-ready cleanup removes only known legacy topology:
+
+- old domain-stream groups superseded by dedicated push and translation
+  streams;
+- the dated native push test stream.
+
+A legacy group is destroyed only when its pending count is zero. The test
+stream is deleted only when it is empty and all of its groups have no pending
+deliveries. The five managed streams are never cleanup candidates.
 
 ## Operational Checks
 

@@ -4,6 +4,7 @@ import com.buddystudy.backend.admin.stream.application.model.AdminCursorPage
 import com.buddystudy.backend.admin.stream.application.model.AdminPushOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminRedisEventOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamEntry
+import com.buddystudy.backend.admin.stream.application.model.AdminStreamGroupSummary
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamPendingEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamTopicSummary
 import com.buddystudy.backend.admin.stream.application.port.outbound.AdminOutboxInspectionPort
@@ -67,6 +68,21 @@ class AdminEventStreamServiceTest {
         assertThat(service.topics("domain").map { it.topic })
             .containsExactly("domain-events")
         assertThat(service.topics(" ")).hasSize(2)
+    }
+
+    @Test
+    fun `topics are searched by consumer group`(): Unit = runBlocking {
+        streams.topicItems = listOf(
+            topic(
+                "question-generated",
+                "buddystudy-question-generated-v1",
+                group = "bs-backend-question-translation",
+            ),
+            topic("push-events", "buddystudy-push-v1"),
+        )
+
+        assertThat(service.topics("TRANSLATION").map { it.topic })
+            .containsExactly("question-generated")
     }
 
     @Test
@@ -204,6 +220,32 @@ class AdminEventStreamServiceTest {
         val status: String?,
     )
 
-    private fun topic(topic: String, key: String) =
-        AdminStreamTopicSummary(topic, key, 1_000, 0, null, null, emptyList())
+    private fun topic(topic: String, key: String, group: String? = null) =
+        AdminStreamTopicSummary(
+            topic,
+            key,
+            1_000,
+            0,
+            null,
+            null,
+            group?.let {
+                listOf(
+                    AdminStreamGroupSummary(
+                        name = it,
+                        consumers = 0,
+                        pending = 0,
+                        lastDeliveredId = null,
+                        entriesRead = null,
+                        lag = null,
+                        pendingMinId = null,
+                        pendingMaxId = null,
+                        oldestPendingIdleMs = null,
+                        maxDeliveryCount = 0,
+                        maxRetryCount = 0,
+                        pendingSampleTruncated = false,
+                        consumerDetails = emptyList(),
+                    ),
+                )
+            }.orEmpty(),
+        )
 }

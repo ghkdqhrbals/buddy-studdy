@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { adminFetch } from "../admin/adminApi.js";
 import {
   DataTable,
-  Pagination,
+  Pagination, SearchField,
   StatusBadge,
 } from "./AdminUI.jsx";
 import { Button } from "./Button.jsx";
@@ -13,6 +13,7 @@ import {
   formatStreamDuration,
   streamGroupRows,
   streamGroupState,
+  streamRetention,
   summarizeStreamHealth,
 } from "../lib/streamHealth.js";
 import { streamPendingPath } from "../lib/streamPaths.js";
@@ -21,6 +22,16 @@ const PENDING_PAGE_SIZE = 20;
 
 function number(value) {
   return Number(value || 0).toLocaleString();
+}
+
+function InspectionErrors({ errors }) {
+  const items = Array.isArray(errors) ? errors : [];
+  if (items.length === 0) return null;
+  return (
+    <InlineNotice tone="warning">
+      {items.map((item) => `${item.operation}: ${item.message}`).join(" · ")}
+    </InlineNotice>
+  );
 }
 
 function ConsumerList({ consumers }) {
@@ -123,9 +134,58 @@ export function StreamDeliveryDashboard({
   onRefresh,
 }) {
   const [selectedKey, setSelectedKey] = useState("");
-  const rows = useMemo(() => streamGroupRows(topics), [topics]);
+  const [search, setSearch] = useState("");
+  const normalizedSearch = search.trim().toLowerCase();
+  const rows = useMemo(
+    () => streamGroupRows(topics).filter((row) => (
+      !normalizedSearch ||
+      row.topic.toLowerCase().includes(normalizedSearch) ||
+      row.streamKey.toLowerCase().includes(normalizedSearch) ||
+      row.name.toLowerCase().includes(normalizedSearch) ||
+      (row.consumerDetails || []).some((consumer) =>
+        consumer.name.toLowerCase().includes(normalizedSearch))
+    )),
+    [normalizedSearch, topics],
+  );
   const summary = useMemo(() => summarizeStreamHealth(topics), [topics]);
   const selected = rows.find((row) => `${row.topic}:${row.name}` === selectedKey) || null;
+  const streamColumns = useMemo(() => [
+    {
+      key: "topic",
+      label: "Stream",
+      render: (row) => (
+        <span className="primary-cell">
+          <strong>{row.topic}</strong>
+          <span className="mono">{row.streamKey}</span>
+        </span>
+      ),
+    },
+    { key: "length", label: "Entries", render: (row) => number(row.length) },
+    { key: "maxLength", label: "MAXLEN", render: (row) => number(row.maxLength) },
+    {
+      key: "retention",
+      label: "Retention",
+      render: (row) => {
+        const retention = streamRetention(row);
+        return (
+          <span className="stream-retention" title={`${number(row.length)} of ${number(row.maxLength)} retained entries`}>
+            <span><i style={{ width: `${retention.percent || 0}%` }} /></span>
+            <strong>{retention.label}</strong>
+          </span>
+        );
+      },
+    },
+    { key: "groups", label: "Groups", render: (row) => number(row.groups?.length) },
+    {
+      key: "inspection",
+      label: "Inspection",
+      render: (row) => (
+        <StatusBadge tone={row.inspectionErrors?.length ? "warning" : "success"}>
+          {row.inspectionErrors?.length ? "Partial data" : "Healthy"}
+        </StatusBadge>
+      ),
+    },
+  ], []);
 
   const columns = useMemo(() => [
     {
@@ -184,6 +244,7 @@ export function StreamDeliveryDashboard({
         <div><span>Total lag</span><strong>{number(summary.lag)}</strong></div>
         <div><span>Pending</span><strong>{number(summary.pending)}</strong></div>
         <div><span>Groups retrying</span><strong>{number(summary.retrying)}</strong></div>
+        <div><span>Inspection failures</span><strong>{number(summary.inspectionFailures)}</strong></div>
       </div>
       <div className="stream-legend">
         <span><strong>Offset</strong> last delivered Redis ID</span>
@@ -192,6 +253,42 @@ export function StreamDeliveryDashboard({
         <span><strong>Retries</strong> deliveries after the first attempt</span>
       </div>
       {error ? <InlineNotice tone="danger">{error.message}</InlineNotice> : null}
+      <section className="stream-overview">
+        <div className="stream-section-heading">
+          <div>
+            <h2>Stream retention</h2>
+            <p>Current Redis XLEN against the configured exact MAXLEN.</p>
+          </div>
+        </div>
+        <DataTable
+          columns={streamColumns}
+          rows={topics}
+          rowKey={(row) => row.topic}
+          emptyText="No configured Redis streams were found."
+          loading={loading}
+        />
+        {topics.flatMap((topic) => topic.inspectionErrors || []).length > 0 ? (
+          <div className="stream-inspection-errors">
+            {topics.map((topic) => (
+              <InspectionErrors key={topic.topic} errors={topic.inspectionErrors} />
+            ))}
+          </div>
+        ) : null}
+      </section>
+      <section className="stream-groups">
+        <div className="stream-section-heading stream-group-toolbar">
+          <div>
+            <h2>Consumer groups</h2>
+            <p>Search by stream, group, or consumer and inspect delivery state.</p>
+          </div>
+          <SearchField
+            value={search}
+            onChange={setSearch}
+            onSubmit={() => {}}
+            label="Consumer group search"
+            placeholder="Stream, group, or consumer"
+          />
+        </div>
       <DataTable
         columns={columns}
         rows={rows}
@@ -200,6 +297,7 @@ export function StreamDeliveryDashboard({
         emptyText="No Redis consumer groups were found."
         loading={loading}
       />
+      </section>
       {selected ? (
         <section className="stream-group-detail">
           <header>
@@ -216,6 +314,7 @@ export function StreamDeliveryDashboard({
             <div><span>Pending range</span><strong className="mono">{selected.pendingMinId && selected.pendingMaxId ? `${selected.pendingMinId} – ${selected.pendingMaxId}` : "-"}</strong></div>
             <div><span>Oldest pending</span><strong>{formatStreamDuration(selected.oldestPendingIdleMs)}</strong></div>
           </div>
+          <InspectionErrors errors={[...(selected.topicInspectionErrors || []), ...(selected.inspectionErrors || [])]} />
           <ConsumerList consumers={selected.consumerDetails} />
           <PendingList key={selectedKey} topic={selected.topic} group={selected.name} />
         </section>

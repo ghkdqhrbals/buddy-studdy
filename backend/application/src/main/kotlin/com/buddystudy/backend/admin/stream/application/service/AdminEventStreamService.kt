@@ -24,7 +24,13 @@ class AdminEventStreamService(
         return streams.topics().filter { topic ->
             normalizedQuery == null ||
                 topic.topic.lowercase().contains(normalizedQuery) ||
-                topic.streamKey.lowercase().contains(normalizedQuery)
+                topic.streamKey.lowercase().contains(normalizedQuery) ||
+                topic.groups.any { group ->
+                    group.name.lowercase().contains(normalizedQuery) ||
+                        group.consumerDetails.any { consumer ->
+                            consumer.name.lowercase().contains(normalizedQuery)
+                        }
+                }
         }
     }
 

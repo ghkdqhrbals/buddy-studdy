@@ -17,6 +17,7 @@ data class AdminStreamTopicSummary(
     val firstEntryId: String?,
     val lastEntryId: String?,
     val groups: List<AdminStreamGroupSummary>,
+    val inspectionErrors: List<AdminStreamInspectionError> = emptyList(),
 )
 
 data class AdminStreamGroupSummary(
@@ -33,6 +34,12 @@ data class AdminStreamGroupSummary(
     val maxRetryCount: Long,
     val pendingSampleTruncated: Boolean,
     val consumerDetails: List<AdminStreamConsumerSummary>,
+    val inspectionErrors: List<AdminStreamInspectionError> = emptyList(),
+)
+
+data class AdminStreamInspectionError(
+    val operation: String,
+    val message: String,
 )
 
 data class AdminStreamConsumerSummary(

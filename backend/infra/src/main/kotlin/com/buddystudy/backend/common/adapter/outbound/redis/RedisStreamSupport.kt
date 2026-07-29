@@ -4,6 +4,7 @@ import com.buddystudy.backend.admin.stream.application.model.AdminCursorPage
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamConsumerSummary
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamGroupSummary
+import com.buddystudy.backend.admin.stream.application.model.AdminStreamInspectionError
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamPendingEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamTopicSummary
 import com.buddystudy.backend.admin.stream.application.port.outbound.AdminRedisStreamInspectionPort
@@ -253,80 +254,127 @@ class RedisStreamTopicManager(
 
     override suspend fun topics(): List<AdminStreamTopicSummary> = withContext(Dispatchers.IO) {
         topics.map { definition ->
-            runCatching {
-                val operations = blockingRedis.opsForStream<String, String>()
-                val info = operations.info(definition.streamKey)
-                val groups = operations.groups(definition.streamKey).map { group ->
-                    val groupName = group.groupName()
-                    val pendingSummary = operations.pending(definition.streamKey, groupName)
-                    val pendingSample = if (group.pendingCount() > 0) {
-                        operations.pending(
-                            definition.streamKey,
-                            groupName,
-                            Range.unbounded<String>(),
-                            PENDING_SUMMARY_SAMPLE_LIMIT,
-                        ).toList()
-                    } else {
-                        emptyList()
-                    }
-                    AdminStreamGroupSummary(
-                        name = groupName,
-                        consumers = group.consumerCount(),
-                        pending = group.pendingCount(),
-                        lastDeliveredId = group.lastDeliveredId(),
-                        entriesRead = group.raw.longValue("entries-read"),
-                        lag = group.raw.longValue("lag"),
-                        pendingMinId = pendingSummary?.minMessageId(),
-                        pendingMaxId = pendingSummary?.maxMessageId(),
-                        oldestPendingIdleMs = pendingSample.maxOfOrNull {
-                            it.elapsedTimeSinceLastDelivery.toMillis()
-                        },
-                        maxDeliveryCount = pendingSample.maxOfOrNull {
-                            it.totalDeliveryCount
-                        } ?: 0,
-                        maxRetryCount = pendingSample.maxOfOrNull {
-                            (it.totalDeliveryCount - 1).coerceAtLeast(0)
-                        } ?: 0,
-                        pendingSampleTruncated = group.pendingCount() > pendingSample.size,
-                        consumerDetails = operations.consumers(definition.streamKey, groupName)
-                            .map { consumer ->
-                                AdminStreamConsumerSummary(
-                                    name = consumer.consumerName(),
-                                    pending = consumer.pendingCount(),
-                                    idleMs = consumer.idleTimeMs(),
-                                    inactiveMs = consumer.raw.longValue("inactive"),
-                                )
-                            }
-                            .toList(),
-                    )
-                }.toList()
-                AdminStreamTopicSummary(
-                    topic = definition.topic.apiName,
-                    streamKey = definition.streamKey,
-                    maxLength = definition.maxLength,
-                    length = info.streamLength(),
-                    firstEntryId = info.firstEntryId(),
-                    lastEntryId = info.lastEntryId(),
-                    groups = groups,
-                )
-            }.getOrElse { error ->
-                logger.debug(
-                    "redis_stream_inspection_empty topic={} stream={} error={}",
-                    definition.topic.apiName,
-                    definition.streamKey,
-                    error.message,
-                )
-                AdminStreamTopicSummary(
-                    topic = definition.topic.apiName,
-                    streamKey = definition.streamKey,
-                    maxLength = definition.maxLength,
-                    length = 0,
-                    firstEntryId = null,
-                    lastEntryId = null,
-                    groups = emptyList(),
-                )
-            }
+            inspectTopic(definition)
         }
+    }
+
+    private fun inspectTopic(definition: RedisStreamTopicDefinition): AdminStreamTopicSummary {
+        val operations = blockingRedis.opsForStream<String, String>()
+        val errors = mutableListOf<AdminStreamInspectionError>()
+        val info = inspect(definition, "XINFO STREAM", errors) {
+            operations.info(definition.streamKey)
+        }
+        val length = info?.streamLength()
+            ?: inspect(definition, "XLEN", errors) {
+                operations.size(definition.streamKey)
+            }
+            ?: 0L
+        val groupInfos = inspect(definition, "XINFO GROUPS", errors) {
+            operations.groups(definition.streamKey).toList()
+        }.orEmpty()
+        val groups = groupInfos.map { group ->
+            val groupName = group.groupName()
+            val groupErrors = mutableListOf<AdminStreamInspectionError>()
+            val lastDeliveredId = inspect(definition, "XINFO GROUPS offset", groupErrors, groupName) {
+                group.lastDeliveredId()
+            }
+            val pendingSummary = inspect(definition, "XPENDING summary", groupErrors, groupName) {
+                operations.pending(definition.streamKey, groupName)
+            }
+            val pendingSample = if (group.pendingCount() > 0) {
+                inspect(definition, "XPENDING range", groupErrors, groupName) {
+                    operations.pending(
+                        definition.streamKey,
+                        groupName,
+                        Range.unbounded<String>(),
+                        PENDING_SUMMARY_SAMPLE_LIMIT,
+                    ).toList()
+                }.orEmpty()
+            } else {
+                emptyList()
+            }
+            val consumers = inspect(definition, "XINFO CONSUMERS", groupErrors, groupName) {
+                operations.consumers(definition.streamKey, groupName)
+                    .map { consumer ->
+                        AdminStreamConsumerSummary(
+                            name = consumer.consumerName(),
+                            pending = consumer.pendingCount(),
+                            idleMs = consumer.idleTimeMs(),
+                            inactiveMs = consumer.raw.longValue("inactive"),
+                        )
+                    }
+                    .toList()
+            }.orEmpty()
+            AdminStreamGroupSummary(
+                name = groupName,
+                consumers = group.consumerCount(),
+                pending = group.pendingCount(),
+                lastDeliveredId = lastDeliveredId,
+                entriesRead = group.raw.longValue("entries-read"),
+                lag = group.raw.longValue("lag"),
+                pendingMinId = if (group.pendingCount() > 0) {
+                    inspect(definition, "XPENDING minimum ID", groupErrors, groupName) {
+                        pendingSummary?.minMessageId()
+                    }
+                } else {
+                    null
+                },
+                pendingMaxId = if (group.pendingCount() > 0) {
+                    inspect(definition, "XPENDING maximum ID", groupErrors, groupName) {
+                        pendingSummary?.maxMessageId()
+                    }
+                } else {
+                    null
+                },
+                oldestPendingIdleMs = pendingSample.maxOfOrNull {
+                    it.elapsedTimeSinceLastDelivery.toMillis()
+                },
+                maxDeliveryCount = pendingSample.maxOfOrNull {
+                    it.totalDeliveryCount
+                } ?: 0,
+                maxRetryCount = pendingSample.maxOfOrNull {
+                    (it.totalDeliveryCount - 1).coerceAtLeast(0)
+                } ?: 0,
+                pendingSampleTruncated = group.pendingCount() > pendingSample.size,
+                consumerDetails = consumers,
+                inspectionErrors = groupErrors,
+            )
+        }
+        return AdminStreamTopicSummary(
+            topic = definition.topic.apiName,
+            streamKey = definition.streamKey,
+            maxLength = definition.maxLength,
+            length = length,
+            firstEntryId = info?.takeIf { length > 0 }?.let {
+                inspect(definition, "XINFO STREAM first entry", errors) { it.firstEntryId() }
+            },
+            lastEntryId = info?.takeIf { length > 0 }?.let {
+                inspect(definition, "XINFO STREAM last entry", errors) { it.lastEntryId() }
+            },
+            groups = groups,
+            inspectionErrors = errors,
+        )
+    }
+
+    private fun <T> inspect(
+        definition: RedisStreamTopicDefinition,
+        operation: String,
+        errors: MutableList<AdminStreamInspectionError>,
+        group: String? = null,
+        query: () -> T,
+    ): T? = runCatching(query).getOrElse { error ->
+        val message = error.message?.take(240) ?: error.javaClass.simpleName
+        errors += AdminStreamInspectionError(operation = operation, message = message)
+        logger.warn(
+            "redis_stream_inspection_failed topic={} stream={} group={} operation={} errorType={} error={}",
+            definition.topic.apiName,
+            definition.streamKey,
+            group ?: "-",
+            operation,
+            error.javaClass.name,
+            message,
+        )
+        null
     }
 
     override suspend fun entries(

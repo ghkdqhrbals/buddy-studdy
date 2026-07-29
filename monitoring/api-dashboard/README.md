@@ -11,8 +11,9 @@ Grafana, and the private TestZone API behind one Basic Auth boundary.
 - `/audit.html`: monitoring workspace page, authentication, and action history
 - `/users.html`: authenticated member search, membership tiers, and quota controls
 - `/streams.html`: authenticated Redis Stream delivery status with
-  consumer-group offsets, lag, pending ranges, per-consumer ownership, retry
-  counts, cursor navigation, exact entry lookup, and redacted message details
+  configured MAXLEN and retention use, consumer-group offsets, lag, pending
+  ranges, per-consumer ownership, retry counts, partial-inspection errors,
+  cursor navigation, exact entry lookup, and redacted message details
 - `/testzone.html`: live k6 script workspace, execution history, disposable
   test components, and Grafana links
 - `/settings.html`: browser-local navigation and access-history preferences

@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   formatStreamDuration,
   streamGroupState,
+  streamRetention,
   summarizeStreamHealth,
 } from "../src/lib/streamHealth.js";
 
@@ -25,10 +26,19 @@ test("consumer group summary separates lag pending and retrying groups", () => {
     lag: 3,
     pending: 2,
     retrying: 1,
+    inspectionFailures: 0,
+  });
+});
+
+test("stream retention compares XLEN with configured MAXLEN", () => {
+  assert.deepEqual(streamRetention({ length: 250, maxLength: 1_000 }), {
+    percent: 25,
+    label: "25%",
   });
 });
 
 test("consumer group state prioritizes retries then pending then lag", () => {
+  assert.equal(streamGroupState({ inspectionErrors: [{ operation: "XPENDING" }] }).label, "Partial data");
   assert.equal(streamGroupState({ maxRetryCount: 1, pending: 2, lag: 3 }).label, "Retrying");
   assert.equal(streamGroupState({ maxRetryCount: 0, pending: 2, lag: 3 }).label, "Pending");
   assert.equal(streamGroupState({ maxRetryCount: 0, pending: 0, lag: 3 }).label, "Lagging");
