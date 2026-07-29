@@ -3,6 +3,7 @@ package com.buddystudy.backend.localization.adapter.outbound.translation
 import com.buddystudy.backend.localization.application.model.ContentTranslationResult
 import com.buddystudy.backend.localization.application.port.ContentTranslationPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionTranslationPort
+import com.buddystudy.backend.study.application.port.outbound.TranslationValidationMode
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -31,6 +32,11 @@ class ContentTranslationAdapter(
                         hint = null,
                         sourceLanguage = sourceLanguages[name] ?: "ko",
                         targetLanguage = targetLanguage,
+                        validationMode = if (name == "question") {
+                            TranslationValidationMode.QUESTION
+                        } else {
+                            TranslationValidationMode.SHORT_TEXT
+                        },
                     )
                     name to result.question
                 }

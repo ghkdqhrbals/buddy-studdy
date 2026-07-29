@@ -2,6 +2,7 @@ package com.buddystudy.backend.study.adapter.outbound.translation
 
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.model.TranslatedQuestionContent
+import com.buddystudy.backend.study.application.port.outbound.TranslationValidationMode
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -78,6 +79,66 @@ class ResilientQuestionTranslationAdapterTest {
                 "outcome", "failure",
             ).count(),
         ).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `accepts short translated content for answer feedback and comment fields`() = runBlocking {
+        val libre = RecordingProvider(
+            providerId = "libretranslate",
+            result = TranslatedQuestionContent(
+                topic = "Content",
+                question = "OK",
+                hint = null,
+            ),
+        )
+        val openAI = RecordingProvider(providerId = "openai")
+        val adapter = adapter(listOf(libre, openAI), listOf("libretranslate", "openai"))
+
+        val translated = adapter.translate(
+            topic = "Content",
+            question = "확인",
+            hint = null,
+            sourceLanguage = "ko",
+            targetLanguage = "en",
+            validationMode = TranslationValidationMode.SHORT_TEXT,
+        )
+
+        assertThat(translated.question).isEqualTo("OK")
+        assertThat(libre.calls).hasSize(1)
+        assertThat(openAI.calls).isEmpty()
+    }
+
+    @Test
+    fun `keeps sentence validation for study questions`() = runBlocking {
+        val libre = RecordingProvider(
+            providerId = "libretranslate",
+            result = TranslatedQuestionContent(
+                topic = "Content",
+                question = "OK",
+                hint = null,
+            ),
+        )
+        val openAI = RecordingProvider(
+            providerId = "openai",
+            result = TranslatedQuestionContent(
+                topic = "Content",
+                question = "Explain why the operation should be acknowledged.",
+                hint = null,
+            ),
+        )
+        val adapter = adapter(listOf(libre, openAI), listOf("libretranslate", "openai"))
+
+        val translated = adapter.translate(
+            topic = "내용",
+            question = "작업을 확인해야 하는 이유를 설명하세요.",
+            hint = null,
+            sourceLanguage = "ko",
+            targetLanguage = "en",
+        )
+
+        assertThat(translated.question).startsWith("Explain why")
+        assertThat(libre.calls).hasSize(1)
+        assertThat(openAI.calls).hasSize(1)
     }
 
     private fun adapter(

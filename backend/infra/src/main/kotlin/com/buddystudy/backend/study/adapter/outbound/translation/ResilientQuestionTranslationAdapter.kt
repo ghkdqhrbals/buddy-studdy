@@ -3,6 +3,7 @@ package com.buddystudy.backend.study.adapter.outbound.translation
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.model.TranslatedQuestionContent
 import com.buddystudy.backend.study.application.port.outbound.QuestionTranslationPort
+import com.buddystudy.backend.study.application.port.outbound.TranslationValidationMode
 import com.buddystudy.study.domain.QuestionLanguage
 import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
@@ -23,6 +24,7 @@ class ResilientQuestionTranslationAdapter(
         hint: String?,
         sourceLanguage: String,
         targetLanguage: String,
+        validationMode: TranslationValidationMode,
     ): TranslatedQuestionContent {
         val request = QuestionTranslationRequest(topic, question, hint, sourceLanguage, targetLanguage)
         val providerOrder = properties.translation.providerOrder
@@ -43,7 +45,7 @@ class ResilientQuestionTranslationAdapter(
         configuredProviders.forEach { provider ->
             try {
                 val translated = provider.translate(request)
-                validate(translated, targetLanguage)
+                validate(translated, targetLanguage, validationMode)
                 count(provider.providerId, "success")
                 return translated
             } catch (error: Exception) {
@@ -65,12 +67,25 @@ class ResilientQuestionTranslationAdapter(
         )
     }
 
-    private fun validate(content: TranslatedQuestionContent, targetLanguage: String) {
+    private fun validate(
+        content: TranslatedQuestionContent,
+        targetLanguage: String,
+        validationMode: TranslationValidationMode,
+    ) {
         require(QuestionLanguage.matchesShortLabel(content.topic, targetLanguage)) {
             "Translation provider did not return a topic in $targetLanguage."
         }
-        require(QuestionLanguage.matches(content.question, targetLanguage)) {
+        val questionMatches = when (validationMode) {
+            TranslationValidationMode.QUESTION -> QuestionLanguage.matches(content.question, targetLanguage)
+            TranslationValidationMode.SHORT_TEXT -> QuestionLanguage.matchesShortLabel(content.question, targetLanguage)
+        }
+        require(questionMatches) {
             "Translation provider did not return a question in $targetLanguage."
+        }
+        content.hint?.takeIf(String::isNotBlank)?.let { hint ->
+            require(QuestionLanguage.matchesShortLabel(hint, targetLanguage)) {
+                "Translation provider did not return a hint in $targetLanguage."
+            }
         }
     }
 

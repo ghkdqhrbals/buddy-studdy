@@ -103,6 +103,11 @@ interface OpenAIPort {
     )
 }
 
+enum class TranslationValidationMode {
+    QUESTION,
+    SHORT_TEXT,
+}
+
 interface QuestionTranslationPort {
     suspend fun translate(
         topic: String,
@@ -110,6 +115,7 @@ interface QuestionTranslationPort {
         hint: String?,
         sourceLanguage: String,
         targetLanguage: String,
+        validationMode: TranslationValidationMode = TranslationValidationMode.QUESTION,
     ): TranslatedQuestionContent
 
     suspend fun translateToEnglish(
@@ -117,7 +123,8 @@ interface QuestionTranslationPort {
         question: String,
         hint: String?,
         sourceLanguage: String,
-    ): TranslatedQuestionContent = translate(topic, question, hint, sourceLanguage, "en")
+        validationMode: TranslationValidationMode = TranslationValidationMode.QUESTION,
+    ): TranslatedQuestionContent = translate(topic, question, hint, sourceLanguage, "en", validationMode)
 }
 
 interface GradingPromptPreviewPort {

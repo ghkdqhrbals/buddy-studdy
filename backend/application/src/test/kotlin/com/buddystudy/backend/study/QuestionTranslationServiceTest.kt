@@ -19,6 +19,7 @@ import com.buddystudy.backend.study.application.port.inbound.QuestionWriteResult
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionTranslationPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
+import com.buddystudy.backend.study.application.port.outbound.TranslationValidationMode
 import com.buddystudy.backend.study.application.service.QuestionTranslationService
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.StudyEntity
@@ -156,6 +157,7 @@ class QuestionTranslationServiceTest {
             hint: String?,
             sourceLanguage: String,
             targetLanguage: String,
+            validationMode: TranslationValidationMode,
         ): TranslatedQuestionContent {
             calls += topic
             return TranslatedQuestionContent(
