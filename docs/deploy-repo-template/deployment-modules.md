@@ -76,9 +76,9 @@ deployment.
   disables Basic Auth while maintenance administration and the rest of the
   monitoring workspace remain authenticated. Backend deployment and the
   application database do not own this state.
-- Backend deployment has no Redis Stream Coordinator runtime dependency and
-  must not provision coordinator containers, networks, routes, secrets, or
-  readiness settings.
+- Backend deployment uses Redis Streams directly through the application
+  consumers. It must not provision a separate stream coordination service,
+  related containers, networks, routes, secrets, or readiness settings.
 - Backend deployment owns one Redis runtime with AOF `everysec`, RDB snapshots,
   a retained Docker volume, and a password stored in AWS Secrets Manager.
   Redis publishes host port `6379`; the separate backend-network workflow

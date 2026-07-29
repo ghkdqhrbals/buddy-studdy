@@ -6,10 +6,10 @@ K3S_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 KUBECTL="${KUBECTL:-kubectl}"
 
 "$KUBECTL" apply -f "$K3S_DIR/../kubernetes/namespace.yaml"
-"$KUBECTL" -n buddystudy delete deployment buddystudy-redis buddystudy-redis-proxy buddystudy-redis-stream-coordinator --ignore-not-found
+"$KUBECTL" -n buddystudy delete deployment buddystudy-redis buddystudy-redis-proxy --ignore-not-found
 "$KUBECTL" -n buddystudy delete statefulset buddystudy-redis --ignore-not-found
 "$KUBECTL" -n buddystudy delete service buddystudy-redis buddystudy-redis-external --ignore-not-found
-"$KUBECTL" -n buddystudy delete job buddystudy-redis-cluster-init buddystudy-redis-stream-coordinator-bootstrap --ignore-not-found
+"$KUBECTL" -n buddystudy delete job buddystudy-redis-cluster-init --ignore-not-found
 "$KUBECTL" apply -k "$K3S_DIR"
 
 "$KUBECTL" -n buddystudy rollout status statefulset/buddystudy-mysql --timeout=180s

@@ -283,7 +283,7 @@ test("deploy repo docs explain Grafana-owned outage alerting", () => {
 
   assert.match(readme, /Grafana alerting owns continuous server-down detection/i);
   assert.match(readme, /Cloudflare Worker[\s\S]*scheduled check is disabled/i);
-  assert.doesNotMatch(readme, /internal Redis Stream Coordinator/i);
+  assert.doesNotMatch(readme, /internal stream coordination service/i);
 });
 
 test("deploy repo monitoring template remains PLG only", () => {
@@ -292,19 +292,20 @@ test("deploy repo monitoring template remains PLG only", () => {
   assert.match(template, /docker pull grafana\/loki:/);
   assert.match(template, /docker pull grafana\/promtail:/);
   assert.match(template, /docker pull grafana\/grafana:/);
-  assert.match(template, /docker rm -f[\s\S]*rsc-prometheus[\s\S]*redis-exporter-6379[\s\S]*redis-exporter-6381/);
+  assert.match(template, /docker rm -f[\s\S]*redis-exporter-6379[\s\S]*redis-exporter-6381/);
   assert.doesNotMatch(template, /docker run[\s\S]*prom\/prometheus/);
   assert.doesNotMatch(template, /docker run[\s\S]*redis_exporter/);
   assert.doesNotMatch(template, /prometheus\.yml/);
+  assert.doesNotMatch(template, /\brsc-/);
 });
 
 test("deploy repo monitoring template persists Loki and Grafana state", () => {
   const template = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-monitoring.yml"), "utf8");
 
-  assert.match(template, /docker volume create rsc-loki-data/);
-  assert.match(template, /docker volume create rsc-grafana-data/);
-  assert.match(template, /-v rsc-loki-data:\/loki/);
-  assert.match(template, /-v rsc-grafana-data:\/var\/lib\/grafana/);
+  assert.match(template, /docker volume create buddystudy-loki-data/);
+  assert.match(template, /docker volume create buddystudy-grafana-data/);
+  assert.match(template, /-v buddystudy-loki-data:\/loki/);
+  assert.match(template, /-v buddystudy-grafana-data:\/var\/lib\/grafana/);
   assert.match(template, /retention_period:\s*168h/);
   assert.match(template, /retention_enabled:\s*true/);
 });
@@ -424,7 +425,7 @@ jobs:
   deploy:
     steps:
       - name: Check Grafana
-        run: docker exec rsc-grafana wget -qO- http://127.0.0.1:3000/api/health
+        run: docker exec buddystudy-grafana wget -qO- http://127.0.0.1:3000/api/health
 `;
 
   assert.match(validateNoActionsRuntimeHealthChecks(workflow, "deploy-monitoring.yml").join("\n"), /must not run container health probes/);
@@ -698,13 +699,12 @@ test("deploy repo backend template wires scheduler readiness policy into backend
   assert.match(template, /MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES=\$\{MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES\}/);
 });
 
-test("kubernetes backend config does not depend on an undeployed stream coordinator", () => {
+test("kubernetes backend config does not depend on an external stream service", () => {
   const backendConfig = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/config/backend-config.yaml"), "utf8");
   const combinedManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/deploy.yaml"), "utf8");
 
   for (const text of [backendConfig, combinedManifest]) {
     assert.doesNotMatch(text, /MONITORING_COORDINATOR_/);
-    assert.doesNotMatch(text, /buddystudy-redis-stream-coordinator/);
   }
 });
 

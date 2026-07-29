@@ -17,7 +17,7 @@ The backend is split into Gradle modules: `domain`, `application`, `infra`, and 
 ## Non-Goals
 
 - Changing API paths or response contracts.
-- Replacing JPA, MySQL, Redis stream coordinator, APNs, or OpenAI.
+- Replacing JPA, MySQL, Redis Streams, APNs, or OpenAI.
 - Introducing CQRS or event sourcing for all domain state.
 - Moving iOS client logic in this refactor.
 
@@ -139,7 +139,7 @@ interface SendReportEmailPort
 - JPA repositories and persistence mappers.
 - OpenAI client adapter.
 - APNs adapter.
-- Redis stream coordinator adapter.
+- Redis Streams adapter.
 - SMTP/report email adapter.
 - AWS secrets adapter.
 

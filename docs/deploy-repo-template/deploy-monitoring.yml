@@ -10,7 +10,7 @@ concurrency:
 jobs:
   deploy:
     name: Deploy Loki Promtail Grafana
-    runs-on: [self-hosted, Linux, ARM64, ec2, rsc-deploy]
+    runs-on: [self-hosted, Linux, ARM64, ec2, buddystudy]
     timeout-minutes: 15
     env:
       MONITOR_DOMAIN: monitor.ghkdqhrbals.org
@@ -28,7 +28,7 @@ jobs:
             exit 1
           fi
 
-          monitoring_root="/opt/redis-stream-coordinator"
+          monitoring_root="/opt/buddystudy-monitoring"
           render_root="${RUNNER_TEMP:-/tmp}/buddystudy-monitoring-render"
           rm -rf "${render_root}"
 
@@ -48,7 +48,7 @@ jobs:
               uid: buddystudy-loki
               type: loki
               access: proxy
-              url: http://rsc-loki:3100
+              url: http://buddystudy-loki:3100
               isDefault: false
               editable: true
           YAML
@@ -128,7 +128,7 @@ jobs:
             filename: /tmp/positions.yaml
 
           clients:
-            - url: http://rsc-loki:3100/loki/api/v1/push
+            - url: http://buddystudy-loki:3100/loki/api/v1/push
 
           scrape_configs:
             - job_name: docker
@@ -144,7 +144,7 @@ jobs:
                 - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
                   target_label: compose_service
                 - source_labels: ['__meta_docker_container_name']
-                  regex: '/(buddystudy-.*|rsc-.*)'
+                  regex: '/buddystudy-.*'
                   action: keep
           YAML
 
@@ -156,37 +156,35 @@ jobs:
             sh -c 'mkdir -p /target/grafana /target/loki /target/promtail && cp -R /source/grafana/provisioning /target/grafana/ && cp -R /source/grafana/dashboards /target/grafana/ && cp /source/loki/loki.yml /target/loki/loki.yml && cp /source/promtail/promtail.yml /target/promtail/promtail.yml'
 
           docker network create buddystudy-net >/dev/null 2>&1 || true
-          docker network create redis-stream-coordinator-net >/dev/null 2>&1 || true
-          docker volume create rsc-loki-data >/dev/null
-          docker volume create rsc-grafana-data >/dev/null
+          docker network create buddystudy-monitoring >/dev/null 2>&1 || true
+          docker volume create buddystudy-loki-data >/dev/null
+          docker volume create buddystudy-grafana-data >/dev/null
 
           docker pull grafana/loki:3.3.2
           docker pull grafana/promtail:3.3.2
           docker pull grafana/grafana:11.4.0
 
           docker rm -f \
-            rsc-prometheus \
             redis-exporter-6379 \
             redis-exporter-6380 \
             redis-exporter-6381 \
             buddystudy-loki \
             buddystudy-promtail \
+            buddystudy-grafana \
             >/dev/null 2>&1 || true
 
-          docker rm -f rsc-loki rsc-promtail rsc-grafana >/dev/null 2>&1 || true
-
           docker run -d \
-            --name rsc-loki \
-            --network redis-stream-coordinator-net \
+            --name buddystudy-loki \
+            --network buddystudy-monitoring \
             --restart unless-stopped \
-            -v rsc-loki-data:/loki \
+            -v buddystudy-loki-data:/loki \
             -v "${monitoring_root}/loki/loki.yml:/etc/loki/local-config.yaml:ro" \
             grafana/loki:3.3.2 \
             -config.file=/etc/loki/local-config.yaml
 
           docker run -d \
-            --name rsc-promtail \
-            --network redis-stream-coordinator-net \
+            --name buddystudy-promtail \
+            --network buddystudy-monitoring \
             --restart unless-stopped \
             -v /var/run/docker.sock:/var/run/docker.sock:ro \
             -v "${monitoring_root}/promtail/promtail.yml:/etc/promtail/config.yml:ro" \
@@ -194,19 +192,19 @@ jobs:
             -config.file=/etc/promtail/config.yml
 
           docker run -d \
-            --name rsc-grafana \
-            --network redis-stream-coordinator-net \
+            --name buddystudy-grafana \
+            --network buddystudy-monitoring \
             --restart unless-stopped \
             -e GF_SECURITY_ADMIN_USER=admin \
             -e GF_SECURITY_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD}" \
             -e GF_USERS_ALLOW_SIGN_UP=false \
             -e GF_AUTH_ANONYMOUS_ENABLED=false \
-            -v rsc-grafana-data:/var/lib/grafana \
+            -v buddystudy-grafana-data:/var/lib/grafana \
             -v "${monitoring_root}/grafana/provisioning:/etc/grafana/provisioning:ro" \
             -v "${monitoring_root}/grafana/dashboards:/var/lib/grafana/dashboards:ro" \
             grafana/grafana:11.4.0
 
-          docker network connect buddystudy-net rsc-grafana >/dev/null 2>&1 || true
-          docker network connect redis-stream-coordinator-net buddystudy-nginx >/dev/null 2>&1 || true
+          docker network connect buddystudy-net buddystudy-grafana >/dev/null 2>&1 || true
+          docker network connect buddystudy-monitoring buddystudy-nginx >/dev/null 2>&1 || true
 
           echo "Monitoring stack is running. Open https://${MONITOR_DOMAIN}/"
