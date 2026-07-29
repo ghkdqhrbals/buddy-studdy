@@ -477,6 +477,12 @@ final class QuestionGenerationFlowTests: XCTestCase {
         let requestedNanoseconds = await sleepProvider.requestedNanoseconds()
         XCTAssertEqual(requestedNanoseconds, [3_000_000_000])
         XCTAssertEqual(pollCounter.value, 1)
+        let persistedQueuedRecord = try? XCTUnwrap(
+            store.loadStudyRecords().first(where: { $0.id == record.id })
+        )
+        XCTAssertEqual(persistedQueuedRecord?.answer, "Polling should stop.")
+        XCTAssertEqual(persistedQueuedRecord?.gradingRequestID, "grading-screen-exit")
+        XCTAssertEqual(persistedQueuedRecord?.gradingStatus, .queued)
 
         appState.cancelAnswerGradingPolling(
             ownerID: ownerID,
@@ -488,6 +494,18 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertEqual(pollCounter.value, 1)
         XCTAssertFalse(appState.isGradingAnswer)
         XCTAssertNil(appState.answerGradingStatusMessage)
+        XCTAssertTrue(appState.isAnswerGradingInProgress(for: persistedQueuedRecord))
+        XCTAssertEqual(
+            appState.gradingPresentationMessage(for: persistedQueuedRecord),
+            appState.strings.gradingQueued
+        )
+        var requestOnlyRecord = persistedQueuedRecord
+        requestOnlyRecord?.gradingStatus = nil
+        XCTAssertTrue(appState.isAnswerGradingInProgress(for: requestOnlyRecord))
+        XCTAssertEqual(
+            appState.gradingPresentationMessage(for: requestOnlyRecord),
+            appState.strings.gradingQueued
+        )
     }
 
     func testReopeningStudyRoomRestoresPersistedAnswerAndGradingState() async throws {

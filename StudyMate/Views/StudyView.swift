@@ -14,6 +14,7 @@ struct StudyView: View {
     @State private var selectedTreeRootID: Int?
     @State private var answerSubmissionTask: Task<Void, Never>?
     @State private var answerGradingOwnerID: String?
+    @State private var isResolvingInitialAnswerState = true
     #if os(iOS)
     @FocusState private var isAnswerEditorFocused: Bool
     #endif
@@ -42,13 +43,15 @@ struct StudyView: View {
 
                 Group {
                     if let record = selectedStudyRecord {
+                        let isGradingAnswer = appState.isAnswerGradingInProgress(for: record)
                         StudyConversationSection(
                             question: record.question,
                             draftAnswer: $draftAnswer,
                             showsHint: $showsHint,
                             gradingResult: record.gradingResult,
-                            isGradingAnswer: appState.isGradingAnswer,
-                            gradingStatusMessage: appState.answerGradingStatusMessage,
+                            isGradingAnswer: isGradingAnswer,
+                            isResolvingAnswerState: isResolvingInitialAnswerState,
+                            gradingStatusMessage: appState.gradingPresentationMessage(for: record),
                             canSubmitAnswer: canSubmitAnswer,
                             strings: strings,
                             answerEditor: {
@@ -124,14 +127,19 @@ struct StudyView: View {
             presentPendingLimitNoticeIfNeeded()
         }
         .task(id: preferredCategoryID) {
+            isResolvingInitialAnswerState = true
             let ownerID = UUID().uuidString
             answerGradingOwnerID = ownerID
             async let roomPreparation: Void = appState.prepareStudyRoom(
                 categoryID: preferredCategoryID,
-                gradingPollingOwnerID: ownerID
+                gradingPollingOwnerID: ownerID,
+                onInitialStateResolved: {
+                    isResolvingInitialAnswerState = false
+                }
             )
             async let quotaRefresh: Void = appState.refreshQuestionQuota()
             _ = await (roomPreparation, quotaRefresh)
+            isResolvingInitialAnswerState = false
             if answerGradingOwnerID == ownerID {
                 answerGradingOwnerID = nil
             }
@@ -207,9 +215,9 @@ struct StudyView: View {
 
     private var canSubmitAnswer: Bool {
         selectedStudyRecord?.gradingResult == nil &&
-            selectedStudyRecord?.gradingStatus.map(\.isTerminal) != false &&
+            !isResolvingInitialAnswerState &&
             !draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            !appState.isGradingAnswer
+            !appState.isAnswerGradingInProgress(for: selectedStudyRecord)
     }
 
     private var selectedStudyRecord: StudyRecord? {
@@ -566,6 +574,7 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
     @Binding var showsHint: Bool
     var gradingResult: GradingResult?
     var isGradingAnswer: Bool
+    var isResolvingAnswerState: Bool
     var gradingStatusMessage: String?
     var canSubmitAnswer: Bool
     var strings: AppStrings
@@ -584,7 +593,9 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                             .tint(.accentColor)
                             .textSelection(.enabled)
 
-                        if gradingResult == nil {
+                        if gradingResult == nil &&
+                            !isGradingAnswer &&
+                            !isResolvingAnswerState {
                             Button {
                                 onSkip()
                             } label: {
@@ -603,7 +614,9 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                 }
             }
 
-            if gradingResult == nil && !isGradingAnswer {
+            if !isResolvingAnswerState &&
+                gradingResult == nil &&
+                !isGradingAnswer {
                 StudyChatBubble(role: .learnerInput) {
                     MessageAnswerInput(
                         strings: strings,
@@ -613,7 +626,8 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                         onSubmit: onSubmit
                     )
                 }
-            } else if !draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            } else if !isResolvingAnswerState &&
+                        !draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 StudyChatBubble(role: .learnerAnswer) {
                     MarkdownMessageText(markdown: draftAnswer, fillsWidth: false)
                         .font(.body)
@@ -627,7 +641,9 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                 }
             }
 
-            if isGradingAnswer, let gradingStatusMessage {
+            if !isResolvingAnswerState,
+               isGradingAnswer,
+               let gradingStatusMessage {
                 StudyChatBubble(role: .feedback) {
                     HStack(spacing: 10) {
                         ProgressView()

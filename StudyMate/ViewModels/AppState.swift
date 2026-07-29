@@ -5264,9 +5264,11 @@ final class AppState: ObservableObject {
 
     func prepareStudyRoom(
         categoryID: String?,
-        gradingPollingOwnerID: String? = nil
+        gradingPollingOwnerID: String? = nil,
+        onInitialStateResolved: (@MainActor () -> Void)? = nil
     ) async {
         guard let initialCategory = studyCategoryForRoom(categoryID) else {
+            onInitialStateResolved?()
             return
         }
 
@@ -5275,10 +5277,12 @@ final class AppState: ObservableObject {
         let didRefresh = await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
         guard didRefresh,
               let refreshedCategory = studyCategoryForRoom(categoryID) ?? studyCategoryMatchingTopic(initialCategory.title) else {
+            onInitialStateResolved?()
             return
         }
 
         applyPreferredPendingRecord(for: refreshedCategory)
+        onInitialStateResolved?()
 
         guard let gradingPollingOwnerID,
               let record = studyRoomRecordForDisplay(categoryID: categoryID),
@@ -5563,6 +5567,39 @@ final class AppState: ObservableObject {
             : draft
     }
 
+    func isAnswerGradingInProgress(for record: StudyRecord?) -> Bool {
+        guard let record,
+              record.gradingResult == nil else {
+            return false
+        }
+        if let gradingStatus = record.gradingStatus,
+           !gradingStatus.isTerminal {
+            return true
+        }
+        if record.gradingStatus == nil,
+           let gradingRequestID = record.gradingRequestID,
+           !gradingRequestID.isEmpty {
+            return true
+        }
+        return isGradingAnswer
+    }
+
+    func gradingPresentationMessage(for record: StudyRecord?) -> String? {
+        if let answerGradingStatusMessage {
+            return answerGradingStatusMessage
+        }
+        if let gradingStatus = record?.gradingStatus,
+           !gradingStatus.isTerminal {
+            return gradingMessage(for: gradingStatus)
+        }
+        if record?.gradingStatus == nil,
+           let gradingRequestID = record?.gradingRequestID,
+           !gradingRequestID.isEmpty {
+            return strings.gradingQueued
+        }
+        return isGradingAnswer ? strings.gradingQueued : nil
+    }
+
     func updateAnswer(_ answer: String, for record: StudyRecord) {
         pendingAnswerDraft = PendingAnswerDraft(question: record.question, recordID: record.id, answer: answer)
         answerDraftSaveTask?.cancel()
@@ -5624,6 +5661,7 @@ final class AppState: ObservableObject {
                         fallback: settings.appLanguage
                     )
                 )
+                persistAcceptedAnswerGrading(queued)
                 AppAnalytics.answerSubmitted()
                 try Task.checkCancellation()
                 guard isAnswerGradingOwnerCurrent(pollingOwnerID) else {
@@ -6828,6 +6866,7 @@ final class AppState: ObservableObject {
                         fallback: settings.appLanguage
                     )
                 )
+                persistAcceptedAnswerGrading(queued)
                 AppAnalytics.answerSubmitted()
                 try Task.checkCancellation()
                 guard isAnswerGradingOwnerCurrent(pollingOwnerID) else {
@@ -6935,6 +6974,7 @@ final class AppState: ObservableObject {
                         fallback: settings.appLanguage
                     )
                 )
+                persistAcceptedAnswerGrading(queued)
                 try Task.checkCancellation()
                 guard isAnswerGradingOwnerCurrent(pollingOwnerID) else {
                     throw CancellationError()
@@ -7265,6 +7305,21 @@ final class AppState: ObservableObject {
         )
         reloadStudyRecordsFromStore(refreshRooms: false)
         _ = studyRoomState.applyIncomingRecord(progressedRecord)
+    }
+
+    private func persistAcceptedAnswerGrading(_ queuedRecord: StudyRecord) {
+        var acceptedRecord = queuedRecord
+        if acceptedRecord.gradingStatus == nil {
+            acceptedRecord.gradingStatus = .queued
+        }
+        if acceptedRecord.studyID == nil {
+            acceptedRecord.studyID = studyRecords.first(where: { $0.id == acceptedRecord.id })?.studyID
+        }
+        localStudyRecordUseCase.replaceRecords(
+            mergeBackendRecord(acceptedRecord, into: studyRecords)
+        )
+        reloadStudyRecordsFromStore(refreshRooms: false)
+        _ = studyRoomState.applyIncomingRecord(acceptedRecord)
     }
 
     func cancelAnswerGradingPolling(ownerID: String, reason: String) {
