@@ -305,6 +305,15 @@ Public community feed
 - The monitoring Users & Quotas page proxies admin APIs through the authenticated monitoring origin. It does not persist backend admin tokens outside the browser session.
 - User search is bounded to 100 rows per API call and the UI uses 20-row pages.
 
+## Managed Batch Operations
+
+- Business schedulers implement `ManagedJob` and execute through `ManagedJobExecutionUseCase`. The job contract owns an operator-facing name and description in addition to the stable machine name.
+- `scheduled_jobs` is the enablement, schedule-display, timeout, and lock-policy registry. Spring scheduling annotations remain the execution trigger, so migrations must keep the displayed schedule value aligned with the configured trigger.
+- Every managed execution writes `RUNNING` and then `SUCCESS`, `FAILED`, or `SKIPPED` to `scheduled_job_runs`, including trigger type, start/finish time, duration, bounded result summary or error, retry source, and initiator.
+- A MySQL advisory lock prevents concurrent execution of the same managed job across overlapping backend instances. Job work remains idempotent because a lock does not by itself guarantee exactly-once side effects.
+- The administrator status API returns every registered job, while readiness freshness applies only to the configured frequent critical subset. Daily correction jobs remain visible without being incorrectly marked stale by the global 15-minute readiness threshold.
+- Monitoring `Manage > Batch Jobs` uses the authenticated admin APIs for job status, paginated run history, run details, and explicit retry. Redis Stream consumer polling and `@StreamScheduler` pending-entry recovery remain pipeline operations and are inspected under `Manage > Redis Streams`, not recorded as high-frequency batch runs.
+
 ## Build And Verification
 
 Recommended local checks:

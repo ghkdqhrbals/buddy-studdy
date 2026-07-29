@@ -90,6 +90,7 @@ data class BuddyStudyProperties(
             "question-push-outbox-dispatch",
             "user-stats-refresh",
             "admin-analytics-recent",
+            "answer-grading-watchdog",
         ),
     )
     data class Analytics(

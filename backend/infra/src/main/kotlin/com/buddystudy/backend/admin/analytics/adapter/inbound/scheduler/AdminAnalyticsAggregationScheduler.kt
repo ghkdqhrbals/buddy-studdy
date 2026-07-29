@@ -33,6 +33,9 @@ class AdminAnalyticsRecentJob(
     private val analytics: AdminAnalyticsAggregationUseCase,
 ) : ManagedJob {
     override val name: String = "admin-analytics-recent"
+    override val displayName: String = "Recent admin analytics"
+    override val description: String =
+        "Recalculates the recent operating-metrics window used by the administrator dashboard."
 
     override suspend fun run(): String {
         val today = LocalDate.now(ZoneOffset.UTC)
@@ -45,6 +48,9 @@ class AdminAnalyticsCorrectionJob(
     private val analytics: AdminAnalyticsAggregationUseCase,
 ) : ManagedJob {
     override val name: String = "admin-analytics-correction"
+    override val displayName: String = "Admin analytics correction"
+    override val description: String =
+        "Recalculates the longer correction window to repair late or changed operating metrics."
 
     override suspend fun run(): String {
         val today = LocalDate.now(ZoneOffset.UTC)

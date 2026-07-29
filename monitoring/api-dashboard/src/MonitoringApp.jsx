@@ -4,6 +4,7 @@ import { ApiLogsPage, ApiPerformancePage, TestZonePage } from "./pages/ObservePa
 import { SettingsPage } from "./pages/SettingsPage.jsx";
 import { ServiceStatusPage } from "./pages/ServiceStatusPage.jsx";
 import { StreamsPage } from "./pages/StreamsPage.jsx";
+import { JobsPage } from "./pages/JobsPage.jsx";
 import { UsersPage } from "./pages/UsersPage.jsx";
 
 export function MonitoringApp() {
@@ -13,6 +14,7 @@ export function MonitoringApp() {
     "/performance.html": { Page: ApiPerformancePage },
     "/testzone.html": { Page: TestZonePage, contentClassName: "react-content-workspace" },
     "/users.html": UsersPage,
+    "/jobs.html": JobsPage,
     "/streams.html": StreamsPage,
     "/audit.html": AuditPage,
     "/settings.html": SettingsPage,

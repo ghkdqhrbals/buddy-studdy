@@ -21,6 +21,7 @@ test("all monitoring pages load the shared React application", async () => {
     "audit.html",
     "settings.html",
     "users.html",
+    "jobs.html",
     "streams.html",
   ]) {
     const html = await text(page);
@@ -37,8 +38,25 @@ test("all monitoring pages load the shared React application", async () => {
   const navigation = await source("app/navigation.js");
   assert.match(navigation, /Access & Audit/);
   assert.match(navigation, /Users & Quotas/);
+  assert.match(navigation, /Batch Jobs/);
   assert.match(navigation, /Redis Streams/);
   assert.match(navigation, /Service Status/);
+});
+
+test("batch jobs show operator metadata, timing, results, paginated history, and retry controls", async () => {
+  const app = await source("MonitoringApp.jsx");
+  const page = await source("pages/JobsPage.jsx");
+  assert.match(app, /jobs\.html/);
+  assert.match(page, /\/jobs\/statuses/);
+  assert.match(page, /\/jobs\/runs/);
+  assert.match(page, /displayName/);
+  assert.match(page, /description/);
+  assert.match(page, /Last started/);
+  assert.match(page, /Duration/);
+  assert.match(page, /Latest result/);
+  assert.match(page, /Pagination/);
+  assert.match(page, /Retry job/);
+  assert.match(page, /retryOfRunId/);
 });
 
 test("service status administration schedules, ends, and audits maintenance windows", async () => {

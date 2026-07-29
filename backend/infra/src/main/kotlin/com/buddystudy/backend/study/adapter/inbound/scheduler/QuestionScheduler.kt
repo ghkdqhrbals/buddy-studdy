@@ -25,6 +25,9 @@ class QuestionScheduleJob(
     private val runQuestionSchedule: RunQuestionScheduleUseCase,
 ) : ManagedJob {
     override val name: String = "question-schedule"
+    override val displayName: String = "Scheduled question dispatch"
+    override val description: String =
+        "Claims due study schedules and queues one question-generation request for each eligible study."
 
     override suspend fun run(): String {
         runQuestionSchedule.runDueQuestions()

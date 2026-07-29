@@ -7,6 +7,10 @@ import com.buddystudy.backend.scheduler.application.model.ScheduledJobStatusResp
 
 interface ManagedJob {
     val name: String
+    val displayName: String
+        get() = name
+    val description: String
+        get() = ""
     suspend fun run(): String?
 }
 

@@ -49,7 +49,10 @@ data class ScheduledJobSnapshot(
 
 data class ScheduledJobStatus(
     val jobName: String,
+    val displayName: String = jobName,
+    val description: String = "",
     val enabled: Boolean,
+    val monitored: Boolean = false,
     val scheduleType: String,
     val scheduleValue: String,
     val latestRun: ScheduledJobRun?,

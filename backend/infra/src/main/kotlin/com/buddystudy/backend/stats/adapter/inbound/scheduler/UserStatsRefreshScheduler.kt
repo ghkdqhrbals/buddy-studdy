@@ -26,6 +26,9 @@ class UserStatsRefreshJob(
     private val refreshUserStats: RefreshUserStatsUseCase,
 ) : ManagedJob {
     override val name: String = "user-stats-refresh"
+    override val displayName: String = "User learning statistics refresh"
+    override val description: String =
+        "Rebuilds user and topic learning statistics from completed grading records."
 
     override suspend fun run(): String {
         val now = Instant.now()

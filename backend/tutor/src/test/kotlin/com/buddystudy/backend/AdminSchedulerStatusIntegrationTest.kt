@@ -115,6 +115,9 @@ class AdminSchedulerStatusIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(body["jobs"]).hasSize(2)
         val questionSchedule = body["jobs"].first { it["jobName"].asText() == "question-schedule" }
         val statsRefresh = body["jobs"].first { it["jobName"].asText() == "user-stats-refresh" }
+        assertThat(questionSchedule["displayName"].asText()).isEqualTo("Scheduled question dispatch")
+        assertThat(questionSchedule["description"].asText()).isNotBlank()
+        assertThat(questionSchedule["monitored"].asBoolean()).isTrue()
         assertThat(questionSchedule["enabled"].asBoolean()).isTrue()
         assertThat(questionSchedule["stale"].asBoolean()).isFalse()
         assertThat(questionSchedule["latestRun"]["status"].asText()).isEqualTo("SUCCESS")

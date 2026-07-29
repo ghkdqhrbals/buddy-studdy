@@ -249,6 +249,32 @@ class ManagedJobExecutionServiceTest {
         assertThat(status.stale).isTrue()
     }
 
+    @Test
+    fun `find statuses returns unmonitored registered jobs with operator metadata`(): Unit = runBlocking {
+        val correction = object : ManagedJob {
+            override val name = "admin-analytics-correction"
+            override val displayName = "Admin analytics correction"
+            override val description = "Recalculates the correction window."
+            override suspend fun run(): String = "rows=0"
+        }
+        runs.snapshots += ScheduledJobSnapshot(
+            jobName = correction.name,
+            enabled = true,
+            scheduleType = "CRON",
+            scheduleValue = "0 20 3 * * *",
+            latestRun = null,
+        )
+        val serviceWithCatalog = ManagedJobExecutionService(runs, locks, properties, listOf(correction))
+
+        val response = serviceWithCatalog.findStatuses()
+
+        val status = response.jobs.single { it.jobName == correction.name }
+        assertThat(status.displayName).isEqualTo(correction.displayName)
+        assertThat(status.description).isEqualTo(correction.description)
+        assertThat(status.monitored).isFalse()
+        assertThat(status.stale).isFalse()
+    }
+
     private class FakeJob(
         override val name: String,
         private val block: () -> String,

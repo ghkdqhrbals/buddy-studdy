@@ -22,8 +22,10 @@ class ManagedJobExecutionService(
     private val runs: ScheduledJobRunPort,
     private val locks: JobLockPort,
     private val properties: BuddyStudyProperties,
+    registeredJobs: List<ManagedJob> = emptyList(),
 ) : ManagedJobExecutionUseCase {
     private val logger = LoggerFactory.getLogger(javaClass)
+    private val jobsByName = registeredJobs.associateBy(ManagedJob::name)
 
     override suspend fun execute(
         job: ManagedJob,
@@ -72,15 +74,19 @@ class ManagedJobExecutionService(
 
     override suspend fun findStatuses(): ScheduledJobStatusResponse {
         val monitoredJobs = properties.monitoring.schedulerMonitoredJobs
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .distinct()
         val thresholdMinutes = properties.monitoring.schedulerStaleThresholdMinutes.coerceAtLeast(1)
         val threshold = Duration.ofMinutes(thresholdMinutes)
         val now = Instant.now()
-        val snapshots = runs.findSnapshots(monitoredJobs).associateBy { it.jobName }
-        val orderedSnapshots = if (monitoredJobs.isEmpty()) {
-            snapshots.values.sortedBy { it.jobName }
-        } else {
-            monitoredJobs.map { jobName ->
-                snapshots[jobName] ?: ScheduledJobSnapshot(
+        val snapshots = runs.findSnapshots(emptyList()).associateBy { it.jobName }
+        val orderedJobNames = buildList {
+            addAll(snapshots.keys.sorted())
+            addAll(monitoredJobs.filterNot(snapshots::containsKey))
+        }
+        val orderedSnapshots = orderedJobNames.map { jobName ->
+            snapshots[jobName] ?: ScheduledJobSnapshot(
                     jobName = jobName,
                     enabled = true,
                     scheduleType = "MISSING",
@@ -89,15 +95,17 @@ class ManagedJobExecutionService(
                     latestRun = null,
                     lastSuccessfulRun = null,
                 )
-            }
         }
         val jobs = orderedSnapshots.map { snapshot ->
+            val definition = jobsByName[snapshot.jobName]
+            val monitored = snapshot.jobName in monitoredJobs
             val latestRun = snapshot.latestRun
             val lastSuccessfulRun = snapshot.lastSuccessfulRun
             val stuck = snapshot.enabled &&
                 latestRun?.status == JobRunStatus.RUNNING &&
                 Duration.between(latestRun.startedAt, now).seconds > snapshot.timeoutSeconds.coerceAtLeast(1)
-            val stale = snapshot.enabled &&
+            val stale = monitored &&
+                snapshot.enabled &&
                 (
                     lastSuccessfulRun == null ||
                         latestRun?.status == JobRunStatus.FAILED ||
@@ -106,7 +114,10 @@ class ManagedJobExecutionService(
                     )
             ScheduledJobStatus(
                 jobName = snapshot.jobName,
+                displayName = definition?.displayName ?: snapshot.jobName,
+                description = definition?.description.orEmpty(),
                 enabled = snapshot.enabled,
+                monitored = monitored,
                 scheduleType = snapshot.scheduleType,
                 scheduleValue = snapshot.scheduleValue,
                 latestRun = latestRun,

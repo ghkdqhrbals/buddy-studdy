@@ -10,6 +10,7 @@ export function formatDateTime(value) {
 }
 
 export function formatDuration(milliseconds) {
+  if (milliseconds == null || milliseconds === "") return "-";
   const value = Number(milliseconds);
   if (!Number.isFinite(value)) return "-";
   if (value < 1) return `${Math.round(value * 1000)}µs`;
@@ -19,8 +20,8 @@ export function formatDuration(milliseconds) {
 
 export function statusTone(value) {
   const status = String(value || "").toUpperCase();
-  if (["ACTIVE", "READY", "PUBLISHED", "COMPLETED", "200"].includes(status)) return "success";
-  if (["FAILED", "DEAD", "BLOCKED", "ERROR"].includes(status) || Number(status) >= 500) return "danger";
-  if (["PENDING", "RETRY", "CLAIMED", "ANONYMOUS"].includes(status)) return "warning";
+  if (["ACTIVE", "READY", "PUBLISHED", "COMPLETED", "SUCCESS", "200"].includes(status)) return "success";
+  if (["FAILED", "DEAD", "BLOCKED", "ERROR", "STUCK", "STALE"].includes(status) || Number(status) >= 500) return "danger";
+  if (["PENDING", "RETRY", "CLAIMED", "ANONYMOUS", "RUNNING", "SKIPPED", "DISABLED"].includes(status)) return "warning";
   return "neutral";
 }

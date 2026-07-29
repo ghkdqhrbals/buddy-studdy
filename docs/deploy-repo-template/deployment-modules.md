@@ -81,6 +81,8 @@ deployment.
 - Scheduler readiness includes only jobs expected to succeed within the
   readiness freshness window. Daily correction jobs remain visible in run
   history and failure alerts but must not make a 15-minute readiness check stale.
+  The answer-grading watchdog is a frequent critical job and belongs in the
+  default monitored list.
 - Runtime health checks are not GitHub Actions deploy gates. GitHub Actions may
   validate deploy mechanics such as image pull, container process survival, and
   nginx syntax only.

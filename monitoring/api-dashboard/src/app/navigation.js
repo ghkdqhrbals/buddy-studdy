@@ -1,6 +1,7 @@
 import {
   Activity,
   BookOpenText,
+  CalendarClock,
   ExternalLink,
   Gauge,
   History,
@@ -13,7 +14,7 @@ import {
   Users,
 } from "lucide-react";
 
-export const UI_VERSION = "2026.07.28.1";
+export const UI_VERSION = "2026.07.29.1";
 export const NAV_COLLAPSED_KEY = "buddystudy.monitoring.nav.collapsed";
 export const NAV_GROUP_KEY = "buddystudy.monitoring.nav.groups";
 export const NAV_MODE_KEY = "buddystudy.monitoring.nav.mode";
@@ -36,6 +37,7 @@ export const navigationGroups = [
     label: "Manage",
     items: [
       { href: "/users.html", label: "Users & Quotas", icon: Users },
+      { href: "/jobs.html", label: "Batch Jobs", icon: CalendarClock },
       { href: "/streams.html", label: "Redis Streams", icon: Layers3 },
       { href: "/service-status.html", label: "Service Status", icon: Wrench },
     ],
