@@ -146,6 +146,9 @@ deployment.
 - Deployment notifications use the dedicated `DEPLOY_SLACK_WEBHOOK_URL` Slack
   app identity and show status, production environment, runtime, source commit,
   immutable image, actor, timestamp, and direct build/deploy run actions.
+  Block Kit Markdown fields use actual newline characters so Slack renders
+  labels and values on separate lines; payload text must not contain a literal
+  `\n` sequence.
   `SLACK_WEBHOOK_URL` is only a migration fallback.
 - iOS release notifications are sent through
   `Notify BuddyStudy Deployment Status` in the private deploy repository, so

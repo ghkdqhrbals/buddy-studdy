@@ -57,7 +57,7 @@ class StudyController(
 
     @Operation(
         summary = "Fetch my studies",
-        description = "Returns the authenticated user's study rooms. Each study can include one pendingQuestion for the current unanswered study-room question. Record history is intentionally split into /api/v1/records.",
+        description = "Returns the authenticated user's study rooms. Each study can include one pendingQuestion with its persisted answer and grading request state, allowing clients to restore a submitted answer after reopening the room. Record history is intentionally split into /api/v1/records.",
     )
     @ApiResponses(
         ApiResponse(responseCode = "200", description = "Study rooms returned."),

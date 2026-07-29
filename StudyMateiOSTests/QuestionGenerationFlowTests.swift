@@ -490,6 +490,297 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertNil(appState.answerGradingStatusMessage)
     }
 
+    func testReopeningStudyRoomRestoresPersistedAnswerAndGradingState() async throws {
+        let suiteName = "QuestionGenerationFlowTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+
+        let category = StudyCategory(
+            id: "11",
+            title: "운영체제",
+            difficulty: .intermediate
+        )
+        let question = QuestionItem(
+            question: "프로세스와 스레드의 차이는 무엇인가요?",
+            expectedAnswerHint: nil,
+            createdAt: Date(timeIntervalSince1970: 1_753_660_800)
+        )
+        let store = SettingsStore(
+            defaults: defaults,
+            recordDatabaseURL: databaseURL,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveSettings(
+            StudySettings(
+                topic: category.title,
+                difficulty: category.difficulty,
+                customPrompt: StudySettings.defaultCustomPrompt,
+                intervalMinutes: 15,
+                studyCategories: [category],
+                selectedStudyCategoryID: category.id
+            )
+        )
+        store.saveStudyRecord(
+            StudyRecord(
+                id: "record-11",
+                studyID: 11,
+                question: question,
+                topic: category.title,
+                difficulty: category.difficulty
+            )
+        )
+        store.saveQuestion(question)
+        store.saveLastAnswer("")
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+
+        let client = makeClient { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/v1/studies")
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: """
+                {
+                  "studies": [
+                    {
+                      "id": 11,
+                      "topic": "운영체제",
+                      "difficultyLevel": 5,
+                      "intervalMinutes": 15,
+                      "enabled": true,
+                      "activeForQuestions": true,
+                      "notificationSound": null,
+                      "customPrompt": "짧게",
+                      "openaiModel": "gpt-5.4",
+                      "maxHistoryCount": 100,
+                      "nextDueAt": null,
+                      "lastSentAt": null,
+                      "lastError": null,
+                      "pendingQuestion": {
+                        "id": "record-11",
+                        "studyId": 11,
+                        "question": {
+                          "question": "프로세스와 스레드의 차이는 무엇인가요?",
+                          "expectedAnswerHint": null,
+                          "createdAt": "2025-07-28T00:00:00Z"
+                        },
+                        "answer": "프로세스는 독립된 메모리를 갖고 스레드는 메모리를 공유합니다.",
+                        "gradingResult": null,
+                        "topic": "운영체제",
+                        "difficulty": 5,
+                        "answeredAt": "2025-07-28T00:01:00Z",
+                        "isPublic": true,
+                        "gradingRequestId": "grading-11",
+                        "gradingStatus": "FAILED",
+                        "gradingError": "일시적인 채점 오류"
+                      },
+                      "createdAt": "2025-07-28T00:00:00Z",
+                      "updatedAt": "2025-07-28T00:01:00Z"
+                    }
+                  ],
+                  "totalCount": 1,
+                  "limit": 500,
+                  "offset": 0,
+                  "serverTime": "2025-07-28T00:01:00Z"
+                }
+                """
+            )
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+
+        await appState.prepareStudyRoom(categoryID: category.id)
+
+        let restored = try XCTUnwrap(
+            appState.studyRoomRecordForDisplay(categoryID: category.id)
+        )
+        XCTAssertEqual(
+            restored.answer,
+            "프로세스는 독립된 메모리를 갖고 스레드는 메모리를 공유합니다."
+        )
+        XCTAssertEqual(restored.gradingRequestID, "grading-11")
+        XCTAssertEqual(restored.gradingStatus, .failed)
+        XCTAssertEqual(store.loadStudyRecords().first?.answer, restored.answer)
+        XCTAssertEqual(appState.lastAnswer, restored.answer)
+    }
+
+    func testReopeningStudyRoomResumesPersistedAnswerGrading() async throws {
+        let suiteName = "QuestionGenerationFlowTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+
+        let category = StudyCategory(
+            id: "12",
+            title: "데이터베이스",
+            difficulty: .intermediate
+        )
+        let question = QuestionItem(
+            question: "트랜잭션 격리 수준을 설명하세요.",
+            expectedAnswerHint: nil,
+            createdAt: Date(timeIntervalSince1970: 1_753_660_800)
+        )
+        let store = SettingsStore(
+            defaults: defaults,
+            recordDatabaseURL: databaseURL,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveSettings(
+            StudySettings(
+                topic: category.title,
+                difficulty: category.difficulty,
+                customPrompt: StudySettings.defaultCustomPrompt,
+                intervalMinutes: 15,
+                studyCategories: [category],
+                selectedStudyCategoryID: category.id
+            )
+        )
+        store.saveStudyRecord(
+            StudyRecord(
+                id: "record-12",
+                studyID: 12,
+                question: question,
+                topic: category.title,
+                difficulty: category.difficulty
+            )
+        )
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+
+        let client = makeClient { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/v1/studies"):
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "studies": [
+                        {
+                          "id": 12,
+                          "topic": "데이터베이스",
+                          "difficultyLevel": 5,
+                          "intervalMinutes": 15,
+                          "enabled": true,
+                          "activeForQuestions": true,
+                          "notificationSound": null,
+                          "customPrompt": "짧게",
+                          "openaiModel": "gpt-5.4",
+                          "maxHistoryCount": 100,
+                          "nextDueAt": null,
+                          "lastSentAt": null,
+                          "lastError": null,
+                          "pendingQuestion": {
+                            "id": "record-12",
+                            "studyId": 12,
+                            "question": {
+                              "question": "트랜잭션 격리 수준을 설명하세요.",
+                              "expectedAnswerHint": null,
+                              "createdAt": "2025-07-28T00:00:00Z"
+                            },
+                            "answer": "격리 수준은 동시성 문제와 일관성 사이의 균형을 정합니다.",
+                            "gradingResult": null,
+                            "topic": "데이터베이스",
+                            "difficulty": 5,
+                            "answeredAt": "2025-07-28T00:01:00Z",
+                            "isPublic": true,
+                            "gradingRequestId": "grading-12",
+                            "gradingStatus": "QUEUED",
+                            "gradingError": null
+                          },
+                          "createdAt": "2025-07-28T00:00:00Z",
+                          "updatedAt": "2025-07-28T00:01:00Z"
+                        }
+                      ],
+                      "totalCount": 1,
+                      "limit": 500,
+                      "offset": 0,
+                      "serverTime": "2025-07-28T00:01:00Z"
+                    }
+                    """
+                )
+            case ("GET", "/api/v1/answer-processes/grading-12"):
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "correlationId": "grading-12",
+                      "recordId": "record-12",
+                      "status": "COMPLETED",
+                      "terminal": true,
+                      "pollAfterMs": null,
+                      "events": [],
+                      "errorMessage": null,
+                      "updatedAt": "2025-07-28T00:02:00Z"
+                    }
+                    """
+                )
+            case ("GET", "/api/v1/records/record-12"):
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "id": "record-12",
+                      "studyId": 12,
+                      "question": {
+                        "question": "트랜잭션 격리 수준을 설명하세요.",
+                        "expectedAnswerHint": null,
+                        "createdAt": "2025-07-28T00:00:00Z"
+                      },
+                      "answer": "격리 수준은 동시성 문제와 일관성 사이의 균형을 정합니다.",
+                      "gradingResult": {
+                        "score": 91,
+                        "correct": true,
+                        "feedback": "핵심을 잘 설명했습니다.",
+                        "explanation": "격리 수준별 현상까지 연결하면 더 좋습니다."
+                      },
+                      "topic": "데이터베이스",
+                      "difficulty": 5,
+                      "answeredAt": "2025-07-28T00:01:00Z",
+                      "isPublic": true,
+                      "gradingRequestId": "grading-12",
+                      "gradingStatus": "COMPLETED",
+                      "gradingError": null
+                    }
+                    """
+                )
+            default:
+                XCTFail("Unexpected request: \(request.httpMethod ?? "-") \(request.url?.path ?? "-")")
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: client,
+            appSleepProvider: ImmediateAppSleepProvider()
+        )
+
+        await appState.prepareStudyRoom(
+            categoryID: category.id,
+            gradingPollingOwnerID: "study-view-12"
+        )
+
+        let restored = try XCTUnwrap(
+            appState.studyRoomRecordForDisplay(categoryID: category.id)
+        )
+        XCTAssertEqual(
+            restored.answer,
+            "격리 수준은 동시성 문제와 일관성 사이의 균형을 정합니다."
+        )
+        XCTAssertEqual(restored.gradingResult?.score, 91)
+        XCTAssertEqual(restored.gradingStatus, .completed)
+        XCTAssertFalse(appState.isGradingAnswer)
+    }
+
     func testJapaneseLanguageUsesJapaneseLocaleAndBackendCode() {
         XCTAssertEqual(AppLanguage.japanese.locale.identifier, "ja_JP")
         XCTAssertEqual(AppLanguage.japanese.backendCode, "ja")
@@ -674,6 +965,14 @@ final class QuestionGenerationFlowTests: XCTestCase {
         apnsToken: ""
     )
 
+    private static let signedInRegistration = RemotePushRegistration(
+        deviceID: "device-1",
+        clientSecret: "client-secret",
+        apnsToken: "",
+        accessToken: "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJkZXZpY2VfaWQiOiJkZXZpY2UtMSIsImlzX2Fub255bW91cyI6ZmFsc2UsInN0YXR1cyI6IkFDVElWRSJ9.",
+        accessTokenExpiresAt: Date().addingTimeInterval(3_600)
+    )
+
     private static func response(
         for request: URLRequest,
         statusCode: Int,
@@ -773,4 +1072,8 @@ private actor BlockingRecordingAppSleepProvider: AppSleepProviding {
     func requestedNanoseconds() -> [UInt64] {
         values
     }
+}
+
+private struct ImmediateAppSleepProvider: AppSleepProviding {
+    func sleep(nanoseconds: UInt64) async throws {}
 }

@@ -179,6 +179,10 @@ User answer
 -> AppState saves answer draft
 -> AppState.gradeCurrentAnswer or gradeRecord
 -> RemotePushBackendClient.gradeRecord
+-> backend persists the submitted answer and grading correlation before OpenAI work
+-> leaving the detail screen cancels only client polling
+-> reopening fetches /api/v1/studies and merges pendingQuestion answer/grading state over stale local cache
+-> iOS resumes polling by the persisted grading correlation
 -> backend calls OpenAI and persists score, feedback, and explanation
 -> SettingsStore updates StudyRecord
 -> StatisticsView recalculates topic ranges from records

@@ -124,9 +124,17 @@ struct StudyView: View {
             presentPendingLimitNoticeIfNeeded()
         }
         .task(id: preferredCategoryID) {
-            async let roomPreparation: Void = appState.prepareStudyRoom(categoryID: preferredCategoryID)
+            let ownerID = UUID().uuidString
+            answerGradingOwnerID = ownerID
+            async let roomPreparation: Void = appState.prepareStudyRoom(
+                categoryID: preferredCategoryID,
+                gradingPollingOwnerID: ownerID
+            )
             async let quotaRefresh: Void = appState.refreshQuestionQuota()
             _ = await (roomPreparation, quotaRefresh)
+            if answerGradingOwnerID == ownerID {
+                answerGradingOwnerID = nil
+            }
         }
         .onDisappear {
             answerSubmissionTask?.cancel()
@@ -199,6 +207,7 @@ struct StudyView: View {
 
     private var canSubmitAnswer: Bool {
         selectedStudyRecord?.gradingResult == nil &&
+            selectedStudyRecord?.gradingStatus.map(\.isTerminal) != false &&
             !draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !appState.isGradingAnswer
     }

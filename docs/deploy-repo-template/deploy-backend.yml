@@ -754,17 +754,17 @@ jobs:
                   {
                       "type": "section",
                       "fields": [
-                          {"type": "mrkdwn", "text": f"*상태*\\n{status_label}"},
-                          {"type": "mrkdwn", "text": f"*환경*\\n`production`"},
-                          {"type": "mrkdwn", "text": f"*런타임*\\n`{escape(runtime)}`"},
-                          {"type": "mrkdwn", "text": f"*소스*\\n{source_text}"},
+                          {"type": "mrkdwn", "text": f"*상태*\n{status_label}"},
+                          {"type": "mrkdwn", "text": f"*환경*\n`production`"},
+                          {"type": "mrkdwn", "text": f"*런타임*\n`{escape(runtime)}`"},
+                          {"type": "mrkdwn", "text": f"*소스*\n{source_text}"},
                       ],
                   },
                   {
                       "type": "section",
                       "text": {
                           "type": "mrkdwn",
-                          "text": f"*배포 이미지*\\n`{escape(image)}`",
+                          "text": f"*배포 이미지*\n`{escape(image)}`",
                       },
                   },
                   {"type": "actions", "elements": actions},

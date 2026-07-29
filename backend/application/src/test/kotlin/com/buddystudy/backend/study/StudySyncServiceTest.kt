@@ -34,7 +34,12 @@ class StudySyncServiceTest {
     fun `study list does not query pending question once per study`(): Unit = runBlocking {
         studies.rows += study(id = 11, topic = "Swift")
         studies.rows += study(id = 12, topic = "Kotlin")
-        questions.pendingRows += pendingQuestion(id = 101, studyId = 11, topic = "Swift")
+        questions.pendingRows += pendingQuestion(id = 101, studyId = 11, topic = "Swift").apply {
+            answer = "A process owns resources while a thread is an execution flow."
+            answeredAt = Instant.parse("2026-06-10T00:05:00Z")
+            gradingRequestId = "grading-101"
+            gradingStatus = "JUDGING"
+        }
         questions.pendingRows += pendingQuestion(id = 102, studyId = 12, topic = "Kotlin")
         questionStats.rows += QuestionStatsEntity(questionId = 101, viewCount = 3)
         questionStats.rows += QuestionStatsEntity(questionId = 102, viewCount = 4)
@@ -43,6 +48,10 @@ class StudySyncServiceTest {
 
         assertThat(response.studies.map { it.pendingQuestion?.id }).containsExactly("101", "102")
         assertThat(response.studies.map { it.pendingQuestion?.viewCount }).containsExactly(3, 4)
+        assertThat(response.studies.first().pendingQuestion?.answer)
+            .isEqualTo("A process owns resources while a thread is an execution flow.")
+        assertThat(response.studies.first().pendingQuestion?.gradingRequestId).isEqualTo("grading-101")
+        assertThat(response.studies.first().pendingQuestion?.gradingStatus?.name).isEqualTo("JUDGING")
         assertThat(questions.findPendingByStudyIdCalls).isZero()
         assertThat(questions.findLatestPendingByStudyIdsCalls).isEqualTo(1)
         assertThat(questionStats.findByIdCalls).isZero()

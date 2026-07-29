@@ -2693,7 +2693,49 @@ final class AppState: ObservableObject {
 
     private func applyBackendStudyPage(_ studyPage: BackendStudyPage) {
         let visibleStudies = studyPage.studies.filter { !isLocallyDeletedStudy($0) }
+        let pendingRecords = visibleStudies.compactMap(\.pendingQuestion)
+        let visibleStudyIDs = Set(visibleStudies.map(\.id))
+        let pendingRecordIDsByStudyID = Dictionary(
+            uniqueKeysWithValues: pendingRecords.compactMap { record in
+                record.studyID.map { ($0, record.id) }
+            }
+        )
+        let staleLocalPendingRecords = studyRecords.filter { record in
+            guard record.gradingResult == nil,
+                  let studyID = record.studyID,
+                  visibleStudyIDs.contains(studyID) else {
+                return false
+            }
+            return pendingRecordIDsByStudyID[studyID] != record.id
+        }
+        let authoritativeLocalRecords = studyRecords.filter { record in
+            !staleLocalPendingRecords.contains(where: { $0.id == record.id })
+        }
+        let mergedRecords = pendingRecords.reduce(authoritativeLocalRecords) { records, record in
+            mergeBackendRecord(record, into: records)
+        }
+        if mergedRecords != studyRecords {
+            localStudyRecordUseCase.replaceRecords(mergedRecords)
+            reloadStudyRecordsFromStore(refreshRooms: false)
+        }
+        if let currentQuestion,
+           staleLocalPendingRecords.contains(where: {
+               studyRecordMatches($0, question: currentQuestion)
+           }),
+           !pendingRecords.contains(where: {
+               studyRecordMatches($0, question: currentQuestion)
+           }) {
+            self.currentQuestion = nil
+            lastAnswer = ""
+            gradingResult = nil
+            currentStudySessionUseCase.saveCurrentQuestionState(
+                question: nil,
+                lastAnswer: "",
+                gradingResult: nil
+            )
+        }
         studyRoomState.replace(with: visibleStudies)
+        studyRoomState.refreshPendingQuestions(from: studyRecords)
         guard !isEditingSettings else {
             return
         }
@@ -5192,16 +5234,15 @@ final class AppState: ObservableObject {
         return addedTopics
     }
 
-    func prepareStudyRoom(categoryID: String?) async {
+    func prepareStudyRoom(
+        categoryID: String?,
+        gradingPollingOwnerID: String? = nil
+    ) async {
         guard let initialCategory = studyCategoryForRoom(categoryID) else {
             return
         }
 
         applyPreferredPendingRecord(for: initialCategory)
-
-        guard preferredPendingRecord(for: initialCategory) == nil else {
-            return
-        }
 
         let didRefresh = await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
         guard didRefresh,
@@ -5210,6 +5251,21 @@ final class AppState: ObservableObject {
         }
 
         applyPreferredPendingRecord(for: refreshedCategory)
+
+        guard let gradingPollingOwnerID,
+              let record = studyRoomRecordForDisplay(categoryID: categoryID),
+              record.gradingResult == nil,
+              let gradingStatus = record.gradingStatus,
+              !gradingStatus.isTerminal,
+              let gradingRequestID = record.gradingRequestID,
+              !gradingRequestID.isEmpty else {
+            return
+        }
+
+        await resumeStudyRoomAnswerGrading(
+            record,
+            pollingOwnerID: gradingPollingOwnerID
+        )
     }
 
     func pendingStudyRecord(categoryID: String?) -> StudyRecord? {
@@ -5554,6 +5610,58 @@ final class AppState: ObservableObject {
             onSuccess: { updatedRecord in
                 applyStudyRoomRecord(updatedRecord, answer: submittedAnswer)
                 await syncRemotePushScheduleIfPossible(reason: "grade")
+            },
+            onFailure: { error in
+                guard !(error is CancellationError),
+                      isAnswerGradingSessionCurrent(sessionGeneration),
+                      isAnswerGradingOwnerCurrent(pollingOwnerID) else {
+                    return
+                }
+                handleOpenAIError(error)
+                statusMessage = nil
+            },
+            onCompletion: {
+                finishAnswerGrading(ownerID: pollingOwnerID)
+            }
+        )
+    }
+
+    private func resumeStudyRoomAnswerGrading(
+        _ queuedRecord: StudyRecord,
+        pollingOwnerID: String
+    ) async {
+        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
+              let registration = await registrationWithAccessToken(
+                storedRegistration,
+                reason: "resume-study-room-grading"
+              ) else {
+            return
+        }
+
+        let sessionGeneration = communitySessionState.generation
+        activateAnswerGrading(ownerID: pollingOwnerID)
+        let progressMessage = gradingMessage(for: queuedRecord.gradingStatus ?? .queued)
+        answerGradingStatusMessage = progressMessage
+        statusMessage = progressMessage
+        log(
+            .info,
+            "저장된 학습룸 답변 채점을 이어서 조회합니다. recordID=\(queuedRecord.id), requestID=\(queuedRecord.gradingRequestID ?? "")"
+        )
+
+        await actionRunner.run(
+            operation: {
+                try await startAnswerGradingPolling(
+                    queuedRecord,
+                    registration: registration,
+                    sessionGeneration: sessionGeneration,
+                    ownerID: pollingOwnerID
+                )
+            },
+            onSuccess: { updatedRecord in
+                applyStudyRoomRecord(
+                    updatedRecord,
+                    answer: updatedRecord.answer ?? queuedRecord.answer ?? ""
+                )
             },
             onFailure: { error in
                 guard !(error is CancellationError),
