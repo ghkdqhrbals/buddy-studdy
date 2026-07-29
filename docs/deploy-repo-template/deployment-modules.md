@@ -136,6 +136,10 @@ deployment.
   Logback integration. `SENTRY_DSN` is supplied only through the backend deploy
   secret, and PII capture remains disabled. The backend application does not
   receive a Slack webhook and never sends operational alerts directly.
+- Deployment notifications use the dedicated `DEPLOY_SLACK_WEBHOOK_URL` Slack
+  app identity and show status, production environment, runtime, source commit,
+  immutable image, actor, timestamp, and direct build/deploy run actions.
+  `SLACK_WEBHOOK_URL` is only a migration fallback.
 - The backend deploy temporarily retains the `buddystudy-profile-photos`
   volume for legacy-file cleanup. New profile-photo uploads are disabled;
   saving a pixel avatar or deleting an account removes the user's legacy file.
@@ -167,7 +171,8 @@ deployment.
   port 443 after Routingflare consumes the original host header. This keeps
   Grafana Live origin checks aligned with its public HTTPS `root_url`.
   Grafana also provisions a Loki alert for backend `level=ERROR` events and
-  sends it to the `BuddyStudy Slack` contact point. Slack contains the incident
+  sends it to the `BuddyStudy Slack` contact point through the dedicated
+  `GRAFANA_SLACK_WEBHOOK_URL` app identity. Slack contains the incident
   summary and a direct Grafana Explore link with the exact Loki ERROR query;
   Loki and Sentry retain the full stack and diagnostic context. The link does
   not depend on the Logs Drilldown volume API. This Grafana path is the only

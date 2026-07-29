@@ -32,7 +32,8 @@ jobs:
       - name: Deploy monitoring module
         env:
           GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          GRAFANA_SLACK_WEBHOOK_URL: ${{ secrets.GRAFANA_SLACK_WEBHOOK_URL }}
+          LEGACY_SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           API_DASHBOARD_BASIC_AUTH_HTPASSWD: ${{ secrets.API_DASHBOARD_BASIC_AUTH_HTPASSWD }}
           TESTZONE_ROOT: ${{ vars.MACBOOKAIR_TESTZONE_ROOT || '$HOME/buddystudy/monitoring/testzone' }}
           TESTZONE_INFLUX_ORG: ${{ vars.TESTZONE_INFLUX_ORG || 'buddystudy' }}
@@ -48,8 +49,9 @@ jobs:
             echo "Missing GitHub Actions secret: API_DASHBOARD_BASIC_AUTH_HTPASSWD" >&2
             exit 1
           fi
-          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
-            echo "Missing GitHub Actions secret: SLACK_WEBHOOK_URL" >&2
+          GRAFANA_SLACK_WEBHOOK_URL="${GRAFANA_SLACK_WEBHOOK_URL:-${LEGACY_SLACK_WEBHOOK_URL:-}}"
+          if [ -z "${GRAFANA_SLACK_WEBHOOK_URL}" ]; then
+            echo "Missing GitHub Actions secret: GRAFANA_SLACK_WEBHOOK_URL (or legacy SLACK_WEBHOOK_URL)" >&2
             exit 1
           fi
 
@@ -260,7 +262,7 @@ jobs:
               -e TESTZONE_INFLUX_TOKEN="${TESTZONE_INFLUX_TOKEN}" \
               -e TESTZONE_INFLUX_ORG="${TESTZONE_INFLUX_ORG}" \
               -e TESTZONE_INFLUX_BUCKET="${TESTZONE_INFLUX_BUCKET}" \
-              -e SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL}" \
+              -e GRAFANA_SLACK_WEBHOOK_URL="${GRAFANA_SLACK_WEBHOOK_URL}" \
               -v "${grafana_volume}:/var/lib/grafana" \
               -v "${monitoring_root}/grafana/provisioning:/etc/grafana/provisioning:ro" \
               -v "${monitoring_root}/grafana/dashboards:/var/lib/grafana/dashboards:ro" \

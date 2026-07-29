@@ -230,6 +230,17 @@ their ERROR logs and must not make readiness stale between scheduled runs.
 Grafana alerting owns continuous server-down detection. The Cloudflare Worker
 scheduled check is disabled in production to avoid periodic KV writes.
 
+Slack uses separate app webhooks for separate sender identities:
+
+- `GRAFANA_SLACK_WEBHOOK_URL` belongs to the Grafana Slack app, whose app name
+  and icon are configured as Grafana.
+- `DEPLOY_SLACK_WEBHOOK_URL` belongs to the BuddyStudy Deploy Slack app, whose
+  app name and icon are configured for deployments.
+- `SLACK_WEBHOOK_URL` remains a temporary fallback for both workflows while the
+  dedicated app webhooks are being provisioned. Slack app name and icon are
+  properties of the app behind an Incoming Webhook, so a single webhook cannot
+  reliably present two different sender identities.
+
 `api.ghkdqhrbals.org` must resolve to the EC2 host for trusted certificate issuance.
 
 ## Backup restore

@@ -252,9 +252,16 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
   assert.match(backendDeploy, /target_label: container/);
   assert.match(backendDeploy, /level:/);
   assert.match(monitoringDeploy, /grafana\/provisioning\/alerting/);
-  assert.match(monitoringDeploy, /SLACK_WEBHOOK_URL/);
-  assert.match(compose, /SLACK_WEBHOOK_URL: \$\{SLACK_WEBHOOK_URL:\?set SLACK_WEBHOOK_URL\}/);
+  assert.match(monitoringDeploy, /GRAFANA_SLACK_WEBHOOK_URL/);
+  assert.match(monitoringDeploy, /LEGACY_SLACK_WEBHOOK_URL/);
+  assert.match(
+    compose,
+    /GRAFANA_SLACK_WEBHOOK_URL: \$\{GRAFANA_SLACK_WEBHOOK_URL:-\$\{SLACK_WEBHOOK_URL:-\}\}/,
+  );
   assert.match(alert, /type: slack/);
+  assert.match(alert, /url: \$GRAFANA_SLACK_WEBHOOK_URL/);
+  assert.match(alert, /username: Grafana/);
+  assert.match(alert, /icon_url: https:\/\/avatars\.githubusercontent\.com\/u\/7195757/);
   assert.match(alert, /level="ERROR"/);
   assert.match(alert, /receiver: BuddyStudy Slack/);
   const logsUrlValue = alert.match(/^\s+logs_url: (\S+)$/m)?.[1];
@@ -272,6 +279,19 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
     '{app="buddystudy", level="ERROR"}',
   );
   assert.doesNotMatch(logsUrl.pathname, /grafana-lokiexplore-app/);
+});
+
+test("backend deploy Slack notification is branded and action-oriented", async () => {
+  const backendDeploy = await fs.readFile(backendDeployTemplatePath, "utf8");
+
+  assert.match(backendDeploy, /DEPLOY_SLACK_WEBHOOK_URL/);
+  assert.match(backendDeploy, /LEGACY_SLACK_WEBHOOK_URL/);
+  assert.match(backendDeploy, /"username": "BuddyStudy Deploy"/);
+  assert.match(backendDeploy, /"icon_emoji": ":rocket:"/);
+  assert.match(backendDeploy, /Backend 운영 배포/);
+  assert.match(backendDeploy, /배포 실행 보기/);
+  assert.match(backendDeploy, /빌드 실행 보기/);
+  assert.match(backendDeploy, /"type": "actions"/);
 });
 
 test("TestZone dashboard separates server, database, and Redis runtime signals", async () => {
