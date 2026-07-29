@@ -20,7 +20,9 @@ Current workflow templates:
   EC2 security group.
 - `deploy-admin-frontend.yml`: admin frontend runtime on EC2.
 - `notify-deployment-status.yml`: centralized Slack status receiver for
-  planned, in-progress, and completed iOS release notifications.
+  one compact iOS release summary and concise threaded progress replies. Set
+  `DEPLOY_SLACK_BOT_TOKEN` and `DEPLOY_SLACK_CHANNEL_ID`; the incoming webhook
+  remains a parent-summary fallback.
 - `deploy-macbookair-monitoring.yml`: API Logs dashboard, Grafana, and Loki on
   MacBook Air.
 - `deploy-testzone.yml`: TestZone k6 execution service and InfluxDB on MacBook

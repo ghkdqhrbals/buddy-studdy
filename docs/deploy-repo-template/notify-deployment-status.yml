@@ -9,229 +9,28 @@ permissions:
   contents: read
 
 jobs:
-  notify_deployment_status:
-    name: Notify ${{ github.event.client_payload.module }} ${{ github.event.client_payload.phase }}
+  monitor_ios_deployment:
+    name: Monitor iOS deployment thread
+    if: ${{ github.event.client_payload.module == 'ios' && github.event.client_payload.phase == 'planned' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 35
     env:
+      DEPLOY_SLACK_BOT_TOKEN: ${{ secrets.DEPLOY_SLACK_BOT_TOKEN }}
+      DEPLOY_SLACK_CHANNEL_ID: ${{ vars.DEPLOY_SLACK_CHANNEL_ID }}
       DEPLOY_SLACK_WEBHOOK_URL: ${{ secrets.DEPLOY_SLACK_WEBHOOK_URL }}
       LEGACY_SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-      MODULE: ${{ github.event.client_payload.module }}
-      PHASE: ${{ github.event.client_payload.phase }}
-      DEPLOY_STATUS: ${{ github.event.client_payload.status }}
-      DEPLOY_ENVIRONMENT: ${{ github.event.client_payload.environment }}
       RELEASE_VERSION: ${{ github.event.client_payload.release.version }}
       RELEASE_BUILD_NUMBER: ${{ github.event.client_payload.release.build }}
       DEPLOYMENT_TARGETS: ${{ github.event.client_payload.targets }}
       UPLOAD_ENABLED: ${{ github.event.client_payload.release.upload_enabled }}
-      BUILD_RESULT: ${{ github.event.client_payload.results.build }}
-      UPLOAD_RESULT: ${{ github.event.client_payload.results.upload }}
-      DETAIL: ${{ github.event.client_payload.detail }}
       SOURCE_REPOSITORY: ${{ github.event.client_payload.source.repo }}
       SOURCE_SHA: ${{ github.event.client_payload.source.sha }}
       SOURCE_REF: ${{ github.event.client_payload.source.ref }}
       SOURCE_RUN_ID: ${{ github.event.client_payload.source.run_id }}
-      TRIGGERED_BY: ${{ github.actor }}
 
     steps:
-      - name: Validate deployment status event
-        run: |
-          set -euo pipefail
+      - name: Checkout
+        uses: actions/checkout@v4
 
-          if [ "${SOURCE_REPOSITORY}" != "ghkdqhrbals/buddy-studdy" ]; then
-            echo "Unsupported deployment source: ${SOURCE_REPOSITORY}" >&2
-            exit 1
-          fi
-
-          case "${MODULE}" in
-            ios) ;;
-            *)
-              echo "Unsupported deployment module: ${MODULE}" >&2
-              exit 1
-              ;;
-          esac
-
-          case "${PHASE}" in
-            planned|in_progress|completed) ;;
-            *)
-              echo "Unsupported deployment phase: ${PHASE}" >&2
-              exit 1
-              ;;
-          esac
-
-      - name: Send deployment status to Slack
-        run: |
-          set -euo pipefail
-
-          webhook_url="${DEPLOY_SLACK_WEBHOOK_URL:-${LEGACY_SLACK_WEBHOOK_URL:-}}"
-          if [ -z "${webhook_url}" ]; then
-            echo "DEPLOY_SLACK_WEBHOOK_URL and legacy SLACK_WEBHOOK_URL are empty." >&2
-            exit 1
-          fi
-
-          python3 - <<'PY' > "${RUNNER_TEMP}/buddystudy-deployment-status.json"
-          import json
-          import os
-          import time
-
-          def escape(value):
-              return str(value or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-          def result_label(value):
-              return {
-                  "success": "✅ 성공",
-                  "failure": "❌ 실패",
-                  "cancelled": "⚪ 취소",
-                  "skipped": "➖ 생략",
-                  "pending": "⏳ 대기",
-              }.get(value, escape(value or "확인 필요"))
-
-          phase = os.environ["PHASE"]
-          status = os.environ["DEPLOY_STATUS"]
-          upload_enabled = os.environ.get("UPLOAD_ENABLED", "false") == "true"
-
-          if phase == "planned":
-              marker = "📋"
-              headline = "iOS 배포 예정"
-              status_label = "배포 예정"
-          elif phase == "in_progress":
-              marker = "🚀"
-              headline = "iOS 배포 중"
-              status_label = "배포 중"
-          elif status == "success":
-              marker = "✅"
-              headline = "iOS 배포 완료"
-              status_label = "완료"
-          elif status == "cancelled":
-              marker = "⚪"
-              headline = "iOS 배포 취소"
-              status_label = "취소"
-          else:
-              marker = "❌"
-              headline = "iOS 배포 실패"
-              status_label = "실패"
-
-          targets = [
-              target.strip()
-              for target in os.environ.get("DEPLOYMENT_TARGETS", "").split(",")
-              if target.strip()
-          ]
-          target_text = "\n".join(f"• {escape(target)}" for target in targets) or "• iOS"
-
-          source_repository = os.environ.get("SOURCE_REPOSITORY", "")
-          source_sha = os.environ.get("SOURCE_SHA", "")
-          source_ref = escape(os.environ.get("SOURCE_REF", ""))
-          source_run_id = os.environ.get("SOURCE_RUN_ID", "")
-          run_url = (
-              f"https://github.com/{source_repository}/actions/runs/{source_run_id}"
-              if source_repository and source_run_id
-              else ""
-          )
-          source_url = (
-              f"https://github.com/{source_repository}/commit/{source_sha}"
-              if source_repository and source_sha
-              else ""
-          )
-          source_text = (
-              f"<{source_url}|`{escape(source_sha[:8])}`> · `{source_ref}`"
-              if source_url
-              else f"`{source_ref or 'unknown'}`"
-          )
-
-          blocks = [
-              {
-                  "type": "header",
-                  "text": {"type": "plain_text", "text": f"{marker} {headline}"},
-              },
-              {
-                  "type": "section",
-                  "text": {"type": "mrkdwn", "text": f"*배포 대상*\n{target_text}"},
-              },
-              {
-                  "type": "section",
-                  "fields": [
-                      {"type": "mrkdwn", "text": f"*상태*\n{status_label}"},
-                      {
-                          "type": "mrkdwn",
-                          "text": f"*환경*\n`{escape(os.environ.get('DEPLOY_ENVIRONMENT', 'production'))}`",
-                      },
-                      {
-                          "type": "mrkdwn",
-                          "text": f"*버전*\n`{escape(os.environ.get('RELEASE_VERSION'))} ({escape(os.environ.get('RELEASE_BUILD_NUMBER'))})`",
-                      },
-                      {"type": "mrkdwn", "text": f"*소스*\n{source_text}"},
-                  ],
-              },
-          ]
-
-          detail = escape(os.environ.get("DETAIL", ""))
-          if detail:
-              blocks.append(
-                  {
-                      "type": "section",
-                      "text": {"type": "mrkdwn", "text": f"*현재 단계*\n{detail}"},
-                  }
-              )
-
-          if phase == "completed":
-              result_fields = [
-                  {
-                      "type": "mrkdwn",
-                      "text": f"*IPA 빌드*\n{result_label(os.environ.get('BUILD_RESULT'))}",
-                  }
-              ]
-              if upload_enabled:
-                  result_fields.append(
-                      {
-                          "type": "mrkdwn",
-                          "text": f"*TestFlight 업로드*\n{result_label(os.environ.get('UPLOAD_RESULT'))}",
-                      }
-                  )
-              blocks.append({"type": "section", "fields": result_fields})
-
-          if run_url:
-              blocks.append(
-                  {
-                      "type": "actions",
-                      "elements": [
-                          {
-                              "type": "button",
-                              "text": {"type": "plain_text", "text": "배포 실행 보기"},
-                              "url": run_url,
-                              "style": "primary" if status in {"planned", "running", "success"} else "danger",
-                          }
-                      ],
-                  }
-              )
-
-          blocks.append(
-              {
-                  "type": "context",
-                  "elements": [
-                      {
-                          "type": "mrkdwn",
-                          "text": (
-                              f"실행: `{escape(os.environ.get('TRIGGERED_BY', 'unknown'))}` · "
-                              f"<!date^{int(time.time())}^{{date_short_pretty}} {{time}}|방금>"
-                          ),
-                      }
-                  ],
-              }
-          )
-
-          payload = {
-              "username": "BuddyStudy Deploy",
-              "icon_emoji": ":rocket:",
-              "text": f"{marker} BuddyStudy {headline}",
-              "blocks": blocks,
-          }
-          print(json.dumps(payload, ensure_ascii=False))
-          PY
-
-          curl -fsS \
-            --retry 3 \
-            --retry-all-errors \
-            --request POST \
-            --header "Content-Type: application/json" \
-            --data @"${RUNNER_TEMP}/buddystudy-deployment-status.json" \
-            "${webhook_url}"
+      - name: Post summary and monitor deployment thread
+        run: python3 scripts/notify_ios_release.py
