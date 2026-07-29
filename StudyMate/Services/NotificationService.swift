@@ -373,6 +373,7 @@ protocol NotificationServicing: AnyObject {
     ) async -> Bool
     func cancelQuestionNotification(for question: QuestionItem)
     func cancelQuestionNotifications(for questions: [QuestionItem])
+    func cancelDeliveredQuestionNotifications(recordID: String) async
     func pendingQuestionNotificationCount() async -> Int
 }
 
@@ -585,6 +586,23 @@ final class NotificationService: NotificationServicing {
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: identifiers)
         center.removeDeliveredNotifications(withIdentifiers: identifiers)
+    }
+
+    func cancelDeliveredQuestionNotifications(recordID: String) async {
+        #if os(iOS)
+        let delivered = await UNUserNotificationCenter.current().deliveredNotifications()
+        let identifiers = delivered.compactMap { notification in
+            StudyNotificationPayload.backendRecordID(
+                from: notification.request.content.userInfo
+            ) == recordID ? notification.request.identifier : nil
+        }
+        guard !identifiers.isEmpty else {
+            return
+        }
+        UNUserNotificationCenter.current().removeDeliveredNotifications(
+            withIdentifiers: identifiers
+        )
+        #endif
     }
 
     func pendingQuestionNotificationCount() async -> Int {

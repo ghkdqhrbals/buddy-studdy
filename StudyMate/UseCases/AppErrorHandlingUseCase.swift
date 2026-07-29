@@ -17,6 +17,10 @@ struct AppErrorHandlingUseCase {
         BackendErrorPresentationPolicy.isBackendDeviceNotFound(error)
     }
 
+    func isBackendRecordNotFound(_ error: Error) -> Bool {
+        BackendErrorPresentationPolicy.isBackendRecordNotFound(error)
+    }
+
     func isUnauthorizedBackendError(_ error: Error) -> Bool {
         BackendErrorPresentationPolicy.isUnauthorizedBackendError(error)
     }

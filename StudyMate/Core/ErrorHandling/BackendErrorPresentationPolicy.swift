@@ -134,6 +134,19 @@ enum BackendErrorPresentationPolicy {
         (error as? RemotePushBackendError)?.backendCode == "DEVICE_NOT_FOUND"
     }
 
+    static func isBackendRecordNotFound(_ error: Error) -> Bool {
+        guard let backendError = error as? RemotePushBackendError else {
+            return false
+        }
+
+        switch backendError {
+        case .httpStatus(let status, _, let apiError):
+            return status == 404 || apiError?.code == "RECORD_NOT_FOUND"
+        case .invalidResponse:
+            return false
+        }
+    }
+
     static func isUnauthorizedBackendError(_ error: Error) -> Bool {
         guard let backendError = error as? RemotePushBackendError else {
             return false

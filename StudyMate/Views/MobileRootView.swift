@@ -228,6 +228,33 @@ private struct MobileNotificationsTab: View {
             isPresented = true
             appState.setSelectedTab(.home)
         }
+        .onAppear {
+            handleNotificationRouteRequest(appState.appRouteRequest)
+        }
+        .onChange(of: appState.appRouteRequest) { _, request in
+            handleNotificationRouteRequest(request)
+        }
+    }
+
+    private func handleNotificationRouteRequest(_ request: AppRouteRequest?) {
+        guard let request,
+              request.presentation == .notificationInbox,
+              appState.mobileVisibleTab == .notifications else {
+            return
+        }
+
+        if request.route == .home {
+            forwardedRoute = nil
+            appState.appRouteRequest = nil
+            appState.setSelectedTab(.home)
+            return
+        }
+
+        forwardedRoute = NotificationForwardRoute(route: request.route)
+        appState.appRouteRequest = nil
+        appState.logRemoteNotificationEvent(
+            "push_destination_presented route=\(request.route), tab=notifications"
+        )
     }
 }
 
@@ -808,20 +835,20 @@ private struct MobileRequiredTermsGateSheet: View {
                     requiredGateRow(
                         title: termsTitle(strings.termsOfService, required: true),
                         isChecked: true,
-                        url: termsOfService?.url ?? AppLegalLinks.termsOfServiceURL(language: appState.settings.appLanguage)
+                        url: AppLegalLinks.termsOfServiceURL(language: appState.settings.appLanguage)
                     )
                     Divider().padding(.leading, 34)
                     requiredGateRow(
                         title: termsTitle(strings.privacyPolicy, required: true),
                         isChecked: true,
-                        url: privacyPolicy?.url ?? AppLegalLinks.privacyPolicyURL(language: appState.settings.appLanguage)
+                        url: AppLegalLinks.privacyPolicyURL(language: appState.settings.appLanguage)
                     )
                     if let marketingTerms {
                         Divider().padding(.leading, 34)
                         requiredGateRow(
                             title: termsTitle(strings.marketingNotifications, required: false),
                             isChecked: marketingAgreed,
-                            url: marketingTerms.url,
+                            url: AppLegalLinks.marketingNotificationURL(language: appState.settings.appLanguage),
                             togglesSelection: true
                         )
                     }
@@ -1482,6 +1509,9 @@ private struct MobileHomeView: View {
         }
 
         if request.presentation == .notificationInbox {
+            guard appState.mobileVisibleTab == .home else {
+                return
+            }
             if request.route == .home {
                 notificationForwardRoute = nil
                 isShowingNotifications = false
@@ -2226,9 +2256,10 @@ private struct NotificationRouteDestination: View {
 
 private struct NotificationRecordDestination: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
     var recordID: String
     @State private var loadedRecord: StudyRecord?
-    @State private var isLoading = true
+    @State private var loadState = NotificationRecordLoadState.loading
 
     private var strings: AppStrings {
         appState.strings
@@ -2242,15 +2273,8 @@ private struct NotificationRecordDestination: View {
         Group {
             if let record {
                 recordContent(record)
-            } else if isLoading {
-                ProgressView()
-                    .frame(maxWidth: .infinity, minHeight: 260, alignment: .center)
             } else {
-                ContentUnavailableView(
-                    strings.notificationQuestionMissingTitle,
-                    systemImage: "trash",
-                    description: Text(strings.notificationQuestionUnavailableHelp)
-                )
+                loadStateContent
             }
         }
         .navigationTitle(strings.recordDetail)
@@ -2262,24 +2286,95 @@ private struct NotificationRecordDestination: View {
 
     @ViewBuilder
     private func recordContent(_ record: StudyRecord) -> some View {
-        StudyRecordDetailView(record: record)
+        StudyRecordDetailView(
+            record: record,
+            refreshesRecordOnAppear: false,
+            onSkip: {
+                appState.skipPendingQuestion(record, shouldOpenNextQuestion: false)
+                dismiss()
+            }
+        )
             .padding(.horizontal, 16)
     }
 
-    private func loadRecordIfNeeded() async {
-        guard record == nil else {
+    @ViewBuilder
+    private var loadStateContent: some View {
+        switch loadState {
+        case .loading:
+            VStack(spacing: 12) {
+                ProgressView()
+                Text(strings.openingNotificationQuestion)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 260, alignment: .center)
+        case .unavailable:
+            ContentUnavailableView(
+                strings.notificationQuestionMissingTitle,
+                systemImage: "trash",
+                description: Text(strings.notificationQuestionUnavailableHelp)
+            )
+        case .failed:
+            ContentUnavailableView {
+                Label(strings.notificationQuestionMissingTitle, systemImage: "arrow.clockwise")
+            } description: {
+                Text(strings.notificationLoadRetryDescription)
+            } actions: {
+                Button(strings.retry) {
+                    Task {
+                        await loadRecordIfNeeded(force: true)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    private func loadRecordIfNeeded(force: Bool = false) async {
+        if !force, record != nil {
+            appState.logRemoteNotificationEvent(
+                "push_record_destination_used_cache recordID=\(recordID)"
+            )
             return
         }
 
-        isLoading = true
-        defer { isLoading = false }
+        loadState = .loading
 
         do {
-            loadedRecord = try await appState.fetchBackendNotificationRecord(recordID: recordID)
+            let fetched = try await appState.fetchBackendNotificationRecord(recordID: recordID)
+            try Task.checkCancellation()
+            loadedRecord = fetched
+            appState.logRemoteNotificationEvent(
+                "push_record_destination_loaded recordID=\(recordID)"
+            )
+        } catch is CancellationError {
+            appState.logRemoteNotificationEvent(
+                "push_record_destination_cancelled recordID=\(recordID)"
+            )
         } catch {
-            await appState.refreshBackendRecords()
+            if appState.isBackendRecordNotFound(error) {
+                loadState = .unavailable
+                await appState.removeNotifications(forRecordID: recordID)
+                appState.logRemoteNotificationEvent(
+                    "push_record_destination_unavailable recordID=\(recordID)",
+                    isWarning: true
+                )
+            } else {
+                loadState = .failed
+                appState.logRemoteNotificationEvent(
+                    "push_record_destination_failed recordID=\(recordID), error=\(error.localizedDescription)",
+                    isWarning: true
+                )
+            }
         }
     }
+
+}
+
+private enum NotificationRecordLoadState {
+    case loading
+    case unavailable
+    case failed
 }
 
 private struct NotificationCommunityQuestionDestination: View {
@@ -5918,7 +6013,7 @@ private struct MobileTermsSettingsView: View {
             Spacer(minLength: 8)
 
             Button(strings.details) {
-                legalWebRoute = MobileLegalWebRoute(url: term.url)
+                legalWebRoute = MobileLegalWebRoute(url: localizedURL(for: term.type))
             }
             .font(.subheadline.weight(.semibold))
             .buttonStyle(.borderless)
@@ -5979,6 +6074,17 @@ private struct MobileTermsSettingsView: View {
                 mutable: true,
                 agreed: false
             )
+        }
+    }
+
+    private func localizedURL(for type: BackendTermsType) -> URL {
+        switch type {
+        case .termsOfService:
+            AppLegalLinks.termsOfServiceURL(language: appState.settings.appLanguage)
+        case .privacyPolicy:
+            AppLegalLinks.privacyPolicyURL(language: appState.settings.appLanguage)
+        case .marketingNotification:
+            AppLegalLinks.marketingNotificationURL(language: appState.settings.appLanguage)
         }
     }
 

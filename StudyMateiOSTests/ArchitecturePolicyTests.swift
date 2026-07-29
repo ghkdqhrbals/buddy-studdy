@@ -2281,6 +2281,31 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testNotificationRouteUsesNotificationsTabAndSingleRouteRequest() {
+        let suiteName = "NotificationRouteTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let appState = AppState(settingsStore: SettingsStore(defaults: defaults))
+
+        XCTAssertTrue(
+            appState.openRouteFromNotification(
+                .recordDetail(recordID: "record-56")
+            )
+        )
+        XCTAssertEqual(appState.mobileVisibleTab, .notifications)
+        XCTAssertEqual(
+            appState.appRouteRequest?.route,
+            .recordDetail(recordID: "record-56")
+        )
+        XCTAssertEqual(
+            appState.appRouteRequest?.presentation,
+            .notificationInbox
+        )
+    }
+
     func testNotificationDelegateIsInstalledDuringApplicationLaunch() throws {
         let root = try repositoryRoot()
         let appContent = try String(

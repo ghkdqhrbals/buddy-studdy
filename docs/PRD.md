@@ -108,9 +108,10 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 6. Decorative setting-row icons are omitted so labels and controls remain the primary scan targets.
 7. The primary iOS tab bar contains Home, Records, Statistics, and Notifications. Settings is reached through Profile.
 8. The notification inbox supports marking every visible account/device notification as read in one action, independently from deletion.
-9. Profile is a compact category hub: avatar editing is labeled `Avatar`, logout sits at the bottom of the hub, and account deletion lives under `Settings > Account Settings`.
-10. Record settings provide destructive record management only; record retention is not configurable.
-11. Notification loading failures show a short retry action without exposing HTTP status codes, gateway names, request IDs, or backend diagnostics.
+9. Tapping a system push selects the Notifications tab and pushes exactly one destination onto that tab's navigation stack. It does not construct a hidden Home > Notification Inbox > Detail stack. Ungraded notification questions expose the same Skip action as the study room, and skipped/deleted records show an explicit unavailable state instead of an empty detail shell.
+10. Profile is a compact category hub: avatar editing is labeled `Avatar`, logout sits at the bottom of the hub, and account deletion lives under `Settings > Account Settings`.
+11. Record settings provide destructive record management only; record retention is not configurable.
+12. Notification loading failures show a short retry action without exposing HTTP status codes, gateway names, request IDs, or backend diagnostics.
 
 ### Identity
 

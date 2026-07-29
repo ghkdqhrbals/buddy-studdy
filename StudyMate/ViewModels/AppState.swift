@@ -822,12 +822,12 @@ final class AppState: ObservableObject {
             .info,
             "push_route_applying route=\(route), selectedTabBefore=\(selectedTab)"
         )
-        selectedTab = .home
+        selectedTab = .notifications
         homeStudyRoute = nil
         appRouteRequest = AppRouteRequest(route: route, presentation: .notificationInbox)
         log(
             .info,
-            "push_route_applied route=\(route), presentation=notificationInbox"
+            "push_route_applied route=\(route), selectedTab=notifications, presentation=notificationInbox"
         )
         return true
     }
@@ -2232,7 +2232,7 @@ final class AppState: ObservableObject {
                 storedRegistration,
                 reason: "study-records"
               ) else {
-            throw RemotePushBackendError.invalidResponse
+            throw AppStateError.missingRemotePushRegistration
         }
 
         return try await performWithBackendIdentityRecovery(
@@ -2523,6 +2523,21 @@ final class AppState: ObservableObject {
             },
             failureMessage: { "알림 전체삭제 실패: \($0.localizedDescription)" }
         )
+    }
+
+    func removeNotifications(forRecordID recordID: String) async {
+        await notificationService.cancelDeliveredQuestionNotifications(recordID: recordID)
+
+        let matchingNotifications = notifications.filter { notification in
+            NotificationRouteResolver.route(for: notification) == .recordDetail(recordID: recordID)
+        }
+        for notification in matchingNotifications {
+            await deleteNotification(notification)
+        }
+    }
+
+    func isBackendRecordNotFound(_ error: Error) -> Bool {
+        appErrorHandlingUseCase.isBackendRecordNotFound(error)
     }
 
     private func runBackendNotificationMutation(
@@ -7335,6 +7350,7 @@ final class AppState: ObservableObject {
                     )
                 },
                 onSuccess: { _ in
+                    await removeNotifications(forRecordID: record.id)
                     await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
                     await syncRemotePushScheduleIfPossible(reason: "skip")
                 },

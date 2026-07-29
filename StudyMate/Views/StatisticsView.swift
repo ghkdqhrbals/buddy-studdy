@@ -392,6 +392,8 @@ private extension View {
 struct StudyRecordDetailView: View {
     @EnvironmentObject private var appState: AppState
     var record: StudyRecord
+    var refreshesRecordOnAppear: Bool
+    var onSkip: (() -> Void)?
     @State private var draftAnswer: String
     @State private var detailRecord: StudyRecord
     @State private var isShowingOriginal = false
@@ -403,8 +405,14 @@ struct StudyRecordDetailView: View {
     @FocusState private var isAnswerEditorFocused: Bool
     #endif
 
-    init(record: StudyRecord) {
+    init(
+        record: StudyRecord,
+        refreshesRecordOnAppear: Bool = true,
+        onSkip: (() -> Void)? = nil
+    ) {
         self.record = record
+        self.refreshesRecordOnAppear = refreshesRecordOnAppear
+        self.onSkip = onSkip
         _draftAnswer = State(initialValue: record.answer ?? "")
         _detailRecord = State(initialValue: record)
         _originalAvailable = State(
@@ -425,11 +433,28 @@ struct StudyRecordDetailView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     RecordChatBubble(role: .question) {
                         VStack(alignment: .leading, spacing: 8) {
-                            MarkdownMessageText(markdown: displayedRecord.question.question)
-                                .font(.body)
-                                .foregroundStyle(.primary)
-                                .tint(.accentColor)
-                                .textSelection(.enabled)
+                            HStack(alignment: .top, spacing: 10) {
+                                MarkdownMessageText(markdown: displayedRecord.question.question)
+                                    .font(.body)
+                                    .foregroundStyle(.primary)
+                                    .tint(.accentColor)
+                                    .textSelection(.enabled)
+
+                                if canSkip(displayedRecord), let onSkip {
+                                    Button {
+                                        onSkip()
+                                    } label: {
+                                        Image(systemName: "forward.fill")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(.secondary)
+                                            .frame(width: 30, height: 30)
+                                            .background(Color.secondary.opacity(0.12), in: Circle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel(appState.strings.skipQuestion)
+                                    .accessibilityHint(appState.strings.skipQuestionHelp)
+                                }
+                            }
 
                             hintView(for: displayedRecord)
                         }
@@ -561,14 +586,14 @@ struct StudyRecordDetailView: View {
     }
 
     private func refreshLocalizedRecord() async {
-        guard let refreshed = await appState.loadStudyRecordDetail(recordID: record.id) else {
-            return
+        if refreshesRecordOnAppear {
+            guard let refreshed = await appState.loadStudyRecordDetail(recordID: record.id) else {
+                return
+            }
+            applyRefreshedRecord(refreshed)
         }
-        detailRecord = refreshed
-        originalAvailable = originalAvailable ||
-            refreshed.localization?.containsTranslation == true ||
-            refreshed.localization?.question.originalAvailable == true
-        guard refreshed.localization?.containsPendingTranslation == true else {
+
+        guard detailRecord.localization?.containsPendingTranslation == true else {
             return
         }
         for delay in [1, 2, 4] {
@@ -577,12 +602,18 @@ struct StudyRecordDetailView: View {
                   let retried = await appState.loadStudyRecordDetail(recordID: record.id) else {
                 return
             }
-            detailRecord = retried
-            originalAvailable = originalAvailable || retried.localization?.containsTranslation == true
+            applyRefreshedRecord(retried)
             if retried.localization?.containsPendingTranslation != true {
                 return
             }
         }
+    }
+
+    private func applyRefreshedRecord(_ refreshed: StudyRecord) {
+        detailRecord = refreshed
+        originalAvailable = originalAvailable ||
+            refreshed.localization?.containsTranslation == true ||
+            refreshed.localization?.question.originalAvailable == true
     }
 
     private func switchContentView() async {
@@ -598,6 +629,13 @@ struct StudyRecordDetailView: View {
     private var canSubmitAnswer: Bool {
         !appState.isGradingAnswer &&
             !draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func canSkip(_ record: StudyRecord) -> Bool {
+        onSkip != nil &&
+            record.gradingResult == nil &&
+            record.gradingRequestID == nil &&
+            !appState.isGradingAnswer
     }
 
     private func submittedAnswer(for record: StudyRecord) -> String? {
