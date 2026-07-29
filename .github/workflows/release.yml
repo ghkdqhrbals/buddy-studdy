@@ -7,11 +7,11 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Marketing version, for example 1.0.17. Leave empty to use the project version."
+        description: "Marketing version, for example 1.1.0. Leave empty to use the iOS project version."
         required: false
         type: string
       upload_to_app_store_connect:
-        description: "Upload the exported IPA to App Store Connect."
+        description: "Upload the exported IPA to App Store Connect for TestFlight."
         required: true
         default: true
         type: boolean
@@ -20,9 +20,121 @@ permissions:
   contents: read
 
 jobs:
-  ios:
-    name: Build and Upload iOS
+  plan_ios_release:
+    name: Plan iOS Release
+    runs-on: ubuntu-latest
+    outputs:
+      release_version: ${{ steps.release.outputs.release_version }}
+      release_build_number: ${{ steps.release.outputs.release_build_number }}
+      upload_enabled: ${{ steps.release.outputs.upload_enabled }}
+      artifact_name: ${{ steps.release.outputs.artifact_name }}
+      deployment_targets: ${{ steps.release.outputs.deployment_targets }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve release plan
+        id: release
+        env:
+          INPUT_VERSION: ${{ inputs.version || '' }}
+          INPUT_UPLOAD_ENABLED: ${{ inputs.upload_to_app_store_connect }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          elif [ -n "${INPUT_VERSION}" ]; then
+            version="${INPUT_VERSION}"
+          else
+            version="$(
+              sed -n 's/^[[:space:]]*MARKETING_VERSION = \([^;]*\);/\1/p' \
+                StudyMate.xcodeproj/project.pbxproj |
+                tail -n 1
+            )"
+          fi
+
+          if ! [[ "${version}" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+            echo "Invalid release version: ${version}" >&2
+            exit 1
+          fi
+
+          upload_enabled="${INPUT_UPLOAD_ENABLED:-true}"
+          case "${upload_enabled}" in
+            true|false) ;;
+            *)
+              echo "Invalid App Store Connect upload setting: ${upload_enabled}" >&2
+              exit 1
+              ;;
+          esac
+
+          build_number="${GITHUB_RUN_NUMBER}"
+          artifact_name="BuddyStudy-iOS-${version}-${build_number}"
+          deployment_targets="iOS 서명 IPA"
+          if [ "${upload_enabled}" = "true" ]; then
+            deployment_targets="${deployment_targets}, TestFlight"
+          fi
+
+          {
+            echo "release_version=${version}"
+            echo "release_build_number=${build_number}"
+            echo "upload_enabled=${upload_enabled}"
+            echo "artifact_name=${artifact_name}"
+            echo "deployment_targets=${deployment_targets}"
+          } >> "${GITHUB_OUTPUT}"
+
+          {
+            echo "## iOS Release Plan"
+            echo ""
+            echo "- Version: \`${version}\`"
+            echo "- Build: \`${build_number}\`"
+            echo "- Targets: ${deployment_targets}"
+            echo "- Source: \`${GITHUB_SHA}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  notify_ios_planned:
+    name: Notify iOS Release Planned
+    needs: plan_ios_release
+    uses: ./.github/workflows/reusable-deployment-status.yml
+    with:
+      module: ios
+      phase: planned
+      status: planned
+      environment: production
+      release_version: ${{ needs.plan_ios_release.outputs.release_version }}
+      release_build_number: ${{ needs.plan_ios_release.outputs.release_build_number }}
+      deployment_targets: ${{ needs.plan_ios_release.outputs.deployment_targets }}
+      upload_enabled: ${{ needs.plan_ios_release.outputs.upload_enabled }}
+      detail: "빌드 검증 → 서명 아카이브 → IPA 생성 → TestFlight 업로드 순서로 진행합니다."
+    secrets:
+      deploy_repo_dispatch_token: ${{ secrets.DEPLOY_REPO_DISPATCH_TOKEN }}
+
+  notify_ios_deploying:
+    name: Notify iOS Release In Progress
+    needs:
+      - plan_ios_release
+      - notify_ios_planned
+    uses: ./.github/workflows/reusable-deployment-status.yml
+    with:
+      module: ios
+      phase: in_progress
+      status: running
+      environment: production
+      release_version: ${{ needs.plan_ios_release.outputs.release_version }}
+      release_build_number: ${{ needs.plan_ios_release.outputs.release_build_number }}
+      deployment_targets: ${{ needs.plan_ios_release.outputs.deployment_targets }}
+      upload_enabled: ${{ needs.plan_ios_release.outputs.upload_enabled }}
+      detail: "iOS 기기용 빌드와 서명 아카이브를 시작했습니다."
+    secrets:
+      deploy_repo_dispatch_token: ${{ secrets.DEPLOY_REPO_DISPATCH_TOKEN }}
+
+  build_ios_ipa:
+    name: Build Signed iOS IPA
     runs-on: macos-26
+    timeout-minutes: 60
+    needs:
+      - plan_ios_release
+      - notify_ios_deploying
     env:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       APPSTORE_CONNECT_KEY_ID: ${{ secrets.APPSTORE_CONNECT_KEY_ID }}
@@ -31,8 +143,9 @@ jobs:
       IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64 }}
       IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
       IOS_APP_STORE_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_APP_STORE_PROVISIONING_PROFILE_BASE64 }}
-      INPUT_VERSION: ${{ inputs.version || '' }}
-      UPLOAD_TO_APP_STORE_CONNECT: ${{ github.event_name != 'workflow_dispatch' || inputs.upload_to_app_store_connect }}
+      RELEASE_VERSION: ${{ needs.plan_ios_release.outputs.release_version }}
+      RELEASE_BUILD_NUMBER: ${{ needs.plan_ios_release.outputs.release_build_number }}
+      ARTIFACT_NAME: ${{ needs.plan_ios_release.outputs.artifact_name }}
 
     steps:
       - name: Checkout
@@ -65,53 +178,53 @@ jobs:
         run: |
           set -euo pipefail
 
-          PRIVATE_KEY_PATH="${RUNNER_TEMP}/AuthKey_${APPSTORE_CONNECT_KEY_ID}.p8"
-          echo "${APPSTORE_CONNECT_PRIVATE_KEY_BASE64}" | base64 --decode > "${PRIVATE_KEY_PATH}"
-          chmod 600 "${PRIVATE_KEY_PATH}"
+          private_key_path="${RUNNER_TEMP}/AuthKey_${APPSTORE_CONNECT_KEY_ID}.p8"
+          echo "${APPSTORE_CONNECT_PRIVATE_KEY_BASE64}" | base64 --decode > "${private_key_path}"
+          chmod 600 "${private_key_path}"
 
-          echo "APPSTORE_CONNECT_PRIVATE_KEY_PATH=${PRIVATE_KEY_PATH}" >> "${GITHUB_ENV}"
+          echo "APPSTORE_CONNECT_PRIVATE_KEY_PATH=${private_key_path}" >> "${GITHUB_ENV}"
 
       - name: Install iOS distribution signing assets
         run: |
           set -euo pipefail
 
-          CERTIFICATE_PATH="${RUNNER_TEMP}/ios-distribution.p12"
-          PROFILE_PATH="${RUNNER_TEMP}/ios-app-store.mobileprovision"
-          PROFILE_PLIST_PATH="${RUNNER_TEMP}/ios-app-store-profile.plist"
-          KEYCHAIN_PATH="${RUNNER_TEMP}/ios-signing.keychain-db"
-          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          certificate_path="${RUNNER_TEMP}/ios-distribution.p12"
+          profile_path="${RUNNER_TEMP}/ios-app-store.mobileprovision"
+          profile_plist_path="${RUNNER_TEMP}/ios-app-store-profile.plist"
+          keychain_path="${RUNNER_TEMP}/ios-signing.keychain-db"
+          keychain_password="$(openssl rand -base64 32)"
 
-          echo "${IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64}" | base64 --decode > "${CERTIFICATE_PATH}"
-          echo "${IOS_APP_STORE_PROVISIONING_PROFILE_BASE64}" | base64 --decode > "${PROFILE_PATH}"
+          echo "${IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64}" | base64 --decode > "${certificate_path}"
+          echo "${IOS_APP_STORE_PROVISIONING_PROFILE_BASE64}" | base64 --decode > "${profile_path}"
 
-          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
-          security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
-          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
-          security import "${CERTIFICATE_PATH}" \
-            -k "${KEYCHAIN_PATH}" \
+          security create-keychain -p "${keychain_password}" "${keychain_path}"
+          security set-keychain-settings -lut 21600 "${keychain_path}"
+          security unlock-keychain -p "${keychain_password}" "${keychain_path}"
+          security import "${certificate_path}" \
+            -k "${keychain_path}" \
             -P "${IOS_DISTRIBUTION_CERTIFICATE_PASSWORD}" \
             -T /usr/bin/codesign \
             -T /usr/bin/security
           security set-key-partition-list \
             -S apple-tool:,apple:,codesign: \
             -s \
-            -k "${KEYCHAIN_PASSWORD}" \
-            "${KEYCHAIN_PATH}"
-          security list-keychains -d user -s "${KEYCHAIN_PATH}"
-          security default-keychain -d user -s "${KEYCHAIN_PATH}"
+            -k "${keychain_password}" \
+            "${keychain_path}"
+          security list-keychains -d user -s "${keychain_path}"
+          security default-keychain -d user -s "${keychain_path}"
 
-          security cms -D -i "${PROFILE_PATH}" > "${PROFILE_PLIST_PATH}"
-          PROFILE_UUID="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "${PROFILE_PLIST_PATH}")"
-          PROFILE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :Name' "${PROFILE_PLIST_PATH}")"
-          PROFILE_TEAM_ID="$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "${PROFILE_PLIST_PATH}")"
-          PROFILE_APP_IDENTIFIER="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "${PROFILE_PLIST_PATH}")"
+          security cms -D -i "${profile_path}" > "${profile_plist_path}"
+          profile_uuid="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "${profile_plist_path}")"
+          profile_name="$(/usr/libexec/PlistBuddy -c 'Print :Name' "${profile_plist_path}")"
+          profile_team_id="$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "${profile_plist_path}")"
+          profile_app_identifier="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "${profile_plist_path}")"
 
-          if [ "${PROFILE_TEAM_ID}" != "${APPLE_TEAM_ID}" ]; then
+          if [ "${profile_team_id}" != "${APPLE_TEAM_ID}" ]; then
             echo "Provisioning profile team does not match APPLE_TEAM_ID." >&2
             exit 1
           fi
 
-          if [ "${PROFILE_APP_IDENTIFIER}" != "${APPLE_TEAM_ID}.io.github.ghkdqhrbals.StudyMate" ]; then
+          if [ "${profile_app_identifier}" != "${APPLE_TEAM_ID}.io.github.ghkdqhrbals.StudyMate" ]; then
             echo "Provisioning profile does not match the iOS app bundle identifier." >&2
             exit 1
           fi
@@ -119,37 +232,11 @@ jobs:
           mkdir -p \
             "${HOME}/Library/MobileDevice/Provisioning Profiles" \
             "${HOME}/Library/Developer/Xcode/UserData/Provisioning Profiles"
-          cp "${PROFILE_PATH}" "${HOME}/Library/MobileDevice/Provisioning Profiles/${PROFILE_UUID}.mobileprovision"
-          cp "${PROFILE_PATH}" "${HOME}/Library/Developer/Xcode/UserData/Provisioning Profiles/${PROFILE_UUID}.mobileprovision"
+          cp "${profile_path}" "${HOME}/Library/MobileDevice/Provisioning Profiles/${profile_uuid}.mobileprovision"
+          cp "${profile_path}" "${HOME}/Library/Developer/Xcode/UserData/Provisioning Profiles/${profile_uuid}.mobileprovision"
 
-          security find-identity -v -p codesigning "${KEYCHAIN_PATH}"
-          echo "IOS_PROVISIONING_PROFILE_NAME=${PROFILE_NAME}" >> "${GITHUB_ENV}"
-
-      - name: Resolve release version
-        run: |
-          set -euo pipefail
-
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-          elif [ -n "${INPUT_VERSION}" ]; then
-            VERSION="${INPUT_VERSION}"
-          else
-            VERSION="$(
-              xcodebuild -project StudyMate.xcodeproj \
-                -scheme StudyMateiOS \
-                -configuration Release \
-                -showBuildSettings |
-                awk -F '= ' '/MARKETING_VERSION/ { print $2; exit }'
-            )"
-          fi
-
-          if ! [[ "${VERSION}" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
-            echo "Invalid release version: ${VERSION}" >&2
-            exit 1
-          fi
-
-          echo "RELEASE_VERSION=${VERSION}" >> "${GITHUB_ENV}"
-          echo "RELEASE_BUILD_NUMBER=${GITHUB_RUN_NUMBER}" >> "${GITHUB_ENV}"
+          security find-identity -v -p codesigning "${keychain_path}"
+          echo "IOS_PROVISIONING_PROFILE_NAME=${profile_name}" >> "${GITHUB_ENV}"
 
       - name: Build iOS debug target
         run: |
@@ -184,17 +271,17 @@ jobs:
         run: |
           set -euo pipefail
 
-          APP_PATH="build/StudyMateiOS.xcarchive/Products/Applications/StudyMate.app"
-          test -d "${APP_PATH}"
+          app_path="build/StudyMateiOS.xcarchive/Products/Applications/StudyMate.app"
+          test -d "${app_path}"
 
-          codesign --verify --deep --strict --verbose=2 "${APP_PATH}"
-          codesign -d --entitlements - "${APP_PATH}" > "${RUNNER_TEMP}/ios-archive-entitlements.plist"
+          codesign --verify --deep --strict --verbose=2 "${app_path}"
+          codesign -d --entitlements - "${app_path}" > "${RUNNER_TEMP}/ios-archive-entitlements.plist"
 
           grep -q "aps-environment" "${RUNNER_TEMP}/ios-archive-entitlements.plist"
           grep -q "iCloud.io.github.ghkdqhrbals.StudyMate" "${RUNNER_TEMP}/ios-archive-entitlements.plist"
           grep -q "com.apple.developer.icloud-services" "${RUNNER_TEMP}/ios-archive-entitlements.plist"
 
-      - name: Export IPA
+      - name: Export signed IPA
         run: |
           set -euo pipefail
 
@@ -234,13 +321,13 @@ jobs:
             -exportPath dist \
             -exportOptionsPlist build/export-options.plist
 
-          IPA_PATH="$(find dist -maxdepth 1 -name '*.ipa' -print -quit)"
-          if [ -z "${IPA_PATH}" ]; then
+          ipa_path="$(find dist -maxdepth 1 -name '*.ipa' -print -quit)"
+          if [ -z "${ipa_path}" ]; then
             echo "IPA export failed." >&2
             exit 1
           fi
 
-          echo "IPA_PATH=${IPA_PATH}" >> "${GITHUB_ENV}"
+          echo "IPA_PATH=${ipa_path}" >> "${GITHUB_ENV}"
 
       - name: Verify exported IPA entitlements
         run: |
@@ -249,68 +336,130 @@ jobs:
           mkdir -p build/ipa-check
           unzip -q "${IPA_PATH}" -d build/ipa-check
 
-          APP_PATH="$(find build/ipa-check/Payload -maxdepth 1 -name '*.app' -print -quit)"
-          if [ -z "${APP_PATH}" ]; then
+          app_path="$(find build/ipa-check/Payload -maxdepth 1 -name '*.app' -print -quit)"
+          if [ -z "${app_path}" ]; then
             echo "Exported IPA does not contain an app bundle." >&2
             exit 1
           fi
 
-          codesign --verify --deep --strict --verbose=2 "${APP_PATH}"
-          codesign -d --entitlements - "${APP_PATH}" > "${RUNNER_TEMP}/ios-export-entitlements.plist"
+          codesign --verify --deep --strict --verbose=2 "${app_path}"
+          codesign -d --entitlements - "${app_path}" > "${RUNNER_TEMP}/ios-export-entitlements.plist"
 
           grep -q "aps-environment" "${RUNNER_TEMP}/ios-export-entitlements.plist"
           grep -q "production" "${RUNNER_TEMP}/ios-export-entitlements.plist"
           grep -q "iCloud.io.github.ghkdqhrbals.StudyMate" "${RUNNER_TEMP}/ios-export-entitlements.plist"
           grep -q "com.apple.developer.icloud-services" "${RUNNER_TEMP}/ios-export-entitlements.plist"
 
-      - name: Upload IPA artifact
+      - name: Write release metadata
+        run: |
+          jq -n \
+            --arg version "${RELEASE_VERSION}" \
+            --arg build "${RELEASE_BUILD_NUMBER}" \
+            --arg source_sha "${GITHUB_SHA}" \
+            --arg run_id "${GITHUB_RUN_ID}" \
+            '{
+              version: $version,
+              build: $build,
+              sourceSha: $source_sha,
+              runId: $run_id
+            }' > dist/release-metadata.json
+
+      - name: Upload signed IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BuddyStudy-iOS-${{ env.RELEASE_VERSION }}-${{ env.RELEASE_BUILD_NUMBER }}
-          path: dist/*.ipa
+          name: ${{ env.ARTIFACT_NAME }}
+          path: |
+            dist/*.ipa
+            dist/release-metadata.json
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload to App Store Connect
-        if: env.UPLOAD_TO_APP_STORE_CONNECT == 'true'
+  upload_testflight:
+    name: Upload iOS IPA to TestFlight
+    runs-on: macos-26
+    timeout-minutes: 30
+    needs:
+      - plan_ios_release
+      - build_ios_ipa
+    if: ${{ needs.plan_ios_release.outputs.upload_enabled == 'true' }}
+    env:
+      APPSTORE_CONNECT_KEY_ID: ${{ secrets.APPSTORE_CONNECT_KEY_ID }}
+      APPSTORE_CONNECT_ISSUER_ID: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID }}
+      APPSTORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APPSTORE_CONNECT_PRIVATE_KEY_BASE64 }}
+      ARTIFACT_NAME: ${{ needs.plan_ios_release.outputs.artifact_name }}
+
+    steps:
+      - name: Download signed IPA
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: release-artifact
+
+      - name: Prepare App Store Connect API key
         run: |
           set -euo pipefail
 
-          cat > build/upload-options.plist <<PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>destination</key>
-            <string>upload</string>
-            <key>method</key>
-            <string>app-store-connect</string>
-            <key>signingStyle</key>
-            <string>manual</string>
-            <key>signingCertificate</key>
-            <string>Apple Distribution</string>
-            <key>provisioningProfiles</key>
-            <dict>
-              <key>io.github.ghkdqhrbals.StudyMate</key>
-              <string>${IOS_PROVISIONING_PROFILE_NAME}</string>
-            </dict>
-            <key>stripSwiftSymbols</key>
-            <true/>
-            <key>teamID</key>
-            <string>${APPLE_TEAM_ID}</string>
-            <key>iCloudContainerEnvironment</key>
-            <string>Production</string>
-            <key>manageAppVersionAndBuildNumber</key>
-            <false/>
-          </dict>
-          </plist>
-          PLIST
+          for name in \
+            APPSTORE_CONNECT_KEY_ID \
+            APPSTORE_CONNECT_ISSUER_ID \
+            APPSTORE_CONNECT_PRIVATE_KEY_BASE64; do
+            if [ -z "${!name}" ]; then
+              echo "Missing GitHub Actions secret: ${name}" >&2
+              exit 1
+            fi
+          done
 
-          xcodebuild -exportArchive \
-            -archivePath build/StudyMateiOS.xcarchive \
-            -exportPath build/app-store-upload \
-            -exportOptionsPlist build/upload-options.plist \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "${APPSTORE_CONNECT_PRIVATE_KEY_PATH}" \
-            -authenticationKeyID "${APPSTORE_CONNECT_KEY_ID}" \
-            -authenticationKeyIssuerID "${APPSTORE_CONNECT_ISSUER_ID}"
+          private_keys_dir="${RUNNER_TEMP}/app-store-connect-private-keys"
+          mkdir -p "${private_keys_dir}"
+          echo "${APPSTORE_CONNECT_PRIVATE_KEY_BASE64}" |
+            base64 --decode > "${private_keys_dir}/AuthKey_${APPSTORE_CONNECT_KEY_ID}.p8"
+          chmod 600 "${private_keys_dir}/AuthKey_${APPSTORE_CONNECT_KEY_ID}.p8"
+          echo "API_PRIVATE_KEYS_DIR=${private_keys_dir}" >> "${GITHUB_ENV}"
+
+      - name: Upload to App Store Connect for TestFlight
+        run: |
+          set -euo pipefail
+
+          ipa_path="$(find release-artifact -name '*.ipa' -print -quit)"
+          if [ -z "${ipa_path}" ]; then
+            echo "Downloaded artifact does not contain an IPA." >&2
+            exit 1
+          fi
+
+          xcrun altool \
+            --upload-app \
+            --file "${ipa_path}" \
+            --type ios \
+            --apiKey "${APPSTORE_CONNECT_KEY_ID}" \
+            --apiIssuer "${APPSTORE_CONNECT_ISSUER_ID}"
+
+          {
+            echo "## TestFlight Upload"
+            echo ""
+            echo "- IPA: \`$(basename "${ipa_path}")\`"
+            echo "- Result: App Store Connect accepted the upload."
+            echo "- Next: Apple processing continues asynchronously."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  notify_ios_completed:
+    name: Notify iOS Release Completed
+    needs:
+      - plan_ios_release
+      - build_ios_ipa
+      - upload_testflight
+    if: ${{ always() && needs.plan_ios_release.result == 'success' }}
+    uses: ./.github/workflows/reusable-deployment-status.yml
+    with:
+      module: ios
+      phase: completed
+      status: ${{ needs.build_ios_ipa.result == 'success' && (needs.upload_testflight.result == 'success' || needs.upload_testflight.result == 'skipped') && 'success' || (needs.build_ios_ipa.result == 'cancelled' || needs.upload_testflight.result == 'cancelled') && 'cancelled' || 'failure' }}
+      environment: production
+      release_version: ${{ needs.plan_ios_release.outputs.release_version }}
+      release_build_number: ${{ needs.plan_ios_release.outputs.release_build_number }}
+      deployment_targets: ${{ needs.plan_ios_release.outputs.deployment_targets }}
+      upload_enabled: ${{ needs.plan_ios_release.outputs.upload_enabled }}
+      build_result: ${{ needs.build_ios_ipa.result }}
+      upload_result: ${{ needs.upload_testflight.result }}
+      detail: "TestFlight 업로드 성공은 App Store Connect 접수를 뜻하며 Apple의 빌드 처리는 이후 비동기로 진행됩니다."
+    secrets:
+      deploy_repo_dispatch_token: ${{ secrets.DEPLOY_REPO_DISPATCH_TOKEN }}

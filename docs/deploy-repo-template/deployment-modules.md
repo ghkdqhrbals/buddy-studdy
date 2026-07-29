@@ -11,6 +11,7 @@ one workflow run just because they share a host.
 | Backend network | `Configure BuddyStudy Backend Network` | manual | EC2 self-hosted | Redis administrator ingress on the backend security group |
 | Database cutover | `Migrate BuddyStudy PostgreSQL To MySQL` | manual, one-time | EC2 self-hosted | PostgreSQL backup, MySQL import, row-count and reference validation, automatic pre-cutover rollback |
 | Admin frontend | `Deploy BuddyStudy Admin Frontend` | `admin-frontend-image-published`, manual | EC2 self-hosted | Admin frontend container only |
+| iOS TestFlight | `Release iOS App` | `v*`, manual | GitHub-hosted macOS | Release planning, signed IPA build, artifact retention, and TestFlight upload as separate jobs |
 | Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, TestZone UI, Grafana, Loki, ERROR-log Slack alerting, monitoring auth and access audit, customer-facing service status and maintenance history |
 | Monitoring routing | `Deploy BuddyStudy Monitoring Routes on MacBook Air` | manual | MacBook Air self-hosted | Routingflare routes for the monitoring UI and Grafana |
 | TestZone execution | `Deploy BuddyStudy TestZone on MacBook Air` | `testzone-image-published`, manual | MacBook Air self-hosted | k6 runner, script/project/run storage, InfluxDB, approved disposable test components |
@@ -34,6 +35,10 @@ deployment.
   workflows.
 - A job must have a module-specific name such as `deploy_backend`,
   `deploy_admin_frontend`, or `deploy_monitoring`.
+- The iOS release workflow remains an iOS-only module. It separates release
+  planning, the signed IPA build, TestFlight upload, and completion reporting
+  into dependent jobs so each failure boundary is visible without combining
+  backend, monitoring, or admin deployment.
 - Backend image build remains in the app repository on GitHub-hosted runners.
 - Backend images support `native` and `jvm` runtime modes from one Dockerfile.
   Native remains the default for tag-triggered releases. Manual image builds
@@ -140,6 +145,13 @@ deployment.
   app identity and show status, production environment, runtime, source commit,
   immutable image, actor, timestamp, and direct build/deploy run actions.
   `SLACK_WEBHOOK_URL` is only a migration fallback.
+- iOS release notifications are sent through
+  `Notify BuddyStudy Deployment Status` in the private deploy repository, so
+  the deploy webhook remains centralized. Slack receives distinct planned,
+  in-progress, and completed/failed messages with the selected deployment
+  targets, version/build, source, IPA build result, and TestFlight upload result.
+  A successful upload means App Store Connect accepted the binary; Apple
+  processing continues asynchronously.
 - The backend deploy temporarily retains the `buddystudy-profile-photos`
   volume for legacy-file cleanup. New profile-photo uploads are disabled;
   saving a pixel avatar or deleting an account removes the user's legacy file.
