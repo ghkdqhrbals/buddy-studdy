@@ -3,233 +3,47 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="BuddyStudy는 짧은 질문으로 학습을 돕는 무료 iPhone AI 튜터입니다.">
-  <meta name="robots" content="noindex, nofollow">
+  <meta name="description" content="BuddyStudy는 짧은 AI 학습 질문, 답변 기록, 주제별 통계로 꾸준한 학습을 돕는 iPhone·iPad 앱입니다.">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://ghkdqhrbals.github.io/buddy-studdy/">
+  <link rel="alternate" hreflang="ko" href="https://ghkdqhrbals.github.io/buddy-studdy/">
+  <link rel="alternate" hreflang="en" href="https://ghkdqhrbals.github.io/buddy-studdy/en/">
+  <link rel="alternate" hreflang="ja" href="https://ghkdqhrbals.github.io/buddy-studdy/ja/">
+  <link rel="alternate" hreflang="x-default" href="https://ghkdqhrbals.github.io/buddy-studdy/en/">
   <link rel="icon" href="assets/buddystudy-icon.png" type="image/png">
   <link rel="apple-touch-icon" href="assets/buddystudy-icon.png">
-  <link rel="alternate" hreflang="ko" href="https://ghkdqhrbals.github.io/buddy-study/">
-  <link rel="alternate" hreflang="en" href="https://ghkdqhrbals.github.io/buddy-study/en/">
-  <title>BuddyStudy</title>
-  <style>
-    :root {
-      color-scheme: light dark;
-      --bg: #fafafa;
-      --fg: #1f2328;
-      --muted: #6b7280;
-      --line: rgba(31, 35, 40, 0.14);
-    }
-
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #141414;
-        --fg: #f5f5f5;
-        --muted: #a1a1aa;
-        --line: rgba(255, 255, 255, 0.14);
-      }
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--fg);
-      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
-      line-height: 1.55;
-    }
-
-    a {
-      color: inherit;
-      text-decoration: none;
-    }
-
-    main {
-      width: min(720px, calc(100vw - 40px));
-      margin: 0 auto;
-      padding: 48px 0 40px;
-    }
-
-    nav {
-      display: flex;
-      justify-content: flex-end;
-      gap: 12px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    nav strong {
-      color: var(--fg);
-    }
-
-    header {
-      padding: 72px 0 42px;
-    }
-
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 34px;
-      color: var(--muted);
-      font-size: 14px;
-      font-weight: 700;
-    }
-
-    h1 {
-      margin: 0;
-      max-width: 680px;
-      font-size: clamp(42px, 8vw, 72px);
-      line-height: 1.02;
-      letter-spacing: 0;
-    }
-
-    .lead {
-      max-width: 640px;
-      margin: 22px 0 0;
-      color: var(--muted);
-      font-size: 20px;
-    }
-
-    .meta {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      margin-top: 18px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    .meta span + span::before {
-      content: "/";
-      margin-right: 12px;
-      color: var(--line);
-    }
-
-    .actions {
-      display: flex;
-      gap: 10px;
-      margin-top: 30px;
-    }
-
-    .button {
-      min-height: 42px;
-      padding: 10px 16px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      font-weight: 700;
-    }
-
-    .button.primary {
-      background: var(--fg);
-      color: var(--bg);
-      border-color: var(--fg);
-    }
-
-    .note {
-      margin-top: 14px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    section {
-      border-top: 1px solid var(--line);
-      padding: 24px 0;
-    }
-
-    h2 {
-      margin: 0 0 10px;
-      font-size: 16px;
-    }
-
-    p {
-      margin: 0;
-      color: var(--muted);
-    }
-
-    ul {
-      display: grid;
-      gap: 10px;
-      margin: 0;
-      padding: 0;
-      color: var(--muted);
-      list-style: none;
-    }
-
-    li::before {
-      content: "- ";
-    }
-
-    footer {
-      border-top: 1px solid var(--line);
-      padding-top: 20px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    @media (max-width: 520px) {
-      header {
-        padding-top: 52px;
-      }
-
-      .lead {
-        font-size: 17px;
-      }
-
-      .actions {
-        flex-direction: column;
-      }
-
-      .button {
-        display: block;
-        text-align: center;
-      }
-    }
-  </style>
+  <link rel="stylesheet" href="assets/landing.css">
+  <title>BuddyStudy — 짧은 질문으로 만드는 학습 습관</title>
 </head>
 <body>
   <main>
-    <nav aria-label="Language">
-      <strong>한국어</strong>
-      <a href="en/" lang="en">English</a>
-    </nav>
-
+    <nav aria-label="언어"><strong>한국어</strong><a href="en/" lang="en">English</a><a href="ja/" lang="ja">日本語</a></nav>
     <header>
-      <div class="brand">
-        <span>BuddyStudy</span>
-      </div>
+      <div class="brand">BuddyStudy</div>
       <h1>잘 아는 만큼, AI 결과도 선명해집니다.</h1>
-      <p class="lead">AI를 매일 쓰면서 깨달았습니다. 내가 더 잘 이해할수록 질문은 또렷해지고, 결과물의 해상도도 높아집니다. 그 감각을 꾸준히 유지하고 나누고 싶어서 BuddyStudy를 만들었습니다.</p>
-      <div class="meta" aria-label="Release information">
-        <span>v1.0.16</span>
-        <span>MIT License</span>
-        <span>무료 소프트웨어</span>
-      </div>
+      <p class="lead">짧은 질문에 직접 답하고, 피드백과 해설을 확인하며, 주제별 성장 흐름을 쌓아 보세요. BuddyStudy는 능동적인 학습을 매일 이어가도록 돕습니다.</p>
+      <div class="meta" aria-label="앱 정보"><span>iPhone · iPad</span><span>한국어 · English · 日本語</span><span>무료</span></div>
       <div class="actions">
         <a class="button primary" href="https://apps.apple.com/app/id6774108938">App Store</a>
-        <a class="button" href="https://github.com/ghkdqhrbals/buddy-study">GitHub</a>
+        <a class="button" href="https://github.com/ghkdqhrbals/buddy-studdy">GitHub</a>
+        <a class="button" href="mailto:ghkdqhrbals@gmail.com">문의하기</a>
       </div>
-      <p class="note">iPhone 앱은 무료입니다. AI 질문 생성과 채점은 BuddyStudy 백엔드를 통해 제공됩니다.</p>
+      <p class="note">AI 질문 생성과 채점은 BuddyStudy 백엔드를 통해 제공됩니다.</p>
     </header>
-
     <section>
-      <h2>무엇을 돕나요</h2>
+      <h2>학습 흐름</h2>
       <ul>
-        <li>원하는 주제와 난이도로 질문을 받습니다.</li>
-        <li>답변하면 AI가 점수, 피드백, 해설을 제공합니다.</li>
-        <li>기록과 통계로 내가 얼마나 알고 있는지 확인합니다.</li>
+        <li>주제와 난이도에 맞춘 짧은 질문을 만듭니다.</li>
+        <li>작성 중인 답변을 안전하게 보존하고, 제출 후 피드백과 해설을 확인합니다.</li>
+        <li>학습 트리, 검색 가능한 기록, 주제별 통계로 다음 학습을 정합니다.</li>
       </ul>
     </section>
-
     <section>
-      <h2>간단한 원칙</h2>
-      <p>AI가 대신 생각해주는 도구가 되지 않도록, 나만의 지식을 계속 쌓는 작은 루틴을 만드는 것이 목표입니다.</p>
+      <h2>꾸준함을 위한 기능</h2>
+      <p>원하는 주기로 질문 알림을 받고, 루트 학습과 하위 주제를 트리로 정리하며, 전 세계 어디서든 같은 학습 기록을 이어갈 수 있습니다.</p>
     </section>
-
     <footer>
-      최신 버전은 v1.0.16입니다. MIT License로 제공되며, AI 기능은 BuddyStudy 백엔드를 통해 제공됩니다.
-      <a href="terms-2026-07-07.html">사용 약관</a> · <a href="privacy-2026-07-07.html">개인정보 처리방침</a>.
+      © 2026 BuddyStudy · <a href="terms-2026-07-30.html">서비스 이용약관</a> · <a href="privacy-2026-07-30.html">개인정보 처리방침</a> · <a href="marketing-consent-2026-07-30.html">마케팅 수신 동의</a> · <a href="mailto:ghkdqhrbals@gmail.com">지원</a>
     </footer>
   </main>
 </body>

@@ -3,232 +3,47 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="BuddyStudy is a free iPhone AI tutor that helps you study with short questions.">
-  <meta name="robots" content="noindex, nofollow">
+  <meta name="description" content="BuddyStudy is an iPhone and iPad app for active learning with short AI questions, saved answers, and topic-level progress.">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://ghkdqhrbals.github.io/buddy-studdy/en/">
+  <link rel="alternate" hreflang="ko" href="https://ghkdqhrbals.github.io/buddy-studdy/">
+  <link rel="alternate" hreflang="en" href="https://ghkdqhrbals.github.io/buddy-studdy/en/">
+  <link rel="alternate" hreflang="ja" href="https://ghkdqhrbals.github.io/buddy-studdy/ja/">
+  <link rel="alternate" hreflang="x-default" href="https://ghkdqhrbals.github.io/buddy-studdy/en/">
   <link rel="icon" href="../assets/buddystudy-icon.png" type="image/png">
   <link rel="apple-touch-icon" href="../assets/buddystudy-icon.png">
-  <link rel="alternate" hreflang="ko" href="https://ghkdqhrbals.github.io/buddy-study/">
-  <link rel="alternate" hreflang="en" href="https://ghkdqhrbals.github.io/buddy-study/en/">
-  <title>BuddyStudy</title>
-  <style>
-    :root {
-      color-scheme: light dark;
-      --bg: #fafafa;
-      --fg: #1f2328;
-      --muted: #6b7280;
-      --line: rgba(31, 35, 40, 0.14);
-    }
-
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #141414;
-        --fg: #f5f5f5;
-        --muted: #a1a1aa;
-        --line: rgba(255, 255, 255, 0.14);
-      }
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--fg);
-      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
-      line-height: 1.55;
-    }
-
-    a {
-      color: inherit;
-      text-decoration: none;
-    }
-
-    main {
-      width: min(720px, calc(100vw - 40px));
-      margin: 0 auto;
-      padding: 48px 0 40px;
-    }
-
-    nav {
-      display: flex;
-      justify-content: flex-end;
-      gap: 12px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    nav strong {
-      color: var(--fg);
-    }
-
-    header {
-      padding: 72px 0 42px;
-    }
-
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 34px;
-      color: var(--muted);
-      font-size: 14px;
-      font-weight: 700;
-    }
-
-    h1 {
-      margin: 0;
-      max-width: 680px;
-      font-size: clamp(42px, 8vw, 72px);
-      line-height: 1.02;
-      letter-spacing: 0;
-    }
-
-    .lead {
-      max-width: 640px;
-      margin: 22px 0 0;
-      color: var(--muted);
-      font-size: 20px;
-    }
-
-    .meta {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      margin-top: 18px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    .meta span + span::before {
-      content: "/";
-      margin-right: 12px;
-      color: var(--line);
-    }
-
-    .actions {
-      display: flex;
-      gap: 10px;
-      margin-top: 30px;
-    }
-
-    .button {
-      min-height: 42px;
-      padding: 10px 16px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      font-weight: 700;
-    }
-
-    .button.primary {
-      background: var(--fg);
-      color: var(--bg);
-      border-color: var(--fg);
-    }
-
-    .note {
-      margin-top: 14px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    section {
-      border-top: 1px solid var(--line);
-      padding: 24px 0;
-    }
-
-    h2 {
-      margin: 0 0 10px;
-      font-size: 16px;
-    }
-
-    p {
-      margin: 0;
-      color: var(--muted);
-    }
-
-    ul {
-      display: grid;
-      gap: 10px;
-      margin: 0;
-      padding: 0;
-      color: var(--muted);
-      list-style: none;
-    }
-
-    li::before {
-      content: "- ";
-    }
-
-    footer {
-      border-top: 1px solid var(--line);
-      padding-top: 20px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    @media (max-width: 520px) {
-      header {
-        padding-top: 52px;
-      }
-
-      .lead {
-        font-size: 17px;
-      }
-
-      .actions {
-        flex-direction: column;
-      }
-
-      .button {
-        display: block;
-        text-align: center;
-      }
-    }
-  </style>
+  <link rel="stylesheet" href="../assets/landing.css">
+  <title>BuddyStudy — Build knowledge one question at a time</title>
 </head>
 <body>
   <main>
-    <nav aria-label="Language">
-      <a href="../" lang="ko">한국어</a>
-      <strong>English</strong>
-    </nav>
-
+    <nav aria-label="Language"><a href="../" lang="ko">한국어</a><strong>English</strong><a href="../ja/" lang="ja">日本語</a></nav>
     <header>
-      <div class="brand">
-        <span>BuddyStudy</span>
-      </div>
+      <div class="brand">BuddyStudy</div>
       <h1>The better you understand, the better AI works.</h1>
-      <p class="lead">Using AI every day taught me one thing: the more I understand a subject, the sharper my questions become and the clearer the output gets. I built BuddyStudy to keep that habit alive and share it.</p>
-      <div class="meta" aria-label="Release information">
-        <span>v1.0.16</span>
-        <span>MIT License</span>
-        <span>Free software</span>
-      </div>
+      <p class="lead">Answer short questions in your own words, review focused feedback and explanations, and build a clear picture of your progress by topic.</p>
+      <div class="meta" aria-label="App information"><span>iPhone · iPad</span><span>한국어 · English · 日本語</span><span>Free</span></div>
       <div class="actions">
         <a class="button primary" href="https://apps.apple.com/app/id6774108938">App Store</a>
-        <a class="button" href="https://github.com/ghkdqhrbals/buddy-study">GitHub</a>
+        <a class="button" href="https://github.com/ghkdqhrbals/buddy-studdy">GitHub</a>
+        <a class="button" href="mailto:ghkdqhrbals@gmail.com">Support</a>
       </div>
-      <p class="note">The iPhone app is free. AI question generation and grading are provided through the BuddyStudy backend.</p>
+      <p class="note">AI question generation and grading are provided through the BuddyStudy backend.</p>
     </header>
-
     <section>
-      <h2>What it helps with</h2>
+      <h2>A focused learning loop</h2>
       <ul>
-        <li>Get questions by topic and difficulty.</li>
-        <li>Answer and receive a score, feedback, and explanation.</li>
-        <li>Review records and statistics to see what you know.</li>
+        <li>Create concise questions tailored to your topic and difficulty.</li>
+        <li>Keep your active draft safe, then review feedback and a detailed explanation.</li>
+        <li>Use the study tree, searchable records, and topic statistics to decide what comes next.</li>
       </ul>
     </section>
-
     <section>
-      <h2>A simple principle</h2>
-      <p>The goal is to keep building your own knowledge, so AI stays a tool for clearer thinking instead of a replacement for it.</p>
+      <h2>Built for consistency</h2>
+      <p>Choose a question schedule, organize root subjects and deeper topics, and keep your learning history available across sessions.</p>
     </section>
-
     <footer>
-      Latest version: v1.0.16. Released under the MIT License. AI features are provided through the BuddyStudy backend. <a href="terms-2026-07-07.html">Terms of Service</a> · <a href="privacy-2026-07-07.html">Privacy Policy</a>.
+      © 2026 BuddyStudy · <a href="terms-2026-07-30.html">Terms</a> · <a href="privacy-2026-07-30.html">Privacy</a> · <a href="marketing-consent-2026-07-30.html">Marketing consent</a> · <a href="mailto:ghkdqhrbals@gmail.com">Support</a>
     </footer>
   </main>
 </body>
