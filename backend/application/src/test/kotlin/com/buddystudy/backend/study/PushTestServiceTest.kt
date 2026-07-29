@@ -7,6 +7,7 @@ import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.common.application.outbox.PublishedStreamRecord
 import com.buddystudy.backend.study.application.model.PushTestCommand
 import com.buddystudy.backend.study.application.port.outbound.ApnsQuestionMessage
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushPublishPort
@@ -132,9 +133,9 @@ class PushTestServiceTest {
 
     private class FakePushEventPublisher : QuestionPushPublishPort {
         val requests = mutableListOf<QuestionPushRequest>()
-        override suspend fun publishPush(request: QuestionPushRequest): Boolean {
+        override suspend fun publishPush(request: QuestionPushRequest): PublishedStreamRecord {
             requests += request
-            return true
+            return PublishedStreamRecord("notification.question-push.requested.v1", "1-0")
         }
     }
 }

@@ -31,7 +31,7 @@ class QuestionGenerationStreamListener(
         options = StreamOptions.ACK,
     )
     private suspend fun consume(payload: QuestionGenerationRequestedEvent, context: StreamMessageContext) {
-        generation.process(payload)
+        generation.process(payload, context.streamKey)
     }
 
     @StreamScheduler(
@@ -49,7 +49,7 @@ class QuestionGenerationStreamListener(
         options = StreamOptions.ACK,
     )
     private suspend fun recover(payload: QuestionGenerationRequestedEvent, context: StreamMessageContext) {
-        generation.process(payload)
+        generation.process(payload, context.streamKey)
     }
 
     private companion object {

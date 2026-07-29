@@ -1,5 +1,6 @@
 package com.buddystudy.backend
 
+import com.buddystudy.backend.common.application.outbox.PublishedStreamRecord
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxPort
 import com.buddystudy.backend.common.application.outbox.RedisOutboxEventType
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
@@ -92,8 +93,9 @@ class RedisEventOutboxIntegrationTest : MySqlIntegrationTestSupport() {
             ).single { it.eventId == eventId }
         assertThat(reclaimed.id).isEqualTo(retry.id)
         assertThat(reclaimed.claimToken).isNotEqualTo(retry.claimToken)
-        assertThat(outbox.markPublished(reclaimed.id, retry.claimToken, now.plusSeconds(30))).isFalse()
-        assertThat(outbox.markPublished(reclaimed.id, reclaimed.claimToken, now.plusSeconds(30))).isTrue()
+        val publication = PublishedStreamRecord("notification.message.requested.v1", "3-0")
+        assertThat(outbox.markPublished(reclaimed.id, retry.claimToken, publication, now.plusSeconds(30))).isFalse()
+        assertThat(outbox.markPublished(reclaimed.id, reclaimed.claimToken, publication, now.plusSeconds(30))).isTrue()
     }
 
     @Test

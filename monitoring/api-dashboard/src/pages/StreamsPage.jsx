@@ -131,6 +131,7 @@ function StreamsWorkspace() {
     events: [
       { key: "id", label: "ID", className: "mono" },
       { key: "eventType", label: "Event type" },
+      { key: "streamKey", label: "Published stream", className: "mono" },
       { key: "eventId", label: "Event ID", className: "mono" },
       { key: "status", label: "Status", render: (row) => <StatusBadge tone={statusTone(row.status)}>{row.status}</StatusBadge> },
       { key: "attempts", label: "Attempts" },
@@ -140,6 +141,7 @@ function StreamsWorkspace() {
     pushes: [
       { key: "id", label: "ID", className: "mono" },
       { key: "topic", label: "Topic" },
+      { key: "streamKey", label: "Published stream", className: "mono" },
       { key: "recordId", label: "Record ID" },
       { key: "userId", label: "User ID" },
       { key: "deviceId", label: "Device ID", className: "mono" },

@@ -1,5 +1,6 @@
 package com.buddystudy.backend
 
+import com.buddystudy.backend.common.application.outbox.PublishedStreamRecord
 import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionPushOutboxRepository
 import com.buddystudy.study.domain.entity.QuestionPushOutboxEntity
 import kotlinx.coroutines.Dispatchers
@@ -45,10 +46,14 @@ class QuestionPushOutboxRepositoryTest : MySqlIntegrationTestSupport() {
 
         assertThat(claims).hasSize(1)
         val claim = claims.single()
-        assertThat(outbox.markPublished(item.id, "wrong-token", now)).isFalse()
+        val publication = PublishedStreamRecord("notification.question-push.requested.v1", "1-0")
+        assertThat(outbox.markPublished(item.id, "wrong-token", publication, now)).isFalse()
         assertThat(outbox.findById(item.id)!!.status).isEqualTo("PROCESSING")
-        assertThat(outbox.markPublished(item.id, claim.claimToken, now)).isTrue()
-        assertThat(outbox.findById(item.id)!!.status).isEqualTo("PUBLISHED")
+        assertThat(outbox.markPublished(item.id, claim.claimToken, publication, now)).isTrue()
+        val published = outbox.findById(item.id)!!
+        assertThat(published.status).isEqualTo("PUBLISHED")
+        assertThat(published.streamKey).isEqualTo(publication.streamKey)
+        assertThat(published.redisRecordId).isEqualTo(publication.recordId)
     }
 
     @Test
@@ -71,7 +76,14 @@ class QuestionPushOutboxRepositoryTest : MySqlIntegrationTestSupport() {
                 updatedAt = reclaimedAt,
             ),
         ).isFalse()
-        assertThat(outbox.markPublished(item.id, reclaimed.claimToken, reclaimedAt)).isTrue()
+        assertThat(
+            outbox.markPublished(
+                item.id,
+                reclaimed.claimToken,
+                PublishedStreamRecord("notification.question-push.requested.v1", "2-0"),
+                reclaimedAt,
+            ),
+        ).isTrue()
     }
 
     @Test

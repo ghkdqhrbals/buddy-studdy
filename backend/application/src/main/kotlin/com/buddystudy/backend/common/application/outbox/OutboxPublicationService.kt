@@ -100,14 +100,15 @@ class OutboxPublicationService(
             }
             domainPublisher.publish(event)
         }.fold(
-            onSuccess = { recordId ->
-                if (domainOutbox.markPublished(event.id, event.claimToken, publishedAt)) {
+            onSuccess = { publication ->
+                if (domainOutbox.markPublished(event.id, event.claimToken, publication, publishedAt)) {
                     log.info(
-                        "redis_outbox_published outboxId={} eventId={} eventType={} redisRecordId={} attempts={} ageMs={}",
+                        "redis_outbox_published outboxId={} eventId={} eventType={} streamKey={} redisRecordId={} attempts={} ageMs={}",
                         event.id,
                         event.eventId,
                         event.eventType,
-                        recordId,
+                        publication.streamKey,
+                        publication.recordId,
                         event.attempts,
                         Duration.between(event.createdAt, publishedAt).toMillis(),
                     )
@@ -123,14 +124,18 @@ class OutboxPublicationService(
 
     private suspend fun publishPush(item: ClaimedQuestionPushOutbox): PublishOutcome {
         val publishedAt = Instant.now()
-        return runCatching { check(pushPublisher.publishPush(item.request)) { "Push stream publish failed." } }
+        return runCatching {
+            checkNotNull(pushPublisher.publishPush(item.request)) { "Push stream publish failed." }
+        }
             .fold(
-                onSuccess = {
-                    if (pushOutbox.markPublished(item.id, item.claimToken, publishedAt)) {
+                onSuccess = { publication ->
+                    if (pushOutbox.markPublished(item.id, item.claimToken, publication, publishedAt)) {
                         log.info(
-                            "question_push_outbox_published outboxId={} eventId={} attempts={} ageMs={}",
+                            "question_push_outbox_published outboxId={} eventId={} streamKey={} redisRecordId={} attempts={} ageMs={}",
                             item.id,
                             item.request.eventId,
+                            publication.streamKey,
+                            publication.recordId,
                             item.attempts,
                             Duration.between(item.createdAt, publishedAt).toMillis(),
                         )

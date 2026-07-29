@@ -25,6 +25,8 @@ class QuestionPushOutboxEntity(
     var nextAttemptAt: Instant = Instant.now(),
     var claimedAt: Instant? = null,
     var claimToken: String? = null,
+    var streamKey: String? = null,
+    var redisRecordId: String? = null,
     var publishedAt: Instant? = null,
     var lastError: String? = null,
     var createdAt: Instant = Instant.now(),

@@ -3,6 +3,7 @@ package com.buddystudy.backend.common.adapter.outbound.persistence
 import com.buddystudy.backend.common.application.outbox.ClaimedRedisOutboxEvent
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxPort
 import com.buddystudy.backend.common.application.outbox.RedisOutboxEventType
+import com.buddystudy.backend.common.application.outbox.PublishedStreamRecord
 import com.buddystudy.backend.jooq.tables.RedisEventOutbox.REDIS_EVENT_OUTBOX
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.profile.application.model.AccountWithdrawnEvent
@@ -211,11 +212,18 @@ class RedisEventOutboxRepository(
             }
     }
 
-    override suspend fun markPublished(id: Long, claimToken: String, publishedAt: Instant): Boolean = jooq.withDsl { dsl ->
+    override suspend fun markPublished(
+        id: Long,
+        claimToken: String,
+        publication: PublishedStreamRecord,
+        publishedAt: Instant,
+    ): Boolean = jooq.withDsl { dsl ->
         val table = REDIS_EVENT_OUTBOX
         val now = publishedAt.toUtcLocalDateTime()
         dsl.update(table)
             .set(table.STATUS, PUBLISHED)
+            .set(table.STREAM_KEY, publication.streamKey)
+            .set(table.REDIS_RECORD_ID, publication.recordId)
             .set(table.PUBLISHED_AT, now)
             .setNull(table.CLAIMED_AT)
             .setNull(table.CLAIM_TOKEN)

@@ -36,7 +36,7 @@ interface GetQuestionGenerationProcessUseCase {
 }
 
 interface ProcessQuestionGenerationUseCase {
-    suspend fun process(event: QuestionGenerationRequestedEvent)
+    suspend fun process(event: QuestionGenerationRequestedEvent, streamKey: String = "test")
 }
 
 interface BrowseRecordsUseCase {

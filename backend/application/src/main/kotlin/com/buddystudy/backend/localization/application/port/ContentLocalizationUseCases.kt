@@ -10,5 +10,5 @@ interface RequestContentLocalizationUseCase {
 }
 
 interface ProcessContentTranslationUseCase {
-    suspend fun process(event: ContentTranslationRequestedEvent)
+    suspend fun process(event: ContentTranslationRequestedEvent, streamKey: String = "test")
 }

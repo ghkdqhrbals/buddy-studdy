@@ -37,11 +37,16 @@ class QuestionTranslationExecutionWriteService(
     private val questionKeys: OpenAIQuestionKeyProvider,
 ) : QuestionTranslationExecutionWriteUseCase {
     @Transactional
-    override suspend fun claim(event: QuestionGeneratedEvent, now: Instant): ClaimedQuestionTranslation? {
+    override suspend fun claim(
+        event: QuestionGeneratedEvent,
+        now: Instant,
+        streamKey: String,
+    ): ClaimedQuestionTranslation? {
         val inboxClaim = inbox.claim(
             eventId = event.eventId,
             consumerGroup = CONSUMER_GROUP,
             correlationId = event.correlationId,
+            streamKey = streamKey,
             leaseDuration = LEASE_DURATION,
             now = now,
         ) ?: return null

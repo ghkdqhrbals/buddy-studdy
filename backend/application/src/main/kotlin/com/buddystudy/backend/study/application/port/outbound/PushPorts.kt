@@ -2,6 +2,7 @@ package com.buddystudy.backend.study.application.port.outbound
 
 import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.common.application.outbox.OutboxType
+import com.buddystudy.backend.common.application.outbox.PublishedStreamRecord
 import java.time.Instant
 
 data class QuestionPushRequest(
@@ -26,7 +27,7 @@ data class QuestionPushRequest(
 }
 
 interface QuestionPushPublishPort {
-    suspend fun publishPush(request: QuestionPushRequest): Boolean
+    suspend fun publishPush(request: QuestionPushRequest): PublishedStreamRecord?
 }
 
 data class QuestionPushOutboxCommand(
@@ -66,7 +67,12 @@ interface QuestionPushOutboxAppendPort {
 interface QuestionPushOutboxPort : QuestionPushOutboxAppendPort {
     suspend fun claim(id: Long, now: Instant, staleBefore: Instant): ClaimedQuestionPushOutbox?
     suspend fun claimBatch(now: Instant, staleBefore: Instant, limit: Int): List<ClaimedQuestionPushOutbox>
-    suspend fun markPublished(id: Long, claimToken: String, publishedAt: Instant): Boolean
+    suspend fun markPublished(
+        id: Long,
+        claimToken: String,
+        publication: PublishedStreamRecord,
+        publishedAt: Instant,
+    ): Boolean
     suspend fun markRetry(
         id: Long,
         claimToken: String,

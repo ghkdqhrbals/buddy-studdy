@@ -271,6 +271,7 @@ function InboxAttemptList({ group }) {
       <DataTable
         columns={[
           { key: "eventId", label: "Event ID", className: "mono" },
+          { key: "streamKey", label: "Source stream", className: "mono" },
           { key: "attempt", label: "Attempt", render: (row) => number(row.attempt) },
           {
             key: "status",

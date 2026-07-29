@@ -24,13 +24,14 @@ class ContentTranslationProcessor(
 ) : ProcessContentTranslationUseCase {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    override suspend fun process(event: ContentTranslationRequestedEvent) {
+    override suspend fun process(event: ContentTranslationRequestedEvent, streamKey: String) {
         val claim = inbox.claim(
-            event.eventId,
-            CONSUMER_GROUP,
-            inboxCorrelationId(event.eventId),
-            Duration.ofMinutes(3),
-            Instant.now(),
+            eventId = event.eventId,
+            consumerGroup = CONSUMER_GROUP,
+            correlationId = inboxCorrelationId(event.eventId),
+            leaseDuration = Duration.ofMinutes(3),
+            now = Instant.now(),
+            streamKey = streamKey,
         ) ?: return
         try {
             when (event.contentType) {

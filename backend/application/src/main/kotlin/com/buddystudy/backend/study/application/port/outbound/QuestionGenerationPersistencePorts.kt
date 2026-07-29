@@ -31,6 +31,7 @@ interface StreamInboxPort {
         correlationId: String,
         leaseDuration: Duration,
         now: Instant,
+        streamKey: String = "test",
     ): StreamInboxClaim?
 
     suspend fun markSucceeded(claim: StreamInboxClaim, now: Instant): Boolean

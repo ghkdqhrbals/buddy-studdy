@@ -49,8 +49,8 @@ class QuestionGenerationProcessor(
 ) : ProcessQuestionGenerationUseCase {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    override suspend fun process(event: QuestionGenerationRequestedEvent) {
-        val claimed = writer.claim(event, Instant.now()) ?: return
+    override suspend fun process(event: QuestionGenerationRequestedEvent, streamKey: String) {
+        val claimed = writer.claim(event, Instant.now(), streamKey) ?: return
         var questionKey: OpenAIQuestionKey? = null
         try {
             val saga = claimed.saga

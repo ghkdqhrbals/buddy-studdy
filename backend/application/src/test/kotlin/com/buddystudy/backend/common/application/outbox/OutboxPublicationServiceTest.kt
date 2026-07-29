@@ -118,7 +118,12 @@ class OutboxPublicationServiceTest {
             available.values.take(limit).also { rows -> rows.forEach { available.remove(it.id) } }
         }
 
-        override suspend fun markPublished(id: Long, claimToken: String, publishedAt: Instant): Boolean {
+        override suspend fun markPublished(
+            id: Long,
+            claimToken: String,
+            publication: PublishedStreamRecord,
+            publishedAt: Instant,
+        ): Boolean {
             published += id
             return true
         }
@@ -154,7 +159,12 @@ class OutboxPublicationServiceTest {
             available.values.take(limit).also { rows -> rows.forEach { available.remove(it.id) } }
         }
 
-        override suspend fun markPublished(id: Long, claimToken: String, publishedAt: Instant): Boolean {
+        override suspend fun markPublished(
+            id: Long,
+            claimToken: String,
+            publication: PublishedStreamRecord,
+            publishedAt: Instant,
+        ): Boolean {
             published += id
             return true
         }
@@ -171,18 +181,18 @@ class OutboxPublicationServiceTest {
 
     private class FakeDomainPublisher(private val failure: Throwable? = null) : DomainEventPublishPort {
         var calls = 0
-        override suspend fun publish(event: ClaimedRedisOutboxEvent): String {
+        override suspend fun publish(event: ClaimedRedisOutboxEvent): PublishedStreamRecord {
             calls += 1
             failure?.let { throw it }
-            return "1-0"
+            return PublishedStreamRecord("notification.message.requested.v1", "1-0")
         }
     }
 
     private class FakePushPublisher : QuestionPushPublishPort {
         var calls = 0
-        override suspend fun publishPush(request: QuestionPushRequest): Boolean {
+        override suspend fun publishPush(request: QuestionPushRequest): PublishedStreamRecord {
             calls += 1
-            return true
+            return PublishedStreamRecord("notification.question-push.requested.v1", "2-0")
         }
     }
 

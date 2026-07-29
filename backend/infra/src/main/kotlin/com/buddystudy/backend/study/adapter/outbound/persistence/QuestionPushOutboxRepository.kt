@@ -1,6 +1,7 @@
 package com.buddystudy.backend.study.adapter.outbound.persistence
 
 import com.buddystudy.backend.config.saveEntity
+import com.buddystudy.backend.common.application.outbox.PublishedStreamRecord
 import com.buddystudy.backend.study.application.content.QuestionNotificationContentPolicy
 import com.buddystudy.backend.study.application.port.outbound.ClaimedQuestionPushOutbox
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxPort
@@ -105,7 +106,12 @@ class QuestionPushOutboxRepository(
         return claimed
     }
 
-    override suspend fun markPublished(id: Long, claimToken: String, publishedAt: Instant): Boolean =
+    override suspend fun markPublished(
+        id: Long,
+        claimToken: String,
+        publication: PublishedStreamRecord,
+        publishedAt: Instant,
+    ): Boolean =
         updateClaimed(
             id = id,
             claimToken = claimToken,
@@ -113,6 +119,8 @@ class QuestionPushOutboxRepository(
                 """
                 update question_push_outbox
                 set status = :nextStatus,
+                    stream_key = :streamKey,
+                    redis_record_id = :redisRecordId,
                     published_at = :updatedAt,
                     claimed_at = null,
                     claim_token = null,
@@ -121,6 +129,7 @@ class QuestionPushOutboxRepository(
                 where id = :id and status = :processing and claim_token = :claimToken
                 """.trimIndent(),
             nextStatus = PUBLISHED,
+            publication = publication,
             updatedAt = publishedAt,
         )
 
@@ -182,14 +191,21 @@ class QuestionPushOutboxRepository(
         claimToken: String,
         sql: String,
         nextStatus: String,
+        publication: PublishedStreamRecord? = null,
         updatedAt: Instant,
     ): Boolean {
-        val updated = template.databaseClient.sql(sql)
+        var statement = template.databaseClient.sql(sql)
             .bind("nextStatus", nextStatus)
             .bind("updatedAt", updatedAt)
             .bind("id", id)
             .bind("processing", PROCESSING)
             .bind("claimToken", claimToken)
+        if (publication != null) {
+            statement = statement
+                .bind("streamKey", publication.streamKey)
+                .bind("redisRecordId", publication.recordId)
+        }
+        val updated = statement
             .fetch()
             .rowsUpdated()
             .awaitSingle()

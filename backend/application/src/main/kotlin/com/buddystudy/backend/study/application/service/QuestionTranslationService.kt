@@ -25,8 +25,8 @@ class QuestionTranslationService(
 ) : ProcessQuestionTranslationUseCase {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    override suspend fun process(event: QuestionGeneratedEvent) {
-        val claimed = writer.claim(event, Instant.now()) ?: return
+    override suspend fun process(event: QuestionGeneratedEvent, streamKey: String) {
+        val claimed = writer.claim(event, Instant.now(), streamKey) ?: return
         try {
             val question = checkNotNull(questions.findQuestionById(event.questionId)) {
                 "Question was not found for translation."

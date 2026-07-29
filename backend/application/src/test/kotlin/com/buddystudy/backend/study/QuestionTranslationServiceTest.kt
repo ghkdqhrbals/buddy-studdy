@@ -176,7 +176,7 @@ class QuestionTranslationServiceTest {
         var appLanguage: String? = null
         var translation: TranslatedQuestionContent? = null
 
-        override suspend fun claim(event: QuestionGeneratedEvent, now: Instant) =
+        override suspend fun claim(event: QuestionGeneratedEvent, now: Instant, streamKey: String) =
             ClaimedQuestionTranslation(
                 saga = QuestionGenerationSaga(
                     correlationId = event.correlationId,

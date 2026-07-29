@@ -10,6 +10,7 @@ import com.buddystudy.backend.common.adapter.stream.StreamOptions
 import com.buddystudy.backend.common.adapter.stream.StreamScheduler
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
+import com.buddystudy.backend.common.application.outbox.PublishedStreamRecord
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.notification.application.port.inbound.ProcessNotificationEventUseCase
 import com.buddystudy.backend.notification.application.port.outbound.NotificationPersistencePort
@@ -46,7 +47,7 @@ class PushStreamManager(
     private val logger = LoggerFactory.getLogger(javaClass)
     private val stalePushClaimAge = Duration.ofMinutes(5)
 
-    override suspend fun publishPush(request: QuestionPushRequest): Boolean {
+    override suspend fun publishPush(request: QuestionPushRequest): PublishedStreamRecord? {
         if (!properties.streams.enabled) {
             logger.info(
                 "redis_stream_publish_skipped reason=streams_disabled eventType={} recordId={} deviceId={} userId={}",
@@ -55,9 +56,9 @@ class PushStreamManager(
                 request.deviceId,
                 request.userId,
             )
-            return false
+            return null
         }
-        val prepared = prepareForPublish(request) ?: return false
+        val prepared = prepareForPublish(request) ?: return null
         val event = prepared.request.toEvent()
         val publishStartedAt = Instant.now()
         logger.info(
@@ -97,7 +98,7 @@ class PushStreamManager(
                 event.createdAt,
                 Duration.between(event.createdAt, publishedAt).toMillis(),
             )
-            true
+            PublishedStreamRecord(streamKey = published.streamKey, recordId = published.recordId)
         } catch (error: Exception) {
             logger.warn(
                 "redis_stream_publish_failed streamKey={} eventId={} eventType={} recordId={} deviceId={} userId={} error={}",
@@ -109,7 +110,7 @@ class PushStreamManager(
                 event.userId,
                 error.message,
             )
-            false
+            null
         }
     }
 

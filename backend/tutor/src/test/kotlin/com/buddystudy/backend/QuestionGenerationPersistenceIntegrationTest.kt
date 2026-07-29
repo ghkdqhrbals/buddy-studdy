@@ -41,9 +41,11 @@ class QuestionGenerationPersistenceIntegrationTest : MySqlIntegrationTestSupport
         val now = Instant.parse("2026-07-27T12:00:00Z")
         val lease = Duration.ofMinutes(3)
 
-        val generation = inbox.claim(eventId, "generation", correlationId, lease, now)
+        val generationStream = "study.question-generation.requested.v1"
+        val generation = inbox.claim(eventId, "generation", correlationId, lease, now, generationStream)
         assertThat(generation).isNotNull
         assertThat(generation!!.attempt).isEqualTo(1)
+        assertThat(generation.streamKey).isEqualTo(generationStream)
         assertThat(inbox.claim(eventId, "generation", correlationId, lease, now.plusSeconds(179))).isNull()
 
         val audit = inbox.claim(eventId, "audit", correlationId, lease, now.plusSeconds(1))
@@ -90,9 +92,9 @@ class QuestionGenerationPersistenceIntegrationTest : MySqlIntegrationTestSupport
         ).isTrue()
         assertThat(inbox.claim(eventId, group, correlationId, Duration.ofMinutes(3), now.plusSeconds(600))).isNull()
 
-        val statuses: List<String> = database.sql(
+        val attempts: List<Pair<String, String>> = database.sql(
             """
-            select status
+            select stream_key, status
             from stream_consumer_inbox_attempts
             where event_id = :eventId and consumer_group = :consumerGroup
             order by attempt
@@ -100,11 +102,17 @@ class QuestionGenerationPersistenceIntegrationTest : MySqlIntegrationTestSupport
         )
             .bind("eventId", eventId)
             .bind("consumerGroup", group)
-            .map { row, _ -> row.get("status", String::class.java).orEmpty() }
+            .map { row, _ ->
+                row.get("stream_key", String::class.java).orEmpty() to
+                    row.get("status", String::class.java).orEmpty()
+            }
             .all()
             .collectList()
             .awaitSingle()
-        assertThat(statuses).containsExactly("RETRY_SCHEDULED", "FAILED")
+        assertThat(attempts).containsExactly(
+            "test" to "RETRY_SCHEDULED",
+            "test" to "FAILED",
+        )
     }
 
     @Test

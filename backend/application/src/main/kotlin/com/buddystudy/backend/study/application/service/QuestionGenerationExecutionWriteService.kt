@@ -41,11 +41,13 @@ class QuestionGenerationExecutionWriteService(
     override suspend fun claim(
         event: QuestionGenerationRequestedEvent,
         now: Instant,
+        streamKey: String,
     ): ClaimedQuestionGeneration? {
         val inboxClaim = inbox.claim(
             eventId = event.eventId,
             consumerGroup = CONSUMER_GROUP,
             correlationId = event.correlationId,
+            streamKey = streamKey,
             leaseDuration = LEASE_DURATION,
             now = now,
         ) ?: return null

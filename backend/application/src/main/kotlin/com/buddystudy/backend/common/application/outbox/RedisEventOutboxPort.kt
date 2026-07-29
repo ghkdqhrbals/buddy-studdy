@@ -31,8 +31,13 @@ interface RecoverOutboxUseCase {
     suspend fun recoverPending(): OutboxPublishSummary
 }
 
+data class PublishedStreamRecord(
+    val streamKey: String,
+    val recordId: String,
+)
+
 interface DomainEventPublishPort {
-    suspend fun publish(event: ClaimedRedisOutboxEvent): String
+    suspend fun publish(event: ClaimedRedisOutboxEvent): PublishedStreamRecord
 }
 
 interface AfterCommitPort {
@@ -78,7 +83,12 @@ interface RedisEventOutboxAppendPort {
 interface RedisEventOutboxPort : RedisEventOutboxAppendPort {
     suspend fun claim(id: Long, now: Instant, staleBefore: Instant): ClaimedRedisOutboxEvent?
     suspend fun claimBatch(now: Instant, staleBefore: Instant, limit: Int): List<ClaimedRedisOutboxEvent>
-    suspend fun markPublished(id: Long, claimToken: String, publishedAt: Instant): Boolean
+    suspend fun markPublished(
+        id: Long,
+        claimToken: String,
+        publication: PublishedStreamRecord,
+        publishedAt: Instant,
+    ): Boolean
     suspend fun markRetry(
         id: Long,
         claimToken: String,

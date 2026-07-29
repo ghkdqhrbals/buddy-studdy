@@ -31,7 +31,7 @@ class ContentTranslationStreamListener(
         options = StreamOptions.ACK,
     )
     private suspend fun consume(payload: ContentTranslationRequestedEvent, context: StreamMessageContext) {
-        translations.process(payload)
+        translations.process(payload, context.streamKey)
     }
 
     @StreamScheduler(
@@ -49,6 +49,6 @@ class ContentTranslationStreamListener(
         options = StreamOptions.ACK,
     )
     private suspend fun recover(payload: ContentTranslationRequestedEvent, context: StreamMessageContext) {
-        translations.process(payload)
+        translations.process(payload, context.streamKey)
     }
 }

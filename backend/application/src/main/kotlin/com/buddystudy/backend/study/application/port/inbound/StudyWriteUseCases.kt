@@ -55,6 +55,7 @@ interface QuestionGenerationExecutionWriteUseCase {
     suspend fun claim(
         event: QuestionGenerationRequestedEvent,
         now: Instant,
+        streamKey: String = "test",
     ): ClaimedQuestionGeneration?
 
     suspend fun complete(
@@ -85,7 +86,11 @@ interface QuestionDeliveryWriteUseCase {
 }
 
 interface QuestionTranslationExecutionWriteUseCase {
-    suspend fun claim(event: QuestionGeneratedEvent, now: Instant): ClaimedQuestionTranslation?
+    suspend fun claim(
+        event: QuestionGeneratedEvent,
+        now: Instant,
+        streamKey: String = "test",
+    ): ClaimedQuestionTranslation?
 
     suspend fun complete(
         event: QuestionGeneratedEvent,

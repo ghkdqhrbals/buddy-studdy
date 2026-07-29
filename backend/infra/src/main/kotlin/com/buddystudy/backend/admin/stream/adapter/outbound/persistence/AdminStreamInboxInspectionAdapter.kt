@@ -33,6 +33,7 @@ class AdminStreamInboxInspectionAdapter(
                     (
                         event_id like :query
                         or correlation_id like :query
+                        or stream_key like :query
                         or coalesce(error_type, '') like :query
                         or coalesce(error_message, '') like :query
                     )
@@ -46,7 +47,7 @@ class AdminStreamInboxInspectionAdapter(
         var statement = database.sql(
             """
             select
-                id, event_id, consumer_group, correlation_id, attempt, status,
+                id, event_id, consumer_group, correlation_id, stream_key, attempt, status,
                 error_type, error_message, started_at, finished_at
             from stream_consumer_inbox_attempts
             $where
@@ -81,6 +82,7 @@ class AdminStreamInboxInspectionAdapter(
             eventId = string("event_id"),
             consumerGroup = string("consumer_group"),
             correlationId = string("correlation_id"),
+            streamKey = string("stream_key"),
             attempt = int("attempt"),
             status = string("status"),
             errorType = nullableString("error_type"),

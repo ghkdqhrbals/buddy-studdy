@@ -30,7 +30,7 @@ class PushStreamManagerTest {
         val publisher = RecordingPublisher()
         val service = service(enabled = false, publisher = publisher)
 
-        assertThat(service.publishPush(pushEvent())).isFalse()
+        assertThat(service.publishPush(pushEvent())).isNull()
         assertThat(publisher.requests).isEmpty()
     }
 
@@ -39,7 +39,10 @@ class PushStreamManagerTest {
         val publisher = RecordingPublisher()
         val service = service(enabled = true, publisher = publisher)
 
-        assertThat(service.publishPush(pushEvent(topic = "SwiftUI"))).isTrue()
+        val published = service.publishPush(pushEvent(topic = "SwiftUI"))
+        assertThat(published).isNotNull
+        assertThat(published!!.streamKey).isEqualTo("notification.question-push.requested.v1")
+        assertThat(published.recordId).isEqualTo("1-0")
 
         val request = publisher.requests.single()
         assertThat(request.topic).isEqualTo(RedisStreamTopic.NOTIFICATION_QUESTION_PUSH_REQUESTED)
@@ -65,7 +68,7 @@ class PushStreamManagerTest {
     fun `publish methods return false when publisher throws`(): Unit = runBlocking {
         val service = service(enabled = true, publisher = RecordingPublisher(fail = true))
 
-        assertThat(service.publishPush(pushEvent())).isFalse()
+        assertThat(service.publishPush(pushEvent())).isNull()
     }
 
     @Test
@@ -73,7 +76,7 @@ class PushStreamManagerTest {
         val publisher = RecordingPublisher()
         val fixture = fixture(enabled = true, publisher = publisher, configureApns = false)
 
-        assertThat(fixture.manager.publishPush(pushEvent())).isFalse()
+        assertThat(fixture.manager.publishPush(pushEvent())).isNull()
 
         assertThat(publisher.requests).isEmpty()
         val failure = mockingDetails(fixture.notifications).invocations
@@ -177,7 +180,7 @@ class PushStreamManagerTest {
         ): RedisStreamPublishedMessage {
             if (fail) throw IllegalStateException("publish failed")
             requests += PublishRequest(topic, eventType, eventId, payload, fields)
-            return RedisStreamPublishedMessage(topic.apiName, "record-1")
+            return RedisStreamPublishedMessage(topic.apiName, "1-0")
         }
     }
 

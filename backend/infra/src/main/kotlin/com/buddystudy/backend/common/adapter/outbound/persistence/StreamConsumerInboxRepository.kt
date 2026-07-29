@@ -24,19 +24,25 @@ class StreamConsumerInboxRepository(
         correlationId: String,
         leaseDuration: Duration,
         now: Instant,
+        streamKey: String,
     ): StreamInboxClaim? {
         val claimToken = UUID.randomUUID().toString()
         val leaseExpiresAt = now.plus(leaseDuration)
         databaseClient.sql(
             """
             insert into stream_consumer_inbox (
-                event_id, consumer_group, correlation_id, status, claim_token, attempts,
+                event_id, consumer_group, correlation_id, stream_key, status, claim_token, attempts,
                 lease_expires_at, created_at, updated_at
             ) values (
-                :eventId, :consumerGroup, :correlationId, 'PROCESSING', :claimToken, 1,
+                :eventId, :consumerGroup, :correlationId, :streamKey, 'PROCESSING', :claimToken, 1,
                 :leaseExpiresAt, :now, :now
             )
             on duplicate key update
+                stream_key = if(
+                    status = 'PROCESSING' and (lease_expires_at is null or lease_expires_at <= :now),
+                    values(stream_key),
+                    stream_key
+                ),
                 claim_token = if(
                     status = 'PROCESSING' and (lease_expires_at is null or lease_expires_at <= :now),
                     values(claim_token),
@@ -72,6 +78,7 @@ class StreamConsumerInboxRepository(
             .bind("eventId", eventId)
             .bind("consumerGroup", consumerGroup)
             .bind("correlationId", correlationId)
+            .bind("streamKey", streamKey)
             .bind("claimToken", claimToken)
             .bind("leaseExpiresAt", leaseExpiresAt.utcDateTime())
             .bind("now", now.utcDateTime())
@@ -96,6 +103,7 @@ class StreamConsumerInboxRepository(
                     consumerGroup = consumerGroup,
                     claimToken = claimToken,
                     attempt = row.get("attempts", java.lang.Integer::class.java)!!.toInt(),
+                    streamKey = streamKey,
                 )
             }
             .one()
@@ -123,13 +131,14 @@ class StreamConsumerInboxRepository(
             databaseClient.sql(
                 """
                 insert into stream_consumer_inbox_attempts (
-                    event_id, consumer_group, correlation_id, attempt, claim_token, status,
+                    event_id, consumer_group, correlation_id, stream_key, attempt, claim_token, status,
                     started_at, created_at, updated_at
                 ) values (
-                    :eventId, :consumerGroup, :correlationId, :attempt, :claimToken, 'PROCESSING',
+                    :eventId, :consumerGroup, :correlationId, :streamKey, :attempt, :claimToken, 'PROCESSING',
                     :now, :now, :now
                 )
                 on duplicate key update
+                    stream_key = values(stream_key),
                     claim_token = values(claim_token),
                     status = 'PROCESSING',
                     error_type = null,
@@ -142,6 +151,7 @@ class StreamConsumerInboxRepository(
                 .bind("eventId", eventId)
                 .bind("consumerGroup", consumerGroup)
                 .bind("correlationId", correlationId)
+                .bind("streamKey", streamKey)
                 .bind("attempt", claim.attempt)
                 .bind("claimToken", claimToken)
                 .bind("now", now.utcDateTime())

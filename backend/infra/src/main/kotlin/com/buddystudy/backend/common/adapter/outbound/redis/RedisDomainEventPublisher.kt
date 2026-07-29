@@ -2,6 +2,7 @@ package com.buddystudy.backend.common.adapter.outbound.redis
 
 import com.buddystudy.backend.common.application.outbox.ClaimedRedisOutboxEvent
 import com.buddystudy.backend.common.application.outbox.DomainEventPublishPort
+import com.buddystudy.backend.common.application.outbox.PublishedStreamRecord
 import com.buddystudy.backend.common.application.outbox.RedisOutboxEventType
 import org.springframework.stereotype.Component
 
@@ -9,7 +10,7 @@ import org.springframework.stereotype.Component
 class RedisDomainEventPublisher(
     private val streams: RedisStreamPublishOperations,
 ) : DomainEventPublishPort {
-    override suspend fun publish(event: ClaimedRedisOutboxEvent): String =
+    override suspend fun publish(event: ClaimedRedisOutboxEvent): PublishedStreamRecord =
         streams.publish(
             event.topic(),
             mapOf(
@@ -17,7 +18,7 @@ class RedisDomainEventPublisher(
                 "eventType" to event.eventType.name,
                 "payload" to event.payloadJson,
             ),
-        ).recordId
+        ).let { PublishedStreamRecord(streamKey = it.streamKey, recordId = it.recordId) }
 
     private fun ClaimedRedisOutboxEvent.topic(): RedisStreamTopic =
         when (eventType) {

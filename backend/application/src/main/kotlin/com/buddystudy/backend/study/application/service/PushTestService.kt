@@ -79,7 +79,7 @@ class PushTestService(
         )
         val published = pushEvents.publishPush(request)
         return PushTestResponse(
-            sent = published,
+            sent = published != null,
             provider = "PUSH_STREAM",
             deviceId = principal.deviceId,
             topic = request.topic,

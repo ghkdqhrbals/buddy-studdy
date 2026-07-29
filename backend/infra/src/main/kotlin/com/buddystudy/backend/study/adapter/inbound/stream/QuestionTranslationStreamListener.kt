@@ -31,7 +31,7 @@ class QuestionTranslationStreamListener(
         options = StreamOptions.ACK,
     )
     private suspend fun consume(payload: QuestionGeneratedEvent, context: StreamMessageContext) {
-        translations.process(payload)
+        translations.process(payload, context.streamKey)
     }
 
     @StreamScheduler(
@@ -49,7 +49,7 @@ class QuestionTranslationStreamListener(
         options = StreamOptions.ACK,
     )
     private suspend fun recover(payload: QuestionGeneratedEvent, context: StreamMessageContext) {
-        translations.process(payload)
+        translations.process(payload, context.streamKey)
     }
 
     private companion object {

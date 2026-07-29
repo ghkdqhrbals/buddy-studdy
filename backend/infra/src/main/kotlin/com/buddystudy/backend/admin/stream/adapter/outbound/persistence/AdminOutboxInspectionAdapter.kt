@@ -32,7 +32,7 @@ class AdminOutboxInspectionAdapter(
         var query = database.sql(
             """
             select
-                id, event_id, event_type, payload_version, payload_json, status, attempts,
+                id, event_id, event_type, stream_key, redis_record_id, payload_version, payload_json, status, attempts,
                 next_attempt_at, claimed_at, published_at, last_error, created_at, updated_at
             from redis_event_outbox
             $where
@@ -59,7 +59,7 @@ class AdminOutboxInspectionAdapter(
         var query = database.sql(
             """
             select
-                id, record_id, device_id, user_id, study_id, topic, status, attempts,
+                id, record_id, device_id, user_id, study_id, topic, stream_key, redis_record_id, status, attempts,
                 next_attempt_at, published_at, last_error, created_at, updated_at
             from question_push_outbox
             $where
@@ -78,6 +78,8 @@ class AdminOutboxInspectionAdapter(
             id = long("id"),
             eventId = string("event_id"),
             eventType = string("event_type"),
+            streamKey = nullableString("stream_key"),
+            redisRecordId = nullableString("redis_record_id"),
             payloadVersion = int("payload_version"),
             payloadJson = redactor.json(string("payload_json")),
             status = string("status"),
@@ -98,6 +100,8 @@ class AdminOutboxInspectionAdapter(
             userId = nullableLong("user_id"),
             studyId = nullableLong("study_id"),
             topic = string("topic"),
+            streamKey = nullableString("stream_key"),
+            redisRecordId = nullableString("redis_record_id"),
             status = string("status"),
             attempts = int("attempts"),
             nextAttemptAt = instant("next_attempt_at"),

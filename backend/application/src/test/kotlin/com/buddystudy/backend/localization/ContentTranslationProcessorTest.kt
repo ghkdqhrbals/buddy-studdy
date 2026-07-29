@@ -224,10 +224,11 @@ private class RecordingStreamInbox(
         correlationId: String,
         leaseDuration: Duration,
         now: Instant,
+        streamKey: String,
     ): StreamInboxClaim? {
         correlationIds += correlationId
         return if (shouldClaim) {
-            StreamInboxClaim(eventId, consumerGroup, "claim-token", attempt)
+            StreamInboxClaim(eventId, consumerGroup, "claim-token", attempt, streamKey)
         } else {
             null
         }

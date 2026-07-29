@@ -97,6 +97,7 @@ data class StreamInboxClaim(
     val consumerGroup: String,
     val claimToken: String,
     val attempt: Int,
+    val streamKey: String = "unknown",
 )
 
 data class QueuedQuestionGeneration(

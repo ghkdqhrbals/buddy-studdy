@@ -160,7 +160,7 @@ class NotificationStreamListener(
 
         try {
             val metadata = NotificationPushMetadata.from(command.metadataJson)
-            check(
+            checkNotNull(
                 pushPublisher.publishPush(
                     QuestionPushRequest(
                         recordId = metadata.recordId ?: command.threadId?.toLongOrNull() ?: notificationId,
