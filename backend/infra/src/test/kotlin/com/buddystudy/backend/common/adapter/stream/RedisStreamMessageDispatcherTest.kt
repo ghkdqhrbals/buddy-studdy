@@ -84,6 +84,28 @@ class RedisStreamMessageDispatcherTest {
     }
 
     @Test
+    fun `non fatal linkage failure leaves the message pending without escaping the dispatcher`() = runBlocking {
+        val streams = RecordingConsumerOperations()
+        val dispatcher = RedisStreamMessageDispatcher(
+            streams,
+            JacksonRedisStreamCodec(JsonMapperProvider.mapper),
+        )
+
+        dispatcher.dispatch(
+            bean = SampleHandler(),
+            method = handlerMethod("linkageFail"),
+            eventType = "SAMPLE",
+            payloadType = SamplePayload::class.java,
+            group = "sample-group",
+            options = StreamOptions.ACK,
+            message = message("""{"value":31}"""),
+            claimed = false,
+        )
+
+        assertThat(streams.acknowledged).isEmpty()
+    }
+
+    @Test
     fun `handler failure is an error with complete root stack trace`(output: CapturedOutput) = runBlocking {
         val dispatcher = RedisStreamMessageDispatcher(
             RecordingConsumerOperations(),
@@ -211,6 +233,11 @@ class RedisStreamMessageDispatcherTest {
         @Suppress("unused", "UNUSED_PARAMETER")
         private suspend fun fail(payload: SamplePayload, context: StreamMessageContext) {
             throw IllegalStateException("handler failed")
+        }
+
+        @Suppress("unused", "UNUSED_PARAMETER")
+        private suspend fun linkageFail(payload: SamplePayload, context: StreamMessageContext) {
+            throw NoClassDefFoundError("stream handler dependency")
         }
     }
 

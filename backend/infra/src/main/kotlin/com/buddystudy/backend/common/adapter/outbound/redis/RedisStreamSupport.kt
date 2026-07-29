@@ -36,6 +36,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.reactor.awaitSingle
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 
 enum class RedisStreamTopic(val apiName: String) {
@@ -193,7 +194,7 @@ class RedisStreamTopicManager(
         consumer: String,
         count: Long,
         timeout: Duration,
-    ): List<RedisStreamMessage> = withContext(Dispatchers.IO) {
+    ): List<RedisStreamMessage> = runInterruptible(Dispatchers.IO) {
         val definition = definition(topic)
         ensureGroup(definition.streamKey, group)
         read(

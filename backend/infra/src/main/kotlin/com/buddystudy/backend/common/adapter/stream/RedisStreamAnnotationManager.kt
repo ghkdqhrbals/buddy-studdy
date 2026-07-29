@@ -12,6 +12,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import org.slf4j.LoggerFactory
 import org.springframework.aop.support.AopUtils
 import org.springframework.beans.factory.DisposableBean
@@ -127,13 +128,29 @@ class RedisStreamAnnotationManager(
             scope.launch(CoroutineName("stream-listener-${handler.beanName}-$consumer")) {
                 while (currentCoroutineContext().isActive) {
                     try {
-                        val messages = streams.readNew(
-                            topic = annotation.topic,
-                            group = annotation.group,
-                            consumer = consumer,
-                            count = annotation.batchSize.coerceAtLeast(1),
-                            timeout = Duration.ofMillis(annotation.blockTimeMs.coerceAtLeast(1)),
-                        )
+                        val blockTimeMs = annotation.blockTimeMs.coerceAtLeast(1)
+                        val messages = withTimeoutOrNull(readDeadlineMs(blockTimeMs)) {
+                            streams.readNew(
+                                topic = annotation.topic,
+                                group = annotation.group,
+                                consumer = consumer,
+                                count = annotation.batchSize.coerceAtLeast(1),
+                                timeout = Duration.ofMillis(blockTimeMs),
+                            )
+                        }
+                        if (messages == null) {
+                            logger.warn(
+                                "redis_stream_listener_read_timed_out bean={} method={} topic={} group={} consumer={} blockTimeMs={}",
+                                handler.beanName,
+                                handler.method.name,
+                                annotation.topic.apiName,
+                                annotation.group,
+                                consumer,
+                                blockTimeMs,
+                            )
+                            delay(annotation.pollDelayMs.coerceAtLeast(1))
+                            continue
+                        }
                         if (messages.isNotEmpty()) {
                             logger.debug(
                                 "redis_stream_listener_batch_received bean={} method={} topic={} group={} consumer={} count={}",
@@ -149,7 +166,8 @@ class RedisStreamAnnotationManager(
                         if (messages.isEmpty()) delay(annotation.pollDelayMs.coerceAtLeast(1))
                     } catch (error: CancellationException) {
                         throw error
-                    } catch (error: Exception) {
+                    } catch (error: Throwable) {
+                        if (error.isFatalStreamWorkerFailure()) throw error
                         logger.warn(
                             "redis_stream_listener_poll_failed bean={} method={} topic={} group={} consumer={} errorType={} error={}",
                             handler.beanName,
@@ -199,7 +217,8 @@ class RedisStreamAnnotationManager(
                     claimed.messages.forEach { dispatch(handler.bean, handler.method, annotation, it, claimed = true) }
                 } catch (error: CancellationException) {
                     throw error
-                } catch (error: Exception) {
+                } catch (error: Throwable) {
+                    if (error.isFatalStreamWorkerFailure()) throw error
                     logger.warn(
                         "redis_stream_autoclaim_failed bean={} method={} topic={} group={} consumer={} errorType={} error={}",
                         handler.beanName,
@@ -277,6 +296,9 @@ class RedisStreamAnnotationManager(
     private fun consumerName(prefix: String, workerIndex: Int): String =
         if (workerIndex == 0) prefix else "$prefix-${workerIndex + 1}"
 
+    private fun readDeadlineMs(blockTimeMs: Long): Long =
+        blockTimeMs + maxOf(MIN_READ_TIMEOUT_GRACE_MS, blockTimeMs / 2)
+
     private data class ListenerHandler(
         val beanName: String,
         val bean: Any,
@@ -293,9 +315,13 @@ class RedisStreamAnnotationManager(
 
     private companion object {
         const val MAX_CONCURRENCY = 32
+        const val MIN_READ_TIMEOUT_GRACE_MS = 100L
         const val START_ID = "0-0"
     }
 }
+
+internal fun Throwable.isFatalStreamWorkerFailure(): Boolean =
+    this is VirtualMachineError || javaClass.name == "java.lang.ThreadDeath"
 
 internal class RedisStreamHandlerMethod private constructor(
     private val function: KFunction<*>,

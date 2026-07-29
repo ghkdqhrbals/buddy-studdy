@@ -48,8 +48,42 @@ class RedisStreamAnnotationManagerLifecycleTest {
         assertThat(streams.readCount.get()).isEqualTo(readsAfterStop)
     }
 
+    @Test
+    fun `listener continues polling after a non fatal linkage error`() {
+        val streams = FailingOnceStreamOperations()
+        val manager = manager(streams)
+
+        manager.afterSingletonsInstantiated()
+        manager.start()
+        waitUntil { streams.readCount.get() > 1 }
+
+        assertThat(manager.isRunning).isTrue()
+        manager.stop()
+    }
+
+    @Test
+    fun `listener abandons a stalled blocking read and polls again`() {
+        val streams = StallingOnceStreamOperations()
+        val manager = manager(streams)
+
+        manager.afterSingletonsInstantiated()
+        manager.start()
+        waitUntil { streams.readCount.get() > 1 }
+
+        assertThat(manager.isRunning).isTrue()
+        manager.stop()
+    }
+
+    private fun manager(streams: RedisStreamConsumerOperations): RedisStreamAnnotationManager =
+        RedisStreamAnnotationManager(
+            streams = streams,
+            dispatcher = mock(RedisStreamMessageDispatcher::class.java),
+            environment = MockEnvironment(),
+            beanFactory = StaticListableBeanFactory(mapOf("sampleStreamListener" to SampleStreamListener())),
+        )
+
     private fun waitUntil(assertion: () -> Boolean) {
-        repeat(50) {
+        repeat(100) {
             if (assertion()) return
             Thread.sleep(10)
         }
@@ -86,6 +120,64 @@ class RedisStreamAnnotationManagerLifecycleTest {
             timeout: Duration,
         ): List<RedisStreamMessage> {
             readCount.incrementAndGet()
+            return emptyList()
+        }
+
+        override suspend fun autoClaim(
+            topic: RedisStreamTopic,
+            group: String,
+            consumer: String,
+            minIdleTime: Duration,
+            count: Long,
+            startId: String,
+        ): RedisStreamClaimBatch = RedisStreamClaimBatch(startId, emptyList())
+    }
+
+    private class FailingOnceStreamOperations : RedisStreamConsumerOperations {
+        val readCount = AtomicInteger()
+
+        override suspend fun acknowledge(message: RedisStreamMessage, group: String) = Unit
+        override suspend fun acknowledgeAndDelete(message: RedisStreamMessage, group: String) = Unit
+
+        override suspend fun readNew(
+            topic: RedisStreamTopic,
+            group: String,
+            consumer: String,
+            count: Long,
+            timeout: Duration,
+        ): List<RedisStreamMessage> {
+            if (readCount.incrementAndGet() == 1) {
+                throw NoClassDefFoundError("transient stream dependency")
+            }
+            return emptyList()
+        }
+
+        override suspend fun autoClaim(
+            topic: RedisStreamTopic,
+            group: String,
+            consumer: String,
+            minIdleTime: Duration,
+            count: Long,
+            startId: String,
+        ): RedisStreamClaimBatch = RedisStreamClaimBatch(startId, emptyList())
+    }
+
+    private class StallingOnceStreamOperations : RedisStreamConsumerOperations {
+        val readCount = AtomicInteger()
+
+        override suspend fun acknowledge(message: RedisStreamMessage, group: String) = Unit
+        override suspend fun acknowledgeAndDelete(message: RedisStreamMessage, group: String) = Unit
+
+        override suspend fun readNew(
+            topic: RedisStreamTopic,
+            group: String,
+            consumer: String,
+            count: Long,
+            timeout: Duration,
+        ): List<RedisStreamMessage> {
+            if (readCount.incrementAndGet() == 1) {
+                kotlinx.coroutines.delay(5_000)
+            }
             return emptyList()
         }
 

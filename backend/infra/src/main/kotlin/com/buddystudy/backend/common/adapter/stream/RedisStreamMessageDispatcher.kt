@@ -77,7 +77,8 @@ class RedisStreamMessageDispatcher(
             )
         } catch (error: CancellationException) {
             throw error
-        } catch (error: Exception) {
+        } catch (error: Throwable) {
+            if (error.isFatalStreamWorkerFailure()) throw error
             val rootError = error.unwrapReflectionFailure()
             logger.error(
                 HANDLER_FAILED_LOG,
