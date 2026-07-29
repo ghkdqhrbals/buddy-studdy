@@ -58,6 +58,14 @@ class SmtpMailConfiguration {
         check(fromAddresses.size == 1) {
             "buddystudy.email.from must contain exactly one email address."
         }
+        val mailbox = fromAddresses.single().address
+        check(
+            mailbox.count { it == '@' } == 1 &&
+                mailbox.substringBefore('@').isNotBlank() &&
+                mailbox.substringAfter('@').isNotBlank(),
+        ) {
+            "buddystudy.email.from must contain a valid email address."
+        }
         return email
     }
 }
