@@ -107,18 +107,24 @@ jobs:
                   phase: $phase,
                   status: $status,
                   environment: $environment,
-                  version: $version,
-                  build: $build,
                   targets: $targets,
-                  upload_enabled: $upload_enabled,
-                  build_result: $build_result,
-                  upload_result: $upload_result,
                   detail: $detail,
-                  source_repo: $source_repo,
-                  source_sha: $source_sha,
-                  source_ref: $source_ref,
-                  source_run_id: $source_run_id,
-                  source_run_attempt: $source_run_attempt
+                  release: {
+                    version: $version,
+                    build: $build,
+                    upload_enabled: $upload_enabled
+                  },
+                  results: {
+                    build: $build_result,
+                    upload: $upload_result
+                  },
+                  source: {
+                    repo: $source_repo,
+                    sha: $source_sha,
+                    ref: $source_ref,
+                    run_id: $source_run_id,
+                    run_attempt: $source_run_attempt
+                  }
                 }
               }'
           )"

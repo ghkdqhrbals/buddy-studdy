@@ -20,17 +20,17 @@ jobs:
       PHASE: ${{ github.event.client_payload.phase }}
       DEPLOY_STATUS: ${{ github.event.client_payload.status }}
       DEPLOY_ENVIRONMENT: ${{ github.event.client_payload.environment }}
-      RELEASE_VERSION: ${{ github.event.client_payload.version }}
-      RELEASE_BUILD_NUMBER: ${{ github.event.client_payload.build }}
+      RELEASE_VERSION: ${{ github.event.client_payload.release.version }}
+      RELEASE_BUILD_NUMBER: ${{ github.event.client_payload.release.build }}
       DEPLOYMENT_TARGETS: ${{ github.event.client_payload.targets }}
-      UPLOAD_ENABLED: ${{ github.event.client_payload.upload_enabled }}
-      BUILD_RESULT: ${{ github.event.client_payload.build_result }}
-      UPLOAD_RESULT: ${{ github.event.client_payload.upload_result }}
+      UPLOAD_ENABLED: ${{ github.event.client_payload.release.upload_enabled }}
+      BUILD_RESULT: ${{ github.event.client_payload.results.build }}
+      UPLOAD_RESULT: ${{ github.event.client_payload.results.upload }}
       DETAIL: ${{ github.event.client_payload.detail }}
-      SOURCE_REPOSITORY: ${{ github.event.client_payload.source_repo }}
-      SOURCE_SHA: ${{ github.event.client_payload.source_sha }}
-      SOURCE_REF: ${{ github.event.client_payload.source_ref }}
-      SOURCE_RUN_ID: ${{ github.event.client_payload.source_run_id }}
+      SOURCE_REPOSITORY: ${{ github.event.client_payload.source.repo }}
+      SOURCE_SHA: ${{ github.event.client_payload.source.sha }}
+      SOURCE_REF: ${{ github.event.client_payload.source.ref }}
+      SOURCE_RUN_ID: ${{ github.event.client_payload.source.run_id }}
       TRIGGERED_BY: ${{ github.actor }}
 
     steps:
