@@ -83,7 +83,7 @@ def summary_payload(
         item.strip() for item in targets.split(",") if item.strip()
     )
     payload = {
-        "text": f"iOS 배포 준비 · {version} ({build})",
+        "text": f"iOS 배포 · {version} ({build})",
         "attachments": [
             {
                 "color": "#2EB67D",
@@ -93,7 +93,7 @@ def summary_payload(
                         "text": {
                             "type": "mrkdwn",
                             "text": (
-                                f"*iOS 배포 준비*\n"
+                                f"*iOS 배포*\n"
                                 f"`{version} ({build})` · {target_label}"
                             ),
                         },
@@ -104,9 +104,8 @@ def summary_payload(
                             {
                                 "type": "mrkdwn",
                                 "text": (
-                                    "빌드 → 서명 → 업로드"
-                                    f" · <{run_url}|실행 보기>"
-                                    f" · `{source_sha[:8]}` `{source_ref}`"
+                                    f"<{run_url}|GitHub Actions>"
+                                    f" · `{source_sha[:8]}`"
                                 ),
                             }
                         ],
@@ -189,37 +188,37 @@ def monitor_thread(
         if failure:
             label, conclusion = failure
             result = "취소" if conclusion == "cancelled" else "실패"
-            reply("failure", f"❌ {label} {result} · <{run_url}|실행 보기>")
+            reply("failure", f"❌ {label} {result}\n<{run_url}|실행 보기>")
             return 1
 
         build_step = step_by_name(build_job, "Build iOS debug target")
         if build_step and build_step.get("status") == "in_progress":
-            reply("build_started", "🔨 iOS 빌드 중")
+            reply("build_started", "1/4 · 빌드 검증 중")
 
         archive_step = step_by_name(build_job, "Archive iOS app")
         if archive_step and archive_step.get("status") == "in_progress":
-            reply("archive_started", "📦 서명 아카이브 생성 중")
+            reply("archive_started", "2/4 · 서명 아카이브 생성 중")
 
         if build_job and build_job.get("conclusion") == "success":
-            reply("build_completed", "✓ IPA 준비 완료")
+            reply("build_completed", "3/4 · IPA 준비 완료")
 
         upload_step = step_by_name(upload_job, "Upload to App Store Connect for TestFlight")
         if upload_step and upload_step.get("status") == "in_progress":
-            reply("upload_started", "⬆️ TestFlight 업로드 중")
+            reply("upload_started", "4/4 · TestFlight 업로드 중")
 
         if upload_job and upload_job.get("conclusion") == "success":
             reply(
                 "upload_completed",
-                f"✅ TestFlight 업로드 접수 완료 · Apple 처리 중\n<{run_url}|배포 실행 보기>",
+                f"✅ TestFlight 접수 완료\nApple 처리 중 · <{run_url}|실행 보기>",
             )
             return 0
 
         if not upload_enabled and build_job and build_job.get("conclusion") == "success":
-            reply("artifact_completed", f"✅ IPA 생성 완료 · <{run_url}|실행 보기>")
+            reply("artifact_completed", f"✅ IPA 생성 완료\n<{run_url}|실행 보기>")
             return 0
 
         if upload_job and upload_job.get("conclusion") == "skipped":
-            reply("upload_skipped", f"✅ IPA 생성 완료 · TestFlight 생략\n<{run_url}|실행 보기>")
+            reply("upload_skipped", f"✅ IPA 생성 완료\nTestFlight 생략 · <{run_url}|실행 보기>")
             return 0
 
         time.sleep(POLL_INTERVAL_SECONDS)

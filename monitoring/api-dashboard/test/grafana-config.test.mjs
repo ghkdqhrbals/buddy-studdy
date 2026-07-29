@@ -27,6 +27,10 @@ const backendDeployTemplatePath = path.resolve(
   testDirectory,
   "../../../docs/deploy-repo-template/deploy-backend.yml",
 );
+const iosDeployNotificationTemplatePath = path.resolve(
+  testDirectory,
+  "../../../docs/deploy-repo-template/scripts/notify_ios_release.py",
+);
 const databaseCollectorPath = path.resolve(
   testDirectory,
   "../../scripts/database-runtime-collector.sh",
@@ -313,6 +317,22 @@ test("backend deploy Slack notification is branded and action-oriented", async (
   assert.match(backendDeploy, /배포 실행 보기/);
   assert.match(backendDeploy, /빌드 실행 보기/);
   assert.match(backendDeploy, /"type": "actions"/);
+});
+
+test("iOS deploy Slack notification keeps a compact parent and numbered thread", async () => {
+  const iosDeployNotification = await fs.readFile(
+    iosDeployNotificationTemplatePath,
+    "utf8",
+  );
+
+  assert.match(iosDeployNotification, /iOS 배포 · \{version\} \(\{build\}\)/);
+  assert.match(iosDeployNotification, /GitHub Actions/);
+  assert.match(iosDeployNotification, /1\/4 · 빌드 검증 중/);
+  assert.match(iosDeployNotification, /2\/4 · 서명 아카이브 생성 중/);
+  assert.match(iosDeployNotification, /3\/4 · IPA 준비 완료/);
+  assert.match(iosDeployNotification, /4\/4 · TestFlight 업로드 중/);
+  assert.match(iosDeployNotification, /✅ TestFlight 접수 완료/);
+  assert.doesNotMatch(iosDeployNotification, /🔨|📦|⬆️/);
 });
 
 test("TestZone dashboard separates server, database, and Redis runtime signals", async () => {

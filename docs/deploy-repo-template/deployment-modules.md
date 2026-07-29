@@ -149,10 +149,11 @@ deployment.
   `Notify BuddyStudy Deployment Status` in the private deploy repository, so
   Slack credentials remain centralized. The channel receives one compact
   attachment with a colored left bar and the iOS release summary. A separate
-  monitor follows the source workflow and posts concise IPA build, archive, and
-  TestFlight progress as replies in that message's thread. A successful upload
-  means App Store Connect accepted the binary; Apple processing continues
-  asynchronously. `DEPLOY_SLACK_BOT_TOKEN` with `chat:write` and
+  monitor follows the source workflow and posts four short, numbered IPA build,
+  archive, and TestFlight progress replies in that message's thread. The parent
+  keeps only the release, targets, source commit, and GitHub Actions link. A
+  successful upload means App Store Connect accepted the binary; Apple
+  processing continues asynchronously. `DEPLOY_SLACK_BOT_TOKEN` with `chat:write` and
   `DEPLOY_SLACK_CHANNEL_ID` enable thread replies. When either is absent, the
   incoming webhook posts only the compact parent summary.
 - The backend deploy temporarily retains the `buddystudy-profile-photos`
