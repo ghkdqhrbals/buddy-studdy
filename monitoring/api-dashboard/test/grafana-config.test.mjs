@@ -289,6 +289,11 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
   assert.match(alert, /icon_url: https:\/\/avatars\.githubusercontent\.com\/u\/7195757/);
   assert.match(alert, /level="ERROR"/);
   assert.match(alert, /receiver: BuddyStudy Slack/);
+  assert.match(
+    alert,
+    /<\{\{ \.Annotations\.logs_url \}\}\|Grafana에서 오류 로그 보기>/,
+  );
+  assert.doesNotMatch(alert, /Logs: \{\{ \.Annotations\.logs_url \}\}/);
   const logsUrlValue = alert.match(/^\s+logs_url: (\S+)$/m)?.[1];
   assert.ok(logsUrlValue, "Slack alert must include a Grafana logs URL");
   const logsUrl = new URL(logsUrlValue);

@@ -14,9 +14,9 @@ contactPoints:
           title: '{{ template "default.title" . }}'
           text: |-
             {{ range .Alerts.Firing }}
-            {{ .Annotations.summary }}
+            *{{ .Annotations.summary }}*
             {{ .Annotations.description }}
-            Logs: {{ .Annotations.logs_url }}
+            <{{ .Annotations.logs_url }}|Grafana에서 오류 로그 보기>
             {{ end }}
 
 groups:

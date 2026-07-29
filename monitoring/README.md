@@ -59,6 +59,8 @@ docker run --rm httpd:2.4-alpine htpasswd -nbB admin 'your-password'
     the `GRAFANA_ADMIN_PASSWORD` deployment secret on every rollout.
   - Anonymous access is disabled; unauthenticated users see the login screen
     instead of a protected default dashboard.
+  - Backend ERROR alerts show a compact `Grafana에서 오류 로그 보기` hyperlink
+    in Slack instead of printing the raw Explore URL.
   - Legacy custom-dashboard paths redirect to
     `https://monitoring.lowfidev.cloud` so old bookmarks cannot send Loki
     requests to Grafana.

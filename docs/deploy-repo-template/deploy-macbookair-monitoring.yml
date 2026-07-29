@@ -185,6 +185,8 @@ jobs:
             | grep -q 'auth_basic off;'
           grep -q 'job: monitoring-access' \
             "${monitoring_root}/promtail/config/promtail.yml"
+          grep -Fq '<{{ .Annotations.logs_url }}|Grafana에서 오류 로그 보기>' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
 
           docker network create buddystudy-monitoring >/dev/null 2>&1 || true
 

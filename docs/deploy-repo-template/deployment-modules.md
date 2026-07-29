@@ -194,7 +194,8 @@ deployment.
   Grafana also provisions a Loki alert for backend `level=ERROR` events and
   sends it to the `BuddyStudy Slack` contact point through the dedicated
   `GRAFANA_SLACK_WEBHOOK_URL` app identity. Slack contains the incident
-  summary and a direct Grafana Explore link with the exact Loki ERROR query;
+  summary and a compact `Grafana에서 오류 로그 보기` hyperlink whose target is
+  the exact Loki ERROR query; the raw Explore URL is not printed in the message.
   Loki and Sentry retain the full stack and diagnostic context. The link does
   not depend on the Logs Drilldown volume API. This Grafana path is the only
   production path from backend application errors to Slack.
