@@ -31,7 +31,6 @@ jobs:
       IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64 }}
       IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
       IOS_APP_STORE_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_APP_STORE_PROVISIONING_PROFILE_BASE64 }}
-      POSTHOG_PROJECT_TOKEN: ${{ secrets.POSTHOG_PROJECT_TOKEN }}
       INPUT_VERSION: ${{ inputs.version || '' }}
       UPLOAD_TO_APP_STORE_CONNECT: ${{ github.event_name != 'workflow_dispatch' || inputs.upload_to_app_store_connect }}
 
@@ -178,7 +177,6 @@ jobs:
             -authenticationKeyID "${APPSTORE_CONNECT_KEY_ID}" \
             -authenticationKeyIssuerID "${APPSTORE_CONNECT_ISSUER_ID}" \
             DEVELOPMENT_TEAM="${APPLE_TEAM_ID}" \
-            POSTHOG_PROJECT_TOKEN="${POSTHOG_PROJECT_TOKEN}" \
             MARKETING_VERSION="${RELEASE_VERSION}" \
             CURRENT_PROJECT_VERSION="${RELEASE_BUILD_NUMBER}"
 

@@ -137,6 +137,8 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 3. Membership tiers define the default monthly question allowance. An operator can assign a tier and optionally set a per-user allowance override.
 4. Payment-plan names and controls remain internal. The consumer app exposes only allowance, remaining count, and reset time.
 5. Monitoring `Manage > Redis Streams` provides searchable Redis Stream topics, cursor-paginated entries, exact entry-ID lookup, consumer-group lag, and redacted message detail.
+6. Sentry is reserved for backend and iOS error/fatal diagnostics. Product analytics, performance traces, standalone session analytics, and PostHog collection are not part of the app.
+7. iOS Session Replay uploads only when an error occurs. Ordinary sessions have a zero upload sample rate, error replays use a 100% sample rate, and all text and images remain masked.
 
 ### Community
 

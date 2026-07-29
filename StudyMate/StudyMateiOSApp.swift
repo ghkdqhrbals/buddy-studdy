@@ -963,7 +963,6 @@ final class StudyMateiOSAppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         SentryMonitoring.start()
-        ProductAnalytics.start()
         StudyMateBackgroundRefreshBridge.shared.register()
         return true
     }

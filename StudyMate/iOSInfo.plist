@@ -39,10 +39,6 @@
 	<string>$(GOOGLE_OAUTH_REDIRECT_SCHEME)</string>
 	<key>SentryDSN</key>
 	<string>https://1f27f8ce965e634944d4b0b4dc2f4ec9@o4511814165790720.ingest.us.sentry.io/4511814175948805</string>
-	<key>PostHogProjectToken</key>
-	<string>$(POSTHOG_PROJECT_TOKEN)</string>
-	<key>PostHogHost</key>
-	<string>https://us.i.posthog.com</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>

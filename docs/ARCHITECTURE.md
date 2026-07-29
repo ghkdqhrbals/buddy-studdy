@@ -71,6 +71,12 @@ runtime comparison or rollback does not fork application behavior.
 - `Services/NotificationService.swift`
   - Handles local notifications, notification actions, iOS remote notification bridge, and macOS study window foregrounding.
 
+- `SentryMonitoring.swift`
+  - Initializes the iOS Sentry SDK before app state is created.
+  - Accepts only error and fatal events. Product analytics, logs, metrics, automatic session health, and performance tracing are disabled.
+  - Keeps ordinary Session Replay sampling at zero and uploads the masked replay buffer only for error events. Text, images, request bodies, and network headers are not recorded in Replay.
+  - PostHog is not linked, initialized, or supplied through the iOS release workflow.
+
 - `backend/`
   - Spring Boot Kotlin APNs push backend.
   - Runs Spring WebFlux on Reactor Netty with Kotlin suspending controllers, use cases, persistence ports, and security lookups.
