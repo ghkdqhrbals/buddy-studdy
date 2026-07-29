@@ -2,6 +2,15 @@ import Foundation
 
 @MainActor
 struct AppActionRunner {
+    func runViewIndependent(
+        operation: @escaping @MainActor () async -> Void
+    ) async {
+        let task = Task { @MainActor in
+            await operation()
+        }
+        await task.value
+    }
+
     @discardableResult
     func run<Value>(
         operation: () async throws -> Value,

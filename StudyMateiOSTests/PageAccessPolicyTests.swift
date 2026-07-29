@@ -2,6 +2,24 @@ import XCTest
 @testable import StudyMate
 
 final class PageAccessPolicyTests: XCTestCase {
+    @MainActor
+    func testViewIndependentLoadFinishesAfterCallingTaskIsCancelled() async {
+        var didFinish = false
+
+        let callingTask = Task { @MainActor in
+            await AppActionRunner().runViewIndependent {
+                try? await Task.sleep(nanoseconds: 20_000_000)
+                didFinish = true
+            }
+        }
+
+        await Task.yield()
+        callingTask.cancel()
+        await callingTask.value
+
+        XCTAssertTrue(didFinish)
+    }
+
     func testLoginGateUsesAuthoritativeSignedInState() {
         XCTAssertFalse(
             PageAccessPolicy.shouldShowLoginGate(

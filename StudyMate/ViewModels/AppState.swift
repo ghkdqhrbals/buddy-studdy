@@ -617,6 +617,7 @@ final class AppState: ObservableObject {
     private var timerTask: Task<Void, Never>?
     private var cloudSyncTask: Task<Void, Never>?
     private var visibleDataRefreshTask: Task<Void, Never>?
+    private var backendRecordRefreshTask: Task<Void, Never>?
     private var answerDraftSaveTask: Task<Void, Never>?
     private var protectedPageAccessRefreshTask: Task<Void, Never>?
     private var questionGenerationPollingTask: Task<Void, Never>?
@@ -1931,6 +1932,7 @@ final class AppState: ObservableObject {
             let timerTask = timerTask
             let cloudSyncTask = cloudSyncTask
             let answerDraftSaveTask = answerDraftSaveTask
+            let backendRecordRefreshTask = backendRecordRefreshTask
             let protectedPageAccessRefreshTask = protectedPageAccessRefreshTask
             let questionGenerationPollingTask = questionGenerationPollingTask
             let answerGradingPollingTask = answerGradingPollingTask
@@ -1940,6 +1942,7 @@ final class AppState: ObservableObject {
             timerTask?.cancel()
             cloudSyncTask?.cancel()
             answerDraftSaveTask?.cancel()
+            backendRecordRefreshTask?.cancel()
             protectedPageAccessRefreshTask?.cancel()
             questionGenerationPollingTask?.cancel()
             answerGradingPollingTask?.cancel()
@@ -2196,7 +2199,20 @@ final class AppState: ObservableObject {
             return
         }
         #endif
-        await loadBackendRecordsPage(reset: true)
+        if let backendRecordRefreshTask {
+            await backendRecordRefreshTask.value
+            return
+        }
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+            await loadBackendRecordsPage(reset: true)
+        }
+        backendRecordRefreshTask = task
+        await task.value
+        backendRecordRefreshTask = nil
     }
 
     func loadMoreBackendRecords() async {
@@ -2280,6 +2296,10 @@ final class AppState: ObservableObject {
                 log(.info, "백엔드 기록만 새로고침했습니다. records=\(recordsPage.records.count)")
             },
             onFailure: { error in
+                if Self.isCancellationLikeError(error) {
+                    log(.info, "기록 조회 취소를 인증 또는 페이지 접근 오류로 처리하지 않습니다.")
+                    return
+                }
                 if handlePageAccessError(error, page: .records) {
                     return
                 }
@@ -3000,6 +3020,26 @@ final class AppState: ObservableObject {
         limit: Int = 8,
         offset: Int = 0
     ) async {
+        await actionRunner.runViewIndependent { [weak self] in
+            await self?.performFetchBackendStats(
+                period: period,
+                sort: sort,
+                startAt: startAt,
+                endAt: endAt,
+                limit: limit,
+                offset: offset
+            )
+        }
+    }
+
+    private func performFetchBackendStats(
+        period: BackendStatsPeriod,
+        sort: BackendStatsSort,
+        startAt: Date?,
+        endAt: Date?,
+        limit: Int,
+        offset: Int
+    ) async {
         #if DEBUG
         if isAppStoreScreenshotFixtureEnabled {
             return
@@ -3062,6 +3102,12 @@ final class AppState: ObservableObject {
     }
 
     func fetchBackendStatsActivity(startAt: Date? = nil, endAt: Date? = nil) async {
+        await actionRunner.runViewIndependent { [weak self] in
+            await self?.performFetchBackendStatsActivity(startAt: startAt, endAt: endAt)
+        }
+    }
+
+    private func performFetchBackendStatsActivity(startAt: Date?, endAt: Date?) async {
         #if DEBUG
         if isAppStoreScreenshotFixtureEnabled {
             return
@@ -3117,6 +3163,12 @@ final class AppState: ObservableObject {
     }
 
     func fetchBackendStudyGrowth(startAt: Date? = nil, endAt: Date? = nil) async {
+        await actionRunner.runViewIndependent { [weak self] in
+            await self?.performFetchBackendStudyGrowth(startAt: startAt, endAt: endAt)
+        }
+    }
+
+    private func performFetchBackendStudyGrowth(startAt: Date?, endAt: Date?) async {
         #if DEBUG
         if isAppStoreScreenshotFixtureEnabled {
             return
