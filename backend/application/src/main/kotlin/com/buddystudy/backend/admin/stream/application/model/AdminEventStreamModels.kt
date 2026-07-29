@@ -24,6 +24,30 @@ data class AdminStreamGroupSummary(
     val consumers: Long,
     val pending: Long,
     val lastDeliveredId: String?,
+    val entriesRead: Long?,
+    val lag: Long?,
+    val pendingMinId: String?,
+    val pendingMaxId: String?,
+    val oldestPendingIdleMs: Long?,
+    val maxDeliveryCount: Long,
+    val maxRetryCount: Long,
+    val pendingSampleTruncated: Boolean,
+    val consumerDetails: List<AdminStreamConsumerSummary>,
+)
+
+data class AdminStreamConsumerSummary(
+    val name: String,
+    val pending: Long,
+    val idleMs: Long,
+    val inactiveMs: Long?,
+)
+
+data class AdminStreamPendingEntry(
+    val id: String,
+    val consumer: String,
+    val idleMs: Long,
+    val deliveryCount: Long,
+    val retryCount: Long,
 )
 
 data class AdminStreamEntry(

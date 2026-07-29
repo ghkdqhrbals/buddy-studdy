@@ -19,3 +19,9 @@ export function streamEntriesPath(topic, filters) {
 export function streamEntryPath(topic, entryId) {
   return `/event-streams/topics/${encodeURIComponent(topic)}/entries/${encodeURIComponent(entryId.trim())}`;
 }
+
+export function streamPendingPath(topic, group, { cursor = "", limit = 20 } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set("cursor", cursor);
+  return `/event-streams/topics/${encodeURIComponent(topic)}/groups/${encodeURIComponent(group)}/pending?${params}`;
+}

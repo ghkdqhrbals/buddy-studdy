@@ -5,6 +5,7 @@ import com.buddystudy.backend.admin.stream.application.model.AdminCursorPage
 import com.buddystudy.backend.admin.stream.application.model.AdminPushOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminRedisEventOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamEntry
+import com.buddystudy.backend.admin.stream.application.model.AdminStreamPendingEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamTopicSummary
 import com.buddystudy.backend.admin.stream.application.port.inbound.AdminEventStreamUseCase
 import org.springframework.stereotype.Component
@@ -45,6 +46,16 @@ class AdminEventStreamController(
     ): AdminStreamEntry =
         streams.entry(authorization.adminBearerToken(), topic, entryId)
 
+    @GetMapping("/topics/{topic}/groups/{group}/pending")
+    suspend fun pending(
+        @RequestHeader("Authorization") authorization: String?,
+        @PathVariable topic: String,
+        @PathVariable group: String,
+        @RequestParam(required = false) cursor: String?,
+        @RequestParam(defaultValue = "20") limit: Int,
+    ): AdminCursorPage<AdminStreamPendingEntry> =
+        streams.pending(authorization.adminBearerToken(), topic, group, cursor, limit)
+
     @GetMapping("/outboxes/events")
     suspend fun eventOutbox(
         @RequestHeader("Authorization") authorization: String?,
@@ -77,6 +88,14 @@ interface AdminEventStreamWebPort {
     ): AdminCursorPage<AdminStreamEntry>
 
     suspend fun entry(adminToken: String, topic: String, entryId: String): AdminStreamEntry
+
+    suspend fun pending(
+        adminToken: String,
+        topic: String,
+        group: String,
+        cursor: String?,
+        limit: Int,
+    ): AdminCursorPage<AdminStreamPendingEntry>
 
     suspend fun eventOutbox(
         adminToken: String,
@@ -118,6 +137,17 @@ class AdminEventStreamWebAdapter(
     override suspend fun entry(adminToken: String, topic: String, entryId: String): AdminStreamEntry {
         authentication.validate(adminToken)
         return streams.streamEntry(topic, entryId)
+    }
+
+    override suspend fun pending(
+        adminToken: String,
+        topic: String,
+        group: String,
+        cursor: String?,
+        limit: Int,
+    ): AdminCursorPage<AdminStreamPendingEntry> {
+        authentication.validate(adminToken)
+        return streams.pendingEntries(topic, group, cursor, limit)
     }
 
     override suspend fun eventOutbox(

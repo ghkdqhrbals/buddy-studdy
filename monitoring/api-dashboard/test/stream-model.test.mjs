@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   streamEntriesPath,
   streamEntryPath,
+  streamPendingPath,
   isRedisStreamId,
 } from "../src/lib/streamPaths.js";
 
@@ -26,5 +27,12 @@ test("entry paths preserve cursor pagination and filters", () => {
   assert.equal(
     streamEntryPath("question events", "1785000998000-0"),
     "/event-streams/topics/question%20events/entries/1785000998000-0",
+  );
+  assert.equal(
+    streamPendingPath("question events", "grading workers", {
+      cursor: "1785000998000-4",
+      limit: 20,
+    }),
+    "/event-streams/topics/question%20events/groups/grading%20workers/pending?limit=20&cursor=1785000998000-4",
   );
 });

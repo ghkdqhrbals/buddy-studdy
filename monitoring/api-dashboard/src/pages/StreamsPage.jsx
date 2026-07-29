@@ -16,6 +16,7 @@ import {
 import { Button } from "../components/Button.jsx";
 import { InlineNotice } from "../components/InlineNotice.jsx";
 import { ObjectInspector } from "../components/ObjectInspector.jsx";
+import { StreamDeliveryDashboard } from "../components/StreamDeliveryDashboard.jsx";
 import { formatDateTime, statusTone } from "../lib/format.js";
 import {
   cursorPath,
@@ -25,6 +26,7 @@ import {
 } from "../lib/streamPaths.js";
 
 const MODES = [
+  { value: "delivery", label: "Delivery status" },
   { value: "streams", label: "Stream entries" },
   { value: "events", label: "Event outbox" },
   { value: "pushes", label: "Push outbox" },
@@ -62,7 +64,7 @@ function useCursorPage(queryKey, pathBuilder, dependencies, enabled = true) {
 }
 
 function StreamsWorkspace() {
-  const [mode, setMode] = useState("streams");
+  const [mode, setMode] = useState("delivery");
   const [limit, setLimit] = useState(20);
   const [status, setStatus] = useState("");
   const [eventType, setEventType] = useState("");
@@ -76,7 +78,8 @@ function StreamsWorkspace() {
   const topicsQuery = useQuery({
     queryKey: ["admin", "stream-topics", topicQuery],
     queryFn: () => adminFetch(`/event-streams/topics${topicQuery ? `?query=${encodeURIComponent(topicQuery)}` : ""}`),
-    enabled: mode === "streams",
+    enabled: mode === "streams" || mode === "delivery",
+    refetchInterval: mode === "delivery" ? 5_000 : false,
   });
   const topics = Array.isArray(topicsQuery.data) ? topicsQuery.data : [];
   const selectedTopic = topics.find((item) => item.topic === topic) || topics[0] || null;
@@ -107,7 +110,11 @@ function StreamsWorkspace() {
     enabled: mode === "streams" && Boolean(activeTopic && exactEntryId),
   });
   const currentPage = mode === "streams" ? streamPage : mode === "events" ? eventPage : pushPage;
-  const currentQuery = exactEntryId ? exactQuery : currentPage.query;
+  const currentQuery = mode === "delivery"
+    ? topicsQuery
+    : exactEntryId
+      ? exactQuery
+      : currentPage.query;
   const rows = exactEntryId
     ? (exactQuery.data ? [exactQuery.data] : [])
     : (Array.isArray(currentQuery.data?.items) ? currentQuery.data.items : []);
@@ -160,34 +167,36 @@ function StreamsWorkspace() {
       <section className="workspace-section">
         <div className="section-heading mode-heading">
           <SegmentedTabs value={mode} onChange={changeMode} items={MODES} ariaLabel="Redis data source" />
-          <div className="inline-controls">
-            {mode !== "pushes" ? (
-              <label className="field compact-field"><span>Event type</span><input value={eventType} onChange={(event) => {
-                setEventType(event.target.value);
-                streamPage.reset();
-                eventPage.reset();
-              }} placeholder="All types" /></label>
-            ) : null}
-            {mode !== "streams" ? (
-              <label className="field compact-field"><span>Status</span><input value={status} onChange={(event) => {
-                setStatus(event.target.value);
-                eventPage.reset();
-                pushPage.reset();
-              }} placeholder="All statuses" /></label>
-            ) : null}
-            <label className="field compact-field page-size-field">
-              <span>Rows</span>
-              <select value={limit} onChange={(event) => {
-                setLimit(Number(event.target.value));
-                streamPage.reset();
-                eventPage.reset();
-                pushPage.reset();
-              }}>
-                {[20, 50, 100].map((value) => <option key={value}>{value}</option>)}
-              </select>
-            </label>
-            <Button variant="secondary" icon={RefreshCw} onClick={() => currentQuery.refetch()}>Refresh</Button>
-          </div>
+          {mode !== "delivery" ? (
+            <div className="inline-controls">
+              {mode !== "pushes" ? (
+                <label className="field compact-field"><span>Event type</span><input value={eventType} onChange={(event) => {
+                  setEventType(event.target.value);
+                  streamPage.reset();
+                  eventPage.reset();
+                }} placeholder="All types" /></label>
+              ) : null}
+              {mode !== "streams" ? (
+                <label className="field compact-field"><span>Status</span><input value={status} onChange={(event) => {
+                  setStatus(event.target.value);
+                  eventPage.reset();
+                  pushPage.reset();
+                }} placeholder="All statuses" /></label>
+              ) : null}
+              <label className="field compact-field page-size-field">
+                <span>Rows</span>
+                <select value={limit} onChange={(event) => {
+                  setLimit(Number(event.target.value));
+                  streamPage.reset();
+                  eventPage.reset();
+                  pushPage.reset();
+                }}>
+                  {[20, 50, 100].map((value) => <option key={value}>{value}</option>)}
+                </select>
+              </label>
+              <Button variant="secondary" icon={RefreshCw} onClick={() => currentQuery.refetch()}>Refresh</Button>
+            </div>
+          ) : null}
         </div>
 
         {mode === "streams" ? (
@@ -223,25 +232,37 @@ function StreamsWorkspace() {
           </>
         ) : null}
 
-        {error ? <InlineNotice tone="danger">{error.message}</InlineNotice> : null}
-        {mode === "streams" && exactEntryId && !isRedisStreamId(exactEntryId) ? <InlineNotice tone="danger">Use a Redis Stream ID such as 1785000998000-0.</InlineNotice> : null}
-        <DataTable
-          columns={columns[mode]}
-          rows={rows}
-          rowKey={(row) => `${mode}-${row.id}`}
-          onRowClick={setSelected}
-          emptyText={mode === "streams" ? "No stream entries found." : "No outbox entries found."}
-          loading={currentQuery.isLoading || currentQuery.isFetching}
-        />
-        {!exactEntryId ? (
-          <Pagination
-            page={currentPage.page}
-            label={`${rows.length} entries on this page`}
-            hasNext={Boolean(currentPage.query.data?.hasMore && currentPage.query.data?.nextCursor)}
-            onPrevious={currentPage.previous}
-            onNext={currentPage.next}
+        {mode === "delivery" ? (
+          <StreamDeliveryDashboard
+            topics={topics}
+            loading={topicsQuery.isLoading}
+            fetching={topicsQuery.isFetching}
+            error={topicsQuery.error}
+            onRefresh={() => topicsQuery.refetch()}
           />
-        ) : null}
+        ) : (
+          <>
+            {error ? <InlineNotice tone="danger">{error.message}</InlineNotice> : null}
+            {mode === "streams" && exactEntryId && !isRedisStreamId(exactEntryId) ? <InlineNotice tone="danger">Use a Redis Stream ID such as 1785000998000-0.</InlineNotice> : null}
+            <DataTable
+              columns={columns[mode]}
+              rows={rows}
+              rowKey={(row) => `${mode}-${row.id}`}
+              onRowClick={setSelected}
+              emptyText={mode === "streams" ? "No stream entries found." : "No outbox entries found."}
+              loading={currentQuery.isLoading || currentQuery.isFetching}
+            />
+            {!exactEntryId ? (
+              <Pagination
+                page={currentPage.page}
+                label={`${rows.length} entries on this page`}
+                hasNext={Boolean(currentPage.query.data?.hasMore && currentPage.query.data?.nextCursor)}
+                onPrevious={currentPage.previous}
+                onNext={currentPage.next}
+              />
+            ) : null}
+          </>
+        )}
       </section>
       <DetailDrawer
         open={Boolean(selected)}
@@ -262,7 +283,7 @@ export function StreamsPage() {
       <PageHeader
         eyebrow="Manage"
         title="Redis event inspection"
-        description="Inspect stream entries and delivery outboxes without loading unbounded datasets."
+        description="Monitor consumer-group offsets, lag, pending deliveries, retries, stream entries, and delivery outboxes."
         actions={authenticated ? <Button variant="ghost" icon={LogOut} onClick={logout}>Sign out</Button> : null}
       />
       <AdminGate><StreamsWorkspace /></AdminGate>

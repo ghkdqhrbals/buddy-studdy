@@ -17,6 +17,7 @@ function storedJson(key, fallback) {
 }
 
 function initialCollapsed() {
+  if (window.matchMedia("(max-width: 700px)").matches) return true;
   const mode = window.localStorage.getItem(NAV_MODE_KEY) || "remember";
   return mode === "compact"
     || (mode === "remember" && window.localStorage.getItem(NAV_COLLAPSED_KEY) === "true");

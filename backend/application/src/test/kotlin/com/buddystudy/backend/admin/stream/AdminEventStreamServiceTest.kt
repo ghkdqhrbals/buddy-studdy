@@ -4,6 +4,7 @@ import com.buddystudy.backend.admin.stream.application.model.AdminCursorPage
 import com.buddystudy.backend.admin.stream.application.model.AdminPushOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminRedisEventOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamEntry
+import com.buddystudy.backend.admin.stream.application.model.AdminStreamPendingEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamTopicSummary
 import com.buddystudy.backend.admin.stream.application.port.outbound.AdminOutboxInspectionPort
 import com.buddystudy.backend.admin.stream.application.port.outbound.AdminRedisStreamInspectionPort
@@ -96,11 +97,33 @@ class AdminEventStreamServiceTest {
         }.hasMessage("Redis Stream entry was not found.")
     }
 
+    @Test
+    fun `pending entry lookup normalizes group cursor and limit`(): Unit = runBlocking {
+        service.pendingEntries(
+            topic = "push-events",
+            group = " push-workers ",
+            cursor = " 1785000998000-2 ",
+            limit = 500,
+        )
+
+        assertThat(streams.pendingRequest).isEqualTo(
+            PendingRequest("push-events", "push-workers", "1785000998000-2", 100),
+        )
+    }
+
+    @Test
+    fun `pending entry lookup rejects an empty group`(): Unit {
+        assertThatThrownBy {
+            runBlocking { service.pendingEntries("push-events", " ", null, 20) }
+        }.hasMessage("Redis Stream consumer group is required.")
+    }
+
     private class RecordingStreamPort : AdminRedisStreamInspectionPort {
         var request: StreamRequest? = null
         var entryRequest: Pair<String, String>? = null
         var entryResult: AdminStreamEntry? = null
         var topicItems: List<AdminStreamTopicSummary> = emptyList()
+        var pendingRequest: PendingRequest? = null
 
         override suspend fun topics(): List<AdminStreamTopicSummary> = topicItems
 
@@ -117,6 +140,16 @@ class AdminEventStreamServiceTest {
         override suspend fun entry(topic: String, entryId: String): AdminStreamEntry? {
             entryRequest = topic to entryId
             return entryResult
+        }
+
+        override suspend fun pending(
+            topic: String,
+            group: String,
+            cursor: String?,
+            limit: Int,
+        ): AdminCursorPage<AdminStreamPendingEntry> {
+            pendingRequest = PendingRequest(topic, group, cursor, limit)
+            return AdminCursorPage(emptyList(), null, false, limit)
         }
     }
 
@@ -149,6 +182,13 @@ class AdminEventStreamServiceTest {
         val cursor: String?,
         val limit: Int,
         val eventType: String?,
+    )
+
+    private data class PendingRequest(
+        val topic: String,
+        val group: String,
+        val cursor: String?,
+        val limit: Int,
     )
 
     private data class EventRequest(

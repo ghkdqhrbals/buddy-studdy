@@ -99,7 +99,8 @@ The React admin console exposes **Operations > Event Streams**.
 Sources:
 
 1. Redis Stream: topic length, configured maximum, first/last ID, consumer
-   count, pending count, and entries.
+   groups, last-delivered offset, entries read, lag, pending range, oldest
+   pending age, per-consumer ownership/idle time, retry count, and entries.
 2. Event outbox: durable `redis_event_outbox` rows.
 3. Push outbox: durable `question_push_outbox` rows.
 
@@ -122,6 +123,7 @@ Admin endpoints:
 GET /api/v1/admin/event-streams/topics?query={topic-or-key}
 GET /api/v1/admin/event-streams/topics/{topic}/entries
 GET /api/v1/admin/event-streams/topics/{topic}/entries/{entryId}
+GET /api/v1/admin/event-streams/topics/{topic}/groups/{group}/pending
 GET /api/v1/admin/event-streams/outboxes/events
 GET /api/v1/admin/event-streams/outboxes/pushes
 ```
@@ -145,6 +147,20 @@ The page shares the backend administrator session with `Users & Quotas`, keeps
 credentials in memory during login, and stores only the short-lived bearer
 token in browser session storage. Stream entries use cursor pagination and the
 exact-ID lookup bypasses list pagination for incident investigation.
+
+`Delivery status` refreshes every five seconds. Its overview reports one row
+per Redis consumer group:
+
+- **Offset**: the group's last delivered Redis Stream ID.
+- **Lag**: entries not yet delivered to that group.
+- **Pending**: delivered entries that have not been acknowledged.
+- **Retries**: `deliveryCount - 1`; the first delivery is not a retry.
+
+Selecting a group shows its active consumers and a cursor-paginated pending
+entry list. The overview samples at most the first 100 pending entries to avoid
+an unbounded Redis read. When a group has more pending entries, the maximum
+retry value is marked with `+` and is a sampled lower bound; the paginated
+pending list remains exact for each displayed entry.
 
 ## Operational Checks
 

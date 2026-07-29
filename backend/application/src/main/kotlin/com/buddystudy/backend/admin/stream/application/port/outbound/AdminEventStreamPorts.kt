@@ -4,6 +4,7 @@ import com.buddystudy.backend.admin.stream.application.model.AdminCursorPage
 import com.buddystudy.backend.admin.stream.application.model.AdminPushOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminRedisEventOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamEntry
+import com.buddystudy.backend.admin.stream.application.model.AdminStreamPendingEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamTopicSummary
 
 interface AdminRedisStreamInspectionPort {
@@ -17,6 +18,13 @@ interface AdminRedisStreamInspectionPort {
     ): AdminCursorPage<AdminStreamEntry>
 
     suspend fun entry(topic: String, entryId: String): AdminStreamEntry?
+
+    suspend fun pending(
+        topic: String,
+        group: String,
+        cursor: String?,
+        limit: Int,
+    ): AdminCursorPage<AdminStreamPendingEntry>
 }
 
 interface AdminOutboxInspectionPort {

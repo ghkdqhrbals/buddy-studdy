@@ -4,6 +4,7 @@ import com.buddystudy.backend.admin.stream.application.model.AdminCursorPage
 import com.buddystudy.backend.admin.stream.application.model.AdminPushOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminRedisEventOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamEntry
+import com.buddystudy.backend.admin.stream.application.model.AdminStreamPendingEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamTopicSummary
 import com.buddystudy.backend.admin.stream.application.port.inbound.AdminEventStreamUseCase
 import com.buddystudy.backend.admin.stream.application.port.outbound.AdminOutboxInspectionPort
@@ -49,6 +50,21 @@ class AdminEventStreamService(
                 ApiErrorCode.RESOURCE_NOT_FOUND,
                 "Redis Stream entry was not found.",
             )
+    }
+
+    override suspend fun pendingEntries(
+        topic: String,
+        group: String,
+        cursor: String?,
+        limit: Int,
+    ): AdminCursorPage<AdminStreamPendingEntry> {
+        val normalizedGroup = group.normalized()
+            ?: throw ApiException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.VALIDATION_ERROR,
+                "Redis Stream consumer group is required.",
+            )
+        return streams.pending(topic, normalizedGroup, cursor.validStreamCursor(), limit.normalized())
     }
 
     override suspend fun redisEventOutbox(

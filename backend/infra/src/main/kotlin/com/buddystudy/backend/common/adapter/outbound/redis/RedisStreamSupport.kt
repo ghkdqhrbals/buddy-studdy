@@ -2,7 +2,9 @@ package com.buddystudy.backend.common.adapter.outbound.redis
 
 import com.buddystudy.backend.admin.stream.application.model.AdminCursorPage
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamEntry
+import com.buddystudy.backend.admin.stream.application.model.AdminStreamConsumerSummary
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamGroupSummary
+import com.buddystudy.backend.admin.stream.application.model.AdminStreamPendingEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamTopicSummary
 import com.buddystudy.backend.admin.stream.application.port.outbound.AdminRedisStreamInspectionPort
 import com.buddystudy.backend.common.adapter.outbound.security.SensitiveDataRedactor
@@ -255,11 +257,47 @@ class RedisStreamTopicManager(
                 val operations = blockingRedis.opsForStream<String, String>()
                 val info = operations.info(definition.streamKey)
                 val groups = operations.groups(definition.streamKey).map { group ->
+                    val groupName = group.groupName()
+                    val pendingSummary = operations.pending(definition.streamKey, groupName)
+                    val pendingSample = if (group.pendingCount() > 0) {
+                        operations.pending(
+                            definition.streamKey,
+                            groupName,
+                            Range.unbounded<String>(),
+                            PENDING_SUMMARY_SAMPLE_LIMIT,
+                        ).toList()
+                    } else {
+                        emptyList()
+                    }
                     AdminStreamGroupSummary(
-                        name = group.groupName(),
+                        name = groupName,
                         consumers = group.consumerCount(),
                         pending = group.pendingCount(),
                         lastDeliveredId = group.lastDeliveredId(),
+                        entriesRead = group.raw.longValue("entries-read"),
+                        lag = group.raw.longValue("lag"),
+                        pendingMinId = pendingSummary?.minMessageId(),
+                        pendingMaxId = pendingSummary?.maxMessageId(),
+                        oldestPendingIdleMs = pendingSample.maxOfOrNull {
+                            it.elapsedTimeSinceLastDelivery.toMillis()
+                        },
+                        maxDeliveryCount = pendingSample.maxOfOrNull {
+                            it.totalDeliveryCount
+                        } ?: 0,
+                        maxRetryCount = pendingSample.maxOfOrNull {
+                            (it.totalDeliveryCount - 1).coerceAtLeast(0)
+                        } ?: 0,
+                        pendingSampleTruncated = group.pendingCount() > pendingSample.size,
+                        consumerDetails = operations.consumers(definition.streamKey, groupName)
+                            .map { consumer ->
+                                AdminStreamConsumerSummary(
+                                    name = consumer.consumerName(),
+                                    pending = consumer.pendingCount(),
+                                    idleMs = consumer.idleTimeMs(),
+                                    inactiveMs = consumer.raw.longValue("inactive"),
+                                )
+                            }
+                            .toList(),
                     )
                 }.toList()
                 AdminStreamTopicSummary(
@@ -338,6 +376,49 @@ class RedisStreamTopicManager(
             ?.let(::adminEntry)
     }
 
+    override suspend fun pending(
+        topic: String,
+        group: String,
+        cursor: String?,
+        limit: Int,
+    ): AdminCursorPage<AdminStreamPendingEntry> = withContext(Dispatchers.IO) {
+        val definition = topicDefinition(topic)
+        val operations = blockingRedis.opsForStream<String, String>()
+        val groupExists = operations.groups(definition.streamKey).any { it.groupName() == group }
+        if (!groupExists) {
+            throw ApiException(
+                HttpStatus.NOT_FOUND,
+                ApiErrorCode.RESOURCE_NOT_FOUND,
+                "Redis Stream consumer group '$group' was not found.",
+            )
+        }
+        val lowerBound = cursor ?: "-"
+        val messages = operations.pending(
+            definition.streamKey,
+            group,
+            Range.closed(lowerBound, "+"),
+            limit + 1L,
+        ).asSequence()
+            .filterNot { cursor != null && it.idAsString == cursor }
+            .take(limit + 1)
+            .map { message ->
+                AdminStreamPendingEntry(
+                    id = message.idAsString,
+                    consumer = message.consumerName,
+                    idleMs = message.elapsedTimeSinceLastDelivery.toMillis(),
+                    deliveryCount = message.totalDeliveryCount,
+                    retryCount = (message.totalDeliveryCount - 1).coerceAtLeast(0L),
+                )
+            }
+            .toList()
+        AdminCursorPage(
+            items = messages.take(limit),
+            nextCursor = messages.take(limit).lastOrNull()?.id?.takeIf { messages.size > limit },
+            hasMore = messages.size > limit,
+            limit = limit,
+        )
+    }
+
     private fun topicDefinition(topic: String): RedisStreamTopicDefinition =
         topics.firstOrNull { it.topic.apiName == topic }
             ?: throw ApiException(
@@ -362,6 +443,13 @@ class RedisStreamTopicManager(
             fields = fields,
         )
     }
+
+    private fun Map<String, Any>.longValue(key: String): Long? =
+        when (val value = this[key]) {
+            is Number -> value.toLong()
+            is ByteArray -> value.toString(Charsets.UTF_8).toLongOrNull()
+            else -> value?.toString()?.toLongOrNull()
+        }
 
     private suspend fun pollWorker(
         definition: RedisStreamTopicDefinition,
@@ -429,6 +517,7 @@ class RedisStreamTopicManager(
 
     private companion object {
         const val MAX_CONCURRENCY = 32
+        const val PENDING_SUMMARY_SAMPLE_LIMIT = 100L
         val ACKNOWLEDGE_AND_DELETE = DefaultRedisScript(
             """
             redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
