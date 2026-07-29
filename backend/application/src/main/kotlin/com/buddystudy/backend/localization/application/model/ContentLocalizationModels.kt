@@ -32,6 +32,12 @@ data class ContentTranslationRequestedEvent(
     }
 }
 
+data class PendingContentTranslation(
+    val contentType: LocalizableContentType,
+    val sourceHash: String,
+    val requestToken: String,
+)
+
 data class TextLocalizationSnapshot(
     val sourceLanguage: String,
     val targetLanguage: String,

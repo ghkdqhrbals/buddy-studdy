@@ -20,6 +20,7 @@ import com.buddystudy.backend.study.adapter.outbound.persistence.StudyRepository
 import com.buddystudy.backend.study.adapter.outbound.persistence.UserMembershipTierRepository
 import com.buddystudy.backend.community.adapter.outbound.persistence.QuestionCommentRepository
 import com.buddystudy.backend.localization.application.model.ContentTranslationResult
+import com.buddystudy.backend.localization.application.model.LocalizableContentType
 import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
 import com.buddystudy.backend.localization.application.service.ContentLocalizationService
 import com.buddystudy.account.domain.entity.UserMembershipTierEntity
@@ -593,7 +594,13 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
             )
         )
         val sourceHashes = ContentLocalizationService.recordHashes(publicQuestion)
-        contentLocalizations.ensureRecordPending(publicQuestion, "en", sourceHashes, publicQuestion.updatedAt)
+        contentLocalizations.ensureRecordPending(
+            publicQuestion,
+            "en",
+            sourceHashes,
+            publicQuestion.updatedAt,
+            publicQuestion.updatedAt.minusSeconds(300),
+        )
         contentLocalizations.saveQuestionReady(
             question = publicQuestion,
             targetLanguage = "en",
@@ -734,6 +741,66 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
+    fun `stale failed content translation receives one new durable request token`(): Unit = runBlocking {
+        val owner = registerActiveUser("translation-retry-owner")
+        val study = createStudy(owner, "Translation Retry")
+        val question = questions.save(
+            gradedQuestion(
+                deviceId = owner.deviceId,
+                userId = study.userId,
+                studyId = study.id,
+                topic = "Translation Retry",
+                question = "번역 재시도를 설명하세요.",
+                createdAt = Instant.parse("2026-06-09T06:00:00Z"),
+            )
+        )
+        val hashes = ContentLocalizationService.recordHashes(question)
+        val firstRequestedAt = Instant.parse("2026-06-09T06:01:00Z")
+
+        val first = contentLocalizations.ensureRecordPending(
+            question,
+            "en",
+            hashes,
+            firstRequestedAt,
+            firstRequestedAt.minusSeconds(300),
+        )
+        val duplicate = contentLocalizations.ensureRecordPending(
+            question,
+            "en",
+            hashes,
+            firstRequestedAt.plusSeconds(60),
+            firstRequestedAt.minusSeconds(240),
+        )
+
+        assertThat(first).hasSize(3)
+        assertThat(duplicate).isEmpty()
+
+        databaseClient.sql(
+            """
+            update question_localizations
+            set status = 'FAILED', error = 'provider unavailable', updated_at = :failedAt
+            where question_id = :questionId and target_language = 'en'
+            """.trimIndent(),
+        )
+            .bind("failedAt", firstRequestedAt)
+            .bind("questionId", question.id)
+            .fetch().rowsUpdated().awaitSingle()
+
+        val retry = contentLocalizations.ensureRecordPending(
+            question,
+            "en",
+            hashes,
+            firstRequestedAt.plusSeconds(301),
+            firstRequestedAt.plusSeconds(1),
+        )
+
+        val firstQuestion = first.single { it.contentType == LocalizableContentType.QUESTION }
+        val retriedQuestion = retry.single { it.contentType == LocalizableContentType.QUESTION }
+        assertThat(retriedQuestion.requestToken).isNotEqualTo(firstQuestion.requestToken)
+        assertThat(contentLocalizations.record(question.id, "en").question?.status).isEqualTo("PENDING")
+    }
+
+    @Test
     fun `comment keeps its original text and reads translation from comment localizations`(): Unit = runBlocking {
         val owner = registerActiveUser("localized-comment-owner")
         val commenter = registerActiveUser("localized-comment-author")
@@ -759,7 +826,13 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
         val comment = comments.findById(created["id"].asLong())!!
         val sourceHash = ContentLocalizationService.sha256(comment.body)
-        contentLocalizations.ensureCommentPending(comment, "en", sourceHash, comment.updatedAt)
+        contentLocalizations.ensureCommentPending(
+            comment,
+            "en",
+            sourceHash,
+            comment.updatedAt,
+            comment.updatedAt.minusSeconds(300),
+        )
         contentLocalizations.saveCommentReady(
             comment = comment,
             targetLanguage = "en",

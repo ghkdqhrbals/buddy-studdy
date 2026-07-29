@@ -1,11 +1,13 @@
 package com.buddystudy.backend.localization
 
+import com.buddystudy.backend.common.application.outbox.AfterCommitPort
 import com.buddystudy.backend.common.application.outbox.OutboxPublishSummary
 import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
 import com.buddystudy.backend.localization.application.model.ContentTranslationRequestedEvent
 import com.buddystudy.backend.localization.application.model.ContentTranslationResult
 import com.buddystudy.backend.localization.application.model.LocalizableContentType
+import com.buddystudy.backend.localization.application.model.PendingContentTranslation
 import com.buddystudy.backend.localization.application.model.RecordLocalizationSnapshot
 import com.buddystudy.backend.localization.application.model.RecordSourceHashes
 import com.buddystudy.backend.localization.application.model.TextLocalizationSnapshot
@@ -25,7 +27,7 @@ class ContentLocalizationServiceTest {
         val localizations = RecordingLocalizationPort()
         val events = RecordingTranslationEvents()
         val publisher = RecordingPublisher()
-        val service = ContentLocalizationService(localizations, events, publisher)
+        val service = ContentLocalizationService(localizations, events, ImmediateAfterCommit(), publisher)
         val question = QuestionEntity(
             id = 42,
             topic = "Redis",
@@ -58,6 +60,7 @@ class ContentLocalizationServiceTest {
         assertThat(eventsByType.values).allMatch {
             it.questionSourceHash == null && it.answerSourceHash == null && it.aiResponseSourceHash == null
         }
+        assertThat(eventsByType.values).allMatch { it.eventId.startsWith("content-translation-request-") }
         assertThat(localizations.hashes?.question).isNotEqualTo(localizations.hashes?.answer)
         assertThat(publisher.references).hasSize(3)
     }
@@ -89,12 +92,25 @@ private class RecordingLocalizationPort : ContentLocalizationPort {
         targetLanguage: String,
         sourceHashes: RecordSourceHashes,
         now: Instant,
-    ): Set<LocalizableContentType> {
+        retryPendingBefore: Instant,
+    ): List<PendingContentTranslation> {
         hashes = sourceHashes
-        return setOf(
-            LocalizableContentType.QUESTION,
-            LocalizableContentType.ANSWER,
-            LocalizableContentType.AI_RESPONSE,
+        return listOf(
+            PendingContentTranslation(
+                LocalizableContentType.QUESTION,
+                sourceHashes.question,
+                "request-question",
+            ),
+            PendingContentTranslation(
+                LocalizableContentType.ANSWER,
+                sourceHashes.answer!!,
+                "request-answer",
+            ),
+            PendingContentTranslation(
+                LocalizableContentType.AI_RESPONSE,
+                sourceHashes.aiResponse!!,
+                "request-ai-response",
+            ),
         )
     }
 
@@ -103,7 +119,8 @@ private class RecordingLocalizationPort : ContentLocalizationPort {
         targetLanguage: String,
         sourceHash: String,
         now: Instant,
-    ) = true
+        retryPendingBefore: Instant,
+    ) = PendingContentTranslation(LocalizableContentType.COMMENT, sourceHash, "request-comment")
 
     override suspend fun saveQuestionReady(
         question: QuestionEntity,
@@ -156,4 +173,8 @@ private class RecordingPublisher : PublishOutboxUseCase {
         this.references += references
         return OutboxPublishSummary(references.size, references.size, 0)
     }
+}
+
+private class ImmediateAfterCommit : AfterCommitPort {
+    override suspend fun execute(action: suspend () -> Unit) = action()
 }

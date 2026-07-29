@@ -100,7 +100,7 @@ view=localized|original
 
 ## 비동기 번역
 
-번역 누락 조회는 작은 DB 트랜잭션 안에서 `PENDING` 행과 `CONTENT_TRANSLATION_REQUESTED` Outbox를 함께 저장한다. 질문, 사용자 답변, AI 응답은 각각 `QUESTION`, `ANSWER`, `AI_RESPONSE` 이벤트를 가지며 독립적으로 번역·재시도·실패 처리된다. 과거의 `RECORD` 이벤트는 배포 전 생성된 메시지를 비우기 위한 소비 호환 타입일 뿐 새로 발행하지 않는다. 이벤트 ID는 콘텐츠 유형, ID, 대상 언어, 해당 콘텐츠의 source hash로 결정하므로 동시 요청과 재시도가 중복 제거된다.
+번역 누락 조회는 작은 DB 트랜잭션 안에서 `PENDING` 행과 `CONTENT_TRANSLATION_REQUESTED` Outbox를 함께 저장한다. 질문, 사용자 답변, AI 응답은 각각 `QUESTION`, `ANSWER`, `AI_RESPONSE` 이벤트를 가지며 독립적으로 번역·재시도·실패 처리된다. 과거의 `RECORD` 이벤트는 배포 전 생성된 메시지를 비우기 위한 소비 호환 타입일 뿐 새로 발행하지 않는다. 각 번역 행의 durable request token이 Outbox 이벤트 ID를 결정하므로 동시 누락 조회는 하나의 이벤트로 수렴한다. 5분 이상 멈춘 `PENDING` 또는 `FAILED` 행은 새 token으로 재큐잉되어 번역 공급자 장애 복구 후 다시 처리된다.
 
 ```mermaid
 sequenceDiagram
@@ -126,11 +126,15 @@ sequenceDiagram
 ```
 
 - Redis Stream 이름은 `content-translation`이며 전용 Consumer Group을 사용한다.
+- `PENDING` 행과 Outbox를 먼저 커밋한 뒤에만 즉시 publish를 시도한다.
+  publish 실패나 프로세스 종료는 공용 Outbox recovery가 재처리한다.
 - 기존 Inbox claim, 재시도, auto-claim 구조를 재사용해 at-least-once로 처리한다.
 - 이벤트에는 원문을 넣지 않는다. 소비자가 콘텐츠 ID로 원문을 다시 읽는다.
 - source hash가 달라진 오래된 이벤트는 새 원문을 덮어쓰지 않고 성공 처리한다.
 - 외부 번역 호출은 DB 트랜잭션 밖에서 실행한다.
 - 최종 실패는 번역 행만 `FAILED`로 바꾸며 원문 노출을 유지한다.
+- 장시간 `PENDING` 및 `FAILED`는 조회 시 5분 간격으로만 재큐잉해
+  영구 정체를 복구하면서 장애 중 요청 폭주를 막는다.
 - 번역은 질문 생성 할당량을 소비하지 않는다.
 
 질문 레코드는 질문, 답변, AI 응답 가운데 변경되거나 누락된 부분만 번역한다. 각 부분의 hash와 이벤트가 독립적이므로 한 부분의 번역 실패가 다른 부분의 완료나 재시도를 막지 않는다. 댓글은 댓글별 이벤트로 처리한다.
@@ -182,4 +186,8 @@ Translated into English · Show original
 - 원문 전환, 조용한 재조회, 행 높이와 스크롤 위치 유지
 - 백엔드 전체 로컬 테스트, iOS generic build, 실제 iPhone 실행
 
-배포는 별도 승인 후에만 진행한다.
+운영 LibreTranslate는 `Deploy BuddyStudy Translation Server` 전용
+워크플로가 `buddystudy-net` 내부에 배포한다. 백엔드는
+`http://buddystudy-libretranslate:5000`을 사용하며, 번역 컨테이너의
+포트는 호스트나 인터넷에 공개하지 않는다. 모델 캐시는 전용 Docker
+volume에 유지하고 `ko`, `en`, `ja`만 로드한다.

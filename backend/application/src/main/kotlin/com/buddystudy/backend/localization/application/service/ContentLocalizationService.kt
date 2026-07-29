@@ -1,5 +1,6 @@
 package com.buddystudy.backend.localization.application.service
 
+import com.buddystudy.backend.common.application.outbox.AfterCommitPort
 import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.common.application.outbox.OutboxType
 import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
@@ -17,12 +18,14 @@ import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import java.time.Duration
 import java.time.Instant
 
 @Service
 class ContentLocalizationService(
     private val localizations: ContentLocalizationPort,
     private val events: ContentTranslationEventPort,
+    private val afterCommit: AfterCommitPort,
     private val publisher: PublishOutboxUseCase,
 ) : RequestContentLocalizationUseCase {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -30,31 +33,31 @@ class ContentLocalizationService(
         val target = QuestionLanguage.normalize(targetLanguage)
         val hashes = recordHashes(question)
         val requestedAt = Instant.now()
-        val pendingContent = localizations.ensureRecordPending(question, target, hashes, requestedAt)
-        if (pendingContent.isEmpty()) return
-        val outboxIds = pendingContent.mapNotNull { contentType ->
-            val sourceHash = when (contentType) {
-                LocalizableContentType.QUESTION -> hashes.question
-                LocalizableContentType.ANSWER -> hashes.answer
-                LocalizableContentType.AI_RESPONSE -> hashes.aiResponse
-                LocalizableContentType.RECORD,
-                LocalizableContentType.COMMENT,
-                -> null
-            } ?: return@mapNotNull null
+        val pendingRequests = localizations.ensureRecordPending(
+            question,
+            target,
+            hashes,
+            requestedAt,
+            requestedAt.minus(REQUEST_RETRY_DELAY),
+        )
+        if (pendingRequests.isEmpty()) return
+        val outboxIds = pendingRequests.map { request ->
             events.append(
                 ContentTranslationRequestedEvent(
-                    eventId = "content-translation-${contentType.eventName}-${question.id}-$target-$sourceHash",
-                    contentType = contentType,
+                    eventId = "content-translation-${request.requestToken}",
+                    contentType = request.contentType,
                     contentId = question.id,
                     targetLanguage = target,
-                    sourceHash = sourceHash,
+                    sourceHash = request.sourceHash,
                     requestedAt = requestedAt,
                 ),
                 requestedAt,
             )
         }
         if (outboxIds.isNotEmpty()) {
-            publisher.publishNow(outboxIds.map { OutboxReference(OutboxType.DOMAIN_EVENT, it) })
+            afterCommit.execute {
+                publisher.publishNow(outboxIds.map { OutboxReference(OutboxType.DOMAIN_EVENT, it) })
+            }
         }
     }
 
@@ -62,23 +65,32 @@ class ContentLocalizationService(
     override suspend fun requestComment(comment: QuestionCommentEntity, targetLanguage: String) {
         val target = QuestionLanguage.normalize(targetLanguage)
         val hash = sha256(comment.body)
-        if (!localizations.ensureCommentPending(comment, target, hash, Instant.now())) return
+        val requestedAt = Instant.now()
+        val request = localizations.ensureCommentPending(
+            comment,
+            target,
+            hash,
+            requestedAt,
+            requestedAt.minus(REQUEST_RETRY_DELAY),
+        ) ?: return
         val outboxId = events.append(
             ContentTranslationRequestedEvent(
-                eventId = "content-translation-comment-${comment.id}-$target-$hash",
+                eventId = "content-translation-${request.requestToken}",
                 contentType = LocalizableContentType.COMMENT,
                 contentId = comment.id,
                 targetLanguage = target,
                 sourceHash = hash,
-                requestedAt = Instant.now(),
+                requestedAt = requestedAt,
             ),
+            requestedAt,
         )
-        publisher.publishNow(listOf(OutboxReference(OutboxType.DOMAIN_EVENT, outboxId)))
+        afterCommit.execute {
+            publisher.publishNow(listOf(OutboxReference(OutboxType.DOMAIN_EVENT, outboxId)))
+        }
     }
 
     companion object {
-        private val LocalizableContentType.eventName: String
-            get() = name.lowercase().replace('_', '-')
+        private val REQUEST_RETRY_DELAY: Duration = Duration.ofMinutes(5)
 
         fun recordHashes(question: QuestionEntity): RecordSourceHashes {
             val questionHash = sha256(

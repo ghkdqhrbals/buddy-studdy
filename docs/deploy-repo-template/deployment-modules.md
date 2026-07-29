@@ -8,6 +8,7 @@ one workflow run just because they share a host.
 | Module | Workflow | Trigger | Runner | Owns |
 | --- | --- | --- | --- | --- |
 | Backend API | `Deploy BuddyStudy Backend` | `backend-image-published`, manual | EC2 self-hosted | Backend app rollout, backend env, backend nginx route, log-only MySQL runtime observer, backend-log multiline collection |
+| Translation server | `Deploy BuddyStudy Translation Server` | manual | EC2 self-hosted | Internal LibreTranslate runtime and persisted `ko`, `en`, `ja` model cache |
 | Backend network | `Configure BuddyStudy Backend Network` | manual | EC2 self-hosted | Redis administrator ingress on the backend security group |
 | Database cutover | `Migrate BuddyStudy PostgreSQL To MySQL` | manual, one-time | EC2 self-hosted | PostgreSQL backup, MySQL import, row-count and reference validation, automatic pre-cutover rollback |
 | Admin frontend | `Deploy BuddyStudy Admin Frontend` | `admin-frontend-image-published`, manual | EC2 self-hosted | Admin frontend container only |
@@ -33,6 +34,12 @@ deployment.
 
 - A workflow must deploy one module. If two modules need to change, run two
   workflows.
+- LibreTranslate is an internal-only runtime on `buddystudy-net`. Its workflow
+  owns the `buddystudy-libretranslate` container and model volume; the backend
+  workflow only injects
+  `BUDDYSTUDY_TRANSLATION_BASE_URL=http://buddystudy-libretranslate:5000`.
+  The translation workflow pins a multi-architecture image and never publishes
+  the service port on the host.
 - A job must have a module-specific name such as `deploy_backend`,
   `deploy_admin_frontend`, or `deploy_monitoring`.
 - The iOS release workflow remains an iOS-only module. It separates release
@@ -93,6 +100,9 @@ deployment.
 ## Change Routing
 
 - Backend Kotlin/API/env changes: build backend image, then run backend deploy.
+- LibreTranslate image, language-model, or container changes: run the
+  translation-server deploy independently. Deploy it before a backend release
+  that first depends on its Docker network address.
 - Backend runtime secrets are read by the backend deploy workflow from AWS
   Secrets Manager. The `buddystudy/prod` application secret owns
   `OPENAI_API_KEY_USER`, `OPENAI_API_KEY_SYSTEM`, `REDIS_PASSWORD`,

@@ -3,6 +3,7 @@ package com.buddystudy.backend.test
 import com.buddystudy.backend.localization.application.model.ContentTranslationRequestedEvent
 import com.buddystudy.backend.localization.application.model.ContentTranslationResult
 import com.buddystudy.backend.localization.application.model.LocalizableContentType
+import com.buddystudy.backend.localization.application.model.PendingContentTranslation
 import com.buddystudy.backend.localization.application.model.RecordLocalizationSnapshot
 import com.buddystudy.backend.localization.application.model.RecordSourceHashes
 import com.buddystudy.backend.localization.application.model.TextLocalizationSnapshot
@@ -30,10 +31,19 @@ open class EmptyContentLocalizationPort : ContentLocalizationPort {
         targetLanguage: String,
         sourceHashes: RecordSourceHashes,
         now: Instant,
-    ) = setOf(
-        LocalizableContentType.QUESTION,
-        LocalizableContentType.ANSWER,
-        LocalizableContentType.AI_RESPONSE,
+        retryPendingBefore: Instant,
+    ) = listOf(
+        PendingContentTranslation(LocalizableContentType.QUESTION, sourceHashes.question, "request-question"),
+        PendingContentTranslation(
+            LocalizableContentType.ANSWER,
+            sourceHashes.answer ?: sourceHashes.question,
+            "request-answer",
+        ),
+        PendingContentTranslation(
+            LocalizableContentType.AI_RESPONSE,
+            sourceHashes.aiResponse ?: sourceHashes.question,
+            "request-ai-response",
+        ),
     )
 
     override suspend fun ensureCommentPending(
@@ -41,7 +51,8 @@ open class EmptyContentLocalizationPort : ContentLocalizationPort {
         targetLanguage: String,
         sourceHash: String,
         now: Instant,
-    ) = true
+        retryPendingBefore: Instant,
+    ) = PendingContentTranslation(LocalizableContentType.COMMENT, sourceHash, "request-comment")
 
     override suspend fun saveQuestionReady(
         question: QuestionEntity,

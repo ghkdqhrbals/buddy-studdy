@@ -3,6 +3,7 @@ package com.buddystudy.backend.localization.adapter.outbound.persistence
 import com.buddystudy.backend.localization.application.model.ContentTranslationRequestedEvent
 import com.buddystudy.backend.localization.application.model.ContentTranslationResult
 import com.buddystudy.backend.localization.application.model.LocalizableContentType
+import com.buddystudy.backend.localization.application.model.PendingContentTranslation
 import com.buddystudy.backend.localization.application.model.RecordLocalizationSnapshot
 import com.buddystudy.backend.localization.application.model.RecordSourceHashes
 import com.buddystudy.backend.localization.application.model.TextLocalizationSnapshot
@@ -16,6 +17,7 @@ import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.stereotype.Repository
 import java.time.Instant
+import java.util.UUID
 
 @Repository
 class ContentLocalizationPersistenceAdapter(
@@ -59,10 +61,11 @@ class ContentLocalizationPersistenceAdapter(
         targetLanguage: String,
         sourceHashes: RecordSourceHashes,
         now: Instant,
-    ): Set<LocalizableContentType> {
-        val pendingContent = mutableSetOf<LocalizableContentType>()
+        retryPendingBefore: Instant,
+    ): List<PendingContentTranslation> {
+        val pendingContent = mutableListOf<PendingContentTranslation>()
         if (QuestionLanguage.normalize(question.sourceLanguage) != targetLanguage) {
-            if (upsertPending(
+            upsertPending(
                 table = "question_localizations",
                 idColumn = "question_id",
                 id = question.id,
@@ -75,24 +78,35 @@ class ContentLocalizationPersistenceAdapter(
                     "hint" to question.hint,
                 ),
                 now = now,
-            )) {
-                pendingContent += LocalizableContentType.QUESTION
+                retryPendingBefore = retryPendingBefore,
+            )?.let { requestToken ->
+                pendingContent += PendingContentTranslation(
+                    LocalizableContentType.QUESTION,
+                    sourceHashes.question,
+                    requestToken,
+                )
             }
         }
         question.answer?.takeIf(String::isNotBlank)?.let { answer ->
             val source = question.answerSourceLanguage ?: question.sourceLanguage
             if (QuestionLanguage.normalize(source) != targetLanguage) {
-                if (upsertPending(
+                val sourceHash = sourceHashes.answer ?: return@let
+                upsertPending(
                     "answer_localizations",
                     "question_id",
                     question.id,
                     targetLanguage,
                     source,
-                    sourceHashes.answer ?: return@let,
+                    sourceHash,
                     mapOf("answer" to answer),
                     now,
-                )) {
-                    pendingContent += LocalizableContentType.ANSWER
+                    retryPendingBefore,
+                )?.let { requestToken ->
+                    pendingContent += PendingContentTranslation(
+                        LocalizableContentType.ANSWER,
+                        sourceHash,
+                        requestToken,
+                    )
                 }
             }
         }
@@ -100,7 +114,7 @@ class ContentLocalizationPersistenceAdapter(
             val source = question.aiResponseSourceLanguage ?: question.sourceLanguage
             val aiResponseHash = sourceHashes.aiResponse
             if (QuestionLanguage.normalize(source) != targetLanguage && aiResponseHash != null) {
-                if (upsertPending(
+                upsertPending(
                     "grading_localizations",
                     "question_id",
                     question.id,
@@ -113,8 +127,13 @@ class ContentLocalizationPersistenceAdapter(
                         "assessment_json" to question.gradingAssessmentJson,
                     ),
                     now,
-                )) {
-                    pendingContent += LocalizableContentType.AI_RESPONSE
+                    retryPendingBefore,
+                )?.let { requestToken ->
+                    pendingContent += PendingContentTranslation(
+                        LocalizableContentType.AI_RESPONSE,
+                        aiResponseHash,
+                        requestToken,
+                    )
                 }
             }
         }
@@ -126,8 +145,9 @@ class ContentLocalizationPersistenceAdapter(
         targetLanguage: String,
         sourceHash: String,
         now: Instant,
-    ): Boolean {
-        if (QuestionLanguage.normalize(comment.sourceLanguage) == targetLanguage) return false
+        retryPendingBefore: Instant,
+    ): PendingContentTranslation? {
+        if (QuestionLanguage.normalize(comment.sourceLanguage) == targetLanguage) return null
         return upsertPending(
             "question_comment_localizations",
             "comment_id",
@@ -137,7 +157,10 @@ class ContentLocalizationPersistenceAdapter(
             sourceHash,
             mapOf("body" to comment.body),
             now,
-        )
+            retryPendingBefore,
+        )?.let { requestToken ->
+            PendingContentTranslation(LocalizableContentType.COMMENT, sourceHash, requestToken)
+        }
     }
 
     override suspend fun saveQuestionReady(
@@ -305,42 +328,56 @@ class ContentLocalizationPersistenceAdapter(
         sourceHash: String,
         values: Map<String, String?>,
         now: Instant,
-    ): Boolean {
+        retryPendingBefore: Instant,
+    ): String? {
+        val requestToken = UUID.randomUUID().toString()
         val columns = values.keys.joinToString(", ")
         val markers = values.keys.joinToString(", ") { ":$it" }
+        val refreshCondition =
+            """
+            source_hash <> values(source_hash)
+                or source_language <> values(source_language)
+                or (
+                    status in ('PENDING', 'FAILED')
+                    and updated_at <= :retryPendingBefore
+                )
+            """.trimIndent()
         val refreshAssignments = values.keys.joinToString(",\n") { column ->
-            "$column = if(source_hash <> values(source_hash), values($column), $column)"
+            "$column = if(request_token = values(request_token), values($column), $column)"
         }
         var spec = databaseClient.sql(
             """
             insert into $table (
                 $idColumn, target_language, source_language, source_hash,
-                $columns, status, translation_version, created_at, updated_at
+                $columns, status, translation_version, request_token, created_at, updated_at
             ) values (
                 :id, :targetLanguage, :sourceLanguage, :sourceHash,
-                $markers, 'PENDING', 1, :now, :now
+                $markers, 'PENDING', 1, :requestToken, :now, :now
             )
             on duplicate key update
+                request_token = if($refreshCondition, values(request_token), request_token),
                 $refreshAssignments,
-                status = if(source_hash <> values(source_hash), 'PENDING', status),
-                error = if(source_hash <> values(source_hash), null, error),
-                updated_at = if(source_hash <> values(source_hash), values(updated_at), updated_at),
-                source_language = values(source_language),
-                source_hash = values(source_hash)
+                status = if(request_token = values(request_token), 'PENDING', status),
+                error = if(request_token = values(request_token), null, error),
+                updated_at = if(request_token = values(request_token), values(updated_at), updated_at),
+                source_language = if(request_token = values(request_token), values(source_language), source_language),
+                source_hash = if(request_token = values(request_token), values(source_hash), source_hash)
             """.trimIndent(),
         )
             .bind("id", id)
             .bind("targetLanguage", targetLanguage)
             .bind("sourceLanguage", QuestionLanguage.normalize(sourceLanguage))
             .bind("sourceHash", sourceHash)
+            .bind("requestToken", requestToken)
             .bind("now", now)
+            .bind("retryPendingBefore", retryPendingBefore)
         values.forEach { (name, value) ->
             spec = if (value == null) spec.bindNull(name, String::class.java) else spec.bind(name, value)
         }
         spec.fetch().rowsUpdated().awaitSingle()
         return databaseClient.sql(
             """
-            select status, source_hash
+            select status, source_hash, request_token
             from $table
             where $idColumn = :id and target_language = :targetLanguage
             """.trimIndent(),
@@ -349,10 +386,13 @@ class ContentLocalizationPersistenceAdapter(
             .bind("targetLanguage", targetLanguage)
             .map { row, _ ->
                 row.get("status", String::class.java) == "PENDING" &&
-                    row.get("source_hash", String::class.java) == sourceHash
+                    row.get("source_hash", String::class.java) == sourceHash &&
+                    row.get("request_token", String::class.java) == requestToken
             }
             .one()
-            .awaitSingleOrNull() == true
+            .awaitSingleOrNull()
+            ?.takeIf { it }
+            ?.let { requestToken }
     }
 
     private suspend fun updateReady(
@@ -370,7 +410,7 @@ class ContentLocalizationPersistenceAdapter(
             """
             update $table
             set $assignments, status = 'READY', provider = :provider,
-                error = null, updated_at = :now
+                error = null, request_token = null, updated_at = :now
             where $idColumn = :id and target_language = :targetLanguage
               and source_hash = :sourceHash
             """.trimIndent(),

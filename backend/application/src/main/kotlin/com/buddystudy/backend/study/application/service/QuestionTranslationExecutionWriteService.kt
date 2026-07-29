@@ -74,7 +74,13 @@ class QuestionTranslationExecutionWriteService(
         if (translation != null) {
             val targetLanguage = QuestionLanguage.normalize(appLanguage)
             val hashes = ContentLocalizationService.recordHashes(question)
-            localizations.ensureRecordPending(question, targetLanguage, hashes, now)
+            localizations.ensureRecordPending(
+                question,
+                targetLanguage,
+                hashes,
+                now,
+                now.minus(Duration.ofMinutes(5)),
+            )
             check(
                 localizations.saveQuestionReady(
                     question = question,
