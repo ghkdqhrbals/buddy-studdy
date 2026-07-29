@@ -39,7 +39,7 @@ User properties are limited to app language and signed-in/signed-out state.
 5. Update the App Store privacy disclosure before enabling production collection.
 6. Run the iOS release workflow.
 
-The workflow validates the plist, bundle ID, Google app ID, API key, and Analytics enable flag. The committed plist is deliberately disabled so builds cannot accidentally report to an unknown project.
+The workflow validates the plist, bundle ID, Google app ID, and API key. Firebase's generated Apple configuration can contain `IS_ANALYTICS_ENABLED=false` even when the project is linked to Google Analytics, so collection is enabled explicitly through `Analytics.setAnalyticsCollectionEnabled(true)` after the project and app identifiers pass validation. The committed plist remains a nonfunctional placeholder so builds cannot accidentally report to an unknown project.
 
 ## Verification
 

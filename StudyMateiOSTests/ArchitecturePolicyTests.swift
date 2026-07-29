@@ -2,12 +2,12 @@ import XCTest
 @testable import StudyMate
 
 final class ArchitecturePolicyTests: XCTestCase {
-    func testAnalyticsConfigurationRequiresMatchingEnabledFirebaseApp() {
+    func testAnalyticsConfigurationRequiresMatchingFirebaseApp() {
         let configured: [String: Any] = [
             "BUNDLE_ID": "io.github.ghkdqhrbals.StudyMate",
             "GOOGLE_APP_ID": "1:1234567890:ios:abcdef",
             "API_KEY": "configured-api-key",
-            "IS_ANALYTICS_ENABLED": true
+            "IS_ANALYTICS_ENABLED": false
         ]
 
         XCTAssertTrue(
@@ -23,11 +23,11 @@ final class ArchitecturePolicyTests: XCTestCase {
             )
         )
 
-        var disabled = configured
-        disabled["IS_ANALYTICS_ENABLED"] = false
+        var placeholder = configured
+        placeholder["API_KEY"] = "NOT_CONFIGURED"
         XCTAssertFalse(
             AppAnalyticsConfiguration.isUsable(
-                dictionary: disabled,
+                dictionary: placeholder,
                 bundleIdentifier: "io.github.ghkdqhrbals.StudyMate"
             )
         )

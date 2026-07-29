@@ -168,15 +168,13 @@ jobs:
           bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :BUNDLE_ID' "${config_path}")"
           app_id="$(/usr/libexec/PlistBuddy -c 'Print :GOOGLE_APP_ID' "${config_path}")"
           api_key="$(/usr/libexec/PlistBuddy -c 'Print :API_KEY' "${config_path}")"
-          analytics_enabled="$(/usr/libexec/PlistBuddy -c 'Print :IS_ANALYTICS_ENABLED' "${config_path}")"
-          analytics_enabled="$(printf '%s' "${analytics_enabled}" | tr '[:upper:]' '[:lower:]')"
 
           if [ "${bundle_id}" != "io.github.ghkdqhrbals.StudyMate" ]; then
             echo "Firebase configuration has an unexpected bundle identifier." >&2
             exit 1
           fi
-          if [[ "${app_id}" != 1:* ]] || [ -z "${api_key}" ] || { [ "${analytics_enabled}" != "true" ] && [ "${analytics_enabled}" != "yes" ] && [ "${analytics_enabled}" != "1" ]; }; then
-            echo "Firebase Analytics configuration is incomplete or disabled." >&2
+          if [[ "${app_id}" != 1:* ]] || [ -z "${api_key}" ] || [ "${api_key}" = "NOT_CONFIGURED" ]; then
+            echo "Firebase Analytics configuration is incomplete." >&2
             exit 1
           fi
 

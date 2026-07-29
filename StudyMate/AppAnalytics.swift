@@ -62,9 +62,7 @@ struct AppAnalyticsConfiguration {
               appID.hasPrefix("1:"),
               let apiKey = dictionary["API_KEY"] as? String,
               !apiKey.isEmpty,
-              !apiKey.hasPrefix("NOT_CONFIGURED"),
-              let analyticsEnabled = dictionary["IS_ANALYTICS_ENABLED"] as? Bool,
-              analyticsEnabled else {
+              !apiKey.hasPrefix("NOT_CONFIGURED") else {
             return false
         }
 
