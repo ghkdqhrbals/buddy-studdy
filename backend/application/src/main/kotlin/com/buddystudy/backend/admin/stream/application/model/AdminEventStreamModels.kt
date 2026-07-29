@@ -57,6 +57,20 @@ data class AdminStreamPendingEntry(
     val retryCount: Long,
 )
 
+data class AdminStreamInboxAttempt(
+    val id: Long,
+    val eventId: String,
+    val consumerGroup: String,
+    val correlationId: String,
+    val attempt: Int,
+    val status: String,
+    val errorType: String?,
+    val errorMessage: String?,
+    val startedAt: Instant,
+    val finishedAt: Instant?,
+    val durationMs: Long?,
+)
+
 data class AdminStreamEntry(
     val id: String,
     val eventType: String?,

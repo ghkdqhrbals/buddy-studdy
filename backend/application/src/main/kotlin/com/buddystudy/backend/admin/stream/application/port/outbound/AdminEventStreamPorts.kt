@@ -4,6 +4,7 @@ import com.buddystudy.backend.admin.stream.application.model.AdminCursorPage
 import com.buddystudy.backend.admin.stream.application.model.AdminPushOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminRedisEventOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamEntry
+import com.buddystudy.backend.admin.stream.application.model.AdminStreamInboxAttempt
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamPendingEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamTopicSummary
 
@@ -40,4 +41,14 @@ interface AdminOutboxInspectionPort {
         limit: Int,
         status: String?,
     ): AdminCursorPage<AdminPushOutboxEntry>
+}
+
+interface AdminStreamInboxInspectionPort {
+    suspend fun attempts(
+        cursor: Long?,
+        limit: Int,
+        consumerGroup: String?,
+        status: String?,
+        query: String?,
+    ): AdminCursorPage<AdminStreamInboxAttempt>
 }

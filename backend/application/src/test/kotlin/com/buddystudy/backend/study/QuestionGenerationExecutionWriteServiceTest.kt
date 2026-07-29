@@ -48,8 +48,12 @@ class QuestionGenerationExecutionWriteServiceTest {
                 now,
             ),
         ).thenReturn(true)
-        Mockito.`when`(inbox.markSucceeded(firstClaim, now)).thenReturn(true)
-        Mockito.`when`(inbox.markSucceeded(duplicateClaim, now)).thenReturn(true)
+        Mockito.`when`(
+            inbox.markFailed(firstClaim, "QUESTION_GENERATION_FAILED", "Generation failed.", now),
+        ).thenReturn(true)
+        Mockito.`when`(
+            inbox.markFailed(duplicateClaim, "QUESTION_GENERATION_FAILED", "Generation failed.", now),
+        ).thenReturn(true)
 
         writer.fail(
             event,
@@ -86,11 +90,18 @@ class QuestionGenerationExecutionWriteServiceTest {
         val memberships = Mockito.mock(QuestionMembershipPort::class.java)
         val writer = writer(sagas, inbox, memberships)
         val claim = StreamInboxClaim("event-1", "generation", "claim-1", 1)
-        Mockito.`when`(inbox.releaseForRetry(claim, "Temporary failure", now)).thenReturn(true)
+        Mockito.`when`(
+            inbox.releaseForRetry(claim, "QUESTION_GENERATION_FAILED", "Temporary failure", now),
+        ).thenReturn(true)
 
         writer.retry(claim, "Temporary failure", now)
 
-        Mockito.verify(inbox).releaseForRetry(claim, "Temporary failure", now)
+        Mockito.verify(inbox).releaseForRetry(
+            claim,
+            "QUESTION_GENERATION_FAILED",
+            "Temporary failure",
+            now,
+        )
         Mockito.verifyNoInteractions(memberships)
         Mockito.verifyNoInteractions(sagas)
     }

@@ -9,6 +9,7 @@ import com.buddystudy.backend.localization.application.port.ProcessContentTransl
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.StreamInboxPort
 import com.buddystudy.study.domain.entity.QuestionEntity
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.time.Duration
 import java.time.Instant
@@ -21,6 +22,8 @@ class ContentTranslationProcessor(
     private val translator: ContentTranslationPort,
     private val inbox: StreamInboxPort,
 ) : ProcessContentTranslationUseCase {
+    private val log = LoggerFactory.getLogger(javaClass)
+
     override suspend fun process(event: ContentTranslationRequestedEvent) {
         val claim = inbox.claim(
             event.eventId,
@@ -40,12 +43,37 @@ class ContentTranslationProcessor(
             }
             check(inbox.markSucceeded(claim, Instant.now()))
         } catch (error: Exception) {
+            val errorType = error.javaClass.name
+            val errorMessage = error.message ?: error.javaClass.simpleName
+            val now = Instant.now()
             if (claim.attempt < MAX_ATTEMPTS) {
-                check(inbox.releaseForRetry(claim, error.message ?: error.javaClass.simpleName, Instant.now()))
+                check(inbox.releaseForRetry(claim, errorType, errorMessage, now))
+                log.warn(
+                    "content_translation_retry_scheduled eventId={} contentType={} contentId={} targetLanguage={} attempt={} maxAttempts={} errorType={} error={}",
+                    event.eventId,
+                    event.contentType,
+                    event.contentId,
+                    event.targetLanguage,
+                    claim.attempt,
+                    MAX_ATTEMPTS,
+                    errorType,
+                    errorMessage,
+                )
                 throw error
             }
-            localizations.markFailed(event, error.message ?: error.javaClass.simpleName, Instant.now())
-            check(inbox.markSucceeded(claim, Instant.now()))
+            localizations.markFailed(event, errorMessage, now)
+            check(inbox.markFailed(claim, errorType, errorMessage, now))
+            log.error(
+                "content_translation_terminal_failure eventId={} contentType={} contentId={} targetLanguage={} attempt={} maxAttempts={} errorType={} error={}",
+                event.eventId,
+                event.contentType,
+                event.contentId,
+                event.targetLanguage,
+                claim.attempt,
+                MAX_ATTEMPTS,
+                errorType,
+                errorMessage,
+            )
         }
     }
 

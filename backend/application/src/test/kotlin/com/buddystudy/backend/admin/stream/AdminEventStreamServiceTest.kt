@@ -6,9 +6,11 @@ import com.buddystudy.backend.admin.stream.application.model.AdminRedisEventOutb
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamGroupSummary
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamPendingEntry
+import com.buddystudy.backend.admin.stream.application.model.AdminStreamInboxAttempt
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamTopicSummary
 import com.buddystudy.backend.admin.stream.application.port.outbound.AdminOutboxInspectionPort
 import com.buddystudy.backend.admin.stream.application.port.outbound.AdminRedisStreamInspectionPort
+import com.buddystudy.backend.admin.stream.application.port.outbound.AdminStreamInboxInspectionPort
 import com.buddystudy.backend.admin.stream.application.service.AdminEventStreamService
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -18,7 +20,8 @@ import org.junit.jupiter.api.Test
 class AdminEventStreamServiceTest {
     private val streams = RecordingStreamPort()
     private val outboxes = RecordingOutboxPort()
-    private val service = AdminEventStreamService(streams, outboxes)
+    private val inbox = RecordingInboxPort()
+    private val service = AdminEventStreamService(streams, outboxes, inbox)
 
     @Test
     fun `stream cursor filters and limits are normalized`(): Unit = runBlocking {
@@ -134,6 +137,27 @@ class AdminEventStreamServiceTest {
         }.hasMessage("Redis Stream consumer group is required.")
     }
 
+    @Test
+    fun `inbox attempt filters normalize status query and cursor`(): Unit = runBlocking {
+        service.inboxAttempts(
+            cursor = "92",
+            limit = 500,
+            consumerGroup = " bs-backend-content-translation ",
+            status = " failed ",
+            query = " validation ",
+        )
+
+        assertThat(inbox.request).isEqualTo(
+            InboxRequest(
+                cursor = 92,
+                limit = 100,
+                consumerGroup = "bs-backend-content-translation",
+                status = "FAILED",
+                query = "validation",
+            ),
+        )
+    }
+
     private class RecordingStreamPort : AdminRedisStreamInspectionPort {
         var request: StreamRequest? = null
         var entryRequest: Pair<String, String>? = null
@@ -193,6 +217,21 @@ class AdminEventStreamServiceTest {
         }
     }
 
+    private class RecordingInboxPort : AdminStreamInboxInspectionPort {
+        var request: InboxRequest? = null
+
+        override suspend fun attempts(
+            cursor: Long?,
+            limit: Int,
+            consumerGroup: String?,
+            status: String?,
+            query: String?,
+        ): AdminCursorPage<AdminStreamInboxAttempt> {
+            request = InboxRequest(cursor, limit, consumerGroup, status, query)
+            return AdminCursorPage(emptyList(), null, false, limit)
+        }
+    }
+
     private data class StreamRequest(
         val topic: String,
         val cursor: String?,
@@ -218,6 +257,14 @@ class AdminEventStreamServiceTest {
         val cursor: Long?,
         val limit: Int,
         val status: String?,
+    )
+
+    private data class InboxRequest(
+        val cursor: Long?,
+        val limit: Int,
+        val consumerGroup: String?,
+        val status: String?,
+        val query: String?,
     )
 
     private fun topic(topic: String, key: String, group: String? = null) =

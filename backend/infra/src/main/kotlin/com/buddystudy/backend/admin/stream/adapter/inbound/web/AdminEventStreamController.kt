@@ -5,6 +5,7 @@ import com.buddystudy.backend.admin.stream.application.model.AdminCursorPage
 import com.buddystudy.backend.admin.stream.application.model.AdminPushOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminRedisEventOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamEntry
+import com.buddystudy.backend.admin.stream.application.model.AdminStreamInboxAttempt
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamPendingEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamTopicSummary
 import com.buddystudy.backend.admin.stream.application.port.inbound.AdminEventStreamUseCase
@@ -56,6 +57,24 @@ class AdminEventStreamController(
     ): AdminCursorPage<AdminStreamPendingEntry> =
         streams.pending(authorization.adminBearerToken(), topic, group, cursor, limit)
 
+    @GetMapping("/inbox/attempts")
+    suspend fun inboxAttempts(
+        @RequestHeader("Authorization") authorization: String?,
+        @RequestParam(required = false) cursor: String?,
+        @RequestParam(defaultValue = "20") limit: Int,
+        @RequestParam(required = false) consumerGroup: String?,
+        @RequestParam(required = false) status: String?,
+        @RequestParam(required = false) query: String?,
+    ): AdminCursorPage<AdminStreamInboxAttempt> =
+        streams.inboxAttempts(
+            authorization.adminBearerToken(),
+            cursor,
+            limit,
+            consumerGroup,
+            status,
+            query,
+        )
+
     @GetMapping("/outboxes/events")
     suspend fun eventOutbox(
         @RequestHeader("Authorization") authorization: String?,
@@ -96,6 +115,15 @@ interface AdminEventStreamWebPort {
         cursor: String?,
         limit: Int,
     ): AdminCursorPage<AdminStreamPendingEntry>
+
+    suspend fun inboxAttempts(
+        adminToken: String,
+        cursor: String?,
+        limit: Int,
+        consumerGroup: String?,
+        status: String?,
+        query: String?,
+    ): AdminCursorPage<AdminStreamInboxAttempt>
 
     suspend fun eventOutbox(
         adminToken: String,
@@ -148,6 +176,18 @@ class AdminEventStreamWebAdapter(
     ): AdminCursorPage<AdminStreamPendingEntry> {
         authentication.validate(adminToken)
         return streams.pendingEntries(topic, group, cursor, limit)
+    }
+
+    override suspend fun inboxAttempts(
+        adminToken: String,
+        cursor: String?,
+        limit: Int,
+        consumerGroup: String?,
+        status: String?,
+        query: String?,
+    ): AdminCursorPage<AdminStreamInboxAttempt> {
+        authentication.validate(adminToken)
+        return streams.inboxAttempts(cursor, limit, consumerGroup, status, query)
     }
 
     override suspend fun eventOutbox(

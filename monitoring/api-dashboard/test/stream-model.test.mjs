@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   streamEntriesPath,
   streamEntryPath,
+  streamInboxAttemptsPath,
   streamPendingPath,
   isRedisStreamId,
 } from "../src/lib/streamPaths.js";
@@ -34,5 +35,15 @@ test("entry paths preserve cursor pagination and filters", () => {
       limit: 20,
     }),
     "/event-streams/topics/question%20events/groups/grading%20workers/pending?limit=20&cursor=1785000998000-4",
+  );
+  assert.equal(
+    streamInboxAttemptsPath({
+      cursor: "92",
+      limit: 20,
+      consumerGroup: "grading workers",
+      status: "FAILED",
+      query: "validation",
+    }),
+    "/event-streams/inbox/attempts?limit=20&cursor=92&consumerGroup=grading+workers&status=FAILED&query=validation",
   );
 });

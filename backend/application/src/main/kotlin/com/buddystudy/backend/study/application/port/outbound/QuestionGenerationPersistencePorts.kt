@@ -34,5 +34,17 @@ interface StreamInboxPort {
     ): StreamInboxClaim?
 
     suspend fun markSucceeded(claim: StreamInboxClaim, now: Instant): Boolean
-    suspend fun releaseForRetry(claim: StreamInboxClaim, error: String, now: Instant): Boolean
+    suspend fun releaseForRetry(
+        claim: StreamInboxClaim,
+        errorType: String,
+        errorMessage: String,
+        now: Instant,
+    ): Boolean
+
+    suspend fun markFailed(
+        claim: StreamInboxClaim,
+        errorType: String,
+        errorMessage: String,
+        now: Instant,
+    ): Boolean
 }

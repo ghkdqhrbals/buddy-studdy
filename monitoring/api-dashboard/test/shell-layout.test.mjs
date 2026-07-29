@@ -97,6 +97,11 @@ test("Redis Stream administration lives in monitoring Manage with bounded cursor
   assert.match(page, /ObjectInspector/);
   assert.match(paths, /streamEntriesPath/);
   assert.match(paths, /streamEntryPath/);
+  const delivery = await source("components/StreamDeliveryDashboard.jsx");
+  assert.match(delivery, /Inbox processing history/);
+  assert.match(delivery, /streamInboxAttemptsPath/);
+  assert.match(delivery, /RETRY_SCHEDULED/);
+  assert.match(delivery, /LEASE_EXPIRED/);
   assert.doesNotMatch(page, /innerHTML/);
 });
 

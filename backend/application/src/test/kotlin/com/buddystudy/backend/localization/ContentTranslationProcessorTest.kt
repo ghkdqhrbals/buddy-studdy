@@ -131,12 +131,92 @@ class ContentTranslationProcessorTest {
         assertThat(correlationId).isNotEqualTo(event.eventId)
         Unit
     }
+
+    @Test
+    fun `retryable translation failure records the failed attempt before redis redelivery`() = runBlocking {
+        val question = question()
+        val questions = Mockito.mock(QuestionPort::class.java)
+        Mockito.`when`(questions.findQuestionById(question.id)).thenReturn(question)
+        val inbox = RecordingStreamInbox(shouldClaim = true, attempt = 1)
+        val processor = ContentTranslationProcessor(
+            questions = questions,
+            comments = Mockito.mock(QuestionCommentPort::class.java),
+            localizations = EmptyContentLocalizationPort(),
+            translator = FailingContentTranslator(),
+            inbox = inbox,
+        )
+
+        val failure = runCatching {
+            processor.process(questionEvent(question))
+        }.exceptionOrNull()
+
+        assertThat(failure).isInstanceOf(IllegalStateException::class.java)
+            .hasMessage("translation provider unavailable")
+        assertThat(inbox.retryFailures).containsExactly(
+            IllegalStateException::class.java.name to "translation provider unavailable",
+        )
+        assertThat(inbox.terminalFailures).isEmpty()
+        Unit
+    }
+
+    @Test
+    fun `third translation failure is persisted as a terminal inbox failure`() = runBlocking {
+        val question = question()
+        val questions = Mockito.mock(QuestionPort::class.java)
+        Mockito.`when`(questions.findQuestionById(question.id)).thenReturn(question)
+        val inbox = RecordingStreamInbox(shouldClaim = true, attempt = 3)
+        var localizationFailure: String? = null
+        val localizations = object : EmptyContentLocalizationPort() {
+            override suspend fun markFailed(
+                event: ContentTranslationRequestedEvent,
+                error: String,
+                now: Instant,
+            ) {
+                localizationFailure = error
+            }
+        }
+        val processor = ContentTranslationProcessor(
+            questions = questions,
+            comments = Mockito.mock(QuestionCommentPort::class.java),
+            localizations = localizations,
+            translator = FailingContentTranslator(),
+            inbox = inbox,
+        )
+
+        processor.process(questionEvent(question))
+
+        assertThat(localizationFailure).isEqualTo("translation provider unavailable")
+        assertThat(inbox.retryFailures).isEmpty()
+        assertThat(inbox.terminalFailures).containsExactly(
+            IllegalStateException::class.java.name to "translation provider unavailable",
+        )
+        Unit
+    }
+
+    private fun question() = QuestionEntity(
+        id = 58,
+        topic = "MySQL",
+        question = "인덱스를 설명하세요.",
+        sourceLanguage = "ko",
+    )
+
+    private fun questionEvent(question: QuestionEntity) = ContentTranslationRequestedEvent(
+        eventId = "content-translation-question-${question.id}-en-${ContentLocalizationService.recordHashes(question).question}",
+        contentType = LocalizableContentType.QUESTION,
+        contentId = question.id,
+        targetLanguage = "en",
+        sourceHash = ContentLocalizationService.recordHashes(question).question,
+        requestedAt = Instant.parse("2026-07-28T00:00:00Z"),
+    )
 }
 
 private class RecordingStreamInbox(
     private val shouldClaim: Boolean = false,
+    private val attempt: Int = 1,
 ) : StreamInboxPort {
     val correlationIds = mutableListOf<String>()
+    val retryFailures = mutableListOf<Pair<String, String>>()
+    val terminalFailures = mutableListOf<Pair<String, String>>()
 
     override suspend fun claim(
         eventId: String,
@@ -147,7 +227,7 @@ private class RecordingStreamInbox(
     ): StreamInboxClaim? {
         correlationIds += correlationId
         return if (shouldClaim) {
-            StreamInboxClaim(eventId, consumerGroup, "claim-token", 1)
+            StreamInboxClaim(eventId, consumerGroup, "claim-token", attempt)
         } else {
             null
         }
@@ -155,7 +235,25 @@ private class RecordingStreamInbox(
 
     override suspend fun markSucceeded(claim: StreamInboxClaim, now: Instant) = true
 
-    override suspend fun releaseForRetry(claim: StreamInboxClaim, error: String, now: Instant) = true
+    override suspend fun releaseForRetry(
+        claim: StreamInboxClaim,
+        errorType: String,
+        errorMessage: String,
+        now: Instant,
+    ): Boolean {
+        retryFailures += errorType to errorMessage
+        return true
+    }
+
+    override suspend fun markFailed(
+        claim: StreamInboxClaim,
+        errorType: String,
+        errorMessage: String,
+        now: Instant,
+    ): Boolean {
+        terminalFailures += errorType to errorMessage
+        return true
+    }
 }
 
 private class RecordingContentTranslator : ContentTranslationPort {
@@ -175,5 +273,15 @@ private class RecordingContentTranslator : ContentTranslationPort {
             fields = fields.mapValues { (_, value) -> value?.let { "translated:$it" } },
             provider = "test",
         )
+    }
+}
+
+private class FailingContentTranslator : ContentTranslationPort {
+    override suspend fun translate(
+        fields: Map<String, String?>,
+        sourceLanguages: Map<String, String>,
+        targetLanguage: String,
+    ): ContentTranslationResult {
+        throw IllegalStateException("translation provider unavailable")
     }
 }

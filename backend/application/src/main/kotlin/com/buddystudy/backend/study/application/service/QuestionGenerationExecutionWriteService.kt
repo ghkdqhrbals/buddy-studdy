@@ -121,7 +121,7 @@ class QuestionGenerationExecutionWriteService(
 
     @Transactional
     override suspend fun retry(claim: StreamInboxClaim, error: String, now: Instant) {
-        check(inbox.releaseForRetry(claim, error, now)) {
+        check(inbox.releaseForRetry(claim, "QUESTION_GENERATION_FAILED", error, now)) {
             "Question generation Inbox claim was lost before retry."
         }
     }
@@ -150,7 +150,7 @@ class QuestionGenerationExecutionWriteService(
                 questionKeys.releaseQuestionReservation(saga.userId, saga.quotaPeriodStartedAt, now)
             }
         }
-        check(inbox.markSucceeded(claim, now)) {
+        check(inbox.markFailed(claim, errorCode, errorMessage, now)) {
             "Question generation Inbox claim was lost before terminal failure."
         }
     }

@@ -112,8 +112,10 @@ Sources:
 1. Redis Stream: topic length, configured maximum, first/last ID, consumer
    groups, last-delivered offset, entries read, lag, pending range, oldest
    pending age, per-consumer ownership/idle time, retry count, and entries.
-2. Event outbox: durable `redis_event_outbox` rows.
-3. Push outbox: durable `question_push_outbox` rows.
+2. Consumer Inbox: current state in `stream_consumer_inbox` and one durable
+   lifecycle row per processing attempt in `stream_consumer_inbox_attempts`.
+3. Event outbox: durable `redis_event_outbox` rows.
+4. Push outbox: durable `question_push_outbox` rows.
 
 All lists use cursor pagination with a bounded `limit` of 1 to 100.
 
@@ -136,6 +138,7 @@ GET /api/v1/admin/event-streams/topics?query={topic-or-key}
 GET /api/v1/admin/event-streams/topics/{topic}/entries
 GET /api/v1/admin/event-streams/topics/{topic}/entries/{entryId}
 GET /api/v1/admin/event-streams/topics/{topic}/groups/{group}/pending
+GET /api/v1/admin/event-streams/inbox/attempts
 GET /api/v1/admin/event-streams/outboxes/events
 GET /api/v1/admin/event-streams/outboxes/pushes
 ```
@@ -174,10 +177,27 @@ per managed stream before reporting one row per Redis consumer group:
 - **Retries**: `deliveryCount - 1`; the first delivery is not a retry.
 
 Selecting a group shows its active consumers and a cursor-paginated pending
-entry list. The overview samples at most the first 100 pending entries to avoid
-an unbounded Redis read. When a group has more pending entries, the maximum
-retry value is marked with `+` and is a sampled lower bound; the paginated
-pending list remains exact for each displayed entry.
+entry list. It also shows the durable **Inbox processing history**, searchable
+by event ID, correlation ID, exception type, or error message. The history can
+be filtered by:
+
+- `PROCESSING`: the current lease is active.
+- `RETRY_SCHEDULED`: this attempt failed and Redis may redeliver it.
+- `LEASE_EXPIRED`: the worker did not complete before another worker reclaimed
+  the database lease.
+- `SUCCEEDED`: the attempt completed and may be acknowledged.
+- `FAILED`: the retry budget was exhausted; the Inbox row is terminal and the
+  event cannot be claimed again by that consumer group.
+
+Each attempt stores its start and finish time, duration, failure classification,
+and bounded failure message. The current Inbox row remains the idempotency and
+lease-fencing record; the attempt table is the audit trail and is not used as a
+message broker.
+
+The overview samples at most the first 100 pending entries to avoid an
+unbounded Redis read. When a group has more pending entries, the maximum retry
+value is marked with `+` and is a sampled lower bound; the paginated pending
+list remains exact for each displayed entry.
 
 Stream, group, pending-summary, pending-range, and consumer inspection are
 isolated operations. A failure in one command is returned as `Partial data`
@@ -201,7 +221,12 @@ Investigate when any of these conditions hold:
 - A consumer group's pending count grows across refreshes.
 - Event or push outbox rows remain `PENDING`/`PROCESSING`.
 - Attempts or `lastError` increase.
+- Inbox attempts remain `PROCESSING`, become `LEASE_EXPIRED`, or end in
+  `FAILED`.
 - Published database rows do not appear in the Redis stream.
 
 Start from the durable outbox row, correlate its event or record ID with the
-Redis entry, then inspect the relevant consumer group's pending count.
+Redis entry, then inspect the relevant consumer group's pending count and Inbox
+processing history. For a terminal failure, search its event ID and use the
+stored exception type/message to distinguish provider failure, invalid payload,
+and exhausted retry budget.

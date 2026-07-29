@@ -11,8 +11,8 @@ import { adminFetch } from "../admin/adminApi.js";
 import {
   DataTable,
   Pagination,
-  SearchField,
   StatusBadge,
+  SearchField,
 } from "./AdminUI.jsx";
 import { Button } from "./Button.jsx";
 import { InlineNotice } from "./InlineNotice.jsx";
@@ -27,9 +27,11 @@ import {
   streamRetention,
   summarizeStreamHealth,
 } from "../lib/streamHealth.js";
-import { streamPendingPath } from "../lib/streamPaths.js";
+import { formatDateTime, formatDuration, statusTone } from "../lib/format.js";
+import { streamInboxAttemptsPath, streamPendingPath } from "../lib/streamPaths.js";
 
 const PENDING_PAGE_SIZE = 20;
+const INBOX_PAGE_SIZE = 20;
 
 function number(value) {
   return Number(value || 0).toLocaleString();
@@ -184,6 +186,126 @@ function PendingList({ topic, group }) {
   );
 }
 
+function InboxAttemptList({ group }) {
+  const [cursorStack, setCursorStack] = useState([""]);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [status, setStatus] = useState("");
+  const [search, setSearch] = useState("");
+  const [queryValue, setQueryValue] = useState("");
+  const cursor = cursorStack[pageIndex] || "";
+  const query = useQuery({
+    queryKey: ["admin", "stream-inbox-attempts", group, status, queryValue, cursor],
+    queryFn: () => adminFetch(streamInboxAttemptsPath({
+      cursor,
+      limit: INBOX_PAGE_SIZE,
+      consumerGroup: group,
+      status,
+      query: queryValue,
+    })),
+    enabled: Boolean(group),
+    refetchInterval: 5_000,
+  });
+  const rows = Array.isArray(query.data?.items) ? query.data.items : [];
+
+  function resetPage() {
+    setCursorStack([""]);
+    setPageIndex(0);
+  }
+
+  function next() {
+    if (!query.data?.nextCursor) return;
+    setCursorStack((current) => {
+      const nextStack = [...current];
+      nextStack[pageIndex + 1] = query.data.nextCursor;
+      return nextStack;
+    });
+    setPageIndex((value) => value + 1);
+  }
+
+  return (
+    <section className="stream-subsection stream-inbox-history">
+      <div className="stream-subsection-heading stream-inbox-heading">
+        <div>
+          <h4>Inbox processing history</h4>
+          <p>Durable consumer attempts, retries, terminal failures, and completion time.</p>
+        </div>
+        <div className="stream-inbox-controls">
+          <SearchField
+            value={search}
+            onChange={setSearch}
+            onSubmit={() => {
+              setQueryValue(search.trim());
+              resetPage();
+            }}
+            label={`${group} inbox search`}
+            placeholder="Event ID, correlation ID, or error"
+          />
+          <label className="field compact-field">
+            <span>Status</span>
+            <select
+              value={status}
+              onChange={(event) => {
+                setStatus(event.target.value);
+                resetPage();
+              }}
+            >
+              <option value="">All</option>
+              <option value="FAILED">Failed</option>
+              <option value="RETRY_SCHEDULED">Retry scheduled</option>
+              <option value="LEASE_EXPIRED">Lease expired</option>
+              <option value="PROCESSING">Processing</option>
+              <option value="SUCCEEDED">Succeeded</option>
+            </select>
+          </label>
+          <Button
+            variant="ghost"
+            icon={RefreshCw}
+            onClick={() => query.refetch()}
+            disabled={query.isFetching}
+          >
+            Refresh
+          </Button>
+        </div>
+      </div>
+      {query.error ? <InlineNotice tone="danger">{query.error.message}</InlineNotice> : null}
+      <DataTable
+        columns={[
+          { key: "eventId", label: "Event ID", className: "mono" },
+          { key: "attempt", label: "Attempt", render: (row) => number(row.attempt) },
+          {
+            key: "status",
+            label: "Outcome",
+            render: (row) => <StatusBadge tone={statusTone(row.status)}>{row.status}</StatusBadge>,
+          },
+          {
+            key: "errorType",
+            label: "Failure",
+            render: (row) => (
+              <span className="stream-inbox-error" title={row.errorMessage || ""}>
+                <strong>{row.errorType?.split(".").at(-1) || "-"}</strong>
+                {row.errorMessage ? <small>{row.errorMessage}</small> : null}
+              </span>
+            ),
+          },
+          { key: "durationMs", label: "Duration", render: (row) => formatDuration(row.durationMs) },
+          { key: "startedAt", label: "Started", render: (row) => formatDateTime(row.startedAt) },
+        ]}
+        rows={rows}
+        rowKey={(row) => row.id}
+        emptyText="No Inbox processing attempts have been recorded for this group."
+        loading={query.isLoading}
+      />
+      <Pagination
+        page={pageIndex + 1}
+        label={`${rows.length} attempts on this page`}
+        hasNext={Boolean(query.data?.hasMore && query.data?.nextCursor)}
+        onPrevious={() => setPageIndex((value) => Math.max(0, value - 1))}
+        onNext={next}
+      />
+    </section>
+  );
+}
+
 function GroupDetails({ topic, group }) {
   const activity = latestConsumerActivity(group);
   const errors = [
@@ -223,6 +345,7 @@ function GroupDetails({ topic, group }) {
       </div>
       <InspectionErrors errors={errors} />
       <ConsumerList consumers={group.consumerDetails} />
+      <InboxAttemptList group={group.name} />
       {Number(group.pending || 0) > 0 ? (
         <PendingList key={`${topic.topic}:${group.name}`} topic={topic.topic} group={group.name} />
       ) : (

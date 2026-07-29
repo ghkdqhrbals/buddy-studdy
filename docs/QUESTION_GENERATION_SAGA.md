@@ -88,11 +88,27 @@ One row represents one event as observed by one consumer group.
 - `claim_token` fences an expired worker from completing a lease now owned by
   another worker.
 - `attempts` increments only when a new lease is acquired.
-- `SUCCEEDED` is terminal for that group.
+- `SUCCEEDED` and `FAILED` are terminal for that group.
 - Two different groups may claim the same event ID independently.
 
 This is why group state is not stored as one column on the Saga row. Inbox owns
 delivery attempts; Saga owns the business process.
+
+### `stream_consumer_inbox_attempts`
+
+One durable audit row represents one acquired Inbox lease.
+
+- Unique key: `(event_id, consumer_group, attempt)`
+- `PROCESSING` becomes `SUCCEEDED`, `RETRY_SCHEDULED`, or `FAILED`.
+- A stale unfinished attempt becomes `LEASE_EXPIRED` when the next worker
+  acquires the lease.
+- Failure rows keep the exception classification and a bounded message for
+  operator diagnosis.
+
+The current Inbox row prevents duplicate business processing. Attempt history
+explains how the event reached that current state and is exposed under
+Monitoring `Manage > Redis Streams > Consumer group > Inbox processing
+history`.
 
 ## Event And Transaction Sequence
 
@@ -176,10 +192,10 @@ column.
 - Redis pending recovery starts only after 210 seconds. This is intentionally
   longer than the database lease, preventing Redis from transferring a message
   while the original database claim is still valid.
-- A retryable failure releases the Inbox lease immediately and leaves quota
-  reserved.
+- A retryable failure records `RETRY_SCHEDULED`, releases the Inbox lease
+  immediately, and leaves quota reserved.
 - After the retry limit, the worker marks the Saga `FAILED`, records the failed
-  step, compensates quota once, and closes the Inbox entry.
+  step, compensates quota once, and closes the Inbox entry as `FAILED`.
 - Translation terminal failure also soft-deletes the unusable question.
 - A duplicate terminal-failure call sees the terminal Saga and cannot refund
   quota again.

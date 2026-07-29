@@ -126,7 +126,7 @@ class QuestionTranslationExecutionWriteService(
 
     @Transactional
     override suspend fun retry(claim: StreamInboxClaim, error: String, now: Instant) {
-        check(inbox.releaseForRetry(claim, error, now)) {
+        check(inbox.releaseForRetry(claim, "QUESTION_TRANSLATION_FAILED", error, now)) {
             "Question translation Inbox claim was lost before retry."
         }
     }
@@ -155,7 +155,7 @@ class QuestionTranslationExecutionWriteService(
                 questionKeys.releaseQuestionReservation(saga.userId, saga.quotaPeriodStartedAt, now)
             }
         }
-        check(inbox.markSucceeded(claim, now)) {
+        check(inbox.markFailed(claim, "QUESTION_TRANSLATION_FAILED", errorMessage, now)) {
             "Question translation Inbox claim was lost before terminal failure."
         }
     }

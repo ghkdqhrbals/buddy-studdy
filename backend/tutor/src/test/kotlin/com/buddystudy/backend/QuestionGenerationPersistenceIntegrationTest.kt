@@ -7,10 +7,12 @@ import com.buddystudy.backend.study.application.model.QuestionGenerationSource
 import com.buddystudy.backend.study.application.model.QuestionGenerationStatus
 import com.buddystudy.backend.study.application.model.QuestionGenerationStep
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.reactive.awaitSingle
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.r2dbc.core.DatabaseClient
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -27,6 +29,9 @@ class QuestionGenerationPersistenceIntegrationTest : MySqlIntegrationTestSupport
 
     @Autowired
     private lateinit var sagas: QuestionGenerationSagaRepository
+
+    @Autowired
+    private lateinit var database: DatabaseClient
 
     @Test
     fun `consumer groups deduplicate independently and recover only after the lease expires`(): Unit = runBlocking {
@@ -53,6 +58,53 @@ class QuestionGenerationPersistenceIntegrationTest : MySqlIntegrationTestSupport
 
         assertThat(inbox.markSucceeded(audit, now.plusSeconds(2))).isTrue()
         assertThat(inbox.claim(eventId, "audit", correlationId, lease, now.plusSeconds(600))).isNull()
+    }
+
+    @Test
+    fun `inbox records retry and terminal failure attempts without allowing another claim`(): Unit = runBlocking {
+        val eventId = "event-${UUID.randomUUID()}"
+        val correlationId = UUID.randomUUID().toString()
+        val now = Instant.parse("2026-07-29T00:00:00Z")
+        val group = "translation"
+        val first = checkNotNull(inbox.claim(eventId, group, correlationId, Duration.ofMinutes(3), now))
+
+        assertThat(
+            inbox.releaseForRetry(
+                first,
+                "TranslationValidationException",
+                "Question was not translated.",
+                now.plusSeconds(1),
+            ),
+        ).isTrue()
+        val second = checkNotNull(
+            inbox.claim(eventId, group, correlationId, Duration.ofMinutes(3), now.plusSeconds(2)),
+        )
+        assertThat(second.attempt).isEqualTo(2)
+        assertThat(
+            inbox.markFailed(
+                second,
+                "TranslationValidationException",
+                "Question was not translated.",
+                now.plusSeconds(3),
+            ),
+        ).isTrue()
+        assertThat(inbox.claim(eventId, group, correlationId, Duration.ofMinutes(3), now.plusSeconds(600))).isNull()
+
+        val statuses: List<String> = database.sql(
+            """
+            select status
+            from stream_consumer_inbox_attempts
+            where event_id = :eventId and consumer_group = :consumerGroup
+            order by attempt
+            """.trimIndent(),
+        )
+            .bind("eventId", eventId)
+            .bind("consumerGroup", group)
+            .map { row, _ -> row.get("status", String::class.java).orEmpty() }
+            .all()
+            .collectList()
+            .awaitSingle()
+        assertThat(statuses).containsExactly("RETRY_SCHEDULED", "FAILED")
     }
 
     @Test

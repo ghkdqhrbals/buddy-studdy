@@ -20,8 +20,8 @@ export function formatDuration(milliseconds) {
 
 export function statusTone(value) {
   const status = String(value || "").toUpperCase();
-  if (["ACTIVE", "READY", "PUBLISHED", "COMPLETED", "SUCCESS", "200"].includes(status)) return "success";
+  if (["ACTIVE", "READY", "PUBLISHED", "COMPLETED", "SUCCESS", "SUCCEEDED", "200"].includes(status)) return "success";
   if (["FAILED", "DEAD", "BLOCKED", "ERROR", "STUCK", "STALE"].includes(status) || Number(status) >= 500) return "danger";
-  if (["PENDING", "RETRY", "CLAIMED", "ANONYMOUS", "RUNNING", "SKIPPED", "DISABLED"].includes(status)) return "warning";
+  if (["PENDING", "RETRY", "RETRY_SCHEDULED", "LEASE_EXPIRED", "PROCESSING", "CLAIMED", "ANONYMOUS", "RUNNING", "SKIPPED", "DISABLED"].includes(status)) return "warning";
   return "neutral";
 }

@@ -4,11 +4,13 @@ import com.buddystudy.backend.admin.stream.application.model.AdminCursorPage
 import com.buddystudy.backend.admin.stream.application.model.AdminPushOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminRedisEventOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamEntry
+import com.buddystudy.backend.admin.stream.application.model.AdminStreamInboxAttempt
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamPendingEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamTopicSummary
 import com.buddystudy.backend.admin.stream.application.port.inbound.AdminEventStreamUseCase
 import com.buddystudy.backend.admin.stream.application.port.outbound.AdminOutboxInspectionPort
 import com.buddystudy.backend.admin.stream.application.port.outbound.AdminRedisStreamInspectionPort
+import com.buddystudy.backend.admin.stream.application.port.outbound.AdminStreamInboxInspectionPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import org.springframework.http.HttpStatus
@@ -18,6 +20,7 @@ import org.springframework.stereotype.Service
 class AdminEventStreamService(
     private val streams: AdminRedisStreamInspectionPort,
     private val outboxes: AdminOutboxInspectionPort,
+    private val inbox: AdminStreamInboxInspectionPort,
 ) : AdminEventStreamUseCase {
     override suspend fun topics(query: String?): List<AdminStreamTopicSummary> {
         val normalizedQuery = query.normalized()?.lowercase()
@@ -72,6 +75,21 @@ class AdminEventStreamService(
             )
         return streams.pending(topic, normalizedGroup, cursor.validStreamCursor(), limit.normalized())
     }
+
+    override suspend fun inboxAttempts(
+        cursor: String?,
+        limit: Int,
+        consumerGroup: String?,
+        status: String?,
+        query: String?,
+    ): AdminCursorPage<AdminStreamInboxAttempt> =
+        inbox.attempts(
+            cursor = cursor.longCursor(),
+            limit = limit.normalized(),
+            consumerGroup = consumerGroup.normalized(),
+            status = status.normalized()?.uppercase(),
+            query = query.normalized(),
+        )
 
     override suspend fun redisEventOutbox(
         cursor: String?,
