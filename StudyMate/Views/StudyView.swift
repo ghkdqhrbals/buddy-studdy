@@ -494,6 +494,20 @@ struct MarkdownMessageText: View {
     }
 }
 
+enum ConversationBubblePalette {
+    static var incomingBackground: Color {
+        #if os(iOS)
+        Color(uiColor: .systemGray5)
+        #elseif os(macOS)
+        Color(nsColor: .controlBackgroundColor)
+        #else
+        Color.secondary.opacity(0.14)
+        #endif
+    }
+
+    static let incomingBorder = Color.clear
+}
+
 struct CompactMessageLayout: Layout {
     var minimumWidth: CGFloat = 44
     var maximumWidth: CGFloat = 280
@@ -688,22 +702,22 @@ private enum StudyChatBubbleRole: Equatable {
     var bubbleColor: Color {
         switch self {
         case .tutor:
-            Color.secondary.opacity(0.08)
+            ConversationBubblePalette.incomingBackground
         case .learnerInput, .learnerAnswer:
             Color.clear
         case .feedback:
-            Color.secondary.opacity(0.08)
+            ConversationBubblePalette.incomingBackground
         }
     }
 
     var borderColor: Color {
         switch self {
         case .tutor:
-            Color.secondary.opacity(0.12)
+            ConversationBubblePalette.incomingBorder
         case .learnerInput, .learnerAnswer:
             Color.clear
         case .feedback:
-            Color.secondary.opacity(0.12)
+            ConversationBubblePalette.incomingBorder
         }
     }
 }

@@ -741,11 +741,11 @@ private enum RecordChatBubbleRole {
     var fill: Color {
         switch self {
         case .question:
-            Color.secondary.opacity(0.08)
+            ConversationBubblePalette.incomingBackground
         case .answer:
             Color.green.opacity(0.92)
         case .feedback:
-            Color.secondary.opacity(0.08)
+            ConversationBubblePalette.incomingBackground
         case .input:
             Color.clear
         }
@@ -754,7 +754,7 @@ private enum RecordChatBubbleRole {
     var border: Color {
         switch self {
         case .question, .feedback:
-            Color.secondary.opacity(0.12)
+            ConversationBubblePalette.incomingBorder
         default:
             Color.clear
         }

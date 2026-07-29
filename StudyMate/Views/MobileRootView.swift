@@ -8149,11 +8149,11 @@ private enum CommunityMessageBubbleRole: Equatable {
     var foregroundBackground: Color {
         switch self {
         case .question:
-            Color.secondary.opacity(0.08)
+            ConversationBubblePalette.incomingBackground
         case .answer:
             Color.green.opacity(0.92)
         case .feedback:
-            Color.secondary.opacity(0.08)
+            ConversationBubblePalette.incomingBackground
         }
     }
 
@@ -8162,7 +8162,7 @@ private enum CommunityMessageBubbleRole: Equatable {
         case .answer:
             Color.clear
         case .question, .feedback:
-            Color.secondary.opacity(0.12)
+            ConversationBubblePalette.incomingBorder
         }
     }
 }
