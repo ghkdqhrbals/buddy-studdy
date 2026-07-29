@@ -620,6 +620,18 @@ private extension NotificationSoundOption {
     }
 }
 
+private final class NotificationResponseCompletion: @unchecked Sendable {
+    private let handler: () -> Void
+
+    init(_ handler: @escaping () -> Void) {
+        self.handler = handler
+    }
+
+    func callAsFunction() {
+        handler()
+    }
+}
+
 final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     nonisolated(unsafe) static let shared = StudyNotificationDelegate()
 
@@ -843,14 +855,13 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
             actionIdentifier: actionIdentifier
         )
         let payloadKeySummary = StudyNotificationPayload.keySummary(from: userInfo)
+        let completion = NotificationResponseCompletion(completionHandler)
         Task { @MainActor in
             StudyNotificationDelegate.shared.logEvent(
                 "push_response_received action=\(actionIdentifier), openStudy=\(shouldOpenStudy), recordID=\(recordID ?? "-"), keys=\(payloadKeySummary)"
             )
-        }
 
-        if !StudyNotificationRouting.isIgnored(actionIdentifier), shouldOpenStudy {
-            Task { @MainActor in
+            if !StudyNotificationRouting.isIgnored(actionIdentifier), shouldOpenStudy {
                 if let route = StudyNotificationPayload.appRoute(from: userInfo) {
                     StudyNotificationDelegate.shared.enqueueAppRoute(route)
                 } else if recordID != nil {
@@ -869,24 +880,20 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
                         openStudy: true
                     )
                 }
+                completion()
+                return
             }
-            completionHandler()
-            return
-        }
 
-        if StudyNotificationPayload.isCloudQuestionPush(from: userInfo) {
-            Task { @MainActor in
+            if StudyNotificationPayload.isCloudQuestionPush(from: userInfo) {
                 StudyRemoteNotificationBridge.shared.enqueueNotificationResponse(
                     userInfo: userInfo,
                     actionIdentifier: actionIdentifier,
                     replyText: replyText
                 )
+                completion()
+                return
             }
-            completionHandler()
-            return
-        }
 
-        Task { @MainActor in
             StudyNotificationDelegate.shared.enqueueLocalResponse(
                 actionIdentifier: actionIdentifier,
                 recordID: recordID,
@@ -894,8 +901,8 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
                 replyText: replyText,
                 openStudy: shouldOpenStudy
             )
+            completion()
         }
-        completionHandler()
         #else
         Task { @MainActor in
             StudyNotificationDelegate.shared.handle(

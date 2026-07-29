@@ -963,6 +963,9 @@ final class StudyMateiOSAppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         SentryMonitoring.start()
+        // A notification response can arrive before the SwiftUI bootstrap task creates AppState.
+        // Install the delegate during application launch so the response is queued instead of lost.
+        StudyNotificationDelegate.shared.register()
         StudyMateBackgroundRefreshBridge.shared.register()
         return true
     }

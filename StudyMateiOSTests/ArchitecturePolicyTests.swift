@@ -2176,6 +2176,26 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testNotificationDelegateIsInstalledDuringApplicationLaunch() throws {
+        let root = try repositoryRoot()
+        let appContent = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/StudyMateiOSApp.swift"),
+            encoding: .utf8
+        )
+        let launchMethod = try XCTUnwrap(
+            appContent.range(
+                of: "didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil"
+            )
+        )
+        let launchBody = appContent[launchMethod.lowerBound...]
+        let delegateRegistration = try XCTUnwrap(
+            launchBody.range(of: "StudyNotificationDelegate.shared.register()")
+        )
+        let launchReturn = try XCTUnwrap(launchBody.range(of: "return true"))
+
+        XCTAssertLessThan(delegateRegistration.lowerBound, launchReturn.lowerBound)
+    }
+
     func testAPIValidationDecodesBackendValidFieldName() throws {
         let payload = Data(#"{"openaiKeyConfigured":true,"valid":true,"openaiModel":"gpt-5.4"}"#.utf8)
 
