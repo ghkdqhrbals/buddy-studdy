@@ -1139,6 +1139,43 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testNewStudyFormUsesBackendDefaultPromptWithoutPromptEditor() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+
+        XCTAssertTrue(
+            content.contains(
+                "if category != nil {\n                    Section(strings.relatedPrompt)"
+            ),
+            "The prompt editor should remain available only while editing an existing study; new studies use the backend default prompt."
+        )
+        XCTAssertTrue(
+            content.contains(
+                "appState.addStudyCategory(title, difficulty: difficulty, customPrompt: nil, openAIModel: model)"
+            ),
+            "The new-study form should send no prompt override so the backend chooses its default prompt."
+        )
+
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let appStateContent = try String(contentsOf: appStateFile, encoding: .utf8)
+        XCTAssertTrue(
+            appStateContent.contains(
+                "customPrompt: customPrompt ?? StudySettings.defaultCustomPrompt"
+            ),
+            "New local study state should not inherit a client-level prompt override when the API request uses the backend default."
+        )
+
+        let backendClientFile = root.appendingPathComponent("StudyMate/Services/RemotePushBackendClient.swift")
+        let backendClientContent = try String(contentsOf: backendClientFile, encoding: .utf8)
+        XCTAssertTrue(
+            backendClientContent.contains(
+                "try container.encodeNil(forKey: .customPrompt)"
+            ),
+            "Study creation must encode customPrompt as an explicit JSON null rather than omitting the key."
+        )
+    }
+
     func testSelectedStudyToolbarOffersOnlyEditAndTreeActions() throws {
         let root = try repositoryRoot()
         let file = root.appendingPathComponent("StudyMate/Views/StudyView.swift")

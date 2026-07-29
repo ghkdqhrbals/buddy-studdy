@@ -4988,7 +4988,7 @@ final class AppState: ObservableObject {
         let nextCategory = StudyCategory(
             title: raw,
             difficulty: difficulty ?? settings.difficulty,
-            customPrompt: customPrompt ?? settings.customPrompt,
+            customPrompt: customPrompt ?? StudySettings.defaultCustomPrompt,
             openAIModel: openAIModel ?? settings.sanitizedOpenAIModel
         )
         locallyDeletedStudyTopicKeys.remove(Self.normalizedCategoryText(for: raw))

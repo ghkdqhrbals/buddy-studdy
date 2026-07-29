@@ -1436,8 +1436,8 @@ private struct MobileHomeView: View {
             .environmentObject(appState)
         }
         .sheet(isPresented: $isAddingStudyCategory) {
-            StudyCategoryEditorSheet(category: nil, strings: strings, onDelete: nil) { title, difficulty, prompt, model in
-                appState.addStudyCategory(title, difficulty: difficulty, customPrompt: prompt, openAIModel: model)
+            StudyCategoryEditorSheet(category: nil, strings: strings, onDelete: nil) { title, difficulty, _, model in
+                appState.addStudyCategory(title, difficulty: difficulty, customPrompt: nil, openAIModel: model)
             }
         }
         .sheet(item: $editingStudyCategory) { category in
@@ -7444,19 +7444,21 @@ private struct StudyCategoryEditorSheet: View {
                     }
                 }
 
-                Section(strings.relatedPrompt) {
-                    Menu {
-                        ForEach(RecommendedPrompt.allCases) { prompt in
-                            Button(prompt.title(language: strings.language)) {
-                                customPrompt = prompt.text(language: strings.language)
+                if category != nil {
+                    Section(strings.relatedPrompt) {
+                        Menu {
+                            ForEach(RecommendedPrompt.allCases) { prompt in
+                                Button(prompt.title(language: strings.language)) {
+                                    customPrompt = prompt.text(language: strings.language)
+                                }
                             }
+                        } label: {
+                            Text(strings.recommendedPrompt)
                         }
-                    } label: {
-                        Text(strings.recommendedPrompt)
-                    }
 
-                    TextEditor(text: $customPrompt)
-                        .frame(minHeight: 130)
+                        TextEditor(text: $customPrompt)
+                            .frame(minHeight: 130)
+                    }
                 }
 
                 if onDelete != nil {

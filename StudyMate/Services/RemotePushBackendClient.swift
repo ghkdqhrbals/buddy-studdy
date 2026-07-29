@@ -2055,6 +2055,22 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             case openAIModel = "openaiModel"
             case maxHistoryCount
         }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(topic, forKey: .topic)
+            try container.encode(difficultyLevel, forKey: .difficultyLevel)
+            try container.encode(intervalMinutes, forKey: .intervalMinutes)
+            try container.encode(enabled, forKey: .enabled)
+            try container.encodeIfPresent(notificationSound, forKey: .notificationSound)
+            if let customPrompt {
+                try container.encode(customPrompt, forKey: .customPrompt)
+            } else {
+                try container.encodeNil(forKey: .customPrompt)
+            }
+            try container.encode(openAIModel, forKey: .openAIModel)
+            try container.encode(maxHistoryCount, forKey: .maxHistoryCount)
+        }
     }
 
     private struct CreateStudyTopicRequest: Encodable {
