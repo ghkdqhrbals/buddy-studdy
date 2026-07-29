@@ -215,6 +215,27 @@ test("server runtime dashboard separates server, database, and Redis signals", a
   );
   assert.match(panels.get("Redis activity")?.targets[0].expr ?? "", /redis_/);
   assert.match(panels.get("Redis failures")?.targets[0].expr ?? "", /failed\|retry_scheduled/);
+
+  for (const title of [
+    "Node and process CPU utilization",
+    "JVM and process memory",
+    "Runtime threads",
+    "Garbage collection",
+    "Server event loop",
+    "Root disk",
+    "Network counters",
+    "R2DBC connection pool",
+    "MySQL CPU",
+    "MySQL connections",
+  ]) {
+    for (const target of panels.get(title)?.targets ?? []) {
+      assert.match(
+        target.expr ?? "",
+        /^max\(last_over_time\(.+\)\)$/,
+        `${title} target ${target.refId} must collapse Loki stream labels into one series`,
+      );
+    }
+  }
 });
 
 test("backend deploy starts a log-only MySQL runtime collector", async () => {
