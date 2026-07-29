@@ -82,11 +82,6 @@ class ResilientQuestionTranslationAdapter(
         require(questionMatches) {
             "Translation provider did not return a question in $targetLanguage."
         }
-        content.hint?.takeIf(String::isNotBlank)?.let { hint ->
-            require(QuestionLanguage.matchesShortLabel(hint, targetLanguage)) {
-                "Translation provider did not return a hint in $targetLanguage."
-            }
-        }
     }
 
     private fun count(provider: String, outcome: String) {
