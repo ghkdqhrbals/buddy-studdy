@@ -27,14 +27,14 @@ data class NotificationRequestedPayload(
     val userId: Long? = null,
     val deviceId: String? = null,
     val actorUserId: Long? = null,
-    val type: String,
+    val type: String = "ACTIVITY",
     val title: String,
     val body: String,
     val threadType: String?,
     val threadId: String?,
     val deepLink: String?,
     val metadataJson: String?,
-    val shouldPush: Boolean,
+    val shouldPush: Boolean = false,
 )
 
 fun NotificationRequestedEvent.toRedisStreamFields(): Map<String, String> =

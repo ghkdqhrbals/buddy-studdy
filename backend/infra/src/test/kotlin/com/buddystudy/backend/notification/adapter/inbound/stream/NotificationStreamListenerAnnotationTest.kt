@@ -42,18 +42,16 @@ class NotificationStreamListenerAnnotationTest {
     }
 
     @Test
-    fun `legacy notification payload falls back to Redis envelope event id`() {
+    fun `legacy notification payload uses envelope event id and omitted field defaults`() {
         val payload = JsonMapperProvider.mapper.readValue<NotificationRequestedPayload>(
             """
             {
-              "type": "ACTIVITY",
               "title": "New answer",
               "body": "A user answered.",
               "threadType": "QUESTION",
               "threadId": "45",
               "deepLink": "buddystudy://questions/45",
-              "metadataJson": null,
-              "shouldPush": false
+              "metadataJson": null
             }
             """.trimIndent(),
         )
@@ -67,5 +65,7 @@ class NotificationStreamListenerAnnotationTest {
         )
 
         assertThat(payload.toCommand(context).eventId).isEqualTo("question-created-45")
+        assertThat(payload.toCommand(context).type).isEqualTo("ACTIVITY")
+        assertThat(payload.toCommand(context).shouldPush).isFalse()
     }
 }
