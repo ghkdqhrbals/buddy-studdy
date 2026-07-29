@@ -79,10 +79,10 @@ class LocalAwsSecretMappingTest {
             .run { context ->
                 val properties = context.getBean(BuddyStudyProperties::class.java)
 
-                assertThat(context.environment.getProperty("spring.mail.host")).isEqualTo("smtp-from-aws.example.com")
-                assertThat(context.environment.getProperty("spring.mail.port")).isEqualTo("2525")
-                assertThat(context.environment.getProperty("spring.mail.username")).isEqualTo("mailer-from-aws@example.com")
-                assertThat(context.environment.getProperty("spring.mail.password")).isEqualTo("app-password-from-aws")
+                assertThat(properties.email.host).isEqualTo("smtp-from-aws.example.com")
+                assertThat(properties.email.port).isEqualTo(2525)
+                assertThat(properties.email.username).isEqualTo("mailer-from-aws@example.com")
+                assertThat(properties.email.password).isEqualTo("app-password-from-aws")
                 assertThat(properties.email.from).isEqualTo("BuddyStudy <mailer-from-aws@example.com>")
             }
     }
@@ -101,8 +101,8 @@ class LocalAwsSecretMappingTest {
             .run { context ->
                 val properties = context.getBean(BuddyStudyProperties::class.java)
 
-                assertThat(context.environment.getProperty("spring.mail.username")).isEqualTo("mailer-from-environment@example.com")
-                assertThat(context.environment.getProperty("spring.mail.password")).isEqualTo("app-password-from-environment")
+                assertThat(properties.email.username).isEqualTo("mailer-from-environment@example.com")
+                assertThat(properties.email.password).isEqualTo("app-password-from-environment")
                 assertThat(properties.email.from).isEqualTo("mailer-from-environment@example.com")
             }
     }

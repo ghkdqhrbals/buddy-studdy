@@ -66,7 +66,14 @@ data class BuddyStudyProperties(
         var viewQueueCapacity: Int = 20_000,
         var viewPublisherConcurrency: Int = 4,
     )
-    data class Email(var verificationTtlSeconds: Long = 180, var from: String = "")
+    data class Email(
+        var verificationTtlSeconds: Long = 180,
+        var host: String = "",
+        var port: Int = 587,
+        var username: String = "",
+        var password: String = "",
+        var from: String = "",
+    )
     data class Translation(
         var baseUrl: String = "http://localhost:5001",
         var supportedLanguages: List<String> = listOf("ko", "en", "ja"),

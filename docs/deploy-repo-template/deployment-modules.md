@@ -107,13 +107,15 @@ deployment.
   Secrets Manager. The `buddystudy/prod` application secret owns
   `OPENAI_API_KEY_USER`, `OPENAI_API_KEY_SYSTEM`, `REDIS_PASSWORD`,
   `APNS_AUTH_KEY_BASE64`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`,
-  and `APNS_ENV`. The two OpenAI keys must be present and different:
+  `APNS_ENV`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, and
+  `SMTP_FROM`. The two OpenAI keys must be present and different:
   post-study topic suggestions use only the system key, while question
   generation, embeddings, translation, answer feedback, and grading use only
   the user-content key. Required values must be validated before writing the
   container env file so an optional Spring config import cannot silently start
-  a partially configured backend. APNs credentials must not be duplicated in
-  GitHub Actions Secrets.
+  a partially configured backend. SMTP values are also injected explicitly so
+  email signup cannot deploy with an empty sender. APNs and SMTP credentials
+  must not be duplicated in GitHub Actions Secrets.
 - MySQL credentials and connection URLs are owned by the
   `buddystudy/prod/mysql` secret. It contains `dbname`, `username`,
   `password`, `jdbcUrl`, and `r2dbcUrl`; the deploy workflow reads both JDBC

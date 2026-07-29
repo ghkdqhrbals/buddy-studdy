@@ -111,6 +111,17 @@ jobs:
             echo "OPENAI_API_KEY_USER and OPENAI_API_KEY_SYSTEM must be different." >&2
             exit 1
           fi
+          SMTP_HOST="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("SMTP_HOST") or "")')"
+          SMTP_PORT="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("SMTP_PORT") or "")')"
+          SMTP_USERNAME="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("SMTP_USERNAME") or "")')"
+          SMTP_PASSWORD="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("SMTP_PASSWORD") or "")')"
+          SMTP_FROM="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("SMTP_FROM") or "")')"
+          for required_smtp_key in SMTP_HOST SMTP_PORT SMTP_USERNAME SMTP_PASSWORD SMTP_FROM; do
+            if [ -z "${!required_smtp_key}" ]; then
+              echo "Missing ${required_smtp_key} in AWS Secrets Manager secret: ${APP_SECRET_ID}" >&2
+              exit 1
+            fi
+          done
           APNS_AUTH_KEY_BASE64="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("APNS_AUTH_KEY_BASE64") or "")')"
           APNS_KEY_ID="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("APNS_KEY_ID") or "")')"
           APNS_TEAM_ID="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("APNS_TEAM_ID") or "")')"
@@ -192,6 +203,11 @@ jobs:
           OPENAI_API_KEY_SYSTEM=${OPENAI_API_KEY_SYSTEM}
           OPENAI_MODEL=gpt-5.4
           OPENAI_SYSTEM_MODEL=gpt-5.4
+          SMTP_HOST=${SMTP_HOST}
+          SMTP_PORT=${SMTP_PORT}
+          SMTP_USERNAME=${SMTP_USERNAME}
+          SMTP_PASSWORD=${SMTP_PASSWORD}
+          SMTP_FROM=${SMTP_FROM}
           BUDDYSTUDY_TRANSLATION_BASE_URL=http://buddystudy-libretranslate:5000
           BACKEND_MASTER_KEY=${BACKEND_MASTER_KEY}
           BACKEND_API_TOKEN=${BACKEND_API_TOKEN}

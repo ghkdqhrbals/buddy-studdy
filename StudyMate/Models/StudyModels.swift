@@ -3432,6 +3432,13 @@ struct AppStrings {
     var sendVerificationCode: String { text("인증코드 보내기", "Send Code") }
     var resendVerificationCode: String { text("다시 보내기", "Resend") }
     var emailVerificationSent: String { text("인증코드를 보냈습니다.", "Verification code sent.") }
+    var emailVerificationSendFailed: String {
+        text(
+            "인증코드를 보내지 못했습니다. 잠시 후 다시 시도하세요.",
+            "Could not send the verification code. Please try again shortly.",
+            "確認コードを送信できませんでした。しばらくしてからもう一度お試しください。"
+        )
+    }
     var emailVerificationRequired: String {
         text(
             "처음 사용하는 이메일입니다. 인증코드를 보낸 뒤 입력해 로그인하세요.",

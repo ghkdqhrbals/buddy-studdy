@@ -48,22 +48,6 @@ spring:
       password: ${REDIS_PASSWORD:}
       ssl:
         enabled: ${REDIS_SSL:false}
-  mail:
-    host: ${email.google.smtpHost:${SMTP_HOST:smtp.gmail.com}}
-    port: ${email.google.smtpPort:${SMTP_PORT:587}}
-    username: ${email.google.smtpUsername:${SMTP_USERNAME:}}
-    password: ${email.google.smtpPassword:${SMTP_PASSWORD:}}
-    properties:
-      mail:
-        smtp:
-          auth: true
-          starttls:
-            enable: true
-            required: true
-          connectiontimeout: 5000
-          timeout: 5000
-          writetimeout: 5000
-
 management:
   endpoints:
     web:
@@ -132,7 +116,11 @@ buddystudy:
     view-publisher-concurrency: ${VIEW_EVENT_PUBLISHER_CONCURRENCY:4}
   email:
     verification-ttl-seconds: ${EMAIL_VERIFICATION_TTL_SECONDS:180}
-    from: ${email.google.smtpFrom:${SMTP_FROM:${email.google.smtpUsername:${SMTP_USERNAME:}}}}
+    host: ${SMTP_HOST:smtp.gmail.com}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    from: ${SMTP_FROM:${SMTP_USERNAME:}}
   translation:
     base-url: ${BUDDYSTUDY_TRANSLATION_BASE_URL:http://localhost:5001}
     supported-languages: ${BUDDYSTUDY_TRANSLATION_SUPPORTED_LANGUAGES:ko,en,ja}

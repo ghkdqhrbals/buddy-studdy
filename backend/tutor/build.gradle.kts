@@ -14,6 +14,23 @@ tasks.named<org.springframework.boot.gradle.tasks.aot.ProcessAot>("processAot") 
             "spring.r2dbc.url" to "r2dbc:mysql://localhost:3306/buddystudy?serverZoneId=UTC",
             "spring.r2dbc.username" to "buddystudy",
             "spring.r2dbc.password" to "aot-build-only",
+            "SMTP_HOST" to "smtp.aot.invalid",
+            "SMTP_PORT" to "587",
+            "SMTP_USERNAME" to "aot@invalid.example",
+            "SMTP_PASSWORD" to "aot-build-only",
+            "SMTP_FROM" to "BuddyStudy <aot@invalid.example>",
+        ),
+    )
+}
+
+tasks.named<org.springframework.boot.gradle.tasks.aot.ProcessTestAot>("processTestAot") {
+    systemProperties(
+        mapOf(
+            "SMTP_HOST" to "smtp.test.invalid",
+            "SMTP_PORT" to "587",
+            "SMTP_USERNAME" to "test@invalid.example",
+            "SMTP_PASSWORD" to "test-only",
+            "SMTP_FROM" to "BuddyStudy <test@invalid.example>",
         ),
     )
 }

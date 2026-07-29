@@ -3808,6 +3808,7 @@ final class AppState: ObservableObject {
 
     func requestEmailVerificationCode(email: String) async -> Bool {
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        communityErrorMessage = nil
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "email-code") else {
             clearCommunityErrorForMissingRegistration(reason: "email-code")
             return false
@@ -3824,7 +3825,7 @@ final class AppState: ObservableObject {
                 communityErrorMessage = nil
             },
             onFailure: { error in
-                handleCommunityError(error)
+                handleCommunityError(error, fallback: strings.emailVerificationSendFailed)
                 log(.warning, "Email 인증코드 요청 실패: \(error.localizedDescription)")
             }
         )

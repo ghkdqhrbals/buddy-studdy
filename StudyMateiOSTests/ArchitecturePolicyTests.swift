@@ -1890,6 +1890,28 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertFalse(detailedResolution.featureMessage?.contains("503") ?? true)
     }
 
+    func testEmailDeliveryFailureUsesEmailSpecificLocalizedFallback() {
+        let apiError = BackendAPIError(
+            code: "EMAIL_DELIVERY_FAILED",
+            message: "이메일을 전송하지 못했습니다.",
+            status: 503
+        )
+        let error = RemotePushBackendError.httpStatus(503, "", apiError)
+        let strings = AppStrings(language: .korean)
+
+        let resolution = AppErrorHandlingPolicy.resolve(
+            error,
+            fallback: strings.emailVerificationSendFailed,
+            language: .korean
+        )
+
+        XCTAssertEqual(
+            resolution.featureMessage,
+            "인증코드를 보내지 못했습니다. 잠시 후 다시 시도하세요."
+        )
+        XCTAssertNotEqual(resolution.featureMessage, strings.communityRequestFailed)
+    }
+
     func testInvalidBackendResponseUsesSafeLocalizedFallback() {
         let koreanResolution = AppErrorHandlingPolicy.resolve(
             RemotePushBackendError.invalidResponse,
