@@ -4,6 +4,7 @@ import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamSubscription
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopicManager
+import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import org.slf4j.LoggerFactory
@@ -19,6 +20,7 @@ import java.time.Instant
 class QuestionStatsStreamListener(
     private val topics: RedisStreamTopicManager,
     private val handler: QuestionStatsStreamEventHandler,
+    private val properties: BuddyStudyProperties,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val group = "bs-backend-view"
@@ -33,7 +35,16 @@ class QuestionStatsStreamListener(
 
     @Scheduled(fixedDelayString = "\${VIEW_CONSUMER_POLL_DELAY_MS:1000}")
     suspend fun pollQuestionViews() {
-        topics.poll(RedisStreamTopic.DOMAIN_EVENTS, subscription) {
+        topics.poll(RedisStreamTopic.COMMUNITY_QUESTION_VIEWED, subscription) {
+            onQuestionViewed(it)
+        }
+    }
+
+    @Scheduled(fixedDelayString = "\${VIEW_CONSUMER_POLL_DELAY_MS:1000}")
+    suspend fun drainLegacyQuestionViews() {
+        if (!properties.streams.legacyDrainEnabled) return
+        if (!topics.exists(RedisStreamTopic.LEGACY_DOMAIN_EVENTS)) return
+        topics.poll(RedisStreamTopic.LEGACY_DOMAIN_EVENTS, subscription) {
             onQuestionViewed(it)
         }
     }

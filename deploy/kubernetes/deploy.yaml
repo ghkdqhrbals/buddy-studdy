@@ -10,7 +10,15 @@ data:
   ADMIN_ANALYTICS_DATABASE_URL: jdbc:mysql://buddystudy-mysql:3306/buddystudy_aggregation?serverTimezone=UTC
   ADMIN_ANALYTICS_DATABASE_USERNAME: buddystudy
   APP_PORT: "8080"
-  BUDDYSTUDY_STREAMS_KEY: buddystudy-events-v1
+  BUDDYSTUDY_NOTIFICATION_REQUESTED_STREAM_KEY: notification.message.requested.v1
+  BUDDYSTUDY_ACCOUNT_WITHDRAWN_STREAM_KEY: identity.account.withdrawn.v1
+  BUDDYSTUDY_ANSWER_GRADING_REQUESTED_STREAM_KEY: study.answer-grading.requested.v1
+  BUDDYSTUDY_QUESTION_GENERATION_REQUESTED_STREAM_KEY: study.question-generation.requested.v1
+  BUDDYSTUDY_QUESTION_GENERATED_STREAM_KEY: study.question.generated.v1
+  BUDDYSTUDY_CONTENT_TRANSLATION_REQUESTED_STREAM_KEY: localization.content-translation.requested.v1
+  BUDDYSTUDY_QUESTION_PUSH_REQUESTED_STREAM_KEY: notification.question-push.requested.v1
+  BUDDYSTUDY_QUESTION_VIEWED_STREAM_KEY: community.question.viewed.v1
+  BUDDYSTUDY_LEGACY_STREAM_DRAIN_ENABLED: "true"
   BUDDYSTUDY_TRANSLATION_BASE_URL: http://buddystudy-libretranslate:5000
   DATABASE_URL: jdbc:mysql://buddystudy-mysql:3306/buddystudy?serverTimezone=UTC
   DATABASE_USERNAME: buddystudy

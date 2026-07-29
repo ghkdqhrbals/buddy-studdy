@@ -62,7 +62,7 @@ class PushStreamManager(
         val publishStartedAt = Instant.now()
         logger.info(
             "redis_stream_publish_started streamKey={} eventId={} eventType={} recordId={} deviceId={} userId={} topic={} pushCreatedAt={} publishAgeMs={}",
-            properties.streams.pushKey,
+            properties.streams.questionPushRequestedKey,
             event.eventId,
             EVENT_TYPE,
             event.recordId,
@@ -74,7 +74,7 @@ class PushStreamManager(
         )
         return try {
             val published = publisher.publish(
-                topic = RedisStreamTopic.PUSH_EVENTS,
+                topic = RedisStreamTopic.NOTIFICATION_QUESTION_PUSH_REQUESTED,
                 eventType = EVENT_TYPE,
                 eventId = event.eventId,
                 payload = event.toPayload(),
@@ -101,7 +101,7 @@ class PushStreamManager(
         } catch (error: Exception) {
             logger.warn(
                 "redis_stream_publish_failed streamKey={} eventId={} eventType={} recordId={} deviceId={} userId={} error={}",
-                properties.streams.pushKey,
+                properties.streams.questionPushRequestedKey,
                 event.eventId,
                 EVENT_TYPE,
                 event.recordId,
@@ -185,7 +185,8 @@ class PushStreamManager(
     }
 
     @StreamListener(
-        topic = RedisStreamTopic.PUSH_EVENTS,
+        topic = RedisStreamTopic.NOTIFICATION_QUESTION_PUSH_REQUESTED,
+        legacyTopic = RedisStreamTopic.LEGACY_PUSH_EVENTS,
         group = GROUP,
         consumer = CONSUMER,
         eventType = EVENT_TYPE,
@@ -206,7 +207,8 @@ class PushStreamManager(
     }
 
     @StreamScheduler(
-        topic = RedisStreamTopic.PUSH_EVENTS,
+        topic = RedisStreamTopic.NOTIFICATION_QUESTION_PUSH_REQUESTED,
+        legacyTopic = RedisStreamTopic.LEGACY_PUSH_EVENTS,
         group = GROUP,
         consumer = RECOVERY_CONSUMER,
         eventType = EVENT_TYPE,

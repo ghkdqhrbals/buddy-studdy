@@ -13,7 +13,7 @@ class RedisStreamLegacyTopologyCleaner(
     properties: BuddyStudyProperties,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
-    private val domainStreamKey = properties.streams.key
+    private val domainStreamKey = properties.streams.legacyDomainKey
 
     @EventListener(ApplicationReadyEvent::class)
     fun clean() {

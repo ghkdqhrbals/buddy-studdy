@@ -20,11 +20,13 @@ class QuestionTranslationStreamListenerTest {
             .findAnnotation<StreamScheduler>()
 
         assertThat(consume).isNotNull
-        assertThat(consume!!.topic).isEqualTo(RedisStreamTopic.QUESTION_GENERATED)
+        assertThat(consume!!.topic).isEqualTo(RedisStreamTopic.STUDY_QUESTION_GENERATED)
+        assertThat(consume.legacyTopic).isEqualTo(RedisStreamTopic.LEGACY_QUESTION_GENERATED)
         assertThat(consume.eventType).isEqualTo("QUESTION_GENERATED")
         assertThat(consume.group).isEqualTo("bs-backend-question-translation")
         assertThat(recover).isNotNull
-        assertThat(recover!!.topic).isEqualTo(RedisStreamTopic.QUESTION_GENERATED)
+        assertThat(recover!!.topic).isEqualTo(RedisStreamTopic.STUDY_QUESTION_GENERATED)
+        assertThat(recover.legacyTopic).isEqualTo(RedisStreamTopic.LEGACY_QUESTION_GENERATED)
         assertThat(recover.eventType).isEqualTo("QUESTION_GENERATED")
         assertThat(recover.group).isEqualTo(consume.group)
         assertThat(recover.minIdleTimeMs)

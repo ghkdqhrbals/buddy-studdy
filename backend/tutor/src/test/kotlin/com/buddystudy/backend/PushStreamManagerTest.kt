@@ -42,7 +42,7 @@ class PushStreamManagerTest {
         assertThat(service.publishPush(pushEvent(topic = "SwiftUI"))).isTrue()
 
         val request = publisher.requests.single()
-        assertThat(request.topic).isEqualTo(RedisStreamTopic.PUSH_EVENTS)
+        assertThat(request.topic).isEqualTo(RedisStreamTopic.NOTIFICATION_QUESTION_PUSH_REQUESTED)
         assertThat(request.eventType).isEqualTo("QUESTION_PUSH_REQUESTED")
         val payload = request.payload as QuestionPushRequestedPayload
         assertThat(payload.recordId).isEqualTo(10)
@@ -94,7 +94,7 @@ class PushStreamManagerTest {
     ): Fixture {
         val properties = BuddyStudyProperties().apply {
             streams.enabled = enabled
-            streams.key = "buddystudy-events-v1"
+            streams.questionPushRequestedKey = "notification.question-push.requested.v1"
             if (configureApns) {
                 apns.teamId = "team-id"
                 apns.keyId = "key-id"

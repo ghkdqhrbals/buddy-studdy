@@ -17,7 +17,8 @@ class AccountWithdrawalStreamListenerAnnotationTest {
             .single { it.name == "consume" }
             .findAnnotation<StreamListener>()!!
 
-        assertThat(annotation.topic).isEqualTo(RedisStreamTopic.DOMAIN_EVENTS)
+        assertThat(annotation.topic).isEqualTo(RedisStreamTopic.IDENTITY_ACCOUNT_WITHDRAWN)
+        assertThat(annotation.legacyTopic).isEqualTo(RedisStreamTopic.LEGACY_DOMAIN_EVENTS)
         assertThat(annotation.group).isEqualTo("bs-backend-account-withdrawal")
         assertThat(annotation.eventType).isEqualTo("ACCOUNT_WITHDRAWN")
         assertThat(annotation.payloadType).isEqualTo(AccountWithdrawnEvent::class)
@@ -30,7 +31,8 @@ class AccountWithdrawalStreamListenerAnnotationTest {
             .single { it.name == "recover" }
             .findAnnotation<StreamScheduler>()!!
 
-        assertThat(annotation.topic).isEqualTo(RedisStreamTopic.DOMAIN_EVENTS)
+        assertThat(annotation.topic).isEqualTo(RedisStreamTopic.IDENTITY_ACCOUNT_WITHDRAWN)
+        assertThat(annotation.legacyTopic).isEqualTo(RedisStreamTopic.LEGACY_DOMAIN_EVENTS)
         assertThat(annotation.group).isEqualTo("bs-backend-account-withdrawal")
         assertThat(annotation.eventType).isEqualTo("ACCOUNT_WITHDRAWN")
         assertThat(annotation.payloadType).isEqualTo(AccountWithdrawnEvent::class)

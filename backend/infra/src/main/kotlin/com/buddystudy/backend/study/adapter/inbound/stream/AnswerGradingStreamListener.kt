@@ -19,7 +19,8 @@ class AnswerGradingStreamListener(
     private val log = LoggerFactory.getLogger(javaClass)
 
     @StreamListener(
-        topic = RedisStreamTopic.DOMAIN_EVENTS,
+        topic = RedisStreamTopic.STUDY_ANSWER_GRADING_REQUESTED,
+        legacyTopic = RedisStreamTopic.LEGACY_DOMAIN_EVENTS,
         group = GROUP,
         consumer = CONSUMER,
         eventType = EVENT_TYPE,
@@ -38,7 +39,8 @@ class AnswerGradingStreamListener(
     }
 
     @StreamScheduler(
-        topic = RedisStreamTopic.DOMAIN_EVENTS,
+        topic = RedisStreamTopic.STUDY_ANSWER_GRADING_REQUESTED,
+        legacyTopic = RedisStreamTopic.LEGACY_DOMAIN_EVENTS,
         group = GROUP,
         consumer = RECOVERY_CONSUMER,
         eventType = EVENT_TYPE,

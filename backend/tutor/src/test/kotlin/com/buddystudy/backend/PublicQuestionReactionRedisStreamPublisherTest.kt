@@ -28,7 +28,7 @@ class PublicQuestionReactionRedisStreamPublisherTest {
         assertThat(service.publishViewed(20, null)).isTrue()
 
         val request = publisher.requests.single()
-        assertThat(request.topic).isEqualTo(RedisStreamTopic.DOMAIN_EVENTS)
+        assertThat(request.topic).isEqualTo(RedisStreamTopic.COMMUNITY_QUESTION_VIEWED)
         assertThat(request.fields).containsEntry("eventType", "CONTENT_VIEWED")
         assertThat(request.fields).containsEntry("questionId", "20")
         assertThat(request.fields).doesNotContainKey("userId")
@@ -44,7 +44,7 @@ class PublicQuestionReactionRedisStreamPublisherTest {
     private fun service(enabled: Boolean, publisher: RedisStreamPublishOperations): PublicQuestionReactionRedisStreamPublisher {
         val properties = BuddyStudyProperties().apply {
             streams.enabled = enabled
-            streams.key = "buddystudy-events-v1"
+            streams.questionViewedKey = "community.question.viewed.v1"
         }
         return PublicQuestionReactionRedisStreamPublisher(properties, publisher)
     }

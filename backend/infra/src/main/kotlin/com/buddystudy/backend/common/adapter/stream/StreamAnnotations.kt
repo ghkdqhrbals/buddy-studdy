@@ -21,6 +21,7 @@ enum class StreamOptions {
 @Reflective(StreamReflectiveProcessor::class)
 annotation class StreamListener(
     val topic: RedisStreamTopic,
+    val legacyTopic: RedisStreamTopic = RedisStreamTopic.NONE,
     val group: String,
     val consumer: String,
     val eventType: String,
@@ -39,6 +40,7 @@ annotation class StreamListener(
 @Reflective(StreamReflectiveProcessor::class)
 annotation class StreamScheduler(
     val topic: RedisStreamTopic,
+    val legacyTopic: RedisStreamTopic = RedisStreamTopic.NONE,
     val group: String,
     val consumer: String,
     val eventType: String,

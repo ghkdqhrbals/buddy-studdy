@@ -21,9 +21,13 @@ class RedisDomainEventPublisher(
 
     private fun ClaimedRedisOutboxEvent.topic(): RedisStreamTopic =
         when (eventType) {
-            RedisOutboxEventType.QUESTION_GENERATION_REQUESTED -> RedisStreamTopic.QUESTION_GENERATION
-            RedisOutboxEventType.QUESTION_GENERATED -> RedisStreamTopic.QUESTION_GENERATED
-            RedisOutboxEventType.CONTENT_TRANSLATION_REQUESTED -> RedisStreamTopic.CONTENT_TRANSLATION
-            else -> RedisStreamTopic.DOMAIN_EVENTS
+            RedisOutboxEventType.NOTIFICATION_REQUESTED -> RedisStreamTopic.NOTIFICATION_MESSAGE_REQUESTED
+            RedisOutboxEventType.ACCOUNT_WITHDRAWN -> RedisStreamTopic.IDENTITY_ACCOUNT_WITHDRAWN
+            RedisOutboxEventType.ANSWER_GRADING_REQUESTED -> RedisStreamTopic.STUDY_ANSWER_GRADING_REQUESTED
+            RedisOutboxEventType.QUESTION_GENERATION_REQUESTED ->
+                RedisStreamTopic.STUDY_QUESTION_GENERATION_REQUESTED
+            RedisOutboxEventType.QUESTION_GENERATED -> RedisStreamTopic.STUDY_QUESTION_GENERATED
+            RedisOutboxEventType.CONTENT_TRANSLATION_REQUESTED ->
+                RedisStreamTopic.LOCALIZATION_CONTENT_TRANSLATION_REQUESTED
         }
 }

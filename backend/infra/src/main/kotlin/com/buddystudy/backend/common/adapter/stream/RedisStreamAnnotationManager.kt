@@ -2,6 +2,7 @@ package com.buddystudy.backend.common.adapter.stream
 
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumerOperations
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
@@ -60,8 +61,12 @@ class RedisStreamAnnotationManager(
         workerScope = scope
         val enabledListeners = listeners.filter { isEnabled(it.annotation.enabledProperty) }
         val enabledSchedulers = schedulers.filter { isEnabled(it.annotation.enabledProperty) }
-        enabledListeners.forEach { startListener(it, scope) }
-        enabledSchedulers.forEach { startScheduler(it, scope) }
+        enabledListeners.forEach { handler ->
+            handler.annotation.topics().forEach { topic -> startListener(handler, topic, scope) }
+        }
+        enabledSchedulers.forEach { handler ->
+            handler.annotation.topics().forEach { topic -> startScheduler(handler, topic, scope) }
+        }
         logger.info(
             "redis_stream_annotations_started registeredListeners={} registeredSchedulers={} startedListeners={} startedSchedulers={}",
             listeners.size,
@@ -117,7 +122,7 @@ class RedisStreamAnnotationManager(
         }
     }
 
-    private fun startListener(handler: ListenerHandler, scope: CoroutineScope) {
+    private fun startListener(handler: ListenerHandler, topic: RedisStreamTopic, scope: CoroutineScope) {
         val annotation = handler.annotation
         val concurrency = annotation.concurrencyProperty
             .takeIf(String::isNotBlank)
@@ -125,13 +130,17 @@ class RedisStreamAnnotationManager(
             ?: annotation.concurrency
         repeat(concurrency.coerceIn(1, MAX_CONCURRENCY)) { workerIndex ->
             val consumer = consumerName(annotation.consumer, workerIndex)
-            scope.launch(CoroutineName("stream-listener-${handler.beanName}-$consumer")) {
+            scope.launch(CoroutineName("stream-listener-${handler.beanName}-${topic.apiName}-$consumer")) {
                 while (currentCoroutineContext().isActive) {
                     try {
+                        if (topic.legacy && !streams.exists(topic)) {
+                            delay(annotation.pollDelayMs.coerceAtLeast(1))
+                            continue
+                        }
                         val blockTimeMs = annotation.blockTimeMs.coerceAtLeast(1)
                         val messages = withTimeoutOrNull(readDeadlineMs(blockTimeMs)) {
                             streams.readNew(
-                                topic = annotation.topic,
+                                topic = topic,
                                 group = annotation.group,
                                 consumer = consumer,
                                 count = annotation.batchSize.coerceAtLeast(1),
@@ -143,7 +152,7 @@ class RedisStreamAnnotationManager(
                                 "redis_stream_listener_read_timed_out bean={} method={} topic={} group={} consumer={} blockTimeMs={}",
                                 handler.beanName,
                                 handler.method.name,
-                                annotation.topic.apiName,
+                                topic.apiName,
                                 annotation.group,
                                 consumer,
                                 blockTimeMs,
@@ -156,7 +165,7 @@ class RedisStreamAnnotationManager(
                                 "redis_stream_listener_batch_received bean={} method={} topic={} group={} consumer={} count={}",
                                 handler.beanName,
                                 handler.method.name,
-                                annotation.topic.apiName,
+                                topic.apiName,
                                 annotation.group,
                                 consumer,
                                 messages.size,
@@ -172,7 +181,7 @@ class RedisStreamAnnotationManager(
                             "redis_stream_listener_poll_failed bean={} method={} topic={} group={} consumer={} errorType={} error={}",
                             handler.beanName,
                             handler.method.name,
-                            annotation.topic.apiName,
+                            topic.apiName,
                             annotation.group,
                             consumer,
                             error.javaClass.name,
@@ -186,15 +195,19 @@ class RedisStreamAnnotationManager(
         }
     }
 
-    private fun startScheduler(handler: SchedulerHandler, scope: CoroutineScope) {
+    private fun startScheduler(handler: SchedulerHandler, topic: RedisStreamTopic, scope: CoroutineScope) {
         val annotation = handler.annotation
-        scope.launch(CoroutineName("stream-scheduler-${handler.beanName}-${annotation.consumer}")) {
+        scope.launch(CoroutineName("stream-scheduler-${handler.beanName}-${topic.apiName}-${annotation.consumer}")) {
             delay(annotation.initialDelayMs.coerceAtLeast(0))
             var startId = START_ID
             while (currentCoroutineContext().isActive) {
                 try {
+                    if (topic.legacy && !streams.exists(topic)) {
+                        delay(annotation.fixedDelayMs.coerceAtLeast(1))
+                        continue
+                    }
                     val claimed = streams.autoClaim(
-                        topic = annotation.topic,
+                        topic = topic,
                         group = annotation.group,
                         consumer = annotation.consumer,
                         minIdleTime = Duration.ofMillis(annotation.minIdleTimeMs.coerceAtLeast(1)),
@@ -207,7 +220,7 @@ class RedisStreamAnnotationManager(
                             "redis_stream_autoclaim_batch_received bean={} method={} topic={} group={} consumer={} count={} nextStartId={}",
                             handler.beanName,
                             handler.method.name,
-                            annotation.topic.apiName,
+                            topic.apiName,
                             annotation.group,
                             annotation.consumer,
                             claimed.messages.size,
@@ -223,7 +236,7 @@ class RedisStreamAnnotationManager(
                         "redis_stream_autoclaim_failed bean={} method={} topic={} group={} consumer={} errorType={} error={}",
                         handler.beanName,
                         handler.method.name,
-                        annotation.topic.apiName,
+                        topic.apiName,
                         annotation.group,
                         annotation.consumer,
                         error.javaClass.name,
@@ -293,6 +306,21 @@ class RedisStreamAnnotationManager(
     private fun isEnabled(property: String): Boolean =
         property.isBlank() || environment.getProperty(property, Boolean::class.java, true)
 
+    private fun StreamListener.topics(): List<RedisStreamTopic> =
+        buildList {
+            add(topic)
+            if (legacyTopic != RedisStreamTopic.NONE && legacyDrainEnabled()) add(legacyTopic)
+        }
+
+    private fun StreamScheduler.topics(): List<RedisStreamTopic> =
+        buildList {
+            add(topic)
+            if (legacyTopic != RedisStreamTopic.NONE && legacyDrainEnabled()) add(legacyTopic)
+        }
+
+    private fun legacyDrainEnabled(): Boolean =
+        environment.getProperty(LEGACY_DRAIN_ENABLED_PROPERTY, Boolean::class.java, true)
+
     private fun consumerName(prefix: String, workerIndex: Int): String =
         if (workerIndex == 0) prefix else "$prefix-${workerIndex + 1}"
 
@@ -317,6 +345,7 @@ class RedisStreamAnnotationManager(
         const val MAX_CONCURRENCY = 32
         const val MIN_READ_TIMEOUT_GRACE_MS = 100L
         const val START_ID = "0-0"
+        const val LEGACY_DRAIN_ENABLED_PROPERTY = "buddystudy.streams.legacy-drain-enabled"
     }
 }
 

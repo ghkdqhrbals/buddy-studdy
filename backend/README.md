@@ -22,7 +22,7 @@ This backend is the operational source of truth for the iOS app. The app may cac
 - Uses Spring Data R2DBC with suspending repository/service transaction boundaries.
 - Runs Flyway through a startup-only JDBC connection in the `dev` profile.
 - Generates due questions with OpenAI.
-- Publishes question push jobs from the durable outbox to the dedicated `buddystudy-push-v1` Redis Stream and consumes them through `@StreamListener`.
+- Publishes question push jobs from the durable outbox to the dedicated `notification.question-push.requested.v1` Redis Stream and consumes them through `@StreamListener`.
 - Sends APNs remote notifications to iPhone from the stream consumer.
 - Runs in Docker with MySQL stored on a mounted volume.
 - Persists Redis with AOF (`appendfsync everysec`) and compressed, checksummed
@@ -50,8 +50,9 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`: Google SMTP settings. `SMTP_HOST` defaults to `smtp.gmail.com` and `SMTP_PORT` defaults to `587`; store the Gmail address and Google app password as `SMTP_USERNAME` and `SMTP_PASSWORD` in the active AWS Secrets Manager application secret. When credentials are omitted, reports are stored in the database only and email signup codes cannot be sent.
 - `PROFILE_PHOTO_DIRECTORY`, `PROFILE_PHOTO_PUBLIC_BASE_URL`: legacy profile-photo storage retained temporarily so existing files can be removed when an account switches to a pixel avatar or is deleted. New uploads are disabled.
 - `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_SSL`: Redis settings used by Redis Streams and email verification sessions.
-- `BUDDYSTUDY_STREAMS_KEY`, `BUDDYSTUDY_PUSH_STREAM_KEY`: physical Redis Stream keys for domain events and dedicated question-push delivery.
-- `BUDDYSTUDY_DOMAIN_STREAM_MAX_LEN`, `BUDDYSTUDY_PUSH_STREAM_MAX_LEN`: independent exact `MAXLEN` limits for the domain-event and push streams. Both default to the legacy `REACTION_STREAM_XADD_MAX_LEN` value, or `1000` when it is unset.
+- `BUDDYSTUDY_*_STREAM_KEY`: physical Redis Stream keys. Active keys follow `<business-domain>.<data-type>.<event-type>.<version>` and each event contract has one stream.
+- `BUDDYSTUDY_*_STREAM_MAX_LEN`: independent exact `MAXLEN` limits for each event stream. Active streams default to `1000`.
+- `BUDDYSTUDY_LEGACY_STREAM_DRAIN_ENABLED`: temporarily consumes pending messages from the five pre-convention streams. New events are never published to legacy streams.
 - `EMAIL_VERIFICATION_TTL_SECONDS`: signup code TTL. Production default is `180`.
 - `OPENAI_API_KEY_SYSTEM`: system-workload key used only for post-study child-topic suggestions.
 - `OPENAI_API_KEY_USER`: user-content workload key used for question generation, embeddings, translation, answer feedback, and grading. It must be a different OpenAI key from `OPENAI_API_KEY_SYSTEM`. `OPENAI_USER_CONTENT_API_KEY` and `OPENAI_API_KEY` remain compatibility fallbacks for this value only and never supply the system client; `OPENAI_SYSTEM_API_KEY` remains a compatibility fallback for the system value.

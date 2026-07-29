@@ -22,7 +22,8 @@ class QuestionGenerationStreamListenerTest {
             .findAnnotation<StreamScheduler>()
 
         assertThat(consume).isNotNull
-        assertThat(consume!!.topic).isEqualTo(RedisStreamTopic.QUESTION_GENERATION)
+        assertThat(consume!!.topic).isEqualTo(RedisStreamTopic.STUDY_QUESTION_GENERATION_REQUESTED)
+        assertThat(consume.legacyTopic).isEqualTo(RedisStreamTopic.LEGACY_QUESTION_GENERATION)
         assertThat(consume.eventType).isEqualTo(QuestionGenerationRequestedEvent.EVENT_TYPE)
         assertThat(consume.group).isEqualTo(QuestionGenerationExecutionWriteService.CONSUMER_GROUP)
         assertThat(consume.options).isEqualTo(StreamOptions.ACK)

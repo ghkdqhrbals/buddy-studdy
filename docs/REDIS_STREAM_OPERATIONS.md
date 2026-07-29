@@ -28,42 +28,98 @@ push listener and its idle-message recovery scheduler use `ACK` so successful
 push entries remain available in the bounded stream for operational
 inspection. The durable `question_push_outbox` remains the recovery source.
 
-Notification events use `ACK`: the domain stream can have multiple consumer
-groups, so one successful listener must not delete a record needed by another
-group. Its `@StreamScheduler` auto-claims idle pending records and invokes the
-same Jackson-typed handler.
+Each active physical stream contains exactly one event contract. Active
+consumers therefore do not encounter unrelated event types. `eventType`
+remains in the envelope as a schema guard, while the physical stream is
+selected from the central event catalog. During migration only, consumers
+attached to the former mixed stream acknowledge event types owned by another
+consumer group so every legacy group can advance independently.
+
+## Naming And Catalog
+
+Every active stream key follows:
+
+```text
+<business-domain>.<data-type>.<event-type>.<version>
+```
+
+The catalog is:
+
+| Business domain | Data type | Event type | Stream key | Envelope eventType |
+| --- | --- | --- | --- | --- |
+| notification | message | requested | `notification.message.requested.v1` | `NOTIFICATION_REQUESTED` |
+| identity | account | withdrawn | `identity.account.withdrawn.v1` | `ACCOUNT_WITHDRAWN` |
+| study | answer-grading | requested | `study.answer-grading.requested.v1` | `ANSWER_GRADING_REQUESTED` |
+| study | question-generation | requested | `study.question-generation.requested.v1` | `QUESTION_GENERATION_REQUESTED` |
+| study | question | generated | `study.question.generated.v1` | `QUESTION_GENERATED` |
+| localization | content-translation | requested | `localization.content-translation.requested.v1` | `CONTENT_TRANSLATION_REQUESTED` |
+| notification | question-push | requested | `notification.question-push.requested.v1` | `QUESTION_PUSH_REQUESTED` |
+| community | question | viewed | `community.question.viewed.v1` | `CONTENT_VIEWED` |
+
+`RedisDomainEventPublisher` has an exhaustive `RedisOutboxEventType` mapping.
+Adding an outbox event without assigning a dedicated stream is therefore a
+compile-time error.
 
 ## Retention
 
 Every managed stream uses an independently configurable exact `MAXLEN`. The
-five defaults are `1000`:
+eight active defaults are `1000`:
 
-- `buddystudy-events-v1`
-- `buddystudy-question-generation-v1`
-- `buddystudy-question-generated-v1`
-- `buddystudy-content-translation-v1`
-- `buddystudy-push-v1`
+- `notification.message.requested.v1`
+- `identity.account.withdrawn.v1`
+- `study.answer-grading.requested.v1`
+- `study.question-generation.requested.v1`
+- `study.question.generated.v1`
+- `localization.content-translation.requested.v1`
+- `notification.question-push.requested.v1`
+- `community.question.viewed.v1`
 
 ```yaml
 buddystudy:
   streams:
-    key: ${BUDDYSTUDY_STREAMS_KEY:buddystudy-events-v1}
-    question-generation-key: ${BUDDYSTUDY_QUESTION_GENERATION_STREAM_KEY:buddystudy-question-generation-v1}
-    question-generated-key: ${BUDDYSTUDY_QUESTION_GENERATED_STREAM_KEY:buddystudy-question-generated-v1}
-    content-translation-key: ${BUDDYSTUDY_CONTENT_TRANSLATION_STREAM_KEY:buddystudy-content-translation-v1}
-    push-key: ${BUDDYSTUDY_PUSH_STREAM_KEY:buddystudy-push-v1}
-    domain-max-len: ${BUDDYSTUDY_DOMAIN_STREAM_MAX_LEN:${REACTION_STREAM_XADD_MAX_LEN:1000}}
-    question-generation-max-len: ${BUDDYSTUDY_QUESTION_GENERATION_STREAM_MAX_LEN:1000}
+    notification-requested-key: ${BUDDYSTUDY_NOTIFICATION_REQUESTED_STREAM_KEY:notification.message.requested.v1}
+    account-withdrawn-key: ${BUDDYSTUDY_ACCOUNT_WITHDRAWN_STREAM_KEY:identity.account.withdrawn.v1}
+    answer-grading-requested-key: ${BUDDYSTUDY_ANSWER_GRADING_REQUESTED_STREAM_KEY:study.answer-grading.requested.v1}
+    question-generation-requested-key: ${BUDDYSTUDY_QUESTION_GENERATION_REQUESTED_STREAM_KEY:study.question-generation.requested.v1}
+    question-generated-key: ${BUDDYSTUDY_QUESTION_GENERATED_STREAM_KEY:study.question.generated.v1}
+    content-translation-requested-key: ${BUDDYSTUDY_CONTENT_TRANSLATION_REQUESTED_STREAM_KEY:localization.content-translation.requested.v1}
+    question-push-requested-key: ${BUDDYSTUDY_QUESTION_PUSH_REQUESTED_STREAM_KEY:notification.question-push.requested.v1}
+    question-viewed-key: ${BUDDYSTUDY_QUESTION_VIEWED_STREAM_KEY:community.question.viewed.v1}
+    notification-requested-max-len: ${BUDDYSTUDY_NOTIFICATION_REQUESTED_STREAM_MAX_LEN:1000}
+    account-withdrawn-max-len: ${BUDDYSTUDY_ACCOUNT_WITHDRAWN_STREAM_MAX_LEN:1000}
+    answer-grading-requested-max-len: ${BUDDYSTUDY_ANSWER_GRADING_REQUESTED_STREAM_MAX_LEN:1000}
+    question-generation-requested-max-len: ${BUDDYSTUDY_QUESTION_GENERATION_REQUESTED_STREAM_MAX_LEN:1000}
     question-generated-max-len: ${BUDDYSTUDY_QUESTION_GENERATED_STREAM_MAX_LEN:1000}
-    content-translation-max-len: ${BUDDYSTUDY_CONTENT_TRANSLATION_STREAM_MAX_LEN:1000}
-    push-max-len: ${BUDDYSTUDY_PUSH_STREAM_MAX_LEN:${REACTION_STREAM_XADD_MAX_LEN:1000}}
+    content-translation-requested-max-len: ${BUDDYSTUDY_CONTENT_TRANSLATION_REQUESTED_STREAM_MAX_LEN:1000}
+    question-push-requested-max-len: ${BUDDYSTUDY_QUESTION_PUSH_REQUESTED_STREAM_MAX_LEN:1000}
+    question-viewed-max-len: ${BUDDYSTUDY_QUESTION_VIEWED_STREAM_MAX_LEN:1000}
 ```
 
 Publishing uses each topic's configured `XADD ... MAXLEN` value; trimming is
 not a separate command and approximate trimming is disabled. This gives each
-stream a deterministic operational bound. `REACTION_STREAM_XADD_MAX_LEN`
-remains a compatibility fallback for both values when their stream-specific
-environment variable is unset.
+stream a deterministic operational bound.
+
+## Legacy Drain
+
+The previous five stream keys are read-only migration inputs:
+
+```text
+buddystudy-events-v1
+buddystudy-question-generation-v1
+buddystudy-question-generated-v1
+buddystudy-content-translation-v1
+buddystudy-push-v1
+```
+
+When `BUDDYSTUDY_LEGACY_STREAM_DRAIN_ENABLED=true`, each listener also resumes
+its existing consumer group on the applicable old stream. A legacy worker is
+not started when that physical key does not exist. Publishers never target
+these keys.
+
+Disable legacy drain only after the admin console confirms `lag=0` and
+`pending=0` for every legacy consumer group. After one retention window with
+no new legacy entries, the old keys may be deleted. This two-phase rollout
+prevents in-flight delivery loss without allowing new mixed-stream traffic.
 
 These streams are delivery buffers, not sources of truth. Durable events first
 exist in `redis_event_outbox`, and push requests also have

@@ -15,17 +15,17 @@ class RedisDomainEventPublisherTest {
 
         publisher.publish(event(RedisOutboxEventType.QUESTION_GENERATED))
 
-        assertThat(streams.topic).isEqualTo(RedisStreamTopic.QUESTION_GENERATED)
+        assertThat(streams.topic).isEqualTo(RedisStreamTopic.STUDY_QUESTION_GENERATED)
     }
 
     @Test
-    fun `other domain events remain on the shared domain topic`() = runBlocking {
+    fun `answer grading events use their dedicated topic`() = runBlocking {
         val streams = RecordingPublisher()
         val publisher = RedisDomainEventPublisher(streams)
 
         publisher.publish(event(RedisOutboxEventType.ANSWER_GRADING_REQUESTED))
 
-        assertThat(streams.topic).isEqualTo(RedisStreamTopic.DOMAIN_EVENTS)
+        assertThat(streams.topic).isEqualTo(RedisStreamTopic.STUDY_ANSWER_GRADING_REQUESTED)
     }
 
     private fun event(type: RedisOutboxEventType) =

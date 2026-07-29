@@ -34,7 +34,8 @@ class NotificationStreamListener(
     private val logger = LoggerFactory.getLogger(javaClass)
 
     @StreamListener(
-        topic = RedisStreamTopic.DOMAIN_EVENTS,
+        topic = RedisStreamTopic.NOTIFICATION_MESSAGE_REQUESTED,
+        legacyTopic = RedisStreamTopic.LEGACY_DOMAIN_EVENTS,
         group = GROUP,
         consumer = CONSUMER,
         eventType = EVENT_TYPE,
@@ -53,7 +54,8 @@ class NotificationStreamListener(
     }
 
     @StreamScheduler(
-        topic = RedisStreamTopic.DOMAIN_EVENTS,
+        topic = RedisStreamTopic.NOTIFICATION_MESSAGE_REQUESTED,
+        legacyTopic = RedisStreamTopic.LEGACY_DOMAIN_EVENTS,
         group = GROUP,
         consumer = RECOVERY_CONSUMER,
         eventType = EVENT_TYPE,

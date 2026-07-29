@@ -36,7 +36,7 @@ class RedisStreamAutoClaimTest {
             "0-0",
             listOf(
                 StreamMessage(
-                    bytes("buddystudy-events-v1"),
+                    bytes("notification.question-push.requested.v1"),
                     "17-0",
                     mapOf(
                         bytes("eventType") to bytes("QUESTION_PUSH_REQUESTED"),
@@ -64,7 +64,7 @@ class RedisStreamAutoClaimTest {
         )
 
         val result = manager.autoClaim(
-            topic = RedisStreamTopic.DOMAIN_EVENTS,
+            topic = RedisStreamTopic.NOTIFICATION_QUESTION_PUSH_REQUESTED,
             group = "push",
             consumer = "push-recovery",
             minIdleTime = Duration.ofMinutes(5),
@@ -75,7 +75,7 @@ class RedisStreamAutoClaimTest {
         assertThat(result.nextStartId).isEqualTo("0-0")
         assertThat(result.messages).containsExactly(
             RedisStreamMessage(
-                streamKey = "buddystudy-events-v1",
+                streamKey = "notification.question-push.requested.v1",
                 recordId = "17-0",
                 fields = mapOf(
                     "eventType" to "QUESTION_PUSH_REQUESTED",

@@ -19,7 +19,8 @@ class AccountWithdrawalStreamListener(
     private val log = LoggerFactory.getLogger(javaClass)
 
     @StreamListener(
-        topic = RedisStreamTopic.DOMAIN_EVENTS,
+        topic = RedisStreamTopic.IDENTITY_ACCOUNT_WITHDRAWN,
+        legacyTopic = RedisStreamTopic.LEGACY_DOMAIN_EVENTS,
         group = GROUP,
         consumer = CONSUMER,
         eventType = EVENT_TYPE,
@@ -38,7 +39,8 @@ class AccountWithdrawalStreamListener(
     }
 
     @StreamScheduler(
-        topic = RedisStreamTopic.DOMAIN_EVENTS,
+        topic = RedisStreamTopic.IDENTITY_ACCOUNT_WITHDRAWN,
+        legacyTopic = RedisStreamTopic.LEGACY_DOMAIN_EVENTS,
         group = GROUP,
         consumer = RECOVERY_CONSUMER,
         eventType = EVENT_TYPE,

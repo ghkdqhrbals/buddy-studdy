@@ -22,7 +22,13 @@ class PublicQuestionReactionRedisStreamPublisher(
         localization: PublicQuestionViewLocalization?,
     ): Boolean {
         if (!properties.streams.enabled) {
-            logPublishSkipped("streams_disabled", properties.streams.key, "CONTENT_VIEWED", questionId, userId)
+            logPublishSkipped(
+                "streams_disabled",
+                properties.streams.questionViewedKey,
+                "CONTENT_VIEWED",
+                questionId,
+                userId,
+            )
             return false
         }
         val fields = PublicQuestionViewedEvent(
@@ -39,7 +45,7 @@ class PublicQuestionReactionRedisStreamPublisher(
             aiResponseSourceLanguage = localization?.aiResponseSourceLanguage,
             aiResponseDisplayLanguage = localization?.aiResponseDisplayLanguage,
         ).toStringMapWithoutNull()
-        return publish(properties.streams.key, questionId, fields)
+        return publish(properties.streams.questionViewedKey, questionId, fields)
     }
 
     private suspend fun publish(
@@ -58,7 +64,7 @@ class PublicQuestionReactionRedisStreamPublisher(
                 fields["userId"],
                 fields.keys,
             )
-            val published = viewPublisher.publish(RedisStreamTopic.DOMAIN_EVENTS, fields)
+            val published = viewPublisher.publish(RedisStreamTopic.COMMUNITY_QUESTION_VIEWED, fields)
             logger.debug(
                 "redis_stream_publish_succeeded stream={} redisRecordId={} eventId={} eventType={} partitionKey={} questionId={} userId={}",
                 published.streamKey,

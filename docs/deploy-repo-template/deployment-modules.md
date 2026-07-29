@@ -79,6 +79,10 @@ deployment.
 - Backend deployment uses Redis Streams directly through the application
   consumers. It must not provision a separate stream coordination service,
   related containers, networks, routes, secrets, or readiness settings.
+- Active Redis Stream keys are event-specific and must follow
+  `<business-domain>.<data-type>.<event-type>.<version>`. Deployment may keep
+  the five former `buddystudy-*-v1` keys readable only while their pending
+  entries drain; it must never publish new events to those legacy keys.
 - Backend deployment owns one Redis runtime with AOF `everysec`, RDB snapshots,
   a retained Docker volume, and a password stored in AWS Secrets Manager.
   Redis publishes host port `6379`; the separate backend-network workflow

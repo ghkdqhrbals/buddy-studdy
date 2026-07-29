@@ -21,7 +21,8 @@ class AnswerGradingStreamListenerTest {
             .single { it.name == "consume" }
             .findAnnotation<StreamListener>()!!
 
-        assertThat(annotation.topic).isEqualTo(RedisStreamTopic.DOMAIN_EVENTS)
+        assertThat(annotation.topic).isEqualTo(RedisStreamTopic.STUDY_ANSWER_GRADING_REQUESTED)
+        assertThat(annotation.legacyTopic).isEqualTo(RedisStreamTopic.LEGACY_DOMAIN_EVENTS)
         assertThat(annotation.group).isEqualTo("bs-backend-answer-grading")
         assertThat(annotation.eventType).isEqualTo("ANSWER_GRADING_REQUESTED")
         assertThat(annotation.payloadType).isEqualTo(AnswerGradingRequestedEvent::class)
@@ -34,7 +35,8 @@ class AnswerGradingStreamListenerTest {
             .single { it.name == "recover" }
             .findAnnotation<StreamScheduler>()!!
 
-        assertThat(annotation.topic).isEqualTo(RedisStreamTopic.DOMAIN_EVENTS)
+        assertThat(annotation.topic).isEqualTo(RedisStreamTopic.STUDY_ANSWER_GRADING_REQUESTED)
+        assertThat(annotation.legacyTopic).isEqualTo(RedisStreamTopic.LEGACY_DOMAIN_EVENTS)
         assertThat(annotation.group).isEqualTo("bs-backend-answer-grading")
         assertThat(annotation.eventType).isEqualTo("ANSWER_GRADING_REQUESTED")
         assertThat(annotation.payloadType).isEqualTo(AnswerGradingRequestedEvent::class)

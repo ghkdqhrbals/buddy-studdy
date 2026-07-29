@@ -77,15 +77,18 @@ class AdminEventStreamServiceTest {
     fun `topics are searched by consumer group`(): Unit = runBlocking {
         streams.topicItems = listOf(
             topic(
-                "question-generated",
-                "buddystudy-question-generated-v1",
+                "study.question.generated.v1",
+                "study.question.generated.v1",
                 group = "bs-backend-question-translation",
             ),
-            topic("push-events", "buddystudy-push-v1"),
+            topic(
+                "notification.question-push.requested.v1",
+                "notification.question-push.requested.v1",
+            ),
         )
 
         assertThat(service.topics("TRANSLATION").map { it.topic })
-            .containsExactly("question-generated")
+            .containsExactly("study.question.generated.v1")
     }
 
     @Test

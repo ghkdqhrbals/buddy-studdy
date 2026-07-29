@@ -17,7 +17,8 @@ class QuestionTranslationStreamListener(
     private val translations: ProcessQuestionTranslationUseCase,
 ) {
     @StreamListener(
-        topic = RedisStreamTopic.QUESTION_GENERATED,
+        topic = RedisStreamTopic.STUDY_QUESTION_GENERATED,
+        legacyTopic = RedisStreamTopic.LEGACY_QUESTION_GENERATED,
         group = QuestionTranslationExecutionWriteService.CONSUMER_GROUP,
         consumer = CONSUMER,
         eventType = EVENT_TYPE,
@@ -34,7 +35,8 @@ class QuestionTranslationStreamListener(
     }
 
     @StreamScheduler(
-        topic = RedisStreamTopic.QUESTION_GENERATED,
+        topic = RedisStreamTopic.STUDY_QUESTION_GENERATED,
+        legacyTopic = RedisStreamTopic.LEGACY_QUESTION_GENERATED,
         group = QuestionTranslationExecutionWriteService.CONSUMER_GROUP,
         consumer = RECOVERY_CONSUMER,
         eventType = EVENT_TYPE,

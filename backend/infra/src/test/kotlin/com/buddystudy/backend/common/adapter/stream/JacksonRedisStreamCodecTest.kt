@@ -36,7 +36,7 @@ class JacksonRedisStreamCodecTest {
         val payload = SamplePayload(17, "typed-event", Instant.parse("2026-07-27T00:00:00Z"))
 
         publisher.publish(
-            topic = RedisStreamTopic.DOMAIN_EVENTS,
+            topic = RedisStreamTopic.NOTIFICATION_MESSAGE_REQUESTED,
             eventType = "SAMPLE_EVENT",
             eventId = "event-17",
             payload = payload,

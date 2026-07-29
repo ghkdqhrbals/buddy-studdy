@@ -15,8 +15,8 @@ import {
 
 const topics = [
   {
-    topic: "push-events",
-    streamKey: "buddystudy-push-v1",
+    topic: "notification.question-push.requested.v1",
+    streamKey: "notification.question-push.requested.v1",
     groups: [
       { name: "push", lag: 3, pending: 2, maxRetryCount: 1 },
       { name: "notifications", lag: 0, pending: 0, maxRetryCount: 0 },

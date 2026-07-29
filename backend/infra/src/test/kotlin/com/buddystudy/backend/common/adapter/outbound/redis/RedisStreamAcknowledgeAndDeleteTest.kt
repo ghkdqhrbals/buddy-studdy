@@ -25,7 +25,7 @@ class RedisStreamAcknowledgeAndDeleteTest {
         `when`(
             redis.execute<Boolean>(
                 ArgumentMatchers.any<RedisScript<Boolean>>(),
-                eq(listOf("buddystudy-events-v1")),
+                eq(listOf("notification.message.requested.v1")),
                 eq(listOf("push", "17-0")),
             ),
         ).thenReturn(Flux.just(true))
@@ -38,7 +38,7 @@ class RedisStreamAcknowledgeAndDeleteTest {
 
         manager.acknowledgeAndDelete(
             message = RedisStreamMessage(
-                streamKey = "buddystudy-events-v1",
+                streamKey = "notification.message.requested.v1",
                 recordId = "17-0",
                 fields = emptyMap(),
             ),
@@ -49,7 +49,7 @@ class RedisStreamAcknowledgeAndDeleteTest {
         val scriptCaptor = ArgumentCaptor.forClass(RedisScript::class.java) as ArgumentCaptor<RedisScript<Boolean>>
         verify(redis, times(1)).execute(
             scriptCaptor.capture(),
-            eq(listOf("buddystudy-events-v1")),
+            eq(listOf("notification.message.requested.v1")),
             eq(listOf("push", "17-0")),
         )
         verifyNoMoreInteractions(redis)

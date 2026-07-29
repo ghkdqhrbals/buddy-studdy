@@ -33,7 +33,8 @@ class PushStreamManagerAnnotationTest {
             .single { it.name == "consumePush" }
             .findAnnotation<StreamListener>()!!
 
-        assertThat(annotation.topic).isEqualTo(RedisStreamTopic.PUSH_EVENTS)
+        assertThat(annotation.topic).isEqualTo(RedisStreamTopic.NOTIFICATION_QUESTION_PUSH_REQUESTED)
+        assertThat(annotation.legacyTopic).isEqualTo(RedisStreamTopic.LEGACY_PUSH_EVENTS)
         assertThat(annotation.payloadType).isEqualTo(QuestionPushRequestedPayload::class)
         assertThat(annotation.group).isEqualTo("bs-backend-push")
         assertThat(annotation.consumer).isEqualTo("buddystudy-push")
@@ -49,7 +50,8 @@ class PushStreamManagerAnnotationTest {
             .single { it.name == "recoverIdlePush" }
             .findAnnotation<StreamScheduler>()!!
 
-        assertThat(annotation.topic).isEqualTo(RedisStreamTopic.PUSH_EVENTS)
+        assertThat(annotation.topic).isEqualTo(RedisStreamTopic.NOTIFICATION_QUESTION_PUSH_REQUESTED)
+        assertThat(annotation.legacyTopic).isEqualTo(RedisStreamTopic.LEGACY_PUSH_EVENTS)
         assertThat(annotation.payloadType).isEqualTo(QuestionPushRequestedPayload::class)
         assertThat(annotation.group).isEqualTo("bs-backend-push")
         assertThat(annotation.consumer).isEqualTo("buddystudy-push-recovery")
@@ -88,7 +90,7 @@ class PushStreamManagerAnnotationTest {
             createdAt = Instant.parse("2026-06-08T00:00:00Z"),
         )
         val context = StreamMessageContext(
-            streamKey = "buddystudy-push-v1",
+            streamKey = "notification.question-push.requested.v1",
             recordId = "1-0",
             eventId = "question-push-10-device-1",
             eventType = "QUESTION_PUSH_REQUESTED",
@@ -163,7 +165,7 @@ class PushStreamManagerAnnotationTest {
             createdAt = Instant.parse("2026-06-08T00:00:00Z"),
         )
         val context = StreamMessageContext(
-            streamKey = "buddystudy-push-v1",
+            streamKey = "notification.question-push.requested.v1",
             recordId = "1-0",
             eventId = "question-push-12-device-1",
             eventType = "QUESTION_PUSH_REQUESTED",

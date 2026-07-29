@@ -20,7 +20,8 @@ class NotificationStreamListenerAnnotationTest {
             .single { it.name == "consumeNotification" }
             .findAnnotation<StreamListener>()!!
 
-        assertThat(annotation.topic).isEqualTo(RedisStreamTopic.DOMAIN_EVENTS)
+        assertThat(annotation.topic).isEqualTo(RedisStreamTopic.NOTIFICATION_MESSAGE_REQUESTED)
+        assertThat(annotation.legacyTopic).isEqualTo(RedisStreamTopic.LEGACY_DOMAIN_EVENTS)
         assertThat(annotation.group).isEqualTo("bs-backend-notification")
         assertThat(annotation.eventType).isEqualTo("NOTIFICATION_REQUESTED")
         assertThat(annotation.payloadType).isEqualTo(NotificationRequestedPayload::class)
@@ -33,7 +34,8 @@ class NotificationStreamListenerAnnotationTest {
             .single { it.name == "recoverIdleNotification" }
             .findAnnotation<StreamScheduler>()!!
 
-        assertThat(annotation.topic).isEqualTo(RedisStreamTopic.DOMAIN_EVENTS)
+        assertThat(annotation.topic).isEqualTo(RedisStreamTopic.NOTIFICATION_MESSAGE_REQUESTED)
+        assertThat(annotation.legacyTopic).isEqualTo(RedisStreamTopic.LEGACY_DOMAIN_EVENTS)
         assertThat(annotation.group).isEqualTo("bs-backend-notification")
         assertThat(annotation.eventType).isEqualTo("NOTIFICATION_REQUESTED")
         assertThat(annotation.payloadType).isEqualTo(NotificationRequestedPayload::class)
@@ -57,7 +59,7 @@ class NotificationStreamListenerAnnotationTest {
             """.trimIndent(),
         )
         val context = StreamMessageContext(
-            streamKey = "buddystudy-events-v1",
+            streamKey = "notification.message.requested.v1",
             recordId = "1785259240567-0",
             eventId = "question-created-45",
             eventType = "NOTIFICATION_REQUESTED",
