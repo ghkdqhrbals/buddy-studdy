@@ -139,13 +139,12 @@ private struct AppUpdatePromptView: View {
 
     var body: some View {
         ZStack {
-            if decision.isForced {
-                Color.black.opacity(0.46)
-                    .ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture {}
-                    .accessibilityHidden(true)
-            }
+            Color.black.opacity(decision.isForced ? 0.32 : 0.16)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .allowsHitTesting(decision.isForced)
+                .accessibilityHidden(true)
+                .onTapGesture {}
 
             VStack {
                 Spacer()

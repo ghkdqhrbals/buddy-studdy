@@ -144,7 +144,12 @@ final class ArchitecturePolicyTests: XCTestCase {
                 ".accessibilityHidden(appState.appUpdateDecision?.isForced == true)"
             )
         )
-        XCTAssertTrue(appContent.contains("Color.black.opacity(0.46)"))
+        XCTAssertTrue(
+            appContent.contains(
+                "Color.black.opacity(decision.isForced ? 0.32 : 0.16)"
+            )
+        )
+        XCTAssertTrue(appContent.contains(".allowsHitTesting(decision.isForced)"))
         XCTAssertTrue(appContent.contains("private var updateBanner: some View"))
         XCTAssertTrue(appContent.contains("Image(systemName: \"lock.fill\")"))
         XCTAssertFalse(appContent.contains("private var forcedUpdateContent"))
