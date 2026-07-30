@@ -150,9 +150,10 @@ private struct AppUpdatePromptView: View {
                 .accessibilityAddTraits(.isModal)
             } else {
                 VStack {
+                    Spacer()
+
                     optionalUpdateBanner
                         .padding(.horizontal, 14)
-                        .padding(.top, 8)
 
                     Spacer()
                 }
@@ -162,11 +163,7 @@ private struct AppUpdatePromptView: View {
 
     private var forcedUpdateContent: some View {
         VStack(spacing: 0) {
-            Image(systemName: "arrow.down.app.fill")
-                .font(.system(size: 31, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 62, height: 62)
-                .background(Color.accentColor.opacity(0.12), in: Circle())
+            appIcon(size: 72, cornerRadius: 17)
 
             Text(decision.title?.nonEmpty ?? defaultTitle)
                 .font(.system(size: 22, weight: .bold))
@@ -203,12 +200,7 @@ private struct AppUpdatePromptView: View {
 
     private var optionalUpdateBanner: some View {
         HStack(spacing: 11) {
-            Image(systemName: "arrow.down.app.fill")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 34, height: 34)
-                .background(Color.accentColor.opacity(0.12), in: Circle())
-                .accessibilityHidden(true)
+            appIcon(size: 38, cornerRadius: 9)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(decision.title?.nonEmpty ?? defaultTitle)
@@ -258,6 +250,19 @@ private struct AppUpdatePromptView: View {
                 .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
         }
         .shadow(color: .black.opacity(0.14), radius: 12, y: 5)
+    }
+
+    private func appIcon(size: CGFloat, cornerRadius: CGFloat) -> some View {
+        Image("LaunchLogo")
+            .resizable()
+            .scaledToFill()
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+            }
+            .accessibilityHidden(true)
     }
 
     private func openAppStore() {
