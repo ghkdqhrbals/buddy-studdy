@@ -34,7 +34,7 @@ class ApplicationRuntimeHints : RuntimeHintsRegistrar {
                 MemberCategory.INVOKE_DECLARED_METHODS,
             )
         }
-        jacksonResponseTypes.forEach { type ->
+        jacksonBindingTypes.forEach { type ->
             hints.reflection().registerType(
                 TypeReference.of(type),
                 MemberCategory.INVOKE_DECLARED_CONSTRUCTORS,
@@ -97,7 +97,7 @@ class ApplicationRuntimeHints : RuntimeHintsRegistrar {
         "kotlin.collections.EmptySet",
     )
 
-    private val jacksonResponseTypes = listOf(
+    private val jacksonBindingTypes = listOf(
         "com.buddystudy.backend.auth.application.model.AccessTokenResponse",
         "com.buddystudy.backend.auth.application.model.DeviceRegisterResponse",
         "com.buddystudy.backend.auth.application.model.EmailVerificationCodeResponse",
@@ -113,6 +113,10 @@ class ApplicationRuntimeHints : RuntimeHintsRegistrar {
         "com.buddystudy.backend.profile.application.model.AvatarCategoryResponse",
         "com.buddystudy.backend.profile.application.model.AvatarItemResponse",
         "com.buddystudy.backend.profile.application.model.UserProfileResponse",
+        "com.buddystudy.backend.study.application.port.outbound.AiCriterionAssessment",
+        "com.buddystudy.backend.study.application.port.outbound.AiGradingAssessment",
+        "com.buddystudy.backend.study.application.port.outbound.AiGradingCriterion",
+        "com.buddystudy.backend.study.application.port.outbound.AiGradingRubric",
         "com.buddystudy.backend.study.application.service.QuestionNotificationMetadata",
     )
 }

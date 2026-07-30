@@ -8,6 +8,10 @@ import com.buddystudy.backend.community.application.model.CommunityQuestionsResp
 import com.buddystudy.backend.notification.application.model.AppNotificationsResponse
 import com.buddystudy.backend.stats.application.model.StatsResponse
 import com.buddystudy.backend.study.application.model.StudyPageResponse
+import com.buddystudy.backend.study.application.port.outbound.AiCriterionAssessment
+import com.buddystudy.backend.study.application.port.outbound.AiGradingAssessment
+import com.buddystudy.backend.study.application.port.outbound.AiGradingCriterion
+import com.buddystudy.backend.study.application.port.outbound.AiGradingRubric
 import com.buddystudy.study.domain.entity.QuestionEntity
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -126,5 +130,31 @@ class ApplicationRuntimeHintsTest {
                 )
                 .test(hints),
         ).isTrue()
+    }
+
+    @Test
+    fun `registers grading metadata types for native Jackson serialization`() {
+        val hints = RuntimeHints()
+
+        ApplicationRuntimeHints().registerHints(hints, javaClass.classLoader)
+
+        listOf(
+            AiGradingAssessment::class.java,
+            AiCriterionAssessment::class.java,
+            AiGradingRubric::class.java,
+            AiGradingCriterion::class.java,
+        ).forEach { gradingType ->
+            assertThat(
+                RuntimeHintsPredicates.reflection()
+                    .onType(gradingType)
+                    .withMemberCategories(
+                        MemberCategory.INVOKE_DECLARED_CONSTRUCTORS,
+                        MemberCategory.DECLARED_FIELDS,
+                        MemberCategory.INVOKE_PUBLIC_METHODS,
+                        MemberCategory.INVOKE_DECLARED_METHODS,
+                    )
+                    .test(hints),
+            ).isTrue()
+        }
     }
 }

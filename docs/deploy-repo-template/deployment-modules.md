@@ -48,10 +48,11 @@ deployment.
   backend, monitoring, or admin deployment.
 - Backend image build remains in the app repository on GitHub-hosted runners.
 - Backend images support `native` and `jvm` runtime modes from one Dockerfile.
-  Native remains the default for tag-triggered releases. Manual image builds
-  select the runtime explicitly, stamp it into
-  `io.buddystudy.backend.runtime`, and dispatch that value with the immutable
-  runtime-qualified image reference (`<tag>-native` or `<tag>-jvm`). The
+  JVM is the default for tag-triggered and manually dispatched releases. A
+  manual image build may explicitly select native. Every build stamps the
+  runtime into `io.buddystudy.backend.runtime` and dispatches that value with
+  the immutable runtime-qualified image reference (`<tag>-native` or
+  `<tag>-jvm`). The
   unqualified tag remains a compatibility alias. The deploy workflow verifies
   the label before rollout, so changing runtime does not change the backend
   environment or routing contract.

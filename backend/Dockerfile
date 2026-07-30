@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-ARG BACKEND_RUNTIME=native
+ARG BACKEND_RUNTIME=jvm
 
 FROM scratch AS backend-source
 COPY gradlew gradlew.bat settings.gradle.kts build.gradle.kts /workspace/

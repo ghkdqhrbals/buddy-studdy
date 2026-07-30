@@ -13,11 +13,11 @@ on:
       backend_runtime:
         description: "Backend runtime packaged in the image."
         required: true
-        default: native
+        default: jvm
         type: choice
         options:
-          - native
           - jvm
+          - native
       dispatch_deploy:
         description: "Notify the deploy repository after pushing the image."
         required: true
@@ -56,7 +56,7 @@ jobs:
           fi
           RUNTIME="${{ inputs.backend_runtime }}"
           if [ -z "${RUNTIME}" ]; then
-            RUNTIME="native"
+            RUNTIME="jvm"
           fi
           case "${RUNTIME}" in
             native|jvm) ;;
