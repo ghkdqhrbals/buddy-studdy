@@ -3484,6 +3484,7 @@ struct AppStrings {
     var writeComment: String { text("댓글 쓰기", "Write a comment") }
     var signInToComment: String { text("로그인 후 댓글을 쓸 수 있습니다.", "Sign in to write a comment.") }
     var communityLogin: String { text("로그인", "Sign In") }
+    var signInWithApple: String { text("Apple로 로그인", "Sign in with Apple", "Appleでログイン") }
     var signInWithGoogle: String { text("Google로 로그인", "Sign in with Google", "Googleでログイン") }
     var signInWithEmail: String { text("이메일로 로그인", "Sign in with Email", "メールでログイン") }
     var loginPageHelp: String {

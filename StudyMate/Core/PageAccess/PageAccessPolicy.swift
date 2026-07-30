@@ -94,3 +94,9 @@ enum PageAccessPolicy {
         )
     }
 }
+
+enum SettingsAccessPolicy {
+    static func canEditAccountBackedPreferences(isSignedIn: Bool) -> Bool {
+        isSignedIn
+    }
+}

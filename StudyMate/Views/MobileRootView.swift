@@ -1016,7 +1016,11 @@ private struct MobileLoginPage: View {
                 Button {
                     appState.signInToCommunity()
                 } label: {
-                    SignInButtonLabel(title: strings.signInWithGoogle, isPrimary: true)
+                    SignInButtonLabel(
+                        title: strings.signInWithGoogle,
+                        isPrimary: true,
+                        provider: .google
+                    )
                 }
                 .buttonStyle(.plain)
             }
@@ -5853,7 +5857,11 @@ private struct MobileProfileEditorView: View {
                             Button {
                                 appState.signInToCommunity()
                             } label: {
-                                SignInButtonLabel(title: strings.signInWithGoogle, isPrimary: true)
+                                SignInButtonLabel(
+                                    title: strings.signInWithGoogle,
+                                    isPrimary: true,
+                                    provider: .google
+                                )
                             }
                             .buttonStyle(.plain)
 
@@ -6813,16 +6821,33 @@ private extension Color {
     }
 }
 
+private enum SignInProvider {
+    case apple
+    case google
+}
+
 private struct SignInButtonLabel: View {
     var title: String
     var isPrimary: Bool
+    var provider: SignInProvider? = nil
 
     var body: some View {
         let buttonShape = RoundedRectangle(cornerRadius: 24, style: .continuous)
 
-        Text(title)
-            .font(.body.weight(.semibold))
-            .lineLimit(1)
+        ZStack {
+            Text(title)
+                .font(.body.weight(.semibold))
+                .lineLimit(1)
+                .padding(.horizontal, provider == nil ? 0 : 34)
+
+            if let provider {
+                HStack {
+                    providerMark(provider)
+                        .frame(width: 24, height: 24)
+                    Spacer()
+                }
+            }
+        }
             .frame(maxWidth: .infinity)
             .frame(minHeight: 58)
             .padding(.horizontal, 18)
@@ -6837,6 +6862,18 @@ private struct SignInButtonLabel: View {
             .contentShape(buttonShape)
             .foregroundStyle(isPrimary ? Color(UIColor.systemBackground) : Color.primary)
     }
+
+    @ViewBuilder
+    private func providerMark(_ provider: SignInProvider) -> some View {
+        switch provider {
+        case .apple:
+            Image(systemName: "apple.logo")
+                .font(.system(size: 20, weight: .semibold))
+        case .google:
+            Text("G")
+                .font(.system(size: 19, weight: .bold, design: .rounded))
+        }
+    }
 }
 
 #if os(iOS)
@@ -6845,30 +6882,41 @@ private struct BuddySignInWithAppleButton: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        SignInWithAppleButton(.signIn) { request in
-            request.requestedScopes = [.email]
-        } onCompletion: { result in
-            switch result {
-            case .success(let authorization):
-                guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
-                      let tokenData = credential.identityToken,
-                      let identityToken = String(data: tokenData, encoding: .utf8) else {
-                    appState.appleSignInFailed()
-                    return
-                }
-                Task {
-                    await appState.signInToCommunityWithApple(identityToken: identityToken)
-                }
-            case .failure(let error):
-                if let authorizationError = error as? ASAuthorizationError,
-                   authorizationError.code == .canceled {
-                    appState.appleSignInCancelled()
-                } else {
-                    appState.appleSignInFailed(error)
+        ZStack {
+            SignInButtonLabel(
+                title: appState.strings.signInWithApple,
+                isPrimary: true,
+                provider: .apple
+            )
+            .accessibilityHidden(true)
+
+            SignInWithAppleButton(.signIn) { request in
+                request.requestedScopes = [.email]
+            } onCompletion: { result in
+                switch result {
+                case .success(let authorization):
+                    guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+                          let tokenData = credential.identityToken,
+                          let identityToken = String(data: tokenData, encoding: .utf8) else {
+                        appState.appleSignInFailed()
+                        return
+                    }
+                    Task {
+                        await appState.signInToCommunityWithApple(identityToken: identityToken)
+                    }
+                case .failure(let error):
+                    if let authorizationError = error as? ASAuthorizationError,
+                       authorizationError.code == .canceled {
+                        appState.appleSignInCancelled()
+                    } else {
+                        appState.appleSignInFailed(error)
+                    }
                 }
             }
+            .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
+            .opacity(0.01)
+            .accessibilityLabel(appState.strings.signInWithApple)
         }
-        .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
         .frame(maxWidth: .infinity)
         .frame(height: 58)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
@@ -8735,6 +8783,9 @@ private struct MobileSettingsView: View {
 
     var body: some View {
         let strings = appState.settingsEditorStrings
+        let canEditAccountPreferences = SettingsAccessPolicy.canEditAccountBackedPreferences(
+            isSignedIn: appState.isCommunitySessionActive
+        )
 
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 18) {
@@ -8792,19 +8843,21 @@ private struct MobileSettingsView: View {
                     }
                 }
 
-                MobileSettingsCard(
-                    title: strings.learningRhythmSettings,
-                    systemImage: "timer"
-                ) {
-                    Stepper(
-                        value: $appState.draftSettings.intervalMinutes,
-                        in: 1...240
+                if canEditAccountPreferences {
+                    MobileSettingsCard(
+                        title: strings.learningRhythmSettings,
+                        systemImage: "timer"
                     ) {
-                        MobileSettingsRow(
-                            systemImage: "clock.arrow.2.circlepath",
-                            title: strings.studySettings,
-                            value: strings.questionInterval(minutes: appState.draftSettings.sanitizedIntervalMinutes)
-                        )
+                        Stepper(
+                            value: $appState.draftSettings.intervalMinutes,
+                            in: 1...240
+                        ) {
+                            MobileSettingsRow(
+                                systemImage: "clock.arrow.2.circlepath",
+                                title: strings.studySettings,
+                                value: strings.questionInterval(minutes: appState.draftSettings.sanitizedIntervalMinutes)
+                            )
+                        }
                     }
                 }
 
@@ -8833,45 +8886,47 @@ private struct MobileSettingsView: View {
                     }
                     .buttonStyle(.plain)
 
-                    Divider()
+                    if canEditAccountPreferences {
+                        Divider()
 
-                    Button {
-                        appState.openSystemNotificationSettings()
-                    } label: {
-                        MobileSettingsRow(
-                            systemImage: "bell.badge",
-                            title: strings.notifications,
-                            value: strings.openNotificationSettings,
-                            showsChevron: true
-                        )
-                    }
-                    .buttonStyle(.plain)
+                        Button {
+                            appState.openSystemNotificationSettings()
+                        } label: {
+                            MobileSettingsRow(
+                                systemImage: "bell.badge",
+                                title: strings.notifications,
+                                value: strings.openNotificationSettings,
+                                showsChevron: true
+                            )
+                        }
+                        .buttonStyle(.plain)
 
-                    Divider()
+                        Divider()
 
-                    Menu {
-                        ForEach(NotificationSoundOption.allCases) { sound in
-                            Button {
-                                appState.setDraftNotificationSound(sound)
-                            } label: {
-                                if appState.draftSettings.notificationSound == sound {
-                                    Label(
-                                        sound.displayName(language: appState.draftSettings.appLanguage),
-                                        systemImage: "checkmark"
-                                    )
-                                } else {
-                                    Text(sound.displayName(language: appState.draftSettings.appLanguage))
+                        Menu {
+                            ForEach(NotificationSoundOption.allCases) { sound in
+                                Button {
+                                    appState.setDraftNotificationSound(sound)
+                                } label: {
+                                    if appState.draftSettings.notificationSound == sound {
+                                        Label(
+                                            sound.displayName(language: appState.draftSettings.appLanguage),
+                                            systemImage: "checkmark"
+                                        )
+                                    } else {
+                                        Text(sound.displayName(language: appState.draftSettings.appLanguage))
+                                    }
                                 }
                             }
+                        } label: {
+                            MobileSettingsRow(
+                                systemImage: "speaker.wave.2.fill",
+                                title: strings.notificationSound,
+                                value: appState.draftSettings.notificationSound.displayName(language: appState.draftSettings.appLanguage)
+                            )
                         }
-                    } label: {
-                        MobileSettingsRow(
-                            systemImage: "speaker.wave.2.fill",
-                            title: strings.notificationSound,
-                            value: appState.draftSettings.notificationSound.displayName(language: appState.draftSettings.appLanguage)
-                        )
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
 
                 if !appState.canAccessDeveloperOptions {
@@ -8901,11 +8956,6 @@ private struct MobileSettingsView: View {
                             .onSubmit {
                                 redeemPromotionCode()
                             }
-
-                            Text(strings.promotionCodeHelp)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
 
                             if let message = appState.promotionCodeMessage {
                                 Text(message)

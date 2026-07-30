@@ -35,6 +35,15 @@ final class PageAccessPolicyTests: XCTestCase {
         )
     }
 
+    func testGuestSettingsHideAccountBackedPreferences() {
+        XCTAssertFalse(
+            SettingsAccessPolicy.canEditAccountBackedPreferences(isSignedIn: false)
+        )
+        XCTAssertTrue(
+            SettingsAccessPolicy.canEditAccountBackedPreferences(isSignedIn: true)
+        )
+    }
+
     func testCommunitySessionStateInvalidatesInFlightRequestAfterSignOut() {
         var session = CommunitySessionStateStore(isSignedIn: true)
         let requestSnapshot = session.generation
