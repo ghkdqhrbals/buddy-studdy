@@ -8363,17 +8363,18 @@ private struct CommunityAnswerMessage: View {
         HStack(alignment: .bottom) {
             Spacer(minLength: 24)
 
-            MarkdownMessageText(markdown: answer, fillsWidth: false)
-                .font(.body)
-                .foregroundStyle(.white)
-                .tint(.white)
-                .textSelection(.enabled)
-                .multilineTextAlignment(.leading)
-                .padding(.vertical, 11)
-                .padding(.horizontal, 12)
-                .frame(maxWidth: 260, alignment: .leading)
-                .background(CommunityMessageBubbleRole.answer.foregroundBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            CompactMessageLayout(maximumWidth: 260) {
+                MarkdownMessageText(markdown: answer, fillsWidth: false)
+                    .font(.body)
+                    .foregroundStyle(.white)
+                    .tint(.white)
+                    .textSelection(.enabled)
+                    .multilineTextAlignment(.leading)
+                    .padding(.vertical, 11)
+                    .padding(.horizontal, 12)
+                    .background(CommunityMessageBubbleRole.answer.foregroundBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
