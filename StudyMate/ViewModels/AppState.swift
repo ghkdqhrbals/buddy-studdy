@@ -3614,7 +3614,9 @@ final class AppState: ObservableObject {
                     return
                 }
 
+                let persistedIntervalMinutes = settings.intervalMinutes
                 var nextSettings = backendSettings.studySettings(fallback: settings)
+                nextSettings.intervalMinutes = persistedIntervalMinutes
                 nextSettings = synchronizedTopicCategories(for: nextSettings)
                 if !isCommunitySessionActive {
                     nextSettings = nextSettings.withQuestionPrivacy(false)
@@ -5561,10 +5563,11 @@ final class AppState: ObservableObject {
             return ""
         }
 
+        if let submittedAnswer = StudyAnswerPresentationPolicy.submittedAnswer(for: record) {
+            return submittedAnswer
+        }
         let draft = localStudyRecordUseCase.loadAnswerDraft(recordID: record.id)
-        return draft.isEmpty
-            ? record.answer ?? ""
-            : draft
+        return draft
     }
 
     func isAnswerGradingInProgress(for record: StudyRecord?) -> Bool {
@@ -5637,9 +5640,6 @@ final class AppState: ObservableObject {
         errorMessage = nil
         statusMessage = "답변을 채점 중입니다."
         localStudyRecordUseCase.saveAnswerDraft(submittedAnswer, recordID: record.id)
-        localStudyRecordUseCase.updateAnswer(question: record.question, answer: submittedAnswer, onlyIfUngraded: true)
-        reloadStudyRecordsFromStore()
-        refreshBackendStudyRoomsFromRecords()
         log(.info, "학습룸 질문 답변 채점 요청을 전송합니다. recordID=\(record.id)")
 
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "grade-study-room-answer") else {
@@ -6169,7 +6169,9 @@ final class AppState: ObservableObject {
     }
 
     func setTimerInterval(_ minutes: Int) {
-        settings.intervalMinutes = min(max(minutes, 1), 240)
+        let intervalMinutes = min(max(minutes, 1), 240)
+        settings.intervalMinutes = intervalMinutes
+        draftSettings.intervalMinutes = intervalMinutes
         localStudySettingsUseCase.saveSettings(settings)
         savedSettings = normalizedSettings(settings)
         reloadStudyRecordsFromStore()
@@ -7060,7 +7062,7 @@ final class AppState: ObservableObject {
             throw AnswerGradingProcessError.failed(strings.gradingFailed)
         }
 
-        var cursor: Int64 = 0
+        var cursor = queuedRecord.gradingLastEventID ?? 0
         var consecutiveTransportFailures = 0
         var displayedStatus = queuedRecord.gradingStatus ?? .queued
         var displayedAt = appClock.now
@@ -7085,15 +7087,16 @@ final class AppState: ObservableObject {
                 consecutiveTransportFailures = 0
                 if resumeFromCurrentStatus {
                     cursor = process.events.reduce(cursor) { max($0, $1.id) }
+                    persistAnswerGradingProgress(
+                        process.status,
+                        errorMessage: process.errorMessage,
+                        eventID: cursor > 0 ? cursor : nil,
+                        for: queuedRecord,
+                        usesAuthoritativeStatus: true
+                    )
                     if process.status != displayedStatus {
                         displayedStatus = process.status
                         displayedAt = appClock.now
-                        persistAnswerGradingProgress(
-                            process.status,
-                            errorMessage: process.errorMessage,
-                            for: queuedRecord,
-                            usesAuthoritativeStatus: true
-                        )
                         let progressMessage = gradingMessage(for: process.status)
                         statusMessage = progressMessage
                         answerGradingStatusMessage = progressMessage
@@ -7108,11 +7111,10 @@ final class AppState: ObservableObject {
                                   isAnswerGradingOwnerCurrent(ownerID) else {
                                 throw CancellationError()
                             }
-                            return try await recordsUseCase.fetchRecord(
+                            return try await fetchCompletedAnswerGradingRecord(
                                 registration: registration,
                                 recordID: process.recordID,
-                                language: settings.appLanguage,
-                                view: .localized
+                                cursor: cursor
                             )
                         }
                         throw AnswerGradingProcessError.failed(
@@ -7124,10 +7126,17 @@ final class AppState: ObservableObject {
                 }
                 for event in process.events {
                     cursor = max(cursor, event.id)
-                    guard shouldAdvanceGradingStatus(
+                    let shouldAdvance = shouldAdvanceGradingStatus(
                         from: displayedStatus,
                         to: event.status
-                    ) else {
+                    )
+                    persistAnswerGradingProgress(
+                        displayedStatus,
+                        errorMessage: nil,
+                        eventID: event.id,
+                        for: queuedRecord
+                    )
+                    guard shouldAdvance else {
                         continue
                     }
                     try await keepGradingStatusVisible(
@@ -7139,6 +7148,7 @@ final class AppState: ObservableObject {
                     persistAnswerGradingProgress(
                         event.status,
                         errorMessage: event.errorMessage,
+                        eventID: event.id,
                         for: queuedRecord
                     )
                     let progressMessage = gradingMessage(for: event.status)
@@ -7159,11 +7169,10 @@ final class AppState: ObservableObject {
                               isAnswerGradingOwnerCurrent(ownerID) else {
                             throw CancellationError()
                         }
-                        return try await recordsUseCase.fetchRecord(
+                        return try await fetchCompletedAnswerGradingRecord(
                             registration: registration,
                             recordID: queuedRecord.id,
-                            language: settings.appLanguage,
-                            view: .localized
+                            cursor: cursor
                         )
                     case .failed:
                         throw AnswerGradingProcessError.failed(
@@ -7212,11 +7221,10 @@ final class AppState: ObservableObject {
                               isAnswerGradingOwnerCurrent(ownerID) else {
                             throw CancellationError()
                         }
-                        return try await recordsUseCase.fetchRecord(
+                        return try await fetchCompletedAnswerGradingRecord(
                             registration: registration,
                             recordID: process.recordID,
-                            language: settings.appLanguage,
-                            view: .localized
+                            cursor: cursor
                         )
                     }
                     throw AnswerGradingProcessError.failed(
@@ -7242,6 +7250,23 @@ final class AppState: ObservableObject {
         }
 
         throw CancellationError()
+    }
+
+    private func fetchCompletedAnswerGradingRecord(
+        registration: RemotePushRegistration,
+        recordID: String,
+        cursor: Int64
+    ) async throws -> StudyRecord {
+        var record = try await recordsUseCase.fetchRecord(
+            registration: registration,
+            recordID: recordID,
+            language: settings.appLanguage,
+            view: .localized
+        )
+        if cursor > (record.gradingLastEventID ?? 0) {
+            record.gradingLastEventID = cursor
+        }
+        return record
     }
 
     private func shouldAdvanceGradingStatus(
@@ -7277,12 +7302,10 @@ final class AppState: ObservableObject {
     private func persistAnswerGradingProgress(
         _ status: AnswerGradingStatus,
         errorMessage: String?,
+        eventID: Int64? = nil,
         for queuedRecord: StudyRecord,
         usesAuthoritativeStatus: Bool = false
     ) {
-        guard status != .completed else {
-            return
-        }
         let currentRecord = studyRecords.first(where: { $0.id == queuedRecord.id })
             ?? studyRoomState.rooms
                 .compactMap(\.pendingQuestion)
@@ -7291,15 +7314,26 @@ final class AppState: ObservableObject {
         guard currentRecord.gradingResult == nil else {
             return
         }
-        if !usesAuthoritativeStatus,
-           let currentStatus = currentRecord.gradingStatus,
-           !shouldAdvanceGradingStatus(from: currentStatus, to: status) {
-            return
-        }
 
         var progressedRecord = currentRecord
-        progressedRecord.gradingStatus = status
-        progressedRecord.gradingError = errorMessage
+        if let eventID,
+           eventID > (progressedRecord.gradingLastEventID ?? 0) {
+            progressedRecord.gradingLastEventID = eventID
+        }
+        let shouldApplyStatus = status != .completed && (
+            usesAuthoritativeStatus ||
+                progressedRecord.gradingStatus == nil ||
+                progressedRecord.gradingStatus.map {
+                    shouldAdvanceGradingStatus(from: $0, to: status)
+                } == true
+        )
+        if shouldApplyStatus {
+            progressedRecord.gradingStatus = status
+            progressedRecord.gradingError = errorMessage
+        }
+        guard progressedRecord != currentRecord else {
+            return
+        }
         localStudyRecordUseCase.replaceRecords(
             mergeBackendRecord(progressedRecord, into: studyRecords)
         )
@@ -7314,6 +7348,9 @@ final class AppState: ObservableObject {
         }
         if acceptedRecord.studyID == nil {
             acceptedRecord.studyID = studyRecords.first(where: { $0.id == acceptedRecord.id })?.studyID
+        }
+        if StudyAnswerPresentationPolicy.submittedAnswer(for: acceptedRecord) != nil {
+            localStudyRecordUseCase.deleteAnswerDraft(recordID: acceptedRecord.id)
         }
         localStudyRecordUseCase.replaceRecords(
             mergeBackendRecord(acceptedRecord, into: studyRecords)
@@ -9805,8 +9842,21 @@ final class AppState: ObservableObject {
     }
 
     private func mergeBackendRecord(_ record: StudyRecord, into records: [StudyRecord]) -> [StudyRecord] {
+        let matchingRecords = records.filter {
+            $0.id == record.id || studyRecordMatches($0, question: record.question)
+        }
+        var mergedRecord = record
+        let matchingCursor = matchingRecords
+            .filter { $0.gradingRequestID == record.gradingRequestID }
+            .compactMap(\.gradingLastEventID)
+            .max()
+        if let matchingCursor,
+           matchingCursor > (mergedRecord.gradingLastEventID ?? 0) {
+            mergedRecord.gradingLastEventID = matchingCursor
+        }
+
         var merged = records.filter { $0.id != record.id && !studyRecordMatches($0, question: record.question) }
-        merged.append(record)
+        merged.append(mergedRecord)
         return merged.sorted { studyRecordSortDate($0) < studyRecordSortDate($1) }
     }
 

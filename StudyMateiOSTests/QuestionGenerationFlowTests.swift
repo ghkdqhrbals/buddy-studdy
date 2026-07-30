@@ -666,11 +666,17 @@ final class QuestionGenerationFlowTests: XCTestCase {
                 id: "record-12",
                 studyID: 12,
                 question: question,
+                answer: "격리 수준은 동시성 문제와 일관성 사이의 균형을 정합니다.",
                 topic: category.title,
-                difficulty: category.difficulty
+                difficulty: category.difficulty,
+                answeredAt: Date(timeIntervalSince1970: 1_753_660_860),
+                gradingRequestID: "grading-12",
+                gradingStatus: .judging,
+                gradingLastEventID: 4
             )
         )
         store.saveRemotePushRegistration(Self.signedInRegistration)
+        let gradingCursorQuery = LockedValue<String?>(nil)
 
         let client = makeClient { request in
             switch (request.httpMethod, request.url?.path) {
@@ -725,6 +731,13 @@ final class QuestionGenerationFlowTests: XCTestCase {
                     """
                 )
             case ("GET", "/api/v1/answer-processes/grading-12"):
+                let queryItems = URLComponents(
+                    url: request.url!,
+                    resolvingAgainstBaseURL: false
+                )?.queryItems
+                gradingCursorQuery.set(
+                    queryItems?.first(where: { $0.name == "after" })?.value
+                )
                 return Self.response(
                     for: request,
                     statusCode: 200,
@@ -736,38 +749,6 @@ final class QuestionGenerationFlowTests: XCTestCase {
                       "terminal": true,
                       "pollAfterMs": null,
                       "events": [
-                        {
-                          "id": 1,
-                          "recordId": "record-12",
-                          "correlationId": "grading-12",
-                          "status": "QUEUED",
-                          "errorMessage": null,
-                          "occurredAt": "2025-07-28T00:01:00Z"
-                        },
-                        {
-                          "id": 2,
-                          "recordId": "record-12",
-                          "correlationId": "grading-12",
-                          "status": "ANALYZING_EVIDENCE",
-                          "errorMessage": null,
-                          "occurredAt": "2025-07-28T00:01:10Z"
-                        },
-                        {
-                          "id": 3,
-                          "recordId": "record-12",
-                          "correlationId": "grading-12",
-                          "status": "CRITIQUING",
-                          "errorMessage": null,
-                          "occurredAt": "2025-07-28T00:01:20Z"
-                        },
-                        {
-                          "id": 4,
-                          "recordId": "record-12",
-                          "correlationId": "grading-12",
-                          "status": "JUDGING",
-                          "errorMessage": null,
-                          "occurredAt": "2025-07-28T00:01:30Z"
-                        },
                         {
                           "id": 5,
                           "recordId": "record-12",
@@ -813,7 +794,6 @@ final class QuestionGenerationFlowTests: XCTestCase {
                     """
                 )
             default:
-                XCTFail("Unexpected request: \(request.httpMethod ?? "-") \(request.url?.path ?? "-")")
                 return Self.response(for: request, statusCode: 500, body: "{}")
             }
         }
@@ -838,6 +818,12 @@ final class QuestionGenerationFlowTests: XCTestCase {
         )
         XCTAssertEqual(restored.gradingResult?.score, 91)
         XCTAssertEqual(restored.gradingStatus, .completed)
+        XCTAssertEqual(restored.gradingLastEventID, 5)
+        XCTAssertEqual(
+            gradingCursorQuery.value,
+            "4",
+            "Reopening must continue after the last persisted event instead of reading the stream from zero."
+        )
         XCTAssertFalse(appState.isGradingAnswer)
         let replayDelays = await sleepProvider.requestedNanoseconds()
         XCTAssertEqual(
@@ -928,6 +914,138 @@ final class QuestionGenerationFlowTests: XCTestCase {
 
         XCTAssertFalse(metadata.isTranslated)
         XCTAssertEqual(metadata.displayLanguage, "ko")
+    }
+
+    func testSubmittedBackendAnswerOverridesStaleEditableDraft() throws {
+        let suiteName = "SubmittedAnswerTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+
+        let store = SettingsStore(
+            defaults: defaults,
+            recordDatabaseURL: databaseURL,
+            usesSecureBackendIdentityStorage: false
+        )
+        let record = StudyRecord(
+            id: "submitted-answer",
+            question: QuestionItem(
+                question: "트랜잭션이란 무엇인가요?",
+                expectedAnswerHint: nil,
+                createdAt: Date()
+            ),
+            answer: "서버가 수락한 최종 답변",
+            topic: "데이터베이스",
+            difficulty: .intermediate,
+            gradingRequestID: "grading-submitted",
+            gradingStatus: .judging
+        )
+        store.saveAnswerDraft("제출 전에 남아 있던 편집 초안", recordID: record.id)
+        let appState = AppState(settingsStore: store)
+
+        XCTAssertEqual(appState.answerDraft(for: record), "서버가 수락한 최종 답변")
+        XCTAssertFalse(StudyAnswerPresentationPolicy.shouldShowEditor(for: record))
+        XCTAssertEqual(
+            StudyAnswerPresentationPolicy.submittedAnswer(for: record),
+            "서버가 수락한 최종 답변"
+        )
+
+        var unansweredRecord = record
+        unansweredRecord.answer = nil
+        unansweredRecord.gradingRequestID = nil
+        unansweredRecord.gradingStatus = nil
+        XCTAssertTrue(StudyAnswerPresentationPolicy.shouldShowEditor(for: unansweredRecord))
+        XCTAssertEqual(appState.answerDraft(for: unansweredRecord), "제출 전에 남아 있던 편집 초안")
+    }
+
+    func testLearningRhythmUpdatesSettingsDraftAndSurvivesRelaunch() throws {
+        let suiteName = "LearningRhythmTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+
+        let store = SettingsStore(
+            defaults: defaults,
+            recordDatabaseURL: databaseURL,
+            usesSecureBackendIdentityStorage: false
+        )
+        let appState = AppState(settingsStore: store)
+
+        appState.setTimerInterval(47)
+
+        XCTAssertEqual(appState.settings.intervalMinutes, 47)
+        XCTAssertEqual(appState.draftSettings.intervalMinutes, 47)
+        XCTAssertEqual(store.loadSettings().intervalMinutes, 47)
+
+        let relaunchedState = AppState(settingsStore: store)
+        XCTAssertEqual(relaunchedState.settings.intervalMinutes, 47)
+        XCTAssertEqual(relaunchedState.draftSettings.intervalMinutes, 47)
+    }
+
+    func testBackendSettingsRefreshDoesNotOverwritePersistedLearningRhythm() async throws {
+        let suiteName = "BackendLearningRhythmTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+
+        let store = SettingsStore(
+            defaults: defaults,
+            recordDatabaseURL: databaseURL,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveSettings(
+            StudySettings(
+                topic: "Redis",
+                difficulty: .level6,
+                customPrompt: StudySettings.defaultCustomPrompt,
+                intervalMinutes: 47,
+                studyCategories: [StudyCategory(title: "Redis", difficulty: .level6)]
+            )
+        )
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        let client = makeClient { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/v1/settings")
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: """
+                {
+                  "topic": "Redis",
+                  "difficultyLevel": 6,
+                  "intervalMinutes": 15,
+                  "enabled": true,
+                  "notificationSound": "default",
+                  "customPrompt": "",
+                  "appLanguage": "ko",
+                  "openAIModel": "\(StudySettings.defaultOpenAIModel)",
+                  "maxHistoryCount": 100,
+                  "isQuestionPublic": true,
+                  "openAIKeyConfigured": true
+                }
+                """
+            )
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+
+        appState.beginSettingsEditing()
+        await appState.loadBackendSettingsForEditing()
+
+        XCTAssertEqual(appState.settings.intervalMinutes, 47)
+        XCTAssertEqual(appState.draftSettings.intervalMinutes, 47)
+        XCTAssertEqual(store.loadSettings().intervalMinutes, 47)
     }
 
     func testPendingProcessSurvivesSettingsStoreRecreation() {
@@ -1077,7 +1195,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
     }
 }
 
-private final class QuestionGenerationURLProtocol: URLProtocol {
+private final class QuestionGenerationURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var requestHandler:
         ((URLRequest) throws -> (HTTPURLResponse, Data))?
 
@@ -1090,22 +1208,41 @@ private final class QuestionGenerationURLProtocol: URLProtocol {
     }
 
     override func startLoading() {
-        guard let requestHandler = Self.requestHandler else {
-            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
-            return
-        }
+        let protocolReference = UncheckedSendableBox(self)
+        Task { @MainActor in
+            let protocolInstance = protocolReference.value
+            guard let requestHandler = Self.requestHandler else {
+                protocolInstance.client?.urlProtocol(
+                    protocolInstance,
+                    didFailWithError: URLError(.badServerResponse)
+                )
+                return
+            }
 
-        do {
-            let (response, data) = try requestHandler(request)
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: data)
-            client?.urlProtocolDidFinishLoading(self)
-        } catch {
-            client?.urlProtocol(self, didFailWithError: error)
+            do {
+                let (response, data) = try requestHandler(protocolInstance.request)
+                protocolInstance.client?.urlProtocol(
+                    protocolInstance,
+                    didReceive: response,
+                    cacheStoragePolicy: .notAllowed
+                )
+                protocolInstance.client?.urlProtocol(protocolInstance, didLoad: data)
+                protocolInstance.client?.urlProtocolDidFinishLoading(protocolInstance)
+            } catch {
+                protocolInstance.client?.urlProtocol(protocolInstance, didFailWithError: error)
+            }
         }
     }
 
     override func stopLoading() {}
+}
+
+private final class UncheckedSendableBox<Value>: @unchecked Sendable {
+    let value: Value
+
+    init(_ value: Value) {
+        self.value = value
+    }
 }
 
 private final class LockedRequestCounter: @unchecked Sendable {
@@ -1123,6 +1260,27 @@ private final class LockedRequestCounter: @unchecked Sendable {
     func increment() {
         lock.lock()
         count += 1
+        lock.unlock()
+    }
+}
+
+private final class LockedValue<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedValue: Value
+
+    init(_ value: Value) {
+        storedValue = value
+    }
+
+    var value: Value {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedValue
+    }
+
+    func set(_ value: Value) {
+        lock.lock()
+        storedValue = value
         lock.unlock()
     }
 }

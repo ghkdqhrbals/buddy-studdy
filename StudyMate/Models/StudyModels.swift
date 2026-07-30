@@ -1729,6 +1729,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
     var gradingRequestID: String?
     var gradingStatus: AnswerGradingStatus?
     var gradingError: String?
+    var gradingLastEventID: Int64?
     var localization: RecordLocalizationMetadata?
 
     enum CodingKeys: String, CodingKey {
@@ -1747,6 +1748,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         case gradingRequestID = "gradingRequestId"
         case gradingStatus
         case gradingError
+        case gradingLastEventID
         case localization
     }
 
@@ -1770,6 +1772,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         gradingRequestID: String? = nil,
         gradingStatus: AnswerGradingStatus? = nil,
         gradingError: String? = nil,
+        gradingLastEventID: Int64? = nil,
         localization: RecordLocalizationMetadata? = nil
     ) {
         self.id = id
@@ -1787,6 +1790,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         self.gradingRequestID = gradingRequestID
         self.gradingStatus = gradingStatus
         self.gradingError = gradingError
+        self.gradingLastEventID = gradingLastEventID
         self.localization = localization
     }
 
@@ -1810,6 +1814,7 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         gradingRequestID = try container.decodeIfPresent(String.self, forKey: .gradingRequestID)
         gradingStatus = try container.decodeIfPresent(AnswerGradingStatus.self, forKey: .gradingStatus)
         gradingError = try container.decodeIfPresent(String.self, forKey: .gradingError)
+        gradingLastEventID = try container.decodeIfPresent(Int64.self, forKey: .gradingLastEventID)
         localization = try container.decodeIfPresent(RecordLocalizationMetadata.self, forKey: .localization)
     }
 
@@ -1867,6 +1872,23 @@ enum StudyDateDisplayFormatter {
         relativeFormatter.locale = locale
         relativeFormatter.unitsStyle = .short
         return relativeFormatter.localizedString(for: date, relativeTo: referenceDate)
+    }
+}
+
+enum StudyAnswerPresentationPolicy {
+    static func submittedAnswer(for record: StudyRecord?) -> String? {
+        guard let answer = record?.answer,
+              !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        return answer
+    }
+
+    static func shouldShowEditor(for record: StudyRecord?) -> Bool {
+        guard let record else {
+            return false
+        }
+        return record.gradingResult == nil && submittedAnswer(for: record) == nil
     }
 }
 

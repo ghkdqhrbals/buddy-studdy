@@ -48,6 +48,7 @@ struct StudyView: View {
                             question: record.question,
                             draftAnswer: $draftAnswer,
                             showsHint: $showsHint,
+                            submittedAnswer: StudyAnswerPresentationPolicy.submittedAnswer(for: record),
                             gradingResult: record.gradingResult,
                             isGradingAnswer: isGradingAnswer,
                             isResolvingAnswerState: isResolvingInitialAnswerState,
@@ -158,6 +159,7 @@ struct StudyView: View {
         }
         .onChange(of: draftAnswer) {
             if let selectedStudyRecord,
+               StudyAnswerPresentationPolicy.shouldShowEditor(for: selectedStudyRecord),
                draftAnswer != appState.answerDraft(for: selectedStudyRecord) {
                 appState.updateAnswer(draftAnswer, for: selectedStudyRecord)
             }
@@ -214,7 +216,7 @@ struct StudyView: View {
     }
 
     private var canSubmitAnswer: Bool {
-        selectedStudyRecord?.gradingResult == nil &&
+        StudyAnswerPresentationPolicy.shouldShowEditor(for: selectedStudyRecord) &&
             !isResolvingInitialAnswerState &&
             !draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !appState.isAnswerGradingInProgress(for: selectedStudyRecord)
@@ -572,6 +574,7 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
     var question: QuestionItem
     @Binding var draftAnswer: String
     @Binding var showsHint: Bool
+    var submittedAnswer: String?
     var gradingResult: GradingResult?
     var isGradingAnswer: Bool
     var isResolvingAnswerState: Bool
@@ -593,7 +596,8 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                             .tint(.accentColor)
                             .textSelection(.enabled)
 
-                        if gradingResult == nil &&
+                        if submittedAnswer == nil &&
+                            gradingResult == nil &&
                             !isGradingAnswer &&
                             !isResolvingAnswerState {
                             Button {
@@ -614,22 +618,10 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                 }
             }
 
-            if !isResolvingAnswerState &&
-                gradingResult == nil &&
-                !isGradingAnswer {
-                StudyChatBubble(role: .learnerInput) {
-                    MessageAnswerInput(
-                        strings: strings,
-                        isGradingAnswer: isGradingAnswer,
-                        canSubmitAnswer: canSubmitAnswer,
-                        answerEditor: answerEditor,
-                        onSubmit: onSubmit
-                    )
-                }
-            } else if !isResolvingAnswerState &&
-                        !draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if !isResolvingAnswerState,
+               let displayedLearnerAnswer {
                 StudyChatBubble(role: .learnerAnswer) {
-                    MarkdownMessageText(markdown: draftAnswer, fillsWidth: false)
+                    MarkdownMessageText(markdown: displayedLearnerAnswer, fillsWidth: false)
                         .font(.body)
                         .foregroundStyle(.white)
                         .tint(.white)
@@ -638,6 +630,18 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                         .padding(.vertical, 10)
                         .padding(.horizontal, 13)
                         .background(Color.green.opacity(0.92), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
+            } else if !isResolvingAnswerState &&
+                        gradingResult == nil &&
+                        !isGradingAnswer {
+                StudyChatBubble(role: .learnerInput) {
+                    MessageAnswerInput(
+                        strings: strings,
+                        isGradingAnswer: isGradingAnswer,
+                        canSubmitAnswer: canSubmitAnswer,
+                        answerEditor: answerEditor,
+                        onSubmit: onSubmit
+                    )
                 }
             }
 
@@ -678,6 +682,14 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                 }
             }
         }
+    }
+
+    private var displayedLearnerAnswer: String? {
+        if let submittedAnswer {
+            return submittedAnswer
+        }
+        let trimmedDraft = draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines)
+        return isGradingAnswer && !trimmedDraft.isEmpty ? draftAnswer : nil
     }
 
     @ViewBuilder
