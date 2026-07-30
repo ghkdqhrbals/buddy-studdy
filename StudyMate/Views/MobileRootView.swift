@@ -2224,63 +2224,60 @@ private struct MobileHomeAnnouncementSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 12) {
-                Image(systemName: "bell.badge.fill")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 42, height: 42)
-                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            HStack(spacing: 10) {
+                Image(systemName: "bell.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 30, height: 30)
+                    .background(Color.accentColor.opacity(0.1), in: Circle())
                     .accessibilityHidden(true)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("BuddyStudy")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                Text("BuddyStudy")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
 
-                    Text(announcement.title)
-                        .font(.title3.weight(.bold))
-                        .foregroundStyle(.primary)
-                        .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 12)
+
+                Button {
+                    close()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 34, height: 34)
+                        .background(Color(.tertiarySystemFill), in: Circle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(strings.done)
             }
-            .padding(.horizontal, 22)
-            .padding(.top, 20)
-            .padding(.bottom, 18)
+            .padding(.horizontal, 24)
+            .padding(.top, 18)
+
+            Text(announcement.title)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 24)
+                .padding(.top, 18)
+                .padding(.bottom, 12)
 
             ScrollView {
                 MarkdownMessageText(markdown: announcement.message, fillsWidth: true)
                     .font(.body)
                     .foregroundStyle(.primary)
                     .textSelection(.enabled)
-                    .padding(18)
-                    .background(
-                        Color(.secondarySystemGroupedBackground),
-                        in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    )
-                    .padding(.horizontal, 22)
-                    .padding(.bottom, 18)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 32)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            Divider()
-
-            Button {
-                appState.dismissHomeAnnouncement()
-                dismiss()
-            } label: {
-                Text(strings.done)
-                    .font(.body.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 50)
-            }
-            .buttonStyle(.borderedProminent)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .padding(.horizontal, 22)
-            .padding(.top, 14)
-            .padding(.bottom, 12)
         }
         .background(Color(.systemBackground))
         .accessibilityElement(children: .contain)
+    }
+
+    private func close() {
+        appState.dismissHomeAnnouncement()
+        dismiss()
     }
 }
 
