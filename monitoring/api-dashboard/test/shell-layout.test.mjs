@@ -105,12 +105,15 @@ test("app control administration publishes update campaigns and manages maintena
   assert.match(page, /titleJa/);
   assert.match(updates, /Publish recommended update/);
   assert.match(updates, /Publish required update/);
+  assert.match(updates, /mode:\s*"FORCE"/);
+  assert.match(updates, /iOS does not let an App Store app install its own update/);
   assert.match(updates, /app-updates\/remote-config\/publish/);
   assert.match(updates, /app-updates\/\$\{campaign\.id\}\/users/);
   assert.match(updates, /End campaign/);
   assert.match(updates, /remoteConfigStatus/);
   assert.match(updates, /targetVersion/);
   assert.match(updates, /targetBuild/);
+  assert.match(page, /Maintenance was published to Firebase Remote Config/);
 });
 
 test("user administration is searchable, paginated, and keeps plans internal", async () => {

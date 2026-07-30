@@ -207,7 +207,10 @@ class AdminAppUpdateService(
     override suspend fun activateMaintenance(command: AppControlMaintenanceCommand): AppControlMaintenanceWindow {
         validateMaintenance(command)
         val created = updates.createMaintenance(command, Instant.now())
-        publishPolicy(updates.activeCampaign("ios")?.id)
+        publishPolicy(
+            campaignId = updates.activeCampaign("ios")?.id,
+            maintenanceOverride = created,
+        )
         return created
     }
 
@@ -257,11 +260,18 @@ class AdminAppUpdateService(
         }
     }
 
-    private suspend fun publishPolicy(campaignId: Long?): AdminAppUpdateCampaignSummary {
+    private suspend fun publishPolicy(
+        campaignId: Long?,
+        maintenanceOverride: AppControlMaintenanceWindow? = null,
+    ): AdminAppUpdateCampaignSummary {
         val now = Instant.now()
         val revision = now.toEpochMilli()
         val campaign = updates.activeCampaign("ios")
-        val maintenance = updates.activeMaintenance(now)
+        // Creation and publication are separate transactions. Publish the row
+        // returned by the creation boundary directly so a replica lag, time
+        // zone conversion, or transaction-visibility delay cannot turn a
+        // successful maintenance request into a disabled Remote Config policy.
+        val maintenance = maintenanceOverride ?: updates.activeMaintenance(now)
         val disabledUpdate = AppControlUpdatePolicy(
             enabled = false,
             campaignId = null,

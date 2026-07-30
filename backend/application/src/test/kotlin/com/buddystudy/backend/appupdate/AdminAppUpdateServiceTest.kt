@@ -94,6 +94,33 @@ class AdminAppUpdateServiceTest {
     }
 
     @Test
+    fun `new maintenance publishes the created window without depending on a follow-up read`() = runBlocking {
+        val updates = FakeAdminAppUpdatePort(exposesCreatedMaintenanceOnRead = false)
+        val remoteConfig = CapturingRemoteConfigPort()
+        val service = AdminAppUpdateService(updates, remoteConfig)
+        val startsAt = Instant.parse("2026-08-01T00:00:00Z")
+
+        service.activateMaintenance(
+            AppControlMaintenanceCommand(
+                startsAt = startsAt,
+                endsAt = null,
+                titleKo = "점검",
+                titleEn = "Maintenance",
+                titleJa = "メンテナンス",
+                messageKo = "점검 중입니다.",
+                messageEn = "Maintenance is in progress.",
+                messageJa = "メンテナンス中です。",
+                createdBy = "test",
+            ),
+        )
+
+        val maintenance = requireNotNull(remoteConfig.published).maintenance
+        assertThat(maintenance.enabled).isTrue()
+        assertThat(maintenance.maintenanceId).isEqualTo(9)
+        assertThat(maintenance.startsAt).isEqualTo(startsAt)
+    }
+
+    @Test
     fun `maintenance overview and history are read from the backend store`() = runBlocking {
         val updates = FakeAdminAppUpdatePort()
         val service = AdminAppUpdateService(updates, CapturingRemoteConfigPort())
@@ -131,7 +158,9 @@ class AdminAppUpdateServiceTest {
         }
     }
 
-    private class FakeAdminAppUpdatePort : AppUpdatePort {
+    private class FakeAdminAppUpdatePort(
+        private val exposesCreatedMaintenanceOnRead: Boolean = true,
+    ) : AppUpdatePort {
         private var activeCampaign: AppUpdateCampaign? = null
         private var activeMaintenance: AppControlMaintenanceWindow? = null
         val publicationStatuses = mutableListOf<RemoteConfigPublicationStatus>()
@@ -194,7 +223,7 @@ class AdminAppUpdateServiceTest {
         }
 
         override suspend fun activeMaintenance(now: Instant): AppControlMaintenanceWindow? =
-            activeMaintenance
+            activeMaintenance.takeIf { exposesCreatedMaintenanceOnRead }
 
         override suspend fun updateRemoteConfigPublication(
             campaignId: Long?,

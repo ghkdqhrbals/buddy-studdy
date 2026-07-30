@@ -1001,6 +1001,7 @@
 				120000000000000000000070 /* Sources */,
 				120000000000000000000050 /* Frameworks */,
 				120000000000000000000071 /* Resources */,
+				F80000000000000000000001 /* Install local Firebase configuration */,
 			);
 			buildRules = (
 			);
@@ -1121,6 +1122,30 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		F80000000000000000000001 /* Install local Firebase configuration */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(BUDDYSTUDY_FIREBASE_PLIST_PATH)",
+			);
+			name = "Install local Firebase configuration";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\n\nconfig_path=\"${BUDDYSTUDY_FIREBASE_PLIST_PATH:-}\"\nif [ -z \"${config_path}\" ]; then\n  exit 0\nfi\nif [ ! -f \"${config_path}\" ]; then\n  echo \"Firebase iOS configuration was not found at BUDDYSTUDY_FIREBASE_PLIST_PATH.\" >&2\n  exit 1\nfi\n\nplutil -lint \"${config_path}\" >/dev/null\nbundle_id=\"$(/usr/libexec/PlistBuddy -c 'Print :BUNDLE_ID' \"${config_path}\")\"\napp_id=\"$(/usr/libexec/PlistBuddy -c 'Print :GOOGLE_APP_ID' \"${config_path}\")\"\napi_key=\"$(/usr/libexec/PlistBuddy -c 'Print :API_KEY' \"${config_path}\")\"\nproject_id=\"$(/usr/libexec/PlistBuddy -c 'Print :PROJECT_ID' \"${config_path}\")\"\n\nif [ \"${bundle_id}\" != \"${PRODUCT_BUNDLE_IDENTIFIER}\" ] \\\n  || [[ \"${app_id}\" != 1:* ]] \\\n  || [ -z \"${api_key}\" ] \\\n  || [ \"${api_key}\" = \"NOT_CONFIGURED\" ] \\\n  || [ -z \"${project_id}\" ] \\\n  || [ \"${project_id}\" = \"NOT_CONFIGURED\" ]; then\n  echo \"Firebase iOS configuration is incomplete or belongs to another app.\" >&2\n  exit 1\nfi\n\ndestination=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/GoogleService-Info.plist\"\ncp \"${config_path}\" \"${destination}\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		110000000000000000000070 /* Sources */ = {
@@ -1655,6 +1680,7 @@
 				CLOUDKIT_CONTAINER_ENVIRONMENT = Development;
 				CURRENT_PROJECT_VERSION = 16;
 				DEVELOPMENT_TEAM = 4CL25TC734;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				GOOGLE_OAUTH_CLIENT_ID = "328281669925-evuebplih3vir99daj4lapj1javqsmsr.apps.googleusercontent.com";
 				GOOGLE_OAUTH_REDIRECT_SCHEME = "com.googleusercontent.apps.328281669925-evuebplih3vir99daj4lapj1javqsmsr";

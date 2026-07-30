@@ -20,7 +20,7 @@ const DEFAULT_FORM = {
   platform: "ios",
   targetVersion: "",
   targetBuild: "",
-  mode: "OPTIONAL",
+  mode: "FORCE",
   titleKo: "새 버전이 준비됐어요",
   titleEn: "A new version is ready",
   titleJa: "新しいバージョンがあります",
@@ -94,7 +94,7 @@ function UpdateCampaignForm({ onCreated, onChanged }) {
           ariaLabel="Update prompt behavior"
           items={[
             { value: "OPTIONAL", label: "Recommended · dismissible" },
-            { value: "FORCE", label: "Required · blocking" },
+            { value: "FORCE", label: "Required · blocks app" },
           ]}
         />
       </div>
@@ -154,7 +154,8 @@ function UpdateCampaignForm({ onCreated, onChanged }) {
 
         {form.mode === "FORCE" ? (
           <InlineNotice tone="danger" compact>
-            Required updates cannot be dismissed. Confirm the target build is available in the App Store before publishing.
+            iOS does not let an App Store app install its own update. Required mode blocks app use with a non-dismissible
+            screen until the user installs the target version from the App Store. Confirm that build is available before publishing.
           </InlineNotice>
         ) : null}
         {error ? <InlineNotice tone="danger" compact>{error.message}</InlineNotice> : null}

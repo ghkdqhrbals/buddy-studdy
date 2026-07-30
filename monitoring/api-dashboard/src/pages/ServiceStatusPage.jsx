@@ -132,6 +132,11 @@ function MaintenanceForm({ onSaved }) {
             </fieldset>
           ))}
         </div>
+        {mutation.isSuccess ? (
+          <InlineNotice tone="success" compact>
+            Maintenance was published to Firebase Remote Config. Supported iOS builds will apply it on refresh or through the realtime listener.
+          </InlineNotice>
+        ) : null}
         {mutation.error ? <InlineNotice tone="danger" compact>{mutation.error.message}</InlineNotice> : null}
         <div className="maintenance-form-actions">
           <Button
