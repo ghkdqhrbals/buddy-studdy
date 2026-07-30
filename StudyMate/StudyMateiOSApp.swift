@@ -141,6 +141,7 @@ private struct ServiceMaintenanceView: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 88, height: 88)
+                    .clipShape(RoundedRectangle(cornerRadius: 19, style: .continuous))
                     .accessibilityHidden(true)
 
                 VStack(spacing: 12) {

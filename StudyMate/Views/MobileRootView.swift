@@ -1081,6 +1081,7 @@ private struct MobileLoginLogo: View {
             .resizable()
             .scaledToFit()
             .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
             .accessibilityHidden(true)
     }
 }
