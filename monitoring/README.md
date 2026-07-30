@@ -28,10 +28,14 @@ docker run --rm httpd:2.4-alpine htpasswd -nbB admin 'your-password'
   private on the monitoring Docker network.
 - TestZone has no public container port. Its API is reachable only through the
   authenticated dashboard Nginx route.
-- Operators manage maintenance under `Manage > Service status`. The dashboard
-  calls the authenticated backend admin API; the backend stores the audit
-  history and publishes the active policy to Firebase Remote Config. Monitoring
-  does not run a separate service-status server or expose a public status API.
+- Operators manage update campaigns and maintenance under `Manage > App
+  Control`. The `App updates` tab publishes recommended or required iOS
+  campaigns and exposes per-device version/conversion progress. The
+  `Maintenance` tab starts, schedules, and ends full-screen maintenance
+  windows. The dashboard calls the authenticated backend admin API; the backend
+  stores the audit history and publishes the active policy to Firebase Remote
+  Config. Monitoring does not run a separate service-status server or expose a
+  public status API.
 - Saved k6 scripts may target any valid HTTP or HTTPS URL. The authenticated
   operator is responsible for testing only systems they are authorized to load.
 - Disposable components are selected from a fixed server-side catalog. The

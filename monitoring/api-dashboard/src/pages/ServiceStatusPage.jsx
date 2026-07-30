@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarClock, Power, RefreshCw, XCircle } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { AdminGate } from "../admin/AdminGate.jsx";
 import { adminFetch } from "../admin/adminApi.js";
 import {
   DataTable,
@@ -9,6 +10,7 @@ import {
   SegmentedTabs,
   StatusBadge,
 } from "../components/AdminUI.jsx";
+import { AppUpdatesWorkspace } from "../components/AppUpdatesWorkspace.jsx";
 import { Button } from "../components/Button.jsx";
 import { InlineNotice } from "../components/InlineNotice.jsx";
 import { formatDateTime } from "../lib/format.js";
@@ -266,19 +268,42 @@ function ServiceStatusWorkspace() {
 }
 
 export function ServiceStatusPage() {
+  const [surface, setSurface] = useState("updates");
+
+  useEffect(() => {
+    const previousTitle = document.title;
+    document.title = "App Control · BuddyStudy Monitoring";
+    return () => {
+      document.title = previousTitle;
+    };
+  }, []);
+
   return (
     <>
       <PageHeader
         eyebrow="Manage"
-        title="Service status"
-        description="Publish customer-facing maintenance through Firebase Remote Config and review its history."
+        title="App control"
+        description="Publish update guidance and full-screen maintenance through Firebase Remote Config."
         actions={
           <Button variant="secondary" icon={RefreshCw} onClick={() => window.location.reload()}>
             Refresh
           </Button>
         }
       />
-      <ServiceStatusWorkspace />
+      <AdminGate>
+        <div className="app-control-surface-tabs">
+          <SegmentedTabs
+            value={surface}
+            onChange={setSurface}
+            ariaLabel="App control section"
+            items={[
+              { value: "updates", label: "App updates" },
+              { value: "maintenance", label: "Maintenance" },
+            ]}
+          />
+        </div>
+        {surface === "updates" ? <AppUpdatesWorkspace /> : <ServiceStatusWorkspace />}
+      </AdminGate>
     </>
   );
 }

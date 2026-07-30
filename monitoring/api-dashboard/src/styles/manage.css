@@ -664,6 +664,37 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .settings-actions { display: flex; min-height: 68px; align-items: center; justify-content: flex-end; gap: 8px; }
 .settings-actions > :first-child { margin-right: auto; }
 
+.app-control-surface-tabs {
+  display: flex;
+  max-width: 1600px;
+  justify-content: flex-start;
+  margin: 0 auto 18px;
+}
+.app-update-form-body { display: grid; gap: 18px; padding: 16px; }
+.app-update-target-grid {
+  display: grid;
+  grid-template-columns: minmax(150px, .6fr) minmax(120px, .45fr) minmax(300px, 1.4fr);
+  gap: 12px;
+}
+.app-update-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.section-count { color: var(--muted); font-size: 11px; font-weight: 700; }
+.app-update-user-filters {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.app-update-user-filters .search-field { flex: 1; min-width: 0; }
+.app-update-users-section { padding: 0; overflow: hidden; }
+.app-update-users-section > h3 { margin: 0; padding: 15px 15px 0; }
+.app-update-users-section > .app-update-user-filters { padding: 0 15px; }
+.app-update-users-section > .inline-notice { margin: 0 15px 12px; }
+
 .maintenance-form-body { display: grid; gap: 18px; padding: 16px; }
 .maintenance-now-note {
   display: flex;
@@ -714,6 +745,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .stream-inbox-controls .search-field { width: 100%; }
   .settings-group { grid-template-columns: 1fr; gap: 16px; }
   .maintenance-language-grid { grid-template-columns: 1fr; }
+  .app-update-target-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .app-update-store-field { grid-column: 1 / -1; }
 }
 
 @media (max-width: 700px) {
@@ -768,6 +801,11 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .settings-group { grid-template-columns: 1fr; }
   .settings-actions { align-items: stretch; flex-direction: column; padding: 14px 0; }
   .settings-actions > :first-child { margin-right: 0; }
+  .app-control-surface-tabs .segmented-tabs { width: 100%; }
+  .app-update-target-grid { grid-template-columns: 1fr; }
+  .app-update-store-field { grid-column: auto; }
+  .app-update-form-actions, .app-update-user-filters { align-items: stretch; flex-direction: column; }
+  .app-update-form-actions .button, .app-update-user-filters .compact-field { width: 100%; }
   .maintenance-window-row, .maintenance-window-row > div { align-items: stretch; grid-template-columns: 1fr; flex-direction: column; }
 }
 

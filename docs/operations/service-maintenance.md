@@ -7,7 +7,7 @@ does not own a separate status service.
 ## Operator flow
 
 1. Sign in to Monitoring.
-2. Open `Manage > Service Status`.
+2. Open `Manage > App Control`, then select `Maintenance`.
 3. Choose immediate activation or a future start time.
 4. Optionally set an end time. Without one, maintenance continues until an
    operator ends it.

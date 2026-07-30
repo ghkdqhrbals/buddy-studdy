@@ -44,7 +44,7 @@ test("all monitoring pages load the shared React application", async () => {
   assert.match(navigation, /Redis Streams/);
   assert.match(navigation, /GitPullRequest/);
   assert.doesNotMatch(navigation, /Layers3/);
-  assert.match(navigation, /Service Status/);
+  assert.match(navigation, /App Control/);
 });
 
 test("feedback administration reviews submissions and sends deep-linked user notifications", async () => {
@@ -83,11 +83,15 @@ test("batch jobs show operator metadata, timing, results, paginated history, and
   assert.match(page, /retryOfRunId/);
 });
 
-test("service status administration schedules, ends, and audits maintenance windows", async () => {
+test("app control administration publishes update campaigns and manages maintenance windows", async () => {
   const app = await source("MonitoringApp.jsx");
   const page = await source("pages/ServiceStatusPage.jsx");
+  const updates = await source("components/AppUpdatesWorkspace.jsx");
   const adminApi = await source("admin/adminApi.js");
   assert.match(app, /service-status\.html/);
+  assert.match(page, /App updates/);
+  assert.match(page, /Maintenance/);
+  assert.match(page, /AdminGate/);
   assert.match(page, /Start maintenance/);
   assert.match(page, /Schedule maintenance/);
   assert.match(page, /End maintenance/);
@@ -99,6 +103,14 @@ test("service status administration schedules, ends, and audits maintenance wind
   assert.match(page, /titleKo/);
   assert.match(page, /titleEn/);
   assert.match(page, /titleJa/);
+  assert.match(updates, /Publish recommended update/);
+  assert.match(updates, /Publish required update/);
+  assert.match(updates, /app-updates\/remote-config\/publish/);
+  assert.match(updates, /app-updates\/\$\{campaign\.id\}\/users/);
+  assert.match(updates, /End campaign/);
+  assert.match(updates, /remoteConfigStatus/);
+  assert.match(updates, /targetVersion/);
+  assert.match(updates, /targetBuild/);
 });
 
 test("user administration is searchable, paginated, and keeps plans internal", async () => {
