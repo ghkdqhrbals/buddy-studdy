@@ -3,6 +3,8 @@ package com.buddystudy.backend.appupdate
 import com.buddystudy.backend.appupdate.application.model.AdminAppUpdateCampaignPage
 import com.buddystudy.backend.appupdate.application.model.AdminAppUpdateCampaignSummary
 import com.buddystudy.backend.appupdate.application.model.AdminAppUpdateUserPage
+import com.buddystudy.backend.appupdate.application.model.AdminAppControlMaintenanceOverview
+import com.buddystudy.backend.appupdate.application.model.AdminAppControlMaintenancePage
 import com.buddystudy.backend.appupdate.application.model.AppControlEventCommand
 import com.buddystudy.backend.appupdate.application.model.AppControlMaintenanceCommand
 import com.buddystudy.backend.appupdate.application.model.AppControlMaintenanceWindow
@@ -89,6 +91,35 @@ class AdminAppUpdateServiceTest {
         assertThat(maintenance.enabled).isTrue()
         assertThat(maintenance.startsAt).isEqualTo(startsAt)
         assertThat(maintenance.endsAt).isEqualTo(startsAt.plusSeconds(3600))
+    }
+
+    @Test
+    fun `maintenance overview and history are read from the backend store`() = runBlocking {
+        val updates = FakeAdminAppUpdatePort()
+        val service = AdminAppUpdateService(updates, CapturingRemoteConfigPort())
+        val startsAt = Instant.now().minusSeconds(60)
+
+        service.activateMaintenance(
+            AppControlMaintenanceCommand(
+                startsAt = startsAt,
+                endsAt = startsAt.plusSeconds(3600),
+                titleKo = "점검",
+                titleEn = "Maintenance",
+                titleJa = "メンテナンス",
+                messageKo = "점검 중입니다.",
+                messageEn = "Maintenance is in progress.",
+                messageJa = "メンテナンス中です。",
+                createdBy = "operator",
+            ),
+        )
+
+        val overview = service.maintenanceOverview()
+        val history = service.maintenanceHistory(limit = 20, offset = 0)
+
+        assertThat(overview.current?.id).isEqualTo(9)
+        assertThat(overview.upcoming).isEmpty()
+        assertThat(history.items.map { it.id }).containsExactly(9)
+        assertThat(history.totalCount).isEqualTo(1)
     }
 
     private class CapturingRemoteConfigPort : AppControlRemoteConfigPort {
@@ -250,6 +281,21 @@ class AdminAppUpdateServiceTest {
             limit: Int,
             offset: Int,
         ): AdminAppUpdateUserPage = unused()
+
+        override suspend fun maintenanceOverview(now: Instant): AdminAppControlMaintenanceOverview =
+            AdminAppControlMaintenanceOverview(
+                current = activeMaintenance?.takeIf { !it.startsAt.isAfter(now) },
+                upcoming = listOfNotNull(activeMaintenance?.takeIf { it.startsAt.isAfter(now) }),
+                checkedAt = now,
+            )
+
+        override suspend fun maintenanceHistory(limit: Int, offset: Int): AdminAppControlMaintenancePage =
+            AdminAppControlMaintenancePage(
+                items = listOfNotNull(activeMaintenance),
+                totalCount = if (activeMaintenance == null) 0 else 1,
+                limit = limit,
+                offset = offset,
+            )
 
         override suspend fun endMaintenance(
             maintenanceId: Long,

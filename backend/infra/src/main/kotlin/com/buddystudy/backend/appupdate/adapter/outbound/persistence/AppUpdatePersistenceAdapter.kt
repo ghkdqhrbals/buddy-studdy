@@ -4,6 +4,8 @@ import com.buddystudy.backend.appupdate.application.model.AdminAppUpdateCampaign
 import com.buddystudy.backend.appupdate.application.model.AdminAppUpdateCampaignSummary
 import com.buddystudy.backend.appupdate.application.model.AdminAppUpdateUserPage
 import com.buddystudy.backend.appupdate.application.model.AdminAppUpdateUserSummary
+import com.buddystudy.backend.appupdate.application.model.AdminAppControlMaintenanceOverview
+import com.buddystudy.backend.appupdate.application.model.AdminAppControlMaintenancePage
 import com.buddystudy.backend.appupdate.application.model.AppUpdateCampaign
 import com.buddystudy.backend.appupdate.application.model.AppUpdateEvent
 import com.buddystudy.backend.appupdate.application.model.AppUpdateMode
@@ -273,6 +275,46 @@ class AppUpdatePersistenceAdapter(
         val users = list.bind("limit", limit).bind("offset", offset)
             .map { row, _ -> row.toAdminUserSummary() }.all().collectList().awaitSingle()
         return AdminAppUpdateUserPage(users, total, limit, offset)
+    }
+
+    override suspend fun maintenanceOverview(now: Instant): AdminAppControlMaintenanceOverview {
+        val windows = database.sql(
+            """
+            select id, starts_at, ends_at, title_ko, title_en, title_ja,
+                   message_ko, message_en, message_ja, status, created_by,
+                   terminated_at, created_at, updated_at
+            from app_control_maintenance_windows
+            where status = 'ACTIVE'
+              and terminated_at is null
+              and (ends_at is null or ends_at > :now)
+            order by starts_at asc, id desc
+            limit 21
+            """.trimIndent(),
+        ).bind("now", now)
+            .map { row, _ -> row.toMaintenanceWindow() }.all().collectList().awaitSingle()
+        return AdminAppControlMaintenanceOverview(
+            current = windows.lastOrNull { !it.startsAt.isAfter(now) },
+            upcoming = windows.filter { it.startsAt.isAfter(now) }.take(20),
+            checkedAt = now,
+        )
+    }
+
+    override suspend fun maintenanceHistory(limit: Int, offset: Int): AdminAppControlMaintenancePage {
+        val total = database.sql(
+            "select count(*) as total_count from app_control_maintenance_windows",
+        ).map { row, _ -> row.long("total_count") }.one().awaitSingle()
+        val items = database.sql(
+            """
+            select id, starts_at, ends_at, title_ko, title_en, title_ja,
+                   message_ko, message_en, message_ja, status, created_by,
+                   terminated_at, created_at, updated_at
+            from app_control_maintenance_windows
+            order by created_at desc, id desc
+            limit :limit offset :offset
+            """.trimIndent(),
+        ).bind("limit", limit).bind("offset", offset)
+            .map { row, _ -> row.toMaintenanceWindow() }.all().collectList().awaitSingle()
+        return AdminAppControlMaintenancePage(items, total, limit, offset)
     }
 
     override suspend fun activeMaintenance(now: Instant): AppControlMaintenanceWindow? =

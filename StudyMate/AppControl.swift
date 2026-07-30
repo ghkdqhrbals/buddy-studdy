@@ -212,11 +212,44 @@ private struct AppControlVersion: Comparable {
 }
 
 @MainActor
-protocol AppControlProviding: AnyObject {
+protocol AppControlProviding: AnyObject, Sendable {
     func fetchAndActivate() async -> AppControlRemotePolicy?
     func startListening(_ handler: @escaping @MainActor (AppControlRemotePolicy) -> Void)
-    func stopListening()
+    nonisolated func stopListening()
 }
+
+#if canImport(FirebaseRemoteConfig)
+private final class AppControlListenerRegistrationHolder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var registration: ConfigUpdateListenerRegistration?
+
+    var isEmpty: Bool {
+        lock.withLock { registration == nil }
+    }
+
+    func store(_ newRegistration: ConfigUpdateListenerRegistration) {
+        let previous = lock.withLock {
+            let previous = registration
+            registration = newRegistration
+            return previous
+        }
+        previous?.remove()
+    }
+
+    func remove() {
+        let current = lock.withLock {
+            let current = registration
+            registration = nil
+            return current
+        }
+        current?.remove()
+    }
+
+    deinit {
+        remove()
+    }
+}
+#endif
 
 @MainActor
 final class FirebaseAppControlProvider: AppControlProviding {
@@ -226,7 +259,7 @@ final class FirebaseAppControlProvider: AppControlProviding {
     )
     private let parameterKey = "ios_app_control_v1"
     #if canImport(FirebaseRemoteConfig)
-    private var registration: ConfigUpdateListenerRegistration?
+    nonisolated private let listenerRegistration = AppControlListenerRegistrationHolder()
     #endif
 
     func fetchAndActivate() async -> AppControlRemotePolicy? {
@@ -236,11 +269,10 @@ final class FirebaseAppControlProvider: AppControlProviding {
         }
         let remoteConfig = RemoteConfig.remoteConfig()
         let settings = RemoteConfigSettings()
-        #if DEBUG
+        // App control is an operational safety channel. Always request the
+        // latest policy on launch/foreground; the realtime listener handles
+        // changes while the app remains active.
         settings.minimumFetchInterval = 0
-        #else
-        settings.minimumFetchInterval = 3600
-        #endif
         remoteConfig.configSettings = settings
         remoteConfig.setDefaults([parameterKey: Self.disabledPolicyData as NSObject])
         await withCheckedContinuation { continuation in
@@ -259,11 +291,11 @@ final class FirebaseAppControlProvider: AppControlProviding {
 
     func startListening(_ handler: @escaping @MainActor (AppControlRemotePolicy) -> Void) {
         #if canImport(FirebaseRemoteConfig)
-        guard registration == nil, FirebaseBootstrap.configureIfPossible() else {
+        guard listenerRegistration.isEmpty, FirebaseBootstrap.configureIfPossible() else {
             return
         }
         let remoteConfig = RemoteConfig.remoteConfig()
-        registration = remoteConfig.addOnConfigUpdateListener { [weak self] update, error in
+        let registration = remoteConfig.addOnConfigUpdateListener { [weak self] update, error in
             guard let self else { return }
             if let error {
                 Task { @MainActor in
@@ -289,13 +321,13 @@ final class FirebaseAppControlProvider: AppControlProviding {
                 }
             }
         }
+        listenerRegistration.store(registration)
         #endif
     }
 
-    func stopListening() {
+    nonisolated func stopListening() {
         #if canImport(FirebaseRemoteConfig)
-        registration?.remove()
-        registration = nil
+        listenerRegistration.remove()
         #endif
     }
 

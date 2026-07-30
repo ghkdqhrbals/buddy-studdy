@@ -105,45 +105,26 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertTrue(debugControlsContent.hasPrefix("#if os(iOS)"))
     }
 
-    func testBackendMaintenanceErrorDoesNotReplaceMonitoringServiceStatus() {
-        let error = RemotePushBackendError.httpStatus(
-            503,
-            "",
-            BackendAPIError(
-                code: "SERVICE_UNDER_MAINTENANCE",
-                numericCode: 903,
-                message: "Maintenance in progress"
-            )
+    func testMaintenanceControlUsesFirebaseRemoteConfigWithoutLegacyStatusPolling() throws {
+        let root = try repositoryRoot()
+        let backendClient = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Services/RemotePushBackendClient.swift"),
+            encoding: .utf8
+        )
+        let appState = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/ViewModels/AppState.swift"),
+            encoding: .utf8
+        )
+        let appControl = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/AppControl.swift"),
+            encoding: .utf8
         )
 
-        let resolution = AppErrorHandlingUseCase().resolve(
-            error,
-            fallback: "Request failed"
-        )
-
-        XCTAssertNil(resolution.serviceAvailability)
-    }
-
-    func testTimeoutAndGenericServiceFailureDoNotResolveToMaintenance() {
-        let timeoutResolution = AppErrorHandlingUseCase().resolve(
-            URLError(.timedOut),
-            fallback: "Request timed out"
-        )
-        let genericFailureResolution = AppErrorHandlingUseCase().resolve(
-            RemotePushBackendError.httpStatus(
-                503,
-                "",
-                BackendAPIError(
-                    code: "INTERNAL_SERVER_ERROR",
-                    numericCode: 900,
-                    message: "Service unavailable"
-                )
-            ),
-            fallback: "Request failed"
-        )
-
-        XCTAssertNil(timeoutResolution.serviceAvailability)
-        XCTAssertNil(genericFailureResolution.serviceAvailability)
+        XCTAssertFalse(backendClient.contains("monitoring.lowfidev.cloud/status"))
+        XCTAssertFalse(backendClient.contains("fetchServiceAvailability"))
+        XCTAssertFalse(appState.contains("refreshServiceAvailability"))
+        XCTAssertFalse(appState.contains("maintenancePollingTask"))
+        XCTAssertTrue(appControl.contains("addOnConfigUpdateListener"))
     }
 
     func testEveryAppStringProvidesJapaneseCopy() throws {
@@ -361,14 +342,14 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
-    func testAppStateCleanupUsesActorIsolatedDeinitializer() throws {
+    func testAppStateCleanupAvoidsActorIsolatedDeinitializerBackDeployment() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
         let content = try String(contentsOf: appStateFile, encoding: .utf8)
 
-        XCTAssertTrue(
+        XCTAssertFalse(
             content.contains("isolated deinit {"),
-            "AppState cleanup must let Swift schedule deinitialization on MainActor."
+            "The Swift back-deployed isolated deinit thunk crashes in the iOS simulator."
         )
         XCTAssertFalse(
             content.contains("MainActor.assumeIsolated"),

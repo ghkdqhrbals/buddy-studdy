@@ -13,7 +13,7 @@ one workflow run just because they share a host.
 | Database cutover | `Migrate BuddyStudy PostgreSQL To MySQL` | manual, one-time | EC2 self-hosted | PostgreSQL backup, MySQL import, row-count and reference validation, automatic pre-cutover rollback |
 | Admin frontend | `Deploy BuddyStudy Admin Frontend` | `admin-frontend-image-published`, manual | EC2 self-hosted | Admin frontend container only |
 | iOS TestFlight | `Release iOS App` | `v*`, manual | GitHub-hosted macOS | Release planning, signed IPA build, artifact retention, and TestFlight upload as separate jobs |
-| Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, TestZone UI, Grafana, Loki, ERROR-log Slack alerting, monitoring auth and access audit, customer-facing service status and maintenance history |
+| Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, TestZone UI, Grafana, Loki, ERROR-log Slack alerting, monitoring auth and access audit, and the backend/FRC maintenance operator UI |
 | Monitoring routing | `Deploy BuddyStudy Monitoring Routes on MacBook Air` | manual | MacBook Air self-hosted | Routingflare routes for the monitoring UI and Grafana |
 | TestZone execution | `Deploy BuddyStudy TestZone on MacBook Air` | `testzone-image-published`, manual | MacBook Air self-hosted | k6 runner, script/project/run storage, InfluxDB, approved disposable test components |
 | Health monitor | Cloudflare Worker workflow | manual or source workflow | GitHub-hosted | Explicit diagnostic endpoint only; production scheduled checks are disabled |
@@ -74,13 +74,12 @@ deployment.
   deployed by the monitoring workflow. TestZone's execution service and
   InfluxDB are deployed by the TestZone workflow. Backend deploys must not
   recreate any of them.
-- Maintenance windows are monitoring control-plane state. The monitoring
-  receiver persists their schedule and localized notices and exposes the
-  unauthenticated, read-only `/status/api/v1/service-status` endpoint for
-  customer apps. The monitoring deploy validates that this exact public route
-  disables Basic Auth while maintenance administration and the rest of the
-  monitoring workspace remain authenticated. Backend deployment and the
-  application database do not own this state.
+- Maintenance windows are backend application state. The authenticated
+  monitoring UI writes through the backend admin API, the backend persists the
+  schedule and localized notices, and then publishes the current policy to
+  Firebase Remote Config. iOS consumes only Firebase Remote Config. Monitoring
+  must not deploy a separate service-status server or expose a public status
+  endpoint.
 - Backend deployment uses Redis Streams directly through the application
   consumers. It must not provision a separate stream coordination service,
   related containers, networks, routes, secrets, or readiness settings.

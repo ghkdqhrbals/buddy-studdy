@@ -229,8 +229,6 @@ struct BackendBaseURLConfiguration: Equatable {
 
 @MainActor
 protocol RemotePushBackendClientProtocol {
-    func fetchServiceAvailability(language: AppLanguage) async -> BackendServiceAvailability?
-
     func checkAppUpdate(
         registration: RemotePushRegistration,
         language: AppLanguage
@@ -559,10 +557,6 @@ protocol RemotePushBackendClientProtocol {
 }
 
 extension RemotePushBackendClientProtocol {
-    func fetchServiceAvailability(language: AppLanguage) async -> BackendServiceAvailability? {
-        nil
-    }
-
     func checkAppUpdate(
         registration: RemotePushRegistration,
         language: AppLanguage
@@ -595,23 +589,17 @@ extension RemotePushBackendClientProtocol {
 @MainActor
 final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     static let defaultBaseURL = URL(string: "https://api.ghkdqhrbals.org")!
-    static let defaultServiceStatusURL = URL(
-        string: "https://monitoring.lowfidev.cloud/status/api/v1/service-status"
-    )!
 
     private let baseURL: URL
-    private let serviceStatusURL: URL
     private let session: URLSession
     private let encoder = JSONEncoder()
     private let decoder: JSONDecoder
 
     init(
         baseURL: URL = RemotePushBackendClient.defaultBaseURL,
-        serviceStatusURL: URL = RemotePushBackendClient.defaultServiceStatusURL,
         session: URLSession = URLSession(configuration: .ephemeral)
     ) {
         self.baseURL = baseURL
-        self.serviceStatusURL = serviceStatusURL
         self.session = session
         self.decoder = Self.makeDecoder()
     }
@@ -620,16 +608,6 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom(Self.decodeBackendDate)
         return decoder
-    }
-
-    func fetchServiceAvailability(language: AppLanguage) async -> BackendServiceAvailability? {
-        var request = URLRequest(url: serviceStatusURL)
-        request.httpMethod = "GET"
-        request.setValue(language.backendCode, forHTTPHeaderField: "Accept-Language")
-        guard let data = try? await perform(request, ignoresHTTPStatus: true) else {
-            return nil
-        }
-        return try? decoder.decode(BackendServiceAvailability.self, from: data)
     }
 
     func checkAppUpdate(

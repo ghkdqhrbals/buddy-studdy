@@ -1,38 +1,40 @@
 # Service Maintenance
 
-BuddyStudy maintenance mode is owned by the monitoring control plane. It is
-intended for planned work where customer apps should show a localized global
-maintenance screen independently of backend API availability.
+BuddyStudy maintenance mode uses Firebase Remote Config as the only customer
+app delivery channel. The monitoring site is an authenticated operator UI; it
+does not own a separate status service.
 
 ## Operator flow
 
 1. Sign in to Monitoring.
 2. Open `Manage > Service Status`.
 3. Choose immediate activation or a future start time.
-4. Optionally set an end time. Without one, maintenance continues until an operator ends it.
+4. Optionally set an end time. Without one, maintenance continues until an
+   operator ends it.
 5. Enter Korean, English, and Japanese title and message content.
 6. Save the window.
 7. End active maintenance or cancel a scheduled window from the same page.
 
-Every window remains in the paginated history with planned time, actual termination time, creator, and terminator.
+Every window remains in the backend's paginated audit history with planned
+time, actual termination time, creator, and terminator.
 
 ## Runtime behavior
 
-- The monitoring host persists maintenance windows in
-  `~/buddystudy/monitoring/status/data/service-maintenance.json`.
-- The monitoring status service exposes only
-  `GET https://monitoring.lowfidev.cloud/status/api/v1/service-status`
-  without operator authentication. All management routes remain behind the
-  monitoring site's Basic Auth.
-- Backend API processes and the application database do not store, publish, or
-  enforce maintenance state.
-- The iOS app checks monitoring status at startup, foreground entry, and every
-  60 seconds. During maintenance it shows one global, non-dismissible screen
-  and checks again every 15 to 120 seconds.
-- When maintenance ends, the app removes the maintenance screen and resumes deferred startup synchronization automatically.
-- A timeout, connectivity failure, or generic backend HTTP 503 does not open
-  the maintenance screen. Only an explicit monitoring `MAINTENANCE` response
-  does.
+1. Monitoring calls the authenticated backend `/api/v1/admin/app-updates/maintenance`
+   API.
+2. The backend stores the window in `app_control_maintenance_windows`.
+3. The backend publishes the resulting app-control document to Firebase Remote
+   Config.
+4. iOS fetches the policy during startup and foreground entry and registers a
+   Remote Config real-time update listener while the app is running.
+5. An active policy shows one global, non-dismissible maintenance screen. A
+   scheduled policy becomes active at its local time boundary without polling.
+6. Ending maintenance republishes the policy; the listener fetches the
+   activated configuration and removes the screen.
+
+The app fails open when Firebase Remote Config is unavailable. Generic backend
+errors and HTTP 503 responses do not activate maintenance mode. There is no
+public monitoring status endpoint and no periodic maintenance polling loop.
 
 ## Audit states
 

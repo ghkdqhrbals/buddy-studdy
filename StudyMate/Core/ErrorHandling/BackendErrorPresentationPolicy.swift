@@ -14,10 +14,6 @@ struct BackendErrorPresentation: Equatable {
 }
 
 enum BackendErrorPresentationPolicy {
-    static func serviceAvailability(for _: Error) -> BackendServiceAvailability? {
-        nil
-    }
-
     static func presentation(
         for error: Error,
         fallback: String,

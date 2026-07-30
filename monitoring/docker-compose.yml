@@ -17,7 +17,6 @@ services:
     depends_on:
       - loki
       - testzone-service
-      - service-status
     networks:
       - monitoring
 
@@ -34,23 +33,6 @@ services:
     depends_on:
       - api-dashboard
       - loki
-    networks:
-      - monitoring
-
-  service-status:
-    image: node:22-alpine
-    container_name: buddystudy-service-status
-    restart: unless-stopped
-    working_dir: /app
-    command:
-      - node
-      - src/server.mjs
-    environment:
-      STATUS_PORT: "3030"
-      STATUS_DATA_DIR: /data
-    volumes:
-      - ./status-service:/app:ro
-      - ${HOME}/buddystudy/monitoring/status/data:/data
     networks:
       - monitoring
 

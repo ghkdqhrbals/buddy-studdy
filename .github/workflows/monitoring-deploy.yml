@@ -22,13 +22,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate dashboard and status service
+      - name: Validate monitoring dashboard
         run: |
           set -euo pipefail
           (cd monitoring/api-dashboard && npm ci && npm test)
-          (cd monitoring/status-service && npm test)
-          node --check monitoring/status-service/src/server.mjs
-          node --check monitoring/status-service/src/store.mjs
 
   dispatch:
     name: Dispatch Monitoring Module

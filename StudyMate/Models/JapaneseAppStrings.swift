@@ -145,6 +145,7 @@ enum JapaneseAppStrings {
         "Double-tap to focus the map on this study.": "ダブルタップすると、マップの焦点がこの調査に集中します。",
         "Draft auto-saved": "下書きの自動保存",
         "Duration": "間隔",
+        "Each node uses its own topic records": "各ノードには、そのトピック自体の記録のみが表示されます。",
         "Each study keeps its own topic, difficulty, and prompt. Question interval is shared in Settings.": "各研究は独自のテーマ、難易度、およびプロンプトを維持します。質問間隔は設定で共有されます。",
         "Edit": "編集",
         "Edit Studies": "スタディの編集",

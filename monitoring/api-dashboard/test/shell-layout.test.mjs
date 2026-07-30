@@ -86,12 +86,16 @@ test("batch jobs show operator metadata, timing, results, paginated history, and
 test("service status administration schedules, ends, and audits maintenance windows", async () => {
   const app = await source("MonitoringApp.jsx");
   const page = await source("pages/ServiceStatusPage.jsx");
+  const adminApi = await source("admin/adminApi.js");
   assert.match(app, /service-status\.html/);
   assert.match(page, /Start maintenance/);
   assert.match(page, /Schedule maintenance/);
   assert.match(page, /End maintenance/);
   assert.match(page, /Maintenance history/);
-  assert.match(page, /service-maintenance\/history/);
+  assert.match(page, /app-updates\/maintenance\/history/);
+  assert.match(page, /adminFetch/);
+  assert.doesNotMatch(page, /monitoringStatusFetch/);
+  assert.doesNotMatch(adminApi, /monitoringStatusFetch/);
   assert.match(page, /titleKo/);
   assert.match(page, /titleEn/);
   assert.match(page, /titleJa/);

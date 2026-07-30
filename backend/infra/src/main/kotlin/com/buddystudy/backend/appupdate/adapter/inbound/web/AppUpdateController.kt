@@ -4,6 +4,8 @@ import com.buddystudy.backend.admin.analytics.application.port.inbound.AdminAnal
 import com.buddystudy.backend.appupdate.application.model.AdminAppUpdateCampaignPage
 import com.buddystudy.backend.appupdate.application.model.AdminAppUpdateCampaignSummary
 import com.buddystudy.backend.appupdate.application.model.AdminAppUpdateUserPage
+import com.buddystudy.backend.appupdate.application.model.AdminAppControlMaintenanceOverview
+import com.buddystudy.backend.appupdate.application.model.AdminAppControlMaintenancePage
 import com.buddystudy.backend.appupdate.application.model.AppUpdateCheckCommand
 import com.buddystudy.backend.appupdate.application.model.AppUpdateDecision
 import com.buddystudy.backend.appupdate.application.model.AppUpdateEvent
@@ -104,6 +106,19 @@ class AdminAppUpdateController(
         @RequestHeader("Authorization") authorization: String?,
     ): AdminAppUpdateCampaignSummary? = updates.republish(authorization.bearerToken())
 
+    @GetMapping("/maintenance")
+    suspend fun maintenanceOverview(
+        @RequestHeader("Authorization") authorization: String?,
+    ): AdminAppControlMaintenanceOverview = updates.maintenanceOverview(authorization.bearerToken())
+
+    @GetMapping("/maintenance/history")
+    suspend fun maintenanceHistory(
+        @RequestHeader("Authorization") authorization: String?,
+        @RequestParam(defaultValue = "20") limit: Int,
+        @RequestParam(defaultValue = "0") offset: Int,
+    ): AdminAppControlMaintenancePage =
+        updates.maintenanceHistory(authorization.bearerToken(), limit, offset)
+
     @PostMapping("/maintenance")
     suspend fun activateMaintenance(
         @RequestHeader("Authorization") authorization: String?,
@@ -191,6 +206,8 @@ interface AdminAppUpdateWebPort {
         offset: Int,
     ): AdminAppUpdateUserPage
     suspend fun republish(adminToken: String): AdminAppUpdateCampaignSummary?
+    suspend fun maintenanceOverview(adminToken: String): AdminAppControlMaintenanceOverview
+    suspend fun maintenanceHistory(adminToken: String, limit: Int, offset: Int): AdminAppControlMaintenancePage
     suspend fun activateMaintenance(adminToken: String, request: AppControlMaintenanceRequest): AppControlMaintenanceWindow
     suspend fun endMaintenance(adminToken: String, maintenanceId: Long): AppControlMaintenanceWindow
     suspend fun endCurrentMaintenance(adminToken: String): AppControlMaintenanceWindow?
@@ -281,6 +298,20 @@ class AdminAppUpdateWebAdapter(
     override suspend fun republish(adminToken: String): AdminAppUpdateCampaignSummary? {
         authentication.validate(adminToken)
         return updates.publishCurrentPolicy()
+    }
+
+    override suspend fun maintenanceOverview(adminToken: String): AdminAppControlMaintenanceOverview {
+        authentication.validate(adminToken)
+        return updates.maintenanceOverview()
+    }
+
+    override suspend fun maintenanceHistory(
+        adminToken: String,
+        limit: Int,
+        offset: Int,
+    ): AdminAppControlMaintenancePage {
+        authentication.validate(adminToken)
+        return updates.maintenanceHistory(limit, offset)
     }
 
     override suspend fun activateMaintenance(

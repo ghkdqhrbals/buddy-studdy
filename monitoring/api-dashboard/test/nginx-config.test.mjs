@@ -44,16 +44,8 @@ test("monitoring proxies admin APIs through the same authenticated origin", () =
   assert.doesNotMatch(config, /location \/backend\/api\/ \{/);
 });
 
-test("customer service status is public while monitoring administration stays authenticated", () => {
-  const publicStatusLocation = config.match(
-    /location = \/status\/api\/v1\/service-status \{([\s\S]*?)\n  \}/,
-  )?.[1];
-  const adminStatusLocation = config.match(
-    /location \/status\/api\/v1\/admin\/ \{([\s\S]*?)\n  \}/,
-  )?.[1];
-
-  assert.ok(publicStatusLocation, "Public service status location must exist");
-  assert.match(publicStatusLocation, /auth_basic off;/);
-  assert.ok(adminStatusLocation, "Administrative service status location must exist");
-  assert.doesNotMatch(adminStatusLocation, /auth_basic off;/);
+test("legacy monitoring-owned service status routes are removed", () => {
+  assert.doesNotMatch(config, /\/status\/api\/v1\/service-status/);
+  assert.doesNotMatch(config, /\/status\/api\/v1\/admin/);
+  assert.doesNotMatch(config, /service-status:8080/);
 });

@@ -76,125 +76,6 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertEqual(state.totalCount, 0)
     }
 
-    func testServiceAvailabilityUsesMonitoringEndpointAndBackendLanguageCode() async throws {
-        let statusURL = URL(string: "https://monitoring.example/status/api/v1/service-status")!
-        let client = makeClient(serviceStatusURL: statusURL) { request in
-            XCTAssertEqual(request.url, statusURL)
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept-Language"), "ko")
-            return Self.response(
-                for: request,
-                statusCode: 200,
-                body: #"{"status":"OPERATIONAL","checkedAt":"2026-07-28T00:00:00Z"}"#
-            )
-        }
-
-        let availability = await client.fetchServiceAvailability(language: .korean)
-
-        XCTAssertEqual(availability?.status, .operational)
-        XCTAssertFalse(try XCTUnwrap(availability).isUnderMaintenance)
-    }
-
-    func testServiceAvailabilityUsesValidBodyRegardlessOfHTTPStatus() async throws {
-        let statusURL = URL(string: "https://monitoring.example/status/api/v1/service-status")!
-        let statusCodes = [200, 204, 301, 400, 401, 403, 404, 429, 500, 503]
-
-        for statusCode in statusCodes {
-            let client = makeClient(serviceStatusURL: statusURL) { request in
-                Self.response(
-                    for: request,
-                    statusCode: statusCode,
-                    body: #"{"status":"MAINTENANCE","title":"Maintenance","checkedAt":"invalid","retryAfterSeconds":"invalid"}"#
-                )
-            }
-            let unauthorizedNotifications = LockedRequestCounter()
-            let observer = NotificationCenter.default.addObserver(
-                forName: BackendAuthorizationNotification.didReceiveUnauthorized,
-                object: client,
-                queue: nil
-            ) { _ in
-                unauthorizedNotifications.increment()
-            }
-
-            let availability = await client.fetchServiceAvailability(language: .english)
-
-            NotificationCenter.default.removeObserver(observer)
-            XCTAssertEqual(availability?.status, .maintenance, "HTTP \(statusCode)")
-            XCTAssertEqual(availability?.title, "Maintenance", "HTTP \(statusCode)")
-            XCTAssertEqual(unauthorizedNotifications.value, 0, "HTTP \(statusCode)")
-        }
-    }
-
-    func testServiceAvailabilityIgnoresMissingOrUnknownStatus() async {
-        for body in [
-            #"{"message":"monitoring authentication required"}"#,
-            #"{"status":"DEGRADED"}"#
-        ] {
-            let client = makeClient { request in
-                Self.response(for: request, statusCode: 401, body: body)
-            }
-
-            let availability = await client.fetchServiceAvailability(language: .english)
-
-            XCTAssertNil(availability)
-        }
-    }
-
-    func testDeveloperDebugModeDoesNotRequestMonitoringStatus() async throws {
-        let suiteName = "DeveloperStatusBypassTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        let databaseURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("\(suiteName).sqlite")
-        defer {
-            defaults.removePersistentDomain(forName: suiteName)
-            try? FileManager.default.removeItem(at: databaseURL)
-        }
-
-        let store = SettingsStore(
-            defaults: defaults,
-            recordDatabaseURL: databaseURL,
-            usesSecureBackendIdentityStorage: false
-        )
-        store.saveDeveloperAccessUnlocked(true)
-        store.saveIsDebuggingEnabled(true)
-        store.saveHasCompletedOnboarding(false)
-        let client = makeClient(
-            serviceStatusURL: URL(
-                string: "https://monitoring.example/status/api/v1/service-status"
-            )!
-        ) { request in
-            XCTFail("Debug mode must not request monitoring status: \(request.url?.absoluteString ?? "-")")
-            return Self.response(
-                for: request,
-                statusCode: 500,
-                body: #"{"message":"unexpected request"}"#
-            )
-        }
-        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
-
-        await appState.start()
-        await appState.refreshServiceAvailability()
-
-        XCTAssertTrue(appState.isDebuggingEnabled)
-        XCTAssertFalse(appState.isCheckingServiceAvailability)
-    }
-
-    func testBackendMaintenanceErrorDoesNotReplaceMonitoringServiceStatus() {
-        let error = RemotePushBackendError.httpStatus(
-            503,
-            "",
-            BackendAPIError(
-                code: "SERVICE_UNDER_MAINTENANCE",
-                numericCode: 903,
-                debugDescription: nil,
-                message: "Maintenance in progress",
-                requestID: nil,
-                metadata: nil
-            )
-        )
-
-        XCTAssertNil(BackendErrorPresentationPolicy.serviceAvailability(for: error))
-    }
-
     func testCreateQuestionSendsIdempotencyKeyAndDecodesAcceptedProcess() async throws {
         let client = makeClient { request in
             XCTAssertEqual(request.httpMethod, "POST")
@@ -1254,7 +1135,6 @@ final class QuestionGenerationFlowTests: XCTestCase {
     }
 
     private func makeClient(
-        serviceStatusURL: URL = RemotePushBackendClient.defaultServiceStatusURL,
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> RemotePushBackendClient {
         let configuration = URLSessionConfiguration.ephemeral
@@ -1262,7 +1142,6 @@ final class QuestionGenerationFlowTests: XCTestCase {
         QuestionGenerationURLProtocol.requestHandler = handler
         return RemotePushBackendClient(
             baseURL: URL(string: "https://example.test")!,
-            serviceStatusURL: serviceStatusURL,
             session: URLSession(configuration: configuration)
         )
     }

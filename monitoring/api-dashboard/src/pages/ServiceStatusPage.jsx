@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarClock, Power, RefreshCw, XCircle } from "lucide-react";
 import { useMemo, useState } from "react";
-import { adminFetch, monitoringStatusFetch } from "../admin/adminApi.js";
+import { adminFetch } from "../admin/adminApi.js";
 import {
   DataTable,
   PageHeader,
@@ -59,15 +59,10 @@ function MaintenanceForm({ onSaved }) {
         startsAt: start.toISOString(),
         endsAt: end?.toISOString() || null,
       };
-      const created = await monitoringStatusFetch("/service-maintenance", {
+      return adminFetch("/app-updates/maintenance", {
         method: "POST",
         body: JSON.stringify(payload),
       });
-      await adminFetch("/app-updates/maintenance", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-      return created;
     },
     onSuccess: (created) => {
       onSaved(created);
@@ -158,12 +153,10 @@ function ActiveWindows({ overview, onChanged }) {
   const windows = [overview?.current, ...(overview?.upcoming || [])].filter(Boolean);
   const mutation = useMutation({
     mutationFn: async (item) => {
-      const ended = await monitoringStatusFetch(
-        `/service-maintenance/${item.id}/terminate`,
+      return adminFetch(
+        `/app-updates/maintenance/${item.id}/end`,
         { method: "POST" },
       );
-      await adminFetch("/app-updates/maintenance/end", { method: "POST" });
-      return ended;
     },
     onSuccess: onChanged,
   });
@@ -173,7 +166,7 @@ function ActiveWindows({ overview, onChanged }) {
       <section className="workspace-section">
         <div className="maintenance-operational">
           <span className="operational-dot" />
-          <div><h2>Service operational</h2><p>No active or scheduled maintenance windows. Firebase Remote Config is published with the same state.</p></div>
+          <div><h2>Service operational</h2><p>No active or scheduled Firebase Remote Config maintenance windows.</p></div>
         </div>
       </section>
     );
@@ -182,7 +175,7 @@ function ActiveWindows({ overview, onChanged }) {
   return (
     <section className="workspace-section">
       <div className="section-heading">
-        <div><h2>Active and scheduled</h2><p>Legacy builds read monitoring; FRC-enabled builds receive the same state in real time.</p></div>
+        <div><h2>Active and scheduled</h2><p>Firebase Remote Config delivers this state to supported iOS builds in real time.</p></div>
       </div>
       {mutation.error ? <InlineNotice tone="danger" compact>{mutation.error.message}</InlineNotice> : null}
       <div className="maintenance-window-list">
@@ -192,7 +185,7 @@ function ActiveWindows({ overview, onChanged }) {
             <article className="maintenance-window-row" key={item.id}>
               <div>
                 <StatusBadge tone={stateTone(state)}>{state}</StatusBadge>
-                <strong>{item.content.titleKo}</strong>
+                <strong>{item.titleKo}</strong>
                 <span>{formatDateTime(item.startsAt)} – {item.endsAt ? formatDateTime(item.endsAt) : "Until manually ended"}</span>
               </div>
               <Button
@@ -218,13 +211,13 @@ function ServiceStatusWorkspace() {
   const queryClient = useQueryClient();
   const [offset, setOffset] = useState(0);
   const overviewQuery = useQuery({
-    queryKey: ["admin", "service-maintenance", "overview"],
-    queryFn: () => monitoringStatusFetch("/service-maintenance"),
+    queryKey: ["admin", "app-control-maintenance", "overview"],
+    queryFn: () => adminFetch("/app-updates/maintenance"),
     refetchInterval: 10_000,
   });
   const historyQuery = useQuery({
-    queryKey: ["admin", "service-maintenance", "history", offset],
-    queryFn: () => monitoringStatusFetch(`/service-maintenance/history?limit=${PAGE_SIZE}&offset=${offset}`),
+    queryKey: ["admin", "app-control-maintenance", "history", offset],
+    queryFn: () => adminFetch(`/app-updates/maintenance/history?limit=${PAGE_SIZE}&offset=${offset}`),
     refetchInterval: 10_000,
   });
   const items = Array.isArray(historyQuery.data?.items) ? historyQuery.data.items : [];
@@ -237,7 +230,7 @@ function ServiceStatusWorkspace() {
       const state = stateFor(row);
       return <StatusBadge tone={stateTone(state)}>{state}</StatusBadge>;
     } },
-    { key: "title", label: "Title", render: (row) => <div className="primary-cell"><strong>{row.content.titleKo}</strong><span>{row.content.titleEn}</span></div> },
+    { key: "title", label: "Title", render: (row) => <div className="primary-cell"><strong>{row.titleKo}</strong><span>{row.titleEn}</span></div> },
     { key: "startsAt", label: "Start", render: (row) => formatDateTime(row.startsAt) },
     { key: "endsAt", label: "Planned end", render: (row) => row.endsAt ? formatDateTime(row.endsAt) : "Manual" },
     { key: "terminatedAt", label: "Actual end", render: (row) => row.terminatedAt ? formatDateTime(row.terminatedAt) : "-" },
@@ -245,7 +238,7 @@ function ServiceStatusWorkspace() {
   ], []);
 
   function refresh() {
-    queryClient.invalidateQueries({ queryKey: ["admin", "service-maintenance"] });
+    queryClient.invalidateQueries({ queryKey: ["admin", "app-control-maintenance"] });
   }
 
   return (
@@ -278,7 +271,7 @@ export function ServiceStatusPage() {
       <PageHeader
         eyebrow="Manage"
         title="Service status"
-        description="Publish customer-facing maintenance status from monitoring and review its history."
+        description="Publish customer-facing maintenance through Firebase Remote Config and review its history."
         actions={
           <Button variant="secondary" icon={RefreshCw} onClick={() => window.location.reload()}>
             Refresh

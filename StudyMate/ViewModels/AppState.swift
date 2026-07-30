@@ -140,7 +140,6 @@ final class AppState: ObservableObject {
     @Published private(set) var questionQuota: BackendQuestionQuota?
     @Published private(set) var questionQuotaNotice: String?
     @Published private(set) var serviceAvailability = BackendServiceAvailability.operational
-    @Published private(set) var isCheckingServiceAvailability = false
     @Published private(set) var isCheckingAppControl = false
     @Published private(set) var appUpdateDecision: BackendAppUpdateDecision?
     @Published private(set) var isCheckingAppUpdate = false
@@ -631,7 +630,6 @@ final class AppState: ObservableObject {
     private var answerGradingPollingTask: Task<StudyRecord, Error>?
     private var answerGradingPollingID: String?
     private var answerGradingOwnerID: String?
-    private var maintenancePollingTask: Task<Void, Never>?
     private var appControlBoundaryTask: Task<Void, Never>?
     private var appControlPolicy: AppControlRemotePolicy?
     private var appControlResolution = AppControlResolution.normal
@@ -1017,13 +1015,6 @@ final class AppState: ObservableObject {
         termsRetry: (() async -> Void)? = nil
     ) -> Bool {
         let resolution = appErrorResolution(error, fallback: fallback)
-        if let maintenance = resolution.serviceAvailability {
-            clearErrorMessage(target)
-            pageAccessPrompt = nil
-            applyServiceAvailability(maintenance, source: "app-error")
-            return true
-        }
-
         logAuthTrace(
             "app_error_resolution",
             page: protectedPage ?? currentVisibleProtectedPage(),
@@ -1492,9 +1483,6 @@ final class AppState: ObservableObject {
             appNotificationEventProvider.observeBackendUnauthorized { [weak self] in
                 self?.clearStoredBackendAccessToken()
             },
-            appNotificationEventProvider.observeBackendMaintenance { [weak self] availability in
-                self?.applyServiceAvailability(availability, source: "api-response")
-            },
         ]
 
         if shouldRecoverLegacyRunningState {
@@ -1953,7 +1941,7 @@ final class AppState: ObservableObject {
     }
     #endif
 
-    isolated deinit {
+    deinit {
         timerTask?.cancel()
         cloudSyncTask?.cancel()
         answerDraftSaveTask?.cancel()
@@ -1961,11 +1949,9 @@ final class AppState: ObservableObject {
         protectedPageAccessRefreshTask?.cancel()
         questionGenerationPollingTask?.cancel()
         answerGradingPollingTask?.cancel()
-        maintenancePollingTask?.cancel()
         appControlBoundaryTask?.cancel()
         appControlRefreshTask?.cancel()
         appControlProvider.stopListening()
-        appNotificationEventCancellables.forEach { $0.cancel() }
     }
 
     func start() async {
@@ -1980,9 +1966,6 @@ final class AppState: ObservableObject {
         }
         #endif
         let usesRemoteAppControl = await refreshAppControlPolicy()
-        if !usesRemoteAppControl {
-            await refreshServiceAvailability()
-        }
         guard !isMaintenanceAccessBlocked else {
             return
         }
@@ -2028,9 +2011,6 @@ final class AppState: ObservableObject {
         }
         #endif
         let usesRemoteAppControl = await refreshAppControlPolicy()
-        if !usesRemoteAppControl {
-            await refreshServiceAvailability()
-        }
         guard !isMaintenanceAccessBlocked else {
             return
         }
@@ -2067,7 +2047,7 @@ final class AppState: ObservableObject {
     }
 
     var isCheckingAvailabilityControl: Bool {
-        isCheckingAppControl || isCheckingServiceAvailability
+        isCheckingAppControl
     }
 
     @discardableResult
@@ -2096,6 +2076,8 @@ final class AppState: ObservableObject {
         guard let policy = appControlPolicy, isUsableAppControlPolicy(policy) else {
             appControlPolicy = nil
             appControlResolution = .normal
+            serviceAvailability = .operational
+            isMaintenanceBypassedForDeveloper = false
             await recordAppControlEvent(.versionObserved, resolution: .normal)
             return false
         }
@@ -2104,10 +2086,7 @@ final class AppState: ObservableObject {
     }
 
     func refreshAvailabilityControl() async {
-        let usesRemoteAppControl = await refreshAppControlPolicy()
-        if !usesRemoteAppControl {
-            await refreshServiceAvailability()
-        }
+        _ = await refreshAppControlPolicy()
     }
 
     private func startAppControlListenerIfNeeded() {
@@ -2145,7 +2124,6 @@ final class AppState: ObservableObject {
             now: appClock.now
         )
         appControlResolution = resolution
-        stopMaintenancePolling()
         if let maintenance = resolution.maintenance {
             serviceAvailability = maintenance
             appUpdateDecision = nil
@@ -2184,8 +2162,11 @@ final class AppState: ObservableObject {
             return
         }
         let delay = max(0, date.timeIntervalSince(appClock.now))
+        let maximumDelay = Double(UInt64.max) / 1_000_000_000
+        let delayNanoseconds = UInt64(min(delay, maximumDelay) * 1_000_000_000)
+        let sleepProvider = appSleepProvider
         appControlBoundaryTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(delay))
+            try? await sleepProvider.sleep(nanoseconds: delayNanoseconds)
             guard !Task.isCancelled, let self, let policy = self.appControlPolicy else {
                 return
             }
@@ -2286,7 +2267,7 @@ final class AppState: ObservableObject {
             try await appUpdateUseCase.recordAppControlEvent(
                 registration: registration,
                 request: BackendAppControlEventRequest(
-                    eventID: UUID().uuidString.lowercased(),
+                    eventID: appIdentifierProvider.makeIdentifier().lowercased(),
                     event: event,
                     platform: "ios",
                     channel: appDistributionContext.appControlChannel,
@@ -2311,100 +2292,16 @@ final class AppState: ObservableObject {
         isServiceUnderMaintenance && !isMaintenanceBypassedForDeveloper
     }
 
-    private var shouldSkipServiceAvailabilityMonitoring: Bool {
-        isDebuggingEnabled || isMaintenanceBypassedForDeveloper
-    }
-
     func bypassMaintenanceForDeveloper() async {
         guard canAccessDeveloperOptions else {
             return
         }
         isMaintenanceBypassedForDeveloper = true
-        stopMaintenancePolling()
         log(.info, "개발자 코드로 현재 점검 화면을 우회했습니다.")
         if appControlPolicy != nil {
             await recordAppControlEvent(.maintenanceBypassed, resolution: appControlResolution)
         }
         await completeStartupTasksIfNeeded()
-    }
-
-    func refreshServiceAvailability() async {
-        guard !shouldSkipServiceAvailabilityMonitoring else {
-            stopMaintenancePolling()
-            return
-        }
-        guard !isCheckingServiceAvailability else {
-            return
-        }
-        isCheckingServiceAvailability = true
-        defer {
-            isCheckingServiceAvailability = false
-        }
-        guard let availability = await appUseCases.serviceAvailability.fetch(
-            language: settings.appLanguage
-        ) else {
-            startMaintenancePollingIfNeeded()
-            return
-        }
-        guard !shouldSkipServiceAvailabilityMonitoring else {
-            return
-        }
-        let wasUnderMaintenance = isServiceUnderMaintenance
-        applyServiceAvailability(availability, source: "status-endpoint")
-        if wasUnderMaintenance, !availability.isUnderMaintenance {
-            await completeStartupTasksIfNeeded()
-        }
-    }
-
-    private func applyServiceAvailability(
-        _ availability: BackendServiceAvailability,
-        source: String
-    ) {
-        guard !shouldSkipServiceAvailabilityMonitoring else {
-            return
-        }
-        serviceAvailability = availability
-        if !availability.isUnderMaintenance {
-            isMaintenanceBypassedForDeveloper = false
-        }
-        log(
-            .info,
-            "서비스 상태를 반영했습니다. status=\(availability.status.rawValue), source=\(source)"
-        )
-        startMaintenancePollingIfNeeded()
-    }
-
-    private func startMaintenancePollingIfNeeded() {
-        guard !shouldSkipServiceAvailabilityMonitoring else {
-            stopMaintenancePolling()
-            return
-        }
-        guard maintenancePollingTask == nil else {
-            return
-        }
-        maintenancePollingTask = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self else {
-                    return
-                }
-                let seconds = self.serviceAvailability.isUnderMaintenance
-                    ? (self.serviceAvailability.retryAfterSeconds ?? 60)
-                    : 60
-                let interval = UInt64(min(max(seconds, 15), 120))
-                try? await self.appSleepProvider.sleep(
-                    nanoseconds: interval * 1_000_000_000
-                )
-                if Task.isCancelled {
-                    return
-                }
-                await self.refreshServiceAvailability()
-            }
-        }
-    }
-
-    private func stopMaintenancePolling() {
-        maintenancePollingTask?.cancel()
-        maintenancePollingTask = nil
     }
 
     @discardableResult
@@ -8625,9 +8522,6 @@ final class AppState: ObservableObject {
         }
         isDebuggingEnabled = isEnabled
         developerSettingsUseCase.saveIsDebuggingEnabled(isEnabled)
-        if isEnabled {
-            stopMaintenancePolling()
-        }
         refreshRemotePushBackendClient(reason: isEnabled ? "debug-enabled" : "debug-disabled")
         log(.info, isEnabled ? "디버깅 모드를 켰습니다." : "디버깅 모드를 껐습니다.")
     }

@@ -3,6 +3,8 @@ package com.buddystudy.backend.appupdate.application.service
 import com.buddystudy.backend.appupdate.application.model.AdminAppUpdateCampaignPage
 import com.buddystudy.backend.appupdate.application.model.AdminAppUpdateCampaignSummary
 import com.buddystudy.backend.appupdate.application.model.AdminAppUpdateUserPage
+import com.buddystudy.backend.appupdate.application.model.AdminAppControlMaintenanceOverview
+import com.buddystudy.backend.appupdate.application.model.AdminAppControlMaintenancePage
 import com.buddystudy.backend.appupdate.application.model.AppUpdateCheckCommand
 import com.buddystudy.backend.appupdate.application.model.AppUpdateDecision
 import com.buddystudy.backend.appupdate.application.model.AppUpdateEvent
@@ -183,6 +185,14 @@ class AdminAppUpdateService(
         limit.coerceIn(1, 100),
         offset.coerceAtLeast(0),
     )
+
+    @Transactional(readOnly = true)
+    override suspend fun maintenanceOverview(): AdminAppControlMaintenanceOverview =
+        updates.maintenanceOverview(Instant.now())
+
+    @Transactional(readOnly = true)
+    override suspend fun maintenanceHistory(limit: Int, offset: Int): AdminAppControlMaintenancePage =
+        updates.maintenanceHistory(limit.coerceIn(1, 100), offset.coerceAtLeast(0))
 
     override suspend fun publishCurrentPolicy(): AdminAppUpdateCampaignSummary? {
         val active = updates.activeCampaign("ios")

@@ -3,6 +3,8 @@ package com.buddystudy.backend.appupdate
 import com.buddystudy.backend.appupdate.application.model.AdminAppUpdateCampaignPage
 import com.buddystudy.backend.appupdate.application.model.AdminAppUpdateCampaignSummary
 import com.buddystudy.backend.appupdate.application.model.AdminAppUpdateUserPage
+import com.buddystudy.backend.appupdate.application.model.AdminAppControlMaintenanceOverview
+import com.buddystudy.backend.appupdate.application.model.AdminAppControlMaintenancePage
 import com.buddystudy.backend.appupdate.application.model.AppUpdateCampaign
 import com.buddystudy.backend.appupdate.application.model.AppUpdateCheckCommand
 import com.buddystudy.backend.appupdate.application.model.AppUpdateEvent
@@ -150,6 +152,10 @@ class AppUpdateServiceTest {
         override suspend fun endCampaign(campaignId: Long, now: Instant): AdminAppUpdateCampaignSummary? = null
         override suspend fun campaignUsers(campaignId: Long, query: String?, status: String?, limit: Int, offset: Int) =
             AdminAppUpdateUserPage(emptyList(), 0, limit, offset)
+        override suspend fun maintenanceOverview(now: Instant) =
+            AdminAppControlMaintenanceOverview(null, emptyList(), now)
+        override suspend fun maintenanceHistory(limit: Int, offset: Int) =
+            AdminAppControlMaintenancePage(emptyList(), 0, limit, offset)
         override suspend fun activeMaintenance(now: Instant) = null
         override suspend fun createMaintenance(command: AppControlMaintenanceCommand, now: Instant) =
             error("not used")

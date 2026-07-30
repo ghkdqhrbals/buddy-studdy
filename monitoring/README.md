@@ -11,7 +11,6 @@ This directory is the source of truth for the MacBook Air Grafana/Loki setup.
 - Grafana dashboards: `monitoring/grafana/dashboards` -> `/var/lib/grafana/dashboards`
 - TestZone state/scripts/runs: `~/buddystudy/monitoring/testzone/data` -> `/data`
 - TestZone InfluxDB: `~/buddystudy/monitoring/testzone/influxdb` -> `/var/lib/influxdb2`
-- Service status state: `~/buddystudy/monitoring/status/data` -> `/data`
 
 ## Access Control
 
@@ -29,10 +28,10 @@ docker run --rm httpd:2.4-alpine htpasswd -nbB admin 'your-password'
   private on the monitoring Docker network.
 - TestZone has no public container port. Its API is reachable only through the
   authenticated dashboard Nginx route.
-- Service maintenance is owned by monitoring, not the backend database.
-  Operators manage it under `Manage > Service status`. The only public route is
-  the read-only `GET /status/api/v1/service-status`; mutation routes retain
-  monitoring Basic Auth and are included in the access audit log.
+- Operators manage maintenance under `Manage > Service status`. The dashboard
+  calls the authenticated backend admin API; the backend stores the audit
+  history and publishes the active policy to Firebase Remote Config. Monitoring
+  does not run a separate service-status server or expose a public status API.
 - Saved k6 scripts may target any valid HTTP or HTTPS URL. The authenticated
   operator is responsible for testing only systems they are authorized to load.
 - Disposable components are selected from a fixed server-side catalog. The
@@ -93,4 +92,3 @@ See [TestZone Operations](../docs/performance/TESTZONE_OPERATIONS.md).
 - API Logs: `https://monitoring.lowfidev.cloud`
 - Grafana: `https://grafana.lowfidev.cloud`
 - TestZone: `https://monitoring.lowfidev.cloud/testzone.html`
-- Service status: `https://monitoring.lowfidev.cloud/status/api/v1/service-status`

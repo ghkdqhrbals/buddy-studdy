@@ -240,3 +240,16 @@ data class AppControlMaintenanceWindow(
     val createdAt: Instant,
     val updatedAt: Instant,
 )
+
+data class AdminAppControlMaintenanceOverview(
+    val current: AppControlMaintenanceWindow?,
+    val upcoming: List<AppControlMaintenanceWindow>,
+    val checkedAt: Instant,
+)
+
+data class AdminAppControlMaintenancePage(
+    val items: List<AppControlMaintenanceWindow>,
+    override val totalCount: Long,
+    override val limit: Int,
+    override val offset: Int,
+) : PageResponse

@@ -2394,11 +2394,6 @@ struct BackendAppUpdateDecision: Codable, Equatable, Identifiable {
     }
 }
 
-enum BackendServiceAvailabilityNotification {
-    static let didEnterMaintenance = Notification.Name("studyBackendDidEnterMaintenance")
-    static let userInfoKey = "studyBackendServiceAvailability"
-}
-
 enum LogLevel: String, Codable, CaseIterable {
     case info
     case warning

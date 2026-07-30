@@ -3,6 +3,8 @@ package com.buddystudy.backend.appupdate.application.port.inbound
 import com.buddystudy.backend.appupdate.application.model.AdminAppUpdateCampaignPage
 import com.buddystudy.backend.appupdate.application.model.AdminAppUpdateCampaignSummary
 import com.buddystudy.backend.appupdate.application.model.AdminAppUpdateUserPage
+import com.buddystudy.backend.appupdate.application.model.AdminAppControlMaintenanceOverview
+import com.buddystudy.backend.appupdate.application.model.AdminAppControlMaintenancePage
 import com.buddystudy.backend.appupdate.application.model.AppUpdateCheckCommand
 import com.buddystudy.backend.appupdate.application.model.AppUpdateDecision
 import com.buddystudy.backend.appupdate.application.model.AppUpdateEvent
@@ -23,6 +25,8 @@ interface AdminAppUpdateUseCase {
     suspend fun create(command: CreateAppUpdateCampaignCommand): AdminAppUpdateCampaignSummary
     suspend fun end(campaignId: Long): AdminAppUpdateCampaignSummary
     suspend fun users(campaignId: Long, query: String?, status: String?, limit: Int, offset: Int): AdminAppUpdateUserPage
+    suspend fun maintenanceOverview(): AdminAppControlMaintenanceOverview
+    suspend fun maintenanceHistory(limit: Int, offset: Int): AdminAppControlMaintenancePage
     suspend fun publishCurrentPolicy(): AdminAppUpdateCampaignSummary?
     suspend fun activateMaintenance(command: AppControlMaintenanceCommand): AppControlMaintenanceWindow
     suspend fun endMaintenance(maintenanceId: Long): AppControlMaintenanceWindow
