@@ -46,6 +46,10 @@ deployment.
   planning, the signed IPA build, TestFlight upload, and completion reporting
   into dependent jobs so each failure boundary is visible without combining
   backend, monitoring, or admin deployment.
+- The iOS archive uses the installed Apple Distribution certificate and App
+  Store provisioning profile with manual signing. Archive creation must not
+  ask Apple to create or revoke development certificates; the App Store
+  Connect API key is reserved for upload and version-management operations.
 - Backend image build remains in the app repository on GitHub-hosted runners.
 - Backend images support `native` and `jvm` runtime modes from one Dockerfile.
   JVM is the default for tag-triggered and manually dispatched releases. A
