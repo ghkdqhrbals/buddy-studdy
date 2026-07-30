@@ -8,6 +8,8 @@ import org.springframework.stereotype.Component
 import java.time.Duration
 import java.time.Instant
 
+internal const val MAX_STREAM_HANDLER_ATTEMPTS = 3
+
 interface RedisStreamFailureHistory {
     suspend fun recordTerminal(
         message: RedisStreamMessage,
@@ -19,7 +21,12 @@ interface RedisStreamFailureHistory {
         message: RedisStreamMessage,
         consumerGroup: String,
         error: Throwable,
-    ): Boolean
+    ): RedisStreamFailureDisposition
+}
+
+enum class RedisStreamFailureDisposition {
+    RETRY,
+    DISCARD,
 }
 
 @Component
@@ -32,20 +39,27 @@ class RedisStreamInboxFailureHistory(
         message: RedisStreamMessage,
         consumerGroup: String,
         error: Throwable,
-    ): Boolean = record(message, consumerGroup, error, terminal = true)
+    ): Boolean = record(message, consumerGroup, error, terminal = true) == RetryableFailureRecord.TERMINAL
 
     override suspend fun recordRetryable(
         message: RedisStreamMessage,
         consumerGroup: String,
         error: Throwable,
-    ): Boolean = record(message, consumerGroup, error, terminal = false)
+    ): RedisStreamFailureDisposition {
+        val recorded = record(message, consumerGroup, error, terminal = false)
+        return if (recorded == RetryableFailureRecord.TERMINAL) {
+            RedisStreamFailureDisposition.DISCARD
+        } else {
+            RedisStreamFailureDisposition.RETRY
+        }
+    }
 
     private suspend fun record(
         message: RedisStreamMessage,
         consumerGroup: String,
         error: Throwable,
         terminal: Boolean,
-    ): Boolean {
+    ): RetryableFailureRecord {
         val now = Instant.now()
         val eventId = message.eventIdOrSynthetic()
         return try {
@@ -56,21 +70,23 @@ class RedisStreamInboxFailureHistory(
                 leaseDuration = FAILURE_CLAIM_LEASE,
                 now = now,
                 streamKey = message.streamKey,
-            ) ?: return true
-            if (terminal) {
-                inbox.markFailed(
+            ) ?: return RetryableFailureRecord.NOT_CLAIMED
+            if (terminal || claim.attempt >= MAX_STREAM_HANDLER_ATTEMPTS) {
+                val failed = inbox.markFailed(
                     claim = claim,
                     errorType = error.javaClass.name,
                     errorMessage = error.message ?: error.javaClass.simpleName,
                     now = now,
                 )
+                if (failed) RetryableFailureRecord.TERMINAL else RetryableFailureRecord.NOT_CLAIMED
             } else {
-                inbox.releaseForRetry(
+                val retryScheduled = inbox.releaseForRetry(
                     claim = claim,
                     errorType = error.javaClass.name,
                     errorMessage = error.message ?: error.javaClass.simpleName,
                     now = now,
                 )
+                if (retryScheduled) RetryableFailureRecord.RETRY_SCHEDULED else RetryableFailureRecord.NOT_CLAIMED
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -88,7 +104,7 @@ class RedisStreamInboxFailureHistory(
                 historyError.message,
                 historyError,
             )
-            false
+            RetryableFailureRecord.NOT_CLAIMED
         }
     }
 
@@ -102,5 +118,11 @@ class RedisStreamInboxFailureHistory(
         val FAILURE_CLAIM_LEASE: Duration = Duration.ofMinutes(5)
         const val MAX_EVENT_ID_LENGTH = 120
         const val MAX_CORRELATION_ID_LENGTH = 36
+    }
+
+    private enum class RetryableFailureRecord {
+        NOT_CLAIMED,
+        RETRY_SCHEDULED,
+        TERMINAL,
     }
 }

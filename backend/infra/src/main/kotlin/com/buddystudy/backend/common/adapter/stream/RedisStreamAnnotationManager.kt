@@ -194,6 +194,7 @@ class RedisStreamAnnotationManager(
     private fun startScheduler(handler: SchedulerHandler, topic: RedisStreamTopic, scope: CoroutineScope) {
         val annotation = handler.annotation
         scope.launch(CoroutineName("stream-scheduler-${handler.beanName}-${topic.apiName}-${annotation.consumer}")) {
+            ensureRecoveryConsumer(handler, topic)
             delay(annotation.initialDelayMs.coerceAtLeast(0))
             var startId = START_ID
             while (currentCoroutineContext().isActive) {
@@ -237,6 +238,41 @@ class RedisStreamAnnotationManager(
                     )
                 }
                 delay(annotation.fixedDelayMs.coerceAtLeast(1))
+            }
+        }
+    }
+
+    private suspend fun ensureRecoveryConsumer(handler: SchedulerHandler, topic: RedisStreamTopic) {
+        val annotation = handler.annotation
+        while (currentCoroutineContext().isActive) {
+            try {
+                streams.ensureConsumer(topic, annotation.group, annotation.consumer)
+                logger.info(
+                    "redis_stream_recovery_consumer_ready bean={} method={} topic={} group={} consumer={}",
+                    handler.beanName,
+                    handler.method.name,
+                    topic.apiName,
+                    annotation.group,
+                    annotation.consumer,
+                )
+                return
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                if (error.isFatalStreamWorkerFailure()) throw error
+                logger.error(
+                    "redis_stream_recovery_consumer_create_failed bean={} method={} topic={} group={} consumer={} " +
+                        "errorType={} error={}",
+                    handler.beanName,
+                    handler.method.name,
+                    topic.apiName,
+                    annotation.group,
+                    annotation.consumer,
+                    error.javaClass.name,
+                    error.message,
+                    error,
+                )
+                delay(RECOVERY_CONSUMER_CREATE_RETRY_DELAY_MS)
             }
         }
     }
@@ -322,6 +358,7 @@ class RedisStreamAnnotationManager(
         const val MAX_CONCURRENCY = 32
         const val MIN_READ_TIMEOUT_GRACE_MS = 100L
         const val START_ID = "0-0"
+        const val RECOVERY_CONSUMER_CREATE_RETRY_DELAY_MS = 5_000L
     }
 }
 

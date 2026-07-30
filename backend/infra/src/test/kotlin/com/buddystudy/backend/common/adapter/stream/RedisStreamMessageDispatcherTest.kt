@@ -85,6 +85,29 @@ class RedisStreamMessageDispatcherTest {
     }
 
     @Test
+    fun `third handler failure is acknowledged without deleting the retained stream event`() = runBlocking {
+        val streams = RecordingConsumerOperations()
+        val failures = RecordingFailureHistory(
+            retryDisposition = RedisStreamFailureDisposition.DISCARD,
+        )
+        val dispatcher = dispatcher(streams, failures)
+
+        dispatcher.dispatch(
+            bean = SampleHandler(),
+            method = handlerMethod("fail"),
+            eventType = "SAMPLE",
+            payloadType = SamplePayload::class.java,
+            group = "sample-group",
+            options = StreamOptions.ACK_DEL,
+            message = message("""{"value":31}"""),
+            claimed = true,
+        )
+
+        assertThat(streams.acknowledged).containsExactly("sample-group" to "1-0")
+        assertThat(streams.acknowledgedAndDeleted).isEmpty()
+    }
+
+    @Test
     fun `non fatal linkage failure leaves the message pending without escaping the dispatcher`() = runBlocking {
         val streams = RecordingConsumerOperations()
         val failures = RecordingFailureHistory()
@@ -272,7 +295,9 @@ class RedisStreamMessageDispatcherTest {
         ): RedisStreamClaimBatch = RedisStreamClaimBatch("0-0", emptyList())
     }
 
-    private class RecordingFailureHistory : RedisStreamFailureHistory {
+    private class RecordingFailureHistory(
+        private val retryDisposition: RedisStreamFailureDisposition = RedisStreamFailureDisposition.RETRY,
+    ) : RedisStreamFailureHistory {
         val terminal = mutableListOf<Throwable>()
         val retryable = mutableListOf<Throwable>()
 
@@ -289,9 +314,9 @@ class RedisStreamMessageDispatcherTest {
             message: RedisStreamMessage,
             consumerGroup: String,
             error: Throwable,
-        ): Boolean {
+        ): RedisStreamFailureDisposition {
             retryable += error
-            return true
+            return retryDisposition
         }
     }
 }

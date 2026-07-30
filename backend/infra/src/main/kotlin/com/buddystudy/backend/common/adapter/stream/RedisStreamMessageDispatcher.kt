@@ -29,7 +29,7 @@ class RedisStreamMessageDispatcher(
             val error = RedisStreamEventTypeMismatchException(eventType, actualEventType)
             logFailure(method, message, actualEventType, group, options, claimed, error)
             if (failureHistory.recordTerminal(message, group, error)) {
-                complete(message, group, options)
+                discard(message, group)
             }
             return
         }
@@ -44,7 +44,7 @@ class RedisStreamMessageDispatcher(
             val rootError = error.unwrapReflectionFailure()
             logFailure(method, message, actualEventType, group, options, claimed, rootError)
             if (failureHistory.recordTerminal(message, group, rootError)) {
-                complete(message, group, options)
+                discard(message, group)
             }
             return
         }
@@ -86,7 +86,19 @@ class RedisStreamMessageDispatcher(
             if (error.isFatalStreamWorkerFailure()) throw error
             val rootError = error.unwrapReflectionFailure()
             logFailure(method, message, actualEventType, group, options, claimed, rootError)
-            failureHistory.recordRetryable(message, group, rootError)
+            if (failureHistory.recordRetryable(message, group, rootError) == RedisStreamFailureDisposition.DISCARD) {
+                discard(message, group)
+                logger.error(
+                    "redis_stream_handler_discarded stream={} redisRecordId={} eventId={} eventType={} group={} " +
+                        "attempts={} retained=true",
+                    message.streamKey,
+                    message.recordId,
+                    context.eventId,
+                    actualEventType,
+                    group,
+                    MAX_STREAM_HANDLER_ATTEMPTS,
+                )
+            }
         }
     }
 
@@ -121,6 +133,10 @@ class RedisStreamMessageDispatcher(
             StreamOptions.ACK -> streams.acknowledge(message, group)
             StreamOptions.ACK_DEL -> streams.acknowledgeAndDelete(message, group)
         }
+    }
+
+    private suspend fun discard(message: RedisStreamMessage, group: String) {
+        streams.acknowledge(message, group)
     }
 
     private fun Throwable.unwrapReflectionFailure(): Throwable {

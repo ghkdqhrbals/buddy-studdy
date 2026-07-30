@@ -13,7 +13,9 @@ import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
 import io.lettuce.core.Consumer as LettuceConsumer
+import io.lettuce.core.XGroupCreateArgs
 import io.lettuce.core.XAutoClaimArgs
+import io.lettuce.core.XReadArgs
 import io.lettuce.core.cluster.api.async.RedisClusterAsyncCommands
 import org.springframework.http.HttpStatus
 import org.slf4j.LoggerFactory
@@ -83,6 +85,7 @@ interface RedisStreamPublishOperations {
 interface RedisStreamConsumerOperations {
     suspend fun acknowledge(message: RedisStreamMessage, group: String)
     suspend fun acknowledgeAndDelete(message: RedisStreamMessage, group: String)
+    suspend fun ensureConsumer(topic: RedisStreamTopic, group: String, consumer: String) = Unit
 
     suspend fun readNew(
         topic: RedisStreamTopic,
@@ -242,6 +245,33 @@ class RedisStreamTopicManager(
         ).next().awaitSingle()
     }
 
+    override suspend fun ensureConsumer(
+        topic: RedisStreamTopic,
+        group: String,
+        consumer: String,
+    ) = withContext(Dispatchers.IO) {
+        val definition = definition(topic)
+        val streamKey = definition.streamKey.toByteArray(Charsets.UTF_8)
+        val groupName = group.toByteArray(Charsets.UTF_8)
+        val consumerName = consumer.toByteArray(Charsets.UTF_8)
+        withNativeStreamCommands { commands ->
+            try {
+                commands.xgroupCreate(
+                    XReadArgs.StreamOffset.from(streamKey, "0-0"),
+                    groupName,
+                    XGroupCreateArgs.Builder.mkstream(),
+                ).get()
+            } catch (error: Exception) {
+                if (!error.containsRedisError("BUSYGROUP")) throw error
+            }
+            commands.xgroupCreateconsumer(
+                streamKey,
+                LettuceConsumer.from(groupName, consumerName),
+            ).get()
+        }
+        Unit
+    }
+
     override suspend fun readNew(
         topic: RedisStreamTopic,
         group: String,
@@ -271,13 +301,7 @@ class RedisStreamTopicManager(
     ): RedisStreamClaimBatch = withContext(Dispatchers.IO) {
         val definition = definition(topic)
         ensureGroup(definition.streamKey, group)
-        val connectionFactory = requireNotNull(blockingRedis.connectionFactory) {
-            "Redis connection factory is required for XAUTOCLAIM."
-        }
-        connectionFactory.connection.use { connection ->
-            @Suppress("UNCHECKED_CAST")
-            val commands = connection.nativeConnection as? RedisClusterAsyncCommands<ByteArray, ByteArray>
-                ?: error("XAUTOCLAIM requires a Lettuce Redis connection.")
+        withNativeStreamCommands { commands ->
             val arguments = XAutoClaimArgs<ByteArray>()
                 .consumer(
                     LettuceConsumer.from(
@@ -305,6 +329,29 @@ class RedisStreamTopicManager(
                 },
             )
         }
+    }
+
+    private fun <T> withNativeStreamCommands(
+        operation: (RedisClusterAsyncCommands<ByteArray, ByteArray>) -> T,
+    ): T {
+        val connectionFactory = requireNotNull(blockingRedis.connectionFactory) {
+            "Redis connection factory is required for Redis Stream operations."
+        }
+        return connectionFactory.connection.use { connection ->
+            @Suppress("UNCHECKED_CAST")
+            val commands = connection.nativeConnection as? RedisClusterAsyncCommands<ByteArray, ByteArray>
+                ?: error("Redis Stream operations require a Lettuce Redis connection.")
+            operation(commands)
+        }
+    }
+
+    private fun Throwable.containsRedisError(fragment: String): Boolean {
+        var current: Throwable? = this
+        while (current != null) {
+            if (current.message?.contains(fragment, ignoreCase = true) == true) return true
+            current = current.cause
+        }
+        return false
     }
 
     override suspend fun topics(): List<AdminStreamTopicSummary> = withContext(Dispatchers.IO) {

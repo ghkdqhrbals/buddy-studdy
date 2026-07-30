@@ -8,7 +8,6 @@ import { InlineNotice } from "./InlineNotice.jsx";
 const DESTINATIONS = [
   { value: "buddystudy://home/message", label: "Home popup" },
   { value: "buddystudy://home", label: "Home" },
-  { value: "buddystudy://studies", label: "My Studies" },
   { value: "buddystudy://records", label: "Records" },
   { value: "buddystudy://statistics", label: "Statistics" },
   { value: "buddystudy://settings", label: "Settings" },

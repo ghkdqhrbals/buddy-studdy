@@ -10,6 +10,7 @@ import org.mockito.Mockito.mock
 import org.springframework.beans.factory.support.StaticListableBeanFactory
 import org.springframework.mock.env.MockEnvironment
 import java.time.Duration
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
 class RedisStreamAnnotationManagerLifecycleTest {
@@ -36,9 +37,11 @@ class RedisStreamAnnotationManagerLifecycleTest {
         assertThat(manager.phase).isEqualTo(Int.MAX_VALUE)
 
         manager.start()
-        waitUntil { streams.readCount.get() > 0 }
+        waitUntil { streams.readCount.get() > 0 && streams.ensuredConsumers.isNotEmpty() }
 
         assertThat(manager.isRunning).isTrue()
+        assertThat(streams.ensuredConsumers)
+            .containsExactly("test-group" to "test-consumer-recovery")
 
         manager.stop()
         val readsAfterStop = streams.readCount.get()
@@ -104,13 +107,31 @@ class RedisStreamAnnotationManagerLifecycleTest {
             pollDelayMs = 10,
         )
         private suspend fun consume(payload: SamplePayload) = Unit
+
+        @Suppress("unused")
+        @StreamScheduler(
+            topic = RedisStreamTopic.NOTIFICATION_MESSAGE_REQUESTED,
+            group = "test-group",
+            consumer = "test-consumer-recovery",
+            eventType = "TEST",
+            payloadType = SamplePayload::class,
+            batchSize = 10,
+            minIdleTimeMs = 10,
+            fixedDelayMs = 10,
+            initialDelayMs = 0,
+        )
+        private suspend fun recover(payload: SamplePayload) = Unit
     }
 
     private class CountingStreamOperations : RedisStreamConsumerOperations {
         val readCount = AtomicInteger()
+        val ensuredConsumers = CopyOnWriteArrayList<Pair<String, String>>()
 
         override suspend fun acknowledge(message: RedisStreamMessage, group: String) = Unit
         override suspend fun acknowledgeAndDelete(message: RedisStreamMessage, group: String) = Unit
+        override suspend fun ensureConsumer(topic: RedisStreamTopic, group: String, consumer: String) {
+            ensuredConsumers += group to consumer
+        }
 
         override suspend fun readNew(
             topic: RedisStreamTopic,

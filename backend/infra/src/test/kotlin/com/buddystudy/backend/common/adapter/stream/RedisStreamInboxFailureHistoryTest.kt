@@ -50,7 +50,7 @@ class RedisStreamInboxFailureHistoryTest {
             IllegalStateException("database unavailable"),
         )
 
-        assertThat(recorded).isTrue()
+        assertThat(recorded).isEqualTo(RedisStreamFailureDisposition.RETRY)
         assertThat(inbox.claimedEventId).isEqualTo("grading-event-1")
         assertThat(inbox.retryErrorType).isEqualTo(IllegalStateException::class.java.name)
         assertThat(inbox.retryErrorMessage).isEqualTo("database unavailable")

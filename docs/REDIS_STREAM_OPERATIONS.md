@@ -23,17 +23,24 @@ blocking timeout, and completion policy.
 - `ACK`: execute `XACK` and retain the stream entry.
 - `ACK_DEL`: execute `XACK` and `XDEL` atomically in one Redis Lua script request.
 
-Handler execution failures never ACK or delete the message. The push listener
-and its idle-message recovery scheduler use `ACK` so successful push entries
-remain available in the bounded stream for operational inspection. The durable
-`question_push_outbox` remains the recovery source.
+Handler execution failures remain pending while they are retryable. Every
+listener has a matching `-recovery` consumer in the same consumer group, and
+startup creates that consumer explicitly so it is visible before the first
+pending delivery exists. `XAUTOCLAIM` sends idle entries through the same typed
+handler contract. On the third failed Inbox attempt, the dispatcher records a
+terminal failure and executes `XACK` only: the delivery leaves the group's PEL,
+but the Stream entry is not deleted and remains available until bounded
+retention trims it. The push listener and its idle-message recovery scheduler
+also use `ACK`, and the durable `question_push_outbox` remains the recovery
+source.
 
 Every failed delivery is also represented in `stream_consumer_inbox_attempts`.
 Payload decoding and event-type contract failures are terminal poison messages:
 the dispatcher records a `FAILED` attempt with the physical stream key and
-Redis record ID before ACK. Handler execution failures are recorded as
-`RETRY_SCHEDULED` and remain pending for idle-message recovery. If an envelope
-has no event ID, the dispatcher assigns a deterministic
+Redis record ID before ACK. The first two handler execution failures are
+recorded as `RETRY_SCHEDULED` and remain pending for idle-message recovery; the
+third is recorded as `FAILED` and acknowledged without deleting the event. If
+an envelope has no event ID, the dispatcher assigns a deterministic
 `redis-record:<stream-key>:<record-id>` audit ID so malformed messages are
 still visible in the admin processing history. Full stack traces remain in
 structured ERROR logs; Inbox history retains the error type and message.

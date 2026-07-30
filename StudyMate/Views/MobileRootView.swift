@@ -139,8 +139,9 @@ struct MobileRootView: View {
         .sheet(item: $appState.homeAnnouncement) { announcement in
             MobileHomeAnnouncementSheet(announcement: announcement)
                 .environmentObject(appState)
-                .presentationDetents([.medium])
+                .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
         }
         .onAppear {
             AppAnalytics.setLanguage(appState.settings.appLanguage)
@@ -2222,36 +2223,64 @@ private struct MobileHomeAnnouncementSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    Image(systemName: "message.badge.filled.fill")
-                        .font(.system(size: 34, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
-                        .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                Image(systemName: "bell.badge.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("BuddyStudy")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
 
                     Text(announcement.title)
-                        .font(.title2.weight(.bold))
+                        .font(.title3.weight(.bold))
                         .foregroundStyle(.primary)
                         .fixedSize(horizontal: false, vertical: true)
-
-                    MarkdownMessageText(markdown: announcement.message, fillsWidth: true)
-                        .font(.body)
-                        .foregroundStyle(.primary)
-                        .textSelection(.enabled)
-
-                    Button(strings.done) {
-                        appState.dismissHomeAnnouncement()
-                        dismiss()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
                 }
-                .padding(22)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .background(Color(.systemBackground))
+            .padding(.horizontal, 22)
+            .padding(.top, 20)
+            .padding(.bottom, 18)
+
+            ScrollView {
+                MarkdownMessageText(markdown: announcement.message, fillsWidth: true)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .padding(18)
+                    .background(
+                        Color(.secondarySystemGroupedBackground),
+                        in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    )
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, 18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Divider()
+
+            Button {
+                appState.dismissHomeAnnouncement()
+                dismiss()
+            } label: {
+                Text(strings.done)
+                    .font(.body.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+            }
+            .buttonStyle(.borderedProminent)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.horizontal, 22)
+            .padding(.top, 14)
+            .padding(.bottom, 12)
         }
+        .background(Color(.systemBackground))
+        .accessibilityElement(children: .contain)
     }
 }
 
