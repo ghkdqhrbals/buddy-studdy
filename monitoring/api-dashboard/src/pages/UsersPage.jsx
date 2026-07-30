@@ -211,6 +211,8 @@ function UsersWorkspace() {
             />
             <AdminNotificationComposer
               endpoint={`/users/${selected.id}/notifications`}
+              title="Send push to this user"
+              description="Send an independent in-app notification and APNs push to the selected user."
               initialTitle="BuddyStudy에서 알려드려요"
               initialBody=""
             />
@@ -229,7 +231,7 @@ export function UsersPage() {
       <PageHeader
         eyebrow="Manage"
         title="Users & quotas"
-        description="Search accounts, inspect their full object, and control monthly question capacity."
+        description="Search accounts, manage question capacity, and send a direct push to a selected user."
         actions={authenticated ? <Button variant="ghost" icon={LogOut} onClick={logout}>Sign out</Button> : null}
       />
       <AdminGate><UsersWorkspace /></AdminGate>

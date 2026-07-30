@@ -161,8 +161,8 @@ function FeedbackWorkspace() {
               <AdminNotificationComposer
                 key={`feedback-message-${selected.id}-${selected.status}`}
                 endpoint={`/feedback/${selected.id}/notifications`}
-                title="Reply with a notification"
-                description="The reply is saved in the notification inbox and sent through APNs."
+                title="Reply to this feedback"
+                description="Send a feedback-linked reply through the notification inbox and APNs."
                 initialTitle="피드백을 확인했어요"
                 initialBody="소중한 피드백 감사합니다. 내용을 확인하고 반영할게요."
                 onSent={() => {
