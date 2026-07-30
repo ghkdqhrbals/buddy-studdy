@@ -18,6 +18,7 @@ import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.auth.application.service.AccountSessionManager
 import com.buddystudy.backend.auth.application.service.AuthenticatedLoginManager
+import com.buddystudy.backend.auth.application.service.DeviceRegistrationManager
 import com.buddystudy.backend.auth.application.service.LoginService
 import com.buddystudy.backend.auth.application.service.RandomDisplayNameProvider
 import com.buddystudy.backend.auth.application.service.RandomTokenGenerator
@@ -51,7 +52,6 @@ class LoginServiceEmailVerificationTest {
         devices = devices,
         tokenService = tokenProvider,
         sessions = sessions,
-        tokens = RandomTokenGenerator(),
         emailCodes = emailCodes,
         emailSender = emailSender,
         roles = roles,
@@ -63,6 +63,14 @@ class LoginServiceEmailVerificationTest {
             roles,
             tokenProvider,
             RandomDisplayNameProvider(),
+        ),
+        deviceRegistrations = DeviceRegistrationManager(
+            users,
+            devices,
+            tokenProvider,
+            sessions,
+            RandomTokenGenerator(),
+            roles,
         ),
     )
 

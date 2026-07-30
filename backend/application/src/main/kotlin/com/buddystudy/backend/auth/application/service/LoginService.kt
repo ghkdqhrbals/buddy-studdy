@@ -7,13 +7,14 @@ import com.buddystudy.auth.domain.Account
 import com.buddystudy.auth.domain.AccountDevice
 import com.buddystudy.auth.domain.AccountUser
 import com.buddystudy.auth.domain.PushTokenUpdate
+import com.buddystudy.auth.domain.entity.DeviceEntity
+import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.EmailVerificationCodePort
 import com.buddystudy.backend.auth.application.port.outbound.EmailVerificationSenderPort
 import com.buddystudy.backend.auth.application.port.outbound.GoogleIdentityPort
 import com.buddystudy.backend.auth.application.port.outbound.RoleAssignmentPort
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
-import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.backend.auth.application.port.inbound.IssueDeviceTokenUseCase
 import com.buddystudy.backend.auth.application.port.inbound.LoginUseCase
 import com.buddystudy.backend.auth.application.port.inbound.RegisterDeviceUseCase
@@ -25,14 +26,13 @@ import com.buddystudy.backend.auth.application.permission.Roles
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
-import com.buddystudy.auth.domain.entity.DeviceEntity
-import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.auth.application.model.AccessTokenResponse
 import com.buddystudy.backend.auth.application.model.DeviceRegisterResponse
 import com.buddystudy.backend.auth.application.model.EmailVerificationCodeResponse
 import com.buddystudy.backend.auth.application.model.GoogleLoginResponse
 import com.buddystudy.backend.auth.application.model.LoggedInDeviceResponse
 import com.buddystudy.backend.auth.application.model.LoggedInDevicesResponse
+import org.springframework.dao.DuplicateKeyException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -47,16 +47,15 @@ class LoginService(
     private val devices: DevicePort,
     private val tokenService: TokenProvider,
     private val sessions: AccountSessionManager,
-    private val tokens: RandomTokenGenerator,
     private val emailCodes: EmailVerificationCodePort,
     private val emailSender: EmailVerificationSenderPort,
     private val roles: RoleAssignmentPort,
     private val googleIdentities: GoogleIdentityPort,
     private val authenticatedLogins: AuthenticatedLoginManager,
+    private val deviceRegistrations: DeviceRegistrationManager,
 ) : RegisterDeviceUseCase, IssueDeviceTokenUseCase, LoginUseCase, UpdatePushTokenUseCase {
     private val secureRandom = SecureRandom()
 
-    @Transactional
     override suspend fun register(command: RegisterDeviceCommand): DeviceRegisterResponse {
         val installationId = command.installationId.trim()
         if (installationId.isNotEmpty() && installationId.length !in 32..256) {
@@ -67,49 +66,14 @@ class LoginService(
             )
         }
         val installationKeyHash = installationId.takeIf(String::isNotEmpty)?.let(::sha256)
-        val existingDevice = installationKeyHash?.let { devices.findByInstallationKeyHash(it) }
-        val deviceId = existingDevice?.deviceId ?: tokens.create("dev")
-        val secret = tokens.create("sec")
-        val now = Instant.now()
-        val user = existingDevice?.userId
-            ?.let { users.findById(it) }
-            ?: users.findByProviderAndProviderId("ANONYMOUS", deviceId)
-            ?: users.save(
-                UserEntity(
-                    provider = "ANONYMOUS",
-                    providerId = deviceId,
-                    status = "ANONYMOUS",
-                    email = "",
-                    displayName = "Buddy",
-                    avatarColorSeed = "avatar-color-gray",
-                    createdAt = now,
-                    updatedAt = now,
-                )
-            )
-        val device = existingDevice ?: DeviceEntity(deviceId = deviceId, createdAt = now)
-        user.appLanguage = QuestionLanguage.normalize(command.language)
-        user.updatedAt = now
-        users.save(user)
-        device.installationKeyHash = installationKeyHash
-        device.clientSecretHash = sha256(secret)
-        device.userId = user.id
-        device.apnsToken = command.apnsToken
-        device.platform = command.platform
-        device.apnsEnvironment = command.apnsEnvironment
-        device.language = command.language
-        device.timezone = command.timezone
-        device.updatedAt = now
-        device.lastSeenAt = now
-        devices.save(device)
-
-        val anonymous = user.status == "ANONYMOUS"
-        if (anonymous) {
-            roles.grantRoleIfMissing(user.id, Roles.ANONYMOUS_USER)
+        return try {
+            deviceRegistrations.register(command, installationKeyHash)
+        } catch (duplicate: DuplicateKeyException) {
+            if (installationKeyHash == null) {
+                throw duplicate
+            }
+            deviceRegistrations.register(command, installationKeyHash)
         }
-        val sessionExpiresAt = if (anonymous) null else now.plusSeconds(90 * 86_400)
-        val session = sessions.saveSession(user.id, device.deviceId, now, sessionExpiresAt)
-        val token = tokenService.create(user.id, device.deviceId, session.id, anonymous, user.status)
-        return DeviceRegisterResponse(device.deviceId, secret, token.first, token.second)
     }
 
     @Transactional
