@@ -40,6 +40,8 @@ test("all monitoring pages load the shared React application", async () => {
   assert.match(navigation, /Users & Quotas/);
   assert.match(navigation, /Batch Jobs/);
   assert.match(navigation, /Redis Streams/);
+  assert.match(navigation, /GitPullRequest/);
+  assert.doesNotMatch(navigation, /Layers3/);
   assert.match(navigation, /Service Status/);
 });
 
