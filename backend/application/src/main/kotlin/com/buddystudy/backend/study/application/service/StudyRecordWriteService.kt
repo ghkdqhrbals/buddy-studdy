@@ -86,6 +86,11 @@ class StudyRecordWriteService(
     }
 
     @Transactional
+    override suspend fun clear(userId: Long, now: Instant) {
+        questions.softDeleteByUserId(userId, now)
+    }
+
+    @Transactional
     override suspend fun updatePublicity(userId: Long, recordId: Long, isPublic: Boolean): QuestionEntity {
         val question = lockRecord(recordId, userId)
         question.apply(question.toStudyRecord().restrictPublicity(isPublic))

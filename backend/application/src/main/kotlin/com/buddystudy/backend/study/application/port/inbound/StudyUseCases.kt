@@ -20,6 +20,7 @@ interface StudyUseCase {
     ): StudyRecordResponse
     suspend fun skip(principal: Principal, id: Long): StudyRecordResponse
     suspend fun delete(principal: Principal, id: Long)
+    suspend fun clear(principal: Principal)
     suspend fun publicity(principal: Principal, id: Long, isPublic: Boolean): StudyRecordResponse
 }
 

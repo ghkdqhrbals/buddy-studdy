@@ -138,6 +138,7 @@ interface QuestionPort {
         findPublicAnsweredById(id)
     suspend fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity>
     suspend fun softDelete(id: Long, userId: Long, now: Instant): Int
+    suspend fun softDeleteByUserId(userId: Long, now: Instant): Int
     suspend fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int
     suspend fun softDeleteByStudySubtree(rootStudyId: Long, userId: Long, now: Instant): Int =
         softDeleteByStudyId(rootStudyId, userId, now)

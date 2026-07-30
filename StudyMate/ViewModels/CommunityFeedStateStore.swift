@@ -58,19 +58,28 @@ struct CommunityFeedStateStore {
     }
 
     mutating func removeQuestion(id: String) {
-        hiddenQuestionIDs.insert(id)
+        removeQuestions(ids: [id])
+    }
+
+    mutating func removeQuestions(ids: Set<String>) {
+        guard !ids.isEmpty else {
+            return
+        }
+        hiddenQuestionIDs.formUnion(ids)
         requestID = UUID()
         isLoading = false
-        let containedQuestion = questions.contains { $0.id == id }
-        questions.removeAll { $0.id == id }
-        if containedQuestion {
-            totalCount = max(0, totalCount - 1)
-            offset = max(0, offset - 1)
-        }
+        let removedCount = questions.count { ids.contains($0.id) }
+        questions.removeAll { ids.contains($0.id) }
+        totalCount = max(0, totalCount - removedCount)
+        offset = max(0, offset - removedCount)
     }
 
     mutating func restoreQuestion(id: String) {
-        hiddenQuestionIDs.remove(id)
+        restoreQuestions(ids: [id])
+    }
+
+    mutating func restoreQuestions(ids: Set<String>) {
+        hiddenQuestionIDs.subtract(ids)
     }
 
     func canLoadMore(currentCount: Int) -> Bool {

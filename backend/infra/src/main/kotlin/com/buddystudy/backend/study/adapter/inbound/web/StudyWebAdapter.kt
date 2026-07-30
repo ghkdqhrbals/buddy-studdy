@@ -73,7 +73,10 @@ class StudyWebAdapter(
         view,
     )
 
-    override suspend fun clearRecords(authentication: Authentication): ResponseEntity<Unit> = ResponseEntity.noContent().build()
+    override suspend fun clearRecords(authentication: Authentication): ResponseEntity<Unit> {
+        studyUseCase.clear(authentication.principalOrThrow())
+        return ResponseEntity.noContent().build()
+    }
 
     override suspend fun record(id: Long, language: String, view: String, authentication: Authentication) =
         recordsUseCase.record(authentication.principalOrThrow(), id, language, view)

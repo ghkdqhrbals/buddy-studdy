@@ -175,6 +175,19 @@ class StudyServiceTest {
     }
 
     @Test
+    fun `clear soft deletes every record owned by the user`(): Unit = runBlocking {
+        questions.visibleRows += gradedQuestion(id = 601, topic = "Redis")
+        questions.visibleRows += gradedQuestion(id = 602, topic = "Kotlin").apply { userId = 99 }
+        questions.pendingRows += pendingQuestion(id = 603, topic = "Swift")
+
+        service.clear(principal)
+
+        assertThat(questions.visibleRows.single { it.id == 601L }.deletedAt).isNotNull()
+        assertThat(questions.pendingRows.single { it.id == 603L }.deletedAt).isNotNull()
+        assertThat(questions.visibleRows.single { it.id == 602L }.deletedAt).isNull()
+    }
+
+    @Test
     fun `queued grading does not update coverage before the consumer completes`(): Unit = runBlocking {
         users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         questions.visibleRows += pendingQuestion(id = 502, topic = "Redis").apply {
@@ -302,6 +315,11 @@ class StudyServiceTest {
             val row = (visibleRows + pendingRows).firstOrNull { it.id == id && it.userId == userId } ?: return 0
             row.deletedAt = now
             return 1
+        }
+        override suspend fun softDeleteByUserId(userId: Long, now: Instant): Int {
+            val rows = (visibleRows + pendingRows).filter { it.userId == userId && it.deletedAt == null }
+            rows.forEach { it.deletedAt = now }
+            return rows.size
         }
         override suspend fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int {
             val rows = (visibleRows + pendingRows).filter { it.studyId == studyId && it.userId == userId && it.deletedAt == null }

@@ -355,6 +355,11 @@ class QuestionRepository(
         Criteria.where("id").`is`(id).and("user_id").`is`(userId), now,
     )
 
+    override suspend fun softDeleteByUserId(userId: Long, now: Instant): Int = updateDeleted(
+        Criteria.where("user_id").`is`(userId).and("deleted_at").isNull,
+        now,
+    )
+
     override suspend fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int = updateDeleted(
         Criteria.where("study_id").`is`(studyId).and("user_id").`is`(userId).and("deleted_at").isNull, now,
     )

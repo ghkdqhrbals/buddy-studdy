@@ -2987,6 +2987,18 @@ final class AppState: ObservableObject {
         communityFeedState = nextState
     }
 
+    private func removeCommunityQuestions(ids: Set<String>) {
+        var nextState = communityFeedState
+        nextState.removeQuestions(ids: ids)
+        communityFeedState = nextState
+    }
+
+    private func restoreCommunityQuestions(ids: Set<String>) {
+        var nextState = communityFeedState
+        nextState.restoreQuestions(ids: ids)
+        communityFeedState = nextState
+    }
+
     private func beginBackendStatsRequest() -> UUID {
         var nextState = statsState
         let requestID = nextState.beginRequest()
@@ -8064,20 +8076,75 @@ final class AppState: ObservableObject {
     }
 
     func clearStudyRecords() {
-        notificationService.cancelQuestionNotifications(for: studyRecords.map(\.question))
+        let recordsToClear = studyRecords
+        let currentQuestionToRestore = currentQuestion
+        let lastAnswerToRestore = lastAnswer
+        let gradingResultToRestore = gradingResult
+        let deletedMarkersToRestore = localStudyRecordUseCase.loadDeletedRecordMarkers()
+        let recordsClearedAtToRestore = localStudyRecordUseCase.loadRecordsClearedAt()
+        let ownCommunityQuestionIDs: Set<String> = Set(
+            communityQuestions.compactMap { question -> String? in
+                guard let profileID = communityProfile?.id,
+                      question.author?.id == profileID else {
+                    return nil
+                }
+                return question.id
+            }
+        )
+        let clearedRecordIDs = Set(recordsToClear.map(\.id)).union(ownCommunityQuestionIDs)
+
+        notificationService.cancelQuestionNotifications(for: recordsToClear.map(\.question))
+        removeCommunityQuestions(ids: clearedRecordIDs)
         localStudyRecordUseCase.clearRecords()
+        recordsToClear.forEach { localStudyRecordUseCase.deleteAnswerDraft(recordID: $0.id) }
         recordsState.clear()
+        replaceRecordSearchResults(nil)
+        currentQuestion = nil
+        lastAnswer = ""
+        gradingResult = nil
+        currentStudySessionUseCase.saveCurrentQuestionState(
+            question: nil,
+            lastAnswer: "",
+            gradingResult: nil
+        )
         refreshBackendStudyRoomsFromRecords()
         notificationLandingMessage = nil
         statusMessage = "학습 기록을 삭제했습니다."
         log(.warning, "학습 기록을 모두 삭제했습니다.")
+
+        guard storedBackendIdentityUseCase.loadRegistration() != nil else {
+            markCloudDataChanged(syncDelaySeconds: 0)
+            return
+        }
+
         runBackendRecordMutation(
             reason: "clear-records",
             operation: { recoveredRegistration in
                 try await self.recordsUseCase.clearRecords(registration: recoveredRegistration)
             },
             onSuccess: { _ in
+                await self.refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+                await self.loadCommunityQuestions(reset: true, userInitiated: false)
+                self.restoreCommunityQuestions(ids: clearedRecordIDs)
                 await self.syncRemotePushScheduleIfPossible(reason: "clear-records")
+            },
+            onFailure: { _ in
+                self.localStudyRecordUseCase.saveRecordsClearedAt(recordsClearedAtToRestore)
+                self.localStudyRecordUseCase.saveDeletedRecordMarkers(deletedMarkersToRestore)
+                self.localStudyRecordUseCase.replaceRecords(recordsToClear)
+                self.reloadStudyRecordsFromStore()
+                self.currentQuestion = currentQuestionToRestore
+                self.lastAnswer = lastAnswerToRestore
+                self.gradingResult = gradingResultToRestore
+                self.currentStudySessionUseCase.saveCurrentQuestionState(
+                    question: currentQuestionToRestore,
+                    lastAnswer: lastAnswerToRestore,
+                    gradingResult: gradingResultToRestore
+                )
+                self.restoreCommunityQuestions(ids: clearedRecordIDs)
+                await self.refreshBackendRecords()
+                await self.refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+                await self.loadCommunityQuestions(reset: true, userInitiated: false)
             },
             failureMessage: { "백엔드 학습 기록 전체삭제 실패: \($0.localizedDescription)" }
         )

@@ -173,6 +173,10 @@ class StudyService(
         recordWriter.delete(principal.userId, id, Instant.now())
     }
 
+    override suspend fun clear(principal: Principal) {
+        recordWriter.clear(principal.userId, Instant.now())
+    }
+
     override suspend fun publicity(principal: Principal, id: Long, isPublic: Boolean): StudyRecordResponse {
         val saved = recordWriter.updatePublicity(principal.userId, id, isPublic)
         return saved.toStudyRecord(questionStats.findById(saved.id)).toProjection()

@@ -145,6 +145,7 @@ interface StudyRecordWriteUseCase {
 
     suspend fun skip(userId: Long, recordId: Long): QuestionEntity
     suspend fun delete(userId: Long, recordId: Long, now: Instant)
+    suspend fun clear(userId: Long, now: Instant)
     suspend fun updatePublicity(userId: Long, recordId: Long, isPublic: Boolean): QuestionEntity
 }
 
