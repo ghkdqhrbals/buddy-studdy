@@ -116,6 +116,8 @@ private struct StudyMateiOSRootContent: View {
             } else {
                 ZStack {
                     MobileRootView()
+                        .allowsHitTesting(appState.appUpdateDecision?.isForced != true)
+                        .accessibilityHidden(appState.appUpdateDecision?.isForced == true)
 
                     if let decision = appState.appUpdateDecision {
                         AppUpdatePromptView(decision: decision)
@@ -136,69 +138,28 @@ private struct AppUpdatePromptView: View {
     let decision: BackendAppUpdateDecision
 
     var body: some View {
-        Group {
+        ZStack {
             if decision.isForced {
-                ZStack {
-                    Color(.systemBackground)
-                        .ignoresSafeArea()
-                        .accessibilityHidden(true)
+                Color.black.opacity(0.46)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture {}
+                    .accessibilityHidden(true)
+            }
 
-                    forcedUpdateContent
-                        .frame(maxWidth: 420)
-                        .padding(.horizontal, 32)
-                }
-                .accessibilityAddTraits(.isModal)
-            } else {
-                VStack {
-                    Spacer()
+            VStack {
+                Spacer()
 
-                    optionalUpdateBanner
-                        .padding(.horizontal, 14)
+                updateBanner
+                    .padding(.horizontal, 14)
 
-                    Spacer()
-                }
+                Spacer()
             }
         }
+        .accessibilityAddTraits(decision.isForced ? .isModal : [])
     }
 
-    private var forcedUpdateContent: some View {
-        VStack(spacing: 0) {
-            appIcon(size: 72, cornerRadius: 17)
-
-            Text(decision.title?.nonEmpty ?? defaultTitle)
-                .font(.system(size: 22, weight: .bold))
-                .multilineTextAlignment(.center)
-                .padding(.top, 20)
-
-            Text(decision.message?.nonEmpty ?? defaultMessage)
-                .font(.system(size: 15))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .lineSpacing(4)
-                .padding(.top, 10)
-
-            if let targetVersion = decision.targetVersion?.nonEmpty {
-                Text(versionLabel(targetVersion, build: decision.targetBuild))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .padding(.top, 12)
-            }
-
-            Button {
-                openAppStore()
-            } label: {
-                Text(appState.strings.updateNow)
-                    .font(.system(size: 16, weight: .bold))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 52)
-            }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.roundedRectangle(radius: 16))
-            .padding(.top, 24)
-        }
-    }
-
-    private var optionalUpdateBanner: some View {
+    private var updateBanner: some View {
         HStack(spacing: 11) {
             appIcon(size: 38, cornerRadius: 9)
 
@@ -225,17 +186,25 @@ private struct AppUpdatePromptView: View {
             .buttonBorderShape(.capsule)
             .controlSize(.small)
 
-            Button {
-                appState.dismissOptionalAppUpdate()
-            } label: {
-                Image(systemName: "xmark")
+            if decision.isForced {
+                Image(systemName: "lock.fill")
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.red)
                     .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
+                    .accessibilityLabel(appState.strings.updateRequired)
+            } else {
+                Button {
+                    appState.dismissOptionalAppUpdate()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(appState.strings.updateLater)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(appState.strings.updateLater)
         }
         .padding(.leading, 10)
         .padding(.trailing, 8)
@@ -247,7 +216,10 @@ private struct AppUpdatePromptView: View {
         )
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+                .stroke(
+                    decision.isForced ? Color.red.opacity(0.42) : Color.primary.opacity(0.08),
+                    lineWidth: decision.isForced ? 1 : 0.5
+                )
         }
         .shadow(color: .black.opacity(0.14), radius: 12, y: 5)
     }

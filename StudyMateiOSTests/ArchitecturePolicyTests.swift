@@ -127,6 +127,30 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertTrue(appControl.contains("addOnConfigUpdateListener"))
     }
 
+    func testForcedUpdateUsesCompactSharedCardAndBlocksUnderlyingContent() throws {
+        let root = try repositoryRoot()
+        let appContent = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/StudyMateiOSApp.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(
+            appContent.contains(
+                ".allowsHitTesting(appState.appUpdateDecision?.isForced != true)"
+            )
+        )
+        XCTAssertTrue(
+            appContent.contains(
+                ".accessibilityHidden(appState.appUpdateDecision?.isForced == true)"
+            )
+        )
+        XCTAssertTrue(appContent.contains("Color.black.opacity(0.46)"))
+        XCTAssertTrue(appContent.contains("private var updateBanner: some View"))
+        XCTAssertTrue(appContent.contains("Image(systemName: \"lock.fill\")"))
+        XCTAssertFalse(appContent.contains("private var forcedUpdateContent"))
+        XCTAssertFalse(appContent.contains("private var optionalUpdateBanner"))
+    }
+
     func testEveryAppStringProvidesJapaneseCopy() throws {
         let root = try repositoryRoot()
         let source = try String(

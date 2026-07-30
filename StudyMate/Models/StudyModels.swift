@@ -2498,6 +2498,7 @@ struct AppStrings {
     var showOriginal: String { text("원문 보기", "Show original", "原文を見る") }
     var updateNow: String { text("지금 업데이트", "Update now", "今すぐアップデート") }
     var updateLater: String { text("나중에", "Later", "あとで") }
+    var updateRequired: String { text("필수 업데이트", "Update required", "アップデートが必要です") }
     var showTranslation: String { text("번역 보기", "View translation", "翻訳を見る") }
     var translatedIntoLanguage: String {
         text(
