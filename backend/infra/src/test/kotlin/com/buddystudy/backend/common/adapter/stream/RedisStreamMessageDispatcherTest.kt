@@ -18,10 +18,8 @@ class RedisStreamMessageDispatcherTest {
     @Test
     fun `successful typed handler is acknowledged after invocation`(): Unit = runBlocking {
         val streams = RecordingConsumerOperations()
-        val dispatcher = RedisStreamMessageDispatcher(
-            streams,
-            JacksonRedisStreamCodec(JsonMapperProvider.mapper),
-        )
+        val failures = RecordingFailureHistory()
+        val dispatcher = dispatcher(streams, failures)
         val handlerBean = SampleHandler()
 
         dispatcher.dispatch(
@@ -37,15 +35,15 @@ class RedisStreamMessageDispatcherTest {
 
         assertThat(handlerBean.values).containsExactly(31)
         assertThat(streams.acknowledged).containsExactly("sample-group" to "1-0")
+        assertThat(failures.terminal).isEmpty()
+        assertThat(failures.retryable).isEmpty()
     }
 
     @Test
-    fun `Jackson conversion failure leaves the message pending`() = runBlocking {
+    fun `Jackson conversion failure is recorded as terminal before acknowledging the poison message`() = runBlocking {
         val streams = RecordingConsumerOperations()
-        val dispatcher = RedisStreamMessageDispatcher(
-            streams,
-            JacksonRedisStreamCodec(JsonMapperProvider.mapper),
-        )
+        val failures = RecordingFailureHistory()
+        val dispatcher = dispatcher(streams, failures)
 
         dispatcher.dispatch(
             bean = SampleHandler(),
@@ -58,16 +56,16 @@ class RedisStreamMessageDispatcherTest {
             claimed = false,
         )
 
-        assertThat(streams.acknowledged).isEmpty()
+        assertThat(failures.terminal.single().javaClass.name)
+            .contains("MismatchedInputException")
+        assertThat(streams.acknowledged).containsExactly("sample-group" to "1-0")
     }
 
     @Test
     fun `handler failure leaves the claimed message pending for another recovery`() = runBlocking {
         val streams = RecordingConsumerOperations()
-        val dispatcher = RedisStreamMessageDispatcher(
-            streams,
-            JacksonRedisStreamCodec(JsonMapperProvider.mapper),
-        )
+        val failures = RecordingFailureHistory()
+        val dispatcher = dispatcher(streams, failures)
 
         dispatcher.dispatch(
             bean = SampleHandler(),
@@ -81,15 +79,16 @@ class RedisStreamMessageDispatcherTest {
         )
 
         assertThat(streams.acknowledged).isEmpty()
+        assertThat(failures.retryable.single())
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessage("handler failed")
     }
 
     @Test
     fun `non fatal linkage failure leaves the message pending without escaping the dispatcher`() = runBlocking {
         val streams = RecordingConsumerOperations()
-        val dispatcher = RedisStreamMessageDispatcher(
-            streams,
-            JacksonRedisStreamCodec(JsonMapperProvider.mapper),
-        )
+        val failures = RecordingFailureHistory()
+        val dispatcher = dispatcher(streams, failures)
 
         dispatcher.dispatch(
             bean = SampleHandler(),
@@ -103,14 +102,12 @@ class RedisStreamMessageDispatcherTest {
         )
 
         assertThat(streams.acknowledged).isEmpty()
+        assertThat(failures.retryable.single()).isInstanceOf(NoClassDefFoundError::class.java)
     }
 
     @Test
     fun `handler failure is an error with complete root stack trace`(output: CapturedOutput) = runBlocking {
-        val dispatcher = RedisStreamMessageDispatcher(
-            RecordingConsumerOperations(),
-            JacksonRedisStreamCodec(JsonMapperProvider.mapper),
-        )
+        val dispatcher = dispatcher(RecordingConsumerOperations())
 
         dispatcher.dispatch(
             bean = SampleHandler(),
@@ -132,10 +129,7 @@ class RedisStreamMessageDispatcherTest {
     @Test
     fun `ack del option acknowledges and deletes after successful invocation`() = runBlocking {
         val streams = RecordingConsumerOperations()
-        val dispatcher = RedisStreamMessageDispatcher(
-            streams,
-            JacksonRedisStreamCodec(JsonMapperProvider.mapper),
-        )
+        val dispatcher = dispatcher(streams)
 
         dispatcher.dispatch(
             bean = SampleHandler(),
@@ -155,10 +149,7 @@ class RedisStreamMessageDispatcherTest {
     @Test
     fun `none option leaves successful message pending`() = runBlocking {
         val streams = RecordingConsumerOperations()
-        val dispatcher = RedisStreamMessageDispatcher(
-            streams,
-            JacksonRedisStreamCodec(JsonMapperProvider.mapper),
-        )
+        val dispatcher = dispatcher(streams)
 
         dispatcher.dispatch(
             bean = SampleHandler(),
@@ -178,10 +169,8 @@ class RedisStreamMessageDispatcherTest {
     @Test
     fun `unexpected event type is acknowledged without invoking the typed handler`() = runBlocking {
         val streams = RecordingConsumerOperations()
-        val dispatcher = RedisStreamMessageDispatcher(
-            streams,
-            JacksonRedisStreamCodec(JsonMapperProvider.mapper),
-        )
+        val failures = RecordingFailureHistory()
+        val dispatcher = dispatcher(streams, failures)
         val handler = SampleHandler()
 
         dispatcher.dispatch(
@@ -196,8 +185,20 @@ class RedisStreamMessageDispatcherTest {
         )
 
         assertThat(handler.values).isEmpty()
+        assertThat(failures.terminal.single())
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("Expected eventType 'EXPECTED'")
         assertThat(streams.acknowledged).containsExactly("sample-group" to "1-0")
     }
+
+    private fun dispatcher(
+        streams: RedisStreamConsumerOperations,
+        failures: RedisStreamFailureHistory = RecordingFailureHistory(),
+    ) = RedisStreamMessageDispatcher(
+        streams,
+        JacksonRedisStreamCodec(JsonMapperProvider.mapper),
+        failures,
+    )
 
     private fun handlerMethod(name: String): RedisStreamHandlerMethod {
         val method = SampleHandler::class.java.getDeclaredMethod(
@@ -269,5 +270,28 @@ class RedisStreamMessageDispatcherTest {
             count: Long,
             startId: String,
         ): RedisStreamClaimBatch = RedisStreamClaimBatch("0-0", emptyList())
+    }
+
+    private class RecordingFailureHistory : RedisStreamFailureHistory {
+        val terminal = mutableListOf<Throwable>()
+        val retryable = mutableListOf<Throwable>()
+
+        override suspend fun recordTerminal(
+            message: RedisStreamMessage,
+            consumerGroup: String,
+            error: Throwable,
+        ): Boolean {
+            terminal += error
+            return true
+        }
+
+        override suspend fun recordRetryable(
+            message: RedisStreamMessage,
+            consumerGroup: String,
+            error: Throwable,
+        ): Boolean {
+            retryable += error
+            return true
+        }
     }
 }

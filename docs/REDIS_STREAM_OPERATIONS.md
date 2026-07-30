@@ -23,10 +23,20 @@ blocking timeout, and completion policy.
 - `ACK`: execute `XACK` and retain the stream entry.
 - `ACK_DEL`: execute `XACK` and `XDEL` atomically in one Redis Lua script request.
 
-Handler or Jackson conversion failures never ACK or delete the message. The
-push listener and its idle-message recovery scheduler use `ACK` so successful
-push entries remain available in the bounded stream for operational
-inspection. The durable `question_push_outbox` remains the recovery source.
+Handler execution failures never ACK or delete the message. The push listener
+and its idle-message recovery scheduler use `ACK` so successful push entries
+remain available in the bounded stream for operational inspection. The durable
+`question_push_outbox` remains the recovery source.
+
+Every failed delivery is also represented in `stream_consumer_inbox_attempts`.
+Payload decoding and event-type contract failures are terminal poison messages:
+the dispatcher records a `FAILED` attempt with the physical stream key and
+Redis record ID before ACK. Handler execution failures are recorded as
+`RETRY_SCHEDULED` and remain pending for idle-message recovery. If an envelope
+has no event ID, the dispatcher assigns a deterministic
+`redis-record:<stream-key>:<record-id>` audit ID so malformed messages are
+still visible in the admin processing history. Full stack traces remain in
+structured ERROR logs; Inbox history retains the error type and message.
 
 Each active physical stream contains exactly one event contract. Active
 consumers therefore do not encounter unrelated event types. `eventType`
