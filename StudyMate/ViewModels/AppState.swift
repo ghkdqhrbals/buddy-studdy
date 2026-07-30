@@ -1938,28 +1938,16 @@ final class AppState: ObservableObject {
     }
     #endif
 
-    deinit {
-        MainActor.assumeIsolated {
-            let timerTask = timerTask
-            let cloudSyncTask = cloudSyncTask
-            let answerDraftSaveTask = answerDraftSaveTask
-            let backendRecordRefreshTask = backendRecordRefreshTask
-            let protectedPageAccessRefreshTask = protectedPageAccessRefreshTask
-            let questionGenerationPollingTask = questionGenerationPollingTask
-            let answerGradingPollingTask = answerGradingPollingTask
-            let maintenancePollingTask = maintenancePollingTask
-            let appNotificationEventCancellables = appNotificationEventCancellables
-
-            timerTask?.cancel()
-            cloudSyncTask?.cancel()
-            answerDraftSaveTask?.cancel()
-            backendRecordRefreshTask?.cancel()
-            protectedPageAccessRefreshTask?.cancel()
-            questionGenerationPollingTask?.cancel()
-            answerGradingPollingTask?.cancel()
-            maintenancePollingTask?.cancel()
-            appNotificationEventCancellables.forEach { $0.cancel() }
-        }
+    isolated deinit {
+        timerTask?.cancel()
+        cloudSyncTask?.cancel()
+        answerDraftSaveTask?.cancel()
+        backendRecordRefreshTask?.cancel()
+        protectedPageAccessRefreshTask?.cancel()
+        questionGenerationPollingTask?.cancel()
+        answerGradingPollingTask?.cancel()
+        maintenancePollingTask?.cancel()
+        appNotificationEventCancellables.forEach { $0.cancel() }
     }
 
     func start() async {

@@ -361,6 +361,41 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAppStateCleanupUsesActorIsolatedDeinitializer() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+
+        XCTAssertTrue(
+            content.contains("isolated deinit {"),
+            "AppState cleanup must let Swift schedule deinitialization on MainActor."
+        )
+        XCTAssertFalse(
+            content.contains("MainActor.assumeIsolated"),
+            "A final release can occur off the main queue, so deinit must not assert MainActor isolation."
+        )
+    }
+
+    @MainActor
+    func testAppStateCanDeinitializeAfterFinalReleaseAwayFromMainActor() async {
+        let suiteName = "AppStateDeinitTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let owner = UncheckedAppStateOwner(
+            AppState(settingsStore: SettingsStore(defaults: defaults))
+        )
+        weak var appState = owner.appState
+
+        await Task.detached {
+            owner.appState = nil
+        }.value
+
+        XCTAssertNil(appState)
+    }
+
     func testAppStateDoesNotConstructDefaultRuntimeImplementationsDirectly() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
@@ -2470,6 +2505,14 @@ final class ArchitecturePolicyTests: XCTestCase {
             let values = try url.resourceValues(forKeys: [.isRegularFileKey])
             return values.isRegularFile == true ? url : nil
         }
+    }
+}
+
+private final class UncheckedAppStateOwner: @unchecked Sendable {
+    var appState: AppState?
+
+    init(_ appState: AppState) {
+        self.appState = appState
     }
 }
 
