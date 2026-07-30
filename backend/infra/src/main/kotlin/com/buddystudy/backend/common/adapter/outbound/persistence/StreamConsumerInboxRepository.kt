@@ -6,6 +6,7 @@ import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.stereotype.Repository
+import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.time.Duration
 import java.time.Instant
@@ -17,7 +18,7 @@ import java.util.UUID
 class StreamConsumerInboxRepository(
     private val databaseClient: DatabaseClient,
 ) : StreamInboxPort {
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     override suspend fun claim(
         eventId: String,
         consumerGroup: String,
@@ -160,7 +161,7 @@ class StreamConsumerInboxRepository(
         return claim
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     override suspend fun markSucceeded(claim: StreamInboxClaim, now: Instant): Boolean {
         val updated = databaseClient.sql(
             """
@@ -189,7 +190,7 @@ class StreamConsumerInboxRepository(
         return updated
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     override suspend fun releaseForRetry(
         claim: StreamInboxClaim,
         errorType: String,
@@ -222,7 +223,7 @@ class StreamConsumerInboxRepository(
         return updated
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     override suspend fun markFailed(
         claim: StreamInboxClaim,
         errorType: String,

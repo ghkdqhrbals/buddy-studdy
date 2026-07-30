@@ -110,6 +110,11 @@ explains how the event reached that current state and is exposed under
 Monitoring `Manage > Redis Streams > Consumer group > Inbox processing
 history`.
 
+Claiming a lease and recording its success, retry, or terminal failure are
+independent `REQUIRES_NEW` transactions. They are intentionally not atomic with
+the handler's business transaction: if business work rolls back, the Inbox
+still preserves both receipt and failure history for recovery and diagnosis.
+
 ## Event And Transaction Sequence
 
 ```text

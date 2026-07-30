@@ -194,6 +194,11 @@ Sources:
 
 All lists use cursor pagination with a bounded `limit` of 1 to 100.
 
+Inbox lease acquisition and each success, retry, or failure transition commit
+in their own `REQUIRES_NEW` reactive transaction. A handler's surrounding
+business transaction can therefore roll back without erasing the received
+attempt or its final error state.
+
 Registered streams can be searched by logical topic, physical Redis key,
 consumer group, or consumer name.
 Operators can also bypass pagination and retrieve one retained message by its
