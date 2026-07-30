@@ -28,6 +28,23 @@ class RedisDomainEventPublisherTest {
         assertThat(streams.topic).isEqualTo(RedisStreamTopic.STUDY_ANSWER_GRADING_REQUESTED)
     }
 
+    @Test
+    fun `every community event uses its dedicated topic`() = runBlocking {
+        val expected = mapOf(
+            RedisOutboxEventType.CONTENT_VIEWED to RedisStreamTopic.COMMUNITY_QUESTION_VIEWED,
+            RedisOutboxEventType.QUESTION_LIKED to RedisStreamTopic.COMMUNITY_QUESTION_LIKED,
+            RedisOutboxEventType.QUESTION_UNLIKED to RedisStreamTopic.COMMUNITY_QUESTION_UNLIKED,
+            RedisOutboxEventType.QUESTION_COMMENTED to RedisStreamTopic.COMMUNITY_QUESTION_COMMENTED,
+            RedisOutboxEventType.QUESTION_COMMENT_DELETED to RedisStreamTopic.COMMUNITY_QUESTION_COMMENT_DELETED,
+        )
+
+        expected.forEach { (eventType, topic) ->
+            val streams = RecordingPublisher()
+            RedisDomainEventPublisher(streams).publish(event(eventType))
+            assertThat(streams.topic).isEqualTo(topic)
+        }
+    }
+
     private fun event(type: RedisOutboxEventType) =
         ClaimedRedisOutboxEvent(
             id = 1,

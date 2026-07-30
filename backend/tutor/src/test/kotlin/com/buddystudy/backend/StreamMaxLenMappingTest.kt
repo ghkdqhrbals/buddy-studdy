@@ -16,17 +16,19 @@ class StreamMaxLenMappingTest {
             "BUDDYSTUDY_NOTIFICATION_REQUESTED_STREAM_MAX_LEN=2000",
             "BUDDYSTUDY_QUESTION_GENERATED_STREAM_MAX_LEN=4000",
             "BUDDYSTUDY_QUESTION_PUSH_REQUESTED_STREAM_MAX_LEN=8000",
+            "BUDDYSTUDY_QUESTION_COMMENTED_STREAM_MAX_LEN=16000",
         ).run { context ->
             val streams = context.getBean(BuddyStudyProperties::class.java).streams
 
             assertThat(streams.notificationRequestedMaxLen).isEqualTo(2_000)
             assertThat(streams.questionGeneratedMaxLen).isEqualTo(4_000)
             assertThat(streams.questionPushRequestedMaxLen).isEqualTo(8_000)
+            assertThat(streams.questionCommentedMaxLen).isEqualTo(16_000)
         }
     }
 
     @Test
-    fun `legacy maximum is isolated from active event streams`() {
+    fun `removed legacy maximum does not configure active event streams`() {
         withStreamMappings(
             "REACTION_STREAM_XADD_MAX_LEN=3000",
         ).run { context ->
@@ -35,7 +37,7 @@ class StreamMaxLenMappingTest {
             assertThat(streams.notificationRequestedMaxLen).isEqualTo(1_000)
             assertThat(streams.questionGeneratedMaxLen).isEqualTo(1_000)
             assertThat(streams.questionPushRequestedMaxLen).isEqualTo(1_000)
-            assertThat(streams.legacyMaxLen).isEqualTo(3_000)
+            assertThat(streams.questionCommentedMaxLen).isEqualTo(1_000)
         }
     }
 
@@ -44,7 +46,7 @@ class StreamMaxLenMappingTest {
         properties += "buddystudy.streams.notification-requested-max-len=\${BUDDYSTUDY_NOTIFICATION_REQUESTED_STREAM_MAX_LEN:1000}"
         properties += "buddystudy.streams.question-generated-max-len=\${BUDDYSTUDY_QUESTION_GENERATED_STREAM_MAX_LEN:1000}"
         properties += "buddystudy.streams.question-push-requested-max-len=\${BUDDYSTUDY_QUESTION_PUSH_REQUESTED_STREAM_MAX_LEN:1000}"
-        properties += "buddystudy.streams.legacy-max-len=\${BUDDYSTUDY_LEGACY_STREAM_MAX_LEN:\${REACTION_STREAM_XADD_MAX_LEN:1000}}"
+        properties += "buddystudy.streams.question-commented-max-len=\${BUDDYSTUDY_QUESTION_COMMENTED_STREAM_MAX_LEN:1000}"
         return contextRunner.withPropertyValues(*properties.toTypedArray())
     }
 }

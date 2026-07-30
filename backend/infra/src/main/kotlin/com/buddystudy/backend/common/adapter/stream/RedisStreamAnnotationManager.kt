@@ -62,10 +62,10 @@ class RedisStreamAnnotationManager(
         val enabledListeners = listeners.filter { isEnabled(it.annotation.enabledProperty) }
         val enabledSchedulers = schedulers.filter { isEnabled(it.annotation.enabledProperty) }
         enabledListeners.forEach { handler ->
-            handler.annotation.topics().forEach { topic -> startListener(handler, topic, scope) }
+            startListener(handler, handler.annotation.topic, scope)
         }
         enabledSchedulers.forEach { handler ->
-            handler.annotation.topics().forEach { topic -> startScheduler(handler, topic, scope) }
+            startScheduler(handler, handler.annotation.topic, scope)
         }
         logger.info(
             "redis_stream_annotations_started registeredListeners={} registeredSchedulers={} startedListeners={} startedSchedulers={}",
@@ -133,10 +133,6 @@ class RedisStreamAnnotationManager(
             scope.launch(CoroutineName("stream-listener-${handler.beanName}-${topic.apiName}-$consumer")) {
                 while (currentCoroutineContext().isActive) {
                     try {
-                        if (topic.legacy && !streams.exists(topic)) {
-                            delay(annotation.pollDelayMs.coerceAtLeast(1))
-                            continue
-                        }
                         val blockTimeMs = annotation.blockTimeMs.coerceAtLeast(1)
                         val messages = withTimeoutOrNull(readDeadlineMs(blockTimeMs)) {
                             streams.readNew(
@@ -202,10 +198,6 @@ class RedisStreamAnnotationManager(
             var startId = START_ID
             while (currentCoroutineContext().isActive) {
                 try {
-                    if (topic.legacy && !streams.exists(topic)) {
-                        delay(annotation.fixedDelayMs.coerceAtLeast(1))
-                        continue
-                    }
                     val claimed = streams.autoClaim(
                         topic = topic,
                         group = annotation.group,
@@ -306,21 +298,6 @@ class RedisStreamAnnotationManager(
     private fun isEnabled(property: String): Boolean =
         property.isBlank() || environment.getProperty(property, Boolean::class.java, true)
 
-    private fun StreamListener.topics(): List<RedisStreamTopic> =
-        buildList {
-            add(topic)
-            if (legacyTopic != RedisStreamTopic.NONE && legacyDrainEnabled()) add(legacyTopic)
-        }
-
-    private fun StreamScheduler.topics(): List<RedisStreamTopic> =
-        buildList {
-            add(topic)
-            if (legacyTopic != RedisStreamTopic.NONE && legacyDrainEnabled()) add(legacyTopic)
-        }
-
-    private fun legacyDrainEnabled(): Boolean =
-        environment.getProperty(LEGACY_DRAIN_ENABLED_PROPERTY, Boolean::class.java, true)
-
     private fun consumerName(prefix: String, workerIndex: Int): String =
         if (workerIndex == 0) prefix else "$prefix-${workerIndex + 1}"
 
@@ -345,7 +322,6 @@ class RedisStreamAnnotationManager(
         const val MAX_CONCURRENCY = 32
         const val MIN_READ_TIMEOUT_GRACE_MS = 100L
         const val START_ID = "0-0"
-        const val LEGACY_DRAIN_ENABLED_PROPERTY = "buddystudy.streams.legacy-drain-enabled"
     }
 }
 

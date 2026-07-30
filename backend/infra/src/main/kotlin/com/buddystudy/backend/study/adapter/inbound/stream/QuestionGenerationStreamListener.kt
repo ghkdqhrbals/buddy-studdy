@@ -18,7 +18,6 @@ class QuestionGenerationStreamListener(
 ) {
     @StreamListener(
         topic = RedisStreamTopic.STUDY_QUESTION_GENERATION_REQUESTED,
-        legacyTopic = RedisStreamTopic.LEGACY_QUESTION_GENERATION,
         group = QuestionGenerationExecutionWriteService.CONSUMER_GROUP,
         consumer = CONSUMER,
         eventType = QuestionGenerationRequestedEvent.EVENT_TYPE,
@@ -36,7 +35,6 @@ class QuestionGenerationStreamListener(
 
     @StreamScheduler(
         topic = RedisStreamTopic.STUDY_QUESTION_GENERATION_REQUESTED,
-        legacyTopic = RedisStreamTopic.LEGACY_QUESTION_GENERATION,
         group = QuestionGenerationExecutionWriteService.CONSUMER_GROUP,
         consumer = RECOVERY_CONSUMER,
         eventType = QuestionGenerationRequestedEvent.EVENT_TYPE,

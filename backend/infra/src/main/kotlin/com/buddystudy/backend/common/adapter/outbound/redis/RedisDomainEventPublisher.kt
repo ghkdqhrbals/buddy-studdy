@@ -30,5 +30,11 @@ class RedisDomainEventPublisher(
             RedisOutboxEventType.QUESTION_GENERATED -> RedisStreamTopic.STUDY_QUESTION_GENERATED
             RedisOutboxEventType.CONTENT_TRANSLATION_REQUESTED ->
                 RedisStreamTopic.LOCALIZATION_CONTENT_TRANSLATION_REQUESTED
+            RedisOutboxEventType.CONTENT_VIEWED -> RedisStreamTopic.COMMUNITY_QUESTION_VIEWED
+            RedisOutboxEventType.QUESTION_LIKED -> RedisStreamTopic.COMMUNITY_QUESTION_LIKED
+            RedisOutboxEventType.QUESTION_UNLIKED -> RedisStreamTopic.COMMUNITY_QUESTION_UNLIKED
+            RedisOutboxEventType.QUESTION_COMMENTED -> RedisStreamTopic.COMMUNITY_QUESTION_COMMENTED
+            RedisOutboxEventType.QUESTION_COMMENT_DELETED ->
+                RedisStreamTopic.COMMUNITY_QUESTION_COMMENT_DELETED
         }
 }

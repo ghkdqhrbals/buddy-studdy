@@ -18,7 +18,10 @@ data:
   BUDDYSTUDY_CONTENT_TRANSLATION_REQUESTED_STREAM_KEY: localization.content-translation.requested.v1
   BUDDYSTUDY_QUESTION_PUSH_REQUESTED_STREAM_KEY: notification.question-push.requested.v1
   BUDDYSTUDY_QUESTION_VIEWED_STREAM_KEY: community.question.viewed.v1
-  BUDDYSTUDY_LEGACY_STREAM_DRAIN_ENABLED: "true"
+  BUDDYSTUDY_QUESTION_LIKED_STREAM_KEY: community.question.liked.v1
+  BUDDYSTUDY_QUESTION_UNLIKED_STREAM_KEY: community.question.unliked.v1
+  BUDDYSTUDY_QUESTION_COMMENTED_STREAM_KEY: community.question.commented.v1
+  BUDDYSTUDY_QUESTION_COMMENT_DELETED_STREAM_KEY: community.question.comment-deleted.v1
   BUDDYSTUDY_TRANSLATION_BASE_URL: http://buddystudy-libretranslate:5000
   DATABASE_URL: jdbc:mysql://buddystudy-mysql:3306/buddystudy?serverTimezone=UTC
   DATABASE_USERNAME: buddystudy
@@ -36,7 +39,7 @@ data:
   MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES: "15"
   MONITORING_SERVICE_NAME: BuddyStudy backend
   R2DBC_DATABASE_URL: r2dbc:mysql://buddystudy-mysql:3306/buddystudy?serverZoneId=UTC
-  REACTION_STREAM_ENABLED: "true"
+  BUDDYSTUDY_STREAMS_ENABLED: "true"
   REDIS_HOST: buddystudy-redis
   REDIS_PORT: "6379"
   REDIS_SSL: "false"

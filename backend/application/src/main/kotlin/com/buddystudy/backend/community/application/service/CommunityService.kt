@@ -172,6 +172,13 @@ class CommunityService(
         } else {
             currentLikeCount(id)
         }
+        if (changed) {
+            if (liked) {
+                reactions.publishLiked(id, principal.userId)
+            } else {
+                reactions.publishUnliked(id, principal.userId)
+            }
+        }
         if (changed && liked) {
             publishThreadNotification(
                 ownerUserId = question.userId,
@@ -205,6 +212,7 @@ class CommunityService(
             ),
         )
         incrementCommentCount(id, 1)
+        reactions.publishCommented(id, saved.id, principal.userId)
         publishThreadNotification(
             ownerUserId = question.userId,
             actorUserId = principal.userId,
@@ -231,6 +239,7 @@ class CommunityService(
         comment.updatedAt = now
         comments.save(comment)
         incrementCommentCount(id, -1)
+        reactions.publishCommentDeleted(id, comment.id, principal.userId)
         return CommunityCommentDeleteResponse(comment.id.toString(), id.toString())
     }
 

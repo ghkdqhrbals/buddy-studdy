@@ -44,7 +44,7 @@ services:
       ENABLE_OPENAPI_DOCS: "true"
       OPENAPI_ACCESS_TOKEN: "local-openapi"
       GOOGLE_IOS_CLIENT_ID: 328281669925-evuebplih3vir99daj4lapj1javqsmsr.apps.googleusercontent.com
-      REACTION_STREAM_ENABLED: "false"
+      BUDDYSTUDY_STREAMS_ENABLED: "true"
       BUDDYSTUDY_TRANSLATION_BASE_URL: http://libretranslate:5000
     restart: unless-stopped
 

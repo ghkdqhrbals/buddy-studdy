@@ -6,6 +6,11 @@ interface PublicQuestionReactionPublishPort {
         userId: Long?,
         localization: PublicQuestionViewLocalization? = null,
     ): Boolean
+
+    suspend fun publishLiked(questionId: Long, userId: Long): Boolean
+    suspend fun publishUnliked(questionId: Long, userId: Long): Boolean
+    suspend fun publishCommented(questionId: Long, commentId: Long, userId: Long): Boolean
+    suspend fun publishCommentDeleted(questionId: Long, commentId: Long, userId: Long): Boolean
 }
 
 data class PublicQuestionViewLocalization(

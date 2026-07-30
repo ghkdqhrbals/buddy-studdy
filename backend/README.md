@@ -52,7 +52,7 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_SSL`: Redis settings used by Redis Streams and email verification sessions.
 - `BUDDYSTUDY_*_STREAM_KEY`: physical Redis Stream keys. Active keys follow `<business-domain>.<data-type>.<event-type>.<version>` and each event contract has one stream.
 - `BUDDYSTUDY_*_STREAM_MAX_LEN`: independent exact `MAXLEN` limits for each event stream. Active streams default to `1000`.
-- `BUDDYSTUDY_LEGACY_STREAM_DRAIN_ENABLED`: temporarily consumes pending messages from the five pre-convention streams. New events are never published to legacy streams.
+- `BUDDYSTUDY_STREAMS_ENABLED`: global Redis Stream listener switch. Keep it enabled in normal local and production runtimes; disabling it pauses generation, grading, translation, push, notification, account-withdrawal, and community-event consumers together.
 - `EMAIL_VERIFICATION_TTL_SECONDS`: signup code TTL. Production default is `180`.
 - `OPENAI_API_KEY_SYSTEM`: system-workload key used only for post-study child-topic suggestions.
 - `OPENAI_API_KEY_USER`: user-content workload key used for question generation, embeddings, translation, answer feedback, and grading. It must be a different OpenAI key from `OPENAI_API_KEY_SYSTEM`. `OPENAI_USER_CONTENT_API_KEY` and `OPENAI_API_KEY` remain compatibility fallbacks for this value only and never supply the system client; `OPENAI_SYSTEM_API_KEY` remains a compatibility fallback for the system value.

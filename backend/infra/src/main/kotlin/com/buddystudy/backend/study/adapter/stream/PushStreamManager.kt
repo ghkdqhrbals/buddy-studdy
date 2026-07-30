@@ -187,7 +187,6 @@ class PushStreamManager(
 
     @StreamListener(
         topic = RedisStreamTopic.NOTIFICATION_QUESTION_PUSH_REQUESTED,
-        legacyTopic = RedisStreamTopic.LEGACY_PUSH_EVENTS,
         group = GROUP,
         consumer = CONSUMER,
         eventType = EVENT_TYPE,
@@ -209,7 +208,6 @@ class PushStreamManager(
 
     @StreamScheduler(
         topic = RedisStreamTopic.NOTIFICATION_QUESTION_PUSH_REQUESTED,
-        legacyTopic = RedisStreamTopic.LEGACY_PUSH_EVENTS,
         group = GROUP,
         consumer = RECOVERY_CONSUMER,
         eventType = EVENT_TYPE,

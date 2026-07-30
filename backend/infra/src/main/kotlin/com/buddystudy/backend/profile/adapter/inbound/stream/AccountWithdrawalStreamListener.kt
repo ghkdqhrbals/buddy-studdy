@@ -20,7 +20,6 @@ class AccountWithdrawalStreamListener(
 
     @StreamListener(
         topic = RedisStreamTopic.IDENTITY_ACCOUNT_WITHDRAWN,
-        legacyTopic = RedisStreamTopic.LEGACY_DOMAIN_EVENTS,
         group = GROUP,
         consumer = CONSUMER,
         eventType = EVENT_TYPE,
@@ -40,7 +39,6 @@ class AccountWithdrawalStreamListener(
 
     @StreamScheduler(
         topic = RedisStreamTopic.IDENTITY_ACCOUNT_WITHDRAWN,
-        legacyTopic = RedisStreamTopic.LEGACY_DOMAIN_EVENTS,
         group = GROUP,
         consumer = RECOVERY_CONSUMER,
         eventType = EVENT_TYPE,

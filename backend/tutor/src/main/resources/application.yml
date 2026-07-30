@@ -100,7 +100,7 @@ buddystudy:
     auth-key-p8: ${APNS_AUTH_KEY_P8:${APNS_AUTH_KEY_BASE64:${notificatoin.push.apns.private-key:}}}
     bundle-id: ${APNS_BUNDLE_ID:${notificatoin.push.apns.bundle-id:io.github.ghkdqhrbals.StudyMate}}
   streams:
-    enabled: ${REACTION_STREAM_ENABLED:true}
+    enabled: ${BUDDYSTUDY_STREAMS_ENABLED:true}
     notification-requested-key: ${BUDDYSTUDY_NOTIFICATION_REQUESTED_STREAM_KEY:notification.message.requested.v1}
     account-withdrawn-key: ${BUDDYSTUDY_ACCOUNT_WITHDRAWN_STREAM_KEY:identity.account.withdrawn.v1}
     answer-grading-requested-key: ${BUDDYSTUDY_ANSWER_GRADING_REQUESTED_STREAM_KEY:study.answer-grading.requested.v1}
@@ -109,6 +109,10 @@ buddystudy:
     content-translation-requested-key: ${BUDDYSTUDY_CONTENT_TRANSLATION_REQUESTED_STREAM_KEY:localization.content-translation.requested.v1}
     question-push-requested-key: ${BUDDYSTUDY_QUESTION_PUSH_REQUESTED_STREAM_KEY:notification.question-push.requested.v1}
     question-viewed-key: ${BUDDYSTUDY_QUESTION_VIEWED_STREAM_KEY:community.question.viewed.v1}
+    question-liked-key: ${BUDDYSTUDY_QUESTION_LIKED_STREAM_KEY:community.question.liked.v1}
+    question-unliked-key: ${BUDDYSTUDY_QUESTION_UNLIKED_STREAM_KEY:community.question.unliked.v1}
+    question-commented-key: ${BUDDYSTUDY_QUESTION_COMMENTED_STREAM_KEY:community.question.commented.v1}
+    question-comment-deleted-key: ${BUDDYSTUDY_QUESTION_COMMENT_DELETED_STREAM_KEY:community.question.comment-deleted.v1}
     notification-requested-max-len: ${BUDDYSTUDY_NOTIFICATION_REQUESTED_STREAM_MAX_LEN:1000}
     account-withdrawn-max-len: ${BUDDYSTUDY_ACCOUNT_WITHDRAWN_STREAM_MAX_LEN:1000}
     answer-grading-requested-max-len: ${BUDDYSTUDY_ANSWER_GRADING_REQUESTED_STREAM_MAX_LEN:1000}
@@ -117,16 +121,11 @@ buddystudy:
     content-translation-requested-max-len: ${BUDDYSTUDY_CONTENT_TRANSLATION_REQUESTED_STREAM_MAX_LEN:1000}
     question-push-requested-max-len: ${BUDDYSTUDY_QUESTION_PUSH_REQUESTED_STREAM_MAX_LEN:1000}
     question-viewed-max-len: ${BUDDYSTUDY_QUESTION_VIEWED_STREAM_MAX_LEN:1000}
-    legacy-drain-enabled: ${BUDDYSTUDY_LEGACY_STREAM_DRAIN_ENABLED:true}
-    legacy-domain-key: ${BUDDYSTUDY_LEGACY_DOMAIN_STREAM_KEY:${BUDDYSTUDY_STREAMS_KEY:buddystudy-events-v1}}
-    legacy-question-generation-key: ${BUDDYSTUDY_LEGACY_QUESTION_GENERATION_STREAM_KEY:${BUDDYSTUDY_QUESTION_GENERATION_STREAM_KEY:buddystudy-question-generation-v1}}
-    legacy-question-generated-key: ${BUDDYSTUDY_LEGACY_QUESTION_GENERATED_STREAM_KEY:buddystudy-question-generated-v1}
-    legacy-content-translation-key: ${BUDDYSTUDY_LEGACY_CONTENT_TRANSLATION_STREAM_KEY:${BUDDYSTUDY_CONTENT_TRANSLATION_STREAM_KEY:buddystudy-content-translation-v1}}
-    legacy-push-key: ${BUDDYSTUDY_LEGACY_PUSH_STREAM_KEY:${BUDDYSTUDY_PUSH_STREAM_KEY:buddystudy-push-v1}}
-    legacy-max-len: ${BUDDYSTUDY_LEGACY_STREAM_MAX_LEN:${REACTION_STREAM_XADD_MAX_LEN:1000}}
+    question-liked-max-len: ${BUDDYSTUDY_QUESTION_LIKED_STREAM_MAX_LEN:1000}
+    question-unliked-max-len: ${BUDDYSTUDY_QUESTION_UNLIKED_STREAM_MAX_LEN:1000}
+    question-commented-max-len: ${BUDDYSTUDY_QUESTION_COMMENTED_STREAM_MAX_LEN:1000}
+    question-comment-deleted-max-len: ${BUDDYSTUDY_QUESTION_COMMENT_DELETED_STREAM_MAX_LEN:1000}
     push-consumer-concurrency: ${PUSH_CONSUMER_CONCURRENCY:10}
-    view-queue-capacity: ${VIEW_EVENT_QUEUE_CAPACITY:20000}
-    view-publisher-concurrency: ${VIEW_EVENT_PUBLISHER_CONCURRENCY:4}
   email:
     verification-ttl-seconds: ${EMAIL_VERIFICATION_TTL_SECONDS:180}
     host: ${SMTP_HOST:smtp.gmail.com}

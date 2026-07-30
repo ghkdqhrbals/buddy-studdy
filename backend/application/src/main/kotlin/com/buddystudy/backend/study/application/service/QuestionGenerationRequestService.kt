@@ -133,15 +133,8 @@ class QuestionGenerationRequestWriteService(
             idempotencyKey = idempotencyKey,
             now = now,
         )
-        scheduleStudy.lastSentAt = now
-        scheduleStudy.nextDueAt = now.plusSeconds(scheduleStudy.intervalMinutes.toLong() * 60)
-        scheduleStudy.scheduleClaimedUntil = null
-        scheduleStudy.lastError = null
-        scheduleStudy.updatedAt = now
+        scheduleStudy.advanceScheduledRotation(topicStudy, now)
         if (scheduleStudy.id != topicStudy.id) {
-            topicStudy.lastSentAt = now
-            topicStudy.lastError = null
-            topicStudy.updatedAt = now
             studies.save(topicStudy)
         }
         studies.save(scheduleStudy)
@@ -260,6 +253,19 @@ class QuestionGenerationRequestWriteService(
             ),
             outboxes = listOfNotNull(outbox),
         )
+}
+
+internal fun com.buddystudy.study.domain.entity.StudyEntity.advanceScheduledRotation(
+    topicStudy: com.buddystudy.study.domain.entity.StudyEntity,
+    now: Instant,
+) {
+    nextDueAt = now.plusSeconds(intervalMinutes.toLong() * 60)
+    scheduleClaimedUntil = null
+    lastError = null
+    updatedAt = now
+    topicStudy.lastSentAt = now
+    topicStudy.lastError = null
+    topicStudy.updatedAt = now
 }
 
 @Service

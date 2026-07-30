@@ -1,15 +1,16 @@
 package com.buddystudy.backend.community.adapter.inbound.stream
 
-import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
-import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamSubscription
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
-import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopicManager
-import com.buddystudy.backend.config.BuddyStudyProperties
-import com.buddystudy.study.domain.entity.QuestionStatsEntity
+import com.buddystudy.backend.common.adapter.stream.StreamListener
+import com.buddystudy.backend.common.adapter.stream.StreamMessageContext
+import com.buddystudy.backend.common.adapter.stream.StreamOptions
+import com.buddystudy.backend.common.adapter.stream.StreamScheduler
+import com.buddystudy.backend.community.application.model.CommunityQuestionEvent
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
+import com.buddystudy.backend.study.application.port.outbound.StreamInboxPort
+import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import org.slf4j.LoggerFactory
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
-import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 import java.time.Duration
@@ -18,110 +19,85 @@ import java.time.Instant
 @Component
 @ConditionalOnProperty(prefix = "buddystudy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
 class QuestionStatsStreamListener(
-    private val topics: RedisStreamTopicManager,
     private val handler: QuestionStatsStreamEventHandler,
-    private val properties: BuddyStudyProperties,
 ) {
-    private val logger = LoggerFactory.getLogger(javaClass)
-    private val group = "bs-backend-view"
-    private val consumerName = "buddystudy-question-view"
-    private val eventType = "CONTENT_VIEWED"
-    private val subscription = RedisStreamSubscription(
-        group = group,
-        consumerPrefix = consumerName,
-        count = 100,
-        timeout = Duration.ofMillis(3000),
+    @StreamListener(
+        topic = RedisStreamTopic.COMMUNITY_QUESTION_VIEWED,
+        group = VIEW_GROUP,
+        consumer = "buddystudy-question-view",
+        eventType = VIEW_EVENT_TYPE,
+        payloadType = CommunityQuestionEvent::class,
+        batchSize = 100,
+        blockTimeMs = 3_000,
+        pollDelayMs = 250,
+        enabledProperty = "buddystudy.streams.enabled",
+        options = StreamOptions.ACK,
     )
-
-    @Scheduled(fixedDelayString = "\${VIEW_CONSUMER_POLL_DELAY_MS:1000}")
-    suspend fun pollQuestionViews() {
-        topics.poll(RedisStreamTopic.COMMUNITY_QUESTION_VIEWED, subscription) {
-            onQuestionViewed(it)
-        }
+    private suspend fun consume(
+        payload: CommunityQuestionEvent,
+        context: StreamMessageContext,
+    ) {
+        deliver(payload, context)
     }
 
-    @Scheduled(fixedDelayString = "\${VIEW_CONSUMER_POLL_DELAY_MS:1000}")
-    suspend fun drainLegacyQuestionViews() {
-        if (!properties.streams.legacyDrainEnabled) return
-        if (!topics.exists(RedisStreamTopic.LEGACY_DOMAIN_EVENTS)) return
-        topics.poll(RedisStreamTopic.LEGACY_DOMAIN_EVENTS, subscription) {
-            onQuestionViewed(it)
-        }
+    @StreamScheduler(
+        topic = RedisStreamTopic.COMMUNITY_QUESTION_VIEWED,
+        group = VIEW_GROUP,
+        consumer = "buddystudy-question-view-recovery",
+        eventType = VIEW_EVENT_TYPE,
+        payloadType = CommunityQuestionEvent::class,
+        batchSize = 100,
+        minIdleTimeMs = 60_000,
+        fixedDelayMs = 30_000,
+        initialDelayMs = 30_000,
+        enabledProperty = "buddystudy.streams.enabled",
+        options = StreamOptions.ACK,
+    )
+    private suspend fun recover(
+        payload: CommunityQuestionEvent,
+        context: StreamMessageContext,
+    ) {
+        deliver(payload, context)
     }
 
-    suspend fun onQuestionViewed(message: RedisStreamMessage) {
-        if (message.fields["eventType"] != eventType) {
-            topics.acknowledge(message, group)
-            return
-        }
-        consume("buddystudy-question-view-listener", message) { handler.processViewEvent(message.fields) }
-    }
-
-    private suspend fun consume(listenerId: String, message: RedisStreamMessage, block: suspend () -> Unit) {
-        logger.info("Consuming $listenerId")
-        try {
-            logger.debug(
-                "redis_stream_consume_started listener={} stream={} redisRecordId={} eventId={} eventType={} questionId={} userId={} fieldKeys={}",
-                listenerId,
-                message.streamKey,
-                message.recordId,
-                message.fields["eventId"],
-                message.fields["eventType"],
-                message.fields["questionId"] ?: message.fields["recordId"],
-                message.fields["userId"],
-                message.fields.keys,
-            )
-            block()
-            topics.acknowledge(message, group)
-            logger.debug(
-                "redis_stream_consume_succeeded listener={} stream={} redisRecordId={} eventId={} eventType={} questionId={} userId={}",
-                listenerId,
-                message.streamKey,
-                message.recordId,
-                message.fields["eventId"],
-                message.fields["eventType"],
-                message.fields["questionId"] ?: message.fields["recordId"],
-                message.fields["userId"],
-            )
-        } catch (error: Exception) {
-            logger.warn(
-                "redis_stream_consume_failed listener={} stream={} redisRecordId={} eventId={} eventType={} questionId={} userId={} error={}",
-                listenerId,
-                message.streamKey,
-                message.recordId,
-                message.fields["eventId"],
-                message.fields["eventType"],
-                message.fields["questionId"] ?: message.fields["recordId"],
-                message.fields["userId"],
-                error.message,
-            )
-        }
+    internal suspend fun deliver(
+        payload: CommunityQuestionEvent,
+        context: StreamMessageContext,
+    ) {
+        handler.processViewEvent(payload, context.streamKey)
     }
 }
 
 @Component
 class QuestionStatsStreamEventHandler(
     private val stats: QuestionStatsPort,
+    private val inbox: StreamInboxPort,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
     @Transactional
-    suspend fun processViewEvent(fields: Map<String, String>) {
-        val questionId = fields.questionIdOrNull() ?: run {
-            logger.debug(
-                "question_stats_event_ignored reason=missing_question_id eventId={} eventType={} fieldKeys={}",
-                fields["eventId"],
-                fields["eventType"],
-                fields.keys,
-            )
-            return
+    suspend fun processViewEvent(
+        event: CommunityQuestionEvent,
+        streamKey: String,
+    ) {
+        val now = Instant.now()
+        val claim = inbox.claim(
+            eventId = event.eventId,
+            consumerGroup = VIEW_GROUP,
+            correlationId = event.questionId.toString(),
+            leaseDuration = VIEW_INBOX_LEASE,
+            now = now,
+            streamKey = streamKey,
+        ) ?: return
+        increment(event.questionId) { stats.incrementView(event.questionId, 1, now) }
+        check(inbox.markSucceeded(claim, now)) {
+            "Question view Inbox claim was lost before completion."
         }
-        increment(questionId) { stats.incrementView(questionId, 1, Instant.now()) }
         logger.debug(
             "question_stats_event_applied eventId={} eventType={} questionId={} deltaField={}",
-            fields["eventId"],
-            fields["eventType"] ?: "CONTENT_VIEWED",
-            questionId,
+            event.eventId,
+            VIEW_EVENT_TYPE,
+            event.questionId,
             "viewCount",
         )
     }
@@ -132,20 +108,8 @@ class QuestionStatsStreamEventHandler(
             update()
         }
     }
-
-    private fun logApplied(fields: Map<String, String>, questionId: Long, deltaField: String, delta: Int) {
-        logger.debug(
-            "question_stats_event_applied eventId={} eventType={} questionId={} userId={} deltaField={} delta={}",
-            fields["eventId"],
-            fields["eventType"],
-            questionId,
-            fields["userId"],
-            deltaField,
-            delta,
-        )
-    }
-
-    private fun Map<String, String>.questionIdOrNull(): Long? =
-        this["questionId"]?.toLongOrNull()
-            ?: this["recordId"]?.toLongOrNull()
 }
+
+private const val VIEW_GROUP = "bs-backend-view"
+private const val VIEW_EVENT_TYPE = "CONTENT_VIEWED"
+private val VIEW_INBOX_LEASE: Duration = Duration.ofMinutes(1)

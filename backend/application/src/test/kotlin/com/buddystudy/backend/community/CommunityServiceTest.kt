@@ -38,16 +38,18 @@ class CommunityServiceTest {
     private val questions = FakeQuestionPort()
     private val questionStats = FakeQuestionStatsPort()
     private val likes = FakeQuestionLikePort()
+    private val comments = FakeQuestionCommentPort()
     private val notificationPublisher = FakeNotificationPublisher()
+    private val reactionPublisher = FakeReactionPublisher()
     private val service = CommunityService(
         users = users,
         questions = questions,
         questionStats = questionStats,
         likes = likes,
-        comments = FakeQuestionCommentPort(),
+        comments = comments,
         reports = FakeReportPort(),
         feedbacks = FakeFeedbackPort(),
-        reactions = FakeReactionPublisher(),
+        reactions = reactionPublisher,
         notifications = notificationPublisher,
         languageDetector = PassthroughLanguageDetector(),
         contentLocalizations = EmptyContentLocalizationPort(),
@@ -105,6 +107,7 @@ class CommunityServiceTest {
         assertThat(response.isLikedByMe).isTrue()
         assertThat(questionStats.incrementLikeCalls).isEqualTo(1)
         assertThat(questionStats.findByIdCalls).isEqualTo(1)
+        assertThat(reactionPublisher.events).containsExactly("QUESTION_LIKED:100:7")
         val notification = notificationPublisher.rows.single()
         assertThat(notification.eventId).isEqualTo("question-like-100-7")
         assertThat(notification.userId).isEqualTo(10)
@@ -112,6 +115,19 @@ class CommunityServiceTest {
         assertThat(notification.threadType).isEqualTo("question")
         assertThat(notification.threadId).isEqualTo("100")
         assertThat(notification.shouldPush).isFalse()
+    }
+
+    @Test
+    fun `unliking a public question publishes the unlike event only when state changes`(): Unit = runBlocking {
+        questions.rows += publicQuestion(id = 100, userId = 10, topic = "Redis")
+        questionStats.rows += QuestionStatsEntity(questionId = 100, likeCount = 1)
+        likes.rows += QuestionLikeEntity(questionId = 100, userId = principal.userId)
+
+        val response = service.setLike(principal, id = 100, liked = false)
+
+        assertThat(response.isLikedByMe).isFalse()
+        assertThat(response.likeCount).isZero()
+        assertThat(reactionPublisher.events).containsExactly("QUESTION_UNLIKED:100:7")
     }
 
     @Test
@@ -132,6 +148,18 @@ class CommunityServiceTest {
         assertThat(notification.deepLink).isEqualTo("buddystudy://public/questions/100")
         assertThat(notification.shouldPush).isTrue()
         assertThat(notification.title).isEqualTo("댓글")
+        assertThat(reactionPublisher.events).containsExactly("QUESTION_COMMENTED:100:1:7")
+    }
+
+    @Test
+    fun `deleting my comment publishes the comment deleted event`() = runBlocking<Unit> {
+        questions.rows += publicQuestion(id = 100, userId = 10, topic = "Redis")
+        comments.rows += QuestionCommentEntity(id = 5, questionId = 100, userId = principal.userId, body = "삭제할 댓글")
+
+        service.deleteComment(principal, id = 100, commentId = 5)
+
+        assertThat(comments.rows.single().deletedAt).isNotNull()
+        assertThat(reactionPublisher.events).containsExactly("QUESTION_COMMENT_DELETED:100:5:7")
     }
 
     @Test
@@ -264,19 +292,32 @@ class CommunityServiceTest {
             return rows.filter { it.userId == userId && it.questionId in questionIds }.map { it.questionId }.toSet()
         }
 
-        override suspend fun deleteByQuestionIdAndUserId(questionId: Long, userId: Long): Long = 0
+        override suspend fun deleteByQuestionIdAndUserId(questionId: Long, userId: Long): Long {
+            val removed = rows.removeIf { it.questionId == questionId && it.userId == userId }
+            return if (removed) 1 else 0
+        }
     }
 
     private class FakeQuestionCommentPort : QuestionCommentPort {
+        val rows = mutableListOf<QuestionCommentEntity>()
         private var nextId = 1L
         override suspend fun save(entity: QuestionCommentEntity): QuestionCommentEntity {
             if (entity.id == 0L) {
                 entity.id = nextId++
             }
+            if (entity !in rows) rows += entity
             return entity
         }
-        override suspend fun findByIdAndQuestionIdAndDeletedAtIsNull(id: Long, questionId: Long): QuestionCommentEntity? = null
-        override suspend fun findByQuestionIdAndDeletedAtIsNullOrderByCreatedAtAsc(questionId: Long, pageable: Pageable): Page<QuestionCommentEntity> = Page.empty()
+        override suspend fun findByIdAndQuestionIdAndDeletedAtIsNull(
+            id: Long,
+            questionId: Long,
+        ): QuestionCommentEntity? = rows.firstOrNull {
+            it.id == id && it.questionId == questionId && it.deletedAt == null
+        }
+        override suspend fun findByQuestionIdAndDeletedAtIsNullOrderByCreatedAtAsc(
+            questionId: Long,
+            pageable: Pageable,
+        ): Page<QuestionCommentEntity> = PageImpl(rows.filter { it.questionId == questionId && it.deletedAt == null })
     }
 
     private class FakeReportPort : ReportPort {
@@ -288,11 +329,36 @@ class CommunityServiceTest {
     }
 
     private class FakeReactionPublisher : PublicQuestionReactionPublishPort {
+        val events = mutableListOf<String>()
+
         override suspend fun publishViewed(
             questionId: Long,
             userId: Long?,
             localization: PublicQuestionViewLocalization?,
-        ): Boolean = true
+        ): Boolean {
+            events += "CONTENT_VIEWED:$questionId:$userId"
+            return true
+        }
+
+        override suspend fun publishLiked(questionId: Long, userId: Long): Boolean {
+            events += "QUESTION_LIKED:$questionId:$userId"
+            return true
+        }
+
+        override suspend fun publishUnliked(questionId: Long, userId: Long): Boolean {
+            events += "QUESTION_UNLIKED:$questionId:$userId"
+            return true
+        }
+
+        override suspend fun publishCommented(questionId: Long, commentId: Long, userId: Long): Boolean {
+            events += "QUESTION_COMMENTED:$questionId:$commentId:$userId"
+            return true
+        }
+
+        override suspend fun publishCommentDeleted(questionId: Long, commentId: Long, userId: Long): Boolean {
+            events += "QUESTION_COMMENT_DELETED:$questionId:$commentId:$userId"
+            return true
+        }
     }
 
     private class FakeNotificationPublisher : PublishNotificationUseCase {

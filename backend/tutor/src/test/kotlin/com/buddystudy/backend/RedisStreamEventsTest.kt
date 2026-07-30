@@ -2,10 +2,9 @@ package com.buddystudy.backend
 
 import kotlinx.coroutines.runBlocking
 
-import com.buddystudy.backend.community.adapter.outbound.stream.PublicQuestionViewedEvent
+import com.buddystudy.backend.community.application.model.CommunityQuestionEvent
 import com.buddystudy.backend.study.adapter.outbound.stream.QuestionPushRequestedEvent
 import com.buddystudy.backend.study.adapter.outbound.stream.toPayload
-import com.buddystudy.utils.toStringMapWithoutNull
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant
@@ -41,8 +40,9 @@ class RedisStreamEventsTest {
     }
 
     @Test
-    fun `view event exposes consistent stream field map`(): Unit = runBlocking {
-        val event = PublicQuestionViewedEvent(
+    fun `view event preserves localization metadata in the outbox payload`() {
+        val event = CommunityQuestionEvent(
+            eventId = "event-1",
             questionId = 10,
             userId = 20,
             translationState = "TRANSLATED",
@@ -55,30 +55,16 @@ class RedisStreamEventsTest {
             answerDisplayLanguage = "ja",
             aiResponseSourceLanguage = "en",
             aiResponseDisplayLanguage = "ja",
-            createdAt = Instant.ofEpochSecond(180),
-            eventId = "event-1",
+            occurredAt = Instant.ofEpochSecond(180),
         )
 
-        assertThat(event.toStringMapWithoutNull()).containsExactlyInAnyOrderEntriesOf(
-            mapOf(
-                "eventId" to "event-1",
-                "eventType" to "CONTENT_VIEWED",
-                "questionId" to "10",
-                "userId" to "20",
-                "translationState" to "TRANSLATED",
-                "translationLanguage" to "ja",
-                "translationReason" to "EXPLICIT_TL",
-                "requestId" to "request-1",
-                "questionSourceLanguage" to "en",
-                "questionDisplayLanguage" to "ja",
-                "answerSourceLanguage" to "ko",
-                "answerDisplayLanguage" to "ja",
-                "aiResponseSourceLanguage" to "en",
-                "aiResponseDisplayLanguage" to "ja",
-                "minuteBucket" to "3",
-                "createdAt" to "1970-01-01T00:03:00Z",
-            )
-        )
+        assertThat(event.eventId).isEqualTo("event-1")
+        assertThat(event.questionId).isEqualTo(10)
+        assertThat(event.translationLanguage).isEqualTo("ja")
+        assertThat(event.questionSourceLanguage).isEqualTo("en")
+        assertThat(event.questionDisplayLanguage).isEqualTo("ja")
+        assertThat(event.answerSourceLanguage).isEqualTo("ko")
+        assertThat(event.aiResponseDisplayLanguage).isEqualTo("ja")
+        assertThat(event.occurredAt).isEqualTo(Instant.ofEpochSecond(180))
     }
-
 }

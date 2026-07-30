@@ -31,9 +31,7 @@ inspection. The durable `question_push_outbox` remains the recovery source.
 Each active physical stream contains exactly one event contract. Active
 consumers therefore do not encounter unrelated event types. `eventType`
 remains in the envelope as a schema guard, while the physical stream is
-selected from the central event catalog. During migration only, consumers
-attached to the former mixed stream acknowledge event types owned by another
-consumer group so every legacy group can advance independently.
+selected from the central event catalog.
 
 ## Naming And Catalog
 
@@ -55,6 +53,10 @@ The catalog is:
 | localization | content-translation | requested | `localization.content-translation.requested.v1` | `CONTENT_TRANSLATION_REQUESTED` |
 | notification | question-push | requested | `notification.question-push.requested.v1` | `QUESTION_PUSH_REQUESTED` |
 | community | question | viewed | `community.question.viewed.v1` | `CONTENT_VIEWED` |
+| community | question | liked | `community.question.liked.v1` | `QUESTION_LIKED` |
+| community | question | unliked | `community.question.unliked.v1` | `QUESTION_UNLIKED` |
+| community | question | commented | `community.question.commented.v1` | `QUESTION_COMMENTED` |
+| community | question | comment-deleted | `community.question.comment-deleted.v1` | `QUESTION_COMMENT_DELETED` |
 
 `RedisDomainEventPublisher` has an exhaustive `RedisOutboxEventType` mapping.
 Adding an outbox event without assigning a dedicated stream is therefore a
@@ -63,7 +65,7 @@ compile-time error.
 ## Retention
 
 Every managed stream uses an independently configurable exact `MAXLEN`. The
-eight active defaults are `1000`:
+twelve active defaults are `1000`:
 
 - `notification.message.requested.v1`
 - `identity.account.withdrawn.v1`
@@ -73,6 +75,10 @@ eight active defaults are `1000`:
 - `localization.content-translation.requested.v1`
 - `notification.question-push.requested.v1`
 - `community.question.viewed.v1`
+- `community.question.liked.v1`
+- `community.question.unliked.v1`
+- `community.question.commented.v1`
+- `community.question.comment-deleted.v1`
 
 ```yaml
 buddystudy:
@@ -85,6 +91,10 @@ buddystudy:
     content-translation-requested-key: ${BUDDYSTUDY_CONTENT_TRANSLATION_REQUESTED_STREAM_KEY:localization.content-translation.requested.v1}
     question-push-requested-key: ${BUDDYSTUDY_QUESTION_PUSH_REQUESTED_STREAM_KEY:notification.question-push.requested.v1}
     question-viewed-key: ${BUDDYSTUDY_QUESTION_VIEWED_STREAM_KEY:community.question.viewed.v1}
+    question-liked-key: ${BUDDYSTUDY_QUESTION_LIKED_STREAM_KEY:community.question.liked.v1}
+    question-unliked-key: ${BUDDYSTUDY_QUESTION_UNLIKED_STREAM_KEY:community.question.unliked.v1}
+    question-commented-key: ${BUDDYSTUDY_QUESTION_COMMENTED_STREAM_KEY:community.question.commented.v1}
+    question-comment-deleted-key: ${BUDDYSTUDY_QUESTION_COMMENT_DELETED_STREAM_KEY:community.question.comment-deleted.v1}
     notification-requested-max-len: ${BUDDYSTUDY_NOTIFICATION_REQUESTED_STREAM_MAX_LEN:1000}
     account-withdrawn-max-len: ${BUDDYSTUDY_ACCOUNT_WITHDRAWN_STREAM_MAX_LEN:1000}
     answer-grading-requested-max-len: ${BUDDYSTUDY_ANSWER_GRADING_REQUESTED_STREAM_MAX_LEN:1000}
@@ -93,15 +103,19 @@ buddystudy:
     content-translation-requested-max-len: ${BUDDYSTUDY_CONTENT_TRANSLATION_REQUESTED_STREAM_MAX_LEN:1000}
     question-push-requested-max-len: ${BUDDYSTUDY_QUESTION_PUSH_REQUESTED_STREAM_MAX_LEN:1000}
     question-viewed-max-len: ${BUDDYSTUDY_QUESTION_VIEWED_STREAM_MAX_LEN:1000}
+    question-liked-max-len: ${BUDDYSTUDY_QUESTION_LIKED_STREAM_MAX_LEN:1000}
+    question-unliked-max-len: ${BUDDYSTUDY_QUESTION_UNLIKED_STREAM_MAX_LEN:1000}
+    question-commented-max-len: ${BUDDYSTUDY_QUESTION_COMMENTED_STREAM_MAX_LEN:1000}
+    question-comment-deleted-max-len: ${BUDDYSTUDY_QUESTION_COMMENT_DELETED_STREAM_MAX_LEN:1000}
 ```
 
 Publishing uses each topic's configured `XADD ... MAXLEN` value; trimming is
 not a separate command and approximate trimming is disabled. This gives each
 stream a deterministic operational bound.
 
-## Legacy Drain
+## Retired Stream Cleanup
 
-The previous five stream keys are read-only migration inputs:
+The previous mixed and pre-convention stream keys are no longer consumed:
 
 ```text
 buddystudy-events-v1
@@ -109,17 +123,12 @@ buddystudy-question-generation-v1
 buddystudy-question-generated-v1
 buddystudy-content-translation-v1
 buddystudy-push-v1
+buddystudy-native-push-test-20260728
 ```
 
-When `BUDDYSTUDY_LEGACY_STREAM_DRAIN_ENABLED=true`, each listener also resumes
-its existing consumer group on the applicable old stream. A legacy worker is
-not started when that physical key does not exist. Publishers never target
-these keys.
-
-Disable legacy drain only after the admin console confirms `lag=0` and
-`pending=0` for every legacy consumer group. After one retention window with
-no new legacy entries, the old keys may be deleted. This two-phase rollout
-prevents in-flight delivery loss without allowing new mixed-stream traffic.
+Application startup deletes these exact keys if they exist. No wildcard Redis
+deletion is used, and publishers and listeners only use the dedicated catalog
+keys above.
 
 These streams are delivery buffers, not sources of truth. Durable events first
 exist in `redis_event_outbox`, and push requests also have

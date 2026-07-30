@@ -4,15 +4,16 @@ import com.buddystudy.backend.common.application.outbox.ClaimedRedisOutboxEvent
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxPort
 import com.buddystudy.backend.common.application.outbox.RedisOutboxEventType
 import com.buddystudy.backend.common.application.outbox.PublishedStreamRecord
+import com.buddystudy.backend.community.application.model.CommunityQuestionEvent
 import com.buddystudy.backend.jooq.tables.RedisEventOutbox.REDIS_EVENT_OUTBOX
+import com.buddystudy.backend.localization.application.model.ContentTranslationRequestedEvent
+import com.buddystudy.backend.localization.application.port.ContentTranslationEventPort
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.profile.application.model.AccountWithdrawnEvent
 import com.buddystudy.backend.profile.application.port.outbound.AccountWithdrawalEventPort
 import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
 import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
 import com.buddystudy.backend.study.application.model.QuestionGenerationRequestedEvent
-import com.buddystudy.backend.localization.application.model.ContentTranslationRequestedEvent
-import com.buddystudy.backend.localization.application.port.ContentTranslationEventPort
 import com.fasterxml.jackson.databind.ObjectMapper
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.reactive.asFlow
@@ -84,6 +85,22 @@ class RedisEventOutboxRepository(
             payloadJson = objectMapper.writeValueAsString(event),
             createdAt = event.withdrawnAt,
         )
+
+    override suspend fun appendCommunityQuestionEvent(
+        eventType: RedisOutboxEventType,
+        event: CommunityQuestionEvent,
+        createdAt: Instant,
+    ): Long {
+        require(eventType in COMMUNITY_EVENT_TYPES) {
+            "Unsupported community question event type: $eventType"
+        }
+        return append(
+            eventId = event.eventId,
+            eventType = eventType,
+            payloadJson = objectMapper.writeValueAsString(event),
+            createdAt = createdAt,
+        )
+    }
 
     @Transactional
     override suspend fun claim(
@@ -294,6 +311,13 @@ class RedisEventOutboxRepository(
     private fun Instant.toUtcLocalDateTime(): LocalDateTime = LocalDateTime.ofInstant(this, ZoneOffset.UTC)
 
     private companion object {
+        val COMMUNITY_EVENT_TYPES = setOf(
+            RedisOutboxEventType.CONTENT_VIEWED,
+            RedisOutboxEventType.QUESTION_LIKED,
+            RedisOutboxEventType.QUESTION_UNLIKED,
+            RedisOutboxEventType.QUESTION_COMMENTED,
+            RedisOutboxEventType.QUESTION_COMMENT_DELETED,
+        )
         const val PENDING = "PENDING"
         const val PROCESSING = "PROCESSING"
         const val PUBLISHED = "PUBLISHED"

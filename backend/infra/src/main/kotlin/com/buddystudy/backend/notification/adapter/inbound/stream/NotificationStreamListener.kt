@@ -35,7 +35,6 @@ class NotificationStreamListener(
 
     @StreamListener(
         topic = RedisStreamTopic.NOTIFICATION_MESSAGE_REQUESTED,
-        legacyTopic = RedisStreamTopic.LEGACY_DOMAIN_EVENTS,
         group = GROUP,
         consumer = CONSUMER,
         eventType = EVENT_TYPE,
@@ -55,7 +54,6 @@ class NotificationStreamListener(
 
     @StreamScheduler(
         topic = RedisStreamTopic.NOTIFICATION_MESSAGE_REQUESTED,
-        legacyTopic = RedisStreamTopic.LEGACY_DOMAIN_EVENTS,
         group = GROUP,
         consumer = RECOVERY_CONSUMER,
         eventType = EVENT_TYPE,

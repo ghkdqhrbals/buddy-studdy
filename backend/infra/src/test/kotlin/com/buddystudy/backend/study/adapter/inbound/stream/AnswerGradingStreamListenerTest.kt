@@ -22,7 +22,6 @@ class AnswerGradingStreamListenerTest {
             .findAnnotation<StreamListener>()!!
 
         assertThat(annotation.topic).isEqualTo(RedisStreamTopic.STUDY_ANSWER_GRADING_REQUESTED)
-        assertThat(annotation.legacyTopic).isEqualTo(RedisStreamTopic.LEGACY_DOMAIN_EVENTS)
         assertThat(annotation.group).isEqualTo("bs-backend-answer-grading")
         assertThat(annotation.eventType).isEqualTo("ANSWER_GRADING_REQUESTED")
         assertThat(annotation.payloadType).isEqualTo(AnswerGradingRequestedEvent::class)
@@ -36,7 +35,6 @@ class AnswerGradingStreamListenerTest {
             .findAnnotation<StreamScheduler>()!!
 
         assertThat(annotation.topic).isEqualTo(RedisStreamTopic.STUDY_ANSWER_GRADING_REQUESTED)
-        assertThat(annotation.legacyTopic).isEqualTo(RedisStreamTopic.LEGACY_DOMAIN_EVENTS)
         assertThat(annotation.group).isEqualTo("bs-backend-answer-grading")
         assertThat(annotation.eventType).isEqualTo("ANSWER_GRADING_REQUESTED")
         assertThat(annotation.payloadType).isEqualTo(AnswerGradingRequestedEvent::class)
@@ -46,11 +44,11 @@ class AnswerGradingStreamListenerTest {
 
     @Test
     fun `delivery delegates one event to the grading use case`() = runBlocking {
-        val processed = mutableListOf<AnswerGradingRequestedEvent>()
+        val processed = mutableListOf<Pair<AnswerGradingRequestedEvent, String>>()
         val listener = AnswerGradingStreamListener(
             grading = object : ProcessAnswerGradingUseCase {
-                override suspend fun process(event: AnswerGradingRequestedEvent) {
-                    processed += event
+                override suspend fun process(event: AnswerGradingRequestedEvent, streamKey: String) {
+                    processed += event to streamKey
                 }
             },
         )
@@ -74,6 +72,6 @@ class AnswerGradingStreamListenerTest {
             ),
         )
 
-        assertThat(processed).containsExactly(event)
+        assertThat(processed).containsExactly(event to "buddystudy-domain-events-v1")
     }
 }

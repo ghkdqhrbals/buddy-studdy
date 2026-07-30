@@ -210,6 +210,11 @@ class StudyRecordWriteService(
     ) {
         val question = lockRecord(event.recordId, event.userId)
         if (question.gradingRequestId != event.requestId || question.score != null) return
+        if (question.gradingStatus == AnswerGradingStatus.FAILED.name ||
+            question.gradingStatus == AnswerGradingStatus.COMPLETED.name
+        ) {
+            return
+        }
         question.gradingStatus = AnswerGradingStatus.FAILED.name
         question.gradingError = errorMessage.take(255)
         question.updatedAt = now

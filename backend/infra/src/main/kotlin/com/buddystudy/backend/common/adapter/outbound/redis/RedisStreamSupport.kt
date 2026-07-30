@@ -39,10 +39,7 @@ import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 
-enum class RedisStreamTopic(
-    val apiName: String,
-    val legacy: Boolean = false,
-) {
+enum class RedisStreamTopic(val apiName: String) {
     NOTIFICATION_MESSAGE_REQUESTED("notification.message.requested.v1"),
     IDENTITY_ACCOUNT_WITHDRAWN("identity.account.withdrawn.v1"),
     STUDY_ANSWER_GRADING_REQUESTED("study.answer-grading.requested.v1"),
@@ -51,13 +48,10 @@ enum class RedisStreamTopic(
     LOCALIZATION_CONTENT_TRANSLATION_REQUESTED("localization.content-translation.requested.v1"),
     NOTIFICATION_QUESTION_PUSH_REQUESTED("notification.question-push.requested.v1"),
     COMMUNITY_QUESTION_VIEWED("community.question.viewed.v1"),
-
-    LEGACY_DOMAIN_EVENTS("legacy-domain-events", legacy = true),
-    LEGACY_QUESTION_GENERATION("legacy-question-generation", legacy = true),
-    LEGACY_QUESTION_GENERATED("legacy-question-generated", legacy = true),
-    LEGACY_CONTENT_TRANSLATION("legacy-content-translation", legacy = true),
-    LEGACY_PUSH_EVENTS("legacy-push-events", legacy = true),
-    NONE("none"),
+    COMMUNITY_QUESTION_LIKED("community.question.liked.v1"),
+    COMMUNITY_QUESTION_UNLIKED("community.question.unliked.v1"),
+    COMMUNITY_QUESTION_COMMENTED("community.question.commented.v1"),
+    COMMUNITY_QUESTION_COMMENT_DELETED("community.question.comment-deleted.v1"),
 }
 
 data class RedisStreamTopicDefinition(
@@ -87,7 +81,6 @@ interface RedisStreamPublishOperations {
 }
 
 interface RedisStreamConsumerOperations {
-    suspend fun exists(topic: RedisStreamTopic): Boolean = true
     suspend fun acknowledge(message: RedisStreamMessage, group: String)
     suspend fun acknowledgeAndDelete(message: RedisStreamMessage, group: String)
 
@@ -170,38 +163,32 @@ class RedisStreamTopicManager(
             maxLength = properties.streams.questionViewedMaxLen.coerceAtLeast(1),
         ),
         RedisStreamTopicDefinition(
-            topic = RedisStreamTopic.LEGACY_DOMAIN_EVENTS,
-            streamKey = properties.streams.legacyDomainKey,
-            maxLength = properties.streams.legacyMaxLen.coerceAtLeast(1),
+            topic = RedisStreamTopic.COMMUNITY_QUESTION_LIKED,
+            streamKey = properties.streams.questionLikedKey,
+            maxLength = properties.streams.questionLikedMaxLen.coerceAtLeast(1),
         ),
         RedisStreamTopicDefinition(
-            topic = RedisStreamTopic.LEGACY_QUESTION_GENERATION,
-            streamKey = properties.streams.legacyQuestionGenerationKey,
-            maxLength = properties.streams.legacyMaxLen.coerceAtLeast(1),
+            topic = RedisStreamTopic.COMMUNITY_QUESTION_UNLIKED,
+            streamKey = properties.streams.questionUnlikedKey,
+            maxLength = properties.streams.questionUnlikedMaxLen.coerceAtLeast(1),
         ),
         RedisStreamTopicDefinition(
-            topic = RedisStreamTopic.LEGACY_QUESTION_GENERATED,
-            streamKey = properties.streams.legacyQuestionGeneratedKey,
-            maxLength = properties.streams.legacyMaxLen.coerceAtLeast(1),
+            topic = RedisStreamTopic.COMMUNITY_QUESTION_COMMENTED,
+            streamKey = properties.streams.questionCommentedKey,
+            maxLength = properties.streams.questionCommentedMaxLen.coerceAtLeast(1),
         ),
         RedisStreamTopicDefinition(
-            topic = RedisStreamTopic.LEGACY_CONTENT_TRANSLATION,
-            streamKey = properties.streams.legacyContentTranslationKey,
-            maxLength = properties.streams.legacyMaxLen.coerceAtLeast(1),
-        ),
-        RedisStreamTopicDefinition(
-            topic = RedisStreamTopic.LEGACY_PUSH_EVENTS,
-            streamKey = properties.streams.legacyPushKey,
-            maxLength = properties.streams.legacyMaxLen.coerceAtLeast(1),
+            topic = RedisStreamTopic.COMMUNITY_QUESTION_COMMENT_DELETED,
+            streamKey = properties.streams.questionCommentDeletedKey,
+            maxLength = properties.streams.questionCommentDeletedMaxLen.coerceAtLeast(1),
         ),
     )
 
     init {
-        val activeDefinitions = topics.filterNot { it.topic.legacy }
-        require(activeDefinitions.map { it.streamKey }.distinct().size == activeDefinitions.size) {
+        require(topics.map { it.streamKey }.distinct().size == topics.size) {
             "Active Redis Stream keys must be unique."
         }
-        activeDefinitions.forEach { definition ->
+        topics.forEach { definition ->
             require(ACTIVE_STREAM_KEY.matches(definition.streamKey)) {
                 "Redis Stream key '${definition.streamKey}' must follow " +
                     "<business-domain>.<data-type>.<event-type>.<version>."
@@ -220,10 +207,6 @@ class RedisStreamTopicManager(
         val id = redis.opsForStream<String, String>().add(record, options)
             .awaitSingle()
         return RedisStreamPublishedMessage(streamKey = definition.streamKey, recordId = id.value)
-    }
-
-    override suspend fun exists(topic: RedisStreamTopic): Boolean = withContext(Dispatchers.IO) {
-        blockingRedis.hasKey(definition(topic).streamKey) == true
     }
 
     suspend fun poll(
@@ -325,11 +308,7 @@ class RedisStreamTopicManager(
     }
 
     override suspend fun topics(): List<AdminStreamTopicSummary> = withContext(Dispatchers.IO) {
-        topics
-            .filter { !it.topic.legacy || blockingRedis.hasKey(it.streamKey) == true }
-            .map { definition ->
-                inspectTopic(definition)
-            }
+        topics.map { definition -> inspectTopic(definition) }
     }
 
     private fun inspectTopic(definition: RedisStreamTopicDefinition): AdminStreamTopicSummary {

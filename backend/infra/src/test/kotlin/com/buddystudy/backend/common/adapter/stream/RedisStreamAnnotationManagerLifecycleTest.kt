@@ -10,7 +10,6 @@ import org.mockito.Mockito.mock
 import org.springframework.beans.factory.support.StaticListableBeanFactory
 import org.springframework.mock.env.MockEnvironment
 import java.time.Duration
-import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 
 class RedisStreamAnnotationManagerLifecycleTest {
@@ -75,29 +74,6 @@ class RedisStreamAnnotationManagerLifecycleTest {
         manager.stop()
     }
 
-    @Test
-    fun `missing legacy stream is not read or recreated`() {
-        val streams = TopicRecordingStreamOperations()
-        val manager = RedisStreamAnnotationManager(
-            streams = streams,
-            dispatcher = mock(RedisStreamMessageDispatcher::class.java),
-            environment = MockEnvironment(),
-            beanFactory = StaticListableBeanFactory(
-                mapOf("sampleLegacyStreamListener" to SampleLegacyStreamListener()),
-            ),
-        )
-
-        manager.afterSingletonsInstantiated()
-        manager.start()
-        waitUntil { RedisStreamTopic.NOTIFICATION_MESSAGE_REQUESTED in streams.readTopics }
-        Thread.sleep(30)
-
-        assertThat(streams.readTopics)
-            .contains(RedisStreamTopic.NOTIFICATION_MESSAGE_REQUESTED)
-            .doesNotContain(RedisStreamTopic.LEGACY_DOMAIN_EVENTS)
-        manager.stop()
-    }
-
     private fun manager(streams: RedisStreamConsumerOperations): RedisStreamAnnotationManager =
         RedisStreamAnnotationManager(
             streams = streams,
@@ -128,49 +104,6 @@ class RedisStreamAnnotationManagerLifecycleTest {
             pollDelayMs = 10,
         )
         private suspend fun consume(payload: SamplePayload) = Unit
-    }
-
-    private class SampleLegacyStreamListener {
-        @Suppress("unused")
-        @StreamListener(
-            topic = RedisStreamTopic.NOTIFICATION_MESSAGE_REQUESTED,
-            legacyTopic = RedisStreamTopic.LEGACY_DOMAIN_EVENTS,
-            group = "test-group",
-            consumer = "test-consumer",
-            eventType = "TEST",
-            payloadType = SamplePayload::class,
-            blockTimeMs = 10,
-            pollDelayMs = 10,
-        )
-        private suspend fun consume(payload: SamplePayload) = Unit
-    }
-
-    private class TopicRecordingStreamOperations : RedisStreamConsumerOperations {
-        val readTopics = ConcurrentLinkedQueue<RedisStreamTopic>()
-
-        override suspend fun exists(topic: RedisStreamTopic): Boolean = !topic.legacy
-        override suspend fun acknowledge(message: RedisStreamMessage, group: String) = Unit
-        override suspend fun acknowledgeAndDelete(message: RedisStreamMessage, group: String) = Unit
-
-        override suspend fun readNew(
-            topic: RedisStreamTopic,
-            group: String,
-            consumer: String,
-            count: Long,
-            timeout: Duration,
-        ): List<RedisStreamMessage> {
-            readTopics += topic
-            return emptyList()
-        }
-
-        override suspend fun autoClaim(
-            topic: RedisStreamTopic,
-            group: String,
-            consumer: String,
-            minIdleTime: Duration,
-            count: Long,
-            startId: String,
-        ): RedisStreamClaimBatch = RedisStreamClaimBatch(startId, emptyList())
     }
 
     private class CountingStreamOperations : RedisStreamConsumerOperations {

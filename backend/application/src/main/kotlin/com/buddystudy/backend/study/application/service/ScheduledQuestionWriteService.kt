@@ -65,11 +65,10 @@ class ScheduledQuestionWriteService(
             embedding = generated.embedding,
         )
         questionKeys.markQuestionCreated(questionKey, now)
-        scheduleStudy.markScheduleCompleted(now)
+        scheduleStudy.markScheduledGenerationCompleted(now)
         if (scheduleStudy.id == topicStudy.id) {
             studies.save(scheduleStudy)
         } else {
-            topicStudy.markTopicSelected(now)
             studies.save(topicStudy)
             studies.save(scheduleStudy)
         }
@@ -142,15 +141,14 @@ internal fun StudyEntity.markScheduleFailed(error: String, retryAt: Instant, now
     updatedAt = now
 }
 
-private fun StudyEntity.markTopicSelected(now: Instant) {
-    lastSentAt = now
+internal fun StudyEntity.markScheduleCompleted(now: Instant) {
+    nextDueAt = now.plusSeconds(intervalMinutes.toLong() * 60)
+    scheduleClaimedUntil = null
     lastError = null
     updatedAt = now
 }
 
-internal fun StudyEntity.markScheduleCompleted(now: Instant) {
-    lastSentAt = now
-    nextDueAt = now.plusSeconds(intervalMinutes.toLong() * 60)
+private fun StudyEntity.markScheduledGenerationCompleted(now: Instant) {
     scheduleClaimedUntil = null
     lastError = null
     updatedAt = now

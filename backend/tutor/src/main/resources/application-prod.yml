@@ -24,7 +24,7 @@ buddystudy:
   scheduler:
     enabled: ${SCHEDULER_ENABLED:true}
   streams:
-    enabled: ${REACTION_STREAM_ENABLED:true}
+    enabled: ${BUDDYSTUDY_STREAMS_ENABLED:true}
   openapi:
     enabled: ${ENABLE_OPENAPI_DOCS:false}
     access-token: ${OPENAPI_ACCESS_TOKEN:}

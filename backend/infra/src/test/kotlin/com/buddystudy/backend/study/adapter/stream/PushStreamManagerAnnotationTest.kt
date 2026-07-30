@@ -34,7 +34,6 @@ class PushStreamManagerAnnotationTest {
             .findAnnotation<StreamListener>()!!
 
         assertThat(annotation.topic).isEqualTo(RedisStreamTopic.NOTIFICATION_QUESTION_PUSH_REQUESTED)
-        assertThat(annotation.legacyTopic).isEqualTo(RedisStreamTopic.LEGACY_PUSH_EVENTS)
         assertThat(annotation.payloadType).isEqualTo(QuestionPushRequestedPayload::class)
         assertThat(annotation.group).isEqualTo("bs-backend-push")
         assertThat(annotation.consumer).isEqualTo("buddystudy-push")
@@ -51,7 +50,6 @@ class PushStreamManagerAnnotationTest {
             .findAnnotation<StreamScheduler>()!!
 
         assertThat(annotation.topic).isEqualTo(RedisStreamTopic.NOTIFICATION_QUESTION_PUSH_REQUESTED)
-        assertThat(annotation.legacyTopic).isEqualTo(RedisStreamTopic.LEGACY_PUSH_EVENTS)
         assertThat(annotation.payloadType).isEqualTo(QuestionPushRequestedPayload::class)
         assertThat(annotation.group).isEqualTo("bs-backend-push")
         assertThat(annotation.consumer).isEqualTo("buddystudy-push-recovery")

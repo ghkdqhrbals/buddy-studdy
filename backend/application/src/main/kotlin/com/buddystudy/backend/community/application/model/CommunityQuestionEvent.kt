@@ -1,13 +1,12 @@
-package com.buddystudy.backend.community.adapter.outbound.stream
+package com.buddystudy.backend.community.application.model
 
-import com.buddystudy.backend.study.adapter.outbound.stream.BaseRedisStreamEvent
 import java.time.Instant
-import java.util.UUID
-import com.buddystudy.common.application.model.QuestionStreamEventType
 
-data class PublicQuestionViewedEvent(
+data class CommunityQuestionEvent(
+    val eventId: String,
     val questionId: Long,
     val userId: Long?,
+    val commentId: Long? = null,
     val translationState: String? = null,
     val translationLanguage: String? = null,
     val translationReason: String? = null,
@@ -18,8 +17,5 @@ data class PublicQuestionViewedEvent(
     val answerDisplayLanguage: String? = null,
     val aiResponseSourceLanguage: String? = null,
     val aiResponseDisplayLanguage: String? = null,
-    val createdAt: Instant = Instant.now(),
-    override val eventId: String = UUID.randomUUID().toString(),
-) : BaseRedisStreamEvent(QuestionStreamEventType.CONTENT_VIEWED, eventId) {
-    val minuteBucket: Long = createdAt.epochSecond / 60
-}
+    val occurredAt: Instant,
+)

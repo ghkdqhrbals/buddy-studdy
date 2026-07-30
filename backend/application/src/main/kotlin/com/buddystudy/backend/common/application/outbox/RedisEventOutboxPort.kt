@@ -1,10 +1,11 @@
 package com.buddystudy.backend.common.application.outbox
 
+import com.buddystudy.backend.community.application.model.CommunityQuestionEvent
+import com.buddystudy.backend.localization.application.model.ContentTranslationRequestedEvent
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
 import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
 import com.buddystudy.backend.study.application.model.QuestionGenerationRequestedEvent
-import com.buddystudy.backend.localization.application.model.ContentTranslationRequestedEvent
 import java.time.Instant
 
 enum class OutboxType {
@@ -51,6 +52,11 @@ enum class RedisOutboxEventType {
     QUESTION_GENERATION_REQUESTED,
     QUESTION_GENERATED,
     CONTENT_TRANSLATION_REQUESTED,
+    CONTENT_VIEWED,
+    QUESTION_LIKED,
+    QUESTION_UNLIKED,
+    QUESTION_COMMENTED,
+    QUESTION_COMMENT_DELETED,
 }
 
 data class ClaimedRedisOutboxEvent(
@@ -78,6 +84,11 @@ interface RedisEventOutboxAppendPort {
         event: ContentTranslationRequestedEvent,
         createdAt: Instant = Instant.now(),
     ): Long = error("Content translation outbox is not configured.")
+    suspend fun appendCommunityQuestionEvent(
+        eventType: RedisOutboxEventType,
+        event: CommunityQuestionEvent,
+        createdAt: Instant = Instant.now(),
+    ): Long = error("Community question event outbox is not configured.")
 }
 
 interface RedisEventOutboxPort : RedisEventOutboxAppendPort {

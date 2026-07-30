@@ -21,7 +21,6 @@ class NotificationStreamListenerAnnotationTest {
             .findAnnotation<StreamListener>()!!
 
         assertThat(annotation.topic).isEqualTo(RedisStreamTopic.NOTIFICATION_MESSAGE_REQUESTED)
-        assertThat(annotation.legacyTopic).isEqualTo(RedisStreamTopic.LEGACY_DOMAIN_EVENTS)
         assertThat(annotation.group).isEqualTo("bs-backend-notification")
         assertThat(annotation.eventType).isEqualTo("NOTIFICATION_REQUESTED")
         assertThat(annotation.payloadType).isEqualTo(NotificationRequestedPayload::class)
@@ -35,7 +34,6 @@ class NotificationStreamListenerAnnotationTest {
             .findAnnotation<StreamScheduler>()!!
 
         assertThat(annotation.topic).isEqualTo(RedisStreamTopic.NOTIFICATION_MESSAGE_REQUESTED)
-        assertThat(annotation.legacyTopic).isEqualTo(RedisStreamTopic.LEGACY_DOMAIN_EVENTS)
         assertThat(annotation.group).isEqualTo("bs-backend-notification")
         assertThat(annotation.eventType).isEqualTo("NOTIFICATION_REQUESTED")
         assertThat(annotation.payloadType).isEqualTo(NotificationRequestedPayload::class)

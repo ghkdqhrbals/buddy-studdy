@@ -18,7 +18,6 @@ class ContentTranslationStreamListener(
 ) {
     @StreamListener(
         topic = RedisStreamTopic.LOCALIZATION_CONTENT_TRANSLATION_REQUESTED,
-        legacyTopic = RedisStreamTopic.LEGACY_CONTENT_TRANSLATION,
         group = ContentTranslationProcessor.CONSUMER_GROUP,
         consumer = "buddystudy-content-translation",
         eventType = ContentTranslationRequestedEvent.EVENT_TYPE,
@@ -36,7 +35,6 @@ class ContentTranslationStreamListener(
 
     @StreamScheduler(
         topic = RedisStreamTopic.LOCALIZATION_CONTENT_TRANSLATION_REQUESTED,
-        legacyTopic = RedisStreamTopic.LEGACY_CONTENT_TRANSLATION,
         group = ContentTranslationProcessor.CONSUMER_GROUP,
         consumer = "buddystudy-content-translation-recovery",
         eventType = ContentTranslationRequestedEvent.EVENT_TYPE,

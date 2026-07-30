@@ -20,7 +20,6 @@ class AnswerGradingStreamListener(
 
     @StreamListener(
         topic = RedisStreamTopic.STUDY_ANSWER_GRADING_REQUESTED,
-        legacyTopic = RedisStreamTopic.LEGACY_DOMAIN_EVENTS,
         group = GROUP,
         consumer = CONSUMER,
         eventType = EVENT_TYPE,
@@ -40,7 +39,6 @@ class AnswerGradingStreamListener(
 
     @StreamScheduler(
         topic = RedisStreamTopic.STUDY_ANSWER_GRADING_REQUESTED,
-        legacyTopic = RedisStreamTopic.LEGACY_DOMAIN_EVENTS,
         group = GROUP,
         consumer = RECOVERY_CONSUMER,
         eventType = EVENT_TYPE,
@@ -70,7 +68,7 @@ class AnswerGradingStreamListener(
             payload.recordId,
             context.claimed,
         )
-        grading.process(payload)
+        grading.process(payload, context.streamKey)
     }
 
     private companion object {

@@ -21,9 +21,11 @@ class RedisStreamTopicDefinitionTest {
                     notificationRequestedKey = "notification.message.requested.v1",
                     questionGeneratedKey = "study.question.generated.v1",
                     questionPushRequestedKey = "notification.question-push.requested.v1",
+                    questionCommentedKey = "community.question.commented.v1",
                     notificationRequestedMaxLen = 2_000,
                     questionGeneratedMaxLen = 4_000,
                     questionPushRequestedMaxLen = 8_000,
+                    questionCommentedMaxLen = 16_000,
                 ),
             ),
         )
@@ -52,6 +54,14 @@ class RedisStreamTopicDefinitionTest {
                     maxLength = 8_000,
                 ),
             )
+        assertThat(manager.definition(RedisStreamTopic.COMMUNITY_QUESTION_COMMENTED))
+            .isEqualTo(
+                RedisStreamTopicDefinition(
+                    topic = RedisStreamTopic.COMMUNITY_QUESTION_COMMENTED,
+                    streamKey = "community.question.commented.v1",
+                    maxLength = 16_000,
+                ),
+            )
     }
 
     @Test
@@ -76,7 +86,7 @@ class RedisStreamTopicDefinitionTest {
 
     @Test
     fun `active stream keys follow the four segment naming convention`() {
-        val topics = RedisStreamTopic.entries.filterNot { it.legacy || it == RedisStreamTopic.NONE }
+        val topics = RedisStreamTopic.entries
 
         assertThat(topics.map { it.apiName }).doesNotHaveDuplicates()
         assertThat(topics).allSatisfy { topic ->
