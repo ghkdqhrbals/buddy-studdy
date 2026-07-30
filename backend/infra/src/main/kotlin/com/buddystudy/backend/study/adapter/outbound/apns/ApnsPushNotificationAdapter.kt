@@ -156,7 +156,23 @@ class ApnsPushNotificationAdapter(
             .take(6)
             .joinToString("") { "%02x".format(it) }
 
-    internal fun buildPayloadJson(message: ApnsQuestionMessage): String = message.payload.toJson()
+    internal fun buildPayloadJson(message: ApnsQuestionMessage): String {
+        val original = message.payload.toJsonUnchecked()
+        val originalBytes = original.utf8Size()
+        if (originalBytes <= MAX_PAYLOAD_BYTES) {
+            return original
+        }
+
+        val compacted = message.payload.compactedJson()
+        logger.warn(
+            "apns_payload_compacted recordId={} notificationId={} originalBytes={} payloadBytes={}",
+            message.recordId,
+            message.notificationId,
+            originalBytes,
+            compacted.utf8Size(),
+        )
+        return compacted
+    }
 
     private fun apnsJwt(): String {
         if (properties.apns.teamId.isBlank() || properties.apns.keyId.isBlank() || properties.apns.authKeyP8.isBlank()) {
@@ -198,7 +214,75 @@ class ApnsPushNotificationAdapter(
             }
         }.joinToString("") + "\""
 
-    private fun ApnsQuestionPayload.toJson(): String {
+    private fun ApnsQuestionPayload.compactedJson(): String {
+        val bodyCompacted = copy(
+            aps = aps.copy(
+                alert = aps.alert.copy(
+                    body = aps.alert.body.truncatedToFit { candidate ->
+                        copy(
+                            aps = aps.copy(alert = aps.alert.copy(body = candidate)),
+                        ).toJsonUnchecked()
+                    },
+                ),
+            ),
+        )
+        val bodyCompactedJson = bodyCompacted.toJsonUnchecked()
+        if (bodyCompactedJson.utf8Size() <= MAX_PAYLOAD_BYTES) {
+            return bodyCompactedJson
+        }
+
+        val fullyCompacted = bodyCompacted.copy(
+            aps = bodyCompacted.aps.copy(
+                alert = bodyCompacted.aps.alert.copy(
+                    title = bodyCompacted.aps.alert.title.truncatedToFit { candidate ->
+                        bodyCompacted.copy(
+                            aps = bodyCompacted.aps.copy(
+                                alert = bodyCompacted.aps.alert.copy(title = candidate),
+                            ),
+                        ).toJsonUnchecked()
+                    },
+                ),
+            ),
+        )
+        return fullyCompacted.toJsonUnchecked().also { payload ->
+            require(payload.utf8Size() <= MAX_PAYLOAD_BYTES) {
+                "APNs navigation metadata exceeds the $MAX_PAYLOAD_BYTES-byte payload limit."
+            }
+        }
+    }
+
+    private fun String.truncatedToFit(renderPayload: (String) -> String): String {
+        if (renderPayload(this).utf8Size() <= MAX_PAYLOAD_BYTES) {
+            return this
+        }
+
+        val codePointCount = codePointCount(0, length)
+        var lowerBound = 0
+        var upperBound = codePointCount
+        var best = ""
+        while (lowerBound <= upperBound) {
+            val candidateLength = (lowerBound + upperBound) ushr 1
+            val candidate = if (candidateLength >= codePointCount) {
+                this
+            } else {
+                prefixCodePoints(candidateLength) + ELLIPSIS
+            }
+            if (renderPayload(candidate).utf8Size() <= MAX_PAYLOAD_BYTES) {
+                best = candidate
+                lowerBound = candidateLength + 1
+            } else {
+                upperBound = candidateLength - 1
+            }
+        }
+        return best
+    }
+
+    private fun String.prefixCodePoints(count: Int): String =
+        substring(0, offsetByCodePoints(0, count))
+
+    private fun String.utf8Size(): Int = toByteArray(Charsets.UTF_8).size
+
+    private fun ApnsQuestionPayload.toJsonUnchecked(): String {
         val badge = aps.badge?.let { ""","badge":$it""" }.orEmpty()
         val notificationId = notificationId?.let { ""","notificationId":${jsonString(it)}""" }.orEmpty()
         return """
@@ -207,7 +291,9 @@ class ApnsPushNotificationAdapter(
     }
 
     private companion object {
+        const val MAX_PAYLOAD_BYTES = 4_096
         const val MAX_LOG_BODY_CHARS = 512
+        const val ELLIPSIS = "…"
     }
 }
 
