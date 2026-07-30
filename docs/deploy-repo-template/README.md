@@ -15,7 +15,8 @@ monitor changes must be deployed through separate workflows/jobs. Start with
 
 Current workflow templates:
 
-- `deploy-backend.yml`: backend API runtime on EC2.
+- `deploy-backend.yml`: backend API runtime on EC2 with one compact,
+  emoji-free Slack result attachment.
 - `configure-backend-network.yml`: Redis administrator ingress on the backend
   EC2 security group.
 - `deploy-admin-frontend.yml`: admin frontend runtime on EC2.

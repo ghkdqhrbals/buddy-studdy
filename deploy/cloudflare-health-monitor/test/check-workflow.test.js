@@ -353,6 +353,19 @@ test("deploy repo backend template wires scheduler Slack webhook into backend en
   assert.match(template, /SLACK_WEBHOOK_URL=\$\{SLACK_WEBHOOK_URL\}/);
 });
 
+test("backend deployment Slack notification is compact and emoji-free", () => {
+  const template = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"), "utf8");
+  const notification = template.slice(template.indexOf("- name: Notify Slack"));
+
+  assert.match(notification, /"text": f"Backend 배포 · \{status_label\}"/);
+  assert.match(notification, /"attachments": \[/);
+  assert.match(notification, /\*Backend 배포\*\\n/);
+  assert.match(notification, /`production` · `\{escape\(runtime\)\}`/);
+  assert.match(notification, /GitHub Actions/);
+  assert.doesNotMatch(notification, /icon_emoji|emoji|배포 이미지|type": "header"|type": "actions"/);
+  assert.doesNotMatch(notification, /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u);
+});
+
 test("kubernetes backend config throttles scheduler failure Slack alerts", () => {
   const applicationConfig = fs.readFileSync(path.join(repoRoot, "backend/tutor/src/main/resources/application.yml"), "utf8");
   const backendConfig = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/config/backend-config.yaml"), "utf8");

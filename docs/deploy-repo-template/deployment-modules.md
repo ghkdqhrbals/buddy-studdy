@@ -161,12 +161,11 @@ deployment.
   secret, and PII capture remains disabled. The backend application does not
   receive a Slack webhook and never sends operational alerts directly.
 - Deployment notifications use the dedicated `DEPLOY_SLACK_WEBHOOK_URL` Slack
-  app identity and show status, production environment, runtime, source commit,
-  immutable image, actor, timestamp, and direct build/deploy run actions.
-  Block Kit Markdown fields use actual newline characters so Slack renders
-  labels and values on separate lines; payload text must not contain a literal
-  `\n` sequence.
-  `SLACK_WEBHOOK_URL` is only a migration fallback.
+  app identity. Backend deployment posts the same compact attachment pattern as
+  iOS: one status line with environment and runtime, followed by the deploy run
+  and source commit links. It does not override the Slack app identity, include
+  emoji, repeat the image reference, or render action buttons.
+  `SLACK_WEBHOOK_URL` remains only a migration fallback.
 - iOS release notifications are sent through
   `Notify BuddyStudy Deployment Status` in the private deploy repository, so
   Slack credentials remain centralized. The channel receives one compact
