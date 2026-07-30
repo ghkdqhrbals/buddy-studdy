@@ -1568,6 +1568,7 @@ final class StudyMateTests: XCTestCase {
 
         XCTAssertEqual(backend.fetchSettingsCallCount, 1)
         XCTAssertEqual(appState.settings.studyCategories.map(\.title), ["Redis", "Kafka"])
+        XCTAssertEqual(appState.settings.intervalMinutes, 30)
         XCTAssertEqual(appState.settings.selectedStudyCategoryID, secondCategory.id)
         XCTAssertEqual(appState.studyCategoriesForDisplay.map(\.title), ["Redis", "Kafka"])
         XCTAssertEqual(store.loadSettings().studyCategories.map(\.title), ["Redis", "Kafka"])

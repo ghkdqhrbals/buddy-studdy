@@ -938,7 +938,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertEqual(relaunchedState.draftSettings.intervalMinutes, 47)
     }
 
-    func testBackendSettingsRefreshDoesNotOverwritePersistedLearningRhythm() async throws {
+    func testBackendSettingsRefreshUsesAuthoritativeServerLearningRhythm() async throws {
         let suiteName = "BackendLearningRhythmTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         let databaseURL = FileManager.default.temporaryDirectory
@@ -958,7 +958,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
                 topic: "Redis",
                 difficulty: .level6,
                 customPrompt: StudySettings.defaultCustomPrompt,
-                intervalMinutes: 47,
+                intervalMinutes: 15,
                 studyCategories: [StudyCategory(title: "Redis", difficulty: .level6)]
             )
         )
@@ -973,7 +973,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
                 {
                   "topic": "Redis",
                   "difficultyLevel": 6,
-                  "intervalMinutes": 15,
+                  "intervalMinutes": 47,
                   "enabled": true,
                   "notificationSound": "default",
                   "customPrompt": "",
@@ -993,6 +993,107 @@ final class QuestionGenerationFlowTests: XCTestCase {
 
         XCTAssertEqual(appState.settings.intervalMinutes, 47)
         XCTAssertEqual(appState.draftSettings.intervalMinutes, 47)
+        XCTAssertEqual(store.loadSettings().intervalMinutes, 47)
+    }
+
+    func testBackendSettingsWithoutLearningRhythmFailsInsteadOfDefaultingToFifteen() async throws {
+        let client = makeClient { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/v1/settings")
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: """
+                {
+                  "topic": "Redis",
+                  "difficultyLevel": 6,
+                  "enabled": true,
+                  "notificationSound": "default",
+                  "customPrompt": "",
+                  "appLanguage": "ko",
+                  "openAIModel": "\(StudySettings.defaultOpenAIModel)",
+                  "maxHistoryCount": 100,
+                  "isQuestionPublic": true,
+                  "openAIKeyConfigured": true
+                }
+                """
+            )
+        }
+
+        do {
+            _ = try await client.fetchSettings(registration: Self.registration)
+            XCTFail("Missing intervalMinutes must not silently become 15 minutes.")
+        } catch DecodingError.keyNotFound(let key, _) {
+            XCTAssertEqual(key.stringValue, "intervalMinutes")
+        } catch {
+            XCTFail("Expected a missing intervalMinutes decoding error, got \(error).")
+        }
+    }
+
+    func testFirstSettingsLoadReadsServerBeforeUploadingLocalDefault() async throws {
+        let suiteName = "BackendSettingsBootstrapTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+
+        let store = SettingsStore(
+            defaults: defaults,
+            recordDatabaseURL: databaseURL,
+            usesSecureBackendIdentityStorage: false
+        )
+        let client = makeClient { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/api/v1/devices/register"):
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "deviceId": "device-bootstrap",
+                      "clientSecret": "client-secret-bootstrap",
+                      "accessToken": "\(Self.signedInRegistration.accessToken ?? "")",
+                      "accessTokenExpiresAt": "2027-07-30T00:00:00Z"
+                    }
+                    """
+                )
+            case ("GET", "/api/v1/settings"):
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                    {
+                      "topic": "Redis",
+                      "difficultyLevel": 6,
+                      "intervalMinutes": 47,
+                      "enabled": true,
+                      "notificationSound": "default",
+                      "customPrompt": "",
+                      "appLanguage": "ko",
+                      "openAIModel": "\(StudySettings.defaultOpenAIModel)",
+                      "maxHistoryCount": 100,
+                      "isQuestionPublic": true,
+                      "openAIKeyConfigured": true
+                    }
+                    """
+                )
+            case ("PUT", "/api/v1/settings"):
+                XCTFail("Local 15-minute default was uploaded before server settings were read.")
+                return Self.response(for: request, statusCode: 200, body: "{}")
+            default:
+                XCTFail("Unexpected request: \(request.httpMethod ?? "-") \(request.url?.path ?? "-")")
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+
+        appState.beginSettingsEditing()
+        await appState.loadBackendSettingsForEditing()
+
+        XCTAssertEqual(appState.settings.intervalMinutes, 47)
         XCTAssertEqual(store.loadSettings().intervalMinutes, 47)
     }
 

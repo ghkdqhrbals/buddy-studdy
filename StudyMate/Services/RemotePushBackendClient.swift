@@ -3190,7 +3190,7 @@ struct BackendStudySettings: Decodable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         topic = try container.decodeIfPresent(String.self, forKey: .topic) ?? ""
         difficultyLevel = try container.decodeIfPresent(Int.self, forKey: .difficultyLevel) ?? 5
-        intervalMinutes = try container.decodeIfPresent(Int.self, forKey: .intervalMinutes) ?? 15
+        intervalMinutes = try container.decode(Int.self, forKey: .intervalMinutes)
         enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
         notificationSound = try container.decodeIfPresent(String.self, forKey: .notificationSound)
         customPrompt = try container.decodeIfPresent(String.self, forKey: .customPrompt) ?? ""

@@ -143,38 +143,24 @@ private struct AppUpdatePromptView: View {
                         .ignoresSafeArea()
                         .accessibilityHidden(true)
 
-                    updateContent
+                    forcedUpdateContent
                         .frame(maxWidth: 420)
                         .padding(.horizontal, 32)
                 }
                 .accessibilityAddTraits(.isModal)
             } else {
-                ZStack {
-                    Color.black.opacity(0.52)
-                        .ignoresSafeArea()
-                        .accessibilityHidden(true)
+                VStack {
+                    optionalUpdateBanner
+                        .padding(.horizontal, 14)
+                        .padding(.top, 8)
 
-                    updateContent
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 28)
-                        .frame(maxWidth: 360)
-                        .background(
-                            .regularMaterial,
-                            in: RoundedRectangle(cornerRadius: 28, style: .continuous)
-                        )
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
-                        }
-                        .shadow(color: .black.opacity(0.22), radius: 28, y: 14)
-                        .padding(.horizontal, 24)
-                        .accessibilityAddTraits(.isModal)
+                    Spacer()
                 }
             }
         }
     }
 
-    private var updateContent: some View {
+    private var forcedUpdateContent: some View {
         VStack(spacing: 0) {
             Image(systemName: "arrow.down.app.fill")
                 .font(.system(size: 31, weight: .semibold))
@@ -202,11 +188,7 @@ private struct AppUpdatePromptView: View {
             }
 
             Button {
-                appState.recordAppStoreOpened()
-                if let value = decision.appStoreURL,
-                   let url = URL(string: value) {
-                    openURL(url)
-                }
+                openAppStore()
             } label: {
                 Text(appState.strings.updateNow)
                     .font(.system(size: 16, weight: .bold))
@@ -216,15 +198,73 @@ private struct AppUpdatePromptView: View {
             .buttonStyle(.borderedProminent)
             .buttonBorderShape(.roundedRectangle(radius: 16))
             .padding(.top, 24)
+        }
+    }
 
-            if !decision.isForced {
-                Button(appState.strings.updateLater) {
-                    appState.dismissOptionalAppUpdate()
-                }
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .padding(.top, 15)
+    private var optionalUpdateBanner: some View {
+        HStack(spacing: 11) {
+            Image(systemName: "arrow.down.app.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 34, height: 34)
+                .background(Color.accentColor.opacity(0.12), in: Circle())
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(decision.title?.nonEmpty ?? defaultTitle)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+
+                Text(decision.message?.nonEmpty ?? defaultMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button {
+                openAppStore()
+            } label: {
+                Text(appState.strings.updateNow)
+                    .font(.caption.weight(.bold))
+                    .lineLimit(1)
+            }
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+            .controlSize(.small)
+
+            Button {
+                appState.dismissOptionalAppUpdate()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(appState.strings.updateLater)
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 8)
+        .padding(.vertical, 10)
+        .frame(maxWidth: 440)
+        .background(
+            .regularMaterial,
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.14), radius: 12, y: 5)
+    }
+
+    private func openAppStore() {
+        appState.recordAppStoreOpened()
+        if let value = decision.appStoreURL,
+           let url = URL(string: value) {
+            openURL(url)
         }
     }
 

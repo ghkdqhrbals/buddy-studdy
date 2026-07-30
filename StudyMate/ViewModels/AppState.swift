@@ -1992,6 +1992,7 @@ final class AppState: ObservableObject {
         }
 
         await loadOpenAIModelOptions()
+        await refreshBackendSettingsFromServer(reason: "startup")
         await refreshPermissionEvaluations(reason: "startup")
         await refreshNotificationUnreadCount()
         await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
@@ -2028,6 +2029,7 @@ final class AppState: ObservableObject {
 
         reloadPersistedState()
         await loadOpenAIModelOptions()
+        await refreshBackendSettingsFromServer(reason: "foreground")
         await refreshPermissionEvaluations(reason: "foreground")
         await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
         await resumePendingQuestionGenerationIfNeeded(reason: "foreground")
@@ -3781,57 +3783,79 @@ final class AppState: ObservableObject {
         }
 
         isLoadingBackendSettingsForEditing = true
-
-        guard let registration = await backendRegistrationForOpenAIRequests(reason: "settings-load") else {
+        defer {
             isLoadingBackendSettingsForEditing = false
-            log(.warning, "백엔드 등록이 없어 설정 로드를 건너뛰었습니다.")
-            return
         }
 
-        await actionRunner.run(
-            operation: {
-                try await settingsUseCase.fetchSettings(registration: registration)
-            },
-            onSuccess: { backendSettings in
-                guard isEditingSettings else {
-                    return
-                }
+        await refreshBackendSettingsFromServer(
+            reason: "settings-load",
+            requireCleanEditingState: true
+        )
+    }
 
+    @discardableResult
+    private func refreshBackendSettingsFromServer(
+        reason: String,
+        requireCleanEditingState: Bool = false
+    ) async -> Bool {
+        guard let registration = await backendRegistrationForOpenAIRequests(
+            reason: "settings-\(reason)",
+            syncSettingsAfterRegistration: false
+        ) else {
+            log(.warning, "백엔드 등록이 없어 설정 로드를 건너뛰었습니다. reason=\(reason)")
+            return false
+        }
+
+        do {
+            let backendSettings = try await performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "settings-\(reason)",
+                syncSettingsAfterRegistration: false
+            ) { recoveredRegistration in
+                try await settingsUseCase.fetchSettings(registration: recoveredRegistration)
+            }
+
+            if requireCleanEditingState {
+                guard isEditingSettings else {
+                    return false
+                }
                 guard !hasUnsavedSettingsChanges else {
                     log(.info, "백엔드 설정 로드 중 사용자가 설정을 수정해 응답 반영을 건너뛰었습니다.")
-                    return
+                    return false
                 }
-
-                let persistedIntervalMinutes = settings.intervalMinutes
-                var nextSettings = backendSettings.studySettings(fallback: settings)
-                nextSettings.intervalMinutes = persistedIntervalMinutes
-                nextSettings = synchronizedTopicCategories(for: nextSettings)
-                if !isCommunitySessionActive {
-                    nextSettings = nextSettings.withQuestionPrivacy(false)
-                }
-                let normalizedNextSettings = normalizedSettings(nextSettings)
-
-                settings = normalizedNextSettings
-                draftSettings = normalizedNextSettings
-                savedSettings = normalizedNextSettings
-                isRunning = backendSettings.enabled
-                isBackendOpenAIKeyConfigured = backendSettings.openAIKeyConfigured
-                didReceiveCloudStateWhileEditing = false
-
-                localStudySettingsUseCase.saveSettings(normalizedNextSettings)
-                currentStudySessionUseCase.saveIsRunning(backendSettings.enabled)
-                log(.info, "백엔드 설정을 불러와 설정 화면에 반영했습니다.")
-            },
-            onFailure: { error in
-                if handlePageAccessError(error, page: .studyDetail) {
-                    return
-                }
-                log(.warning, "백엔드 설정 로드 실패: \(error.localizedDescription)")
-            },
-            onCompletion: {
-                isLoadingBackendSettingsForEditing = false
             }
-        )
+
+            var nextSettings = backendSettings.studySettings(fallback: settings)
+            nextSettings = synchronizedTopicCategories(for: nextSettings)
+            if !isCommunitySessionActive {
+                nextSettings = nextSettings.withQuestionPrivacy(false)
+            }
+            let normalizedNextSettings = normalizedSettings(nextSettings)
+            let shouldUpdateDraftSettings = !isEditingSettings || !hasUnsavedSettingsChanges
+
+            settings = normalizedNextSettings
+            savedSettings = normalizedNextSettings
+            if shouldUpdateDraftSettings {
+                draftSettings = normalizedNextSettings
+            }
+            isRunning = backendSettings.enabled
+            isBackendOpenAIKeyConfigured = backendSettings.openAIKeyConfigured
+            didReceiveCloudStateWhileEditing = false
+
+            localStudySettingsUseCase.saveSettings(normalizedNextSettings)
+            currentStudySessionUseCase.saveIsRunning(backendSettings.enabled)
+            log(
+                .info,
+                "백엔드 설정을 기준으로 로컬 설정을 갱신했습니다. reason=\(reason), interval=\(normalizedNextSettings.sanitizedIntervalMinutes)"
+            )
+            return true
+        } catch {
+            if handlePageAccessError(error, page: .studyDetail) {
+                return false
+            }
+            log(.warning, "백엔드 설정 로드 실패: \(error.localizedDescription), reason=\(reason)")
+            return false
+        }
     }
 
     func cancelSettingsEditing() {
@@ -8524,6 +8548,9 @@ final class AppState: ObservableObject {
         developerSettingsUseCase.saveIsDebuggingEnabled(isEnabled)
         refreshRemotePushBackendClient(reason: isEnabled ? "debug-enabled" : "debug-disabled")
         log(.info, isEnabled ? "디버깅 모드를 켰습니다." : "디버깅 모드를 껐습니다.")
+        Task {
+            await refreshBackendSettingsFromServer(reason: "backend-environment-change")
+        }
     }
 
     func saveTermsAgreement(
@@ -8947,16 +8974,24 @@ final class AppState: ObservableObject {
         await generateDueQuestionIfNeeded(reason: "timer")
     }
 
-    private func backendRegistrationForOpenAIRequests(reason: String) async -> RemotePushRegistration? {
+    private func backendRegistrationForOpenAIRequests(
+        reason: String,
+        syncSettingsAfterRegistration: Bool = true
+    ) async -> RemotePushRegistration? {
         if let registration = storedBackendIdentityUseCase.loadRegistration() {
-            return await registrationWithAccessToken(registration, reason: reason)
+            return await registrationWithAccessToken(
+                registration,
+                reason: reason,
+                syncSettingsAfterRegistration: syncSettingsAfterRegistration
+            )
         }
 
         do {
             return try await registerFreshBackendDevice(
                 apnsToken: nil,
                 reason: reason,
-                includeAPIKey: true
+                includeAPIKey: true,
+                syncSettingsAfterRegistration: syncSettingsAfterRegistration
             )
         } catch {
             log(.warning, "OpenAI 요청용 백엔드 기기 등록 실패: \(error.localizedDescription)")
@@ -9110,7 +9145,8 @@ final class AppState: ObservableObject {
 
     private func registrationWithAccessToken(
         _ registration: RemotePushRegistration,
-        reason: String
+        reason: String,
+        syncSettingsAfterRegistration: Bool = true
     ) async -> RemotePushRegistration? {
         guard !registration.hasAccessToken else {
             logAuthTrace("backend_access_token_reuse", reason: reason)
@@ -9135,7 +9171,8 @@ final class AppState: ObservableObject {
                 log(.warning, "저장된 백엔드 identity가 유효하지 않아 새 기기를 등록합니다. reason=\(reason), deviceID=\(registration.deviceID), error=\(error.localizedDescription)")
                 return await resetBackendIdentityAndRegisterFresh(
                     previousRegistration: registration,
-                    reason: "\(reason)-device-recovery"
+                    reason: "\(reason)-device-recovery",
+                    syncSettingsAfterRegistration: syncSettingsAfterRegistration
                 )
             }
             logAuthTrace(
@@ -9152,6 +9189,7 @@ final class AppState: ObservableObject {
     private func performWithBackendIdentityRecovery<T>(
         registration: RemotePushRegistration,
         reason: String,
+        syncSettingsAfterRegistration: Bool = true,
         operation: (RemotePushRegistration) async throws -> T
     ) async throws -> T {
         do {
@@ -9170,7 +9208,8 @@ final class AppState: ObservableObject {
                 storedBackendIdentityUseCase.saveRegistration(expiredRegistration)
                 guard let refreshedRegistration = await registrationWithAccessToken(
                     expiredRegistration,
-                    reason: "\(reason)-access-token-recovery"
+                    reason: "\(reason)-access-token-recovery",
+                    syncSettingsAfterRegistration: syncSettingsAfterRegistration
                 ) else {
                     logAuthTrace("backend_access_token_recovery_failure", reason: reason, deduplicate: false)
                     throw error
@@ -9190,7 +9229,8 @@ final class AppState: ObservableObject {
             )
             guard let recoveredRegistration = await resetBackendIdentityAndRegisterFresh(
                 previousRegistration: registration,
-                reason: reason
+                reason: reason,
+                syncSettingsAfterRegistration: syncSettingsAfterRegistration
             ) else {
                 logAuthTrace("backend_identity_recovery_failure", reason: reason, deduplicate: false)
                 throw error
@@ -9203,7 +9243,8 @@ final class AppState: ObservableObject {
 
     private func resetBackendIdentityAndRegisterFresh(
         previousRegistration: RemotePushRegistration,
-        reason: String
+        reason: String,
+        syncSettingsAfterRegistration: Bool = true
     ) async -> RemotePushRegistration? {
         storedBackendIdentityUseCase.saveRegistration(nil)
         resetCommunitySignInState()
@@ -9213,7 +9254,8 @@ final class AppState: ObservableObject {
             let registration = try await registerFreshBackendDevice(
                 apnsToken: apnsToken.isEmpty ? nil : apnsToken,
                 reason: "\(reason)-identity-reset",
-                includeAPIKey: true
+                includeAPIKey: true,
+                syncSettingsAfterRegistration: syncSettingsAfterRegistration
             )
             log(.warning, "백엔드 device/token이 무효화되어 새 기기로 복구했습니다. reason=\(reason), oldDeviceID=\(previousRegistration.deviceID), newDeviceID=\(registration.deviceID)")
             return registration
@@ -9226,7 +9268,8 @@ final class AppState: ObservableObject {
     private func registerFreshBackendDevice(
         apnsToken: String?,
         reason: String,
-        includeAPIKey: Bool
+        includeAPIKey: Bool,
+        syncSettingsAfterRegistration: Bool = true
     ) async throws -> RemotePushRegistration {
         let registration = try await backendIdentityUseCase.registerDevice(
             installationIdentifier: storedBackendIdentityUseCase.installationIdentifier(),
@@ -9237,11 +9280,13 @@ final class AppState: ObservableObject {
         )
         storedBackendIdentityUseCase.saveRegistration(registration)
         log(.info, "새 백엔드 기기를 등록했습니다. reason=\(reason), deviceID=\(registration.deviceID)")
-        try await updateBackendSettings(
-            registration: registration,
-            reason: reason,
-            includeAPIKey: includeAPIKey
-        )
+        if syncSettingsAfterRegistration {
+            try await updateBackendSettings(
+                registration: registration,
+                reason: reason,
+                includeAPIKey: includeAPIKey
+            )
+        }
         return registration
     }
 
