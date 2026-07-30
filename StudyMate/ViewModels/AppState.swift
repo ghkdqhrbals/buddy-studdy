@@ -141,6 +141,7 @@ final class AppState: ObservableObject {
     @Published private(set) var questionQuotaNotice: String?
     @Published private(set) var serviceAvailability = BackendServiceAvailability.operational
     @Published private(set) var isCheckingServiceAvailability = false
+    @Published private(set) var isCheckingAppControl = false
     @Published private(set) var appUpdateDecision: BackendAppUpdateDecision?
     @Published private(set) var isCheckingAppUpdate = false
     @Published private(set) var isMaintenanceBypassedForDeveloper = false
@@ -617,6 +618,8 @@ final class AppState: ObservableObject {
     private let appTimeZoneProvider: AppTimeZoneProviding
     private let appSleepProvider: AppSleepProviding
     private let appDistributionContext: AppDistributionContext
+    private let appControlProvider: AppControlProviding
+    private let appControlSettingsStore: SettingsStore
     private var cloudSyncService: CloudSyncServiceProtocol?
     private var timerTask: Task<Void, Never>?
     private var cloudSyncTask: Task<Void, Never>?
@@ -629,6 +632,12 @@ final class AppState: ObservableObject {
     private var answerGradingPollingID: String?
     private var answerGradingOwnerID: String?
     private var maintenancePollingTask: Task<Void, Never>?
+    private var appControlBoundaryTask: Task<Void, Never>?
+    private var appControlPolicy: AppControlRemotePolicy?
+    private var appControlResolution = AppControlResolution.normal
+    private var didStartAppControlListener = false
+    private var appControlRefreshTask: Task<Bool, Never>?
+    private var lastAppControlPresentationKey: String?
     private var pendingTermsRequirementRetry: (() async -> Void)?
     private var pendingAnswerDraft: PendingAnswerDraft?
     private var lastBackgroundQuestionPreparationAt: Date?
@@ -1296,6 +1305,7 @@ final class AppState: ObservableObject {
         appTimeZoneProvider: AppTimeZoneProviding? = nil,
         appSleepProvider: AppSleepProviding? = nil,
         appDistributionContext: AppDistributionContext? = nil,
+        appControlProvider: AppControlProviding? = nil,
         appLogRepository: AppLogRepository? = nil,
         appLogUseCase: AppLogUseCase? = nil,
         remotePushRegistrationRepository: RemotePushRegistrationRepository? = nil,
@@ -1409,6 +1419,8 @@ final class AppState: ObservableObject {
         self.appTimeZoneProvider = appTimeZoneProvider
         self.appSleepProvider = appSleepProvider
         self.appDistributionContext = appDistributionContext
+        self.appControlProvider = appControlProvider ?? FirebaseAppControlProvider()
+        self.appControlSettingsStore = settingsStore
         self.settings = effectiveLoadedSettings
         self.draftSettings = effectiveLoadedSettings
         let loadedCurrentStudySession = localUseCases.currentStudySession.loadSession()
@@ -1950,6 +1962,9 @@ final class AppState: ObservableObject {
         questionGenerationPollingTask?.cancel()
         answerGradingPollingTask?.cancel()
         maintenancePollingTask?.cancel()
+        appControlBoundaryTask?.cancel()
+        appControlRefreshTask?.cancel()
+        appControlProvider.stopListening()
         appNotificationEventCancellables.forEach { $0.cancel() }
     }
 
@@ -1964,11 +1979,16 @@ final class AppState: ObservableObject {
             return
         }
         #endif
-        await refreshServiceAvailability()
+        let usesRemoteAppControl = await refreshAppControlPolicy()
+        if !usesRemoteAppControl {
+            await refreshServiceAvailability()
+        }
         guard !isMaintenanceAccessBlocked else {
             return
         }
-        await refreshAppUpdate()
+        if !usesRemoteAppControl {
+            await refreshAppUpdate()
+        }
         guard hasCompletedOnboarding else {
             log(.info, "온보딩 완료 전이라 시작 작업을 대기합니다.")
             return
@@ -2007,11 +2027,16 @@ final class AppState: ObservableObject {
             return
         }
         #endif
-        await refreshServiceAvailability()
+        let usesRemoteAppControl = await refreshAppControlPolicy()
+        if !usesRemoteAppControl {
+            await refreshServiceAvailability()
+        }
         guard !isMaintenanceAccessBlocked else {
             return
         }
-        await refreshAppUpdate()
+        if !usesRemoteAppControl {
+            await refreshAppUpdate()
+        }
         guard hasCompletedOnboarding else {
             return
         }
@@ -2039,6 +2064,133 @@ final class AppState: ObservableObject {
 
     var isServiceUnderMaintenance: Bool {
         serviceAvailability.isUnderMaintenance
+    }
+
+    var isCheckingAvailabilityControl: Bool {
+        isCheckingAppControl || isCheckingServiceAvailability
+    }
+
+    @discardableResult
+    func refreshAppControlPolicy() async -> Bool {
+        if let appControlRefreshTask {
+            return await appControlRefreshTask.value
+        }
+        let task = Task { [weak self] in
+            guard let self else { return false }
+            return await self.performAppControlPolicyRefresh()
+        }
+        appControlRefreshTask = task
+        isCheckingAppControl = true
+        let result = await task.value
+        appControlRefreshTask = nil
+        isCheckingAppControl = false
+        return result
+    }
+
+    private func performAppControlPolicyRefresh() async -> Bool {
+        startAppControlListenerIfNeeded()
+        if let fetched = await appControlProvider.fetchAndActivate(),
+           isUsableAppControlPolicy(fetched) {
+            appControlPolicy = fetched
+        }
+        guard let policy = appControlPolicy, isUsableAppControlPolicy(policy) else {
+            appControlPolicy = nil
+            appControlResolution = .normal
+            await recordAppControlEvent(.versionObserved, resolution: .normal)
+            return false
+        }
+        await applyAppControlPolicy(policy, source: "remote-config-fetch")
+        return true
+    }
+
+    func refreshAvailabilityControl() async {
+        let usesRemoteAppControl = await refreshAppControlPolicy()
+        if !usesRemoteAppControl {
+            await refreshServiceAvailability()
+        }
+    }
+
+    private func startAppControlListenerIfNeeded() {
+        guard !didStartAppControlListener else { return }
+        didStartAppControlListener = true
+        appControlProvider.startListening { [weak self] policy in
+            guard let self, self.isUsableAppControlPolicy(policy) else { return }
+            self.appControlPolicy = policy
+            Task {
+                await self.applyAppControlPolicy(policy, source: "remote-config-listener")
+            }
+        }
+    }
+
+    private func isUsableAppControlPolicy(_ policy: AppControlRemotePolicy) -> Bool {
+        policy.schemaVersion == 1
+            && policy.policyID != "bundled-default"
+            && policy.publishedAt <= appClock.now.addingTimeInterval(5 * 60)
+            && policy.validUntil > appClock.now
+    }
+
+    private func applyAppControlPolicy(
+        _ policy: AppControlRemotePolicy,
+        source: String
+    ) async {
+        let previous = appControlResolution
+        let resolution = AppControlPolicyResolver.resolve(
+            policy: policy,
+            language: settings.appLanguage,
+            channel: appDistributionContext.appControlChannel,
+            currentVersion: appDistributionContext.appVersion,
+            currentBuild: appDistributionContext.appBuild,
+            dismissedOptionalCampaignID: appControlSettingsStore
+                .loadDismissedOptionalAppControlCampaignID(),
+            now: appClock.now
+        )
+        appControlResolution = resolution
+        stopMaintenancePolling()
+        if let maintenance = resolution.maintenance {
+            serviceAvailability = maintenance
+            appUpdateDecision = nil
+        } else {
+            serviceAvailability = .operational
+            isMaintenanceBypassedForDeveloper = false
+            appUpdateDecision = resolution.update?.shouldPresent == true
+                ? resolution.update
+                : nil
+        }
+        scheduleAppControlBoundary(resolution.nextEvaluationAt)
+        log(
+            .info,
+            "앱 제어 정책을 반영했습니다. policy=\(policy.policyID), revision=\(policy.revision), action=\(resolution.action), source=\(source)"
+        )
+        await recordAppControlEvent(.policyEvaluated, resolution: resolution)
+        if resolution.action == "UP_TO_DATE", resolution.campaignID != nil {
+            await recordAppControlEvent(.updated, resolution: resolution)
+        }
+
+        let presentationKey = "\(policy.policyID):\(resolution.action)"
+        if presentationKey != lastAppControlPresentationKey {
+            if resolution.maintenance != nil, previous.maintenance == nil {
+                await recordAppControlEvent(.maintenanceShown, resolution: resolution)
+            } else if resolution.update?.shouldPresent == true {
+                await recordAppControlEvent(.promptShown, resolution: resolution)
+            }
+            lastAppControlPresentationKey = presentationKey
+        }
+    }
+
+    private func scheduleAppControlBoundary(_ date: Date?) {
+        appControlBoundaryTask?.cancel()
+        guard let date else {
+            appControlBoundaryTask = nil
+            return
+        }
+        let delay = max(0, date.timeIntervalSince(appClock.now))
+        appControlBoundaryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled, let self, let policy = self.appControlPolicy else {
+                return
+            }
+            await self.applyAppControlPolicy(policy, source: "policy-time-boundary")
+        }
     }
 
     func refreshAppUpdate() async {
@@ -2075,6 +2227,13 @@ final class AppState: ObservableObject {
             return
         }
         appUpdateDecision = nil
+        if appControlPolicy != nil {
+            appControlSettingsStore.saveDismissedOptionalAppControlCampaignID(decision.campaignID)
+            Task {
+                await recordAppControlEvent(.dismissed, resolution: appControlResolution)
+            }
+            return
+        }
         Task {
             await recordAppUpdateEvent(.dismissed, decision: decision)
         }
@@ -2082,6 +2241,12 @@ final class AppState: ObservableObject {
 
     func recordAppStoreOpened() {
         guard let decision = appUpdateDecision else {
+            return
+        }
+        if appControlPolicy != nil {
+            Task {
+                await recordAppControlEvent(.storeOpened, resolution: appControlResolution)
+            }
             return
         }
         Task {
@@ -2108,6 +2273,40 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func recordAppControlEvent(
+        _ event: BackendAppControlEventType,
+        resolution: AppControlResolution
+    ) async {
+        guard let registration = await backendRegistrationForOpenAIRequests(
+            reason: "app-control-\(event.rawValue.lowercased())"
+        ) else {
+            return
+        }
+        do {
+            try await appUpdateUseCase.recordAppControlEvent(
+                registration: registration,
+                request: BackendAppControlEventRequest(
+                    eventID: UUID().uuidString.lowercased(),
+                    event: event,
+                    platform: "ios",
+                    channel: appDistributionContext.appControlChannel,
+                    currentVersion: appDistributionContext.appVersion,
+                    currentBuild: appDistributionContext.appBuild,
+                    policyID: resolution.policyID,
+                    policyRevision: resolution.policyRevision,
+                    campaignID: resolution.campaignID,
+                    evaluatedAction: resolution.action,
+                    occurredAt: appClock.now
+                )
+            )
+        } catch {
+            log(
+                .warning,
+                "앱 제어 이벤트 기록 실패: event=\(event.rawValue), error=\(error.localizedDescription)"
+            )
+        }
+    }
+
     private var isMaintenanceAccessBlocked: Bool {
         isServiceUnderMaintenance && !isMaintenanceBypassedForDeveloper
     }
@@ -2123,6 +2322,9 @@ final class AppState: ObservableObject {
         isMaintenanceBypassedForDeveloper = true
         stopMaintenancePolling()
         log(.info, "개발자 코드로 현재 점검 화면을 우회했습니다.")
+        if appControlPolicy != nil {
+            await recordAppControlEvent(.maintenanceBypassed, resolution: appControlResolution)
+        }
         await completeStartupTasksIfNeeded()
     }
 
@@ -2207,7 +2409,7 @@ final class AppState: ObservableObject {
 
     @discardableResult
     func handleBackgroundRefresh() async -> Bool {
-        await refreshServiceAvailability()
+        await refreshAvailabilityControl()
         guard !isMaintenanceAccessBlocked else {
             return false
         }

@@ -126,11 +126,15 @@
 		120000000000000000000205 /* PageAccessPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000204 /* PageAccessPolicyTests.swift */; };
 		120000000000000000000207 /* AvatarBuilderAssetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000206 /* AvatarBuilderAssetTests.swift */; };
 		120000000000000000000209 /* QuestionGenerationFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000208 /* QuestionGenerationFlowTests.swift */; };
+		F70000000000000000000021 /* AppControlPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F70000000000000000000020 /* AppControlPolicyTests.swift */; };
 		120000000000000000000101 /* StudyMateiOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000001 /* StudyMateiOSApp.swift */; };
 		F60000000000000000000001 /* AppAnalytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000002 /* AppAnalytics.swift */; };
 		F60000000000000000000003 /* AppAnalytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000002 /* AppAnalytics.swift */; };
 		F60000000000000000000004 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000005 /* GoogleService-Info.plist */; };
 		F60000000000000000000006 /* FirebaseAnalyticsCore in Frameworks */ = {isa = PBXBuildFile; productRef = F60000000000000000000007 /* FirebaseAnalyticsCore */; };
+		F70000000000000000000001 /* AppControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = F70000000000000000000002 /* AppControl.swift */; };
+		F70000000000000000000003 /* AppControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = F70000000000000000000002 /* AppControl.swift */; };
+		F70000000000000000000006 /* FirebaseRemoteConfig in Frameworks */ = {isa = PBXBuildFile; productRef = F70000000000000000000007 /* FirebaseRemoteConfig */; };
 		120000000000000000000102 /* StudyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000002 /* StudyModels.swift */; };
 		1200000000000000000001E0 /* JapaneseAppStrings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000E0 /* JapaneseAppStrings.swift */; };
 		120000000000000000000104 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000004 /* SettingsStore.swift */; };
@@ -398,6 +402,7 @@
 		120000000000000000000001 /* StudyMateiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyMateiOSApp.swift; sourceTree = "<group>"; };
 		F60000000000000000000002 /* AppAnalytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAnalytics.swift; sourceTree = "<group>"; };
 		F60000000000000000000005 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
+		F70000000000000000000002 /* AppControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppControl.swift; sourceTree = "<group>"; };
 		120000000000000000000003 /* MobileRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileRootView.swift; sourceTree = "<group>"; };
 		120000000000000000000301 /* AppDebugControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDebugControls.swift; sourceTree = "<group>"; };
 		120000000000000000000020 /* StudyMate.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StudyMate.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -407,6 +412,7 @@
 		120000000000000000000204 /* PageAccessPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageAccessPolicyTests.swift; sourceTree = "<group>"; };
 		120000000000000000000206 /* AvatarBuilderAssetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarBuilderAssetTests.swift; sourceTree = "<group>"; };
 		120000000000000000000208 /* QuestionGenerationFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionGenerationFlowTests.swift; sourceTree = "<group>"; };
+		F70000000000000000000020 /* AppControlPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppControlPolicyTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -436,6 +442,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F60000000000000000000006 /* FirebaseAnalyticsCore in Frameworks */,
+				F70000000000000000000006 /* FirebaseRemoteConfig in Frameworks */,
 				D40000000000000000000001 /* MarkdownUI in Frameworks */,
 				E50000000000000000000001 /* Sentry in Frameworks */,
 			);
@@ -461,6 +468,7 @@
 				120000000000000000000001 /* StudyMateiOSApp.swift */,
 				E50000000000000000000004 /* SentryMonitoring.swift */,
 				F60000000000000000000002 /* AppAnalytics.swift */,
+				F70000000000000000000002 /* AppControl.swift */,
 				11000000000000000000002A /* Core */,
 				11000000000000000000002F /* UseCases */,
 				11000000000000000000004D /* Repositories */,
@@ -864,6 +872,7 @@
 			children = (
 				120000000000000000000200 /* ArchitecturePolicyTests.swift */,
 				120000000000000000000202 /* QuestionSchedulePolicyTests.swift */,
+				F70000000000000000000020 /* AppControlPolicyTests.swift */,
 				120000000000000000000204 /* PageAccessPolicyTests.swift */,
 				120000000000000000000206 /* AvatarBuilderAssetTests.swift */,
 				120000000000000000000208 /* QuestionGenerationFlowTests.swift */,
@@ -1002,6 +1011,7 @@
 				D40000000000000000000002 /* MarkdownUI */,
 				E50000000000000000000002 /* Sentry */,
 				F60000000000000000000007 /* FirebaseAnalyticsCore */,
+				F70000000000000000000007 /* FirebaseRemoteConfig */,
 			);
 			productName = StudyMate;
 			productReference = 120000000000000000000020 /* StudyMate.app */;
@@ -1119,6 +1129,7 @@
 			files = (
 				110000000000000000000101 /* StudyMateApp.swift in Sources */,
 				F60000000000000000000003 /* AppAnalytics.swift in Sources */,
+				F70000000000000000000003 /* AppControl.swift in Sources */,
 				110000000000000000000102 /* StudyModels.swift in Sources */,
 				1100000000000000000001E0 /* JapaneseAppStrings.swift in Sources */,
 				110000000000000000000104 /* SettingsStore.swift in Sources */,
@@ -1240,6 +1251,7 @@
 			files = (
 				120000000000000000000201 /* ArchitecturePolicyTests.swift in Sources */,
 				120000000000000000000203 /* QuestionSchedulePolicyTests.swift in Sources */,
+				F70000000000000000000021 /* AppControlPolicyTests.swift in Sources */,
 				120000000000000000000205 /* PageAccessPolicyTests.swift in Sources */,
 				120000000000000000000207 /* AvatarBuilderAssetTests.swift in Sources */,
 				120000000000000000000209 /* QuestionGenerationFlowTests.swift in Sources */,
@@ -1252,6 +1264,7 @@
 			files = (
 				120000000000000000000101 /* StudyMateiOSApp.swift in Sources */,
 				F60000000000000000000001 /* AppAnalytics.swift in Sources */,
+				F70000000000000000000001 /* AppControl.swift in Sources */,
 				E50000000000000000000003 /* SentryMonitoring.swift in Sources */,
 				120000000000000000000102 /* StudyModels.swift in Sources */,
 				1200000000000000000001E0 /* JapaneseAppStrings.swift in Sources */,
@@ -1794,6 +1807,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = F60000000000000000000008 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseAnalyticsCore;
+		};
+		F70000000000000000000007 /* FirebaseRemoteConfig */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F60000000000000000000008 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseRemoteConfig;
 		};
 /* End XCSwiftPackageProductDependency section */
 

@@ -152,6 +152,11 @@ buddystudy:
     username: ${ADMIN_USERNAME:admin}
     password: ${ADMIN_PASSWORD:admin}
     token-hours: ${ADMIN_TOKEN_HOURS:12}
+  firebase:
+    remote-config:
+      project-id: ${FIREBASE_PROJECT_ID:}
+      service-account-json-base64: ${FIREBASE_SERVICE_ACCOUNT_JSON_BASE64:}
+      parameter-key: ${FIREBASE_REMOTE_CONFIG_PARAMETER_KEY:ios_app_control_v1}
   monitoring:
     environment-name: ${MONITORING_ENVIRONMENT_NAME:${SPRING_PROFILES_ACTIVE:production}}
     service-name: ${MONITORING_SERVICE_NAME:BuddyStudy backend}

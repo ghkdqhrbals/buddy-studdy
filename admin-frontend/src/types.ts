@@ -95,6 +95,10 @@ export type AppUpdateCampaignSummary = {
   openedUserCount: number;
   convertedUserCount: number;
   conversionRate: number;
+  remoteConfigStatus: "PENDING" | "PUBLISHED" | "FAILED" | "DISABLED";
+  remoteConfigRevision?: number | null;
+  remoteConfigPublishedAt?: string | null;
+  remoteConfigError?: string | null;
 };
 
 export type AppUpdateCampaignPage = {

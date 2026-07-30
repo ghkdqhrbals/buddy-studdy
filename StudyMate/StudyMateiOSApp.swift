@@ -109,20 +109,20 @@ private struct StudyMateiOSRootContent: View {
     let forcesMaintenancePreview: Bool
 
     var body: some View {
-        ZStack {
-            Group {
-                if (forcesMaintenancePreview || appState.isServiceUnderMaintenance)
-                    && !appState.isMaintenanceBypassedForDeveloper {
-                    ServiceMaintenanceView()
-                } else {
+        Group {
+            if (forcesMaintenancePreview || appState.isServiceUnderMaintenance)
+                && !appState.isMaintenanceBypassedForDeveloper {
+                ServiceMaintenanceView()
+            } else {
+                ZStack {
                     MobileRootView()
-                }
-            }
 
-            if let decision = appState.appUpdateDecision {
-                AppUpdatePromptView(decision: decision)
-                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
-                    .zIndex(10)
+                    if let decision = appState.appUpdateDecision {
+                        AppUpdatePromptView(decision: decision)
+                            .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                            .zIndex(10)
+                    }
+                }
             }
         }
         .environmentObject(appState)
@@ -136,73 +136,95 @@ private struct AppUpdatePromptView: View {
     let decision: BackendAppUpdateDecision
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.52)
-                .ignoresSafeArea()
-                .accessibilityHidden(true)
+        Group {
+            if decision.isForced {
+                ZStack {
+                    Color(.systemBackground)
+                        .ignoresSafeArea()
+                        .accessibilityHidden(true)
 
-            VStack(spacing: 0) {
-                Image(systemName: "arrow.down.app.fill")
-                    .font(.system(size: 31, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 62, height: 62)
-                    .background(Color.accentColor.opacity(0.12), in: Circle())
-
-                Text(decision.title?.nonEmpty ?? defaultTitle)
-                    .font(.system(size: 22, weight: .bold))
-                    .multilineTextAlignment(.center)
-                    .padding(.top, 20)
-
-                Text(decision.message?.nonEmpty ?? defaultMessage)
-                    .font(.system(size: 15))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(4)
-                    .padding(.top, 10)
-
-                if let targetVersion = decision.targetVersion?.nonEmpty {
-                    Text(versionLabel(targetVersion, build: decision.targetBuild))
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                        .padding(.top, 12)
+                    updateContent
+                        .frame(maxWidth: 420)
+                        .padding(.horizontal, 32)
                 }
+                .accessibilityAddTraits(.isModal)
+            } else {
+                ZStack {
+                    Color.black.opacity(0.52)
+                        .ignoresSafeArea()
+                        .accessibilityHidden(true)
 
-                Button {
-                    appState.recordAppStoreOpened()
-                    if let value = decision.appStoreURL,
-                       let url = URL(string: value) {
-                        openURL(url)
-                    }
-                } label: {
-                    Text(appState.strings.updateNow)
-                        .font(.system(size: 16, weight: .bold))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 52)
-                }
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.roundedRectangle(radius: 16))
-                .padding(.top, 24)
-
-                if !decision.isForced {
-                    Button(appState.strings.updateLater) {
-                        appState.dismissOptionalAppUpdate()
-                    }
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 15)
+                    updateContent
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 28)
+                        .frame(maxWidth: 360)
+                        .background(
+                            .regularMaterial,
+                            in: RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                        }
+                        .shadow(color: .black.opacity(0.22), radius: 28, y: 14)
+                        .padding(.horizontal, 24)
+                        .accessibilityAddTraits(.isModal)
                 }
             }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 28)
-            .frame(maxWidth: 360)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        }
+    }
+
+    private var updateContent: some View {
+        VStack(spacing: 0) {
+            Image(systemName: "arrow.down.app.fill")
+                .font(.system(size: 31, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 62, height: 62)
+                .background(Color.accentColor.opacity(0.12), in: Circle())
+
+            Text(decision.title?.nonEmpty ?? defaultTitle)
+                .font(.system(size: 22, weight: .bold))
+                .multilineTextAlignment(.center)
+                .padding(.top, 20)
+
+            Text(decision.message?.nonEmpty ?? defaultMessage)
+                .font(.system(size: 15))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .lineSpacing(4)
+                .padding(.top, 10)
+
+            if let targetVersion = decision.targetVersion?.nonEmpty {
+                Text(versionLabel(targetVersion, build: decision.targetBuild))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 12)
             }
-            .shadow(color: .black.opacity(0.22), radius: 28, y: 14)
-            .padding(.horizontal, 24)
-            .accessibilityAddTraits(.isModal)
+
+            Button {
+                appState.recordAppStoreOpened()
+                if let value = decision.appStoreURL,
+                   let url = URL(string: value) {
+                    openURL(url)
+                }
+            } label: {
+                Text(appState.strings.updateNow)
+                    .font(.system(size: 16, weight: .bold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+            }
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.roundedRectangle(radius: 16))
+            .padding(.top, 24)
+
+            if !decision.isForced {
+                Button(appState.strings.updateLater) {
+                    appState.dismissOptionalAppUpdate()
+                }
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.top, 15)
+            }
         }
     }
 
@@ -290,18 +312,18 @@ private struct ServiceMaintenanceView: View {
 
                 Button {
                     Task {
-                        await appState.refreshServiceAvailability()
+                        await appState.refreshAvailabilityControl()
                     }
                 } label: {
                     HStack(spacing: 8) {
-                        if appState.isCheckingServiceAvailability {
+                        if appState.isCheckingAvailabilityControl {
                             ProgressView()
                                 .tint(.white)
                         } else {
                             Image(systemName: "arrow.clockwise")
                         }
                         Text(
-                            appState.isCheckingServiceAvailability
+                            appState.isCheckingAvailabilityControl
                                 ? strings.maintenanceChecking
                                 : strings.maintenanceRetry
                         )
@@ -314,7 +336,7 @@ private struct ServiceMaintenanceView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .disabled(appState.isCheckingServiceAvailability)
+                .disabled(appState.isCheckingAvailabilityControl)
                 .padding(.horizontal, 24)
                 .padding(.bottom, 30)
             }

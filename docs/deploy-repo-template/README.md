@@ -43,9 +43,12 @@ Backend deploy:
 
 Backend application values are stored in AWS Secrets Manager secret
 `buddystudy/prod`. Required APNs keys are `APNS_AUTH_KEY_BASE64`,
-`APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`, and `APNS_ENV`. The deploy
-workflow reads and validates them before writing the backend environment file;
-do not duplicate them as GitHub Actions Secrets.
+`APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`, and `APNS_ENV`. Firebase
+Remote Config publication requires `FIREBASE_PROJECT_ID` and a Base64-encoded
+service-account JSON in `FIREBASE_SERVICE_ACCOUNT_JSON_BASE64`. The service
+account needs only Remote Config template read/update access. The deploy
+workflow reads and validates these values before writing the backend
+environment file; do not duplicate them as GitHub Actions Secrets.
 
 EC2 log forwarding to MacBook Air Loki:
 

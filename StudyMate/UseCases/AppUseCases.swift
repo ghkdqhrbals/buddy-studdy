@@ -42,6 +42,10 @@ protocol AppUpdateRepository {
         campaignID: Int64,
         event: BackendAppUpdateEvent
     ) async throws
+    func recordAppControlEvent(
+        registration: RemotePushRegistration,
+        request: BackendAppControlEventRequest
+    ) async throws
 }
 
 @MainActor
@@ -70,6 +74,16 @@ struct RemoteAppUpdateRepository: AppUpdateRepository {
             event: event
         )
     }
+
+    func recordAppControlEvent(
+        registration: RemotePushRegistration,
+        request: BackendAppControlEventRequest
+    ) async throws {
+        try await backendClient.recordAppControlEvent(
+            registration: registration,
+            request: request
+        )
+    }
 }
 
 @MainActor
@@ -93,6 +107,16 @@ struct AppUpdateUseCase {
         event: BackendAppUpdateEvent
     ) async throws {
         try await repository.record(registration: registration, campaignID: campaignID, event: event)
+    }
+
+    func recordAppControlEvent(
+        registration: RemotePushRegistration,
+        request: BackendAppControlEventRequest
+    ) async throws {
+        try await repository.recordAppControlEvent(
+            registration: registration,
+            request: request
+        )
     }
 }
 

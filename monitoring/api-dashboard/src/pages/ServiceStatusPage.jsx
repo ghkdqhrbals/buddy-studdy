@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarClock, Power, RefreshCw, XCircle } from "lucide-react";
 import { useMemo, useState } from "react";
-import { monitoringStatusFetch } from "../admin/adminApi.js";
+import { adminFetch, monitoringStatusFetch } from "../admin/adminApi.js";
 import {
   DataTable,
   PageHeader,
@@ -51,17 +51,23 @@ function MaintenanceForm({ onSaved }) {
     messageJa: "より安定したサービスのため、メンテナンスを実施しています。しばらくしてからもう一度お試しください。",
   });
   const mutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const start = mode === "now" ? new Date() : new Date(startsAt);
       const end = endsAt ? new Date(endsAt) : null;
-      return monitoringStatusFetch("/service-maintenance", {
+      const payload = {
+        ...content,
+        startsAt: start.toISOString(),
+        endsAt: end?.toISOString() || null,
+      };
+      const created = await monitoringStatusFetch("/service-maintenance", {
         method: "POST",
-        body: JSON.stringify({
-          ...content,
-          startsAt: start.toISOString(),
-          endsAt: end?.toISOString() || null,
-        }),
+        body: JSON.stringify(payload),
       });
+      await adminFetch("/app-updates/maintenance", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      return created;
     },
     onSuccess: (created) => {
       onSaved(created);
@@ -151,7 +157,14 @@ function MaintenanceForm({ onSaved }) {
 function ActiveWindows({ overview, onChanged }) {
   const windows = [overview?.current, ...(overview?.upcoming || [])].filter(Boolean);
   const mutation = useMutation({
-    mutationFn: (item) => monitoringStatusFetch(`/service-maintenance/${item.id}/terminate`, { method: "POST" }),
+    mutationFn: async (item) => {
+      const ended = await monitoringStatusFetch(
+        `/service-maintenance/${item.id}/terminate`,
+        { method: "POST" },
+      );
+      await adminFetch("/app-updates/maintenance/end", { method: "POST" });
+      return ended;
+    },
     onSuccess: onChanged,
   });
 
@@ -160,7 +173,7 @@ function ActiveWindows({ overview, onChanged }) {
       <section className="workspace-section">
         <div className="maintenance-operational">
           <span className="operational-dot" />
-          <div><h2>Service operational</h2><p>No active or scheduled maintenance windows.</p></div>
+          <div><h2>Service operational</h2><p>No active or scheduled maintenance windows. Firebase Remote Config is published with the same state.</p></div>
         </div>
       </section>
     );
@@ -169,7 +182,7 @@ function ActiveWindows({ overview, onChanged }) {
   return (
     <section className="workspace-section">
       <div className="section-heading">
-        <div><h2>Active and scheduled</h2><p>Customer apps read this status directly from monitoring.</p></div>
+        <div><h2>Active and scheduled</h2><p>Legacy builds read monitoring; FRC-enabled builds receive the same state in real time.</p></div>
       </div>
       {mutation.error ? <InlineNotice tone="danger" compact>{mutation.error.message}</InlineNotice> : null}
       <div className="maintenance-window-list">

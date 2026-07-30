@@ -133,6 +133,14 @@ jobs:
               exit 1
             fi
           done
+          FIREBASE_PROJECT_ID="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("FIREBASE_PROJECT_ID") or "")')"
+          FIREBASE_SERVICE_ACCOUNT_JSON_BASE64="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("FIREBASE_SERVICE_ACCOUNT_JSON_BASE64") or "")')"
+          for required_firebase_key in FIREBASE_PROJECT_ID FIREBASE_SERVICE_ACCOUNT_JSON_BASE64; do
+            if [ -z "${!required_firebase_key}" ]; then
+              echo "Missing ${required_firebase_key} in AWS Secrets Manager secret: ${APP_SECRET_ID}" >&2
+              exit 1
+            fi
+          done
           REDIS_PASSWORD="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("REDIS_PASSWORD") or "")')"
           if [ -z "${REDIS_PASSWORD}" ]; then
             REDIS_PASSWORD="$(openssl rand -hex 32)"
@@ -217,6 +225,9 @@ jobs:
           APNS_TEAM_ID=${APNS_TEAM_ID}
           APNS_BUNDLE_ID=${APNS_BUNDLE_ID}
           APNS_ENV=${APNS_ENV}
+          FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
+          FIREBASE_SERVICE_ACCOUNT_JSON_BASE64=${FIREBASE_SERVICE_ACCOUNT_JSON_BASE64}
+          FIREBASE_REMOTE_CONFIG_PARAMETER_KEY=ios_app_control_v1
           AWS_SECRET_ID=${APP_SECRET_ID}
           AWS_REGION=ap-northeast-2
           SENTRY_DSN=${SENTRY_DSN}

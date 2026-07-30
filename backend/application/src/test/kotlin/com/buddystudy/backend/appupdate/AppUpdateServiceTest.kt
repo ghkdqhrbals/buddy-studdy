@@ -8,6 +8,11 @@ import com.buddystudy.backend.appupdate.application.model.AppUpdateCheckCommand
 import com.buddystudy.backend.appupdate.application.model.AppUpdateEvent
 import com.buddystudy.backend.appupdate.application.model.AppUpdateMode
 import com.buddystudy.backend.appupdate.application.model.AppUpdateUserState
+import com.buddystudy.backend.appupdate.application.model.AppControlEventCommand
+import com.buddystudy.backend.appupdate.application.model.AppControlEventType
+import com.buddystudy.backend.appupdate.application.model.AppControlMaintenanceCommand
+import com.buddystudy.backend.appupdate.application.model.AppDistributionChannel
+import com.buddystudy.backend.appupdate.application.model.RemoteConfigPublicationStatus
 import com.buddystudy.backend.appupdate.application.model.CreateAppUpdateCampaignCommand
 import com.buddystudy.backend.appupdate.application.port.outbound.AppUpdatePort
 import com.buddystudy.backend.appupdate.application.service.AppUpdateService
@@ -68,10 +73,38 @@ class AppUpdateServiceTest {
         assertThat(result.title).isEqualTo("更新")
     }
 
+    @Test
+    fun `app control observation updates the exact authenticated device and is idempotent`() = runBlocking {
+        val port = FakeAppUpdatePort()
+        val service = AppUpdateService(port)
+        val command = AppControlEventCommand(
+            eventId = "device-7-launch-1",
+            event = AppControlEventType.VERSION_OBSERVED,
+            platform = "ios",
+            channel = AppDistributionChannel.TESTFLIGHT,
+            currentVersion = "1.2.0",
+            currentBuild = "81",
+            policyId = "ios-81",
+            policyRevision = 81,
+            campaignId = null,
+            evaluatedAction = "NORMAL",
+            occurredAt = Instant.EPOCH,
+        )
+
+        service.recordAppControlEvent(Principal(7, "device-7", 1, false), command)
+        service.recordAppControlEvent(Principal(7, "device-7", 1, false), command)
+
+        assertThat(port.lastDeviceIdentity).isEqualTo(7L to "device-7")
+        assertThat(port.lastDeviceVersion).isEqualTo("1.2.0" to "81")
+        assertThat(port.appControlEvents).containsExactly("device-7-launch-1")
+    }
+
     private class FakeAppUpdatePort(mode: AppUpdateMode = AppUpdateMode.OPTIONAL) : AppUpdatePort {
         var state: AppUpdateUserState? = null
         var converted = false
+        var lastDeviceIdentity: Pair<Long, String>? = null
         var lastDeviceVersion: Pair<String, String>? = null
+        val appControlEvents = mutableListOf<String>()
         private val campaign = AppUpdateCampaign(
             id = 3, platform = "ios", targetVersion = "1.1.0", targetBuild = "71",
             mode = mode, titleKo = "업데이트", titleEn = "Update", titleJa = "更新",
@@ -89,7 +122,19 @@ class AppUpdateServiceTest {
         )
 
         override suspend fun updateDeviceVersion(userId: Long, deviceId: String, version: String, build: String, seenAt: Instant) {
+            lastDeviceIdentity = userId to deviceId
             lastDeviceVersion = version to build
+        }
+        override suspend fun recordAppControlEvent(
+            userId: Long,
+            deviceId: String,
+            command: AppControlEventCommand,
+            recordedAt: Instant,
+        ): Boolean = if (command.eventId in appControlEvents) {
+            false
+        } else {
+            appControlEvents += command.eventId
+            true
         }
         override suspend fun activeCampaign(platform: String) = campaign
         override suspend fun userState(campaignId: Long, userId: Long) = state
@@ -105,5 +150,17 @@ class AppUpdateServiceTest {
         override suspend fun endCampaign(campaignId: Long, now: Instant): AdminAppUpdateCampaignSummary? = null
         override suspend fun campaignUsers(campaignId: Long, query: String?, status: String?, limit: Int, offset: Int) =
             AdminAppUpdateUserPage(emptyList(), 0, limit, offset)
+        override suspend fun activeMaintenance(now: Instant) = null
+        override suspend fun createMaintenance(command: AppControlMaintenanceCommand, now: Instant) =
+            error("not used")
+        override suspend fun endMaintenance(maintenanceId: Long, now: Instant) = null
+        override suspend fun updateRemoteConfigPublication(
+            campaignId: Long?,
+            status: RemoteConfigPublicationStatus,
+            revision: Long?,
+            publishedAt: Instant?,
+            error: String?,
+            now: Instant,
+        ) = Unit
     }
 }

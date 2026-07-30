@@ -4,6 +4,23 @@ struct AppDistributionContext: Equatable {
     let isTestFlight: Bool
     let buildIdentifier: String
 
+    var appVersion: String {
+        buildIdentifier.split(separator: "(", maxSplits: 1).first.map(String.init) ?? "0"
+    }
+
+    var appBuild: String {
+        guard let opening = buildIdentifier.firstIndex(of: "("),
+              let closing = buildIdentifier.lastIndex(of: ")"),
+              opening < closing else {
+            return "0"
+        }
+        return String(buildIdentifier[buildIdentifier.index(after: opening)..<closing])
+    }
+
+    var appControlChannel: AppControlDistributionChannel {
+        isTestFlight ? .testFlight : .appStore
+    }
+
     static var live: AppDistributionContext {
         let bundle = Bundle.main
         let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String

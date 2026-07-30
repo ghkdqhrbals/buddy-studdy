@@ -116,8 +116,10 @@ deployment.
   Secrets Manager. The `buddystudy/prod` application secret owns
   `OPENAI_API_KEY_USER`, `OPENAI_API_KEY_SYSTEM`, `REDIS_PASSWORD`,
   `APNS_AUTH_KEY_BASE64`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`,
-  `APNS_ENV`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, and
-  `SMTP_FROM`. The two OpenAI keys must be present and different:
+  `APNS_ENV`, `FIREBASE_PROJECT_ID`, `FIREBASE_SERVICE_ACCOUNT_JSON_BASE64`,
+  `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, and `SMTP_FROM`.
+  The Firebase service account must be limited to reading and updating Remote
+  Config templates. The two OpenAI keys must be present and different:
   post-study topic suggestions use only the system key, while question
   generation, embeddings, translation, answer feedback, and grading use only
   the user-content key. Required values must be validated before writing the

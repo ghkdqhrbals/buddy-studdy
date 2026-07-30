@@ -2328,6 +2328,45 @@ enum BackendAppUpdateEvent: String, Codable {
     case appStoreOpened = "APP_STORE_OPENED"
 }
 
+enum BackendAppControlEventType: String, Codable {
+    case versionObserved = "VERSION_OBSERVED"
+    case policyEvaluated = "POLICY_EVALUATED"
+    case promptShown = "PROMPT_SHOWN"
+    case dismissed = "DISMISSED"
+    case storeOpened = "STORE_OPENED"
+    case updated = "UPDATED"
+    case maintenanceShown = "MAINTENANCE_SHOWN"
+    case maintenanceBypassed = "MAINTENANCE_BYPASSED"
+}
+
+struct BackendAppControlEventRequest: Codable {
+    var eventID: String
+    var event: BackendAppControlEventType
+    var platform: String
+    var channel: AppControlDistributionChannel
+    var currentVersion: String
+    var currentBuild: String
+    var policyID: String?
+    var policyRevision: Int64?
+    var campaignID: Int64?
+    var evaluatedAction: String?
+    var occurredAt: Date
+
+    private enum CodingKeys: String, CodingKey {
+        case eventID = "eventId"
+        case event
+        case platform
+        case channel
+        case currentVersion
+        case currentBuild
+        case policyID = "policyId"
+        case policyRevision
+        case campaignID = "campaignId"
+        case evaluatedAction
+        case occurredAt
+    }
+}
+
 struct BackendAppUpdateDecision: Codable, Equatable, Identifiable {
     var updateAvailable: Bool
     var shouldPresent: Bool

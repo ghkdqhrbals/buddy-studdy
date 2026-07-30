@@ -161,6 +161,16 @@ export function endAppUpdateCampaign(
   return request(`/api/v1/admin/app-updates/${campaignId}/end`, { method: "POST" }, onUnauthorized);
 }
 
+export function republishAppControlPolicy(
+  onUnauthorized: UnauthorizedHandler,
+): Promise<AppUpdateCampaignSummary | null> {
+  return request(
+    "/api/v1/admin/app-updates/remote-config/publish",
+    { method: "POST" },
+    onUnauthorized,
+  );
+}
+
 export function fetchAppUpdateUsers(
   campaignId: number,
   onUnauthorized: UnauthorizedHandler,

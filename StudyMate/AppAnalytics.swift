@@ -94,22 +94,9 @@ enum AppAnalytics {
         }
         #endif
 
-        guard let configurationURL = bundle.url(
-            forResource: "GoogleService-Info",
-            withExtension: "plist"
-        ),
-        let dictionary = NSDictionary(contentsOf: configurationURL) as? [String: Any],
-        AppAnalyticsConfiguration.isUsable(
-            dictionary: dictionary,
-            bundleIdentifier: bundle.bundleIdentifier
-        ),
-        let options = FirebaseOptions(contentsOfFile: configurationURL.path) else {
+        guard FirebaseBootstrap.configureIfPossible(bundle: bundle) else {
             logger.notice("Firebase Analytics is disabled because its iOS configuration is unavailable.")
             return
-        }
-
-        if FirebaseApp.app() == nil {
-            FirebaseApp.configure(options: options)
         }
 
         #if DEBUG

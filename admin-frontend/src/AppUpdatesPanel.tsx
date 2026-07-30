@@ -5,6 +5,7 @@ import {
   endAppUpdateCampaign,
   fetchAppUpdateCampaigns,
   fetchAppUpdateUsers,
+  republishAppControlPolicy,
   type UnauthorizedHandler,
 } from "./api";
 import type {
@@ -131,6 +132,19 @@ export function AppUpdatesPanel({
     }
   }
 
+  async function republishPolicy() {
+    setSaving(true);
+    setError(null);
+    try {
+      await republishAppControlPolicy(onUnauthorized);
+      await loadCampaigns();
+    } catch (cause) {
+      setError(message(cause));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const promptedConversion = useMemo(
     () => selected && selected.promptedUserCount > 0
       ? `${(selected.conversionRate * 100).toFixed(1)}%`
@@ -190,6 +204,13 @@ export function AppUpdatesPanel({
         </div>
         <div className="app-update-actions">
           <button
+            className="secondary-button"
+            disabled={saving}
+            onClick={() => void republishPolicy()}
+          >
+            Republish current policy
+          </button>
+          <button
             className="primary-button"
             disabled={saving || !form.targetVersion.trim() || !form.targetBuild.trim()}
             onClick={() => void createCampaign()}
@@ -214,6 +235,7 @@ export function AppUpdatesPanel({
                 <th>Target</th>
                 <th>Mode</th>
                 <th>Status</th>
+                <th>Remote Config</th>
                 <th>Checked</th>
                 <th>Prompted</th>
                 <th>Opened</th>
@@ -235,6 +257,12 @@ export function AppUpdatesPanel({
                   <td><strong>{campaign.targetVersion}</strong><small>build {campaign.targetBuild}</small></td>
                   <td><span className={`status-pill ${campaign.mode === "FORCE" ? "danger" : ""}`}>{campaign.mode}</span></td>
                   <td><span className={`status-pill ${campaign.status === "ACTIVE" ? "success" : ""}`}>{campaign.status}</span></td>
+                  <td>
+                    <span className={`status-pill ${campaign.remoteConfigStatus === "PUBLISHED" ? "success" : campaign.remoteConfigStatus === "FAILED" ? "danger" : ""}`}>
+                      {campaign.remoteConfigStatus}
+                    </span>
+                    {campaign.remoteConfigError ? <small title={campaign.remoteConfigError}>{campaign.remoteConfigError}</small> : null}
+                  </td>
                   <td>{campaign.checkedUserCount}</td>
                   <td>{campaign.promptedUserCount}</td>
                   <td>{campaign.openedUserCount}</td>

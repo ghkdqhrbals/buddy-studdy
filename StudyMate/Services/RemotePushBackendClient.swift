@@ -242,6 +242,11 @@ protocol RemotePushBackendClientProtocol {
         event: BackendAppUpdateEvent
     ) async throws
 
+    func recordAppControlEvent(
+        registration: RemotePushRegistration,
+        request: BackendAppControlEventRequest
+    ) async throws
+
     func registerDevice(
         installationIdentifier: String,
         apnsToken: String?,
@@ -571,6 +576,11 @@ extension RemotePushBackendClientProtocol {
         event: BackendAppUpdateEvent
     ) async throws {}
 
+    func recordAppControlEvent(
+        registration: RemotePushRegistration,
+        request: BackendAppControlEventRequest
+    ) async throws {}
+
     func fetchRecordsForStudy(
         registration: RemotePushRegistration,
         studyID: Int,
@@ -656,6 +666,20 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(AppUpdateEventRequest(event: event))
+        _ = try await perform(request)
+    }
+
+    func recordAppControlEvent(
+        registration: RemotePushRegistration,
+        request event: BackendAppControlEventRequest
+    ) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "app-updates", "events")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(event)
         _ = try await perform(request)
     }
 

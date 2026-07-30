@@ -1,6 +1,10 @@
 # iOS Product Analytics
 
-BuddyStudy collects coarse iOS product events through Firebase Analytics. Monitoring pages, the backend, and the macOS target do not use this integration.
+BuddyStudy collects coarse iOS product events through Firebase Analytics. The
+same Firebase Apple app configuration is also used by Firebase Remote Config
+for maintenance and update control; Remote Config does not widen the analytics
+payload boundary below. Monitoring pages, the backend, and the macOS target do
+not use the Analytics integration.
 
 ## SDK and privacy boundary
 
@@ -39,7 +43,15 @@ User properties are limited to app language and signed-in/signed-out state.
 5. Update the App Store privacy disclosure before enabling production collection.
 6. Run the iOS release workflow.
 
-The workflow validates the plist, bundle ID, Google app ID, and API key. Firebase's generated Apple configuration can contain `IS_ANALYTICS_ENABLED=false` even when the project is linked to Google Analytics, so collection is enabled explicitly through `Analytics.setAnalyticsCollectionEnabled(true)` after the project and app identifiers pass validation. The committed plist remains a nonfunctional placeholder so builds cannot accidentally report to an unknown project.
+The workflow validates the plist, bundle ID, Google app ID, API key, and
+Firebase project ID. Firebase's generated Apple configuration can contain
+`IS_ANALYTICS_ENABLED=false` even when the project is linked to Google
+Analytics, so collection is enabled explicitly through
+`Analytics.setAnalyticsCollectionEnabled(true)` after the project and app
+identifiers pass validation. Remote Config initialization is independent of
+the debug Analytics collection switch. The committed plist remains a
+nonfunctional placeholder so local builds cannot accidentally connect to an
+unknown project.
 
 ## Verification
 

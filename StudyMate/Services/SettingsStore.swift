@@ -41,6 +41,7 @@ final class SettingsStore {
         static let backendInstallationIdentifierFallback = "backendInstallationIdentifier"
         static let studyTreeNodeOffsetsPrefix = "studyTreeNodeOffsets"
         static let studyTreeViewportPrefix = "studyTreeViewport"
+        static let dismissedOptionalAppControlCampaignID = "dismissedOptionalAppControlCampaignID"
     }
 
     private enum KeychainAccount {
@@ -173,6 +174,21 @@ final class SettingsStore {
 
         if let data = try? encoder.encode(sanitizedSettings) {
             defaults.set(data, forKey: Keys.settings)
+        }
+    }
+
+    func loadDismissedOptionalAppControlCampaignID() -> Int64? {
+        guard let value = defaults.object(forKey: Keys.dismissedOptionalAppControlCampaignID) as? NSNumber else {
+            return nil
+        }
+        return value.int64Value
+    }
+
+    func saveDismissedOptionalAppControlCampaignID(_ campaignID: Int64?) {
+        if let campaignID {
+            defaults.set(NSNumber(value: campaignID), forKey: Keys.dismissedOptionalAppControlCampaignID)
+        } else {
+            defaults.removeObject(forKey: Keys.dismissedOptionalAppControlCampaignID)
         }
     }
 

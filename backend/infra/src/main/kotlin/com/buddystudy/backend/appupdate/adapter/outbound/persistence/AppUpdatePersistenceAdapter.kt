@@ -8,13 +8,18 @@ import com.buddystudy.backend.appupdate.application.model.AppUpdateCampaign
 import com.buddystudy.backend.appupdate.application.model.AppUpdateEvent
 import com.buddystudy.backend.appupdate.application.model.AppUpdateMode
 import com.buddystudy.backend.appupdate.application.model.AppUpdateUserState
+import com.buddystudy.backend.appupdate.application.model.AppControlEventCommand
+import com.buddystudy.backend.appupdate.application.model.AppControlMaintenanceCommand
+import com.buddystudy.backend.appupdate.application.model.AppControlMaintenanceWindow
 import com.buddystudy.backend.appupdate.application.model.CreateAppUpdateCampaignCommand
+import com.buddystudy.backend.appupdate.application.model.RemoteConfigPublicationStatus
 import com.buddystudy.backend.appupdate.application.port.outbound.AppUpdatePort
 import io.r2dbc.spi.Row
 import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.stereotype.Repository
+import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneOffset
@@ -43,6 +48,36 @@ class AppUpdatePersistenceAdapter(
         ).bind("version", version).bind("build", build).bind("seenAt", seenAt)
             .bind("deviceId", deviceId).bind("userId", userId)
             .fetch().rowsUpdated().awaitSingle()
+    }
+
+    override suspend fun recordAppControlEvent(
+        userId: Long,
+        deviceId: String,
+        command: AppControlEventCommand,
+        recordedAt: Instant,
+    ): Boolean {
+        val inserted = database.sql(
+            """
+            insert ignore into app_control_events
+                (event_id, user_id, device_id, event_type, platform, distribution_channel,
+                 app_version, app_build, policy_id, policy_revision, campaign_id,
+                 evaluated_action, occurred_at, recorded_at)
+            values
+                (:eventId, :userId, :deviceId, :eventType, :platform, :channel,
+                 :version, :build, :policyId, :policyRevision, :campaignId,
+                 :evaluatedAction, :occurredAt, :recordedAt)
+            """.trimIndent(),
+        ).bind("eventId", command.eventId).bind("userId", userId).bind("deviceId", deviceId)
+            .bind("eventType", command.event.name).bind("platform", command.platform)
+            .bind("channel", command.channel.name).bind("version", command.currentVersion)
+            .bind("build", command.currentBuild)
+            .bindNullable("policyId", command.policyId, String::class.java)
+            .bindNullable("policyRevision", command.policyRevision, Long::class.javaObjectType)
+            .bindNullable("campaignId", command.campaignId, Long::class.javaObjectType)
+            .bindNullable("evaluatedAction", command.evaluatedAction, String::class.java)
+            .bind("occurredAt", command.occurredAt ?: recordedAt).bind("recordedAt", recordedAt)
+            .fetch().rowsUpdated().awaitSingle()
+        return inserted > 0
     }
 
     override suspend fun activeCampaign(platform: String): AppUpdateCampaign? =
@@ -153,6 +188,7 @@ class AppUpdatePersistenceAdapter(
         return AdminAppUpdateCampaignPage(campaigns, total, limit, offset)
     }
 
+    @Transactional
     override suspend fun createCampaign(
         command: CreateAppUpdateCampaignCommand,
         now: Instant,
@@ -185,6 +221,7 @@ class AppUpdatePersistenceAdapter(
         return requireNotNull(campaignSummary(id))
     }
 
+    @Transactional
     override suspend fun endCampaign(campaignId: Long, now: Instant): AdminAppUpdateCampaignSummary? {
         val changed = database.sql(
             """
@@ -238,9 +275,110 @@ class AppUpdatePersistenceAdapter(
         return AdminAppUpdateUserPage(users, total, limit, offset)
     }
 
+    override suspend fun activeMaintenance(now: Instant): AppControlMaintenanceWindow? =
+        database.sql(
+            """
+            select id, starts_at, ends_at, title_ko, title_en, title_ja,
+                   message_ko, message_en, message_ja, status, created_by,
+                   terminated_at, created_at, updated_at
+            from app_control_maintenance_windows
+            where status = 'ACTIVE'
+              and terminated_at is null
+              and (ends_at is null or ends_at > :now)
+            order by starts_at asc, id desc
+            limit 1
+            """.trimIndent(),
+        ).bind("now", now)
+            .map { row, _ -> row.toMaintenanceWindow() }.one().awaitSingleOrNull()
+
+    @Transactional
+    override suspend fun createMaintenance(
+        command: AppControlMaintenanceCommand,
+        now: Instant,
+    ): AppControlMaintenanceWindow {
+        database.sql(
+            """
+            update app_control_maintenance_windows
+            set status = 'ENDED', terminated_at = coalesce(terminated_at, :now), updated_at = :now
+            where status = 'ACTIVE'
+            """.trimIndent(),
+        ).bind("now", now).fetch().rowsUpdated().awaitSingle()
+        val id = database.sql(
+            """
+            insert into app_control_maintenance_windows
+                (starts_at, ends_at, title_ko, title_en, title_ja,
+                 message_ko, message_en, message_ja, status, created_by,
+                 created_at, updated_at)
+            values
+                (:startsAt, :endsAt, :titleKo, :titleEn, :titleJa,
+                 :messageKo, :messageEn, :messageJa, 'ACTIVE', :createdBy,
+                 :now, :now)
+            """.trimIndent(),
+        ).bind("startsAt", command.startsAt)
+            .bindNullable("endsAt", command.endsAt, Instant::class.java)
+            .bind("titleKo", command.titleKo).bind("titleEn", command.titleEn)
+            .bind("titleJa", command.titleJa).bind("messageKo", command.messageKo)
+            .bind("messageEn", command.messageEn).bind("messageJa", command.messageJa)
+            .bind("createdBy", command.createdBy).bind("now", now)
+            .filter { statement -> statement.returnGeneratedValues("id") }
+            .map { row, _ -> row.long("id") }.one().awaitSingle()
+        return requireNotNull(maintenanceWindow(id))
+    }
+
+    @Transactional
+    override suspend fun endMaintenance(maintenanceId: Long, now: Instant): AppControlMaintenanceWindow? {
+        val changed = database.sql(
+            """
+            update app_control_maintenance_windows
+            set status = 'ENDED', terminated_at = coalesce(terminated_at, :now), updated_at = :now
+            where id = :maintenanceId
+            """.trimIndent(),
+        ).bind("now", now).bind("maintenanceId", maintenanceId)
+            .fetch().rowsUpdated().awaitSingle()
+        return if (changed == 0L) null else maintenanceWindow(maintenanceId)
+    }
+
+    override suspend fun updateRemoteConfigPublication(
+        campaignId: Long?,
+        status: RemoteConfigPublicationStatus,
+        revision: Long?,
+        publishedAt: Instant?,
+        error: String?,
+        now: Instant,
+    ) {
+        if (campaignId == null) return
+        database.sql(
+            """
+            update app_update_campaigns
+            set remote_config_status = :status,
+                remote_config_revision = :revision,
+                remote_config_published_at = :publishedAt,
+                remote_config_error = :error,
+                updated_at = :now
+            where id = :campaignId
+            """.trimIndent(),
+        ).bind("status", status.name)
+            .bindNullable("revision", revision, Long::class.javaObjectType)
+            .bindNullable("publishedAt", publishedAt, Instant::class.java)
+            .bindNullable("error", error, String::class.java)
+            .bind("now", now).bind("campaignId", campaignId)
+            .fetch().rowsUpdated().awaitSingle()
+    }
+
     private suspend fun campaignSummary(id: Long): AdminAppUpdateCampaignSummary? =
         database.sql("select * from (${campaignSummarySelect()}) campaign_summary where id = :id")
             .bind("id", id).map { row, _ -> row.toCampaignSummary() }.one().awaitSingleOrNull()
+
+    private suspend fun maintenanceWindow(id: Long): AppControlMaintenanceWindow? =
+        database.sql(
+            """
+            select id, starts_at, ends_at, title_ko, title_en, title_ja,
+                   message_ko, message_en, message_ja, status, created_by,
+                   terminated_at, created_at, updated_at
+            from app_control_maintenance_windows
+            where id = :id
+            """.trimIndent(),
+        ).bind("id", id).map { row, _ -> row.toMaintenanceWindow() }.one().awaitSingleOrNull()
 
     private fun campaignSelect() =
         """
@@ -254,6 +392,8 @@ class AppUpdatePersistenceAdapter(
         """
         select c.id, c.platform, c.target_version, c.target_build, c.update_mode, c.status,
                c.app_store_url, c.created_by, c.activated_at, c.ended_at,
+               c.remote_config_status, c.remote_config_revision,
+               c.remote_config_published_at, c.remote_config_error,
                count(s.user_id) as checked_user_count,
                coalesce(sum(case when s.prompted_at is not null then 1 else 0 end), 0) as prompted_user_count,
                coalesce(sum(case when s.app_store_opened_at is not null then 1 else 0 end), 0) as opened_user_count,
@@ -261,7 +401,9 @@ class AppUpdatePersistenceAdapter(
         from app_update_campaigns c
         left join app_update_user_states s on s.campaign_id = c.id
         group by c.id, c.platform, c.target_version, c.target_build, c.update_mode, c.status,
-                 c.app_store_url, c.created_by, c.activated_at, c.ended_at
+                 c.app_store_url, c.created_by, c.activated_at, c.ended_at,
+                 c.remote_config_status, c.remote_config_revision,
+                 c.remote_config_published_at, c.remote_config_error
         """.trimIndent()
 
     private fun Row.toCampaign() = AppUpdateCampaign(
@@ -294,8 +436,31 @@ class AppUpdatePersistenceAdapter(
             checkedUserCount = long("checked_user_count"), promptedUserCount = prompted,
             openedUserCount = long("opened_user_count"), convertedUserCount = converted,
             conversionRate = if (prompted == 0L) 0.0 else converted.toDouble() / prompted.toDouble(),
+            remoteConfigStatus = RemoteConfigPublicationStatus.valueOf(
+                string("remote_config_status").ifBlank { RemoteConfigPublicationStatus.PENDING.name },
+            ),
+            remoteConfigRevision = get("remote_config_revision", java.lang.Long::class.java)?.toLong(),
+            remoteConfigPublishedAt = nullableInstant("remote_config_published_at"),
+            remoteConfigError = get("remote_config_error", String::class.java),
         )
     }
+
+    private fun Row.toMaintenanceWindow() = AppControlMaintenanceWindow(
+        id = long("id"),
+        startsAt = instant("starts_at"),
+        endsAt = nullableInstant("ends_at"),
+        titleKo = string("title_ko"),
+        titleEn = string("title_en"),
+        titleJa = string("title_ja"),
+        messageKo = string("message_ko"),
+        messageEn = string("message_en"),
+        messageJa = string("message_ja"),
+        status = string("status"),
+        createdBy = string("created_by"),
+        terminatedAt = nullableInstant("terminated_at"),
+        createdAt = instant("created_at"),
+        updatedAt = instant("updated_at"),
+    )
 
     private fun Row.toAdminUserSummary(): AdminAppUpdateUserSummary {
         val state = toUserState()
@@ -321,4 +486,11 @@ class AppUpdatePersistenceAdapter(
     private fun Row.instant(name: String): Instant = nullableInstant(name) ?: Instant.EPOCH
     private fun Row.nullableInstant(name: String): Instant? =
         get(name, LocalDateTime::class.java)?.toInstant(ZoneOffset.UTC)
+
+    private fun <T : Any> DatabaseClient.GenericExecuteSpec.bindNullable(
+        name: String,
+        value: T?,
+        type: Class<T>,
+    ): DatabaseClient.GenericExecuteSpec =
+        if (value == null) bindNull(name, type) else bind(name, value)
 }

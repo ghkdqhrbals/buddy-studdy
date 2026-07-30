@@ -157,7 +157,7 @@ jobs:
             exit 1
           fi
 
-      - name: Install Firebase Analytics configuration
+      - name: Install Firebase iOS configuration
         run: |
           set -euo pipefail
 
@@ -168,13 +168,18 @@ jobs:
           bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :BUNDLE_ID' "${config_path}")"
           app_id="$(/usr/libexec/PlistBuddy -c 'Print :GOOGLE_APP_ID' "${config_path}")"
           api_key="$(/usr/libexec/PlistBuddy -c 'Print :API_KEY' "${config_path}")"
+          project_id="$(/usr/libexec/PlistBuddy -c 'Print :PROJECT_ID' "${config_path}")"
 
           if [ "${bundle_id}" != "io.github.ghkdqhrbals.StudyMate" ]; then
             echo "Firebase configuration has an unexpected bundle identifier." >&2
             exit 1
           fi
-          if [[ "${app_id}" != 1:* ]] || [ -z "${api_key}" ] || [ "${api_key}" = "NOT_CONFIGURED" ]; then
-            echo "Firebase Analytics configuration is incomplete." >&2
+          if [[ "${app_id}" != 1:* ]] \
+            || [ -z "${api_key}" ] \
+            || [ "${api_key}" = "NOT_CONFIGURED" ] \
+            || [ -z "${project_id}" ] \
+            || [ "${project_id}" = "NOT_CONFIGURED" ]; then
+            echo "Firebase iOS configuration is incomplete." >&2
             exit 1
           fi
 
