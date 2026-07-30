@@ -22,6 +22,7 @@ enum AppAnalyticsScreen: String {
 }
 
 enum AppAnalyticsLoginMethod: String {
+    case apple
     case google
     case email
 }

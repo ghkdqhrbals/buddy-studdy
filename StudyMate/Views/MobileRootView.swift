@@ -1,5 +1,6 @@
 import SwiftUI
 #if os(iOS)
+import AuthenticationServices
 import SafariServices
 import UIKit
 #endif
@@ -850,7 +851,7 @@ private struct MobileRequiredTermsGateSheet: View {
                         isChecked: true,
                         url: AppLegalLinks.privacyPolicyURL(language: appState.settings.appLanguage)
                     )
-                    if let marketingTerms {
+                    if marketingTerms != nil {
                         Divider().padding(.leading, 34)
                         requiredGateRow(
                             title: termsTitle(strings.marketingNotifications, required: false),
@@ -1010,6 +1011,8 @@ private struct MobileLoginPage: View {
             Spacer(minLength: 0)
 
             VStack(spacing: 10) {
+                BuddySignInWithAppleButton()
+
                 Button {
                     appState.signInToCommunity()
                 } label: {
@@ -5845,6 +5848,8 @@ private struct MobileProfileEditorView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
 
+                            BuddySignInWithAppleButton()
+
                             Button {
                                 appState.signInToCommunity()
                             } label: {
@@ -6833,6 +6838,43 @@ private struct SignInButtonLabel: View {
             .foregroundStyle(isPrimary ? Color(UIColor.systemBackground) : Color.primary)
     }
 }
+
+#if os(iOS)
+private struct BuddySignInWithAppleButton: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        SignInWithAppleButton(.signIn) { request in
+            request.requestedScopes = [.email]
+        } onCompletion: { result in
+            switch result {
+            case .success(let authorization):
+                guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+                      let tokenData = credential.identityToken,
+                      let identityToken = String(data: tokenData, encoding: .utf8) else {
+                    appState.appleSignInFailed()
+                    return
+                }
+                Task {
+                    await appState.signInToCommunityWithApple(identityToken: identityToken)
+                }
+            case .failure(let error):
+                if let authorizationError = error as? ASAuthorizationError,
+                   authorizationError.code == .canceled {
+                    appState.appleSignInCancelled()
+                } else {
+                    appState.appleSignInFailed(error)
+                }
+            }
+        }
+        .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
+        .frame(maxWidth: .infinity)
+        .frame(height: 58)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+}
+#endif
 
 private extension StudyCategory {
     func matchesHomeSearch(_ rawQuery: String, appLanguage: AppLanguage) -> Bool {

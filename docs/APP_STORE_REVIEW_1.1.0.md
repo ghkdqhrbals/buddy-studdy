@@ -15,12 +15,13 @@
 - App privacy manifest embedded in the iOS target
 - In-app account deletion under Settings > Account Settings
 - Public-content reporting and user blocking
+- Sign in with Apple alongside Google and email login
 - Localized review notes describing the primary study and moderation flows
 - Age-rating declaration aligned with public questions, comments, and user-generated content
 
 ## Required release order
 
-1. Deploy the backend user-block API and database migration.
+1. Deploy the backend user-block and Sign in with Apple APIs plus the database migration.
 2. Create and upload a new signed iOS build from the reviewed commit.
 3. Verify the uploaded build on a physical iPhone:
    - sign in;
@@ -34,7 +35,7 @@
    - verify recommended update, forced update, and maintenance overlays.
 4. Select only that verified build for version 1.1.0.
 5. Confirm App Privacy answers in App Store Connect.
-6. Resolve the Sign in with Apple decision below.
+6. Confirm the uploaded archive contains the Sign in with Apple entitlement.
 7. Submit for review.
 
 ## Manual App Store Connect checks
@@ -51,16 +52,11 @@ The privacy labels must match the shipped SDKs and backend behavior. Confirm the
 
 Confirm the review contact, demo-account credentials, export-compliance answers, content-rights answers, and advertising-identifier declaration in the App Store Connect UI.
 
-## Submission blocker: third-party login
+## Sign in with Apple release check
 
-The app currently offers Google login for the primary account but does not offer Sign in with Apple. App Review Guideline 4.8 normally requires an equivalent privacy-preserving login option when a third-party login is used.
+The iOS and backend source support Sign in with Apple, satisfying the login-surface requirement associated with App Review Guideline 4.8.
 
-Before submission, choose one:
-
-- Add Sign in with Apple to iOS and the backend, and enable the capability for the App ID and provisioning profile. This is the recommended path.
-- Remove Google login from the review build and use email login only. This can prevent existing Google-only users from signing in and therefore needs a migration plan.
-
-Do not submit the current login surface without accepting this review risk.
+Sign in with Apple is enabled for App ID `io.github.ghkdqhrbals.StudyMate`. The App Store distribution provisioning profile and the matching GitHub Actions secret were refreshed on 2026-07-30. The release workflow rejects an archive that does not contain the `com.apple.developer.applesignin` entitlement.
 
 ## Review notes source
 

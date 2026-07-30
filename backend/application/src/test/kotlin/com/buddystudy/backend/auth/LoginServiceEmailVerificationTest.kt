@@ -9,6 +9,8 @@ import com.buddystudy.backend.auth.application.port.inbound.EmailLoginCommand
 import com.buddystudy.backend.auth.application.port.inbound.PushTokenCommand
 import com.buddystudy.backend.auth.application.port.inbound.RegisterDeviceCommand
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
+import com.buddystudy.backend.auth.application.port.outbound.AppleIdentity
+import com.buddystudy.backend.auth.application.port.outbound.AppleIdentityPort
 import com.buddystudy.backend.auth.application.port.outbound.EmailVerificationCodePort
 import com.buddystudy.backend.auth.application.port.outbound.EmailVerificationSenderPort
 import com.buddystudy.backend.auth.application.port.outbound.GoogleIdentity
@@ -39,6 +41,7 @@ class LoginServiceEmailVerificationTest {
     private val emailCodes = CapturingEmailCodePort()
     private val emailSender = CapturingEmailSender()
     private val roles = InMemoryRoleAssignmentPort()
+    private val appleIdentities = StubAppleIdentityPort()
     private val googleIdentities = StubGoogleIdentityPort()
     private val properties = BuddyStudyProperties().apply {
         auth.jwtSecret = "test-jwt-secret"
@@ -55,6 +58,7 @@ class LoginServiceEmailVerificationTest {
         emailCodes = emailCodes,
         emailSender = emailSender,
         roles = roles,
+        appleIdentities = appleIdentities,
         googleIdentities = googleIdentities,
         authenticatedLogins = AuthenticatedLoginManager(
             users,
@@ -73,6 +77,17 @@ class LoginServiceEmailVerificationTest {
             roles,
         ),
     )
+
+    @Test
+    fun `apple login attaches verified identity to the device`(): Unit = runBlocking {
+        val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
+        val principal = login.authenticateDevice(device.deviceId, device.clientSecret)
+
+        val response = login.appleLogin(principal, "apple-token")
+
+        assertThat(response.profile.email).isEqualTo("apple-user@example.com")
+        assertThat(users.findByProviderAndProviderId("APPLE", "apple-provider-id")).isNotNull
+    }
 
     @Test
     fun `email code is generated stored and sent`(): Unit = runBlocking {
@@ -360,6 +375,15 @@ class LoginServiceEmailVerificationTest {
         )
 
         override suspend fun verify(idToken: String): GoogleIdentity? = identity
+    }
+
+    private class StubAppleIdentityPort : AppleIdentityPort {
+        var identity: AppleIdentity? = AppleIdentity(
+            providerId = "apple-provider-id",
+            email = "apple-user@example.com",
+        )
+
+        override suspend fun verify(idToken: String): AppleIdentity? = identity
     }
 
     private class InMemoryUserPort : UserPort {

@@ -3964,6 +3964,61 @@ final class AppState: ObservableObject {
         )
     }
 
+    func signInToCommunityWithApple(identityToken: String) async {
+        logAuthTrace("community_sign_in_start", reason: "apple", deduplicate: false)
+        AppAnalytics.login(method: .apple, outcome: .started)
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "apple-login") else {
+            AppAnalytics.login(method: .apple, outcome: .failed)
+            logAuthTrace("community_sign_in_missing_registration", reason: "apple-login", deduplicate: false)
+            clearCommunityErrorForMissingRegistration(reason: "apple-login")
+            return
+        }
+
+        communityErrorMessage = nil
+        await actionRunner.run(
+            operation: {
+                try await communityUseCase.loginWithApple(
+                    registration: registration,
+                    idToken: identityToken
+                )
+            },
+            onSuccess: { result in
+                applyCommunityProfile(result.profile)
+                storedBackendIdentityUseCase.saveRegistration(result.registration)
+                AppAnalytics.login(method: .apple, outcome: .completed)
+                logAuthTrace("community_sign_in_success", reason: "apple-login", deduplicate: false)
+                refreshCommunitySignInDataInBackground(registration: result.registration, reason: "apple-login")
+            },
+            onFailure: { error in
+                handleCommunityError(error)
+                AppAnalytics.login(method: .apple, outcome: .failed)
+                logAuthTrace(
+                    "community_sign_in_token_exchange_failure",
+                    reason: "apple-login",
+                    extra: ["error=\(error.localizedDescription)"],
+                    deduplicate: false
+                )
+                log(.warning, "Apple 로그인 실패: \(error.localizedDescription)")
+            }
+        )
+    }
+
+    func appleSignInCancelled() {
+        AppAnalytics.login(method: .apple, outcome: .cancelled)
+        logAuthTrace("community_sign_in_cancelled", reason: "apple", deduplicate: false)
+    }
+
+    func appleSignInFailed(_ error: Error? = nil) {
+        communityErrorMessage = strings.communityRequestFailed
+        AppAnalytics.login(method: .apple, outcome: .failed)
+        logAuthTrace(
+            "community_sign_in_failure",
+            reason: "apple",
+            extra: error.map { ["error=\($0.localizedDescription)"] } ?? [],
+            deduplicate: false
+        )
+    }
+
     private func refreshCommunitySignInDataInBackground(
         registration: RemotePushRegistration,
         reason: String

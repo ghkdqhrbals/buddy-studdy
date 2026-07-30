@@ -50,6 +50,16 @@ struct CommunityUseCase {
         )
     }
 
+    func loginWithApple(
+        registration: RemotePushRegistration,
+        idToken: String
+    ) async throws -> CommunityLoginResult {
+        try await repository.loginWithApple(
+            registration: registration,
+            idToken: idToken
+        )
+    }
+
     func requestEmailVerificationCode(
         registration: RemotePushRegistration,
         email: String

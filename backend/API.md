@@ -282,6 +282,7 @@ Response:
 
 ```http
 POST /api/v1/auth/google
+POST /api/v1/auth/apple
 Content-Type: application/json
 Authorization: Bearer <accessToken>
 ```

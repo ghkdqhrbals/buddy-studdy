@@ -10,6 +10,7 @@ import com.buddystudy.backend.auth.application.port.inbound.PushTokenCommand
 import com.buddystudy.backend.auth.application.port.inbound.UpdatePushTokenUseCase
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.auth.adapter.inbound.web.dto.DeviceRegisterRequest
+import com.buddystudy.backend.auth.adapter.inbound.web.dto.AppleLoginRequest
 import com.buddystudy.backend.auth.adapter.inbound.web.dto.EmailLoginRequest
 import com.buddystudy.backend.auth.adapter.inbound.web.dto.EmailVerificationCodeRequest
 import com.buddystudy.backend.auth.application.model.EmailVerificationCodeResponse
@@ -38,7 +39,7 @@ import org.springframework.web.bind.annotation.RestController
 
 @RestController
 @RequestMapping("/api/v1")
-@Tag(name = "Auth", description = "Device registration, access-token bootstrap, Google login, and email login APIs.")
+@Tag(name = "Auth", description = "Device registration, access-token bootstrap, Apple, Google, and email login APIs.")
 class AuthController(
     private val auth: AuthWebPort,
 ) {
@@ -67,6 +68,15 @@ class AuthController(
         @RequestHeader("X-Device-Id", required = false) deviceId: String?,
         @RequestHeader("X-Client-Secret", required = false) clientSecret: String?,
     ) = auth.google(body, authentication, deviceId, clientSecret)
+
+    @Operation(summary = "Sign in with Apple", description = "Links the current device session to an Apple account after validating the Apple identity token.")
+    @PostMapping("/auth/apple")
+    suspend fun apple(
+        @RequestBody body: AppleLoginRequest,
+        authentication: Authentication?,
+        @RequestHeader("X-Device-Id", required = false) deviceId: String?,
+        @RequestHeader("X-Client-Secret", required = false) clientSecret: String?,
+    ) = auth.apple(body, authentication, deviceId, clientSecret)
 
     @Operation(summary = "Request email verification code", description = "Sends a short-lived email verification code for sign-up or email login. Verification sessions are held in Redis with a short TTL.")
     @PostMapping("/auth/email/code")
@@ -105,6 +115,7 @@ class AuthController(
 interface AuthWebPort {
     suspend fun register(body: DeviceRegisterRequest): Any
     suspend fun token(deviceId: String, clientSecret: String): Any
+    suspend fun apple(body: AppleLoginRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?): Any
     suspend fun google(body: GoogleLoginRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?): Any
     suspend fun emailCode(body: EmailVerificationCodeRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?): EmailVerificationCodeResponse
     suspend fun email(body: EmailLoginRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?): Any
@@ -126,6 +137,9 @@ class AuthWebAdapter(
 
     override suspend fun google(body: GoogleLoginRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?) =
         login.googleLogin(loginPrincipal(authentication, deviceId, clientSecret), body.idToken)
+
+    override suspend fun apple(body: AppleLoginRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?) =
+        login.appleLogin(loginPrincipal(authentication, deviceId, clientSecret), body.idToken)
 
     override suspend fun emailCode(body: EmailVerificationCodeRequest, authentication: Authentication?, deviceId: String?, clientSecret: String?): EmailVerificationCodeResponse {
         loginPrincipal(authentication, deviceId, clientSecret)

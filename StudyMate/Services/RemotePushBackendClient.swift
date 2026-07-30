@@ -423,6 +423,11 @@ protocol RemotePushBackendClientProtocol {
         idToken: String
     ) async throws -> CommunityLoginResult
 
+    func loginWithApple(
+        registration: RemotePushRegistration,
+        idToken: String
+    ) async throws -> CommunityLoginResult
+
     func requestEmailVerificationCode(
         registration: RemotePushRegistration,
         email: String
@@ -563,6 +568,13 @@ protocol RemotePushBackendClientProtocol {
 }
 
 extension RemotePushBackendClientProtocol {
+    func loginWithApple(
+        registration: RemotePushRegistration,
+        idToken: String
+    ) async throws -> CommunityLoginResult {
+        throw RemotePushBackendError.invalidResponse
+    }
+
     func checkAppUpdate(
         registration: RemotePushRegistration,
         language: AppLanguage
@@ -1387,6 +1399,29 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return CommunityLoginResult(profile: response.profile, registration: updatedRegistration)
     }
 
+    func loginWithApple(
+        registration: RemotePushRegistration,
+        idToken: String
+    ) async throws -> CommunityLoginResult {
+        var request = loginRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "auth", "apple")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(AppleLoginRequest(idToken: idToken))
+        let data = try await perform(request)
+        let response = try decoder.decode(CommunityLoginResponse.self, from: data)
+        let updatedRegistration = RemotePushRegistration(
+            deviceID: registration.deviceID,
+            clientSecret: registration.clientSecret,
+            apnsToken: registration.apnsToken,
+            accessToken: response.accessToken,
+            accessTokenExpiresAt: response.accessTokenExpiresAt
+        )
+        return CommunityLoginResult(profile: response.profile, registration: updatedRegistration)
+    }
+
     func requestEmailVerificationCode(
         registration: RemotePushRegistration,
         email: String
@@ -2194,6 +2229,10 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     }
 
     private struct GoogleLoginRequest: Encodable {
+        var idToken: String
+    }
+
+    private struct AppleLoginRequest: Encodable {
         var idToken: String
     }
 

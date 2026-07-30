@@ -1047,6 +1047,9 @@
 							com.apple.iCloud = {
 								enabled = 1;
 							};
+							com.apple.SignInWithApple = {
+								enabled = 1;
+							};
 						};
 					};
 					120000000000000000000041 = {

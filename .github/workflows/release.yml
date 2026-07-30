@@ -286,6 +286,7 @@ jobs:
           grep -q "aps-environment" "${RUNNER_TEMP}/ios-archive-entitlements.plist"
           grep -q "iCloud.io.github.ghkdqhrbals.StudyMate" "${RUNNER_TEMP}/ios-archive-entitlements.plist"
           grep -q "com.apple.developer.icloud-services" "${RUNNER_TEMP}/ios-archive-entitlements.plist"
+          grep -q "com.apple.developer.applesignin" "${RUNNER_TEMP}/ios-archive-entitlements.plist"
 
       - name: Export signed IPA
         run: |

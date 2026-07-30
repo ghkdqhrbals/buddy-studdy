@@ -23,6 +23,11 @@ protocol CommunityRepository {
         idToken: String
     ) async throws -> CommunityLoginResult
 
+    func loginWithApple(
+        registration: RemotePushRegistration,
+        idToken: String
+    ) async throws -> CommunityLoginResult
+
     func requestEmailVerificationCode(
         registration: RemotePushRegistration,
         email: String

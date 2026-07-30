@@ -10,6 +10,7 @@ import com.buddystudy.auth.domain.PushTokenUpdate
 import com.buddystudy.auth.domain.entity.DeviceEntity
 import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
+import com.buddystudy.backend.auth.application.port.outbound.AppleIdentityPort
 import com.buddystudy.backend.auth.application.port.outbound.EmailVerificationCodePort
 import com.buddystudy.backend.auth.application.port.outbound.EmailVerificationSenderPort
 import com.buddystudy.backend.auth.application.port.outbound.GoogleIdentityPort
@@ -50,6 +51,7 @@ class LoginService(
     private val emailCodes: EmailVerificationCodePort,
     private val emailSender: EmailVerificationSenderPort,
     private val roles: RoleAssignmentPort,
+    private val appleIdentities: AppleIdentityPort,
     private val googleIdentities: GoogleIdentityPort,
     private val authenticatedLogins: AuthenticatedLoginManager,
     private val deviceRegistrations: DeviceRegistrationManager,
@@ -179,6 +181,12 @@ class LoginService(
         val identity = googleIdentities.verify(idToken)
             ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Invalid Google token.")
         return authenticatedLogins.attachGoogleIdentity(principal, identity, Instant.now())
+    }
+
+    override suspend fun appleLogin(principal: Principal, idToken: String): GoogleLoginResponse {
+        val identity = appleIdentities.verify(idToken)
+            ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Invalid Apple token.")
+        return authenticatedLogins.attachAppleIdentity(principal, identity, Instant.now())
     }
 
     private suspend fun UserEntity.toAccountUser() = AccountUser(id = id, status = status)

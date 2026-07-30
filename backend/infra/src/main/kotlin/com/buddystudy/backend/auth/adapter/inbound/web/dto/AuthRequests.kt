@@ -14,6 +14,7 @@ data class DeviceRegisterRequest(
 )
 
 data class PushTokenRequest(var apnsToken: String = "", var apnsEnvironment: String = "production")
+data class AppleLoginRequest(var idToken: String = "")
 data class GoogleLoginRequest(var idToken: String = "")
 data class EmailVerificationCodeRequest(@field:Email var email: String = "")
 data class EmailLoginRequest(@field:Email var email: String = "", var password: String = "", var verificationCode: String? = null)

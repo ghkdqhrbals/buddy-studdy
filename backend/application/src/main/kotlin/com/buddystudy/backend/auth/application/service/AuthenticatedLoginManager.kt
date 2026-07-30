@@ -13,6 +13,7 @@ import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.auth.application.model.GoogleLoginResponse
 import com.buddystudy.backend.auth.application.permission.Roles
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
+import com.buddystudy.backend.auth.application.port.outbound.AppleIdentity
 import com.buddystudy.backend.auth.application.port.outbound.GoogleIdentity
 import com.buddystudy.backend.auth.application.port.outbound.RoleAssignmentPort
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
@@ -32,6 +33,23 @@ class AuthenticatedLoginManager(
     private val tokenService: TokenProvider,
     private val displayNames: RandomDisplayNameProvider,
 ) {
+    @Transactional
+    suspend fun attachAppleIdentity(
+        principal: Principal,
+        identity: AppleIdentity,
+        now: Instant,
+    ): GoogleLoginResponse {
+        val user = users.findByProviderAndProviderId("APPLE", identity.providerId)
+            ?: createUser(
+                provider = "APPLE",
+                providerId = identity.providerId,
+                email = identity.email,
+                now = now,
+            )
+
+        return attachAuthenticatedUser(principal, user, now)
+    }
+
     @Transactional
     suspend fun attachGoogleIdentity(
         principal: Principal,
