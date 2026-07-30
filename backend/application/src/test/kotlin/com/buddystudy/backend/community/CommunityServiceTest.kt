@@ -9,6 +9,7 @@ import com.buddystudy.backend.community.application.port.outbound.QuestionCommen
 import com.buddystudy.backend.community.application.port.outbound.FeedbackPort
 import com.buddystudy.backend.community.application.port.outbound.QuestionLikePort
 import com.buddystudy.backend.community.application.port.outbound.ReportPort
+import com.buddystudy.backend.community.application.port.outbound.UserBlockPort
 import com.buddystudy.backend.community.application.service.CommunityService
 import com.buddystudy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
 import com.buddystudy.backend.community.application.port.outbound.PublicQuestionViewLocalization
@@ -20,6 +21,7 @@ import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.community.domain.entity.FeedbackEntity
 import com.buddystudy.community.domain.entity.QuestionLikeEntity
 import com.buddystudy.community.domain.entity.ReportEntity
+import com.buddystudy.community.domain.entity.UserBlockEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.backend.test.EmptyContentLocalizationPort
@@ -39,6 +41,7 @@ class CommunityServiceTest {
     private val questionStats = FakeQuestionStatsPort()
     private val likes = FakeQuestionLikePort()
     private val comments = FakeQuestionCommentPort()
+    private val userBlocks = FakeUserBlockPort()
     private val notificationPublisher = FakeNotificationPublisher()
     private val reactionPublisher = FakeReactionPublisher()
     private val service = CommunityService(
@@ -48,6 +51,7 @@ class CommunityServiceTest {
         likes = likes,
         comments = comments,
         reports = FakeReportPort(),
+        userBlocks = userBlocks,
         feedbacks = FakeFeedbackPort(),
         reactions = reactionPublisher,
         notifications = notificationPublisher,
@@ -93,6 +97,46 @@ class CommunityServiceTest {
         assertThat(question.answer).isEqualTo("Answer")
         assertThat(question.gradingResult?.feedback).isEqualTo("Good")
         assertThat(question.gradingResult?.explanation).isEqualTo("Because")
+    }
+
+    @Test
+    fun `blocked authors are hidden from public questions and comments`(): Unit = runBlocking {
+        users.rows += UserEntity(id = 10, providerId = "blocked", displayName = "Blocked")
+        users.rows += UserEntity(id = 11, providerId = "visible", displayName = "Visible")
+        questions.rows += publicQuestion(id = 100, userId = 10, topic = "Blocked topic")
+        questions.rows += publicQuestion(id = 101, userId = 11, topic = "Visible topic")
+        comments.rows += QuestionCommentEntity(id = 1, questionId = 101, userId = 10, body = "hidden")
+        comments.rows += QuestionCommentEntity(id = 2, questionId = 101, userId = 11, body = "visible")
+        userBlocks.rows += UserBlockEntity(blockerUserId = principal.userId, blockedUserId = 10)
+
+        val questionsResponse = service.getPublicQuestions(
+            principal,
+            query = null,
+            language = "ko",
+            limit = 20,
+            offset = 0,
+        )
+        val commentsResponse = service.getComments(
+            id = 101,
+            limit = 20,
+            offset = 0,
+            principal = principal,
+        )
+
+        assertThat(questionsResponse.questions.map { it.author?.id }).containsExactly(11)
+        assertThat(commentsResponse.comments.map { it.author.id }).containsExactly(11)
+    }
+
+    @Test
+    fun `blocking a user is idempotent and can be reversed`(): Unit = runBlocking {
+        users.rows += UserEntity(id = 10, providerId = "author", displayName = "Author")
+
+        assertThat(service.setUserBlocked(principal, userId = 10, blocked = true).blocked).isTrue()
+        assertThat(service.setUserBlocked(principal, userId = 10, blocked = true).blocked).isTrue()
+        assertThat(userBlocks.rows).hasSize(1)
+
+        assertThat(service.setUserBlocked(principal, userId = 10, blocked = false).blocked).isFalse()
+        assertThat(userBlocks.rows).isEmpty()
     }
 
     @Test
@@ -327,6 +371,29 @@ class CommunityServiceTest {
 
     private class FakeFeedbackPort : FeedbackPort {
         override suspend fun save(entity: FeedbackEntity): FeedbackEntity = entity
+    }
+
+    private class FakeUserBlockPort : UserBlockPort {
+        val rows = mutableListOf<UserBlockEntity>()
+
+        override suspend fun save(entity: UserBlockEntity): UserBlockEntity {
+            if (entity.id == 0L) entity.id = (rows.maxOfOrNull { it.id } ?: 0L) + 1L
+            rows += entity
+            return entity
+        }
+
+        override suspend fun exists(blockerUserId: Long, blockedUserId: Long): Boolean =
+            rows.any { it.blockerUserId == blockerUserId && it.blockedUserId == blockedUserId }
+
+        override suspend fun findBlockedUserIds(blockerUserId: Long): Set<Long> =
+            rows.filter { it.blockerUserId == blockerUserId }.map { it.blockedUserId }.toSet()
+
+        override suspend fun delete(blockerUserId: Long, blockedUserId: Long): Long {
+            val removed = rows.removeIf {
+                it.blockerUserId == blockerUserId && it.blockedUserId == blockedUserId
+            }
+            return if (removed) 1 else 0
+        }
     }
 
     private class FakeReactionPublisher : PublicQuestionReactionPublishPort {

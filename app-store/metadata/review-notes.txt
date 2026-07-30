@@ -1,0 +1,30 @@
+BuddyStudy 1.1.0 review guide
+
+Sign-in
+- Use the demo account configured in App Review Information.
+- The review account is already active and does not require creating a new account.
+
+Primary study flow
+1. Open Home and select My Studies.
+2. Open an existing study or add a topic.
+3. Create a question, enter an answer, and submit it.
+4. AI grading is processed asynchronously. The page updates without replacing the active answer draft.
+5. Open Records or Statistics to review the saved result and topic-level progress.
+
+Public community and moderation
+- Open Home > All Studies to browse public answered questions.
+- A signed-in reviewer can like, comment, or report a public question.
+- To block an abusive user, long-press a public question and choose Block user. The same action is available from the ellipsis menu on the question detail page and by long-pressing a comment.
+- Blocked users' public questions and comments are hidden immediately.
+
+Account and privacy
+- Account deletion is available in Settings > Account Settings > Delete Account.
+- Privacy policy: https://ghkdqhrbals.github.io/buddy-studdy/en/privacy.html
+- Terms: https://ghkdqhrbals.github.io/buddy-studdy/en/terms.html
+
+Localization and notifications
+- App UI and content display support Korean, English, and Japanese.
+- Translated content provides a Show original / View translation control.
+- Notification taps open the related question or announcement. Push delivery itself is not required to exercise the core review flow.
+
+No purchases, subscriptions, advertisements, or IDFA tracking are included.

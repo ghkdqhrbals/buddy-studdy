@@ -120,13 +120,22 @@ def list_localizations(token, version_id)
     "/v1/appStoreVersions/#{version_id}/appStoreVersionLocalizations",
     token,
     query: {
-      "fields[appStoreVersionLocalizations]" => "locale,promotionalText,description,keywords,supportUrl,marketingUrl",
+      "fields[appStoreVersionLocalizations]" => "locale,promotionalText,description,keywords,supportUrl,marketingUrl,whatsNew",
       "limit" => "200"
     }
   ).fetch("data")
 end
 
 def create_localization(token, version_id, locale, metadata)
+  attributes = {
+    locale: locale,
+    promotionalText: metadata.fetch("promotionalText"),
+    description: metadata.fetch("description"),
+    keywords: metadata.fetch("keywords"),
+    supportUrl: metadata.fetch("supportUrl"),
+    marketingUrl: metadata.fetch("marketingUrl")
+  }
+  attributes[:whatsNew] = metadata.fetch("whatsNew") if metadata.key?("whatsNew")
   api_request(
     :post,
     "/v1/appStoreVersionLocalizations",
@@ -134,14 +143,7 @@ def create_localization(token, version_id, locale, metadata)
     body: {
       data: {
         type: "appStoreVersionLocalizations",
-        attributes: {
-          locale: locale,
-          promotionalText: metadata.fetch("promotionalText"),
-          description: metadata.fetch("description"),
-          keywords: metadata.fetch("keywords"),
-          supportUrl: metadata.fetch("supportUrl"),
-          marketingUrl: metadata.fetch("marketingUrl")
-        },
+        attributes: attributes,
         relationships: {
           appStoreVersion: {
             data: {
@@ -156,6 +158,14 @@ def create_localization(token, version_id, locale, metadata)
 end
 
 def update_localization(token, localization_id, metadata)
+  attributes = {
+    promotionalText: metadata.fetch("promotionalText"),
+    description: metadata.fetch("description"),
+    keywords: metadata.fetch("keywords"),
+    supportUrl: metadata.fetch("supportUrl"),
+    marketingUrl: metadata.fetch("marketingUrl")
+  }
+  attributes[:whatsNew] = metadata.fetch("whatsNew") if metadata.key?("whatsNew")
   api_request(
     :patch,
     "/v1/appStoreVersionLocalizations/#{localization_id}",
@@ -164,13 +174,7 @@ def update_localization(token, localization_id, metadata)
       data: {
         type: "appStoreVersionLocalizations",
         id: localization_id,
-        attributes: {
-          promotionalText: metadata.fetch("promotionalText"),
-          description: metadata.fetch("description"),
-          keywords: metadata.fetch("keywords"),
-          supportUrl: metadata.fetch("supportUrl"),
-          marketingUrl: metadata.fetch("marketingUrl")
-        }
+        attributes: attributes
       }
     }
   )
@@ -185,11 +189,14 @@ def validate_metadata(metadata_by_locale)
     keywords = metadata.fetch("keywords")
     support_url = metadata.fetch("supportUrl")
     marketing_url = metadata.fetch("marketingUrl")
+    whats_new = metadata["whatsNew"]
     abort "#{locale} promotional text exceeds 170 characters" if promotional_text.length > 170
     abort "#{locale} description exceeds 4,000 characters" if description.length > 4_000
+    abort "#{locale} What's New exceeds 4,000 characters" if whats_new && whats_new.length > 4_000
     abort "#{locale} keywords exceed 100 bytes" if keywords.bytesize > 100
     abort "#{locale} promotional text is empty" if promotional_text.strip.empty?
     abort "#{locale} description is empty" if description.strip.empty?
+    abort "#{locale} What's New is empty" if whats_new && whats_new.strip.empty?
     abort "#{locale} keywords are empty" if keywords.strip.empty?
     abort "#{locale} support URL must use HTTPS" unless support_url.start_with?("https://")
     abort "#{locale} marketing URL must use HTTPS" unless marketing_url.start_with?("https://")
@@ -223,7 +230,9 @@ pending = metadata_by_locale.filter_map do |locale, metadata|
                 localization.dig("attributes", "description") != metadata.fetch("description") ||
                 localization.dig("attributes", "keywords") != metadata.fetch("keywords") ||
                 localization.dig("attributes", "supportUrl") != metadata.fetch("supportUrl") ||
-                localization.dig("attributes", "marketingUrl") != metadata.fetch("marketingUrl")
+                localization.dig("attributes", "marketingUrl") != metadata.fetch("marketingUrl") ||
+                (metadata.key?("whatsNew") &&
+                  localization.dig("attributes", "whatsNew") != metadata.fetch("whatsNew"))
             "update"
           end
   next unless state
@@ -231,6 +240,7 @@ pending = metadata_by_locale.filter_map do |locale, metadata|
   puts "#{locale}: #{state} " \
        "(promotional #{metadata.fetch("promotionalText").length}/170, " \
        "description #{metadata.fetch("description").length}/4000, " \
+       "What's New #{metadata["whatsNew"]&.length || "not applicable"}, " \
        "keywords #{metadata.fetch("keywords").bytesize}/100 bytes)"
   [locale, metadata, localization]
 end
@@ -256,7 +266,9 @@ verified = list_localizations(token, version.fetch("id")).to_h do |localization|
 end
 metadata_by_locale.each do |locale, metadata|
   localization = verified[locale] || abort("Localization verification failed: #{locale} is missing")
-  %w[promotionalText description keywords supportUrl marketingUrl].each do |field|
+  fields = %w[promotionalText description keywords supportUrl marketingUrl]
+  fields << "whatsNew" if metadata.key?("whatsNew")
+  fields.each do |field|
     next if localization.dig("attributes", field) == metadata.fetch(field)
 
     abort "Localization verification failed: #{locale} #{field} does not match"

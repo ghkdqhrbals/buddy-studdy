@@ -133,6 +133,7 @@
 		F60000000000000000000004 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = F60000000000000000000005 /* GoogleService-Info.plist */; };
 		F60000000000000000000006 /* FirebaseAnalyticsCore in Frameworks */ = {isa = PBXBuildFile; productRef = F60000000000000000000007 /* FirebaseAnalyticsCore */; };
 		F70000000000000000000001 /* AppControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = F70000000000000000000002 /* AppControl.swift */; };
+		F90000000000000000000001 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = F90000000000000000000002 /* PrivacyInfo.xcprivacy */; };
 		F70000000000000000000003 /* AppControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = F70000000000000000000002 /* AppControl.swift */; };
 		F70000000000000000000006 /* FirebaseRemoteConfig in Frameworks */ = {isa = PBXBuildFile; productRef = F70000000000000000000007 /* FirebaseRemoteConfig */; };
 		120000000000000000000102 /* StudyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000002 /* StudyModels.swift */; };
@@ -403,6 +404,7 @@
 		F60000000000000000000002 /* AppAnalytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAnalytics.swift; sourceTree = "<group>"; };
 		F60000000000000000000005 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		F70000000000000000000002 /* AppControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppControl.swift; sourceTree = "<group>"; };
+		F90000000000000000000002 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		120000000000000000000003 /* MobileRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileRootView.swift; sourceTree = "<group>"; };
 		120000000000000000000301 /* AppDebugControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDebugControls.swift; sourceTree = "<group>"; };
 		120000000000000000000020 /* StudyMate.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StudyMate.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -909,6 +911,7 @@
 		110000000000000000000068 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				F90000000000000000000002 /* PrivacyInfo.xcprivacy */,
 				11000000000000000000014A /* Assets.xcassets */,
 				110000000000000000000069 /* Sounds */,
 			);
@@ -1111,6 +1114,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F90000000000000000000001 /* PrivacyInfo.xcprivacy in Resources */,
 				F60000000000000000000004 /* GoogleService-Info.plist in Resources */,
 				120000000000000000000150 /* study_ping.wav in Resources */,
 				120000000000000000000151 /* study_chime.wav in Resources */,

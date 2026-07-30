@@ -8,6 +8,7 @@ import com.buddystudy.backend.study.application.model.RecordLocalizationResponse
 import java.time.Instant
 
 data class ReportQuestionResponse(val ok: Boolean = true)
+data class UserBlockResponse(val userId: Long, val blocked: Boolean)
 
 data class FeedbackResponse(
     val id: Long,

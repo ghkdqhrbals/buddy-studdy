@@ -13,6 +13,7 @@ import com.buddystudy.backend.community.application.port.outbound.PublicQuestion
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystudy.backend.community.application.port.outbound.ReportPort
+import com.buddystudy.backend.community.application.port.outbound.UserBlockPort
 import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.QuestionLanguage
@@ -25,6 +26,7 @@ import com.buddystudy.backend.localization.application.service.ContentLocalizati
 import com.buddystudy.community.domain.entity.QuestionLikeEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.community.domain.entity.ReportEntity
+import com.buddystudy.community.domain.entity.UserBlockEntity
 import com.buddystudy.community.domain.entity.FeedbackEntity
 import com.buddystudy.backend.community.application.model.FeedbackResponse
 import com.buddystudy.backend.community.application.model.CommunityCommentResponse
@@ -33,6 +35,7 @@ import com.buddystudy.backend.community.application.model.CommunityCommentsRespo
 import com.buddystudy.backend.community.application.model.CommunityLikeResponse
 import com.buddystudy.backend.community.application.model.CommunityQuestionResponse
 import com.buddystudy.backend.community.application.model.CommunityQuestionsResponse
+import com.buddystudy.backend.community.application.model.UserBlockResponse
 import com.buddystudy.backend.community.application.model.toCommunityQuestionResponse
 import com.buddystudy.community.domain.PublicQuestion
 import com.buddystudy.community.domain.PublicQuestionAuthorProjection
@@ -61,6 +64,7 @@ class CommunityService(
     private val likes: QuestionLikePort,
     private val comments: QuestionCommentPort,
     private val reports: ReportPort,
+    private val userBlocks: UserBlockPort,
     private val feedbacks: FeedbackPort,
     private val reactions: PublicQuestionReactionPublishPort,
     private val notifications: PublishNotificationUseCase,
@@ -114,9 +118,13 @@ class CommunityService(
         } else {
             questions.findPublicAnsweredByLanguageAndQuery(language, query, pageable)
         }
-        val context = communityContext(page.content, principal)
+        val blockedUserIds = principal
+            ?.let { userBlocks.findBlockedUserIds(it.userId) }
+            .orEmpty()
+        val visibleQuestions = page.content.filterNot { it.userId in blockedUserIds }
+        val context = communityContext(visibleQuestions, principal)
         val viewMode = translationViewMode(view)
-        val rows = page.content.map { community(it, context, language, viewMode) }
+        val rows = visibleQuestions.map { community(it, context, language, viewMode) }
         return CommunityQuestionsResponse(rows, page.totalElements, limit, offset)
     }
 
@@ -127,6 +135,9 @@ class CommunityService(
         view: String,
     ): CommunityQuestionResponse {
         val q = publicAnsweredQuestion(id)
+        if (principal != null && q.userId != null && userBlocks.exists(principal.userId, q.userId!!)) {
+            throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Question not found.")
+        }
         val viewMode = translationViewMode(view)
         val response = community(
             q,
@@ -260,14 +271,18 @@ class CommunityService(
             TranslationViewMode.LOCALIZED
         }
         val page = comments.findByQuestionIdAndDeletedAtIsNullOrderByCreatedAtAsc(id, PageRequest.of(offset / limit, limit))
-        val profiles = page.content
+        val blockedUserIds = principal
+            ?.let { userBlocks.findBlockedUserIds(it.userId) }
+            .orEmpty()
+        val visibleComments = page.content.filterNot { it.userId in blockedUserIds }
+        val profiles = visibleComments
             .map { it.userId }
             .distinct()
             .takeIf { it.isNotEmpty() }
             ?.let { users.findAllById(it).associateBy { user -> user.id } }
             .orEmpty()
         return CommunityCommentsResponse(
-            page.content.map { comment ->
+            visibleComments.map { comment ->
                 val authorOriginal = comment.userId == principal?.userId
                 val projected = localizedComment(comment, requestedLanguage, viewMode, authorOriginal)
                 projected.comment.toResponse(
@@ -297,6 +312,37 @@ class CommunityService(
                 message = command.message,
             )
         )
+    }
+
+    @Transactional
+    override suspend fun setUserBlocked(
+        principal: Principal,
+        userId: Long,
+        blocked: Boolean,
+    ): UserBlockResponse {
+        if (userId == principal.userId) {
+            throw ApiException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.VALIDATION_ERROR,
+                "You cannot block your own account.",
+            )
+        }
+        users.findById(userId)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "User not found.")
+
+        if (blocked) {
+            if (!userBlocks.exists(principal.userId, userId)) {
+                userBlocks.save(
+                    UserBlockEntity(
+                        blockerUserId = principal.userId,
+                        blockedUserId = userId,
+                    ),
+                )
+            }
+        } else {
+            userBlocks.delete(principal.userId, userId)
+        }
+        return UserBlockResponse(userId = userId, blocked = blocked)
     }
 
     @Transactional
