@@ -2981,6 +2981,12 @@ final class AppState: ObservableObject {
         communityFeedState = nextState
     }
 
+    private func restoreCommunityQuestion(id: String) {
+        var nextState = communityFeedState
+        nextState.restoreQuestion(id: id)
+        communityFeedState = nextState
+    }
+
     private func beginBackendStatsRequest() -> UUID {
         var nextState = statsState
         let requestID = nextState.beginRequest()
@@ -8109,11 +8115,14 @@ final class AppState: ObservableObject {
             },
             onSuccess: { _ in
                 await self.refreshBackendStudyIfPossible(updateVisibleQuestion: false)
+                await self.loadCommunityQuestions(reset: true, userInitiated: false)
+                self.restoreCommunityQuestion(id: record.id)
                 await self.syncRemotePushScheduleIfPossible(reason: "delete-record")
             },
             onFailure: { _ in
                 self.localStudyRecordUseCase.saveRecord(record)
                 self.reloadStudyRecordsFromStore()
+                self.restoreCommunityQuestion(id: record.id)
                 await self.refreshBackendRecords()
                 let recordQuery = self.searchState.recordQuery
                 if !recordQuery.isEmpty {
@@ -8131,7 +8140,9 @@ final class AppState: ObservableObject {
         updatedRecord.isPublic = isPublic
         localStudyRecordUseCase.saveRecord(updatedRecord)
         reloadStudyRecordsFromStore()
-        if !isPublic {
+        if isPublic {
+            restoreCommunityQuestion(id: record.id)
+        } else {
             removeCommunityQuestion(id: record.id)
         }
         markCloudDataChanged()
@@ -8148,14 +8159,22 @@ final class AppState: ObservableObject {
             onSuccess: { backendRecord in
                 self.localStudyRecordUseCase.saveRecord(backendRecord)
                 self.reloadStudyRecordsFromStore()
-                if !backendRecord.isPublic {
+                if backendRecord.isPublic {
+                    self.restoreCommunityQuestion(id: backendRecord.id)
+                } else {
                     self.removeCommunityQuestion(id: backendRecord.id)
                 }
                 await self.loadCommunityQuestions(reset: true, userInitiated: false)
+                self.restoreCommunityQuestion(id: backendRecord.id)
             },
             onFailure: { _ in
                 self.localStudyRecordUseCase.saveRecord(record)
                 self.reloadStudyRecordsFromStore()
+                if record.isPublic {
+                    self.restoreCommunityQuestion(id: record.id)
+                } else {
+                    self.removeCommunityQuestion(id: record.id)
+                }
                 await self.loadCommunityQuestions(reset: true, userInitiated: false)
             },
             failureMessage: { "기록 공개 상태 변경 실패: \($0.localizedDescription)" }

@@ -8,6 +8,7 @@ struct CommunityFeedStateStore {
     var isLoading = false
     var errorMessage: String?
     var requestID = UUID()
+    private var hiddenQuestionIDs = Set<String>()
 
     mutating func reset() {
         questions = []
@@ -15,6 +16,7 @@ struct CommunityFeedStateStore {
         offset = 0
         errorMessage = nil
         requestID = UUID()
+        hiddenQuestionIDs = []
     }
 
     mutating func beginLoading() -> UUID {
@@ -37,13 +39,15 @@ struct CommunityFeedStateStore {
     }
 
     mutating func applyPage(_ response: CommunityQuestionsResponse, offset normalizedOffset: Int, reset: Bool) {
+        let visibleQuestions = response.questions.filter { !hiddenQuestionIDs.contains($0.id) }
+        let hiddenResponseCount = response.questions.count - visibleQuestions.count
         if reset {
-            questions = response.questions
+            questions = visibleQuestions
         } else {
             let existing = Set(questions.map(\.id))
-            questions.append(contentsOf: response.questions.filter { !existing.contains($0.id) })
+            questions.append(contentsOf: visibleQuestions.filter { !existing.contains($0.id) })
         }
-        totalCount = response.totalCount
+        totalCount = max(0, response.totalCount - hiddenResponseCount)
         offset = normalizedOffset + response.questions.count
     }
 
@@ -54,13 +58,19 @@ struct CommunityFeedStateStore {
     }
 
     mutating func removeQuestion(id: String) {
-        guard questions.contains(where: { $0.id == id }) else {
-            return
-        }
-
+        hiddenQuestionIDs.insert(id)
+        requestID = UUID()
+        isLoading = false
+        let containedQuestion = questions.contains { $0.id == id }
         questions.removeAll { $0.id == id }
-        totalCount = max(0, totalCount - 1)
-        offset = max(0, offset - 1)
+        if containedQuestion {
+            totalCount = max(0, totalCount - 1)
+            offset = max(0, offset - 1)
+        }
+    }
+
+    mutating func restoreQuestion(id: String) {
+        hiddenQuestionIDs.remove(id)
     }
 
     func canLoadMore(currentCount: Int) -> Bool {

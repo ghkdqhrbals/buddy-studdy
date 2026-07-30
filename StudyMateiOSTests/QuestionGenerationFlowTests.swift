@@ -9,6 +9,41 @@ final class QuestionGenerationFlowTests: XCTestCase {
         super.tearDown()
     }
 
+    func testDeletedRecordIsNotReinsertedIntoAllStudiesByStaleCommunityPage() {
+        let deletedQuestion = CommunityQuestion(
+            id: "record-42",
+            question: "삭제된 기록",
+            answer: "삭제된 답변",
+            gradingResult: GradingResult(
+                score: 80,
+                isCorrect: true,
+                feedback: "좋아요.",
+                explanation: "설명"
+            ),
+            topic: "Swift",
+            difficultyLevel: 5,
+            status: "COMPLETED",
+            source: "STUDY",
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            answeredAt: Date(timeIntervalSince1970: 1_100),
+            author: nil
+        )
+        let response = CommunityQuestionsResponse(
+            questions: [deletedQuestion],
+            totalCount: 1,
+            limit: 20,
+            offset: 0
+        )
+        var state = CommunityFeedStateStore()
+        state.applyPage(response, offset: 0, reset: true)
+
+        state.removeQuestion(id: deletedQuestion.id)
+        state.applyPage(response, offset: 0, reset: true)
+
+        XCTAssertFalse(state.questions.contains { $0.id == deletedQuestion.id })
+        XCTAssertEqual(state.totalCount, 0)
+    }
+
     func testServiceAvailabilityUsesMonitoringEndpointAndBackendLanguageCode() async throws {
         let statusURL = URL(string: "https://monitoring.example/status/api/v1/service-status")!
         let client = makeClient(serviceStatusURL: statusURL) { request in
