@@ -2,6 +2,10 @@ import type {
   AdminApiError,
   AdminLoginResponse,
   AdminMetricsResponse,
+  AppUpdateCampaignPage,
+  AppUpdateCampaignSummary,
+  AppUpdateUserPage,
+  CreateAppUpdateCampaignInput,
   ScheduledJobRun,
   ScheduledJobRunsResponse,
   ScheduledJobStatusResponse,
@@ -128,4 +132,45 @@ export function retryJob(jobName: string, runId: number | null, onUnauthorized: 
   }
   const suffix = params.toString() ? `?${params}` : "";
   return request(`/api/v1/admin/jobs/${encodeURIComponent(jobName)}/retry${suffix}`, { method: "POST" }, onUnauthorized);
+}
+
+export function fetchAppUpdateCampaigns(
+  onUnauthorized: UnauthorizedHandler,
+  limit = 20,
+  offset = 0,
+): Promise<AppUpdateCampaignPage> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  return request(`/api/v1/admin/app-updates?${params}`, { method: "GET" }, onUnauthorized);
+}
+
+export function createAppUpdateCampaign(
+  input: CreateAppUpdateCampaignInput,
+  onUnauthorized: UnauthorizedHandler,
+): Promise<AppUpdateCampaignSummary> {
+  return request("/api/v1/admin/app-updates", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }, onUnauthorized);
+}
+
+export function endAppUpdateCampaign(
+  campaignId: number,
+  onUnauthorized: UnauthorizedHandler,
+): Promise<AppUpdateCampaignSummary> {
+  return request(`/api/v1/admin/app-updates/${campaignId}/end`, { method: "POST" }, onUnauthorized);
+}
+
+export function fetchAppUpdateUsers(
+  campaignId: number,
+  onUnauthorized: UnauthorizedHandler,
+  limit = 20,
+  offset = 0,
+  query = "",
+  status = "",
+): Promise<AppUpdateUserPage> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (query.trim()) params.set("query", query.trim());
+  if (status) params.set("status", status);
+  return request(`/api/v1/admin/app-updates/${campaignId}/users?${params}`, { method: "GET" }, onUnauthorized);
 }

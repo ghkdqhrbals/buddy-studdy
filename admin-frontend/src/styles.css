@@ -451,6 +451,240 @@ h2 {
   padding: 10px 12px 20px;
 }
 
+.app-updates-page {
+  display: grid;
+  gap: 10px;
+  padding: 10px 12px 24px;
+}
+
+.app-update-panel {
+  min-width: 0;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.app-update-heading {
+  align-items: flex-start;
+}
+
+.app-update-heading h2 {
+  margin-bottom: 3px;
+}
+
+.app-update-heading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.app-update-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px 12px;
+}
+
+.app-update-field {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.app-update-field input,
+.app-update-field select,
+.app-update-field textarea,
+.app-update-filters input,
+.app-update-filters select {
+  min-width: 0;
+  width: 100%;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  outline: 0;
+  font: inherit;
+  font-size: 12px;
+}
+
+.app-update-field input,
+.app-update-field select,
+.app-update-filters input,
+.app-update-filters select {
+  height: 31px;
+  padding: 0 8px;
+}
+
+.app-update-field textarea {
+  resize: vertical;
+  padding: 7px 8px;
+  line-height: 1.45;
+}
+
+.app-update-field input:focus,
+.app-update-field select:focus,
+.app-update-field textarea:focus,
+.app-update-filters input:focus,
+.app-update-filters select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 13%, transparent);
+}
+
+.app-update-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.inline-error {
+  margin: 0;
+}
+
+.admin-table-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.admin-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: 8px 9px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.admin-table th {
+  color: var(--muted);
+  background: var(--surface-2);
+  font-weight: 750;
+}
+
+.admin-table tbody tr {
+  transition: background 120ms ease;
+}
+
+.admin-table tbody tr:hover,
+.admin-table tbody tr.selected {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.admin-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.admin-table td strong,
+.admin-table td small {
+  display: block;
+}
+
+.admin-table td small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 7px;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.status-pill.success {
+  color: var(--accent-2);
+  background: color-mix(in srgb, var(--accent-2) 9%, transparent);
+  border-color: color-mix(in srgb, var(--accent-2) 22%, transparent);
+}
+
+.status-pill.danger {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 22%, transparent);
+}
+
+.table-empty {
+  margin: 0;
+  padding: 24px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 12px;
+}
+
+.campaign-summary,
+.app-update-filters,
+.simple-pager,
+.simple-pager > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.campaign-summary {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.campaign-summary b {
+  color: var(--text);
+}
+
+.app-update-filters {
+  margin-bottom: 8px;
+}
+
+.app-update-filters input {
+  max-width: 280px;
+}
+
+.app-update-filters select {
+  max-width: 160px;
+}
+
+.simple-pager {
+  justify-content: space-between;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+@media (max-width: 780px) {
+  .app-update-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .app-update-heading {
+    gap: 8px;
+  }
+
+  .app-update-filters {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .app-update-filters input,
+  .app-update-filters select {
+    max-width: none;
+  }
+}
+
 .metric-rail {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

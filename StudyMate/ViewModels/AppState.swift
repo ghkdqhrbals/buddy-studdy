@@ -141,6 +141,8 @@ final class AppState: ObservableObject {
     @Published private(set) var questionQuotaNotice: String?
     @Published private(set) var serviceAvailability = BackendServiceAvailability.operational
     @Published private(set) var isCheckingServiceAvailability = false
+    @Published private(set) var appUpdateDecision: BackendAppUpdateDecision?
+    @Published private(set) var isCheckingAppUpdate = false
     @Published private(set) var isMaintenanceBypassedForDeveloper = false
     @Published private(set) var pendingQuestionLimitCategoryID: String?
     @Published private var backendRuntimeState = BackendRuntimeStateStore()
@@ -595,6 +597,7 @@ final class AppState: ObservableObject {
     private let appUseCasesProvider: AppUseCasesProvider
     private var appUseCases: AppUseCases
     private var backendIdentityUseCase: BackendIdentityUseCase { appUseCases.backendIdentity }
+    private var appUpdateUseCase: AppUpdateUseCase { appUseCases.appUpdate }
     private var googleSignInUseCase: GoogleSignInUseCase { appUseCases.googleSignIn }
     private var studyRoomUseCase: StudyRoomUseCase { appUseCases.studyRoom }
     private var recordsUseCase: RecordsUseCase { appUseCases.records }
@@ -1965,6 +1968,7 @@ final class AppState: ObservableObject {
         guard !isMaintenanceAccessBlocked else {
             return
         }
+        await refreshAppUpdate()
         guard hasCompletedOnboarding else {
             log(.info, "온보딩 완료 전이라 시작 작업을 대기합니다.")
             return
@@ -2007,6 +2011,7 @@ final class AppState: ObservableObject {
         guard !isMaintenanceAccessBlocked else {
             return
         }
+        await refreshAppUpdate()
         guard hasCompletedOnboarding else {
             return
         }
@@ -2034,6 +2039,73 @@ final class AppState: ObservableObject {
 
     var isServiceUnderMaintenance: Bool {
         serviceAvailability.isUnderMaintenance
+    }
+
+    func refreshAppUpdate() async {
+        guard !isCheckingAppUpdate else {
+            return
+        }
+        isCheckingAppUpdate = true
+        defer { isCheckingAppUpdate = false }
+
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "app-update-check") else {
+            return
+        }
+        do {
+            let decision = try await appUpdateUseCase.check(
+                registration: registration,
+                language: settings.appLanguage
+            )
+            guard decision.updateAvailable, decision.shouldPresent, decision.campaignID != nil else {
+                appUpdateDecision = nil
+                return
+            }
+            let isNewPresentation = appUpdateDecision?.campaignID != decision.campaignID
+            appUpdateDecision = decision
+            if isNewPresentation {
+                await recordAppUpdateEvent(.shown, decision: decision)
+            }
+        } catch {
+            log(.warning, "앱 업데이트 정책 확인 실패: \(error.localizedDescription)")
+        }
+    }
+
+    func dismissOptionalAppUpdate() {
+        guard let decision = appUpdateDecision, !decision.isForced else {
+            return
+        }
+        appUpdateDecision = nil
+        Task {
+            await recordAppUpdateEvent(.dismissed, decision: decision)
+        }
+    }
+
+    func recordAppStoreOpened() {
+        guard let decision = appUpdateDecision else {
+            return
+        }
+        Task {
+            await recordAppUpdateEvent(.appStoreOpened, decision: decision)
+        }
+    }
+
+    private func recordAppUpdateEvent(
+        _ event: BackendAppUpdateEvent,
+        decision: BackendAppUpdateDecision
+    ) async {
+        guard let campaignID = decision.campaignID,
+              let registration = storedBackendIdentityUseCase.loadRegistration() else {
+            return
+        }
+        do {
+            try await appUpdateUseCase.record(
+                registration: registration,
+                campaignID: campaignID,
+                event: event
+            )
+        } catch {
+            log(.warning, "앱 업데이트 이벤트 기록 실패: event=\(event.rawValue), error=\(error.localizedDescription)")
+        }
     }
 
     private var isMaintenanceAccessBlocked: Bool {

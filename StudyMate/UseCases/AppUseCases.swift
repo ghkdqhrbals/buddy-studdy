@@ -32,6 +32,71 @@ struct ServiceAvailabilityUseCase {
 }
 
 @MainActor
+protocol AppUpdateRepository {
+    func check(
+        registration: RemotePushRegistration,
+        language: AppLanguage
+    ) async throws -> BackendAppUpdateDecision
+    func record(
+        registration: RemotePushRegistration,
+        campaignID: Int64,
+        event: BackendAppUpdateEvent
+    ) async throws
+}
+
+@MainActor
+struct RemoteAppUpdateRepository: AppUpdateRepository {
+    private let backendClient: RemotePushBackendClientProtocol
+
+    init(backendClient: RemotePushBackendClientProtocol) {
+        self.backendClient = backendClient
+    }
+
+    func check(
+        registration: RemotePushRegistration,
+        language: AppLanguage
+    ) async throws -> BackendAppUpdateDecision {
+        try await backendClient.checkAppUpdate(registration: registration, language: language)
+    }
+
+    func record(
+        registration: RemotePushRegistration,
+        campaignID: Int64,
+        event: BackendAppUpdateEvent
+    ) async throws {
+        try await backendClient.recordAppUpdateEvent(
+            registration: registration,
+            campaignID: campaignID,
+            event: event
+        )
+    }
+}
+
+@MainActor
+struct AppUpdateUseCase {
+    private let repository: AppUpdateRepository
+
+    init(repository: AppUpdateRepository) {
+        self.repository = repository
+    }
+
+    func check(
+        registration: RemotePushRegistration,
+        language: AppLanguage
+    ) async throws -> BackendAppUpdateDecision {
+        try await repository.check(registration: registration, language: language)
+    }
+
+    func record(
+        registration: RemotePushRegistration,
+        campaignID: Int64,
+        event: BackendAppUpdateEvent
+    ) async throws {
+        try await repository.record(registration: registration, campaignID: campaignID, event: event)
+    }
+}
+
+@MainActor
 protocol TermsRepository {
     func fetchActiveTerms(registration: RemotePushRegistration) async throws -> [BackendTerms]
 
@@ -148,6 +213,7 @@ struct TermsUseCase {
 @MainActor
 struct AppUseCases {
     let serviceAvailability: ServiceAvailabilityUseCase
+    let appUpdate: AppUpdateUseCase
     let backendIdentity: BackendIdentityUseCase
     let googleSignIn: GoogleSignInUseCase
     let studyRoom: StudyRoomUseCase
@@ -160,6 +226,7 @@ struct AppUseCases {
 
     init(backendClient: RemotePushBackendClientProtocol) {
         let serviceAvailabilityRepository = RemoteServiceAvailabilityRepository(backendClient: backendClient)
+        let appUpdateRepository = RemoteAppUpdateRepository(backendClient: backendClient)
         let googleSignInRepository = OAuthGoogleSignInRepository()
         let identityRepository = RemoteIdentityRepository(backendClient: backendClient)
         let communityRepository = RemoteCommunityRepository(backendClient: backendClient)
@@ -170,6 +237,7 @@ struct AppUseCases {
         let settingsRepository = RemoteSettingsRepository(backendClient: backendClient)
         let termsRepository = RemoteTermsRepository(backendClient: backendClient)
         serviceAvailability = ServiceAvailabilityUseCase(repository: serviceAvailabilityRepository)
+        appUpdate = AppUpdateUseCase(repository: appUpdateRepository)
         backendIdentity = BackendIdentityUseCase(repository: identityRepository)
         googleSignIn = GoogleSignInUseCase(repository: googleSignInRepository)
         studyRoom = StudyRoomUseCase(repository: studyRoomRepository)

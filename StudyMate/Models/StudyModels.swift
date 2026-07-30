@@ -2317,6 +2317,44 @@ struct BackendServiceAvailability: Codable, Equatable {
     }
 }
 
+enum BackendAppUpdateMode: String, Codable, Equatable {
+    case force = "FORCE"
+    case optional = "OPTIONAL"
+}
+
+enum BackendAppUpdateEvent: String, Codable {
+    case shown = "SHOWN"
+    case dismissed = "DISMISSED"
+    case appStoreOpened = "APP_STORE_OPENED"
+}
+
+struct BackendAppUpdateDecision: Codable, Equatable, Identifiable {
+    var updateAvailable: Bool
+    var shouldPresent: Bool
+    var campaignID: Int64?
+    var mode: BackendAppUpdateMode?
+    var targetVersion: String?
+    var targetBuild: String?
+    var title: String?
+    var message: String?
+    var appStoreURL: String?
+
+    var id: Int64 { campaignID ?? -1 }
+    var isForced: Bool { mode == .force }
+
+    private enum CodingKeys: String, CodingKey {
+        case updateAvailable
+        case shouldPresent
+        case campaignID = "campaignId"
+        case mode
+        case targetVersion
+        case targetBuild
+        case title
+        case message
+        case appStoreURL = "appStoreUrl"
+    }
+}
+
 enum BackendServiceAvailabilityNotification {
     static let didEnterMaintenance = Notification.Name("studyBackendDidEnterMaintenance")
     static let userInfoKey = "studyBackendServiceAvailability"
@@ -2424,6 +2462,8 @@ struct AppStrings {
     }
 
     var showOriginal: String { text("원문 보기", "Show original", "原文を見る") }
+    var updateNow: String { text("지금 업데이트", "Update now", "今すぐアップデート") }
+    var updateLater: String { text("나중에", "Later", "あとで") }
     var showTranslation: String { text("번역 보기", "View translation", "翻訳を見る") }
     var translatedIntoLanguage: String {
         text(

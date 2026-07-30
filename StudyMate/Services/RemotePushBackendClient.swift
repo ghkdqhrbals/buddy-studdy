@@ -231,6 +231,17 @@ struct BackendBaseURLConfiguration: Equatable {
 protocol RemotePushBackendClientProtocol {
     func fetchServiceAvailability(language: AppLanguage) async -> BackendServiceAvailability?
 
+    func checkAppUpdate(
+        registration: RemotePushRegistration,
+        language: AppLanguage
+    ) async throws -> BackendAppUpdateDecision
+
+    func recordAppUpdateEvent(
+        registration: RemotePushRegistration,
+        campaignID: Int64,
+        event: BackendAppUpdateEvent
+    ) async throws
+
     func registerDevice(
         installationIdentifier: String,
         apnsToken: String?,
@@ -547,6 +558,19 @@ extension RemotePushBackendClientProtocol {
         nil
     }
 
+    func checkAppUpdate(
+        registration: RemotePushRegistration,
+        language: AppLanguage
+    ) async throws -> BackendAppUpdateDecision {
+        BackendAppUpdateDecision(updateAvailable: false, shouldPresent: false)
+    }
+
+    func recordAppUpdateEvent(
+        registration: RemotePushRegistration,
+        campaignID: Int64,
+        event: BackendAppUpdateEvent
+    ) async throws {}
+
     func fetchRecordsForStudy(
         registration: RemotePushRegistration,
         studyID: Int,
@@ -598,6 +622,43 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return try? decoder.decode(BackendServiceAvailability.self, from: data)
     }
 
+    func checkAppUpdate(
+        registration: RemotePushRegistration,
+        language: AppLanguage
+    ) async throws -> BackendAppUpdateDecision {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "app-updates", "check")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(
+            AppUpdateCheckRequest(
+                platform: "ios",
+                currentVersion: Self.currentAppVersion,
+                currentBuild: Self.currentAppBuild,
+                language: language.backendCode
+            )
+        )
+        let data = try await perform(request)
+        return try decoder.decode(BackendAppUpdateDecision.self, from: data)
+    }
+
+    func recordAppUpdateEvent(
+        registration: RemotePushRegistration,
+        campaignID: Int64,
+        event: BackendAppUpdateEvent
+    ) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "app-updates", String(campaignID), "events")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(AppUpdateEventRequest(event: event))
+        _ = try await perform(request)
+    }
+
     func registerDevice(
         installationIdentifier: String,
         apnsToken: String?,
@@ -611,7 +672,9 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             platform: "ios",
             apnsEnvironment: apnsEnvironment,
             language: language.backendCode,
-            timezone: timezone
+            timezone: timezone,
+            appVersion: Self.currentAppVersion,
+            appBuild: Self.currentAppBuild
         )
         var request = URLRequest(url: endpoint("api", "v1", "devices", "register"))
         request.httpMethod = "POST"
@@ -1923,6 +1986,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.setValue(registration.deviceID, forHTTPHeaderField: "X-Device-Id")
         request.setValue(registration.clientSecret, forHTTPHeaderField: "X-Client-Secret")
         request.setValue(Self.currentAppVersion, forHTTPHeaderField: "X-App-Version")
+        request.setValue(Self.currentAppBuild, forHTTPHeaderField: "X-App-Build")
         if registration.hasAccessToken,
            let accessToken = registration.accessToken,
            !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -1936,15 +2000,20 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.setValue(registration.deviceID, forHTTPHeaderField: "X-Device-Id")
         request.setValue(registration.clientSecret, forHTTPHeaderField: "X-Client-Secret")
         request.setValue(Self.currentAppVersion, forHTTPHeaderField: "X-App-Version")
+        request.setValue(Self.currentAppBuild, forHTTPHeaderField: "X-App-Build")
         return request
     }
 
     private static var currentAppVersion: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let trimmed = version?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "0" : trimmed
+    }
+
+    private static var currentAppBuild: String {
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-        return [version, build]
-            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first { !$0.isEmpty } ?? "0"
+        let trimmed = build?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "0" : trimmed
     }
 
     private static let dateFormatter = ISO8601DateFormatter()
@@ -1956,6 +2025,19 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var apnsEnvironment: String
         var language: String
         var timezone: String
+        var appVersion: String
+        var appBuild: String
+    }
+
+    private struct AppUpdateCheckRequest: Encodable {
+        var platform: String
+        var currentVersion: String
+        var currentBuild: String
+        var language: String
+    }
+
+    private struct AppUpdateEventRequest: Encodable {
+        var event: BackendAppUpdateEvent
     }
 
     private struct PushTokenRequest: Encodable {

@@ -109,15 +109,122 @@ private struct StudyMateiOSRootContent: View {
     let forcesMaintenancePreview: Bool
 
     var body: some View {
-        Group {
-            if (forcesMaintenancePreview || appState.isServiceUnderMaintenance)
-                && !appState.isMaintenanceBypassedForDeveloper {
-                ServiceMaintenanceView()
-            } else {
-                MobileRootView()
+        ZStack {
+            Group {
+                if (forcesMaintenancePreview || appState.isServiceUnderMaintenance)
+                    && !appState.isMaintenanceBypassedForDeveloper {
+                    ServiceMaintenanceView()
+                } else {
+                    MobileRootView()
+                }
+            }
+
+            if let decision = appState.appUpdateDecision {
+                AppUpdatePromptView(decision: decision)
+                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                    .zIndex(10)
             }
         }
         .environmentObject(appState)
+        .animation(.easeOut(duration: 0.2), value: appState.appUpdateDecision?.campaignID)
+    }
+}
+
+private struct AppUpdatePromptView: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.openURL) private var openURL
+    let decision: BackendAppUpdateDecision
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.52)
+                .ignoresSafeArea()
+                .accessibilityHidden(true)
+
+            VStack(spacing: 0) {
+                Image(systemName: "arrow.down.app.fill")
+                    .font(.system(size: 31, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 62, height: 62)
+                    .background(Color.accentColor.opacity(0.12), in: Circle())
+
+                Text(decision.title?.nonEmpty ?? defaultTitle)
+                    .font(.system(size: 22, weight: .bold))
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 20)
+
+                Text(decision.message?.nonEmpty ?? defaultMessage)
+                    .font(.system(size: 15))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(4)
+                    .padding(.top, 10)
+
+                if let targetVersion = decision.targetVersion?.nonEmpty {
+                    Text(versionLabel(targetVersion, build: decision.targetBuild))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 12)
+                }
+
+                Button {
+                    appState.recordAppStoreOpened()
+                    if let value = decision.appStoreURL,
+                       let url = URL(string: value) {
+                        openURL(url)
+                    }
+                } label: {
+                    Text(appState.strings.updateNow)
+                        .font(.system(size: 16, weight: .bold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.roundedRectangle(radius: 16))
+                .padding(.top, 24)
+
+                if !decision.isForced {
+                    Button(appState.strings.updateLater) {
+                        appState.dismissOptionalAppUpdate()
+                    }
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 15)
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 28)
+            .frame(maxWidth: 360)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.22), radius: 28, y: 14)
+            .padding(.horizontal, 24)
+            .accessibilityAddTraits(.isModal)
+        }
+    }
+
+    private var defaultTitle: String {
+        switch appState.settings.appLanguage {
+        case .korean: "새 버전이 준비됐어요"
+        case .english: "A new version is ready"
+        case .japanese: "新しいバージョンがあります"
+        }
+    }
+
+    private var defaultMessage: String {
+        switch appState.settings.appLanguage {
+        case .korean: "더 안정적인 학습 경험을 위해 앱을 업데이트해 주세요."
+        case .english: "Update the app for a more reliable study experience."
+        case .japanese: "より安定した学習体験のため、アプリをアップデートしてください。"
+        }
+    }
+
+    private func versionLabel(_ version: String, build: String?) -> String {
+        let suffix = build?.nonEmpty.map { " (\($0))" } ?? ""
+        return "v\(version)\(suffix)"
     }
 }
 

@@ -147,7 +147,10 @@ class AdminManagementPersistenceAdapter(
             coalesce(m.tier, 'TIER1') as tier_code,
             coalesce(t.description, fallback_tier.description, '') as tier_description,
             m.monthly_question_limit_override,
-            coalesce(m.monthly_question_limit_override, t.monthly_question_limit, fallback_tier.monthly_question_limit, 0) as monthly_limit
+            coalesce(m.monthly_question_limit_override, t.monthly_question_limit, fallback_tier.monthly_question_limit, 0) as monthly_limit,
+            d.app_version,
+            d.app_build,
+            d.app_version_seen_at
         from users u
         left join user_memberships m on m.id = (
             select max(active_membership.id)
@@ -159,6 +162,13 @@ class AdminManagementPersistenceAdapter(
         )
         left join user_membership_tiers t on t.tier_code = m.tier
         left join user_membership_tiers fallback_tier on fallback_tier.tier_code = 'TIER1'
+        left join devices d on d.id = (
+            select latest_device.id
+            from devices latest_device
+            where latest_device.user_id = u.id
+            order by latest_device.app_version_seen_at desc, latest_device.last_seen_at desc, latest_device.id desc
+            limit 1
+        )
         """.trimIndent()
 
     private fun DatabaseClient.GenericExecuteSpec.bindSearch(search: String?, exact: String?): DatabaseClient.GenericExecuteSpec {
@@ -203,6 +213,9 @@ class AdminManagementPersistenceAdapter(
             monthlyLimit = int("monthly_limit"),
             monthlyLimitOverride = get("monthly_question_limit_override", java.lang.Integer::class.java)?.toInt(),
             createdAt = instant("created_at"),
+            appVersion = get("app_version", String::class.java),
+            appBuild = get("app_build", String::class.java),
+            appVersionSeenAt = nullableInstant("app_version_seen_at"),
         )
 
     private fun AdminUserRow.toAdminUser(usedCount: Int, now: Instant): AdminUserSummary {
@@ -221,6 +234,9 @@ class AdminManagementPersistenceAdapter(
             remainingCount = (monthlyLimit - usedCount).coerceAtLeast(0),
             resetAt = period.resetAt,
             createdAt = createdAt,
+            appVersion = appVersion,
+            appBuild = appBuild,
+            appVersionSeenAt = appVersionSeenAt,
         )
     }
 
@@ -235,12 +251,16 @@ class AdminManagementPersistenceAdapter(
         val monthlyLimit: Int,
         val monthlyLimitOverride: Int?,
         val createdAt: Instant,
+        val appVersion: String?,
+        val appBuild: String?,
+        val appVersionSeenAt: Instant?,
     )
 
     private fun Row.string(name: String): String = get(name, String::class.java).orEmpty()
     private fun Row.int(name: String): Int = get(name, java.lang.Integer::class.java)?.toInt() ?: 0
     private fun Row.long(name: String): Long = get(name, java.lang.Long::class.java)?.toLong() ?: 0L
     private fun Row.instant(name: String): Instant =
+        nullableInstant(name) ?: Instant.EPOCH
+    private fun Row.nullableInstant(name: String): Instant? =
         get(name, LocalDateTime::class.java)?.toInstant(ZoneOffset.UTC)
-            ?: Instant.EPOCH
 }

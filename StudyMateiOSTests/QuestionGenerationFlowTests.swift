@@ -1196,6 +1196,63 @@ final class QuestionGenerationFlowTests: XCTestCase {
         )
     }
 
+    func testAppUpdateCheckSendsInstalledVersionAndDecodesForcedCampaign() async throws {
+        let client = makeClient { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/app-updates/check")
+            XCTAssertEqual(request.httpMethod, "POST")
+            let body = try JSONSerialization.jsonObject(with: Self.bodyData(from: request)) as? [String: Any]
+            XCTAssertEqual(body?["platform"] as? String, "ios")
+            let expectedVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+            let expectedBuild = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+            XCTAssertEqual(body?["currentVersion"] as? String, expectedVersion)
+            XCTAssertEqual(body?["currentBuild"] as? String, expectedBuild)
+            XCTAssertEqual(body?["language"] as? String, "ja")
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: """
+                {
+                  "updateAvailable": true,
+                  "shouldPresent": true,
+                  "campaignId": 9,
+                  "mode": "FORCE",
+                  "targetVersion": "2.0.0",
+                  "targetBuild": "100",
+                  "title": "更新が必要です",
+                  "message": "続けるには更新してください。",
+                  "appStoreUrl": "https://apps.apple.com/app/id6774108938"
+                }
+                """
+            )
+        }
+
+        let decision = try await client.checkAppUpdate(
+            registration: Self.registration,
+            language: .japanese
+        )
+
+        XCTAssertTrue(decision.updateAvailable)
+        XCTAssertTrue(decision.shouldPresent)
+        XCTAssertEqual(decision.mode, .force)
+        XCTAssertEqual(decision.campaignID, 9)
+    }
+
+    func testAppUpdateDismissalEventUsesCampaignEndpoint() async throws {
+        let client = makeClient { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/app-updates/42/events")
+            XCTAssertEqual(request.httpMethod, "POST")
+            let body = try JSONSerialization.jsonObject(with: Self.bodyData(from: request)) as? [String: Any]
+            XCTAssertEqual(body?["event"] as? String, "DISMISSED")
+            return Self.response(for: request, statusCode: 204, body: "")
+        }
+
+        try await client.recordAppUpdateEvent(
+            registration: Self.registration,
+            campaignID: 42,
+            event: .dismissed
+        )
+    }
+
     private func makeClient(
         serviceStatusURL: URL = RemotePushBackendClient.defaultServiceStatusURL,
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)

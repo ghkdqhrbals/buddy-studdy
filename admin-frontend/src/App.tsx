@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { clearToken, fetchJobRuns, fetchJobStatuses, fetchMetrics, getStoredToken, refreshMetrics, retryJob } from "./api";
 import { AdminShell } from "./AdminShell";
+import { AppUpdatesPanel } from "./AppUpdatesPanel";
 import { JOB_PAGE_SIZE, sectionPaths, sections } from "./adminConfig";
 import { LoginScreen } from "./LoginScreen";
 import { MetricsDashboard } from "./MetricsDashboard";
@@ -123,7 +124,7 @@ function sectionHref(
 }
 
 function sectionUsesDateRange(section: SectionKey): boolean {
-  return section !== "operations";
+  return section !== "operations" && section !== "app_updates";
 }
 
 export function App() {
@@ -140,6 +141,7 @@ export function App() {
   const [highlightRunId, setHighlightRunId] = useState(() => routeState().runId);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [appUpdatesRefreshKey, setAppUpdatesRefreshKey] = useState(0);
 
   const active = sections.find((section) => section.key === activeSection) ?? sections[0];
   const isAuthenticated = Boolean(token);
@@ -204,7 +206,10 @@ export function App() {
     setLoading(true);
     setError(null);
     try {
-      if (activeSection === "operations") {
+      if (activeSection === "app_updates") {
+        setSeries([]);
+        setJobPage(emptyJobPage);
+      } else if (activeSection === "operations") {
         const [runs, statuses] = await Promise.all([
           fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset, jobNameFilter, highlightRunId),
           fetchJobStatuses(handleUnauthorized).catch(() => emptyJobStatuses),
@@ -233,7 +238,9 @@ export function App() {
     setLoading(true);
     setError(null);
     try {
-      if (activeSection === "operations") {
+      if (activeSection === "app_updates") {
+        setAppUpdatesRefreshKey((value) => value + 1);
+      } else if (activeSection === "operations") {
         const [runs, statuses] = await Promise.all([
           fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset, jobNameFilter, highlightRunId),
           fetchJobStatuses(handleUnauthorized).catch(() => jobStatuses),
@@ -348,7 +355,9 @@ export function App() {
       onThemeChange={setTheme}
       showDateRange={sectionUsesDateRange(activeSection)}
     >
-      {activeSection === "operations" ? (
+      {activeSection === "app_updates" ? (
+        <AppUpdatesPanel onUnauthorized={handleUnauthorized} refreshKey={appUpdatesRefreshKey} />
+      ) : activeSection === "operations" ? (
         <OperationsPanel
           page={jobPage}
           statuses={jobStatuses.jobs}

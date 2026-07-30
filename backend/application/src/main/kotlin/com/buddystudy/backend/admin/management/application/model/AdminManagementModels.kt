@@ -17,6 +17,9 @@ data class AdminUserSummary(
     val remainingCount: Int,
     val resetAt: Instant,
     val createdAt: Instant,
+    val appVersion: String? = null,
+    val appBuild: String? = null,
+    val appVersionSeenAt: Instant? = null,
 )
 
 data class AdminUserPageResponse(

@@ -60,6 +60,9 @@ class DeviceRegistrationManager(
         device.apnsEnvironment = command.apnsEnvironment
         device.language = command.language
         device.timezone = command.timezone
+        device.appVersion = command.appVersion?.takeIf { it.isNotBlank() }
+        device.appBuild = command.appBuild?.takeIf { it.isNotBlank() }
+        device.appVersionSeenAt = now
         device.updatedAt = now
         device.lastSeenAt = now
         devices.save(device)

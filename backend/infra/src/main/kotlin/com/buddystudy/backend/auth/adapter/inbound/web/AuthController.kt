@@ -168,6 +168,8 @@ private fun DeviceRegisterRequest.toCommand() = RegisterDeviceCommand(
     apnsEnvironment = apnsEnvironment,
     language = language,
     timezone = timezone,
+    appVersion = appVersion,
+    appBuild = appBuild,
 )
 
 private fun EmailLoginRequest.toCommand() = EmailLoginCommand(
