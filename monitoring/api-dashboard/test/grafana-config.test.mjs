@@ -311,17 +311,17 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
   assert.doesNotMatch(logsUrl.pathname, /grafana-lokiexplore-app/);
 });
 
-test("backend deploy Slack notification is branded and action-oriented", async () => {
+test("backend deploy Slack notification stays compact and links to the deployment", async () => {
   const backendDeploy = await fs.readFile(backendDeployTemplatePath, "utf8");
 
   assert.match(backendDeploy, /DEPLOY_SLACK_WEBHOOK_URL/);
   assert.match(backendDeploy, /LEGACY_SLACK_WEBHOOK_URL/);
-  assert.match(backendDeploy, /"username": "BuddyStudy Deploy"/);
-  assert.match(backendDeploy, /"icon_emoji": ":rocket:"/);
-  assert.match(backendDeploy, /Backend 운영 배포/);
-  assert.match(backendDeploy, /배포 실행 보기/);
-  assert.match(backendDeploy, /빌드 실행 보기/);
-  assert.match(backendDeploy, /"type": "actions"/);
+  assert.match(backendDeploy, /"text": f"Backend 배포 · \{status_label\}"/);
+  assert.match(backendDeploy, /"attachments": \[/);
+  assert.match(backendDeploy, /"color": color/);
+  assert.match(backendDeploy, /\*Backend 배포\*\\n/);
+  assert.match(backendDeploy, /<\{run_url\}\|GitHub Actions> · \{source_text\}/);
+  assert.doesNotMatch(backendDeploy, /"type": "actions"/);
 });
 
 test("iOS deploy Slack notification keeps a compact parent and numbered thread", async () => {
