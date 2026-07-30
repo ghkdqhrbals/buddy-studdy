@@ -1672,7 +1672,8 @@
 				APNS_ENVIRONMENT = production;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = StudyMate/StudyMateiOS.entitlements;
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "Apple Distribution";
+				CODE_SIGN_STYLE = Manual;
 				CLOUDKIT_CONTAINER_ENVIRONMENT = Production;
 				CURRENT_PROJECT_VERSION = 16;
 				DEVELOPMENT_TEAM = 4CL25TC734;
@@ -1692,6 +1693,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.ghkdqhrbals.StudyMate;
 				PRODUCT_NAME = StudyMate;
+				PROVISIONING_PROFILE_SPECIFIER = "$(IOS_PROVISIONING_PROFILE_NAME)";
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_COMPILATION_MODE = wholemodule;
