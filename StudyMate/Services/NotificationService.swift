@@ -117,6 +117,27 @@ enum StudyNotificationPayload {
         return nil
     }
 
+    static func homeAnnouncement(from userInfo: [AnyHashable: Any]) -> HomeAnnouncement? {
+        guard cloudKitDictionaries(from: userInfo).contains(where: { dictionary in
+            ["deepLink", "url", "landingUrl"].contains { key in
+                HomeAnnouncement.isMessageDeepLink(stringValue(dictionary[key]))
+            }
+        }) else {
+            return nil
+        }
+        guard let aps = dictionaryValue(userInfo["aps"]),
+              let alert = dictionaryValue(aps["alert"]),
+              let title = stringValue(alert["title"]),
+              let body = stringValue(alert["body"]) else {
+            return nil
+        }
+        return HomeAnnouncement(
+            notificationID: appNotificationID(from: userInfo),
+            title: title,
+            message: body
+        )
+    }
+
     private static func appRouteFromDeepLink(in dictionary: [AnyHashable: Any]) -> AppRoute? {
         for key in ["deepLink", "url", "landingUrl"] {
             if let value = stringValue(dictionary[key]),
@@ -658,7 +679,7 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
     @MainActor
     private var pendingLocalResponses: [PendingLocalNotificationResponse] = []
     @MainActor
-    private var pendingAppRoutes: [AppRoute] = []
+    private var pendingAppRoutes: [PendingAppRoute] = []
     @MainActor
     private var pendingEventLogs: [(message: String, isWarning: Bool)] = []
 
@@ -668,6 +689,11 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
         var questionCreatedAt: TimeInterval?
         var replyText: String?
         var openStudy: Bool
+    }
+
+    private struct PendingAppRoute {
+        var route: AppRoute
+        var announcement: HomeAnnouncement?
     }
 
     @MainActor
@@ -680,14 +706,14 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
     }
 
     @MainActor
-    private func enqueueAppRoute(_ route: AppRoute) {
+    private func enqueueAppRoute(_ route: AppRoute, announcement: HomeAnnouncement? = nil) {
         logEvent("push_route_enqueued route=\(route)")
         guard let appState else {
-            pendingAppRoutes.append(route)
+            pendingAppRoutes.append(PendingAppRoute(route: route, announcement: announcement))
             return
         }
 
-        appState.openRouteFromNotification(route)
+        apply(PendingAppRoute(route: route, announcement: announcement), to: appState)
     }
 
     @MainActor
@@ -698,10 +724,25 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
 
         let routes = pendingAppRoutes
         pendingAppRoutes.removeAll()
-        for route in routes {
-            logEvent("push_route_processing route=\(route)")
-            appState.openRouteFromNotification(route)
+        for pending in routes {
+            logEvent("push_route_processing route=\(pending.route)")
+            apply(pending, to: appState)
         }
+    }
+
+    @MainActor
+    private func apply(_ pending: PendingAppRoute, to appState: AppState) {
+        if let announcement = pending.announcement {
+            appState.presentHomeAnnouncement(announcement)
+            appState.openRoute(.home)
+            if let notificationID = announcement.notificationID {
+                Task { @MainActor in
+                    await appState.markNotificationRead(notificationID: notificationID)
+                }
+            }
+            return
+        }
+        appState.openRouteFromNotification(pending.route)
     }
 
     @MainActor
@@ -881,7 +922,10 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
 
             if !StudyNotificationRouting.isIgnored(actionIdentifier), shouldOpenStudy {
                 if let route = StudyNotificationPayload.appRoute(from: userInfo) {
-                    StudyNotificationDelegate.shared.enqueueAppRoute(route)
+                    StudyNotificationDelegate.shared.enqueueAppRoute(
+                        route,
+                        announcement: StudyNotificationPayload.homeAnnouncement(from: userInfo)
+                    )
                 } else if recordID != nil {
                     StudyRemoteNotificationBridge.shared.enqueueNotificationResponse(
                         userInfo: userInfo,

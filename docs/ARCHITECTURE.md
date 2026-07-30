@@ -137,6 +137,8 @@ runtime comparison or rollback does not fork application behavior.
   - Rejects duplicate topics using a trim, case-fold, and repeated-whitespace normalized key across all studies owned by the user.
   - Resolves monthly question allowance from the active membership tier and an optional per-user override. `GET /api/v1/questions/quota` returns usage, allowance, remaining count, and the next UTC reset instant.
   - Provides authenticated admin APIs for paginated user search, tier allowance updates, and per-user tier/override assignment. Payment-plan metadata is never returned by the consumer quota endpoint.
+  - Provides authenticated feedback review and targeted messaging APIs. Feedback retains the submitting user/device target and progresses through `NEW`, `REVIEWED`, and `REPLIED`; administrative messages reuse the notification outbox/Redis/APNs pipeline instead of sending directly from the controller.
+  - Validates administrative destinations as allowlisted `buddystudy://` deep links. The default `buddystudy://home/message` route opens a Markdown popup on Home, while study, record, statistics, settings, profile, and public-question destinations use the shared `AppRoute` parser.
   - Exposes Redis Stream inspection under the unified Monitoring `Manage` section. The standalone analytics admin does not duplicate this operational surface.
   - Provides authenticated topic/key search, cursor-based Redis Stream inspection, exact stream-entry ID lookup, consumer groups, `redis_event_outbox`, and `question_push_outbox`. Nested credentials are redacted before serialization. See [`REDIS_STREAM_OPERATIONS.md`](REDIS_STREAM_OPERATIONS.md).
 
@@ -155,6 +157,7 @@ runtime comparison or rollback does not fork application behavior.
   - Recommended child topics support multi-selection. iOS filters duplicate normalized names, creates the selected topics in stable order through the existing single-topic use case, and refreshes the study tree once after the batch so topic creation remains separate from question generation.
   - The notification inbox calls `POST /api/v1/notifications/read-all` and updates loaded rows through `NotificationStateStore` only after the backend mutation succeeds.
   - A system notification tap selects the Notifications tab before publishing its route request. `MobileNotificationsTab` consumes that request and pushes one direct destination; Home no longer stages an inbox destination and a nested detail destination in the same SwiftUI update. Notification record loading has explicit loading, unavailable, and retryable-failure states, reuses the first fresh record response without a duplicate detail fetch, and exposes Skip for ungraded questions.
+  - `ADMIN_MESSAGE` notifications with `buddystudy://home/message` are a distinct route: an explicit APNs or notification-inbox tap selects Home and presents the stored Markdown in a sheet. The payload parser takes title/body from `aps.alert`, preserves a pending route until `AppState` is configured, and marks a linked inbox notification read after presentation. Other administrative destinations continue through `AppRoute`.
 
 ## Markdown Message Contract
 
@@ -253,6 +256,12 @@ Public community feed
 -> feedback prompt opens a dedicated form
 -> POST /api/v1/feedback accepts only content and stores it in the dedicated feedbacks table
 -> authenticated user and registered-device identifiers are captured as server-side metadata
+-> Monitoring GET /api/v1/admin/feedback provides paginated operator review
+-> PATCH /api/v1/admin/feedback/{id}/review records review state
+-> POST /api/v1/admin/feedback/{id}/notifications queues an ADMIN_MESSAGE for its captured target
+-> POST /api/v1/admin/users/{id}/notifications queues the same message for a selected member
+-> notification outbox and Redis deliver APNs with parser-derived plain text
+-> an explicit tap routes to the validated app destination; home/message presents the full Markdown popup
 ```
 
 ## Sync Model

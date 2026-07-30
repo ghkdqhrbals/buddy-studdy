@@ -123,6 +123,7 @@ final class AppState: ObservableObject {
     @Published var statusMessage: String?
     @Published var errorMessage: String?
     @Published var notificationLandingMessage: String?
+    @Published var homeAnnouncement: HomeAnnouncement?
     @Published var selectedTab: AppTab = .study
     @Published var homeStudyRoute: HomeStudyRoute?
     @Published var appRouteRequest: AppRouteRequest?
@@ -814,6 +815,16 @@ final class AppState: ObservableObject {
         }
 
         openRoute(route)
+    }
+
+    func presentHomeAnnouncement(_ announcement: HomeAnnouncement) {
+        selectedTab = .home
+        homeStudyRoute = nil
+        homeAnnouncement = announcement
+    }
+
+    func dismissHomeAnnouncement() {
+        homeAnnouncement = nil
     }
 
     @discardableResult

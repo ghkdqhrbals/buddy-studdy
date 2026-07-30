@@ -147,6 +147,45 @@ Response:
 }
 ```
 
+### Admin Feedback And Targeted Notifications
+
+```http
+GET /api/v1/admin/feedback?query=&status=NEW&limit=20&offset=0
+Authorization: Bearer <BACKEND_API_TOKEN>
+
+PATCH /api/v1/admin/feedback/{feedbackId}/review
+Authorization: Bearer <BACKEND_API_TOKEN>
+
+POST /api/v1/admin/feedback/{feedbackId}/notifications
+Authorization: Bearer <BACKEND_API_TOKEN>
+
+POST /api/v1/admin/users/{userId}/notifications
+Authorization: Bearer <BACKEND_API_TOKEN>
+```
+
+The feedback list supports `NEW`, `REVIEWED`, and `REPLIED` status filters.
+Sending through a feedback targets its captured registered user, or its
+submitting device when the feedback was anonymous. A direct user notification
+targets the selected member.
+
+Both notification endpoints accept:
+
+```json
+{
+  "title": "피드백을 확인했어요",
+  "body": "소중한 피드백 감사합니다. **무료 크레딧**을 확인해 주세요.",
+  "deepLink": "buddystudy://home/message"
+}
+```
+
+`deepLink` defaults to `buddystudy://home/message`. Only validated
+`buddystudy://` app destinations are accepted; HTTP and HTTPS destinations are
+rejected. `home/message` presents the full Markdown body in a Home popup after
+an explicit notification tap. Other supported destinations route to Home, My
+Studies, Records, Statistics, Settings/Profile, or Public Questions. APNs uses
+a parser-derived plain-text preview while the notification inbox retains the
+original Markdown.
+
 ### Register Device
 
 ```http

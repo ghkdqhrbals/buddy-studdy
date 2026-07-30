@@ -15,6 +15,7 @@ import {
 import { Button } from "../components/Button.jsx";
 import { InlineNotice } from "../components/InlineNotice.jsx";
 import { ObjectInspector } from "../components/ObjectInspector.jsx";
+import { AdminNotificationComposer } from "../components/AdminNotificationComposer.jsx";
 import { formatDateTime, statusTone } from "../lib/format.js";
 
 const PAGE_SIZE = 20;
@@ -207,6 +208,11 @@ function UsersWorkspace() {
                 setSelected(updated);
                 refresh();
               }}
+            />
+            <AdminNotificationComposer
+              endpoint={`/users/${selected.id}/notifications`}
+              initialTitle="BuddyStudy에서 알려드려요"
+              initialBody=""
             />
             <ObjectInspector value={selected} title="User object" />
           </>

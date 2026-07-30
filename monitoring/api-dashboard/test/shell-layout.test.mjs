@@ -21,6 +21,7 @@ test("all monitoring pages load the shared React application", async () => {
     "audit.html",
     "settings.html",
     "users.html",
+    "feedback.html",
     "jobs.html",
     "streams.html",
   ]) {
@@ -38,11 +39,32 @@ test("all monitoring pages load the shared React application", async () => {
   const navigation = await source("app/navigation.js");
   assert.match(navigation, /Access & Audit/);
   assert.match(navigation, /Users & Quotas/);
+  assert.match(navigation, /User Feedback/);
   assert.match(navigation, /Batch Jobs/);
   assert.match(navigation, /Redis Streams/);
   assert.match(navigation, /GitPullRequest/);
   assert.doesNotMatch(navigation, /Layers3/);
   assert.match(navigation, /Service Status/);
+});
+
+test("feedback administration reviews submissions and sends deep-linked user notifications", async () => {
+  const app = await source("MonitoringApp.jsx");
+  const page = await source("pages/FeedbackPage.jsx");
+  const users = await source("pages/UsersPage.jsx");
+  const composer = await source("components/AdminNotificationComposer.jsx");
+  assert.match(app, /feedback\.html/);
+  assert.match(page, /\/feedback\?/);
+  assert.match(page, /\/feedback\/\$\{selected\.id\}\/review/);
+  assert.match(page, /\/feedback\/\$\{selected\.id\}\/notifications/);
+  assert.match(page, /Pagination/);
+  assert.match(page, /NEW/);
+  assert.match(page, /REVIEWED/);
+  assert.match(page, /REPLIED/);
+  assert.match(users, /AdminNotificationComposer/);
+  assert.match(composer, /buddystudy:\/\/home\/message/);
+  assert.match(composer, /buddystudy:\/\/statistics/);
+  assert.match(composer, /Custom app deep link/);
+  assert.doesNotMatch(composer, /https?:\/\//);
 });
 
 test("batch jobs show operator metadata, timing, results, paginated history, and retry controls", async () => {

@@ -6,6 +6,7 @@ import { ServiceStatusPage } from "./pages/ServiceStatusPage.jsx";
 import { StreamsPage } from "./pages/StreamsPage.jsx";
 import { JobsPage } from "./pages/JobsPage.jsx";
 import { UsersPage } from "./pages/UsersPage.jsx";
+import { FeedbackPage } from "./pages/FeedbackPage.jsx";
 
 export function MonitoringApp() {
   const route = {
@@ -14,6 +15,7 @@ export function MonitoringApp() {
     "/performance.html": { Page: ApiPerformancePage },
     "/testzone.html": { Page: TestZonePage, contentClassName: "react-content-workspace" },
     "/users.html": UsersPage,
+    "/feedback.html": FeedbackPage,
     "/jobs.html": JobsPage,
     "/streams.html": StreamsPage,
     "/audit.html": AuditPage,

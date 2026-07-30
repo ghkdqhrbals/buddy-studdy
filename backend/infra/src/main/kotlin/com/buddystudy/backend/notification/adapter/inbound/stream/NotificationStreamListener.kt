@@ -15,6 +15,7 @@ import com.buddystudy.backend.notification.application.port.inbound.RecoverNotif
 import com.buddystudy.backend.notification.application.port.outbound.NotificationPersistencePort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushPublishPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
+import com.buddystudy.backend.study.application.content.MarkdownContentPolicy
 import com.fasterxml.jackson.module.kotlin.readValue
 import org.slf4j.LoggerFactory
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
@@ -174,7 +175,7 @@ class NotificationStreamListener(
                         sound = metadata.sound ?: "default",
                         intervalMinutes = metadata.intervalMinutes ?: 0,
                         title = command.title,
-                        body = command.body,
+                        body = MarkdownContentPolicy.plainText(command.body),
                         deepLink = command.deepLink ?: "buddystudy://notifications/$notificationId",
                     ),
                 ),

@@ -629,6 +629,11 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .drawer-section { padding: 15px; }
 .drawer-section h3 { margin: 0 0 13px; font-size: 14px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.notification-message-field { grid-column: 1 / -1; }
+.notification-message-field textarea { min-height: 132px; }
+.section-description { margin: -5px 0 13px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.feedback-preview { display: -webkit-box; max-width: 560px; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.45; }
+.feedback-full-content { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: #263244; font-size: 14px; line-height: 1.65; }
 .three-columns { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .drawer-form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .drawer-form-actions .inline-notice { flex: 1; }

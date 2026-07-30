@@ -819,6 +819,49 @@ struct HomeStudyRoute: Identifiable, Hashable {
     var showsTree = false
 }
 
+struct HomeAnnouncement: Identifiable, Equatable {
+    var notificationID: String?
+    var title: String
+    var message: String
+
+    var id: String {
+        notificationID ?? "\(title)|\(message)"
+    }
+
+    init(notificationID: String?, title: String, message: String) {
+        self.notificationID = notificationID
+        self.title = title
+        self.message = message
+    }
+
+    init?(notification: BackendAppNotification) {
+        guard notification.type
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased() == "ADMIN_MESSAGE",
+              Self.isMessageDeepLink(notification.deepLink) else {
+            return nil
+        }
+        self.init(
+            notificationID: notification.id,
+            title: notification.title,
+            message: notification.body
+        )
+    }
+
+    static func isMessageDeepLink(_ value: String?) -> Bool {
+        guard let value,
+              let url = URL(string: value),
+              url.scheme?.lowercased() == "buddystudy" else {
+            return false
+        }
+        let components = [url.host, url.path]
+            .compactMap { $0 }
+            .flatMap { $0.split(separator: "/") }
+            .map { $0.lowercased() }
+        return components == ["home", "message"]
+    }
+}
+
 enum AppRoute: Equatable, Hashable {
     case home
     case studyList
@@ -857,7 +900,7 @@ enum AppRoute: Equatable, Hashable {
         }
 
         let normalized = components.map { $0.lowercased() }
-        if normalized == ["home"] {
+        if normalized == ["home"] || normalized == ["home", "message"] {
             self = .home
         } else if normalized == ["test-push"] {
             self = .home
@@ -3604,7 +3647,11 @@ struct AppStrings {
     var feedbackLink: String { text("피드백 보내기", "Send feedback") }
     var feedbackPromptTitle: String { text("BuddyStudy를 더 좋게 만들어 주세요", "Help improve BuddyStudy") }
     var feedbackPromptBody: String {
-        text("불편했던 점이나 필요한 기능을 짧게 알려주세요.", "Tell us briefly what felt difficult or what you need.")
+        text(
+            "피드백 주는 분들께 무료 크레딧을 더 드려요!",
+            "Share feedback and receive extra credits for free!",
+            "フィードバックをくださった方に無料クレジットを追加します！"
+        )
     }
     var feedbackMessage: String { text("내용", "Message") }
     var feedbackMessagePlaceholder: String {

@@ -2263,6 +2263,60 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertEqual(StudyNotificationPayload.questionCreatedAt(from: payload), 100.25)
     }
 
+    func testAdminHomeMessagePayloadCreatesAnnouncementFromAPSAlert() {
+        let payload: [AnyHashable: Any] = [
+            "aps": [
+                "alert": [
+                    "title": "피드백 크레딧을 드렸어요",
+                    "body": "소중한 의견 감사합니다."
+                ]
+            ],
+            "deepLink": "buddystudy://home/message",
+            "notificationId": "91"
+        ]
+
+        XCTAssertEqual(
+            StudyNotificationPayload.homeAnnouncement(from: payload),
+            HomeAnnouncement(
+                notificationID: "91",
+                title: "피드백 크레딧을 드렸어요",
+                message: "소중한 의견 감사합니다."
+            )
+        )
+    }
+
+    func testAdminNotificationListItemCreatesHomeAnnouncementOnlyForMessageDestination() {
+        let popup = BackendAppNotification(
+            id: "91",
+            type: "ADMIN_MESSAGE",
+            title: "안내",
+            body: "**무료 크레딧**을 추가했습니다.",
+            deepLink: "buddystudy://home/message",
+            isRead: false,
+            createdAt: Date()
+        )
+        let routed = BackendAppNotification(
+            id: "92",
+            type: "ADMIN_MESSAGE",
+            title: "통계 안내",
+            body: "통계를 확인해 주세요.",
+            deepLink: "buddystudy://statistics",
+            isRead: false,
+            createdAt: Date()
+        )
+
+        XCTAssertEqual(
+            HomeAnnouncement(notification: popup),
+            HomeAnnouncement(
+                notificationID: "91",
+                title: "안내",
+                message: "**무료 크레딧**을 추가했습니다."
+            )
+        )
+        XCTAssertNil(HomeAnnouncement(notification: routed))
+        XCTAssertEqual(NotificationRouteResolver.route(for: routed), .statistics)
+    }
+
     func testExplicitNotificationTapIsNavigationIntentRegardlessOfActivationTiming() {
         XCTAssertTrue(
             StudyNotificationRouting.shouldOpenStudyImmediately(

@@ -11,5 +11,8 @@ class FeedbackEntity(
     var userId: Long? = null,
     var deviceId: String? = null,
     var content: String = "",
+    var status: String = "NEW",
+    var reviewedAt: Instant? = null,
+    var repliedAt: Instant? = null,
     var createdAt: Instant = Instant.now(),
 )

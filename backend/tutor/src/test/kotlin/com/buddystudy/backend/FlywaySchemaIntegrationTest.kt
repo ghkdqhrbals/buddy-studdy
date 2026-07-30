@@ -154,6 +154,37 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
+    fun `feedback schema supports operator review and reply state`(): Unit = runBlocking {
+        val columns = databaseClient.sql(
+            """
+            select column_name
+            from information_schema.columns
+            where table_schema = database() and table_name = 'feedbacks'
+            """.trimIndent(),
+        )
+            .map { row, _ -> row.get("column_name", String::class.java)!! }
+            .all()
+            .collectList()
+            .awaitSingle()
+
+        assertThat(columns).contains("status", "reviewed_at", "replied_at")
+
+        val indexes = databaseClient.sql(
+            """
+            select distinct index_name
+            from information_schema.statistics
+            where table_schema = database() and table_name = 'feedbacks'
+            """.trimIndent(),
+        )
+            .map { row, _ -> row.get("index_name", String::class.java)!! }
+            .all()
+            .collectList()
+            .awaitSingle()
+
+        assertThat(indexes).contains("idx_feedbacks_status_created")
+    }
+
+    @Test
     fun `flyway schema supports user openai settings`(): Unit = runBlocking {
         val saved = users.save(
             UserEntity(

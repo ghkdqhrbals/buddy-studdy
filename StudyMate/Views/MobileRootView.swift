@@ -136,6 +136,12 @@ struct MobileRootView: View {
             MobileRequiredTermsGateSheet()
                 .environmentObject(appState)
         }
+        .sheet(item: $appState.homeAnnouncement) { announcement in
+            MobileHomeAnnouncementSheet(announcement: announcement)
+                .environmentObject(appState)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+        }
         .onAppear {
             AppAnalytics.setLanguage(appState.settings.appLanguage)
             AppAnalytics.setSignedIn(appState.isCommunitySessionActive)
@@ -2115,7 +2121,11 @@ private struct MobileNotificationsView: View {
                 ForEach(appState.notifications) { notification in
                     Button {
                         let route = appState.notificationLandingCoordinator.routeForNotificationListSelection(notification)
-                        if route == .home {
+                        if let announcement = HomeAnnouncement(notification: notification) {
+                            appState.presentHomeAnnouncement(announcement)
+                            forwardedRoute = nil
+                            isPresented = false
+                        } else if route == .home {
                             forwardedRoute = nil
                             isPresented = false
                         } else {
@@ -2198,6 +2208,49 @@ private struct MobileNotificationsView: View {
                         .accessibilityLabel(strings.more)
                 }
             }
+        }
+    }
+}
+
+private struct MobileHomeAnnouncementSheet: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    var announcement: HomeAnnouncement
+
+    private var strings: AppStrings {
+        appState.strings
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    Image(systemName: "message.badge.filled.fill")
+                        .font(.system(size: 34, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .accessibilityHidden(true)
+
+                    Text(announcement.title)
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    MarkdownMessageText(markdown: announcement.message, fillsWidth: true)
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                        .textSelection(.enabled)
+
+                    Button(strings.done) {
+                        appState.dismissHomeAnnouncement()
+                        dismiss()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                .padding(22)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .background(Color(.systemBackground))
         }
     }
 }

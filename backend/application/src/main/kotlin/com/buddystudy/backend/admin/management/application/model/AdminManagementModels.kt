@@ -36,3 +36,38 @@ data class AssignUserPlanCommand(
     val tierCode: String,
     val monthlyQuestionLimitOverride: Int?,
 )
+
+data class AdminFeedbackSummary(
+    val id: Long,
+    val userId: Long?,
+    val deviceId: String?,
+    val email: String?,
+    val displayName: String?,
+    val content: String,
+    val status: String,
+    val reviewedAt: Instant?,
+    val repliedAt: Instant?,
+    val createdAt: Instant,
+)
+
+data class AdminFeedbackPageResponse(
+    val feedback: List<AdminFeedbackSummary>,
+    override val totalCount: Long,
+    override val limit: Int,
+    override val offset: Int,
+) : PageResponse
+
+data class AdminNotificationCommand(
+    val title: String,
+    val body: String,
+    val deepLink: String?,
+)
+
+data class AdminNotificationDispatchResponse(
+    val eventId: String,
+    val status: String = "QUEUED",
+    val targetUserId: Long?,
+    val targetDeviceId: String?,
+    val deepLink: String,
+    val feedbackId: Long? = null,
+)
