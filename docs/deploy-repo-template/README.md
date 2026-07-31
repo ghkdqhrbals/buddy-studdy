@@ -227,8 +227,14 @@ The deploy process uses Docker Swarm rolling updates:
 
 For the first migration only, run with `promote_swarm=false`, inspect the staged
 task and logs, then rerun the same image with `promote_swarm=true`. This switches
-Nginx once and removes the former A/B containers. A single Swarm node provides
-zero-downtime application replacement but does not provide host failover.
+Nginx once and removes the former A/B containers without resubmitting the
+stack, so the inspected staged task is the task that receives traffic. A single
+Swarm node provides zero-downtime application replacement but does not provide
+host failover.
+
+Use `Inspect BuddyStudy Backend Swarm` after the image startup grace period.
+It reports only the service image, replica count, update state, and task
+history. It does not call the application or expose the service environment.
 
 Only one scheduler leader is active during overlap windows. MySQL advisory lock is used so only one running backend instance processes scheduled question dispatch at a time.
 

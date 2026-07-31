@@ -69,7 +69,7 @@ deployment.
   containers, but must not compile backend code or build Docker images.
 - The backend application is a single-replica Docker Swarm service named
   `buddystudy_backend`. Updates use `start-first`, the image dependency health
-  check, a 90-second monitor window, and automatic rollback. This prevents an
+  check, a 300-second monitor window, and automatic rollback. This prevents an
   unhealthy replacement task from taking traffic while retaining the previous
   task during the update. A single Swarm node provides deployment continuity,
   not host-level high availability.
@@ -80,7 +80,8 @@ deployment.
   attachable `buddystudy-swarm-net` overlay. Ordinary backend updates never
   rewrite the upstream. The first migration is staged with the old route
   intact and requires one explicit `promote_swarm=true` run after the staged
-  task has been inspected.
+  task has been inspected. Promotion routes to that existing task without
+  resubmitting the stack.
 - Before pulling a backend release, the backend deploy removes only Docker
   images that are not referenced by any container. This keeps the small EC2
   disk from accumulating superseded release images without touching running

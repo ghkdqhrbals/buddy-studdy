@@ -38,19 +38,19 @@ services:
         parallelism: 1
         order: start-first
         failure_action: rollback
-        monitor: 90s
+        monitor: 300s
         max_failure_ratio: 0
       rollback_config:
         parallelism: 1
         order: start-first
         failure_action: pause
-        monitor: 90s
+        monitor: 300s
         max_failure_ratio: 0
       restart_policy:
         condition: on-failure
         delay: 5s
-        max_attempts: 3
-        window: 120s
+        max_attempts: 5
+        window: 300s
 
 networks:
   buddystudy-swarm-net:
