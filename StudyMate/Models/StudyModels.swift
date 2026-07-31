@@ -720,6 +720,33 @@ enum AppLanguage: String, CaseIterable, Codable, Identifiable {
             "日本語"
         }
     }
+
+    static func preferred(from languageIdentifiers: [String]) -> AppLanguage {
+        for identifier in languageIdentifiers {
+            let languageCode = identifier
+                .replacingOccurrences(of: "_", with: "-")
+                .split(separator: "-", maxSplits: 1)
+                .first?
+                .lowercased()
+
+            switch languageCode {
+            case "ko":
+                return .korean
+            case "en":
+                return .english
+            case "ja":
+                return .japanese
+            default:
+                continue
+            }
+        }
+
+        return .english
+    }
+
+    static var systemPreferred: AppLanguage {
+        preferred(from: Locale.preferredLanguages)
+    }
 }
 
 enum NotificationSoundOption: String, CaseIterable, Codable, Identifiable {
@@ -1235,6 +1262,17 @@ struct StudySettings: Codable, Equatable {
         customPrompt: defaultCustomPrompt,
         intervalMinutes: 15
     )
+
+    static func initial(for appLanguage: AppLanguage) -> StudySettings {
+        StudySettings(
+            topic: fallbackTopic(for: appLanguage),
+            difficulty: .beginner,
+            appLanguage: appLanguage,
+            language: appLanguage.studyLanguage,
+            customPrompt: defaultCustomPrompt,
+            intervalMinutes: 15
+        )
+    }
 
     func category(for id: String?) -> StudyCategory? {
         guard let id else {

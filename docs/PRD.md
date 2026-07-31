@@ -28,7 +28,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 
 ### Onboarding
 
-1. User chooses app language.
+1. On a fresh installation, the app starts in the first supported iOS preferred language (`ko`, `en`, or `ja`) and falls back to English. The user can change it during onboarding or later in Settings; an explicit saved choice is never overwritten by later device-language changes.
 2. User optionally enters an OpenAI API key.
 3. User sets topic, difficulty, and interval.
 4. User can skip setup and finish later in Settings.

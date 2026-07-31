@@ -2,6 +2,58 @@ import XCTest
 @testable import StudyMate
 
 final class PageAccessPolicyTests: XCTestCase {
+    func testAppLanguageResolvesSupportedPreferredLanguagesInOrder() {
+        XCTAssertEqual(AppLanguage.preferred(from: ["ko-KR"]), .korean)
+        XCTAssertEqual(AppLanguage.preferred(from: ["en-GB"]), .english)
+        XCTAssertEqual(AppLanguage.preferred(from: ["ja-JP"]), .japanese)
+        XCTAssertEqual(AppLanguage.preferred(from: ["fr-FR", "ja-JP"]), .japanese)
+        XCTAssertEqual(AppLanguage.preferred(from: ["zh-Hans"]), .english)
+    }
+
+    func testFreshInstallPersistsSystemPreferredAppLanguage() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let firstStore = SettingsStore(
+            defaults: defaults,
+            preferredAppLanguageProvider: { .japanese }
+        )
+        let initialSettings = firstStore.loadSettings()
+
+        XCTAssertEqual(initialSettings.appLanguage, .japanese)
+        XCTAssertEqual(initialSettings.language, .japanese)
+        XCTAssertEqual(initialSettings.topic, StudySettings.fallbackTopicJapanese)
+
+        let relaunchedStore = SettingsStore(
+            defaults: defaults,
+            preferredAppLanguageProvider: { .english }
+        )
+        XCTAssertEqual(relaunchedStore.loadSettings().appLanguage, .japanese)
+    }
+
+    func testSavedAppLanguageOverridesCurrentSystemPreference() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(
+            defaults: defaults,
+            preferredAppLanguageProvider: { .japanese }
+        )
+        store.saveSettings(.initial(for: .korean))
+
+        let relaunchedStore = SettingsStore(
+            defaults: defaults,
+            preferredAppLanguageProvider: { .english }
+        )
+        XCTAssertEqual(relaunchedStore.loadSettings().appLanguage, .korean)
+    }
+
     @MainActor
     func testViewIndependentLoadFinishesAfterCallingTaskIsCancelled() async {
         var didFinish = false

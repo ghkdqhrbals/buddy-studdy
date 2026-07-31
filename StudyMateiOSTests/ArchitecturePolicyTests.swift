@@ -2,6 +2,18 @@ import XCTest
 @testable import StudyMate
 
 final class ArchitecturePolicyTests: XCTestCase {
+    func testIOSBundleDeclaresEverySupportedAppLanguage() throws {
+        let root = try repositoryRoot()
+        let infoPlistURL = root.appendingPathComponent("StudyMate/iOSInfo.plist")
+        let data = try Data(contentsOf: infoPlistURL)
+        let plist = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        )
+        let localizations = try XCTUnwrap(plist["CFBundleLocalizations"] as? [String])
+
+        XCTAssertEqual(Set(localizations), Set(["ko", "en", "ja"]))
+    }
+
     func testAnalyticsConfigurationRequiresMatchingFirebaseApp() {
         let configured: [String: Any] = [
             "BUNDLE_ID": "io.github.ghkdqhrbals.StudyMate",

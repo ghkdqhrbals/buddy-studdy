@@ -52,17 +52,20 @@ final class SettingsStore {
     private let defaults: UserDefaults
     private let recordStore: StudyRecordStorage
     private let usesSecureBackendIdentityStorage: Bool
+    private let preferredAppLanguageProvider: () -> AppLanguage
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
     init(
         defaults: UserDefaults = .standard,
         recordDatabaseURL: URL? = nil,
-        usesSecureBackendIdentityStorage: Bool? = nil
+        usesSecureBackendIdentityStorage: Bool? = nil,
+        preferredAppLanguageProvider: @escaping () -> AppLanguage = { .systemPreferred }
     ) {
         self.defaults = defaults
         self.usesSecureBackendIdentityStorage = usesSecureBackendIdentityStorage
             ?? (defaults === UserDefaults.standard)
+        self.preferredAppLanguageProvider = preferredAppLanguageProvider
         Self.removeLegacyRecordDatabaseIfNeeded(defaults: defaults, databaseURL: recordDatabaseURL)
         self.recordStore = Self.makeRecordStore(defaults: defaults, databaseURL: recordDatabaseURL)
         encoder.dateEncodingStrategy = .iso8601
@@ -137,7 +140,9 @@ final class SettingsStore {
     func loadSettings() -> StudySettings {
         guard let data = defaults.data(forKey: Keys.settings),
               let settings = try? decoder.decode(StudySettings.self, from: data) else {
-            return .default
+            let initialSettings = StudySettings.initial(for: preferredAppLanguageProvider())
+            saveSettings(initialSettings)
+            return initialSettings
         }
 
         return StudySettings(
