@@ -125,6 +125,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 13. Record settings provide destructive record management only; record retention is not configurable.
 14. Notification loading failures show a short retry action without exposing HTTP status codes, gateway names, request IDs, or backend diagnostics.
 15. Signed-out Settings exposes only installation-level preferences such as app language and developer promotion-code entry. Account-backed learning rhythm, notification permission, and notification sound controls appear only after sign-in.
+16. The signed-out Profile hub presents Login as its primary account destination instead of Avatar. After authentication succeeds, the same destination becomes Avatar and exposes profile editing.
 
 ### Identity
 

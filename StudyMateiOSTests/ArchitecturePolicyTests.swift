@@ -1284,6 +1284,51 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertFalse(profileContent.contains("Button(strings.done)"))
     }
 
+    func testSignedOutProfileUsesLoginInsteadOfAvatarDestination() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+
+        guard let profileStart = content.range(
+            of: "private struct MobileProfileSettingsSheet: View"
+        )?.lowerBound,
+        let usageStart = content.range(
+            of: "private struct MobileQuestionUsageView: View",
+            range: profileStart..<content.endIndex
+        )?.lowerBound,
+        let editorStart = content.range(
+            of: "private struct MobileProfileEditorView: View"
+        )?.lowerBound,
+        let termsStart = content.range(
+            of: "private struct MobileTermsSettingsView: View",
+            range: editorStart..<content.endIndex
+        )?.lowerBound else {
+            return XCTFail("Profile view boundaries were not found.")
+        }
+
+        let profileContent = String(content[profileStart..<usageStart])
+        let editorContent = String(content[editorStart..<termsStart])
+
+        XCTAssertTrue(
+            profileContent.contains("if appState.isCommunitySessionActive")
+                && profileContent.contains("title: strings.avatar")
+                && profileContent.contains("title: strings.communityLogin"),
+            "The profile hub should show Avatar only for a signed-in account and Login otherwise."
+        )
+        XCTAssertTrue(
+            editorContent.contains(
+                "appState.isCommunitySessionActive ? strings.avatar : strings.communityLogin"
+            ),
+            "The signed-out destination should be titled Login rather than Avatar."
+        )
+        XCTAssertTrue(
+            editorContent.contains(
+                "if appState.isCommunitySessionActive {\n                    ToolbarItem(placement: .confirmationAction)"
+            ),
+            "The avatar Save action should only appear after sign-in."
+        )
+    }
+
     func testChildTopicRecommendationsSupportOrderedBatchSelection() throws {
         let root = try repositoryRoot()
         let viewFile = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")

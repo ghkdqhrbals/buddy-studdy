@@ -5607,14 +5607,26 @@ private struct MobileProfileSettingsSheet: View {
         NavigationStack {
             List {
                 Section {
-                    NavigationLink {
-                        MobileProfileEditorView()
-                    } label: {
-                        profileDestinationLabel(
-                            title: strings.avatar,
-                            subtitle: appState.communityProfile?.displayName,
-                            systemImage: "person.crop.circle"
-                        )
+                    if appState.isCommunitySessionActive {
+                        NavigationLink {
+                            MobileProfileEditorView()
+                        } label: {
+                            profileDestinationLabel(
+                                title: strings.avatar,
+                                subtitle: appState.communityProfile?.displayName,
+                                systemImage: "person.crop.circle"
+                            )
+                        }
+                    } else {
+                        NavigationLink {
+                            MobileProfileEditorView()
+                        } label: {
+                            profileDestinationLabel(
+                                title: strings.communityLogin,
+                                subtitle: nil,
+                                systemImage: "person.crop.circle.badge.plus"
+                            )
+                        }
                     }
 
                     NavigationLink {
@@ -5930,37 +5942,36 @@ private struct MobileProfileEditorView: View {
                 }
             }
             .keyboardDoneToolbar(strings.done)
-            .navigationTitle(strings.avatar)
+            .navigationTitle(
+                appState.isCommunitySessionActive ? strings.avatar : strings.communityLogin
+            )
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        guard appState.isCommunitySessionActive else {
-                            dismiss()
-                            return
-                        }
-
-                        Task {
-                            let didUpdate = await appState.updateCommunityProfile(
-                                displayName: trimmedProfileDisplayName,
-                                avatarSymbolName: draftAvatarSymbolName,
-                                avatarColorSeed: draftAvatarColorSeed,
-                                avatarMode: "PIXEL",
-                                avatarConfig: nil
-                            )
-                            if didUpdate {
-                                dismiss()
+                if appState.isCommunitySessionActive {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button {
+                            Task {
+                                let didUpdate = await appState.updateCommunityProfile(
+                                    displayName: trimmedProfileDisplayName,
+                                    avatarSymbolName: draftAvatarSymbolName,
+                                    avatarColorSeed: draftAvatarColorSeed,
+                                    avatarMode: "PIXEL",
+                                    avatarConfig: nil
+                                )
+                                if didUpdate {
+                                    dismiss()
+                                }
+                            }
+                        } label: {
+                            if appState.isUpdatingCommunityProfile {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Text(strings.save)
                             }
                         }
-                    } label: {
-                        if appState.isUpdatingCommunityProfile {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Text(profileConfirmationTitle(strings: strings))
-                        }
+                        .disabled(!canSaveProfile)
                     }
-                    .disabled(appState.isCommunitySessionActive ? !canSaveProfile : appState.isUpdatingCommunityProfile)
                 }
             }
             .onAppear {
@@ -6027,14 +6038,6 @@ private struct MobileProfileEditorView: View {
         )
         let savedColor = appState.communityProfile?.avatarColorSeed ?? appState.profileAvatarColorSeed
         draftAvatarColorSeed = savedColor.isEmpty ? "avatar-color-sage" : savedColor
-    }
-
-    private func profileConfirmationTitle(strings: AppStrings) -> String {
-        guard appState.isCommunitySessionActive else {
-            return strings.done
-        }
-
-        return strings.save
     }
 
     private func avatarChoice(symbolName: String, colorSeed: String, isSelected: Bool) -> some View {
