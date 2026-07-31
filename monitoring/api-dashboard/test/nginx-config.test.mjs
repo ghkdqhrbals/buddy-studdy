@@ -65,6 +65,19 @@ test("deployment event ingestion keeps its service bearer credential", () => {
   assert.match(ingestLocation, /proxy_set_header Authorization \$http_authorization;/);
 });
 
+test("existing monitoring gateway exposes RedisStreamScope on its dedicated listener", () => {
+  const redisServer = config.match(
+    /server \{\n  listen 8082;([\s\S]*?)proxy_pass \$redisstreamscope;([\s\S]*?)\n\}/,
+  )?.[0];
+
+  assert.ok(redisServer, "RedisStreamScope server must exist on listener 8082");
+  assert.match(redisServer, /buddystudy-redisstreamscope:8080/);
+  assert.match(redisServer, /proxy_buffering off/);
+  assert.match(redisServer, /proxy_set_header X-Forwarded-Proto \$public_forwarded_proto/);
+  assert.match(redisServer, /proxy_set_header Upgrade \$http_upgrade/);
+  assert.doesNotMatch(redisServer, /auth_request/);
+});
+
 test("legacy monitoring-owned service status routes are removed", () => {
   assert.doesNotMatch(config, /\/status\/api\/v1\/service-status/);
   assert.doesNotMatch(config, /\/status\/api\/v1\/admin/);

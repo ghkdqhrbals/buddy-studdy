@@ -18,9 +18,6 @@ jobs:
     name: Deploy RedisStreamScope Module
     runs-on: [self-hosted, macOS, ARM64, macbook-air, buddystudy]
     timeout-minutes: 10
-    env:
-      REDISSTREAMSCOPE_ROOT: ${{ vars.MACBOOKAIR_REDISSTREAMSCOPE_ROOT || '$HOME/buddystudy/redisstreamscope' }}
-      REDISSTREAMSCOPE_PORT: ${{ vars.REDISSTREAMSCOPE_PORT || '3002' }}
 
     steps:
       - name: Deploy RedisStreamScope runtime
@@ -28,7 +25,6 @@ jobs:
           IMAGE_REF: ${{ inputs.image_ref }}
           REDIS_CLUSTER_NODES: ${{ secrets.RSC_REDIS_CLUSTER_NODES }}
           REDIS_PASSWORD: ${{ secrets.RSC_REDIS_PASSWORD }}
-          BASIC_AUTH_HTPASSWD: ${{ secrets.API_DASHBOARD_BASIC_AUTH_HTPASSWD }}
         run: |
           set -euo pipefail
 
@@ -40,59 +36,13 @@ jobs:
             echo "Missing GitHub Actions secret: RSC_REDIS_PASSWORD" >&2
             exit 1
           fi
-          if [ -z "${BASIC_AUTH_HTPASSWD}" ]; then
-            echo "Missing GitHub Actions secret: API_DASHBOARD_BASIC_AUTH_HTPASSWD" >&2
-            exit 1
-          fi
           if [[ "${IMAGE_REF}" != ghcr.io/ghkdqhrbals/redisstreamscope@sha256:* ]]; then
             echo "image_ref must be an immutable ghcr.io/ghkdqhrbals/redisstreamscope digest." >&2
             exit 1
           fi
 
-          redisstreamscope_root="$(eval echo "${REDISSTREAMSCOPE_ROOT}")"
-          mkdir -p "${redisstreamscope_root}/gateway"
-          chmod 700 "${redisstreamscope_root}" "${redisstreamscope_root}/gateway"
-
-          htpasswd_temp="$(mktemp)"
-          nginx_temp="$(mktemp)"
-          cleanup() {
-            rm -f "${htpasswd_temp}" "${nginx_temp}"
-          }
-          trap cleanup EXIT
-
-          printf '%s\n' "${BASIC_AUTH_HTPASSWD}" > "${htpasswd_temp}"
-          chmod 600 "${htpasswd_temp}"
-          cp "${htpasswd_temp}" "${redisstreamscope_root}/gateway/htpasswd"
-          chmod 600 "${redisstreamscope_root}/gateway/htpasswd"
-
-          cat > "${nginx_temp}" <<'NGINX'
-          server {
-            listen 8080;
-            server_name _;
-
-            auth_basic "RedisStreamScope";
-            auth_basic_user_file /etc/nginx/auth/htpasswd;
-
-            location / {
-              proxy_pass http://buddystudy-redisstreamscope:8080;
-              proxy_http_version 1.1;
-              proxy_set_header Host $host;
-              proxy_set_header X-Real-IP $remote_addr;
-              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-              proxy_set_header X-Forwarded-Proto https;
-              proxy_set_header Upgrade $http_upgrade;
-              proxy_set_header Connection "upgrade";
-              proxy_buffering off;
-              proxy_read_timeout 3600s;
-            }
-          }
-          NGINX
-          cp "${nginx_temp}" "${redisstreamscope_root}/gateway/nginx.conf"
-          chmod 600 "${redisstreamscope_root}/gateway/nginx.conf"
-
           docker pull "${IMAGE_REF}"
-          docker pull nginx:1.27-alpine
-          docker network create buddystudy-redisstreamscope >/dev/null 2>&1 || true
+          docker network create buddystudy-monitoring >/dev/null 2>&1 || true
           docker volume create buddystudy-redisstreamscope-data >/dev/null
 
           docker rm -f buddystudy-redisstreamscope-gateway >/dev/null 2>&1 || true
@@ -100,7 +50,7 @@ jobs:
 
           docker run -d \
             --name buddystudy-redisstreamscope \
-            --network buddystudy-redisstreamscope \
+            --network buddystudy-monitoring \
             --restart unless-stopped \
             --memory 256m \
             -e SECURE_COOKIES=true \
@@ -114,22 +64,13 @@ jobs:
             -v buddystudy-redisstreamscope-data:/data \
             "${IMAGE_REF}"
 
-          docker run -d \
-            --name buddystudy-redisstreamscope-gateway \
-            --network buddystudy-redisstreamscope \
-            --restart unless-stopped \
-            --memory 64m \
-            -p "127.0.0.1:${REDISSTREAMSCOPE_PORT}:8080" \
-            -v "${redisstreamscope_root}/gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
-            -v "${redisstreamscope_root}/gateway/htpasswd:/etc/nginx/auth/htpasswd:ro" \
-            nginx:1.27-alpine
-
           {
             echo "### RedisStreamScope deployment submitted"
             echo
             echo "- Image: \`${IMAGE_REF}\`"
-            echo "- Origin: \`127.0.0.1:${REDISSTREAMSCOPE_PORT}\`"
+            echo "- Network: private \`buddystudy-monitoring\`"
             echo "- Data: Docker volume \`buddystudy-redisstreamscope-data\`"
-            echo "- Public protection: gateway Basic Auth + RedisStreamScope session auth"
+            echo "- Public gateway: existing \`buddystudy-api-dashboard\` Nginx"
+            echo "- Authentication: RedisStreamScope session auth"
             echo "- Runtime health is owned by monitoring, not this deploy workflow."
           } >> "${GITHUB_STEP_SUMMARY}"

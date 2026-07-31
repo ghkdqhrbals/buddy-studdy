@@ -15,7 +15,7 @@ one workflow run just because they share a host.
 | Admin frontend | `Deploy BuddyStudy Admin Frontend` | `admin-frontend-image-published`, manual | EC2 self-hosted | Admin frontend container only |
 | iOS TestFlight | `Release iOS App` | `v*`, manual | GitHub-hosted macOS | Release planning, signed IPA build, artifact retention, and TestFlight upload as separate jobs |
 | Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, TestZone UI, deployment history, Grafana, Loki, ERROR-log Slack alerting, monitoring auth and access audit, and the backend/FRC maintenance operator UI |
-| Redis Stream operations | `Deploy RedisStreamScope on MacBook Air` | manual | MacBook Air self-hosted | RedisStreamScope runtime, persisted SQLite/config volume, production Redis connection, and its Basic Auth gateway |
+| Redis Stream operations | `Deploy RedisStreamScope on MacBook Air` | manual | MacBook Air self-hosted | RedisStreamScope runtime, persisted SQLite/config volume, production Redis connection, and attachment to the existing monitoring gateway |
 | Monitoring routing | `Deploy BuddyStudy Monitoring Routes on MacBook Air` | manual | MacBook Air self-hosted | Routingflare routes for the monitoring UI, Grafana, and RedisStreamScope |
 | TestZone execution | `Deploy BuddyStudy TestZone on MacBook Air` | `testzone-image-published`, manual | MacBook Air self-hosted | k6 runner, script/project/run storage, InfluxDB, approved disposable test components |
 | Health monitor | Cloudflare Worker workflow | manual or source workflow | GitHub-hosted | Explicit diagnostic endpoint only; production scheduled checks are disabled |
@@ -290,9 +290,10 @@ deployment.
   after the owning runtime deploy. Routingflare maps
   `monitoring.lowfidev.cloud` to the monitoring nginx gateway and
   `grafana.lowfidev.cloud` to Grafana's dedicated gateway port, and
-  `redis.lowfidev.cloud` to RedisStreamScope's Basic Auth gateway on
-  `127.0.0.1:3002`. RedisStreamScope itself remains reachable only on its
-  private Docker network and persists application state in
+  `redis.lowfidev.cloud` to the existing monitoring Nginx container's
+  RedisStreamScope listener on `127.0.0.1:3002`. RedisStreamScope itself
+  remains reachable only on the shared private monitoring Docker network and
+  persists application state in
   `buddystudy-redisstreamscope-data`. The Grafana
   gateway proxies Grafana and redirects legacy custom-dashboard paths such as
   `/system.html` to `monitoring.lowfidev.cloud`. The targets stay on separate
@@ -312,10 +313,10 @@ deployment.
   public hostname or origin port changed. The deploy pulls an immutable
   multi-architecture GHCR digest on the MacBook Air; it does not build source
   on the self-hosted runner. The production Redis node list and password come
-  from `RSC_REDIS_CLUSTER_NODES` and `RSC_REDIS_PASSWORD`. Public traffic first
-  passes the shared monitoring htpasswd gateway and then RedisStreamScope's own
-  session authentication. GitHub Actions submits the containers without using
-  an HTTP health check as a deployment gate.
+  from `RSC_REDIS_CLUSTER_NODES` and `RSC_REDIS_PASSWORD`. Public traffic passes
+  the existing monitoring Nginx gateway and uses RedisStreamScope's own session
+  authentication. GitHub Actions submits the container without using an HTTP
+  health check as a deployment gate.
 - Cloudflare Health Monitor changes: deploy the Cloudflare Worker only.
   `SCHEDULED_CHECKS_ENABLED=false` is the production default; Grafana owns
   continuous outage alerting so Cron cannot consume Workers KV writes.
