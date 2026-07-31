@@ -896,6 +896,7 @@ jobs:
                   "staged": "Swarm 스테이징됨",
                   "promoted": "Swarm 승격됨",
                   "submitted": "Swarm 업데이트 제출됨",
+                  "rollout-completed": "배포 완료",
               }
               color, status_label = "#2EB67D", state_labels.get(deployment_state, "배포 요청됨")
           elif status == "cancelled":

@@ -208,6 +208,9 @@ deployment.
   iOS: one status line with environment and runtime, followed by the deploy run
   and source commit links. It does not override the Slack app identity, include
   emoji, repeat the image reference, or render action buttons.
+  A successful Swarm rollout is reported as `배포 완료` only after the rollout
+  waiter reaches `rollout-completed`; intermediate submission states must not
+  be presented as completion.
   `SLACK_WEBHOOK_URL` remains only a migration fallback.
 - iOS release notifications are sent through
   `Notify BuddyStudy Deployment Status` in the private deploy repository, so
