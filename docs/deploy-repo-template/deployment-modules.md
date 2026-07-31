@@ -313,7 +313,7 @@ deployment.
   public hostname or origin port changed. The deploy pulls an immutable
   multi-architecture GHCR digest on the MacBook Air; it does not build source
   on the self-hosted runner. The production Redis node list and password come
-  from `RSC_REDIS_CLUSTER_NODES` and `RSC_REDIS_PASSWORD`. Public traffic passes
+  from the standalone `RSC_REDIS_HOST` and `RSC_REDIS_PASSWORD`. Public traffic passes
   the existing monitoring Nginx gateway and uses RedisStreamScope's own session
   authentication. GitHub Actions submits the container without using an HTTP
   health check as a deployment gate.

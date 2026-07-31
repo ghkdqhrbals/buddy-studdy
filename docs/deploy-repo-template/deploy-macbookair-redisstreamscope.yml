@@ -23,13 +23,13 @@ jobs:
       - name: Deploy RedisStreamScope runtime
         env:
           IMAGE_REF: ${{ inputs.image_ref }}
-          REDIS_CLUSTER_NODES: ${{ secrets.RSC_REDIS_CLUSTER_NODES }}
+          REDIS_HOST: ${{ secrets.RSC_REDIS_HOST }}
           REDIS_PASSWORD: ${{ secrets.RSC_REDIS_PASSWORD }}
         run: |
           set -euo pipefail
 
-          if [ -z "${REDIS_CLUSTER_NODES}" ]; then
-            echo "Missing GitHub Actions secret: RSC_REDIS_CLUSTER_NODES" >&2
+          if [ -z "${REDIS_HOST}" ]; then
+            echo "Missing GitHub Actions secret: RSC_REDIS_HOST" >&2
             exit 1
           fi
           if [ -z "${REDIS_PASSWORD}" ]; then
@@ -67,8 +67,8 @@ jobs:
             -e SESSION_TTL=12h \
             -e REDIS_ID=buddystudy-production \
             -e "REDIS_NAME=BuddyStudy Production" \
-            -e REDIS_MODE=cluster \
-            -e "REDIS_NODES=${REDIS_CLUSTER_NODES}" \
+            -e REDIS_MODE=standalone \
+            -e "REDIS_HOST=${REDIS_HOST}" \
             -e "REDIS_PASSWORD=${REDIS_PASSWORD}" \
             -e REDIS_KEY_PATTERN='*' \
             -v buddystudy-redisstreamscope-data:/data \

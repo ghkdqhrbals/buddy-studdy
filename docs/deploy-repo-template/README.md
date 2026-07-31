@@ -69,7 +69,7 @@ MacBook Air monitoring deploy:
 
 MacBook Air RedisStreamScope deploy:
 
-- `RSC_REDIS_CLUSTER_NODES`
+- `RSC_REDIS_HOST`
 - `RSC_REDIS_PASSWORD`
 
 MacBook Air TestZone deploy:
