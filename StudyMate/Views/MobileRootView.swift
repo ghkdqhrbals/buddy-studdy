@@ -1022,7 +1022,7 @@ private struct MobileLoginPage: View {
                         provider: .google
                     )
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(SignInPressButtonStyle())
             }
             .padding(.bottom, 18)
 
@@ -1031,7 +1031,7 @@ private struct MobileLoginPage: View {
             } label: {
                 SignInButtonLabel(title: strings.signInWithEmail, isPrimary: false)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(SignInPressButtonStyle())
             .padding(.bottom, 34)
 
             loginAgreement
@@ -5863,14 +5863,14 @@ private struct MobileProfileEditorView: View {
                                     provider: .google
                                 )
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(SignInPressButtonStyle())
 
                             Button {
                                 isShowingEmailSignIn = true
                             } label: {
                                 SignInButtonLabel(title: strings.signInWithEmail, isPrimary: false)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(SignInPressButtonStyle())
                         }
                         .padding(.vertical, 6)
                     }
@@ -6826,6 +6826,30 @@ private enum SignInProvider {
     case google
 }
 
+private struct SignInPressButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .signInPressEffect(isPressed: configuration.isPressed)
+    }
+}
+
+private struct SignInPressEffect: ViewModifier {
+    var isPressed: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(isPressed ? 0.98 : 1)
+            .opacity(isPressed ? 0.82 : 1)
+            .animation(.easeOut(duration: 0.12), value: isPressed)
+    }
+}
+
+private extension View {
+    func signInPressEffect(isPressed: Bool) -> some View {
+        modifier(SignInPressEffect(isPressed: isPressed))
+    }
+}
+
 private struct SignInButtonLabel: View {
     var title: String
     var isPrimary: Bool
@@ -6880,6 +6904,7 @@ private struct SignInButtonLabel: View {
 private struct BuddySignInWithAppleButton: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.colorScheme) private var colorScheme
+    @GestureState private var isPressed = false
 
     var body: some View {
         ZStack {
@@ -6920,6 +6945,13 @@ private struct BuddySignInWithAppleButton: View {
         .frame(maxWidth: .infinity)
         .frame(height: 58)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .signInPressEffect(isPressed: isPressed)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .updating($isPressed) { _, state, _ in
+                    state = true
+                }
+        )
     }
 }
 #endif
