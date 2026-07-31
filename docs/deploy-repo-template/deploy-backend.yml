@@ -582,6 +582,21 @@ jobs:
             echo "BACKEND_SWARM_SERVICE=buddystudy_backend"
           } >> "${GITHUB_ENV}"
 
+          "${GITHUB_WORKSPACE}/scripts/wait_backend_swarm_rollout.sh" \
+            buddystudy_backend \
+            "${IMAGE_REF}" \
+            600
+          if [ "${BACKEND_DEPLOYMENT_STATE}" = "submitted" ]; then
+            BACKEND_DEPLOYMENT_STATE="rollout-completed"
+          elif [ "${BACKEND_DEPLOYMENT_STATE}" = "staged" ]; then
+            BACKEND_DEPLOYMENT_STATE="staged-ready"
+          fi
+
+          {
+            echo "BACKEND_DEPLOYMENT_STATE=${BACKEND_DEPLOYMENT_STATE}"
+            echo "BACKEND_SWARM_SERVICE=buddystudy_backend"
+          } >> "${GITHUB_ENV}"
+
           SSL_CERTIFICATE="/etc/letsencrypt/live/${BACKEND_DOMAIN}/fullchain.pem"
           SSL_CERTIFICATE_KEY="/etc/letsencrypt/live/${BACKEND_DOMAIN}/privkey.pem"
           if ! test -s "letsencrypt/live/${BACKEND_DOMAIN}/fullchain.pem"; then

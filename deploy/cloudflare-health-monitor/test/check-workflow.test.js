@@ -451,7 +451,35 @@ test("Swarm stack gates replacement tasks on dependency readiness", () => {
   assert.match(stack, /order:\s*start-first/);
   assert.match(stack, /failure_action:\s*rollback/);
   assert.match(stack, /start_period:\s*120s/);
-  assert.match(stack, /monitor:\s*300s/);
+  assert.match(stack, /monitor:\s*5s/);
+});
+
+test("backend deployment waits for the Swarm rollout and current image", () => {
+  const workflow = fs.readFileSync(
+    path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"),
+    "utf8",
+  );
+  const rolloutScript = fs.readFileSync(
+    path.join(
+      repoRoot,
+      "docs/deploy-repo-template/scripts/wait_backend_swarm_rollout.sh",
+    ),
+    "utf8",
+  );
+
+  assert.match(
+    workflow,
+    /wait_backend_swarm_rollout\.sh[\s\S]*buddystudy_backend[\s\S]*"\$\{IMAGE_REF\}"/,
+  );
+  assert.match(workflow, /BACKEND_DEPLOYMENT_STATE="rollout-completed"/);
+  assert.match(rolloutScript, /update_state}" = "completed"/);
+  assert.match(rolloutScript, /replicas}" = "1\/1"/);
+  assert.match(rolloutScript, /expected_task_running}" = "true"/);
+  assert.match(
+    rolloutScript,
+    /paused\|rollback_started\|rollback_paused\|rollback_completed/,
+  );
+  assert.doesNotMatch(rolloutScript, /\/api\/v1\/health|\.State\.Health/);
 });
 
 test("translation deploy preserves Swarm backend connectivity", () => {
@@ -735,13 +763,11 @@ test("deploy repo backend template wires scheduler readiness policy into backend
 
   assert.match(template, /MONITORING_ENVIRONMENT_NAME:\s*\$\{\{\s*vars\.MONITORING_ENVIRONMENT_NAME\s*\|\|\s*'production'\s*\}\}/);
   assert.match(template, /MONITORING_SERVICE_NAME:\s*\$\{\{\s*vars\.MONITORING_SERVICE_NAME\s*\|\|\s*'BuddyStudy backend'\s*\}\}/);
-  assert.match(template, /MONITORING_SLACK_TIMEOUT_MS:\s*\$\{\{\s*vars\.MONITORING_SLACK_TIMEOUT_MS\s*\|\|\s*'5000'\s*\}\}/);
   assert.match(template, /MONITORING_SCHEDULER_READINESS_ENABLED:\s*\$\{\{\s*vars\.MONITORING_SCHEDULER_READINESS_ENABLED\s*\|\|\s*'true'\s*\}\}/);
   assert.match(template, /MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES:\s*\$\{\{\s*vars\.MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES\s*\|\|\s*'15'\s*\}\}/);
   assert.match(template, /MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES:\s*\$\{\{\s*vars\.MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES\s*\|\|\s*'15'\s*\}\}/);
   assert.match(template, /MONITORING_ENVIRONMENT_NAME=\$\{MONITORING_ENVIRONMENT_NAME\}/);
   assert.match(template, /MONITORING_SERVICE_NAME=\$\{MONITORING_SERVICE_NAME\}/);
-  assert.match(template, /MONITORING_SLACK_TIMEOUT_MS=\$\{MONITORING_SLACK_TIMEOUT_MS\}/);
   assert.match(template, /MONITORING_SCHEDULER_READINESS_ENABLED=\$\{MONITORING_SCHEDULER_READINESS_ENABLED\}/);
   assert.match(template, /MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES=\$\{MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES\}/);
   assert.match(template, /MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES=\$\{MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES\}/);

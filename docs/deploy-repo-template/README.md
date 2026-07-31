@@ -248,9 +248,12 @@ The deploy process uses Docker Swarm rolling updates:
 2. Swarm starts the replacement task before stopping the current task.
 3. The image health check calls only
    `/api/v1/health/dependencies`; `failure_action: rollback` restores the
-   previous task when the replacement does not become healthy in the update
-   monitor window.
-4. Nginx keeps the fixed `buddystudy_backend:8080` upstream, so routine updates
+   previous task when the replacement does not become healthy. The
+   post-readiness monitor window is five seconds.
+4. The workflow waits for Swarm `UpdateStatus=completed`, `1/1` replicas, and a
+   running task whose immutable image matches the requested release. A paused
+   or rolled-back update fails the workflow and the deployment notification.
+5. Nginx keeps the fixed `buddystudy_backend:8080` upstream, so routine updates
    do not rewrite or race the proxy configuration.
 
 For the first migration only, run with `promote_swarm=false`, inspect the staged
@@ -275,10 +278,10 @@ The workflow uses Let's Encrypt with the `tls-alpn-01` challenge, so only port `
 
 GitHub Actions must not call backend `/health` or readiness endpoints, must not
 inspect Docker `Health.Status`, must not use indirect container health gates
-such as `docker compose up --wait` or `docker compose wait`, and must not call
-the Health Monitor Worker `/check` endpoint. It reports a Swarm update as
-staged, promoted, or submitted. Swarm evaluates the image health check as the
-platform rollout policy, while runtime server-down alerts are handled by
+such as `docker compose up --wait` or `docker compose wait`, and must not call the Health Monitor Worker `/check` endpoint. It waits on Swarm's control-plane
+rollout state instead. Swarm evaluates the image health check as the platform
+rollout policy; only a completed rollout with the requested image and replica
+count is reported as successful. Runtime server-down alerts remain handled by
 Grafana alerting. The Cloudflare Worker remains available for explicit
 diagnostics, but its production Cron check is disabled.
 

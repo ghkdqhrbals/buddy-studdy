@@ -38,13 +38,13 @@ services:
         parallelism: 1
         order: start-first
         failure_action: rollback
-        monitor: 300s
+        monitor: 5s
         max_failure_ratio: 0
       rollback_config:
         parallelism: 1
         order: start-first
         failure_action: pause
-        monitor: 300s
+        monitor: 5s
         max_failure_ratio: 0
       restart_policy:
         condition: on-failure

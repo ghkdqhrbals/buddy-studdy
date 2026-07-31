@@ -73,10 +73,14 @@ deployment.
   containers, but must not compile backend code or build Docker images.
 - The backend application is a single-replica Docker Swarm service named
   `buddystudy_backend`. Updates use `start-first`, the image dependency health
-  check, a 300-second monitor window, and automatic rollback. This prevents an
-  unhealthy replacement task from taking traffic while retaining the previous
-  task during the update. A single Swarm node provides deployment continuity,
-  not host-level high availability.
+  check, a five-second post-readiness monitor window, and automatic rollback.
+  The deployment workflow waits for Swarm to report `UpdateStatus=completed`,
+  verifies `1/1` replicas, and requires the running task image to match the
+  requested immutable release before it reports success. A paused or rolled
+  back update fails the workflow and its deployment notification. This
+  prevents an unhealthy replacement task from taking traffic while retaining
+  the previous task during the update. A single Swarm node provides deployment
+  continuity, not host-level high availability.
 - The backend task is limited to 1.25 GiB memory and reserves 512 MiB so the
   old and new task can overlap on the 4 GiB EC2 host without allowing two JVMs
   to consume the entire machine. JVM heap remains 50% of its container limit.
