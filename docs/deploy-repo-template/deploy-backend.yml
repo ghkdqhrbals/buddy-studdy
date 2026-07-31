@@ -483,22 +483,37 @@ jobs:
             docker network connect buddystudy-swarm-net buddystudy-libretranslate >/dev/null 2>&1 || true
           fi
 
-          export IMAGE_REF
-          docker stack config -c backend-stack.yml >/dev/null
-          docker stack deploy \
-            --with-registry-auth \
-            -c backend-stack.yml \
-            buddystudy
+          SWARM_ROUTING_ENABLED=false
+          if [ -f .swarm_routing_enabled ]; then
+            SWARM_ROUTING_ENABLED=true
+          fi
 
           BACKEND_DEPLOYMENT_STATE="staged"
-          if [ -f .swarm_routing_enabled ]; then
+          if [ "${PROMOTE_SWARM}" = "true" ] && [ "${SWARM_ROUTING_ENABLED}" = "false" ]; then
+            if ! docker service inspect buddystudy_backend >/dev/null 2>&1; then
+              echo "The staged Swarm service does not exist. Run once with promote_swarm=false first." >&2
+              exit 1
+            fi
+            BACKEND_DEPLOYMENT_STATE="promotion-requested"
+            echo "Promoting the existing staged Swarm task without resubmitting the stack."
+          else
+            export IMAGE_REF
+            docker stack config -c backend-stack.yml >/dev/null
+            docker stack deploy \
+              --with-registry-auth \
+              -c backend-stack.yml \
+              buddystudy
             BACKEND_DEPLOYMENT_STATE="submitted"
+            if [ "${SWARM_ROUTING_ENABLED}" = "false" ]; then
+              BACKEND_DEPLOYMENT_STATE="staged"
+            fi
+            echo "Submitted ${IMAGE_REF} to Swarm service buddystudy_backend."
           fi
+
           {
             echo "BACKEND_DEPLOYMENT_STATE=${BACKEND_DEPLOYMENT_STATE}"
             echo "BACKEND_SWARM_SERVICE=buddystudy_backend"
           } >> "${GITHUB_ENV}"
-          echo "Submitted ${IMAGE_REF} to Swarm service buddystudy_backend."
 
           SSL_CERTIFICATE="/etc/letsencrypt/live/${BACKEND_DOMAIN}/fullchain.pem"
           SSL_CERTIFICATE_KEY="/etc/letsencrypt/live/${BACKEND_DOMAIN}/privkey.pem"

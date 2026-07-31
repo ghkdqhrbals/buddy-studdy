@@ -1,0 +1,78 @@
+name: Inspect BuddyStudy Backend Swarm
+
+on:
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    name: Inspect backend service
+    runs-on: [self-hosted, Linux, ARM64, ec2]
+    timeout-minutes: 5
+
+    steps:
+      - name: Inspect Docker Swarm service state
+        run: |
+          set -euo pipefail
+
+          service_name="buddystudy_backend"
+          swarm_state="$(docker info --format '{{.Swarm.LocalNodeState}}')"
+          if [ "${swarm_state}" != "active" ]; then
+            echo "Docker Swarm is not active: ${swarm_state}" >&2
+            exit 1
+          fi
+          if ! docker service inspect "${service_name}" >/dev/null 2>&1; then
+            echo "Swarm service does not exist: ${service_name}" >&2
+            exit 1
+          fi
+
+          image="$(docker service inspect --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}' "${service_name}")"
+          replicas="$(docker service ls --filter "name=${service_name}" --format '{{.Replicas}}')"
+          update_state="$(docker service inspect --format '{{if .UpdateStatus}}{{.UpdateStatus.State}}{{else}}none{{end}}' "${service_name}")"
+          update_message="$(docker service inspect --format '{{if .UpdateStatus}}{{.UpdateStatus.Message}}{{else}}No update has been recorded.{{end}}' "${service_name}")"
+          current_state="$(docker service ps \
+            --filter desired-state=running \
+            --format '{{.CurrentState}}' \
+            "${service_name}" \
+            | head -n 1)"
+
+          echo "Service: ${service_name}"
+          echo "Image: ${image}"
+          echo "Replicas: ${replicas}"
+          echo "Update state: ${update_state}"
+          echo "Update message: ${update_message}"
+          echo "Current task state: ${current_state}"
+          echo
+          echo "Recent task history:"
+          docker service ps \
+            --no-trunc \
+            --format 'table {{.ID}}\t{{.Name}}\t{{.Image}}\t{{.DesiredState}}\t{{.CurrentState}}\t{{.Error}}' \
+            "${service_name}"
+
+          {
+            echo "## Backend Swarm State"
+            echo ""
+            echo "- Service: \`${service_name}\`"
+            echo "- Image: \`${image}\`"
+            echo "- Replicas: \`${replicas}\`"
+            echo "- Update state: \`${update_state}\`"
+            echo "- Update message: ${update_message}"
+            echo "- Current task state: \`${current_state}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [ "${replicas}" != "1/1" ]; then
+            echo "Backend replica is not available: ${replicas}" >&2
+            exit 1
+          fi
+          case "${update_state}" in
+            paused|rollback_started|rollback_paused|rollback_completed)
+              echo "Backend service is not promotable: ${update_state}" >&2
+              exit 1
+              ;;
+          esac
+          case "${current_state}" in
+            Running*) ;;
+            *)
+              echo "Backend task is not running: ${current_state}" >&2
+              exit 1
+              ;;
+          esac
