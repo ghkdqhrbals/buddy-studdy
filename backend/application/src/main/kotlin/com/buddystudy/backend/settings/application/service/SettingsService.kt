@@ -101,7 +101,7 @@ class SettingsService(
     @Transactional(readOnly = true)
     override suspend fun settings(principal: Principal): StudySettingsResponse {
         val user = users.findById(principal.userId)
-        return studies.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId)
+        return studies.findFirstRootByUserIdOrderByUpdatedAtDesc(principal.userId)
             .toSettings(user)
             .copy(openaiKeyConfigured = properties.openai.userContentApiKey.isNotBlank())
     }

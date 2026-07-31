@@ -6903,55 +6903,115 @@ private struct SignInButtonLabel: View {
 #if os(iOS)
 private struct BuddySignInWithAppleButton: View {
     @EnvironmentObject private var appState: AppState
-    @Environment(\.colorScheme) private var colorScheme
-    @GestureState private var isPressed = false
+    @State private var authorizationCoordinator = AppleSignInAuthorizationCoordinator()
+    @State private var isAuthorizing = false
 
     var body: some View {
-        ZStack {
-            SignInWithAppleButton(.signIn) { request in
-                request.requestedScopes = [.email]
-            } onCompletion: { result in
-                switch result {
-                case .success(let authorization):
-                    guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
-                          let tokenData = credential.identityToken,
-                          let identityToken = String(data: tokenData, encoding: .utf8) else {
-                        appState.appleSignInFailed()
-                        return
-                    }
-                    Task {
-                        await appState.signInToCommunityWithApple(identityToken: identityToken)
-                    }
-                case .failure(let error):
-                    if let authorizationError = error as? ASAuthorizationError,
-                       authorizationError.code == .canceled {
-                        appState.appleSignInCancelled()
-                    } else {
-                        appState.appleSignInFailed(error)
-                    }
+        Button {
+            guard !isAuthorizing else {
+                return
+            }
+            isAuthorizing = true
+            Task { @MainActor in
+                defer {
+                    isAuthorizing = false
+                }
+                do {
+                    let identityToken = try await authorizationCoordinator.requestIdentityToken()
+                    await appState.signInToCommunityWithApple(identityToken: identityToken)
+                } catch let authorizationError as ASAuthorizationError
+                    where authorizationError.code == .canceled {
+                    appState.appleSignInCancelled()
+                } catch {
+                    appState.appleSignInFailed(error)
                 }
             }
-            .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
-            .accessibilityLabel(appState.strings.signInWithApple)
-
+        } label: {
             SignInButtonLabel(
                 title: appState.strings.signInWithApple,
                 isPrimary: true,
                 provider: .apple
             )
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 58)
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .signInPressEffect(isPressed: isPressed)
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .updating($isPressed) { _, state, _ in
-                    state = true
-                }
-        )
+        .buttonStyle(SignInPressButtonStyle())
+        .disabled(isAuthorizing)
+        .accessibilityLabel(appState.strings.signInWithApple)
+    }
+}
+
+@MainActor
+private final class AppleSignInAuthorizationCoordinator: NSObject,
+    ASAuthorizationControllerDelegate,
+    ASAuthorizationControllerPresentationContextProviding {
+    private var continuation: CheckedContinuation<String, Error>?
+    private var authorizationController: ASAuthorizationController?
+
+    func requestIdentityToken() async throws -> String {
+        guard continuation == nil else {
+            throw AppleSignInAuthorizationError.requestAlreadyInProgress
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+            let request = ASAuthorizationAppleIDProvider().createRequest()
+            request.requestedScopes = [.email]
+            let controller = ASAuthorizationController(authorizationRequests: [request])
+            controller.delegate = self
+            controller.presentationContextProvider = self
+            authorizationController = controller
+            controller.performRequests()
+        }
+    }
+
+    func authorizationController(
+        controller: ASAuthorizationController,
+        didCompleteWithAuthorization authorization: ASAuthorization
+    ) {
+        guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+              let tokenData = credential.identityToken,
+              let identityToken = String(data: tokenData, encoding: .utf8) else {
+            finish(.failure(AppleSignInAuthorizationError.missingIdentityToken))
+            return
+        }
+
+        finish(.success(identityToken))
+    }
+
+    func authorizationController(
+        controller: ASAuthorizationController,
+        didCompleteWithError error: Error
+    ) {
+        finish(.failure(error))
+    }
+
+    func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow) ?? ASPresentationAnchor()
+    }
+
+    private func finish(_ result: Result<String, Error>) {
+        guard let continuation else {
+            return
+        }
+        self.continuation = nil
+        authorizationController = nil
+        continuation.resume(with: result)
+    }
+}
+
+private enum AppleSignInAuthorizationError: LocalizedError {
+    case requestAlreadyInProgress
+    case missingIdentityToken
+
+    var errorDescription: String? {
+        switch self {
+        case .requestAlreadyInProgress:
+            "An Apple sign-in request is already in progress."
+        case .missingIdentityToken:
+            "Apple did not return an identity token."
+        }
     }
 }
 #endif

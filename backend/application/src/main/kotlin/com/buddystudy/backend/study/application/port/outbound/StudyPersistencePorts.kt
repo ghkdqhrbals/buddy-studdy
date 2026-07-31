@@ -11,6 +11,11 @@ interface StudyPort {
     suspend fun save(entity: StudyEntity): StudyEntity
     suspend fun deleteByIdAndUserId(id: Long, userId: Long): Long
     suspend fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity?
+    suspend fun findFirstRootByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? =
+        findAllByUserId(userId)
+            .asSequence()
+            .filter { it.parentStudyId == null }
+            .maxWithOrNull(compareBy<StudyEntity> { it.updatedAt }.thenBy { it.id })
     suspend fun findByIdAndUserId(id: Long, userId: Long): StudyEntity?
     suspend fun findByUserIdAndParentStudyIdAndTopic(userId: Long, parentStudyId: Long?, topic: String): StudyEntity?
     suspend fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity?

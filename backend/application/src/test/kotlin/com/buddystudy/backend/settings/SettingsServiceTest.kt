@@ -188,6 +188,33 @@ class SettingsServiceTest {
         assertThat(response.openaiKeyConfigured).isTrue()
     }
 
+    @Test
+    fun `settings reads learning rhythm from a root study instead of a recently updated child`(): Unit = runBlocking {
+        users.row = UserEntity(id = 7, providerId = "u7", status = UserStatus.ACTIVE)
+        studies.rows += StudyEntity(
+            id = 11,
+            userId = 7,
+            deviceId = "dev-1",
+            topic = "Redis",
+            intervalMinutes = 47,
+            updatedAt = Instant.parse("2026-07-30T00:00:00Z"),
+        )
+        studies.rows += StudyEntity(
+            id = 12,
+            userId = 7,
+            deviceId = "dev-1",
+            parentStudyId = 11,
+            topic = "Streams",
+            intervalMinutes = 15,
+            updatedAt = Instant.parse("2026-07-31T00:00:00Z"),
+        )
+
+        val response = service.settings(principal)
+
+        assertThat(response.topic).isEqualTo("Redis")
+        assertThat(response.intervalMinutes).isEqualTo(47)
+    }
+
     private class FakeStudyPort : StudyPort {
         val rows = mutableListOf<StudyEntity>()
         val saved = mutableListOf<StudyEntity>()

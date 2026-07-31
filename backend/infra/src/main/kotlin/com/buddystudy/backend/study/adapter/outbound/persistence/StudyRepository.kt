@@ -47,6 +47,22 @@ class StudyRepository(
             StudyEntity::class.java,
         ).next().awaitSingleOrNull()
 
+    override suspend fun findFirstRootByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? =
+        template.select(
+            Query.query(
+                Criteria.where("user_id").`is`(userId)
+                    .and("parent_study_id").isNull,
+            )
+                .sort(
+                    Sort.by(
+                        Sort.Order.desc("updated_at"),
+                        Sort.Order.desc("id"),
+                    ),
+                )
+                .limit(1),
+            StudyEntity::class.java,
+        ).next().awaitSingleOrNull()
+
     override suspend fun findByIdAndUserId(id: Long, userId: Long): StudyEntity? =
         template.selectOne(
             Query.query(Criteria.where("id").`is`(id).and("user_id").`is`(userId)),
