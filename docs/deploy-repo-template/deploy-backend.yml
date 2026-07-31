@@ -457,16 +457,30 @@ jobs:
           done
           docker network connect buddystudy-swarm-net buddystudy-db >/dev/null 2>&1 || true
 
-          docker rm -f buddystudy-redis >/dev/null 2>&1 || true
-          docker run -d \
-            --name buddystudy-redis \
-            --network buddystudy-net \
-            --restart unless-stopped \
-            --env-file redis.env \
-            -p 6379:6379 \
-            -v buddystudy-redis-data:/data \
-            redis:7.4-alpine \
-            sh -c 'exec redis-server --requirepass "$REDIS_PASSWORD" --appendonly yes --appendfsync everysec --save 900 1 --save 300 10 --save 60 10000'
+          if docker inspect buddystudy-redis >/dev/null 2>&1; then
+            REDIS_IMAGE="$(docker inspect -f '{{.Config.Image}}' buddystudy-redis)"
+            REDIS_DATA_VOLUME="$(
+              docker inspect buddystudy-redis \
+                | python3 -c 'import json, sys; mounts=json.load(sys.stdin)[0].get("Mounts", []); print(next((mount.get("Name", "") for mount in mounts if mount.get("Destination") == "/data" and mount.get("Type") == "volume"), ""))'
+            )"
+            if [ "${REDIS_IMAGE}" != "redis:7.4-alpine" ] || [ "${REDIS_DATA_VOLUME}" != "buddystudy-redis-data" ]; then
+              echo "Refusing to replace the existing Redis container during a backend deployment." >&2
+              echo "Manage Redis image or volume changes through the infrastructure workflow." >&2
+              exit 1
+            fi
+            docker start buddystudy-redis >/dev/null
+            docker network connect buddystudy-net buddystudy-redis >/dev/null 2>&1 || true
+          else
+            docker run -d \
+              --name buddystudy-redis \
+              --network buddystudy-net \
+              --restart unless-stopped \
+              --env-file redis.env \
+              -p 6379:6379 \
+              -v buddystudy-redis-data:/data \
+              redis:7.4-alpine \
+              sh -c 'exec redis-server --requirepass "$REDIS_PASSWORD" --appendonly yes --appendfsync everysec --save 900 1 --save 300 10 --save 60 10000'
+          fi
           docker network connect buddystudy-swarm-net buddystudy-redis >/dev/null 2>&1 || true
 
           sleep 2

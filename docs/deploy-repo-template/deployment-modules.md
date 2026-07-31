@@ -86,6 +86,10 @@ deployment.
   images that are not referenced by any container. This keeps the small EC2
   disk from accumulating superseded release images without touching running
   or rollback containers.
+- Backend application deploys preserve the existing Redis container and data
+  volume. Redis must not be recreated as part of a backend rollout because the
+  resulting dependency outage makes Swarm reject otherwise healthy backend
+  tasks.
 - Monitoring dashboards, the TestZone browser UI, Loki, and Grafana are
   deployed by the monitoring workflow. TestZone's execution service and
   InfluxDB are deployed by the TestZone workflow. Backend deploys must not

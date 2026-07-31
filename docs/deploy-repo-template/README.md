@@ -238,6 +238,11 @@ history. It does not call the application or expose the service environment.
 
 Only one scheduler leader is active during overlap windows. MySQL advisory lock is used so only one running backend instance processes scheduled question dispatch at a time.
 
+Backend deployments preserve the running MySQL and Redis containers. Redis is
+not recreated during an application rollout because a Redis restart would make
+all backend dependency health checks fail simultaneously. Redis runtime changes
+must use an infrastructure workflow.
+
 The workflow uses Let's Encrypt with the `tls-alpn-01` challenge, so only port `443` needs to be public. If certificate issuance fails, a temporary self-signed certificate keeps the service reachable for debugging.
 
 GitHub Actions must not call backend `/health` or readiness endpoints, must not
