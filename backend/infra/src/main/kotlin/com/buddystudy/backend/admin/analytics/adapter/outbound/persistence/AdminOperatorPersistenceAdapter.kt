@@ -67,9 +67,9 @@ class AdminOperatorPersistenceAdapter(
             database.sql(
                 """
                 insert into admin_accounts
-                    (username, display_name, password_hash, status, created_by, created_at, updated_at)
+                    (username, display_name, password_hash, status, last_login_at, created_by, created_at, updated_at)
                 values
-                    (:username, :displayName, :passwordHash, 'ACTIVE', 'bootstrap', :now, :now)
+                    (:username, :displayName, :passwordHash, 'ACTIVE', :now, 'bootstrap', :now, :now)
                 """.trimIndent(),
             ).bind("username", username)
                 .bind("displayName", displayName)
