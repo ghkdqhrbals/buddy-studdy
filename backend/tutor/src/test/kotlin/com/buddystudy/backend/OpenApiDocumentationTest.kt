@@ -40,6 +40,7 @@ class OpenApiDocumentationTest : MySqlIntegrationTestSupport() {
         assertThat(response.body())
             .contains("\"/api/v1/study\"")
             .contains("\"/api/v1/studies\"")
+            .contains("\"/api/v1/studies/{studyId}\"")
             .contains("\"/api/v1/records\"")
             .contains("\"/api/v1/stats\"")
             .contains("\"/api/v1/studies/{studyId}/settings\"")

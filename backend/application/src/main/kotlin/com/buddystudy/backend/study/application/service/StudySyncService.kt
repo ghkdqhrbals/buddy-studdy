@@ -68,6 +68,30 @@ class StudySyncService(
         )
     }
 
+    @Transactional(readOnly = true)
+    override suspend fun study(principal: Principal, studyId: Long, language: String): StudyRoomResponse {
+        val study = studies.findByIdAndUserId(studyId, principal.userId)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
+        val normalizedLanguage = QuestionLanguage.normalize(language)
+        val pendingQuestion = questions
+            .findLatestPendingByStudyIdsAndLanguage(listOf(studyId), normalizedLanguage)
+            .singleOrNull()
+            ?.localizedForDisplay(normalizedLanguage)
+        val latestQuestion = questions
+            .findLatestCompletedByStudyIdAndUserId(studyId, principal.userId)
+            ?.localizedForDisplay(normalizedLanguage)
+        val questionIds = listOfNotNull(pendingQuestion?.id, latestQuestion?.id).distinct()
+        val statsByQuestionId = questionIds
+            .takeIf { it.isNotEmpty() }
+            ?.let { questionStats.findAllByIds(it).associateBy { stats -> stats.questionId } }
+            .orEmpty()
+        return study.toStudyRoomResponse(
+            pendingQuestion = pendingQuestion,
+            latestQuestion = latestQuestion,
+            statsByQuestionId = statsByQuestionId,
+        )
+    }
+
     @Transactional
     @RequirePermission(Permissions.STUDY_CREATE)
     override suspend fun createStudy(principal: Principal, command: CreateStudyCommand): StudyRoomResponse {
@@ -206,12 +230,7 @@ class StudySyncService(
             ?.let { questionStats.findAllByIds(it).associateBy { stats -> stats.questionId } }
             .orEmpty()
         return map { study ->
-            val pendingQuestion = pendingByStudyId[study.id]?.let { question ->
-                question.applyReadyQuestionLocalization(
-                    contentLocalizations.record(question.id, language),
-                    language,
-                )
-            }
+            val pendingQuestion = pendingByStudyId[study.id]?.localizedForDisplay(language)
             study.toStudyRoomResponse(
                 pendingQuestion = pendingQuestion,
                 statsByQuestionId = statsByQuestionId,
@@ -219,13 +238,23 @@ class StudySyncService(
         }
     }
 
+    private suspend fun QuestionEntity.localizedForDisplay(language: String): QuestionEntity =
+        applyReadyQuestionLocalization(
+            contentLocalizations.record(id, language),
+            language,
+        )
+
 }
 
 internal suspend fun StudyEntity.toStudyRoomResponse(
     pendingQuestion: QuestionEntity? = null,
+    latestQuestion: QuestionEntity? = null,
     statsByQuestionId: Map<Long, QuestionStatsEntity> = emptyMap(),
 ): StudyRoomResponse {
     val pending = pendingQuestion?.let { question ->
+        question.toStudyRecord(statsByQuestionId[question.id]).toProjection().toRecordResponse()
+    }
+    val latest = latestQuestion?.let { question ->
         question.toStudyRecord(statsByQuestionId[question.id]).toProjection().toRecordResponse()
     }
 
@@ -246,6 +275,7 @@ internal suspend fun StudyEntity.toStudyRoomResponse(
         lastSentAt = lastSentAt,
         lastError = lastError,
         pendingQuestion = pending,
+        latestQuestion = latest,
         createdAt = createdAt,
         updatedAt = updatedAt,
     )

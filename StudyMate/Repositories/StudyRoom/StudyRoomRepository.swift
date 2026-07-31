@@ -10,6 +10,12 @@ protocol StudyRoomRepository {
         language: AppLanguage
     ) async throws -> BackendStudyPage
 
+    func fetchStudyDetail(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        language: AppLanguage
+    ) async throws -> BackendStudyRoom
+
     func createStudy(
         registration: RemotePushRegistration,
         category: StudyCategory,

@@ -61,6 +61,50 @@ class StudySyncServiceTest {
     }
 
     @Test
+    fun `study detail returns pending and latest completed questions without loading the study list`(): Unit = runBlocking {
+        studies.rows += study(id = 11, topic = "Swift")
+        questions.pendingRows += pendingQuestion(id = 103, studyId = 11, topic = "Swift").apply {
+            answer = "Submitted answer"
+            gradingRequestId = "grading-103"
+            gradingStatus = AnswerGradingStatus.JUDGING
+            status = QuestionStatus.GRADING
+        }
+        questions.completedRows += pendingQuestion(id = 102, studyId = 11, topic = "Swift").apply {
+            answer = "Completed answer"
+            score = 92
+            correct = true
+            feedback = "Good"
+            explanation = "Detailed feedback"
+            status = QuestionStatus.GRADED
+            answeredAt = Instant.parse("2026-06-10T00:10:00Z")
+        }
+        questionStats.rows += QuestionStatsEntity(questionId = 102, viewCount = 7)
+        questionStats.rows += QuestionStatsEntity(questionId = 103, viewCount = 3)
+
+        val response = service.study(principal, studyId = 11, language = "ko")
+
+        assertThat(response.id).isEqualTo(11)
+        assertThat(response.pendingQuestion?.id).isEqualTo("103")
+        assertThat(response.pendingQuestion?.questionStatus).isEqualTo(QuestionStatus.GRADING)
+        assertThat(response.latestQuestion?.id).isEqualTo("102")
+        assertThat(response.latestQuestion?.answer).isEqualTo("Completed answer")
+        assertThat(response.latestQuestion?.gradingResult?.feedback).isEqualTo("Good")
+        assertThat(response.latestQuestion?.viewCount).isEqualTo(7)
+        assertThat(questions.findLatestPendingByStudyIdsCalls).isEqualTo(1)
+        assertThat(questions.findLatestCompletedCalls).isEqualTo(1)
+        assertThat(questionStats.findAllByIdsCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun `study detail rejects a study owned by another user`() {
+        studies.rows += study(id = 11, topic = "Swift").apply { userId = 99 }
+
+        assertThatThrownBy {
+            runBlocking { service.study(principal, studyId = 11, language = "ko") }
+        }.isInstanceOf(ApiException::class.java)
+    }
+
+    @Test
     fun `create new study does not query pending question`(): Unit = runBlocking {
         val response = service.createStudy(
             principal,
@@ -250,11 +294,13 @@ class StudySyncServiceTest {
 
     private class FakeQuestionPort : QuestionPort {
         val pendingRows = mutableListOf<QuestionEntity>()
+        val completedRows = mutableListOf<QuestionEntity>()
         val softDeletedStudyIds = mutableListOf<Long>()
         val softDeletedSubtreeIds = mutableListOf<Long>()
         val softDeletedTopics = mutableListOf<String>()
         var findPendingByStudyIdCalls = 0
         var findLatestPendingByStudyIdsCalls = 0
+        var findLatestCompletedCalls = 0
         override suspend fun save(entity: QuestionEntity): QuestionEntity = entity
         override suspend fun findQuestionById(id: Long): QuestionEntity? = null
         override suspend fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? = null
@@ -275,6 +321,12 @@ class StudySyncServiceTest {
                 .groupBy { it.studyId }
                 .values
                 .mapNotNull { rows -> rows.maxWithOrNull(compareBy<QuestionEntity> { it.createdAt }.thenBy { it.id }) }
+        }
+        override suspend fun findLatestCompletedByStudyIdAndUserId(studyId: Long, userId: Long): QuestionEntity? {
+            findLatestCompletedCalls += 1
+            return completedRows
+                .filter { it.studyId == studyId && it.userId == userId }
+                .maxWithOrNull(compareBy<QuestionEntity> { it.answeredAt }.thenBy { it.createdAt }.thenBy { it.id })
         }
         override suspend fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override suspend fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()

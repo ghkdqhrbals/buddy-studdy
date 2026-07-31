@@ -60,13 +60,15 @@ struct StudyRoomStateStore {
 
     mutating func refreshPendingQuestions(from records: [StudyRecord]) {
         rooms = rooms.map { room in
-            guard let pendingQuestion = room.pendingQuestion,
-                  let refreshedRecord = records.first(where: { $0.id == pendingQuestion.id }) else {
-                return room
-            }
-
             var nextRoom = room
-            nextRoom.pendingQuestion = refreshedRecord
+            if let pendingQuestion = room.pendingQuestion,
+               let refreshedRecord = records.first(where: { $0.id == pendingQuestion.id }) {
+                nextRoom.pendingQuestion = refreshedRecord
+            }
+            if let latestQuestion = room.latestQuestion,
+               let refreshedRecord = records.first(where: { $0.id == latestQuestion.id }) {
+                nextRoom.latestQuestion = refreshedRecord
+            }
             return nextRoom
         }
     }
@@ -102,7 +104,12 @@ struct StudyRoomStateStore {
             }
 
             var nextRoom = room
-            nextRoom.pendingQuestion = record
+            if Self.isPendingQuestion(record) {
+                nextRoom.pendingQuestion = record
+            } else {
+                nextRoom.pendingQuestion = nil
+                nextRoom.latestQuestion = record
+            }
             return nextRoom
         }
     }
@@ -123,7 +130,12 @@ struct StudyRoomStateStore {
 
             var nextRoom = room
             if Self.isPendingQuestion(record) || matchesExistingQuestion {
-                nextRoom.pendingQuestion = record
+                if Self.isPendingQuestion(record) {
+                    nextRoom.pendingQuestion = record
+                } else {
+                    nextRoom.pendingQuestion = nil
+                    nextRoom.latestQuestion = record
+                }
                 didApply = true
             }
             return nextRoom

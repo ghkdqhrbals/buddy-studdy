@@ -256,6 +256,15 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(pendingStudyNode["pendingQuestion"]["topic"].asText()).isEqualTo("Redis")
         assertThat(pendingStudyNode["pendingQuestion"]["question"]["question"].asText()).isEqualTo("Redis의 Stream이 무엇인지 설명하세요.")
 
+        val studyDetail = getJson("/api/v1/studies/${study.id}?tl=ko", accessToken, deviceId, clientSecret)
+            .also { assertThat(it.statusCode()).isEqualTo(200) }
+            .json()
+        assertThat(studyDetail["id"].asLong()).isEqualTo(study.id)
+        assertThat(studyDetail["pendingQuestion"]["id"].asText()).isEqualTo(pending.id.toString())
+        assertThat(studyDetail["latestQuestion"]["id"].asText()).isEqualTo(graded.id.toString())
+        assertThat(studyDetail["latestQuestion"]["answer"].asText()).isEqualTo("랭킹처럼 score가 필요한 목록에 씁니다.")
+        assertThat(studyDetail["latestQuestion"]["gradingResult"]["feedback"].asText()).isEqualTo("좋습니다.")
+
         val searchedStudies = getJson("/api/v1/studies?limit=100&offset=0&query=swift", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()

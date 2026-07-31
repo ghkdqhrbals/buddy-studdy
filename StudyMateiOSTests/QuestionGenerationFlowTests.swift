@@ -748,53 +748,46 @@ final class QuestionGenerationFlowTests: XCTestCase {
 
         let client = makeClient { request in
             XCTAssertEqual(request.httpMethod, "GET")
-            XCTAssertEqual(request.url?.path, "/api/v1/studies")
+            XCTAssertEqual(request.url?.path, "/api/v1/studies/11")
             return Self.response(
                 for: request,
                 statusCode: 200,
                 body: """
                 {
-                  "studies": [
-                    {
-                      "id": 11,
-                      "topic": "운영체제",
-                      "difficultyLevel": 5,
-                      "intervalMinutes": 15,
-                      "enabled": true,
-                      "activeForQuestions": true,
-                      "notificationSound": null,
-                      "customPrompt": "짧게",
-                      "openaiModel": "gpt-5.4",
-                      "maxHistoryCount": 100,
-                      "nextDueAt": null,
-                      "lastSentAt": null,
-                      "lastError": null,
-                      "pendingQuestion": {
-                        "id": "record-11",
-                        "studyId": 11,
-                        "question": {
-                          "question": "프로세스와 스레드의 차이는 무엇인가요?",
-                          "expectedAnswerHint": null,
-                          "createdAt": "2025-07-28T00:00:00Z"
-                        },
-                        "answer": "프로세스는 독립된 메모리를 갖고 스레드는 메모리를 공유합니다.",
-                        "gradingResult": null,
-                        "topic": "운영체제",
-                        "difficulty": 5,
-                        "answeredAt": "2025-07-28T00:01:00Z",
-                        "isPublic": true,
-                        "gradingRequestId": "grading-11",
-                        "gradingStatus": "FAILED",
-                        "gradingError": "일시적인 채점 오류"
-                      },
-                      "createdAt": "2025-07-28T00:00:00Z",
-                      "updatedAt": "2025-07-28T00:01:00Z"
-                    }
-                  ],
-                  "totalCount": 1,
-                  "limit": 500,
-                  "offset": 0,
-                  "serverTime": "2025-07-28T00:01:00Z"
+                  "id": 11,
+                  "topic": "운영체제",
+                  "difficultyLevel": 5,
+                  "intervalMinutes": 15,
+                  "enabled": true,
+                  "activeForQuestions": true,
+                  "notificationSound": null,
+                  "customPrompt": "짧게",
+                  "openaiModel": "gpt-5.4",
+                  "maxHistoryCount": 100,
+                  "nextDueAt": null,
+                  "lastSentAt": null,
+                  "lastError": null,
+                  "pendingQuestion": {
+                    "id": "record-11",
+                    "studyId": 11,
+                    "question": {
+                      "question": "프로세스와 스레드의 차이는 무엇인가요?",
+                      "expectedAnswerHint": null,
+                      "createdAt": "2025-07-28T00:00:00Z"
+                    },
+                    "answer": "프로세스는 독립된 메모리를 갖고 스레드는 메모리를 공유합니다.",
+                    "gradingResult": null,
+                    "topic": "운영체제",
+                    "difficulty": 5,
+                    "answeredAt": "2025-07-28T00:01:00Z",
+                    "isPublic": true,
+                    "gradingRequestId": "grading-11",
+                    "gradingStatus": "FAILED",
+                    "gradingError": "일시적인 채점 오류"
+                  },
+                  "latestQuestion": null,
+                  "createdAt": "2025-07-28T00:00:00Z",
+                  "updatedAt": "2025-07-28T00:01:00Z"
                 }
                 """
             )
@@ -814,6 +807,95 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertEqual(restored.gradingStatus, .failed)
         XCTAssertEqual(store.loadStudyRecords().first?.answer, restored.answer)
         XCTAssertEqual(appState.lastAnswer, restored.answer)
+    }
+
+    func testReopeningStudyRoomUsesDetailEndpointAndShowsLatestCompletedQuestionWhenNoPendingQuestionExists() async throws {
+        let suiteName = "QuestionGenerationFlowTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+
+        let category = StudyCategory(id: "42", title: "Swift", difficulty: .level5)
+        let store = SettingsStore(
+            defaults: defaults,
+            recordDatabaseURL: databaseURL,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveSettings(
+            StudySettings(
+                topic: category.title,
+                difficulty: category.difficulty,
+                customPrompt: StudySettings.defaultCustomPrompt,
+                intervalMinutes: 30,
+                studyCategories: [category],
+                selectedStudyCategoryID: category.id
+            )
+        )
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        let requestedPaths = LockedValue<[String]>([])
+        let client = makeClient { request in
+            requestedPaths.set(requestedPaths.value + [request.url?.path ?? ""])
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: """
+                {
+                  "id": 42,
+                  "topic": "Swift",
+                  "difficultyLevel": 5,
+                  "intervalMinutes": 30,
+                  "enabled": true,
+                  "activeForQuestions": true,
+                  "notificationSound": null,
+                  "customPrompt": "",
+                  "openaiModel": "gpt-5.4",
+                  "maxHistoryCount": 100,
+                  "nextDueAt": null,
+                  "lastSentAt": null,
+                  "lastError": null,
+                  "pendingQuestion": null,
+                  "latestQuestion": {
+                    "id": "latest-42",
+                    "studyId": 42,
+                    "question": {
+                      "question": "가장 최근 완료 질문",
+                      "expectedAnswerHint": null,
+                      "createdAt": "2026-07-30T00:00:00Z"
+                    },
+                    "answer": "사용자 답변",
+                    "gradingResult": {
+                      "score": 90,
+                      "correct": true,
+                      "feedback": "좋아요",
+                      "explanation": "완료된 채점 설명"
+                    },
+                    "topic": "Swift",
+                    "difficulty": 5,
+                    "answeredAt": "2026-07-30T00:01:00Z",
+                    "isPublic": true,
+                    "gradingRequestId": "grading-42",
+                    "gradingStatus": "COMPLETED",
+                    "gradingError": null
+                  },
+                  "createdAt": "2026-07-30T00:00:00Z",
+                  "updatedAt": "2026-07-30T00:01:00Z"
+                }
+                """
+            )
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+
+        await appState.prepareStudyRoom(categoryID: category.id)
+
+        XCTAssertEqual(requestedPaths.value, ["/api/v1/studies/42"])
+        let displayed = try XCTUnwrap(appState.studyRoomRecordForDisplay(categoryID: category.id))
+        XCTAssertEqual(displayed.id, "latest-42")
+        XCTAssertEqual(displayed.answer, "사용자 답변")
+        XCTAssertEqual(displayed.gradingResult?.feedback, "좋아요")
     }
 
     func testReopeningStudyRoomResumesPersistedAnswerGrading() async throws {
@@ -870,53 +952,46 @@ final class QuestionGenerationFlowTests: XCTestCase {
 
         let client = makeClient { request in
             switch (request.httpMethod, request.url?.path) {
-            case ("GET", "/api/v1/studies"):
+            case ("GET", "/api/v1/studies/12"):
                 return Self.response(
                     for: request,
                     statusCode: 200,
                     body: """
                     {
-                      "studies": [
-                        {
-                          "id": 12,
-                          "topic": "데이터베이스",
-                          "difficultyLevel": 5,
-                          "intervalMinutes": 15,
-                          "enabled": true,
-                          "activeForQuestions": true,
-                          "notificationSound": null,
-                          "customPrompt": "짧게",
-                          "openaiModel": "gpt-5.4",
-                          "maxHistoryCount": 100,
-                          "nextDueAt": null,
-                          "lastSentAt": null,
-                          "lastError": null,
-                          "pendingQuestion": {
-                            "id": "record-12",
-                            "studyId": 12,
-                            "question": {
-                              "question": "트랜잭션 격리 수준을 설명하세요.",
-                              "expectedAnswerHint": null,
-                              "createdAt": "2025-07-28T00:00:00Z"
-                            },
-                            "answer": "격리 수준은 동시성 문제와 일관성 사이의 균형을 정합니다.",
-                            "gradingResult": null,
-                            "topic": "데이터베이스",
-                            "difficulty": 5,
-                            "answeredAt": "2025-07-28T00:01:00Z",
-                            "isPublic": true,
-                            "gradingRequestId": "grading-12",
-                            "gradingStatus": "JUDGING",
-                            "gradingError": null
-                          },
-                          "createdAt": "2025-07-28T00:00:00Z",
-                          "updatedAt": "2025-07-28T00:01:00Z"
-                        }
-                      ],
-                      "totalCount": 1,
-                      "limit": 500,
-                      "offset": 0,
-                      "serverTime": "2025-07-28T00:01:00Z"
+                      "id": 12,
+                      "topic": "데이터베이스",
+                      "difficultyLevel": 5,
+                      "intervalMinutes": 15,
+                      "enabled": true,
+                      "activeForQuestions": true,
+                      "notificationSound": null,
+                      "customPrompt": "짧게",
+                      "openaiModel": "gpt-5.4",
+                      "maxHistoryCount": 100,
+                      "nextDueAt": null,
+                      "lastSentAt": null,
+                      "lastError": null,
+                      "pendingQuestion": {
+                        "id": "record-12",
+                        "studyId": 12,
+                        "question": {
+                          "question": "트랜잭션 격리 수준을 설명하세요.",
+                          "expectedAnswerHint": null,
+                          "createdAt": "2025-07-28T00:00:00Z"
+                        },
+                        "answer": "격리 수준은 동시성 문제와 일관성 사이의 균형을 정합니다.",
+                        "gradingResult": null,
+                        "topic": "데이터베이스",
+                        "difficulty": 5,
+                        "answeredAt": "2025-07-28T00:01:00Z",
+                        "isPublic": true,
+                        "gradingRequestId": "grading-12",
+                        "gradingStatus": "JUDGING",
+                        "gradingError": null
+                      },
+                      "latestQuestion": null,
+                      "createdAt": "2025-07-28T00:00:00Z",
+                      "updatedAt": "2025-07-28T00:01:00Z"
                     }
                     """
                 )
@@ -1147,7 +1222,9 @@ final class QuestionGenerationFlowTests: XCTestCase {
         var unansweredRecord = record
         unansweredRecord.answer = nil
         unansweredRecord.gradingRequestID = nil
+        unansweredRecord.correlationID = nil
         unansweredRecord.gradingStatus = nil
+        unansweredRecord.questionStatus = .ungraded
         XCTAssertTrue(StudyAnswerPresentationPolicy.shouldShowEditor(for: unansweredRecord))
         XCTAssertEqual(appState.answerDraft(for: unansweredRecord), "제출 전에 남아 있던 편집 초안")
     }

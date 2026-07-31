@@ -55,6 +55,9 @@ class StudyWebAdapter(
         language,
     )
 
+    override suspend fun study(studyId: Long, language: String, authentication: Authentication) =
+        studySyncUseCase.study(authentication.principalOrThrow(), studyId, language)
+
     override suspend fun records(
         limit: Int,
         offset: Int,

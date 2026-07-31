@@ -24,6 +24,18 @@ struct StudyRoomUseCase {
         )
     }
 
+    func fetchStudyDetail(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        language: AppLanguage
+    ) async throws -> BackendStudyRoom {
+        try await repository.fetchStudyDetail(
+            registration: registration,
+            studyID: studyID,
+            language: language
+        )
+    }
+
     func createStudy(
         registration: RemotePushRegistration,
         category: StudyCategory,

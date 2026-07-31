@@ -52,9 +52,12 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
    the user's draft. Polling belongs to the answer/detail screen that started
    it and stops immediately when that screen disappears, while an accepted
    submission request itself is allowed to finish persisting. Reopening the study
-   room refetches its pending question, including the persisted answer,
-   grading request ID, and current grading status, then resumes polling without
-   asking the user to submit the same answer again.
+   room calls `GET /api/v1/studies/{studyId}` instead of loading the whole study
+   tree. The response contains the pending question, including its persisted
+   answer, grading request ID, and current grading status, plus the latest
+   completed question. The app resumes polling for a pending submitted answer;
+   when no pending question exists it keeps showing the latest completed
+   question, user answer, and AI response.
 6. Grading result, feedback, and explanation are stored in records.
 7. Ungraded pending questions are capped at 3.
 8. My Studies shows root studies first. Selecting one opens an unlimited-depth study tree whose orientation can be switched between vertical and horizontal.

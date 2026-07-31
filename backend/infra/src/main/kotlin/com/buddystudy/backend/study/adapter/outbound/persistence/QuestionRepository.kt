@@ -188,6 +188,26 @@ class QuestionRepository(
         language: String,
     ): List<QuestionEntity> = findLatestPendingByStudyIdsInternal(studyIds)
 
+    override suspend fun findLatestCompletedByStudyIdAndUserId(studyId: Long, userId: Long): QuestionEntity? =
+        template.select(
+            Query.query(
+                Criteria.where("study_id").`is`(studyId)
+                    .and("user_id").`is`(userId)
+                    .and("deleted_at").isNull
+                    .and("skipped_at").isNull
+                    .and("score").isNotNull,
+            )
+                .sort(
+                    Sort.by(
+                        Sort.Order.desc("answered_at"),
+                        Sort.Order.desc("created_at"),
+                        Sort.Order.desc("id"),
+                    ),
+                )
+                .limit(1),
+            QuestionEntity::class.java,
+        ).next().awaitSingleOrNull()
+
     private suspend fun findLatestPendingByStudyIdsInternal(studyIds: Collection<Long>): List<QuestionEntity> {
         if (studyIds.isEmpty()) return emptyList()
         val studyMarkers = indexedBindMarkers("studyId", studyIds.size)

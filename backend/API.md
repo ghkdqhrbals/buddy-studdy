@@ -589,7 +589,24 @@ GET /api/v1/studies?limit=500&offset=0
 Authorization: Bearer <accessToken>
 ```
 
-Returns the authenticated user's study rooms. It does not return record history, but each study can include one `pendingQuestion` for the current unanswered study-room question.
+Returns the authenticated user's study tree/list synchronization page. It is not
+the detail or record-history endpoint. Each list item can include one
+`pendingQuestion` so list badges and pending counts can be synchronized without
+loading completed record history.
+
+### Study Detail
+
+```http
+GET /api/v1/studies/{studyId}?tl=ko
+Authorization: Bearer <accessToken>
+```
+
+Returns exactly one authenticated user-owned study room. `pendingQuestion` is
+the latest non-skipped, non-deleted question without a score, including a
+persisted submitted answer and grading state when present. `latestQuestion` is
+the latest completed question and includes its user answer and AI grading
+response. Clients display `pendingQuestion` first and fall back to
+`latestQuestion` when no pending question exists.
 
 ### Study Topic Suggestions
 
@@ -635,12 +652,15 @@ DELETE /api/v1/records
 
 Study record `id` values are database-generated autoincrement IDs returned as strings for client compatibility.
 `PATCH .../answer` saves an answer draft without grading. `POST .../answer` grades the answer using the device's stored OpenAI API key and persists the score, feedback, and explanation. Delete endpoints immediately remove the target records and related report/public-question references.
-`GET /api/v1/studies` includes the latest ungraded `pendingQuestion` for each
-study. When an answer has already been submitted, that nested record includes
+`GET /api/v1/studies/{studyId}` includes the latest ungraded `pendingQuestion`
+for that study and the latest completed `latestQuestion`. When an answer has
+already been submitted, the pending nested record includes
 `answer`, `questionStatus`, `correlationId` (with `gradingRequestId` retained as
 a compatibility alias), `gradingLastEventId`, `gradingStatus`, and
 `gradingError` so a reopened
 client can restore the submitted state and resume grading-status polling.
+`GET /api/v1/records/{recordId}` remains the canonical record-detail endpoint;
+`GET /api/v1/studies` is reserved for tree/list synchronization.
 Records have no per-user retention cap and remain until the user deletes them or
 withdraws the account. Clients should request subsequent `offset` pages while
 scrolling instead of loading the complete history at once.

@@ -313,6 +313,12 @@ protocol RemotePushBackendClientProtocol {
         language: AppLanguage
     ) async throws -> BackendStudyPage
 
+    func fetchStudyDetail(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        language: AppLanguage
+    ) async throws -> BackendStudyRoom
+
     func createStudy(
         registration: RemotePushRegistration,
         category: StudyCategory,
@@ -914,6 +920,28 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.httpMethod = "GET"
         let data = try await perform(request)
         return try decoder.decode(BackendStudyPage.self, from: data)
+    }
+
+    func fetchStudyDetail(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        language: AppLanguage = .korean
+    ) async throws -> BackendStudyRoom {
+        var components = URLComponents(
+            url: endpoint("api", "v1", "studies", String(studyID)),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "tl", value: language.backendCode)
+        ]
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+
+        var request = authenticatedRequest(registration: registration, url: url)
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(BackendStudyRoom.self, from: data)
     }
 
     func createStudy(
@@ -2364,6 +2392,7 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
     var lastSentAt: Date?
     var lastError: String?
     var pendingQuestion: StudyRecord?
+    var latestQuestion: StudyRecord?
     var createdAt: Date
     var updatedAt: Date
 
@@ -2384,6 +2413,7 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
         lastSentAt: Date?,
         lastError: String?,
         pendingQuestion: StudyRecord?,
+        latestQuestion: StudyRecord? = nil,
         createdAt: Date,
         updatedAt: Date
     ) {
@@ -2403,6 +2433,7 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
         self.lastSentAt = lastSentAt
         self.lastError = lastError
         self.pendingQuestion = pendingQuestion
+        self.latestQuestion = latestQuestion
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -2424,6 +2455,7 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
         case lastSentAt
         case lastError
         case pendingQuestion
+        case latestQuestion
         case createdAt
         case updatedAt
     }
@@ -2446,6 +2478,7 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
         lastSentAt = try container.decodeIfPresent(Date.self, forKey: .lastSentAt)
         lastError = try container.decodeIfPresent(String.self, forKey: .lastError)
         pendingQuestion = try container.decodeIfPresent(StudyRecord.self, forKey: .pendingQuestion)
+        latestQuestion = try container.decodeIfPresent(StudyRecord.self, forKey: .latestQuestion)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
     }

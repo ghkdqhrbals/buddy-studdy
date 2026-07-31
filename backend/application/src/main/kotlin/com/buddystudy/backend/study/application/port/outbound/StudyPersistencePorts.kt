@@ -90,6 +90,7 @@ interface QuestionPort {
     suspend fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity>
     suspend fun findLatestPendingByStudyIdsAndLanguage(studyIds: Collection<Long>, language: String): List<QuestionEntity> =
         findLatestPendingByStudyIds(studyIds)
+    suspend fun findLatestCompletedByStudyIdAndUserId(studyId: Long, userId: Long): QuestionEntity? = null
     suspend fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity>
     suspend fun findVisibleByUserAndLanguage(
         userId: Long,

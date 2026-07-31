@@ -30,6 +30,7 @@ interface StudyWebPort {
         language: String,
         authentication: Authentication,
     ): StudyPageResponse
+    suspend fun study(studyId: Long, language: String, authentication: Authentication): StudyRoomResponse
     suspend fun records(
         limit: Int,
         offset: Int,

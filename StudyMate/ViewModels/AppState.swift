@@ -2879,7 +2879,16 @@ final class AppState: ObservableObject {
     }
 
     private func applyBackendStudyPage(_ studyPage: BackendStudyPage) {
-        let visibleStudies = studyPage.studies.filter { !isLocallyDeletedStudy($0) }
+        let cachedRoomsByID = Dictionary(uniqueKeysWithValues: backendStudyRooms.map { ($0.id, $0) })
+        let visibleStudies = studyPage.studies
+            .filter { !isLocallyDeletedStudy($0) }
+            .map { room in
+                var mergedRoom = room
+                if mergedRoom.latestQuestion == nil {
+                    mergedRoom.latestQuestion = cachedRoomsByID[room.id]?.latestQuestion
+                }
+                return mergedRoom
+            }
         let pendingRecords = visibleStudies.compactMap(\.pendingQuestion)
         let visibleStudyIDs = Set(visibleStudies.map(\.id))
         let pendingRecordIDsByStudyID = Dictionary(
@@ -2976,6 +2985,60 @@ final class AppState: ObservableObject {
         savedSettings = nextSettings
         draftSettings = nextSettings
         localStudySettingsUseCase.saveSettings(nextSettings)
+    }
+
+    private func fetchBackendStudyDetailIfPossible(studyID: Int) async -> BackendStudyRoom? {
+        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
+              let registration = await registrationWithAccessToken(storedRegistration, reason: "study-detail") else {
+            return nil
+        }
+
+        return await actionRunner.run(
+            operation: {
+                try await performWithBackendIdentityRecovery(
+                    registration: registration,
+                    reason: "study-detail",
+                    operation: { recoveredRegistration in
+                        try await studyRoomUseCase.fetchStudyDetail(
+                            registration: recoveredRegistration,
+                            studyID: studyID,
+                            language: settings.appLanguage
+                        )
+                    }
+                )
+            },
+            onSuccess: { _ in },
+            onFailure: { error in
+                handleAppError(error, fallback: strings.pageAccessRequiresLogin, target: .none)
+                log(.warning, "백엔드 학습 상세 로드 실패: studyID=\(studyID), error=\(error.localizedDescription)")
+            }
+        )
+    }
+
+    private func applyBackendStudyDetail(_ room: BackendStudyRoom) {
+        guard !isLocallyDeletedStudy(room) else {
+            return
+        }
+
+        let returnedRecords = [room.pendingQuestion, room.latestQuestion].compactMap { $0 }
+        let returnedPendingID = room.pendingQuestion?.id
+        let authoritativeRecords = studyRecords.filter { record in
+            guard record.studyID == room.id,
+                  record.gradingResult == nil else {
+                return true
+            }
+            return record.id == returnedPendingID
+        }
+        let mergedRecords = returnedRecords.reduce(authoritativeRecords) { records, record in
+            mergeBackendRecord(record, into: records)
+        }
+        if mergedRecords != studyRecords {
+            localStudyRecordUseCase.replaceRecords(mergedRecords)
+            reloadStudyRecordsFromStore(refreshRooms: false)
+        }
+
+        studyRoomState.upsertStudy(room)
+        studyRoomState.refreshPendingQuestions(from: studyRecords)
     }
 
     private func refreshBackendStudyRoomsFromRecords() {
@@ -5476,19 +5539,6 @@ final class AppState: ObservableObject {
 
         applyPreferredPendingRecord(for: targetCategory)
         showStudyScreen(categoryID: targetCategory.id)
-
-        Task { [weak self] in
-            guard let self else {
-                return
-            }
-
-            let didRefresh = await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
-            guard didRefresh,
-                  homeStudyRoute?.categoryID == targetCategory.id else {
-                return
-            }
-            applyPreferredPendingRecord(for: targetCategory)
-        }
     }
 
     func openStudyTree(_ categoryID: String) {
@@ -5595,9 +5645,14 @@ final class AppState: ObservableObject {
 
         applyPreferredPendingRecord(for: initialCategory)
 
-        let didRefresh = await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
-        guard didRefresh,
-              let refreshedCategory = studyCategoryForRoom(categoryID) ?? studyCategoryMatchingTopic(initialCategory.title) else {
+        guard let studyID = Int(initialCategory.id),
+              let detail = await fetchBackendStudyDetailIfPossible(studyID: studyID) else {
+            onInitialStateResolved?()
+            return
+        }
+        applyBackendStudyDetail(detail)
+
+        guard let refreshedCategory = studyCategoryForRoom(categoryID) ?? studyCategoryMatchingTopic(initialCategory.title) else {
             onInitialStateResolved?()
             return
         }
@@ -5657,6 +5712,10 @@ final class AppState: ObservableObject {
     func studyRoomRecordForDisplay(categoryID: String?) -> StudyRecord? {
         if let pendingRecord = pendingStudyRecord(categoryID: categoryID) {
             return pendingRecord
+        }
+
+        if let latestQuestion = backendStudyRoom(categoryID: categoryID)?.latestQuestion {
+            return latestQuestion
         }
 
         guard let category = studyCategoryForRoom(categoryID),
@@ -8151,10 +8210,7 @@ final class AppState: ObservableObject {
 
         localStudyRecordUseCase.replaceRecords(mergeBackendRecord(record, into: studyRecords))
         reloadStudyRecordsFromStore()
-        let didApplyRecordToStudyRoom = studyRoomState.applyIncomingRecord(record)
-        if !didApplyRecordToStudyRoom, record.gradingResult == nil {
-            await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
-        }
+        _ = studyRoomState.applyIncomingRecord(record)
 
         if currentQuestion.map({ Self.questionsMatch($0, record.question) }) == true {
             lastAnswer = record.answer ?? lastAnswer

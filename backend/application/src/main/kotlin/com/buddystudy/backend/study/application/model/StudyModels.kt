@@ -76,6 +76,7 @@ data class StudyRoomResponse(
     val lastSentAt: Instant?,
     val lastError: String?,
     val pendingQuestion: StudyRecordResponse?,
+    val latestQuestion: StudyRecordResponse? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
 )

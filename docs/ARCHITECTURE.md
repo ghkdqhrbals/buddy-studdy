@@ -126,6 +126,7 @@ runtime comparison or rollback does not fork application behavior.
   - Stores studies as a MySQL adjacency list through `studies.parent_study_id`. Root studies use `NULL`; child depth is not capped by the schema or API.
   - Uses `sort_order` plus `id` for stable sibling ordering. A self-referencing foreign key cascades subtree deletion at the study layer, while question soft deletion resolves the same subtree with a recursive CTE before deleting the studies.
   - Keeps study identity on record responses so the iOS cache can remove only records owned by a deleted subtree, even when two branches use the same topic label.
+  - Separates read contracts by purpose: `GET /api/v1/records/{recordId}` is record detail, `GET /api/v1/studies/{studyId}` is one study room with both its latest pending and latest completed question, and paginated `GET /api/v1/studies` is tree/list synchronization. The iOS room prefers the pending question and otherwise keeps the latest completed question, submitted answer, and AI response visible.
   - Root studies own schedule state and question-generation settings. Descendants own topic, difficulty, ordering, and `active_for_questions`; scheduled claims never target descendants directly.
   - Keeps three write boundaries explicit: `POST /api/v1/studies` creates a root, `POST /api/v1/studies/{parentStudyId}/topics` creates a descendant without generating a question or consuming quota, and `POST /api/v1/studies/{topicId}/questions` generates a question.
   - Authorizes study and topic creation with `study:create`, which has no monthly question requirement. Manual question generation uses the separate `question:create` permission and is the only one of these write paths guarded by monthly question quota.
@@ -203,7 +204,9 @@ User answer
 -> backend atomically persists the submitted answer, grading correlation,
    questionStatus=GRADING, and gradingStatus=QUEUED before OpenAI work
 -> leaving the detail screen cancels only client polling
--> reopening fetches /api/v1/studies and merges pendingQuestion answer/grading state over stale local cache
+-> reopening fetches /api/v1/studies/{studyId}, never the full tree page
+-> iOS merges pendingQuestion answer/grading state over stale local cache
+-> when pendingQuestion is absent, iOS displays latestQuestion with the submitted answer and AI response
 -> iOS resumes polling by the persisted grading correlation
 -> backend calls OpenAI and persists score, feedback, and explanation
 -> SettingsStore updates StudyRecord
@@ -218,6 +221,7 @@ User answer
 My Studies root
 -> GET /api/v1/studies
 -> app builds parentStudyId adjacency map
+-> selecting a room calls GET /api/v1/studies/{studyId} for its question state
 -> compact branch navigation swaps data once, then reveals row contents without moving row geometry
 -> recursive tree layout renders circular nodes with restrained level colors
 -> the user can switch orientation, pinch or button zoom, drag nodes, and reset saved positions

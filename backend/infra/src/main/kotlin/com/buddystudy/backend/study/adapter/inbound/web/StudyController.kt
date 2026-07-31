@@ -77,6 +77,24 @@ class StudyController(
     ): StudyPageResponse = study.study(limit, offset, query, language, authentication)
 
     @Operation(
+        summary = "Fetch one study",
+        description = "Returns one owned study with its latest pending question and latest completed question. Clients should prefer pendingQuestion and fall back to latestQuestion.",
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Study returned."),
+        ApiResponse(responseCode = "401", description = "Authentication required."),
+        ApiResponse(responseCode = "404", description = "Study not found or not owned by the caller."),
+    )
+    @GetMapping("/studies/{studyId}")
+    suspend fun studyDetail(
+        @PathVariable studyId: Long,
+        @RequestParam(required = false) tl: String?,
+        @Parameter(description = "Deprecated response language alias.", deprecated = true)
+        @RequestParam(required = false) language: String?,
+        authentication: Authentication,
+    ): StudyRoomResponse = study.study(studyId, resolveTargetLanguage(tl, language), authentication)
+
+    @Operation(
         summary = "Create a study",
         description = "Creates a study room for the authenticated user. If the same topic already exists for the user, the existing study is updated with the request values and returned.",
     )
