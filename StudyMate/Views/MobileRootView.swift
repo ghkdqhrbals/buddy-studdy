@@ -6883,13 +6883,6 @@ private struct BuddySignInWithAppleButton: View {
 
     var body: some View {
         ZStack {
-            SignInButtonLabel(
-                title: appState.strings.signInWithApple,
-                isPrimary: true,
-                provider: .apple
-            )
-            .accessibilityHidden(true)
-
             SignInWithAppleButton(.signIn) { request in
                 request.requestedScopes = [.email]
             } onCompletion: { result in
@@ -6914,8 +6907,15 @@ private struct BuddySignInWithAppleButton: View {
                 }
             }
             .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
-            .opacity(0.01)
             .accessibilityLabel(appState.strings.signInWithApple)
+
+            SignInButtonLabel(
+                title: appState.strings.signInWithApple,
+                isPrimary: true,
+                provider: .apple
+            )
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
         }
         .frame(maxWidth: .infinity)
         .frame(height: 58)
