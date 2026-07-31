@@ -101,20 +101,27 @@ struct StudyView: View {
             MobileStudyTreeView(rootStudyID: rootStudyID)
         }
         .sheet(item: $editingStudyRoom) { room in
-            StudyTopicLevelSheet(
-                room: room,
+            StudyEditorSheet(
+                navigationTitle: strings.editStudyCategory,
+                initialTitle: room.topic,
+                initialDifficulty: Difficulty(level: room.difficultyLevel),
+                initialQuestionRotationEnabled: room.activeForQuestions,
                 strings: strings,
                 onDelete: {
                     deleteStudyRoom(room)
                 }
-            ) { title, difficulty, isActive in
+            ) { title, difficulty, questionRotationEnabled in
                 appState.updateStudyTreeCategory(
                     roomID: room.id,
                     title: title,
                     difficulty: difficulty
                 )
-                if isActive != room.activeForQuestions {
-                    appState.setStudyTopicActive(studyID: room.id, active: isActive)
+                if let questionRotationEnabled,
+                   questionRotationEnabled != room.activeForQuestions {
+                    appState.setStudyTopicActive(
+                        studyID: room.id,
+                        active: questionRotationEnabled
+                    )
                 }
             }
         }

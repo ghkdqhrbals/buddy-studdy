@@ -1174,32 +1174,35 @@ final class ArchitecturePolicyTests: XCTestCase {
             "The My Studies list should not stage direct deletion outside an editor."
         )
         XCTAssertTrue(
-            content.contains("if onDelete != nil {\n                    Section {\n                        Button(role: .destructive)"),
-            "Root-study deletion should remain available inside StudyCategoryEditorSheet."
-        )
-        XCTAssertTrue(
-            content.contains("struct StudyTopicLevelSheet: View")
+            content.contains("struct StudyEditorSheet: View")
+                && content.contains("if onDelete != nil {")
                 && content.contains("Button(strings.deleteStudy, role: .destructive)"),
-            "Child-topic deletion should remain available inside StudyTopicLevelSheet."
+            "Root studies and child topics should share one editor with deletion available inside it."
         )
     }
 
-    func testNewStudyFormUsesBackendDefaultPromptWithoutPromptEditor() throws {
+    func testStudyEditorUsesBackendPromptWithoutExposingPromptControls() throws {
         let root = try repositoryRoot()
         let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
         let content = try String(contentsOf: file, encoding: .utf8)
 
-        XCTAssertTrue(
-            content.contains(
-                "if category != nil {\n                    Section(strings.relatedPrompt)"
-            ),
-            "The prompt editor should remain available only while editing an existing study; new studies use the backend default prompt."
+        XCTAssertFalse(
+            content.contains("Section(strings.relatedPrompt)")
+                || content.contains("RecommendedPrompt.allCases")
+                || content.contains("TextEditor(text: $customPrompt)"),
+            "Study creation and editing must not expose prompt controls."
         )
         XCTAssertTrue(
             content.contains(
-                "appState.addStudyCategory(title, difficulty: difficulty, customPrompt: nil, openAIModel: model)"
+                "customPrompt: nil,\n                    openAIModel: StudySettings.defaultOpenAIModel"
             ),
             "The new-study form should send no prompt override so the backend chooses its default prompt."
+        )
+        XCTAssertTrue(
+            content.contains("struct StudyEditorSheet: View")
+                && !content.contains("struct StudyCategoryEditorSheet: View")
+                && !content.contains("struct StudyTopicLevelSheet: View"),
+            "All study edit entry points should use one shared editor component."
         )
 
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
@@ -1209,6 +1212,11 @@ final class ArchitecturePolicyTests: XCTestCase {
                 "customPrompt: customPrompt ?? StudySettings.defaultCustomPrompt"
             ),
             "New local study state should not inherit a client-level prompt override when the API request uses the backend default."
+        )
+        XCTAssertTrue(
+            appStateContent.contains("customPrompt: category.customPrompt")
+                && appStateContent.contains("openAIModel: category.sanitizedOpenAIModel"),
+            "Editing title or difficulty should preserve hidden prompt and model values."
         )
 
         let backendClientFile = root.appendingPathComponent("StudyMate/Services/RemotePushBackendClient.swift")
@@ -1247,10 +1255,30 @@ final class ArchitecturePolicyTests: XCTestCase {
             "The selected study screen must not offer deletion directly from its More menu."
         )
         XCTAssertTrue(
-            content.contains("StudyTopicLevelSheet(")
+            content.contains("StudyEditorSheet(")
                 && content.contains("onDelete: {\n                    deleteStudyRoom(room)"),
             "Topic deletion should remain available inside the study editor."
         )
+    }
+
+    func testProfileSheetUsesCloseAction() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+
+        guard let profileStart = content.range(
+            of: "private struct MobileProfileSettingsSheet: View"
+        )?.lowerBound,
+        let usageStart = content.range(
+            of: "private struct MobileQuestionUsageView: View",
+            range: profileStart..<content.endIndex
+        )?.lowerBound else {
+            return XCTFail("Profile settings sheet boundaries were not found.")
+        }
+        let profileContent = String(content[profileStart..<usageStart])
+
+        XCTAssertTrue(profileContent.contains("Button(strings.close)"))
+        XCTAssertFalse(profileContent.contains("Button(strings.done)"))
     }
 
     func testChildTopicRecommendationsSupportOrderedBatchSelection() throws {

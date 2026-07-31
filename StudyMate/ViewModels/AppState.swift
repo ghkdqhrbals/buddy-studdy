@@ -5338,6 +5338,25 @@ final class AppState: ObservableObject {
         id: String,
         title: String,
         difficulty: Difficulty,
+        syncBackendSchedule: Bool = true
+    ) {
+        guard let category = settings.studyCategories.first(where: { $0.id == id }) else {
+            return
+        }
+        updateStudyCategory(
+            id: id,
+            title: title,
+            difficulty: difficulty,
+            customPrompt: category.customPrompt,
+            openAIModel: category.sanitizedOpenAIModel,
+            syncBackendSchedule: syncBackendSchedule
+        )
+    }
+
+    private func updateStudyCategory(
+        id: String,
+        title: String,
+        difficulty: Difficulty,
         customPrompt: String,
         openAIModel: String,
         syncBackendSchedule: Bool = true

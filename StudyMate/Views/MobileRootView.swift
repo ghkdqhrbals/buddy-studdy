@@ -1499,38 +1499,59 @@ private struct MobileHomeView: View {
             .environmentObject(appState)
         }
         .sheet(isPresented: $isAddingStudyCategory) {
-            StudyCategoryEditorSheet(category: nil, strings: strings, onDelete: nil) { title, difficulty, _, model in
-                appState.addStudyCategory(title, difficulty: difficulty, customPrompt: nil, openAIModel: model)
+            StudyEditorSheet(
+                navigationTitle: strings.newStudyCategory,
+                initialTitle: "",
+                initialDifficulty: .beginner,
+                strings: strings
+            ) { title, difficulty, _ in
+                appState.addStudyCategory(
+                    title,
+                    difficulty: difficulty,
+                    customPrompt: nil,
+                    openAIModel: StudySettings.defaultOpenAIModel
+                )
             }
         }
         .sheet(item: $editingStudyCategory) { category in
-            StudyCategoryEditorSheet(category: category, strings: strings, onDelete: {
-                appState.deleteStudyCategory(id: category.id)
-            }) { title, difficulty, prompt, model in
+            StudyEditorSheet(
+                navigationTitle: strings.editStudyCategory,
+                initialTitle: category.title,
+                initialDifficulty: category.difficulty,
+                strings: strings,
+                onDelete: {
+                    appState.deleteStudyCategory(id: category.id)
+                }
+            ) { title, difficulty, _ in
                 appState.updateStudyCategory(
                     id: category.id,
                     title: title,
-                    difficulty: difficulty,
-                    customPrompt: prompt,
-                    openAIModel: model
+                    difficulty: difficulty
                 )
             }
         }
         .sheet(item: $editingStudyRoom) { room in
-            StudyTopicLevelSheet(
-                room: room,
+            StudyEditorSheet(
+                navigationTitle: strings.editStudyCategory,
+                initialTitle: room.topic,
+                initialDifficulty: Difficulty(level: room.difficultyLevel),
+                initialQuestionRotationEnabled: room.activeForQuestions,
                 strings: strings,
                 onDelete: {
                     appState.deleteStudyCategory(id: String(room.id))
                 }
-            ) { title, difficulty, isActive in
+            ) { title, difficulty, questionRotationEnabled in
                 appState.updateStudyTreeCategory(
                     roomID: room.id,
                     title: title,
                     difficulty: difficulty
                 )
-                if isActive != room.activeForQuestions {
-                    appState.setStudyTopicActive(studyID: room.id, active: isActive)
+                if let questionRotationEnabled,
+                   questionRotationEnabled != room.activeForQuestions {
+                    appState.setStudyTopicActive(
+                        studyID: room.id,
+                        active: questionRotationEnabled
+                    )
                 }
             }
         }
@@ -3007,20 +3028,27 @@ struct MobileStudyTreeView: View {
             .environmentObject(appState)
         }
         .sheet(item: $editingRoom) { room in
-            StudyTopicLevelSheet(
-                room: room,
+            StudyEditorSheet(
+                navigationTitle: strings.editStudyCategory,
+                initialTitle: room.topic,
+                initialDifficulty: Difficulty(level: room.difficultyLevel),
+                initialQuestionRotationEnabled: room.activeForQuestions,
                 strings: strings,
                 onDelete: {
                     appState.deleteStudyCategory(id: String(room.id))
                 }
-            ) { title, difficulty, isActive in
+            ) { title, difficulty, questionRotationEnabled in
                 appState.updateStudyTreeCategory(
                     roomID: room.id,
                     title: title,
                     difficulty: difficulty
                 )
-                if isActive != room.activeForQuestions {
-                    appState.setStudyTopicActive(studyID: room.id, active: isActive)
+                if let questionRotationEnabled,
+                   questionRotationEnabled != room.activeForQuestions {
+                    appState.setStudyTopicActive(
+                        studyID: room.id,
+                        active: questionRotationEnabled
+                    )
                 }
             }
         }
@@ -4215,32 +4243,39 @@ private struct StudyTopicAddSheet: View {
     }
 }
 
-struct StudyTopicLevelSheet: View {
+struct StudyEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
 
-    var room: BackendStudyRoom
+    var navigationTitle: String
+    var initialQuestionRotationEnabled: Bool?
     var strings: AppStrings
-    var onDelete: () -> Void
-    var onSave: (String, Difficulty, Bool) -> Void
+    var onDelete: (() -> Void)?
+    var onSave: (String, Difficulty, Bool?) -> Void
 
     @State private var title: String
     @State private var difficultyLevel: Double
-    @State private var isActive: Bool
+    @State private var isQuestionRotationEnabled: Bool
     @State private var showsDeleteConfirmation = false
 
     init(
-        room: BackendStudyRoom,
+        navigationTitle: String,
+        initialTitle: String,
+        initialDifficulty: Difficulty,
+        initialQuestionRotationEnabled: Bool? = nil,
         strings: AppStrings,
-        onDelete: @escaping () -> Void,
-        onSave: @escaping (String, Difficulty, Bool) -> Void
+        onDelete: (() -> Void)? = nil,
+        onSave: @escaping (String, Difficulty, Bool?) -> Void
     ) {
-        self.room = room
+        self.navigationTitle = navigationTitle
+        self.initialQuestionRotationEnabled = initialQuestionRotationEnabled
         self.strings = strings
         self.onDelete = onDelete
         self.onSave = onSave
-        _title = State(initialValue: room.topic)
-        _difficultyLevel = State(initialValue: Double(room.difficultyLevel))
-        _isActive = State(initialValue: room.activeForQuestions)
+        _title = State(initialValue: initialTitle)
+        _difficultyLevel = State(initialValue: Double(initialDifficulty.level))
+        _isQuestionRotationEnabled = State(
+            initialValue: initialQuestionRotationEnabled ?? false
+        )
     }
 
     private var canSave: Bool {
@@ -4250,7 +4285,7 @@ struct StudyTopicLevelSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
+                Section(strings.studySettings) {
                     TextField(strings.studyTopic, text: $title)
 
                     VStack(alignment: .leading, spacing: 8) {
@@ -4261,24 +4296,40 @@ struct StudyTopicLevelSheet: View {
                                 .fontWeight(.semibold)
                         }
                         Slider(value: $difficultyLevel, in: 1...10, step: 1)
+
+                        HStack {
+                            Text("1")
+                            Spacer()
+                            Text("10")
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     }
                 }
 
-                Section {
-                    Toggle(strings.questionTopicToggle, isOn: $isActive)
+                if initialQuestionRotationEnabled != nil {
+                    Section {
+                        Toggle(
+                            strings.questionTopicToggle,
+                            isOn: $isQuestionRotationEnabled
+                        )
 
-                    Text(strings.questionRotationHelp)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        Text(strings.questionRotationHelp)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
-                Section {
-                    Button(strings.deleteStudy, role: .destructive) {
-                        showsDeleteConfirmation = true
+                if onDelete != nil {
+                    Section {
+                        Button(strings.deleteStudy, role: .destructive) {
+                            showsDeleteConfirmation = true
+                        }
                     }
                 }
             }
-            .navigationTitle(strings.editStudyCategory)
+            .keyboardDoneToolbar(strings.done)
+            .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -4291,7 +4342,9 @@ struct StudyTopicLevelSheet: View {
                         onSave(
                             title.trimmingCharacters(in: .whitespacesAndNewlines),
                             Difficulty(level: resolvedDifficulty),
-                            isActive
+                            initialQuestionRotationEnabled == nil
+                                ? nil
+                                : isQuestionRotationEnabled
                         )
                         dismiss()
                     }
@@ -4300,7 +4353,7 @@ struct StudyTopicLevelSheet: View {
             }
             .confirmationDialog(strings.deleteStudy, isPresented: $showsDeleteConfirmation) {
                 Button(strings.deleteStudy, role: .destructive) {
-                    onDelete()
+                    onDelete?()
                     dismiss()
                 }
                 Button(strings.cancel, role: .cancel) {}
@@ -5638,7 +5691,7 @@ private struct MobileProfileSettingsSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(strings.done) {
+                    Button(strings.close) {
                         dismiss()
                     }
                 }
@@ -7782,123 +7835,6 @@ private struct MobileHomeCategoryRow: View {
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
-}
-
-private struct StudyCategoryEditorSheet: View {
-    var category: StudyCategory?
-    var strings: AppStrings
-    var onDelete: (() -> Void)?
-    var onSave: (String, Difficulty, String, String) -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var title: String
-    @State private var difficultyLevel: Double
-    @State private var customPrompt: String
-    @State private var showsDeleteConfirmation = false
-
-    init(
-        category: StudyCategory?,
-        strings: AppStrings,
-        onDelete: (() -> Void)? = nil,
-        onSave: @escaping (String, Difficulty, String, String) -> Void
-    ) {
-        self.category = category
-        self.strings = strings
-        self.onDelete = onDelete
-        self.onSave = onSave
-        _title = State(initialValue: category?.title ?? "")
-        _difficultyLevel = State(initialValue: Double((category?.difficulty ?? .beginner).level))
-        _customPrompt = State(initialValue: category?.customPrompt ?? StudySettings.defaultCustomPrompt)
-    }
-
-    private var canSave: Bool {
-        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section(strings.studySettings) {
-                    TextField(strings.studyTopic, text: $title)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text(strings.difficulty)
-                            Spacer()
-                            Text(Difficulty(level: resolvedDifficultyLevel).displayName(language: strings.language))
-                                .fontWeight(.semibold)
-                                .monospacedDigit()
-                        }
-
-                        Slider(value: $difficultyLevel, in: 1...10, step: 1)
-
-                        HStack {
-                            Text("1")
-                            Spacer()
-                            Text("10")
-                        }
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    }
-                }
-
-                if category != nil {
-                    Section(strings.relatedPrompt) {
-                        Menu {
-                            ForEach(RecommendedPrompt.allCases) { prompt in
-                                Button(prompt.title(language: strings.language)) {
-                                    customPrompt = prompt.text(language: strings.language)
-                                }
-                            }
-                        } label: {
-                            Text(strings.recommendedPrompt)
-                        }
-
-                        TextEditor(text: $customPrompt)
-                            .frame(minHeight: 130)
-                    }
-                }
-
-                if onDelete != nil {
-                    Section {
-                        Button(role: .destructive) {
-                            showsDeleteConfirmation = true
-                        } label: {
-                            Text(strings.deleteStudy)
-                        }
-                    }
-                }
-            }
-            .keyboardDoneToolbar(strings.done)
-            .navigationTitle(category == nil ? strings.newStudyCategory : strings.editStudyCategory)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(strings.cancel) {
-                        dismiss()
-                    }
-                }
-
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(strings.save) {
-                        onSave(title, Difficulty(level: resolvedDifficultyLevel), customPrompt, category?.sanitizedOpenAIModel ?? StudySettings.defaultOpenAIModel)
-                        dismiss()
-                    }
-                    .disabled(!canSave)
-                }
-            }
-            .confirmationDialog(strings.deleteStudy, isPresented: $showsDeleteConfirmation) {
-                Button(strings.deleteStudy, role: .destructive) {
-                    onDelete?()
-                    dismiss()
-                }
-                Button(strings.cancel, role: .cancel) {}
-            }
-        }
-    }
-
-    private var resolvedDifficultyLevel: Int {
-        min(max(Int(difficultyLevel.rounded()), 1), 10)
-    }
 }
 
 private struct MobileFeedbackPromptRow: View {

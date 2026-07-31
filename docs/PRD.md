@@ -52,7 +52,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 6. Grading result, feedback, and explanation are stored in records.
 7. Ungraded pending questions are capped at 3.
 8. My Studies shows root studies first. Selecting one opens an unlimited-depth study tree whose orientation can be switched between vertical and horizontal.
-9. A root study owns the question schedule, OpenAI model, optional prompt override, and the single question flow. The backend owns the static default question prompt; clients omit the prompt unless the user explicitly customizes it. Descendant nodes own only their topic, difficulty level, ordering, and question-rotation activation.
+9. A root study owns the question schedule, OpenAI model, and the single question flow. The backend owns the question prompt; iOS study creation and editing do not expose prompt overrides. Descendant nodes own only their topic, difficulty level, ordering, and question-rotation activation.
 10. Adding a tree node opens GPT topic recommendations by default. The user can select one or more recommendations and add them together with one shared difficulty, or switch to manual topic entry. Duplicate normalized topic names are rejected across the user's studies.
 11. Topic recommendations use a shared system catalog before generating new entries. The catalog manages up to five descendant levels and up to ten children per opened branch; missing children are generated once and become reusable suggestions.
 12. The user's study tree materializes selected catalog topics lazily so a five-level catalog never creates an exponential number of unused user nodes. New root and descendant nodes participate in question rotation by default.

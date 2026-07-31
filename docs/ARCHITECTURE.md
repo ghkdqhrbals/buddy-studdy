@@ -234,7 +234,7 @@ Root schedule becomes due
 -> backend claims the root only
 -> complete subtree is resolved
 -> active node with the oldest lastSentAt is selected
--> root OpenAI model and optional prompt override generate a question for the selected node's topic and level, with the backend static prompt used by default
+-> the backend-owned prompt and root OpenAI model generate a question for the selected node's topic and level; iOS study editors do not expose prompt overrides
 -> question is stored under the root study ID
 -> selected node lastSentAt and root nextDueAt are advanced atomically
 -> Redis outbox publishes the APNs notification
