@@ -166,11 +166,46 @@ class StudyServiceTest {
         val response = service.answer(principal, recordId = 501, answer = "My answer", grade = true)
 
         assertThat(response.id).isEqualTo("501")
+        assertThat(response.answer).isEqualTo("My answer")
+        assertThat(response.answeredAt).isNotNull()
         assertThat(response.gradingResult).isNull()
         assertThat(response.gradingStatus).isEqualTo(AnswerGradingStatus.QUEUED)
+        assertThat(response.questionStatus).isEqualTo(QuestionStatus.GRADING)
+        assertThat(response.gradingRequestId).isNotBlank()
+        assertThat(response.correlationId).isEqualTo(response.gradingRequestId)
+        assertThat(response.gradingLastEventId).isEqualTo(1)
+        assertThat(notificationOutbox.gradingEvents).hasSize(1)
         assertThat(openAI.gradeCalls).isZero()
         assertThat(users.findByIdCalls).isEqualTo(1)
         assertThat(questionStats.findByIdCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun `second answer submission is rejected without another grading event`(): Unit = runBlocking {
+        users.row = UserEntity(
+            id = principal.userId,
+            providerId = "u7",
+            status = UserStatus.ACTIVE,
+            appLanguage = SupportedLanguage.ENGLISH,
+        )
+        questions.visibleRows += pendingQuestion(id = 503, topic = "Kotlin")
+
+        service.answer(principal, recordId = 503, answer = "First answer", grade = true)
+        val failure = runCatching {
+            service.answer(principal, recordId = 503, answer = "Changed answer", grade = true)
+        }.exceptionOrNull()
+
+        assertThat(failure)
+            .isInstanceOf(com.buddystudy.backend.common.application.error.ApiException::class.java)
+        assertThat(
+            (failure as com.buddystudy.backend.common.application.error.ApiException).code,
+        ).isEqualTo(ApiErrorCode.ANSWER_ALREADY_SUBMITTED)
+        val persisted = questions.findByIdAndUserIdAndDeletedAtIsNull(503, principal.userId)
+        assertThat(persisted?.answer).isEqualTo("First answer")
+        assertThat(persisted?.status).isEqualTo(QuestionStatus.GRADING)
+        assertThat(persisted?.gradingStatus).isEqualTo(AnswerGradingStatus.QUEUED)
+        assertThat(persisted?.gradingLastEventId).isEqualTo(1)
+        assertThat(notificationOutbox.gradingEvents).hasSize(1)
     }
 
     @Test
@@ -562,6 +597,7 @@ class StudyServiceTest {
             userId: Long,
             requestId: String,
             status: AnswerGradingStatus,
+            questionStatus: QuestionStatus,
             errorMessage: String?,
             occurredAt: Instant,
         ): AnswerGradingProgress = AnswerGradingProgress(
@@ -569,6 +605,7 @@ class StudyServiceTest {
             recordId = recordId,
             requestId = requestId,
             status = status,
+            questionStatus = questionStatus,
             errorMessage = errorMessage,
             occurredAt = occurredAt,
         ).also(events::add)

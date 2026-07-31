@@ -637,7 +637,9 @@ Study record `id` values are database-generated autoincrement IDs returned as st
 `PATCH .../answer` saves an answer draft without grading. `POST .../answer` grades the answer using the device's stored OpenAI API key and persists the score, feedback, and explanation. Delete endpoints immediately remove the target records and related report/public-question references.
 `GET /api/v1/studies` includes the latest ungraded `pendingQuestion` for each
 study. When an answer has already been submitted, that nested record includes
-`answer`, `gradingRequestId`, `gradingStatus`, and `gradingError` so a reopened
+`answer`, `questionStatus`, `correlationId` (with `gradingRequestId` retained as
+a compatibility alias), `gradingLastEventId`, `gradingStatus`, and
+`gradingError` so a reopened
 client can restore the submitted state and resume grading-status polling.
 Records have no per-user retention cap and remain until the user deletes them or
 withdraws the account. Clients should request subsequent `offset` pages while

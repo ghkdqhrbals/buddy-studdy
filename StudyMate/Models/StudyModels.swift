@@ -1660,6 +1660,7 @@ struct AnswerGradingProgressEvent: Codable, Equatable, Identifiable {
     var recordID: String
     var correlationID: String
     var status: AnswerGradingStatus
+    var questionStatus: QuestionStatus?
     var errorMessage: String?
     var occurredAt: Date
 
@@ -1668,6 +1669,7 @@ struct AnswerGradingProgressEvent: Codable, Equatable, Identifiable {
         case recordID = "recordId"
         case correlationID = "correlationId"
         case status
+        case questionStatus
         case errorMessage
         case occurredAt
     }
@@ -1677,6 +1679,7 @@ struct AnswerGradingProcess: Codable, Equatable {
     var correlationID: String
     var recordID: String
     var status: AnswerGradingStatus
+    var questionStatus: QuestionStatus?
     var terminal: Bool
     var pollAfterMilliseconds: Int?
     var events: [AnswerGradingProgressEvent]
@@ -1687,6 +1690,7 @@ struct AnswerGradingProcess: Codable, Equatable {
         case correlationID = "correlationId"
         case recordID = "recordId"
         case status
+        case questionStatus
         case terminal
         case pollAfterMilliseconds = "pollAfterMs"
         case events
@@ -1770,8 +1774,10 @@ struct StudyRecord: Codable, Equatable, Identifiable {
     var commentCount: Int
     var viewCount: Int
     var gradingRequestID: String?
+    var correlationID: String?
     var gradingStatus: AnswerGradingStatus?
     var gradingError: String?
+    var questionStatus: QuestionStatus
     var gradingLastEventID: Int64?
     var localization: RecordLocalizationMetadata?
 
@@ -1789,9 +1795,11 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         case commentCount
         case viewCount
         case gradingRequestID = "gradingRequestId"
+        case correlationID = "correlationId"
         case gradingStatus
         case gradingError
-        case gradingLastEventID
+        case questionStatus
+        case gradingLastEventID = "gradingLastEventId"
         case localization
     }
 
@@ -1813,8 +1821,10 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         commentCount: Int = 0,
         viewCount: Int = 0,
         gradingRequestID: String? = nil,
+        correlationID: String? = nil,
         gradingStatus: AnswerGradingStatus? = nil,
         gradingError: String? = nil,
+        questionStatus: QuestionStatus? = nil,
         gradingLastEventID: Int64? = nil,
         localization: RecordLocalizationMetadata? = nil
     ) {
@@ -1830,9 +1840,14 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         self.likeCount = likeCount
         self.commentCount = commentCount
         self.viewCount = viewCount
-        self.gradingRequestID = gradingRequestID
+        self.gradingRequestID = gradingRequestID ?? correlationID
+        self.correlationID = correlationID ?? gradingRequestID
         self.gradingStatus = gradingStatus
         self.gradingError = gradingError
+        self.questionStatus = questionStatus
+            ?? (gradingResult != nil
+                ? .graded
+                : (self.gradingRequestID?.isEmpty == false || gradingStatus != nil ? .grading : .ungraded))
         self.gradingLastEventID = gradingLastEventID
         self.localization = localization
     }
@@ -1854,9 +1869,16 @@ struct StudyRecord: Codable, Equatable, Identifiable {
         likeCount = try container.decodeIfPresent(Int.self, forKey: .likeCount) ?? 0
         commentCount = try container.decodeIfPresent(Int.self, forKey: .commentCount) ?? 0
         viewCount = try container.decodeIfPresent(Int.self, forKey: .viewCount) ?? 0
-        gradingRequestID = try container.decodeIfPresent(String.self, forKey: .gradingRequestID)
+        let decodedGradingRequestID = try container.decodeIfPresent(String.self, forKey: .gradingRequestID)
+        let decodedCorrelationID = try container.decodeIfPresent(String.self, forKey: .correlationID)
+        gradingRequestID = decodedGradingRequestID ?? decodedCorrelationID
+        correlationID = decodedCorrelationID ?? decodedGradingRequestID
         gradingStatus = try container.decodeIfPresent(AnswerGradingStatus.self, forKey: .gradingStatus)
         gradingError = try container.decodeIfPresent(String.self, forKey: .gradingError)
+        questionStatus = try container.decodeIfPresent(QuestionStatus.self, forKey: .questionStatus)
+            ?? (gradingResult != nil
+                ? .graded
+                : (gradingRequestID?.isEmpty == false || gradingStatus != nil ? .grading : .ungraded))
         gradingLastEventID = try container.decodeIfPresent(Int64.self, forKey: .gradingLastEventID)
         localization = try container.decodeIfPresent(RecordLocalizationMetadata.self, forKey: .localization)
     }
@@ -1891,6 +1913,25 @@ struct StudyRecord: Codable, Equatable, Identifiable {
     }
 }
 
+enum QuestionStatus: String, Codable, Equatable {
+    case ungraded = "UNGRADED"
+    case grading = "GRADING"
+    case graded = "GRADED"
+    case skipped = "SKIPPED"
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self).uppercased()
+        guard let status = Self(rawValue: value) else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unsupported question status: \(value)"
+            )
+        }
+        self = status
+    }
+}
+
 enum StudyDateDisplayFormatter {
     private static let absoluteThreshold: TimeInterval = 7 * 24 * 60 * 60
 
@@ -1919,6 +1960,27 @@ enum StudyDateDisplayFormatter {
 }
 
 enum StudyAnswerPresentationPolicy {
+    enum State: Equatable {
+        case awaitingAnswer
+        case submitting
+        case grading(AnswerGradingStatus)
+        case completed
+        case failed
+
+        var allowsEditing: Bool {
+            self == .awaitingAnswer
+        }
+
+        var isInProgress: Bool {
+            switch self {
+            case .submitting, .grading:
+                true
+            case .awaitingAnswer, .completed, .failed:
+                false
+            }
+        }
+    }
+
     static func submittedAnswer(for record: StudyRecord?) -> String? {
         guard let answer = record?.answer,
               !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -1927,11 +1989,40 @@ enum StudyAnswerPresentationPolicy {
         return answer
     }
 
-    static func shouldShowEditor(for record: StudyRecord?) -> Bool {
+    static func state(for record: StudyRecord?, isSubmitting: Bool = false) -> State {
         guard let record else {
+            return .awaitingAnswer
+        }
+        if record.questionStatus == .graded ||
+            record.gradingResult != nil ||
+            record.gradingStatus == .completed {
+            return .completed
+        }
+        if record.gradingStatus == .failed {
+            return .failed
+        }
+        if record.questionStatus == .grading,
+           record.gradingStatus == nil {
+            return .grading(.queued)
+        }
+        if let gradingStatus = record.gradingStatus, !gradingStatus.isTerminal {
+            return .grading(gradingStatus)
+        }
+        if isSubmitting {
+            return .submitting
+        }
+        if submittedAnswer(for: record) != nil ||
+            !(record.gradingRequestID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .grading(.queued)
+        }
+        return .awaitingAnswer
+    }
+
+    static func shouldShowEditor(for record: StudyRecord?) -> Bool {
+        guard record != nil else {
             return false
         }
-        return record.gradingResult == nil && submittedAnswer(for: record) == nil
+        return state(for: record).allowsEditing
     }
 }
 
@@ -2508,13 +2599,20 @@ struct AppStrings {
         )
     }
 
-    var gradingQueued: String { text("답변을 접수했습니다.", "Answer received.") }
+    var gradingQueued: String { text("답변을 접수했습니다. 채점을 준비하고 있습니다.", "Answer received. Preparing to grade.", "回答を受け付けました。採点を準備しています。") }
     var gradingAnalyzing: String { text("답변의 근거를 분석하고 있습니다.", "Analyzing answer evidence.") }
     var gradingCritiquing: String { text("답변의 오류와 누락을 검토하고 있습니다.", "Reviewing errors and omissions.") }
     var gradingJudging: String { text("채점 기준에 따라 판정하고 있습니다.", "Judging against the rubric.") }
     var gradingAdjudicating: String { text("판정 결과를 다시 검증하고 있습니다.", "Verifying the grading decision.") }
     var gradingCompleted: String { text("채점이 완료됐습니다.", "Grading completed.") }
     var gradingFailed: String { text("채점을 완료하지 못했습니다. 다시 시도해 주세요.", "Grading could not be completed. Please try again.") }
+    var answerAlreadySubmitted: String {
+        text(
+            "이미 제출한 답변입니다. 현재 채점 상태를 불러옵니다.",
+            "This answer was already submitted. Loading its grading status.",
+            "この回答はすでに送信されています。採点状況を読み込みます。"
+        )
+    }
     var questionGenerationCompleted: String {
         text("새 질문이 준비됐습니다.", "Your new question is ready.")
     }

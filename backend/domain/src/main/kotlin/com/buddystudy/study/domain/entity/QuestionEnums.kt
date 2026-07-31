@@ -4,6 +4,7 @@ enum class QuestionStatus(
     val databaseValue: String,
 ) {
     UNGRADED("ungraded"),
+    GRADING("grading"),
     GRADED("graded"),
     SKIPPED("skipped"),
     ;

@@ -2,6 +2,7 @@ package com.buddystudy.backend.study.adapter.outbound.persistence
 
 import com.buddystudy.backend.study.application.model.AnswerGradingProgress
 import com.buddystudy.study.domain.entity.AnswerGradingStatus
+import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.backend.study.application.port.outbound.AnswerGradingProgressPort
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.reactive.asFlow
@@ -22,14 +23,15 @@ class AnswerGradingProgressRepository(
         userId: Long,
         requestId: String,
         status: AnswerGradingStatus,
+        questionStatus: QuestionStatus,
         errorMessage: String?,
         occurredAt: Instant,
     ): AnswerGradingProgress {
         var insert = databaseClient.sql(
             """
             insert into question_grading_events
-                (question_id, user_id, request_id, status, error_message, created_at)
-            values (:questionId, :userId, :requestId, :status, :errorMessage, :createdAt)
+                (question_id, user_id, request_id, status, question_status, error_message, created_at)
+            values (:questionId, :userId, :requestId, :status, :questionStatus, :errorMessage, :createdAt)
             on duplicate key update id = id
             """.trimIndent(),
         )
@@ -37,6 +39,7 @@ class AnswerGradingProgressRepository(
             .bind("userId", userId)
             .bind("requestId", requestId)
             .bind("status", status.name)
+            .bind("questionStatus", questionStatus.databaseValue)
             .bind("createdAt", occurredAt.toUtcLocalDateTime())
         insert = if (errorMessage == null) {
             insert.bindNull("errorMessage", String::class.java)
@@ -47,7 +50,7 @@ class AnswerGradingProgressRepository(
 
         return databaseClient.sql(
             """
-            select id, question_id, request_id, status, error_message, created_at
+            select id, question_id, request_id, status, question_status, error_message, created_at
             from question_grading_events
             where request_id = :requestId and status = :status
             """.trimIndent(),
@@ -69,7 +72,7 @@ class AnswerGradingProgressRepository(
     ): List<AnswerGradingProgress> =
         databaseClient.sql(
             """
-            select id, question_id, request_id, status, error_message, created_at
+            select id, question_id, request_id, status, question_status, error_message, created_at
             from question_grading_events
             where question_id = :questionId
               and user_id = :userId
@@ -94,6 +97,7 @@ class AnswerGradingProgressRepository(
         recordId = get("question_id", java.lang.Long::class.java)!!.toLong(),
         requestId = get("request_id", String::class.java)!!,
         status = AnswerGradingStatus.valueOf(get("status", String::class.java)!!),
+        questionStatus = QuestionStatus.fromDatabaseValue(get("question_status", String::class.java)!!),
         errorMessage = get("error_message", String::class.java),
         occurredAt = get("created_at", LocalDateTime::class.java)!!.toInstant(ZoneOffset.UTC),
     )

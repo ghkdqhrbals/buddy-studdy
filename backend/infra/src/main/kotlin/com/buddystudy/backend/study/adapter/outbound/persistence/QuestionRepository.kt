@@ -79,6 +79,19 @@ class QuestionRepository(
         return updated == 1L
     }
 
+    override suspend fun updateGradingLastEventId(id: Long, requestId: String, eventId: Long): Boolean {
+        val updated = template.update(
+            Query.query(
+                Criteria.where("id").`is`(id)
+                    .and("grading_request_id").`is`(requestId)
+                    .and("deleted_at").isNull,
+            ),
+            Update.update("grading_last_event_id", eventId),
+            QuestionEntity::class.java,
+        ).awaitSingle()
+        return updated == 1L
+    }
+
     override suspend fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? =
         findOne(Criteria.where("id").`is`(id).and("user_id").`is`(userId).and("deleted_at").isNull)
 

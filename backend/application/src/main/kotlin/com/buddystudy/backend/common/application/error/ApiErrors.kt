@@ -49,6 +49,12 @@ enum class ApiErrorCode(
         "error.profile.display_name_taken",
         "Display name is already in use.",
     ),
+    ANSWER_ALREADY_SUBMITTED(
+        HttpStatus.CONFLICT,
+        503,
+        "error.answer.already_submitted",
+        "An answer has already been submitted for this question.",
+    ),
 
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, 900, "error.internal.server_error", "Internal server error."),
     EMAIL_DELIVERY_FAILED(HttpStatus.SERVICE_UNAVAILABLE, 901, "error.email.delivery_failed", "Email delivery failed."),

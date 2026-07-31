@@ -98,6 +98,8 @@ internal fun QuestionEntity.toStudyRecord(stats: QuestionStatsEntity? = null) = 
         gradingRequestId = gradingRequestId,
         gradingStatus = gradingStatus?.name,
         gradingError = gradingError,
+        gradingLastEventId = gradingLastEventId,
+        questionStatus = status.databaseValue,
         questionSourceLanguage = sourceLanguage.databaseValue,
         answerSourceLanguage = answerSourceLanguage?.databaseValue,
         aiResponseSourceLanguage = aiResponseSourceLanguage?.databaseValue,

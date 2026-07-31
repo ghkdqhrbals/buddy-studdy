@@ -1,6 +1,7 @@
 package com.buddystudy.backend.study.application.model
 
 import java.time.Instant
+import com.buddystudy.study.domain.entity.QuestionStatus
 
 typealias AnswerGradingStatus = com.buddystudy.study.domain.entity.AnswerGradingStatus
 
@@ -18,6 +19,7 @@ data class AnswerGradingProgress(
     val recordId: Long,
     val requestId: String,
     val status: AnswerGradingStatus,
+    val questionStatus: QuestionStatus,
     val errorMessage: String? = null,
     val occurredAt: Instant,
 )
@@ -27,6 +29,7 @@ data class AnswerGradingProgressResponse(
     val recordId: String,
     val correlationId: String,
     val status: AnswerGradingStatus,
+    val questionStatus: QuestionStatus,
     val errorMessage: String? = null,
     val occurredAt: Instant,
 )
@@ -35,6 +38,7 @@ data class AnswerGradingProcessResponse(
     val correlationId: String,
     val recordId: String,
     val status: AnswerGradingStatus,
+    val questionStatus: QuestionStatus,
     val terminal: Boolean,
     val pollAfterMs: Long?,
     val events: List<AnswerGradingProgressResponse>,
@@ -47,6 +51,7 @@ fun AnswerGradingProgress.toResponse() = AnswerGradingProgressResponse(
     recordId = recordId.toString(),
     correlationId = requestId,
     status = status,
+    questionStatus = questionStatus,
     errorMessage = errorMessage,
     occurredAt = occurredAt,
 )

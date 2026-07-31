@@ -42,6 +42,7 @@ class QuestionEntity(
     var gradingRequestId: String? = null,
     var gradingStatus: AnswerGradingStatus? = null,
     var gradingError: String? = null,
+    var gradingLastEventId: Long? = null,
     var gradingRequestedAt: Instant? = null,
     var gradingStartedAt: Instant? = null,
     var answeredAt: Instant? = null,

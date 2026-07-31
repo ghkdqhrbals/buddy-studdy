@@ -16,6 +16,7 @@ import com.buddystudy.backend.study.application.port.inbound.StudyRecordWriteUse
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.QuestionStatus
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -40,6 +41,23 @@ class StudyRecordWriteService(
         now: Instant,
     ): QuestionEntity {
         val question = lockRecord(recordId, userId)
+        if (question.gradingRequestId != null ||
+            question.gradingStatus != null ||
+            question.score != null ||
+            question.status == QuestionStatus.GRADING ||
+            question.status == QuestionStatus.GRADED
+        ) {
+            throw ApiException(
+                HttpStatus.CONFLICT,
+                ApiErrorCode.ANSWER_ALREADY_SUBMITTED,
+                "An answer has already been submitted for this question.",
+                metadata = mapOf(
+                    "recordId" to recordId,
+                    "gradingRequestId" to question.gradingRequestId,
+                    "gradingStatus" to question.gradingStatus?.name,
+                ),
+            )
+        }
         val record = question.toStudyRecord()
         question.apply(record.answer(answer, sourceLanguage))
         if (grade != null && question.score == null) {
@@ -107,9 +125,25 @@ class StudyRecordWriteService(
         now: Instant,
     ): QueuedAnswerGrading {
         val question = lockRecord(recordId, userId)
-        val currentStatus = question.gradingStatus
-        if (question.score != null || (currentStatus != null && !currentStatus.terminal)) {
-            return QueuedAnswerGrading(question, emptyList())
+        val normalizedAnswer = answer.trim()
+        val persistedAnswer = question.answer?.trim()?.takeIf { it.isNotEmpty() }
+        if ((persistedAnswer != null && persistedAnswer != normalizedAnswer) ||
+            question.gradingRequestId != null ||
+            question.gradingStatus != null ||
+            question.score != null ||
+            question.status == QuestionStatus.GRADING ||
+            question.status == QuestionStatus.GRADED
+        ) {
+            throw ApiException(
+                HttpStatus.CONFLICT,
+                ApiErrorCode.ANSWER_ALREADY_SUBMITTED,
+                "An answer has already been submitted for this question.",
+                metadata = mapOf(
+                    "recordId" to recordId,
+                    "gradingRequestId" to question.gradingRequestId,
+                    "gradingStatus" to question.gradingStatus?.name,
+                ),
+            )
         }
 
         val requestId = UUID.randomUUID().toString()
@@ -121,14 +155,26 @@ class StudyRecordWriteService(
             requestedAt = now,
             responseLanguage = aiResponseLanguage,
         )
-        question.apply(question.toStudyRecord().answer(answer, sourceLanguage, now))
+        if (persistedAnswer == null) {
+            question.apply(question.toStudyRecord().answer(normalizedAnswer, sourceLanguage, now))
+        }
         question.gradingRequestId = requestId
         question.gradingStatus = AnswerGradingStatus.QUEUED
+        question.status = QuestionStatus.GRADING
         question.gradingError = null
         question.gradingRequestedAt = now
         question.gradingStartedAt = null
+        val progress = gradingProgress.append(
+            recordId,
+            userId,
+            requestId,
+            AnswerGradingStatus.QUEUED,
+            QuestionStatus.GRADING,
+            null,
+            now,
+        )
+        question.gradingLastEventId = progress.id
         val saved = questions.save(question)
-        gradingProgress.append(recordId, userId, requestId, AnswerGradingStatus.QUEUED, null, now)
         val outboxId = redisOutbox.appendAnswerGrading(event, now)
         return QueuedAnswerGrading(saved, listOf(OutboxReference(OutboxType.DOMAIN_EVENT, outboxId)))
     }
@@ -151,8 +197,17 @@ class StudyRecordWriteService(
         question.gradingStatus = status
         question.gradingStartedAt = question.gradingStartedAt ?: now
         question.updatedAt = now
+        val progress = gradingProgress.append(
+            event.recordId,
+            event.userId,
+            event.requestId,
+            status,
+            QuestionStatus.GRADING,
+            null,
+            now,
+        )
+        question.gradingLastEventId = progress.id
         questions.save(question)
-        gradingProgress.append(event.recordId, event.userId, event.requestId, status, null, now)
         return true
     }
 
@@ -184,7 +239,6 @@ class StudyRecordWriteService(
         )
         question.gradingStatus = AnswerGradingStatus.COMPLETED
         question.gradingError = null
-        questions.save(question)
         if (question.conceptId != null && question.angleKey != null) {
             questionCoverage.markAnswered(
                 question.conceptId!!,
@@ -194,14 +248,17 @@ class StudyRecordWriteService(
                 now,
             )
         }
-        gradingProgress.append(
+        val progress = gradingProgress.append(
             event.recordId,
             event.userId,
             event.requestId,
             AnswerGradingStatus.COMPLETED,
+            QuestionStatus.GRADED,
             null,
             now,
         )
+        question.gradingLastEventId = progress.id
+        questions.save(question)
         return true
     }
 
@@ -221,15 +278,17 @@ class StudyRecordWriteService(
         question.gradingStatus = AnswerGradingStatus.FAILED
         question.gradingError = errorMessage.take(255)
         question.updatedAt = now
-        questions.save(question)
-        gradingProgress.append(
+        val progress = gradingProgress.append(
             event.recordId,
             event.userId,
             event.requestId,
             AnswerGradingStatus.FAILED,
+            QuestionStatus.GRADING,
             question.gradingError,
             now,
         )
+        question.gradingLastEventId = progress.id
+        questions.save(question)
     }
 
     private suspend fun lockRecord(recordId: Long, userId: Long): QuestionEntity =

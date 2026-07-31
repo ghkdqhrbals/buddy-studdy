@@ -206,10 +206,11 @@ class StudyController(
         authentication: Authentication,
     ): StudyRecordResponse = study.saveAnswer(id, body, authentication)
 
-    @Operation(summary = "Submit an answer for grading", description = "Persists the answer and queues asynchronous grading. The response contains gradingRequestId, which is used as the correlation id for polling.")
+    @Operation(summary = "Submit an answer for grading", description = "Persists the immutable answer, changes questionStatus to GRADING, and queues asynchronous grading. The response contains correlationId, gradingLastEventId, and the legacy gradingRequestId alias.")
     @ApiResponses(
         ApiResponse(responseCode = "202", description = "Answer accepted for grading."),
         ApiResponse(responseCode = "401", description = "Authentication required."),
+        ApiResponse(responseCode = "409", description = "An answer has already been submitted."),
         ApiResponse(responseCode = "404", description = "Record not found or not owned by the user."),
     )
     @PostMapping("/records/{id}/answer")

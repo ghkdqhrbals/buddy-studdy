@@ -72,6 +72,7 @@ interface QuestionPort {
         error: String,
         now: Instant,
     ): Boolean = false
+    suspend fun updateGradingLastEventId(id: Long, requestId: String, eventId: Long): Boolean = false
     suspend fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity?
     suspend fun findByGradingRequestIdAndUserIdAndDeletedAtIsNull(
         gradingRequestId: String,

@@ -423,6 +423,7 @@ struct StudyRecordDetailView: View {
 
     var body: some View {
         let displayedRecord = latestRecord
+        let isGradingAnswer = appState.isAnswerGradingInProgress(for: displayedRecord)
 
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
@@ -461,7 +462,7 @@ struct StudyRecordDetailView: View {
                     }
 
                     if let answer = submittedAnswer(for: displayedRecord),
-                       displayedRecord.gradingResult != nil || appState.isGradingAnswer {
+                       displayedRecord.gradingResult != nil || isGradingAnswer {
                         RecordChatBubble(role: .answer) {
                             MarkdownMessageText(markdown: answer, fillsWidth: false)
                                 .font(.body)
@@ -474,7 +475,7 @@ struct StudyRecordDetailView: View {
                             RecordAnswerInput(
                                 strings: appState.strings,
                                 draftAnswer: $draftAnswer,
-                                isGradingAnswer: appState.isGradingAnswer,
+                                isGradingAnswer: isGradingAnswer,
                                 canSubmitAnswer: canSubmitAnswer,
                                 onSubmit: {
                                     submitAnswer(for: displayedRecord)
@@ -486,8 +487,8 @@ struct StudyRecordDetailView: View {
                         }
                     }
 
-                    if appState.isGradingAnswer,
-                       let gradingStatusMessage = appState.answerGradingStatusMessage {
+                    if isGradingAnswer,
+                       let gradingStatusMessage = appState.gradingPresentationMessage(for: displayedRecord) {
                         RecordChatBubble(role: .feedback) {
                             HStack(spacing: 10) {
                                 ProgressView()
@@ -539,8 +540,6 @@ struct StudyRecordDetailView: View {
             await refreshLocalizedRecord()
         }
         .onDisappear {
-            answerSubmissionTask?.cancel()
-            answerSubmissionTask = nil
             if let answerGradingOwnerID {
                 appState.cancelAnswerGradingPolling(
                     ownerID: answerGradingOwnerID,
@@ -627,7 +626,8 @@ struct StudyRecordDetailView: View {
     }
 
     private var canSubmitAnswer: Bool {
-        !appState.isGradingAnswer &&
+        StudyAnswerPresentationPolicy.shouldShowEditor(for: latestRecord) &&
+            !appState.isAnswerGradingInProgress(for: latestRecord) &&
             !draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
@@ -635,7 +635,7 @@ struct StudyRecordDetailView: View {
         onSkip != nil &&
             record.gradingResult == nil &&
             record.gradingRequestID == nil &&
-            !appState.isGradingAnswer
+            !appState.isAnswerGradingInProgress(for: record)
     }
 
     private func submittedAnswer(for record: StudyRecord) -> String? {
@@ -672,7 +672,8 @@ struct StudyRecordDetailView: View {
     }
 
     private func submitAnswer(for record: StudyRecord) {
-        guard canSubmitAnswer else {
+        guard canSubmitAnswer,
+              answerSubmissionTask == nil else {
             return
         }
 
@@ -680,7 +681,6 @@ struct StudyRecordDetailView: View {
         isAnswerEditorFocused = false
         #endif
 
-        answerSubmissionTask?.cancel()
         let ownerID = UUID().uuidString
         answerGradingOwnerID = ownerID
         answerSubmissionTask = Task {
@@ -689,10 +689,10 @@ struct StudyRecordDetailView: View {
                 answer: draftAnswer,
                 pollingOwnerID: ownerID
             )
+            answerSubmissionTask = nil
             guard answerGradingOwnerID == ownerID else {
                 return
             }
-            answerSubmissionTask = nil
             answerGradingOwnerID = nil
         }
     }

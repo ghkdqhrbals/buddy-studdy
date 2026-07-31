@@ -105,9 +105,9 @@ runtime comparison or rollback does not fork application behavior.
     embeddings, translation, user-answer feedback, grading, and grading
     previews. Production startup and deployment reject missing or identical
     workload keys.
-  - Answer submission and AI grading are separated by a transactional outbox. `POST /api/v1/records/{id}/grade` stores the answer, `QUEUED` state, first progress event, and `ANSWER_GRADING_REQUESTED` outbox row in one transaction, returns `202 Accepted`, and never waits for OpenAI.
+  - Answer submission and AI grading are separated by a transactional outbox. `POST /api/v1/records/{id}/answer` stores the immutable submitted answer, changes the question projection from `UNGRADED` to `GRADING`, appends the first durable `question_grading_events` event, stores its ID as `grading_last_event_id`, and writes the `ANSWER_GRADING_REQUESTED` outbox row in one transaction. It returns `202 Accepted` with `questionStatus`, `correlationId`, and `gradingLastEventId`, and never waits for OpenAI.
   - `AnswerGradingStreamListener` consumes the typed Redis domain event and runs evidence analysis, criticism, judging, and optional adjudication through `AnswerGradingService`. Each transition is persisted before it is exposed to clients; completion stores the AI decision and statistics dirty key atomically.
-  - `GET /api/v1/answer-processes/{correlationId}` exposes request-scoped grading progress as a one-shot polling response. The iOS app sends the last durable event ID as `after`, receives all newer stages without gaps, polls at the fixed three-second product interval, and reconciles the final record from MySQL when the process becomes terminal. Each polling session has a screen-owned ID; leaving the answer or record-detail screen cancels both the submission task and any in-flight or scheduled status request.
+  - `question_grading_events` is the append-only grading lifecycle event store. Every row records both the detailed grading stage and the resulting question lifecycle state; `questions.status` and `questions.grading_last_event_id` are the current read projection updated in the same transaction. `GET /api/v1/answer-processes/{correlationId}` exposes request-scoped progress as a one-shot polling response. The iOS app sends the last durable event ID as `after`, receives all newer stages without gaps, and polls at the fixed three-second product interval while `questionStatus=GRADING` and the grading status is non-terminal. Leaving the screen cancels only status polling; an already-sent answer request is allowed to finish and persist its accepted state.
   - Stores generated questions in MySQL before sending APNs notifications.
   - Owns Google-linked community profiles, public question browsing metadata, and question reports.
   - Treats anonymous identities as installation credentials rather than administrator-visible members. Admin user and quota queries exclude `ANONYMOUS` rows.
@@ -200,7 +200,8 @@ User answer
 -> AppState saves answer draft
 -> AppState.gradeCurrentAnswer or gradeRecord
 -> RemotePushBackendClient.gradeRecord
--> backend persists the submitted answer and grading correlation before OpenAI work
+-> backend atomically persists the submitted answer, grading correlation,
+   questionStatus=GRADING, and gradingStatus=QUEUED before OpenAI work
 -> leaving the detail screen cancels only client polling
 -> reopening fetches /api/v1/studies and merges pendingQuestion answer/grading state over stale local cache
 -> iOS resumes polling by the persisted grading correlation

@@ -153,8 +153,6 @@ struct StudyView: View {
             }
         }
         .onDisappear {
-            answerSubmissionTask?.cancel()
-            answerSubmissionTask = nil
             if let answerGradingOwnerID {
                 appState.cancelAnswerGradingPolling(
                     ownerID: answerGradingOwnerID,
@@ -467,7 +465,9 @@ struct StudyView: View {
     }
 
     private func submitCurrentAnswer() {
-        guard let selectedStudyRecord else {
+        guard let selectedStudyRecord,
+              canSubmitAnswer,
+              answerSubmissionTask == nil else {
             return
         }
 
@@ -475,7 +475,6 @@ struct StudyView: View {
         isAnswerEditorFocused = false
         #endif
 
-        answerSubmissionTask?.cancel()
         let ownerID = UUID().uuidString
         answerGradingOwnerID = ownerID
         answerSubmissionTask = Task {
@@ -484,10 +483,10 @@ struct StudyView: View {
                 answer: draftAnswer,
                 pollingOwnerID: ownerID
             )
+            answerSubmissionTask = nil
             guard answerGradingOwnerID == ownerID else {
                 return
             }
-            answerSubmissionTask = nil
             answerGradingOwnerID = nil
         }
     }

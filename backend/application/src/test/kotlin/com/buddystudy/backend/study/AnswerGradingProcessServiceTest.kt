@@ -7,6 +7,7 @@ import com.buddystudy.backend.study.application.port.outbound.AnswerGradingProgr
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.service.AnswerGradingProcessService
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.QuestionStatus
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -25,6 +26,7 @@ class AnswerGradingProcessServiceTest {
                 userId = 7,
                 gradingRequestId = "queued-request",
                 gradingStatus = AnswerGradingStatus.QUEUED,
+                status = QuestionStatus.GRADING,
                 updatedAt = Instant.parse("2026-07-27T00:00:00Z"),
             ),
         )
@@ -34,6 +36,7 @@ class AnswerGradingProcessServiceTest {
                 userId: Long,
                 requestId: String,
                 status: AnswerGradingStatus,
+                questionStatus: QuestionStatus,
                 errorMessage: String?,
                 occurredAt: Instant,
             ): AnswerGradingProgress = error("Not used")
@@ -55,6 +58,7 @@ class AnswerGradingProcessServiceTest {
         )
 
         assertThat(process.terminal).isFalse()
+        assertThat(process.questionStatus).isEqualTo(QuestionStatus.GRADING)
         assertThat(process.pollAfterMs).isEqualTo(3_000)
     }
 
@@ -69,6 +73,7 @@ class AnswerGradingProcessServiceTest {
                 userId = 7,
                 gradingRequestId = "current-request",
                 gradingStatus = AnswerGradingStatus.COMPLETED,
+                status = QuestionStatus.GRADED,
                 updatedAt = Instant.parse("2026-07-27T00:00:02Z"),
             ),
         )
@@ -80,6 +85,7 @@ class AnswerGradingProcessServiceTest {
                 userId: Long,
                 requestId: String,
                 status: AnswerGradingStatus,
+                questionStatus: QuestionStatus,
                 errorMessage: String?,
                 occurredAt: Instant,
             ): AnswerGradingProgress = error("Not used")
@@ -99,6 +105,7 @@ class AnswerGradingProcessServiceTest {
                         recordId = recordId,
                         requestId = requestId,
                         status = AnswerGradingStatus.COMPLETED,
+                        questionStatus = QuestionStatus.GRADED,
                         occurredAt = Instant.parse("2026-07-27T00:00:00Z"),
                     ),
                 )
@@ -115,10 +122,12 @@ class AnswerGradingProcessServiceTest {
         assertThat(observedRequestId).isEqualTo("current-request")
         assertThat(observedAfterId).isEqualTo(3)
         assertThat(process.correlationId).isEqualTo("current-request")
+        assertThat(process.questionStatus).isEqualTo(QuestionStatus.GRADED)
         assertThat(process.terminal).isTrue()
         assertThat(process.pollAfterMs).isNull()
         assertThat(process.events).hasSize(1)
         assertThat(process.events.single().correlationId).isEqualTo("current-request")
         assertThat(process.events.single().status).isEqualTo(AnswerGradingStatus.COMPLETED)
+        assertThat(process.events.single().questionStatus).isEqualTo(QuestionStatus.GRADED)
     }
 }

@@ -4,6 +4,7 @@ import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.study.application.port.outbound.AiGradingAssessment
 import com.buddystudy.study.domain.StudyRecordProjection
 import com.buddystudy.study.domain.entity.AnswerGradingStatus
+import com.buddystudy.study.domain.entity.QuestionStatus
 
 fun StudyRecordProjection.toRecordResponse(
     requestedLanguage: String = questionSourceLanguage,
@@ -57,8 +58,11 @@ fun StudyRecordProjection.toRecordResponse(
         viewCount = viewCount,
         studyId = studyId,
         gradingRequestId = gradingRequestId,
+        correlationId = gradingRequestId,
         gradingStatus = gradingStatus?.let { runCatching { AnswerGradingStatus.valueOf(it) }.getOrNull() },
         gradingError = gradingError,
+        gradingLastEventId = gradingLastEventId,
+        questionStatus = QuestionStatus.fromDatabaseValue(questionStatus),
         localization = RecordLocalizationResponse(
             question = localeMetadata(
                 sourceLanguage = questionSourceLanguage,

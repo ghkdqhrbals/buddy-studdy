@@ -630,6 +630,7 @@ final class AppState: ObservableObject {
     private var answerGradingPollingTask: Task<StudyRecord, Error>?
     private var answerGradingPollingID: String?
     private var answerGradingOwnerID: String?
+    private var answerSubmissionRecordIDs: Set<String> = []
     private var appControlBoundaryTask: Task<Void, Never>?
     private var appControlPolicy: AppControlRemotePolicy?
     private var appControlResolution = AppControlResolution.normal
@@ -5890,23 +5891,21 @@ final class AppState: ObservableObject {
     }
 
     func isAnswerGradingInProgress(for record: StudyRecord?) -> Bool {
-        guard let record,
-              record.gradingResult == nil else {
+        guard let record else {
             return false
         }
-        if let gradingStatus = record.gradingStatus,
-           !gradingStatus.isTerminal {
-            return true
-        }
-        if record.gradingStatus == nil,
-           let gradingRequestID = record.gradingRequestID,
-           !gradingRequestID.isEmpty {
-            return true
-        }
-        return isGradingAnswer
+        return StudyAnswerPresentationPolicy.state(
+            for: record,
+            isSubmitting: answerSubmissionRecordIDs.contains(record.id)
+        ).isInProgress
     }
 
     func gradingPresentationMessage(for record: StudyRecord?) -> String? {
+        if let record,
+           answerSubmissionRecordIDs.contains(record.id),
+           record.gradingStatus == nil {
+            return strings.gradingQueued
+        }
         if let answerGradingStatusMessage {
             return answerGradingStatusMessage
         }
@@ -5950,6 +5949,14 @@ final class AppState: ObservableObject {
         guard !trimmedAnswer.isEmpty else {
             errorMessage = "답변을 입력하세요."
             return
+        }
+        guard beginAnswerSubmission(for: record) else {
+            errorMessage = strings.answerAlreadySubmitted
+            statusMessage = strings.answerAlreadySubmitted
+            return
+        }
+        defer {
+            finishAnswerSubmission(recordID: record.id)
         }
         let sessionGeneration = communitySessionState.generation
 
@@ -7267,6 +7274,14 @@ final class AppState: ObservableObject {
             errorMessage = "답변을 입력하세요."
             return
         }
+        guard beginAnswerSubmission(for: record) else {
+            errorMessage = strings.answerAlreadySubmitted
+            statusMessage = strings.answerAlreadySubmitted
+            return
+        }
+        defer {
+            finishAnswerSubmission(recordID: record.id)
+        }
         let sessionGeneration = communitySessionState.generation
 
         activateAnswerGrading(ownerID: pollingOwnerID)
@@ -7375,7 +7390,7 @@ final class AppState: ObservableObject {
         if queuedRecord.gradingResult != nil {
             return queuedRecord
         }
-        guard let correlationID = queuedRecord.gradingRequestID,
+        guard let correlationID = queuedRecord.correlationID ?? queuedRecord.gradingRequestID,
               !correlationID.isEmpty else {
             throw AnswerGradingProcessError.failed(strings.gradingFailed)
         }
@@ -7407,6 +7422,7 @@ final class AppState: ObservableObject {
                     cursor = process.events.reduce(cursor) { max($0, $1.id) }
                     persistAnswerGradingProgress(
                         process.status,
+                        questionStatus: process.questionStatus,
                         errorMessage: process.errorMessage,
                         eventID: cursor > 0 ? cursor : nil,
                         for: queuedRecord,
@@ -7450,6 +7466,7 @@ final class AppState: ObservableObject {
                     )
                     persistAnswerGradingProgress(
                         displayedStatus,
+                        questionStatus: event.questionStatus,
                         errorMessage: nil,
                         eventID: event.id,
                         for: queuedRecord
@@ -7465,6 +7482,7 @@ final class AppState: ObservableObject {
                     displayedAt = appClock.now
                     persistAnswerGradingProgress(
                         event.status,
+                        questionStatus: event.questionStatus,
                         errorMessage: event.errorMessage,
                         eventID: event.id,
                         for: queuedRecord
@@ -7513,6 +7531,7 @@ final class AppState: ObservableObject {
                     displayedAt = appClock.now
                     persistAnswerGradingProgress(
                         process.status,
+                        questionStatus: process.questionStatus,
                         errorMessage: process.errorMessage,
                         for: queuedRecord
                     )
@@ -7619,6 +7638,7 @@ final class AppState: ObservableObject {
 
     private func persistAnswerGradingProgress(
         _ status: AnswerGradingStatus,
+        questionStatus: QuestionStatus? = nil,
         errorMessage: String?,
         eventID: Int64? = nil,
         for queuedRecord: StudyRecord,
@@ -7634,6 +7654,11 @@ final class AppState: ObservableObject {
         }
 
         var progressedRecord = currentRecord
+        if let questionStatus {
+            progressedRecord.questionStatus = questionStatus
+        } else if progressedRecord.questionStatus == .ungraded {
+            progressedRecord.questionStatus = .grading
+        }
         if let eventID,
            eventID > (progressedRecord.gradingLastEventID ?? 0) {
             progressedRecord.gradingLastEventID = eventID
@@ -7664,6 +7689,7 @@ final class AppState: ObservableObject {
         if acceptedRecord.gradingStatus == nil {
             acceptedRecord.gradingStatus = .queued
         }
+        acceptedRecord.questionStatus = .grading
         if acceptedRecord.studyID == nil {
             acceptedRecord.studyID = studyRecords.first(where: { $0.id == acceptedRecord.id })?.studyID
         }
@@ -7704,6 +7730,26 @@ final class AppState: ObservableObject {
 
     private func isAnswerGradingOwnerCurrent(_ ownerID: String) -> Bool {
         answerGradingOwnerID == ownerID
+    }
+
+    private func beginAnswerSubmission(for record: StudyRecord) -> Bool {
+        guard !answerSubmissionRecordIDs.contains(record.id) else {
+            return false
+        }
+        let authoritativeRecord = studyRecords.first(where: { $0.id == record.id })
+            ?? studyRoomState.rooms
+                .compactMap(\.pendingQuestion)
+                .first(where: { $0.id == record.id })
+            ?? record
+        guard StudyAnswerPresentationPolicy.state(for: authoritativeRecord).allowsEditing else {
+            return false
+        }
+        answerSubmissionRecordIDs.insert(record.id)
+        return true
+    }
+
+    private func finishAnswerSubmission(recordID: String) {
+        answerSubmissionRecordIDs.remove(recordID)
     }
 
     private func activateAnswerGrading(ownerID: String) {
@@ -8092,7 +8138,7 @@ final class AppState: ObservableObject {
 
         let trimmedReply = replyText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !trimmedReply.isEmpty, record.gradingResult == nil {
-            record = try await recordsUseCase.saveRecordAnswer(
+            record = try await recordsUseCase.gradeRecord(
                 registration: registration,
                 recordID: recordID,
                 answer: trimmedReply,

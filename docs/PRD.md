@@ -39,13 +39,19 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 2. User writes an answer draft that is preserved automatically.
 3. User can reveal the hint on demand.
 4. User submits for grading. The backend accepts and persists the answer
-   immediately, then grades it asynchronously through the event outbox.
+   immediately, changes the question lifecycle from `UNGRADED` to `GRADING`,
+   appends the lifecycle transition to the durable question event history, then
+   grades it asynchronously through the event outbox. The API also exposes
+   the finer `gradingStatus` (`QUEUED`, analysis stages, `COMPLETED`, or
+   `FAILED`), the active `correlationId`, and the latest event cursor without
+   treating the editable draft as a submitted answer.
 5. The app polls grading every three seconds by the persisted correlation ID
    returned with the accepted answer. Each request includes the last received
    event cursor, so intermediate durable stages are not skipped, and the
    completed AI decision is reconciled from the record API without replacing
    the user's draft. Polling belongs to the answer/detail screen that started
-   it and stops immediately when that screen disappears. Reopening the study
+   it and stops immediately when that screen disappears, while an accepted
+   submission request itself is allowed to finish persisting. Reopening the study
    room refetches its pending question, including the persisted answer,
    grading request ID, and current grading status, then resumes polling without
    asking the user to submit the same answer again.

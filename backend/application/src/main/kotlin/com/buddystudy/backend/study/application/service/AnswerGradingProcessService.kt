@@ -43,6 +43,7 @@ class AnswerGradingProcessService(
             correlationId = correlationId,
             recordId = question.id.toString(),
             status = status,
+            questionStatus = question.status,
             terminal = status.terminal,
             pollAfterMs = if (status.terminal) null else POLL_INTERVAL_MS,
             events = events.map { it.toResponse() },

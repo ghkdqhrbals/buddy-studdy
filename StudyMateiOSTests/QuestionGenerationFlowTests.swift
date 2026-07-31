@@ -6,6 +6,7 @@ import XCTest
 final class QuestionGenerationFlowTests: XCTestCase {
     override func tearDown() {
         QuestionGenerationURLProtocol.requestHandler = nil
+        QuestionGenerationURLProtocol.responseDelayNanoseconds = 0
         super.tearDown()
     }
 
@@ -84,6 +85,166 @@ final class QuestionGenerationFlowTests: XCTestCase {
         )
         XCTAssertNil(appState.studyRecords.first?.answer)
         XCTAssertTrue(StudyAnswerPresentationPolicy.shouldShowEditor(for: appState.studyRecords.first))
+    }
+
+    func testPersistedGradingRequestHidesEditorEvenWhenResponseOmitsAnswer() {
+        let record = StudyRecord(
+            id: "record-grading",
+            question: QuestionItem(
+                question: "왜 멱등성이 필요한가요?",
+                expectedAnswerHint: nil,
+                createdAt: Date()
+            ),
+            topic: "분산 시스템",
+            difficulty: .intermediate,
+            gradingRequestID: "grading-request",
+            gradingStatus: .queued,
+            questionStatus: .grading
+        )
+
+        XCTAssertEqual(
+            StudyAnswerPresentationPolicy.state(for: record),
+            .grading(.queued)
+        )
+        XCTAssertFalse(StudyAnswerPresentationPolicy.shouldShowEditor(for: record))
+    }
+
+    func testAlreadySubmittedAnswerIsRejectedBeforeAnotherRequest() async throws {
+        let suiteName = "DuplicateAnswerTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let requests = LockedRequestCounter()
+        let client = makeClient { request in
+            requests.increment()
+            return Self.response(for: request, statusCode: 500, body: "{}")
+        }
+        let store = SettingsStore(
+            defaults: defaults,
+            recordDatabaseURL: databaseURL,
+            usesSecureBackendIdentityStorage: false
+        )
+        let record = StudyRecord(
+            id: "record-submitted",
+            question: QuestionItem(
+                question: "중복 요청은 왜 위험한가요?",
+                expectedAnswerHint: nil,
+                createdAt: Date()
+            ),
+            answer: "부작용이 두 번 실행될 수 있습니다.",
+            topic: "API",
+            difficulty: .intermediate,
+            answeredAt: Date(),
+            gradingRequestID: "grading-submitted",
+            gradingStatus: .queued
+        )
+        store.saveStudyRecord(record)
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+
+        await appState.gradeStudyRoomRecord(
+            record,
+            answer: "답변을 바꿔서 다시 제출합니다."
+        )
+
+        XCTAssertEqual(requests.value, 0)
+        XCTAssertEqual(appState.errorMessage, appState.strings.answerAlreadySubmitted)
+        XCTAssertEqual(store.loadStudyRecords().first?.answer, record.answer)
+    }
+
+    func testLeavingDuringSubmissionKeepsRequestAliveUntilAnswerIsPersisted() async throws {
+        let suiteName = "InFlightAnswerSubmissionTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let question = QuestionItem(
+            question: "트랜잭션 격리가 필요한 이유는?",
+            expectedAnswerHint: nil,
+            createdAt: Date(timeIntervalSince1970: 1_753_660_800)
+        )
+        let submittedAnswer = "동시 변경의 일관성을 지키기 위해서입니다."
+        QuestionGenerationURLProtocol.responseDelayNanoseconds = 100_000_000
+        let client = makeClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/v1/records/record-in-flight/answer")
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: """
+                {
+                  "id": "record-in-flight",
+                  "question": {
+                    "question": "트랜잭션 격리가 필요한 이유는?",
+                    "expectedAnswerHint": null,
+                    "createdAt": "2025-07-28T00:00:00Z"
+                  },
+                  "answer": "\(submittedAnswer)",
+                  "topic": "데이터베이스",
+                  "difficulty": 5,
+                  "answeredAt": "2025-07-28T00:01:00Z",
+                  "gradingRequestId": "grading-in-flight",
+                  "correlationId": "grading-in-flight",
+                  "gradingStatus": "QUEUED",
+                  "gradingLastEventId": 1,
+                  "questionStatus": "GRADING"
+                }
+                """
+            )
+        }
+        let store = SettingsStore(
+            defaults: defaults,
+            recordDatabaseURL: databaseURL,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        let record = StudyRecord(
+            id: "record-in-flight",
+            question: question,
+            topic: "데이터베이스",
+            difficulty: .intermediate
+        )
+        store.saveStudyRecord(record)
+        store.saveAnswerDraft(submittedAnswer, recordID: record.id)
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        let ownerID = "study-view-owner"
+
+        let submission = Task { @MainActor in
+            await appState.gradeStudyRoomRecord(
+                record,
+                answer: submittedAnswer,
+                pollingOwnerID: ownerID
+            )
+        }
+        try await Task.sleep(nanoseconds: 20_000_000)
+        appState.cancelAnswerGradingPolling(
+            ownerID: ownerID,
+            reason: "study-view-disappeared"
+        )
+        await submission.value
+
+        let persisted = try XCTUnwrap(
+            store.loadStudyRecords().first(where: { $0.id == record.id })
+        )
+        XCTAssertEqual(persisted.answer, submittedAnswer)
+        XCTAssertEqual(persisted.gradingRequestID, "grading-in-flight")
+        XCTAssertEqual(persisted.correlationID, "grading-in-flight")
+        XCTAssertEqual(persisted.gradingLastEventID, 1)
+        XCTAssertEqual(persisted.gradingStatus, .queued)
+        XCTAssertEqual(persisted.questionStatus, .grading)
+        XCTAssertTrue(
+            store.loadAnswerDraft(recordID: record.id)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+        )
+        XCTAssertFalse(StudyAnswerPresentationPolicy.shouldShowEditor(for: persisted))
+        XCTAssertTrue(appState.isAnswerGradingInProgress(for: persisted))
     }
 
     func testDeletedRecordIsNotReinsertedIntoAllStudiesByStaleCommunityPage() {
@@ -244,6 +405,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
                   "correlationId": "grading-77",
                   "recordId": "record-77",
                   "status": "COMPLETED",
+                  "questionStatus": "GRADED",
                   "terminal": true,
                   "pollAfterMs": null,
                   "events": [
@@ -252,6 +414,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
                       "recordId": "record-77",
                       "correlationId": "grading-77",
                       "status": "COMPLETED",
+                      "questionStatus": "GRADED",
                       "errorMessage": null,
                       "occurredAt": "2026-07-27T12:00:01Z"
                     }
@@ -271,10 +434,12 @@ final class QuestionGenerationFlowTests: XCTestCase {
 
         XCTAssertEqual(process.correlationID, "grading-77")
         XCTAssertEqual(process.recordID, "record-77")
+        XCTAssertEqual(process.questionStatus, .graded)
         XCTAssertTrue(process.terminal)
         XCTAssertNil(process.pollAfterMilliseconds)
         XCTAssertEqual(process.events.map(\.id), [5])
         XCTAssertEqual(process.events.first?.status, .completed)
+        XCTAssertEqual(process.events.first?.questionStatus, .graded)
     }
 
     func testSigningOutStopsAnswerGradingProcessPolling() async {
@@ -1379,6 +1544,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
 private final class QuestionGenerationURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var requestHandler:
         ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    nonisolated(unsafe) static var responseDelayNanoseconds: UInt64 = 0
 
     override class func canInit(with request: URLRequest) -> Bool {
         true
@@ -1392,6 +1558,9 @@ private final class QuestionGenerationURLProtocol: URLProtocol, @unchecked Senda
         let protocolReference = UncheckedSendableBox(self)
         Task { @MainActor in
             let protocolInstance = protocolReference.value
+            if Self.responseDelayNanoseconds > 0 {
+                try? await Task.sleep(nanoseconds: Self.responseDelayNanoseconds)
+            }
             guard let requestHandler = Self.requestHandler else {
                 protocolInstance.client?.urlProtocol(
                     protocolInstance,

@@ -7,6 +7,7 @@ import com.buddystudy.backend.study.application.port.outbound.AnswerGradingProgr
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.service.AnswerGradingTimeoutService
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.QuestionStatus
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -24,6 +25,7 @@ class AnswerGradingTimeoutServiceTest {
             userId = 7,
             gradingRequestId = "request-31",
             gradingStatus = AnswerGradingStatus.JUDGING,
+            status = QuestionStatus.GRADING,
             gradingRequestedAt = now.minusSeconds(600),
         )
         Mockito.`when`(questions.findStalledGradings(cutoff, 100)).thenReturn(listOf(stalled))
@@ -36,6 +38,13 @@ class AnswerGradingTimeoutServiceTest {
                 now = now,
             ),
         ).thenReturn(true)
+        Mockito.`when`(
+            questions.updateGradingLastEventId(
+                id = 31,
+                requestId = "request-31",
+                eventId = 1,
+            ),
+        ).thenReturn(true)
         var terminalStatus: AnswerGradingStatus? = null
         val progress = object : AnswerGradingProgressPort {
             override suspend fun append(
@@ -43,6 +52,7 @@ class AnswerGradingTimeoutServiceTest {
                 userId: Long,
                 requestId: String,
                 status: AnswerGradingStatus,
+                questionStatus: QuestionStatus,
                 errorMessage: String?,
                 occurredAt: Instant,
             ): AnswerGradingProgress {
@@ -52,6 +62,7 @@ class AnswerGradingTimeoutServiceTest {
                     recordId = recordId,
                     requestId = requestId,
                     status = status,
+                    questionStatus = questionStatus,
                     errorMessage = errorMessage,
                     occurredAt = occurredAt,
                 )
