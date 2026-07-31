@@ -14,7 +14,7 @@ one workflow run just because they share a host.
 | Flyway V32 recovery | `Repair BuddyStudy Backend Flyway V32` | manual, one-time | EC2 self-hosted | Guarded removal of only the failed V32 history row and V32 partial check constraints |
 | Admin frontend | `Deploy BuddyStudy Admin Frontend` | `admin-frontend-image-published`, manual | EC2 self-hosted | Admin frontend container only |
 | iOS TestFlight | `Release iOS App` | `v*`, manual | GitHub-hosted macOS | Release planning, signed IPA build, artifact retention, and TestFlight upload as separate jobs |
-| Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, TestZone UI, Grafana, Loki, ERROR-log Slack alerting, monitoring auth and access audit, and the backend/FRC maintenance operator UI |
+| Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, TestZone UI, deployment history, Grafana, Loki, ERROR-log Slack alerting, monitoring auth and access audit, and the backend/FRC maintenance operator UI |
 | Monitoring routing | `Deploy BuddyStudy Monitoring Routes on MacBook Air` | manual | MacBook Air self-hosted | Routingflare routes for the monitoring UI and Grafana |
 | TestZone execution | `Deploy BuddyStudy TestZone on MacBook Air` | `testzone-image-published`, manual | MacBook Air self-hosted | k6 runner, script/project/run storage, InfluxDB, approved disposable test components |
 | Health monitor | Cloudflare Worker workflow | manual or source workflow | GitHub-hosted | Explicit diagnostic endpoint only; production scheduled checks are disabled |
@@ -126,6 +126,14 @@ deployment.
   task health, replacement ordering, and rollback; Grafana owns continuous
   outage alerting. A successful workflow is reported as staged, promoted, or
   submitted rather than as runtime-health completion.
+- Backend workflow lifecycle events are written to the monitoring TestZone
+  store with the stable `<deploy-repository>:<run-id>` key. Start and terminal
+  events update one record containing source, image, runtime, actor, phase,
+  duration, and Actions URL. The browser reads this bounded history through the
+  authenticated monitoring gateway. Event ingestion is exposed only on the
+  exact POST route `/deployment-events/events` and requires the dedicated
+  `MONITORING_DEPLOYMENT_INGEST_TOKEN`; it does not expose Docker control or
+  replace Grafana runtime alerting.
 - Shared infrastructure changes, such as nginx routing needed by multiple
   modules, must be called out in the workflow summary and kept backwards
   compatible with currently running containers.
@@ -255,8 +263,10 @@ deployment.
   and request bodies are never logged, and high-cardinality values such as IP,
   username, and path remain JSON fields instead of Loki labels.
   The same authenticated gateway serves one React monitoring shell for API
-  Logs, API Performance, TestZone, Users & Quotas, Redis Streams, Access &
-  Audit, and Settings. It proxies `/backend/api/` to the backend admin API.
+  Logs, API Performance, TestZone, Deployments, Users & Quotas, Redis Streams,
+  Access & Audit, and Settings. It proxies `/backend/api/` to the backend admin
+  API. Deployments auto-refreshes every ten seconds and keeps a maximum of 500
+  workflow records in TestZone's persisted data directory.
   Users & Quotas provides bounded user search, 20-row pagination,
   membership-tier allowance editing, and per-user tier/allowance overrides.
   These controls are internal-only and must not be linked from the consumer

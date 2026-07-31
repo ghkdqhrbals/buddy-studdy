@@ -52,6 +52,59 @@ jobs:
             exit 1
           fi
 
+      - name: Publish deployment started
+        env:
+          MONITORING_DEPLOYMENT_INGEST_TOKEN: ${{ secrets.MONITORING_DEPLOYMENT_INGEST_TOKEN }}
+          SOURCE_REPOSITORY: ${{ github.event.client_payload.source_repo }}
+          SOURCE_SHA: ${{ github.event.client_payload.sha }}
+          SOURCE_RUN_ID: ${{ github.event.client_payload.source_run_id }}
+        run: |
+          set -euo pipefail
+          started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "DEPLOYMENT_STARTED_AT=${started_at}" >> "${GITHUB_ENV}"
+          if [ -z "${MONITORING_DEPLOYMENT_INGEST_TOKEN}" ]; then
+            echo "::warning::MONITORING_DEPLOYMENT_INGEST_TOKEN is missing; deployment history will not be updated."
+            exit 0
+          fi
+          jq -n \
+            --arg id "${GITHUB_REPOSITORY}:${GITHUB_RUN_ID}" \
+            --arg image "${IMAGE_REF}" \
+            --arg runtime "${EXPECTED_BACKEND_RUNTIME}" \
+            --arg source_repository "${SOURCE_REPOSITORY}" \
+            --arg source_sha "${SOURCE_SHA}" \
+            --arg source_run_id "${SOURCE_RUN_ID}" \
+            --arg deploy_repository "${GITHUB_REPOSITORY}" \
+            --arg deploy_run_id "${GITHUB_RUN_ID}" \
+            --arg deploy_url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --arg actor "${GITHUB_ACTOR}" \
+            --arg started_at "${started_at}" \
+            '{
+              id: $id,
+              service: "backend",
+              environment: "production",
+              status: "RUNNING",
+              phase: "workflow-started",
+              image: $image,
+              runtime: $runtime,
+              sourceRepository: $source_repository,
+              sourceSha: $source_sha,
+              sourceRunId: $source_run_id,
+              deployRepository: $deploy_repository,
+              deployRunId: $deploy_run_id,
+              deployUrl: $deploy_url,
+              actor: $actor,
+              startedAt: $started_at,
+              message: "Backend deployment started."
+            }' > /tmp/backend-deployment-event.json
+          curl --silent --show-error --retry 2 --max-time 10 \
+            -X POST \
+            -H "Authorization: Bearer ${MONITORING_DEPLOYMENT_INGEST_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data-binary @/tmp/backend-deployment-event.json \
+            https://monitoring.lowfidev.cloud/deployment-events/events \
+            >/dev/null \
+            || echo "::warning::Could not publish the deployment start event."
+
       - name: Deploy on self-hosted runner
         env:
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
@@ -721,6 +774,77 @@ jobs:
             echo "- Swarm state: \`${BACKEND_DEPLOYMENT_STATE:-not-submitted}\`"
             echo "- Service: \`${BACKEND_SWARM_SERVICE:-buddystudy_backend}\`"
           } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Publish deployment result
+        if: always()
+        env:
+          MONITORING_DEPLOYMENT_INGEST_TOKEN: ${{ secrets.MONITORING_DEPLOYMENT_INGEST_TOKEN }}
+          DEPLOY_STATUS: ${{ job.status }}
+          SOURCE_REPOSITORY: ${{ github.event.client_payload.source_repo }}
+          SOURCE_SHA: ${{ github.event.client_payload.sha }}
+          SOURCE_RUN_ID: ${{ github.event.client_payload.source_run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MONITORING_DEPLOYMENT_INGEST_TOKEN}" ]; then
+            echo "::warning::MONITORING_DEPLOYMENT_INGEST_TOKEN is missing; deployment history will not be updated."
+            exit 0
+          fi
+          case "${DEPLOY_STATUS}" in
+            success) status="SUCCEEDED" ;;
+            cancelled) status="CANCELLED" ;;
+            *) status="FAILED" ;;
+          esac
+          finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          duration_ms="$(
+            STARTED_AT="${DEPLOYMENT_STARTED_AT:-${finished_at}}" FINISHED_AT="${finished_at}" python3 -c \
+              'from datetime import datetime; import os; parse=lambda value: datetime.fromisoformat(value.replace("Z", "+00:00")); print(max(0, int((parse(os.environ["FINISHED_AT"]) - parse(os.environ["STARTED_AT"])).total_seconds() * 1000)))'
+          )"
+          jq -n \
+            --arg id "${GITHUB_REPOSITORY}:${GITHUB_RUN_ID}" \
+            --arg status "${status}" \
+            --arg phase "${BACKEND_DEPLOYMENT_STATE:-not-submitted}" \
+            --arg image "${IMAGE_REF}" \
+            --arg runtime "${BACKEND_RUNTIME:-${EXPECTED_BACKEND_RUNTIME}}" \
+            --arg source_repository "${SOURCE_REPOSITORY}" \
+            --arg source_sha "${SOURCE_SHA}" \
+            --arg source_run_id "${SOURCE_RUN_ID}" \
+            --arg deploy_repository "${GITHUB_REPOSITORY}" \
+            --arg deploy_run_id "${GITHUB_RUN_ID}" \
+            --arg deploy_url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --arg actor "${GITHUB_ACTOR}" \
+            --arg started_at "${DEPLOYMENT_STARTED_AT:-${finished_at}}" \
+            --arg finished_at "${finished_at}" \
+            --argjson duration_ms "${duration_ms}" \
+            --arg swarm_service "${BACKEND_SWARM_SERVICE:-buddystudy_backend}" \
+            '{
+              id: $id,
+              service: "backend",
+              environment: "production",
+              status: $status,
+              phase: $phase,
+              image: $image,
+              runtime: $runtime,
+              sourceRepository: $source_repository,
+              sourceSha: $source_sha,
+              sourceRunId: $source_run_id,
+              deployRepository: $deploy_repository,
+              deployRunId: $deploy_run_id,
+              deployUrl: $deploy_url,
+              actor: $actor,
+              startedAt: $started_at,
+              finishedAt: $finished_at,
+              durationMs: $duration_ms,
+              message: ("Backend deployment " + ($status | ascii_downcase) + "."),
+              metadata: { swarmService: $swarm_service }
+            }' > /tmp/backend-deployment-event.json
+          curl --silent --show-error --retry 2 --max-time 10 \
+            -X POST \
+            -H "Authorization: Bearer ${MONITORING_DEPLOYMENT_INGEST_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data-binary @/tmp/backend-deployment-event.json \
+            https://monitoring.lowfidev.cloud/deployment-events/events \
+            >/dev/null \
+            || echo "::warning::Could not publish the deployment result event."
 
       - name: Notify Slack
         if: always()

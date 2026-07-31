@@ -27,6 +27,10 @@ const backendDeployTemplatePath = path.resolve(
   testDirectory,
   "../../../docs/deploy-repo-template/deploy-backend.yml",
 );
+const backendSwarmStackTemplatePath = path.resolve(
+  testDirectory,
+  "../../../docs/deploy-repo-template/backend-swarm-stack.yml",
+);
 const iosDeployNotificationTemplatePath = path.resolve(
   testDirectory,
   "../../../docs/deploy-repo-template/scripts/notify_ios_release.py",
@@ -243,8 +247,9 @@ test("server runtime dashboard separates server, database, and Redis signals", a
 });
 
 test("backend deploy starts a log-only MySQL runtime collector", async () => {
-  const [deployTemplate, collector] = await Promise.all([
+  const [deployTemplate, swarmStackTemplate, collector] = await Promise.all([
     fs.readFile(backendDeployTemplatePath, "utf8"),
+    fs.readFile(backendSwarmStackTemplatePath, "utf8"),
     fs.readFile(databaseCollectorPath, "utf8"),
   ]);
 
@@ -254,7 +259,7 @@ test("backend deploy starts a log-only MySQL runtime collector", async () => {
   assert.match(deployTemplate, /DATABASE_METRICS_INTERVAL_SECONDS=30/);
   assert.match(deployTemplate, /PROFILE_PHOTO_PUBLIC_BASE_URL=https:\/\/\$\{BACKEND_DOMAIN\}/);
   assert.match(deployTemplate, /docker volume create buddystudy-profile-photos/);
-  assert.match(deployTemplate, /buddystudy-profile-photos:\/app\/profile-photos/);
+  assert.match(swarmStackTemplate, /buddystudy-profile-photos:\/app\/profile-photos/);
   assert.match(collector, /docker stats --no-stream/);
   assert.match(collector, /@@max_connections/);
   assert.match(collector, /performance_schema\.threads/);

@@ -95,6 +95,7 @@ function defaultState() {
       updatedAt: now(),
     }],
     runs: [],
+    deployments: [],
   };
 }
 
@@ -122,6 +123,10 @@ export class TestZoneStore {
     }
     await this.migrateScripts();
     await this.migrateRunMetadata();
+    if (!Array.isArray(this.state.deployments)) {
+      this.state.deployments = [];
+      await this.persist();
+    }
     return this;
   }
 
@@ -385,5 +390,43 @@ export class TestZoneStore {
     await fs.rm(this.runPath(id), { recursive: true, force: true });
     await this.persist();
     return run;
+  }
+
+  listDeployments({ limit = 20, offset = 0, service = "", status = "" } = {}) {
+    const normalizedService = String(service).trim().toLowerCase();
+    const normalizedStatus = String(status).trim().toUpperCase();
+    const values = this.state.deployments.filter((deployment) => (
+      (!normalizedService || deployment.service.toLowerCase() === normalizedService)
+      && (!normalizedStatus || deployment.status === normalizedStatus)
+    ));
+    return {
+      items: structuredClone(values.slice(offset, offset + limit)),
+      totalCount: values.length,
+    };
+  }
+
+  deployment(id) {
+    const deployment = this.state.deployments.find((entry) => entry.id === id);
+    return deployment ? structuredClone(deployment) : null;
+  }
+
+  async upsertDeployment(input) {
+    const timestamp = now();
+    const existing = this.state.deployments.find((entry) => entry.id === input.id);
+    if (existing) {
+      Object.assign(existing, input, { updatedAt: timestamp });
+    } else {
+      this.state.deployments.unshift({
+        ...input,
+        createdAt: input.createdAt || timestamp,
+        updatedAt: timestamp,
+      });
+    }
+    this.state.deployments.sort((left, right) => (
+      Date.parse(right.startedAt || right.createdAt) - Date.parse(left.startedAt || left.createdAt)
+    ));
+    this.state.deployments = this.state.deployments.slice(0, 500);
+    await this.persist();
+    return this.deployment(input.id);
   }
 }

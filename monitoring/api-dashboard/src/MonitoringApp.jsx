@@ -7,6 +7,7 @@ import { StreamsPage } from "./pages/StreamsPage.jsx";
 import { JobsPage } from "./pages/JobsPage.jsx";
 import { UsersPage } from "./pages/UsersPage.jsx";
 import { FeedbackPage } from "./pages/FeedbackPage.jsx";
+import { DeploymentsPage } from "./pages/DeploymentsPage.jsx";
 
 export function MonitoringApp() {
   const route = {
@@ -21,6 +22,7 @@ export function MonitoringApp() {
     "/audit.html": AuditPage,
     "/settings.html": SettingsPage,
     "/service-status.html": ServiceStatusPage,
+    "/deployments.html": DeploymentsPage,
   }[window.location.pathname];
   const normalizedRoute = typeof route === "function" ? { Page: route } : route;
   const { Page, contentClassName = "" } = normalizedRoute || { Page: ApiLogsPage };

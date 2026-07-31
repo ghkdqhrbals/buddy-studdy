@@ -36,10 +36,11 @@ jobs:
         env:
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          MONITORING_DEPLOYMENT_INGEST_TOKEN: ${{ secrets.MONITORING_DEPLOYMENT_INGEST_TOKEN }}
         run: |
           set -euo pipefail
 
-          for required in IMAGE_REF GHCR_USERNAME GHCR_TOKEN; do
+          for required in IMAGE_REF GHCR_USERNAME GHCR_TOKEN MONITORING_DEPLOYMENT_INGEST_TOKEN; do
             if [ -z "${!required:-}" ]; then
               echo "Missing TestZone deployment value: ${required}" >&2
               exit 1
@@ -127,6 +128,7 @@ jobs:
             -e TESTZONE_INFLUX_BUCKET="${TESTZONE_INFLUX_BUCKET}" \
             -e TESTZONE_INFLUX_TOKEN="${TESTZONE_INFLUX_TOKEN}" \
             -e TESTZONE_COMPONENT_PASSWORD="${TESTZONE_COMPONENT_PASSWORD}" \
+            -e MONITORING_DEPLOYMENT_INGEST_TOKEN="${MONITORING_DEPLOYMENT_INGEST_TOKEN}" \
             -v "${testzone_root}/data:/data" \
             -v /var/run/docker.sock:/var/run/docker.sock \
             "${IMAGE_REF}"

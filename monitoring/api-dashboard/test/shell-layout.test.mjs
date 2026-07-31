@@ -24,6 +24,7 @@ test("all monitoring pages load the shared React application", async () => {
     "feedback.html",
     "jobs.html",
     "streams.html",
+    "deployments.html",
   ]) {
     const html = await text(page);
     assert.match(html, /id="monitoring-react-root"/);
@@ -42,9 +43,26 @@ test("all monitoring pages load the shared React application", async () => {
   assert.match(navigation, /User Feedback/);
   assert.match(navigation, /Batch Jobs/);
   assert.match(navigation, /Redis Streams/);
+  assert.match(navigation, /Deployments/);
   assert.match(navigation, /GitPullRequest/);
   assert.doesNotMatch(navigation, /Layers3/);
   assert.match(navigation, /App Control/);
+});
+
+test("deployment administration shows auto-refreshed workflow history and rollout details", async () => {
+  const app = await source("MonitoringApp.jsx");
+  const page = await source("pages/DeploymentsPage.jsx");
+  const api = await source("lib/deploymentApi.js");
+  assert.match(app, /deployments\.html/);
+  assert.match(page, /refetchInterval:\s*10_000/);
+  assert.match(page, /\/deployments\?/);
+  assert.match(page, /Deployment history/);
+  assert.match(page, /Open GitHub Actions/);
+  assert.match(page, /Pagination/);
+  assert.match(page, /DetailDrawer/);
+  assert.match(page, /ObjectInspector/);
+  assert.match(page, /AdminGate/);
+  assert.match(api, /\/testzone\/api/);
 });
 
 test("feedback administration reviews submissions and sends deep-linked user notifications", async () => {

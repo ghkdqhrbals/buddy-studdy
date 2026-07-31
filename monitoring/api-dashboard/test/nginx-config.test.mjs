@@ -27,7 +27,7 @@ test("monitoring gateway records a bounded access audit without request bodies",
   assert.match(config, /"event":"monitoring_access"/);
   assert.match(config, /"user":"\$remote_user"/);
   assert.match(config, /access_log \/var\/log\/nginx\/monitoring-access\.log monitoring_access/);
-  assert.match(config, /GET:\/\(index\|performance\|system\|testzone\|audit\|settings\|users\|streams\)/);
+  assert.match(config, /GET:\/\(index\|performance\|system\|testzone\|audit\|settings\|users\|streams\|deployments\)/);
   assert.match(config, /testzone\/api/);
   assert.match(config, /backend\/api/);
   assert.doesNotMatch(auditLogFormat, /requestBody/);
@@ -42,6 +42,15 @@ test("monitoring proxies admin APIs through the same authenticated origin", () =
   assert.match(backendLocation, /proxy_ssl_server_name on/);
   assert.match(backendLocation, /proxy_set_header Authorization \$http_authorization;/);
   assert.doesNotMatch(config, /location \/backend\/api\/ \{/);
+});
+
+test("deployment event ingestion bypasses browser Basic Auth but requires its bearer credential", () => {
+  const ingestLocation = config.match(/location = \/deployment-events\/events \{([\s\S]*?)\n  \}/)?.[1];
+  assert.ok(ingestLocation, "Deployment event ingest location must exist");
+  assert.match(ingestLocation, /auth_basic off;/);
+  assert.match(ingestLocation, /limit_except POST/);
+  assert.match(ingestLocation, /\/api\/deployments\/events/);
+  assert.match(ingestLocation, /proxy_set_header Authorization \$http_authorization;/);
 });
 
 test("legacy monitoring-owned service status routes are removed", () => {

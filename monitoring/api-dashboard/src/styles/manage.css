@@ -594,6 +594,26 @@ button, a { -webkit-tap-highlight-color: transparent; }
   font-size: 11px;
 }
 .batch-metric-strip strong { font-variant-numeric: tabular-nums; }
+.deployment-metric-strip strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.deployment-current .detail-summary { margin: 14px 16px 16px; }
+.deployment-service-cell { min-width: 130px; }
+.deployment-history-heading { align-items: flex-end; }
+.deployment-detail-section dl { display: grid; gap: 0; margin: 0 0 14px; }
+.deployment-detail-section dl > div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding: 9px 0;
+}
+.deployment-detail-section dt { color: var(--muted); font-size: 11px; font-weight: 700; }
+.deployment-detail-section dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 12px; }
+.deployment-run-link { width: fit-content; text-decoration: none; }
 .job-result-section dl { display: grid; gap: 0; margin: 0; }
 .job-result-section dl > div {
   display: grid;

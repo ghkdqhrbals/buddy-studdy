@@ -24,6 +24,7 @@ async function fixture() {
     grafanaBaseUrl: "https://grafana.example.test/grafana",
     influx: { url: "", token: "", org: "", bucket: "" },
     componentPassword: "test",
+    deploymentIngestToken: "deployment-test-token",
   };
   const runs = {
     active: new Map(),
@@ -84,6 +85,92 @@ async function fixture() {
     },
   };
 }
+
+test("deployment events require a bearer token and upsert paginated history", async (context) => {
+  const app = await fixture();
+  context.after(() => app.close());
+  const event = {
+    id: "ghkdqhrbals/personal-deploy:1234",
+    service: "backend",
+    environment: "production",
+    status: "RUNNING",
+    phase: "submitted",
+    image: "ghcr.io/ghkdqhrbals/buddystudy-backend:abc123",
+    runtime: "native",
+    sourceRepository: "ghkdqhrbals/buddy-studdy",
+    sourceSha: "abc123",
+    deployRepository: "ghkdqhrbals/personal-deploy",
+    deployRunId: "1234",
+    deployUrl: "https://github.com/ghkdqhrbals/personal-deploy/actions/runs/1234",
+    actor: "operator",
+    startedAt: "2026-07-31T00:00:00.000Z",
+  };
+
+  const unauthorized = await fetch(`${app.baseUrl}/api/deployments/events`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(event),
+  });
+  assert.equal(unauthorized.status, 401);
+
+  const accepted = await fetch(`${app.baseUrl}/api/deployments/events`, {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer deployment-test-token",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(event),
+  });
+  assert.equal(accepted.status, 202);
+  assert.equal((await accepted.json()).deployment.status, "RUNNING");
+
+  const completed = await fetch(`${app.baseUrl}/api/deployments/events`, {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer deployment-test-token",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      ...event,
+      status: "SUCCEEDED",
+      phase: "promoted",
+      finishedAt: "2026-07-31T00:01:00.000Z",
+      durationMs: 60_000,
+    }),
+  });
+  assert.equal(completed.status, 202);
+
+  const history = await fetch(`${app.baseUrl}/api/deployments?limit=10&offset=0`)
+    .then((response) => response.json());
+  assert.equal(history.totalCount, 1);
+  assert.equal(history.items[0].status, "SUCCEEDED");
+  assert.equal(history.items[0].phase, "promoted");
+  assert.equal(history.items[0].durationMs, 60_000);
+
+  const detail = await fetch(`${app.baseUrl}/api/deployments/${encodeURIComponent(event.id)}`)
+    .then((response) => response.json());
+  assert.equal(detail.deployment.image, event.image);
+});
+
+test("deployment event validation rejects unsupported status values", async (context) => {
+  const app = await fixture();
+  context.after(() => app.close());
+
+  const response = await fetch(`${app.baseUrl}/api/deployments/events`, {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer deployment-test-token",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      id: "deployment:invalid",
+      service: "backend",
+      status: "READYISH",
+    }),
+  });
+  assert.equal(response.status, 422);
+  assert.match((await response.json()).error, /must be one of/);
+});
 
 test("status and project APIs expose runtime-neutral TestZone state", async (context) => {
   const app = await fixture();
