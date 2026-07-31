@@ -30,6 +30,10 @@ Current workflow templates:
   remains a parent-summary fallback.
 - `deploy-macbookair-monitoring.yml`: API Logs dashboard, Grafana, and Loki on
   MacBook Air.
+- `deploy-macbookair-redisstreamscope.yml`: Redis Streams operations console
+  and its authenticated gateway on MacBook Air.
+- `deploy-macbookair-monitoring-routing.yml`: Routingflare public hostnames for
+  monitoring, Grafana, and RedisStreamScope.
 - `deploy-testzone.yml`: TestZone k6 execution service and InfluxDB on MacBook
   Air.
 - `deploy-monitoring.yml`: legacy EC2-local monitoring fallback only.
@@ -63,6 +67,12 @@ MacBook Air monitoring deploy:
 
 - `GRAFANA_ADMIN_PASSWORD`
 
+MacBook Air RedisStreamScope deploy:
+
+- `RSC_REDIS_CLUSTER_NODES`
+- `RSC_REDIS_PASSWORD`
+- `API_DASHBOARD_BASIC_AUTH_HTPASSWD`
+
 MacBook Air TestZone deploy:
 
 - `GHCR_USERNAME`
@@ -77,6 +87,11 @@ Repository variables:
 
 - `REMOTE_LOKI_PUSH_URL`: remote Loki push endpoint consumed by the EC2 promtail sender, for example `http://100.79.59.22:3100/loki/api/v1/push` over Tailscale or `https://loki.lowfidev.cloud/loki/api/v1/push` when protected by a tunnel.
 - `MACBOOKAIR_MONITORING_ROOT`: persistent host path for MacBook Air PLG data, defaults to `$HOME/data/buddystudy/monitoring`.
+- `MACBOOKAIR_REDISSTREAMSCOPE_ROOT`: persistent host path for the
+  RedisStreamScope gateway files, defaults to
+  `$HOME/buddystudy/redisstreamscope`.
+- `REDISSTREAMSCOPE_PORT`: loopback-only RedisStreamScope gateway port,
+  defaults to `3002`.
 - `GRAFANA_PORT`: MacBook Air Grafana host port, defaults to `3000`.
 - `LOKI_PORT`: MacBook Air Loki host port, defaults to `3100`.
 - `MACBOOKAIR_TESTZONE_ROOT`: persistent TestZone and InfluxDB path.
@@ -183,6 +198,22 @@ monitoring profile.
 The legacy EC2-local monitoring workflow `deploy-monitoring.yml` is kept only
 as a fallback template. Prefer `deploy-macbookair-monitoring.yml` for the
 current cost-saving EC2 layout.
+
+## RedisStreamScope Deploy
+
+Copy `deploy-macbookair-redisstreamscope.yml` and
+`deploy-macbookair-monitoring-routing.yml` into the deploy repository. Run
+**Deploy RedisStreamScope on MacBook Air** first, then run
+**Deploy BuddyStudy Monitoring Routes on MacBook Air** to publish
+`redis.lowfidev.cloud`.
+
+The runtime workflow pulls the immutable RedisStreamScope GHCR digest, stores
+SQLite and connection configuration in the
+`buddystudy-redisstreamscope-data` Docker volume, and configures the production
+Redis cluster from repository secrets. The application container has no host
+port. An Nginx gateway binds only to `127.0.0.1:3002`, requires the shared
+monitoring htpasswd, and proxies to RedisStreamScope's own session-authenticated
+UI. Routingflare maps the public hostname to that loopback gateway.
 
 Grafana dashboard provisioning is file-based, so dashboards are restored on
 container recreation:
