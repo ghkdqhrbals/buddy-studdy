@@ -104,7 +104,8 @@ Push is a separate channel from the inbox.
 
 - `should_push=false`: only the inbox item is created.
 - `should_push=true`: listener attempts APNs delivery after the inbox item is stored.
-- A completed study question also writes `question_push_outbox` in the question transaction. After commit, the central outbox publication service immediately publishes `QUESTION_PUSH_REQUESTED` to the dedicated push topic; its recovery scheduler retries failed or abandoned rows through the same flow. The push listener creates or reuses the same `question-created-{recordId}` inbox event before delivery.
+- A completed study question writes one `NOTIFICATION_REQUESTED` event to `redis_event_outbox`. Its payload owns `shouldPush`; no second push outbox is created.
+- The notification listener first creates or reuses the `app_notifications` row. Only when `shouldPush=true` and a device is eligible does it publish `QUESTION_PUSH_REQUESTED` with that existing notification ID.
 - Push claim uses `push_claimed_at` and permits retry of stale claims after five minutes.
 - A notification is marked sent only after the APNs adapter accepts the request; publishing the intermediate push stream event is not delivery success.
 - Stream consumers use stable names so pending entries remain recoverable across container replacement.

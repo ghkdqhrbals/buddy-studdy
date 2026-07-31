@@ -5,7 +5,6 @@ import com.buddystudy.backend.common.application.outbox.OutboxType
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxAppendPort
 import com.buddystudy.backend.study.application.port.inbound.QuestionDeliveryWriteUseCase
 import com.buddystudy.backend.study.application.port.inbound.QuestionWriteResult
-import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxAppendPort
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.StudyEntity
 import org.springframework.stereotype.Service
@@ -15,7 +14,6 @@ import java.time.Instant
 @Service
 class QuestionDeliveryWriteService(
     private val notificationOutbox: RedisEventOutboxAppendPort,
-    private val pushOutbox: QuestionPushOutboxAppendPort,
 ) : QuestionDeliveryWriteUseCase {
     @Transactional
     override suspend fun enqueue(
@@ -28,16 +26,9 @@ class QuestionDeliveryWriteService(
             question.toQuestionNotification(rootStudy, appLanguage),
             now,
         )
-        val pushOutboxId = pushOutbox.enqueue(
-            question.toQuestionPushRequest(rootStudy, appLanguage),
-            now,
-        )
         return QuestionWriteResult(
             question = question,
-            outboxes = listOf(
-                OutboxReference(OutboxType.DOMAIN_EVENT, notificationOutboxId),
-                OutboxReference(OutboxType.QUESTION_PUSH, pushOutboxId),
-            ),
+            outboxes = listOf(OutboxReference(OutboxType.DOMAIN_EVENT, notificationOutboxId)),
         )
     }
 }

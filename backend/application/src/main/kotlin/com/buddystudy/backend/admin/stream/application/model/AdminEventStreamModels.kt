@@ -99,21 +99,3 @@ data class AdminRedisEventOutboxEntry(
     val createdAt: Instant,
     val updatedAt: Instant,
 )
-
-data class AdminPushOutboxEntry(
-    val id: Long,
-    val recordId: Long,
-    val deviceId: String,
-    val userId: Long?,
-    val studyId: Long?,
-    val topic: String,
-    val streamKey: String?,
-    val redisRecordId: String?,
-    val status: String,
-    val attempts: Int,
-    val nextAttemptAt: Instant,
-    val publishedAt: Instant?,
-    val lastError: String?,
-    val createdAt: Instant,
-    val updatedAt: Instant,
-)

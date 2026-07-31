@@ -24,8 +24,7 @@ class OutboxRecoveryScheduler(
 class OutboxRecoveryJob(
     private val outboxes: RecoverOutboxUseCase,
 ) : ManagedJob {
-    // Retain the registered job name so existing operational controls and alerts keep working.
-    override val name: String = "question-push-outbox-dispatch"
+    override val name: String = "event-outbox-dispatch"
     override val displayName: String = "Event outbox recovery"
     override val description: String =
         "Finds unpublished database outbox events and republishes them to the appropriate Redis Stream."

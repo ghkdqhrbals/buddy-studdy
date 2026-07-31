@@ -23,8 +23,6 @@ import com.buddystudy.notification.domain.entity.NotificationType
 import com.buddystudy.study.domain.entity.AnswerGradingStatus
 import com.buddystudy.study.domain.entity.GradingVerdict
 import com.buddystudy.study.domain.entity.QuestionEntity
-import com.buddystudy.study.domain.entity.QuestionPushOutboxEntity
-import com.buddystudy.study.domain.entity.QuestionPushOutboxStatus
 import com.buddystudy.study.domain.entity.QuestionSource
 import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.StudyQuestionJobEntity
@@ -61,8 +59,6 @@ class EntityEnumContractTest {
         assertFieldType<QuestionEntity>("source", QuestionSource::class.java)
         assertFieldType<QuestionEntity>("gradingVerdict", GradingVerdict::class.java)
         assertFieldType<QuestionEntity>("gradingStatus", AnswerGradingStatus::class.java)
-        assertFieldType<QuestionPushOutboxEntity>("language", SupportedLanguage::class.java)
-        assertFieldType<QuestionPushOutboxEntity>("status", QuestionPushOutboxStatus::class.java)
         assertFieldType<StudyQuestionJobEntity>("status", StudyQuestionJobStatus::class.java)
     }
 

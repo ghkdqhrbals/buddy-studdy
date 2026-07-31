@@ -31,8 +31,9 @@ handler contract. On the third failed Inbox attempt, the dispatcher records a
 terminal failure and executes `XACK` only: the delivery leaves the group's PEL,
 but the Stream entry is not deleted and remains available until bounded
 retention trims it. The push listener and its idle-message recovery scheduler
-also use `ACK`, and the durable `question_push_outbox` remains the recovery
-source.
+also use `ACK`. Push state and claim ownership are kept on the existing
+`app_notifications` row; the notification event's `shouldPush` field is the
+single delivery option.
 
 Every failed delivery is also represented in `stream_consumer_inbox_attempts`.
 Payload decoding and event-type contract failures are terminal poison messages:
@@ -147,12 +148,14 @@ Application startup deletes these exact keys if they exist. No wildcard Redis
 deletion is used, and publishers and listeners only use the dedicated catalog
 keys above.
 
-These streams are delivery buffers, not sources of truth. Durable events first
-exist in `redis_event_outbox`, and push requests also have
-`question_push_outbox`. Operators must treat consumer lag approaching the
+These streams are delivery buffers, not sources of truth. Durable business and
+notification events first exist in `redis_event_outbox`. A notification is
+persisted to `app_notifications` before its optional push request enters the
+delivery stream. Operators must treat consumer lag approaching the
 corresponding stream's configured maximum as urgent: Redis can trim a record
-that is still pending when the bounded stream advances beyond it. The database
-outboxes remain available for diagnosis and recovery.
+that is still pending when the bounded stream advances beyond it. The event
+outbox, notification push state, and consumer Inbox remain available for
+diagnosis and recovery.
 
 Normal publication does not wait for the recovery poll. The business
 transaction commits its `PENDING` outbox row, then immediately calls the
@@ -197,7 +200,6 @@ Sources:
 2. Consumer Inbox: current state in `stream_consumer_inbox` and one durable
    lifecycle row per processing attempt in `stream_consumer_inbox_attempts`.
 3. Event outbox: durable `redis_event_outbox` rows.
-4. Push outbox: durable `question_push_outbox` rows.
 
 All lists use cursor pagination with a bounded `limit` of 1 to 100.
 
@@ -227,7 +229,6 @@ GET /api/v1/admin/event-streams/topics/{topic}/entries/{entryId}
 GET /api/v1/admin/event-streams/topics/{topic}/groups/{group}/pending
 GET /api/v1/admin/event-streams/inbox/attempts
 GET /api/v1/admin/event-streams/outboxes/events
-GET /api/v1/admin/event-streams/outboxes/pushes
 ```
 
 Every endpoint requires the existing administrator bearer token. Stream fields

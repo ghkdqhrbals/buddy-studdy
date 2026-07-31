@@ -106,7 +106,7 @@ data class BuddyStudyProperties(
         var schedulerStartupGraceMinutes: Long = 15,
         var schedulerMonitoredJobs: List<String> = listOf(
             "question-schedule",
-            "question-push-outbox-dispatch",
+            "event-outbox-dispatch",
             "user-stats-refresh",
             "admin-analytics-recent",
             "answer-grading-watchdog",

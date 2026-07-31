@@ -2,7 +2,6 @@ package com.buddystudy.backend.admin.stream.adapter.inbound.web
 
 import com.buddystudy.backend.admin.analytics.application.port.inbound.AdminAnalyticsUseCase
 import com.buddystudy.backend.admin.stream.application.model.AdminCursorPage
-import com.buddystudy.backend.admin.stream.application.model.AdminPushOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminRedisEventOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamInboxAttempt
@@ -85,14 +84,6 @@ class AdminEventStreamController(
     ): AdminCursorPage<AdminRedisEventOutboxEntry> =
         streams.eventOutbox(authorization.adminBearerToken(), cursor, limit, status, eventType)
 
-    @GetMapping("/outboxes/pushes")
-    suspend fun pushOutbox(
-        @RequestHeader("Authorization") authorization: String?,
-        @RequestParam(required = false) cursor: String?,
-        @RequestParam(defaultValue = "20") limit: Int,
-        @RequestParam(required = false) status: String?,
-    ): AdminCursorPage<AdminPushOutboxEntry> =
-        streams.pushOutbox(authorization.adminBearerToken(), cursor, limit, status)
 }
 
 interface AdminEventStreamWebPort {
@@ -133,12 +124,6 @@ interface AdminEventStreamWebPort {
         eventType: String?,
     ): AdminCursorPage<AdminRedisEventOutboxEntry>
 
-    suspend fun pushOutbox(
-        adminToken: String,
-        cursor: String?,
-        limit: Int,
-        status: String?,
-    ): AdminCursorPage<AdminPushOutboxEntry>
 }
 
 @Component
@@ -201,15 +186,6 @@ class AdminEventStreamWebAdapter(
         return streams.redisEventOutbox(cursor, limit, status, eventType)
     }
 
-    override suspend fun pushOutbox(
-        adminToken: String,
-        cursor: String?,
-        limit: Int,
-        status: String?,
-    ): AdminCursorPage<AdminPushOutboxEntry> {
-        authentication.validate(adminToken)
-        return streams.pushOutbox(cursor, limit, status)
-    }
 }
 
 private fun String?.adminBearerToken(): String =

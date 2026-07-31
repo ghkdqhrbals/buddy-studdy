@@ -9,12 +9,8 @@ import com.buddystudy.backend.common.adapter.stream.StreamMessageContext
 import com.buddystudy.backend.common.adapter.stream.StreamOptions
 import com.buddystudy.backend.common.adapter.stream.StreamScheduler
 import com.buddystudy.backend.config.BuddyStudyProperties
-import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.common.application.outbox.PublishedStreamRecord
-import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
-import com.buddystudy.backend.notification.application.port.inbound.ProcessNotificationEventUseCase
 import com.buddystudy.backend.notification.application.port.outbound.NotificationPersistencePort
-import com.buddystudy.backend.notification.application.service.NotificationSendPolicy
 import com.buddystudy.backend.study.adapter.outbound.stream.QuestionPushRequestedEvent
 import com.buddystudy.backend.study.adapter.outbound.stream.QuestionPushRequestedPayload
 import com.buddystudy.backend.study.adapter.outbound.stream.toPayload
@@ -41,8 +37,6 @@ class PushStreamManager(
     private val devices: DevicePort,
     private val userDevices: UserDevicePort,
     private val notifications: NotificationPersistencePort,
-    private val notificationProcessor: ProcessNotificationEventUseCase,
-    private val notificationSendPolicy: NotificationSendPolicy,
 ) : QuestionPushPublishPort {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val stalePushClaimAge = Duration.ofMinutes(5)
@@ -115,8 +109,7 @@ class PushStreamManager(
     }
 
     private suspend fun prepareForPublish(request: QuestionPushRequest): PreparedPush? {
-        val notificationCommand = request.toQuestionNotificationCommand()
-        val notificationId = request.notificationId ?: notificationProcessor.process(notificationCommand)
+        val notificationId = request.notificationId
 
         suspend fun reject(reason: String, detail: String): PreparedPush? {
             notifications.markPushFailed(notificationId, detail, Instant.now())
@@ -132,9 +125,6 @@ class PushStreamManager(
             return null
         }
 
-        if (!notificationSendPolicy.canSendPush(notificationCommand)) {
-            return reject("send_policy_denied", "Push policy denied.")
-        }
         val userId = request.userId
         if (userId != null && !userDevices.hasActiveSession(userId, request.deviceId)) {
             return reject("inactive_session", "Push target session is inactive.")
@@ -172,7 +162,7 @@ class PushStreamManager(
             return null
         }
         return PreparedPush(
-            request = request.copy(notificationId = notificationId),
+            request = request,
             apnsToken = apnsToken,
             apnsEnvironment = device.apnsEnvironment.databaseValue,
         )
@@ -284,31 +274,6 @@ class PushStreamManager(
             throw error
         }
     }
-
-    private fun QuestionPushRequest.toQuestionNotificationCommand(): NotificationRequestCommand =
-        NotificationRequestCommand(
-            eventId = "question-created-$recordId",
-            userId = userId,
-            deviceId = deviceId,
-            type = "STUDY_QUESTION",
-            title = title ?: "BuddyStudy",
-            body = body ?: question,
-            threadType = "study_question",
-            threadId = recordId.toString(),
-            deepLink = deepLink ?: PushDeepLinkFactory.studyRoomOrRecord(recordId.toString()),
-            metadataJson = JsonMapperProvider.mapper.writeValueAsString(
-                mapOf(
-                    "recordId" to recordId,
-                    "studyId" to studyId,
-                    "topic" to topic,
-                    "difficultyLevel" to difficultyLevel,
-                    "language" to language,
-                    "sound" to sound,
-                    "intervalMinutes" to intervalMinutes,
-                )
-            ),
-            shouldPush = true,
-        )
 
     private fun QuestionPushRequest.toEvent(): QuestionPushRequestedEvent =
         QuestionPushRequestedEvent(

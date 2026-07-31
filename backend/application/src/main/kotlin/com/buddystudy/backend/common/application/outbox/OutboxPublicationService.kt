@@ -1,9 +1,6 @@
 package com.buddystudy.backend.common.application.outbox
 
 import com.buddystudy.backend.config.BuddyStudyProperties
-import com.buddystudy.backend.study.application.port.outbound.ClaimedQuestionPushOutbox
-import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxPort
-import com.buddystudy.backend.study.application.port.outbound.QuestionPushPublishPort
 import kotlinx.coroutines.CancellationException
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -14,9 +11,7 @@ import java.time.Instant
 class OutboxPublicationService(
     private val properties: BuddyStudyProperties,
     private val domainOutbox: RedisEventOutboxPort,
-    private val pushOutbox: QuestionPushOutboxPort,
     private val domainPublisher: DomainEventPublishPort,
-    private val pushPublisher: QuestionPushPublishPort,
 ) : PublishOutboxUseCase, RecoverOutboxUseCase {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -40,17 +35,9 @@ class OutboxPublicationService(
     }
 
     private suspend fun publishReference(reference: OutboxReference, now: Instant): PublishOutcome =
-        when (reference.type) {
-            OutboxType.DOMAIN_EVENT ->
-                domainOutbox.claim(reference.id, now, now.minus(CLAIM_LEASE))
-                    ?.let { publishDomain(it) }
-                    ?: PublishOutcome.NOT_CLAIMED
-
-            OutboxType.QUESTION_PUSH ->
-                pushOutbox.claim(reference.id, now, now.minus(CLAIM_LEASE))
-                    ?.let { publishPush(it) }
-                    ?: PublishOutcome.NOT_CLAIMED
-        }
+        domainOutbox.claim(reference.id, now, now.minus(CLAIM_LEASE))
+            ?.let { publishDomain(it) }
+            ?: PublishOutcome.NOT_CLAIMED
 
     override suspend fun recoverPending(): OutboxPublishSummary {
         if (!properties.streams.enabled) return EMPTY_SUMMARY
@@ -66,24 +53,9 @@ class OutboxPublicationService(
             claimFailures += error
             emptyList()
         }
-        val pushes = try {
-            pushOutbox.claimBatch(now, staleBefore, BATCH_SIZE)
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            log.error("question_push_outbox_recovery_claim_failed", error)
-            claimFailures += error
-            emptyList()
-        }
         val outcomes = domainEvents.map { event ->
             runCatching { publishDomain(event) }
                 .onFailure { log.warn("redis_outbox_recovery_publish_failed outboxId={} error={}", event.id, it.message) }
-                .getOrDefault(PublishOutcome.NOT_CLAIMED)
-        } + pushes.map { item ->
-            runCatching { publishPush(item) }
-                .onFailure {
-                    log.warn("question_push_outbox_recovery_publish_failed outboxId={} error={}", item.id, it.message)
-                }
                 .getOrDefault(PublishOutcome.NOT_CLAIMED)
         }
         if (claimFailures.isNotEmpty()) {
@@ -122,37 +94,6 @@ class OutboxPublicationService(
         )
     }
 
-    private suspend fun publishPush(item: ClaimedQuestionPushOutbox): PublishOutcome {
-        val publishedAt = Instant.now()
-        return runCatching {
-            checkNotNull(pushPublisher.publishPush(item.request)) { "Push stream publish failed." }
-        }
-            .fold(
-                onSuccess = { publication ->
-                    if (pushOutbox.markPublished(item.id, item.claimToken, publication, publishedAt)) {
-                        log.info(
-                            "question_push_outbox_published outboxId={} eventId={} streamKey={} redisRecordId={} attempts={} ageMs={}",
-                            item.id,
-                            item.request.eventId,
-                            publication.streamKey,
-                            publication.recordId,
-                            item.attempts,
-                            Duration.between(item.createdAt, publishedAt).toMillis(),
-                        )
-                        PublishOutcome.PUBLISHED
-                    } else {
-                        log.warn(
-                            "question_push_outbox_publish_fence_lost outboxId={} eventId={}",
-                            item.id,
-                            item.request.eventId,
-                        )
-                        PublishOutcome.NOT_CLAIMED
-                    }
-                },
-                onFailure = { error -> retryPush(item, error, publishedAt) },
-            )
-    }
-
     private suspend fun retryDomain(
         event: ClaimedRedisOutboxEvent,
         error: Throwable,
@@ -172,33 +113,6 @@ class OutboxPublicationService(
             "redis_outbox_retry_scheduled outboxId={} eventId={} attempts={} nextAttemptAt={} fenced={} error={}",
             event.id,
             event.eventId,
-            attempts,
-            nextAttemptAt,
-            updated,
-            error.message,
-        )
-        return if (updated) PublishOutcome.RETRY_SCHEDULED else PublishOutcome.NOT_CLAIMED
-    }
-
-    private suspend fun retryPush(
-        item: ClaimedQuestionPushOutbox,
-        error: Throwable,
-        failedAt: Instant,
-    ): PublishOutcome {
-        val attempts = item.attempts + 1
-        val nextAttemptAt = failedAt.plusSeconds(retryDelaySeconds(attempts))
-        val updated = pushOutbox.markRetry(
-            id = item.id,
-            claimToken = item.claimToken,
-            attempts = attempts,
-            nextAttemptAt = nextAttemptAt,
-            error = error.message ?: error.javaClass.simpleName,
-            updatedAt = failedAt,
-        )
-        log.warn(
-            "question_push_outbox_retry_scheduled outboxId={} eventId={} attempts={} nextAttemptAt={} fenced={} error={}",
-            item.id,
-            item.request.eventId,
             attempts,
             nextAttemptAt,
             updated,

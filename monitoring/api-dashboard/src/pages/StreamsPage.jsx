@@ -27,7 +27,6 @@ const MODES = [
   { value: "delivery", label: "Delivery status" },
   { value: "streams", label: "Stream entries" },
   { value: "events", label: "Event outbox" },
-  { value: "pushes", label: "Push outbox" },
 ];
 
 function useCursorPage(queryKey, pathBuilder, dependencies, enabled = true) {
@@ -96,19 +95,12 @@ function StreamsWorkspace() {
     [limit, status, eventType],
     mode === "events",
   );
-  const pushPage = useCursorPage(
-    ["admin", "push-outbox"],
-    (cursor) => cursorPath("/event-streams/outboxes/pushes", { cursor, limit, status }),
-    [limit, status],
-    mode === "pushes",
-  );
-
   const exactQuery = useQuery({
     queryKey: ["admin", "stream-entry", activeTopic, exactEntryId],
     queryFn: () => adminFetch(streamEntryPath(activeTopic, exactEntryId)),
     enabled: mode === "streams" && Boolean(activeTopic && exactEntryId),
   });
-  const currentPage = mode === "streams" ? streamPage : mode === "events" ? eventPage : pushPage;
+  const currentPage = mode === "streams" ? streamPage : eventPage;
   const currentQuery = mode === "delivery"
     ? topicsQuery
     : exactEntryId
@@ -137,17 +129,6 @@ function StreamsWorkspace() {
       { key: "nextAttemptAt", label: "Next attempt", render: (row) => formatDateTime(row.nextAttemptAt) },
       { key: "updatedAt", label: "Updated", render: (row) => formatDateTime(row.updatedAt) },
     ],
-    pushes: [
-      { key: "id", label: "ID", className: "mono" },
-      { key: "topic", label: "Topic" },
-      { key: "streamKey", label: "Published stream", className: "mono" },
-      { key: "recordId", label: "Record ID" },
-      { key: "userId", label: "User ID" },
-      { key: "deviceId", label: "Device ID", className: "mono" },
-      { key: "status", label: "Status", render: (row) => <StatusBadge tone={statusTone(row.status)}>{row.status}</StatusBadge> },
-      { key: "attempts", label: "Attempts" },
-      { key: "updatedAt", label: "Updated", render: (row) => formatDateTime(row.updatedAt) },
-    ],
   }), []);
 
   function changeMode(nextMode) {
@@ -170,18 +151,15 @@ function StreamsWorkspace() {
           <SegmentedTabs value={mode} onChange={changeMode} items={MODES} ariaLabel="Redis data source" />
           {mode !== "delivery" ? (
             <div className="inline-controls">
-              {mode !== "pushes" ? (
-                <label className="field compact-field"><span>Event type</span><input value={eventType} onChange={(event) => {
-                  setEventType(event.target.value);
-                  streamPage.reset();
-                  eventPage.reset();
-                }} placeholder="All types" /></label>
-              ) : null}
+              <label className="field compact-field"><span>Event type</span><input value={eventType} onChange={(event) => {
+                setEventType(event.target.value);
+                streamPage.reset();
+                eventPage.reset();
+              }} placeholder="All types" /></label>
               {mode !== "streams" ? (
                 <label className="field compact-field"><span>Status</span><input value={status} onChange={(event) => {
                   setStatus(event.target.value);
                   eventPage.reset();
-                  pushPage.reset();
                 }} placeholder="All statuses" /></label>
               ) : null}
               <label className="field compact-field page-size-field">
@@ -190,7 +168,6 @@ function StreamsWorkspace() {
                   setLimit(Number(event.target.value));
                   streamPage.reset();
                   eventPage.reset();
-                  pushPage.reset();
                 }}>
                   {[20, 50, 100].map((value) => <option key={value}>{value}</option>)}
                 </select>

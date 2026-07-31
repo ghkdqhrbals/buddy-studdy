@@ -1,7 +1,6 @@
 package com.buddystudy.backend.admin.stream.application.service
 
 import com.buddystudy.backend.admin.stream.application.model.AdminCursorPage
-import com.buddystudy.backend.admin.stream.application.model.AdminPushOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminRedisEventOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamInboxAttempt
@@ -98,13 +97,6 @@ class AdminEventStreamService(
         eventType: String?,
     ): AdminCursorPage<AdminRedisEventOutboxEntry> =
         outboxes.redisEvents(cursor.longCursor(), limit.normalized(), status.normalized(), eventType.normalized())
-
-    override suspend fun pushOutbox(
-        cursor: String?,
-        limit: Int,
-        status: String?,
-    ): AdminCursorPage<AdminPushOutboxEntry> =
-        outboxes.pushes(cursor.longCursor(), limit.normalized(), status.normalized())
 
     private fun Int.normalized(): Int = coerceIn(1, 100)
 

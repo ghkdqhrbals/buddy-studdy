@@ -200,7 +200,8 @@ test("Redis Stream administration lives in monitoring Manage with bounded cursor
   const paths = await source("lib/streamPaths.js");
   assert.match(page, /Stream entries/);
   assert.match(page, /Event outbox/);
-  assert.match(page, /Push outbox/);
+  assert.doesNotMatch(page, /Push outbox/);
+  assert.doesNotMatch(page, /outboxes\/pushes/);
   assert.match(page, /cursorStack/);
   assert.match(page, /ObjectInspector/);
   assert.match(paths, /streamEntriesPath/);

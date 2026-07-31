@@ -13,8 +13,6 @@ import com.buddystudy.backend.study.adapter.stream.PushStreamManager
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystudy.backend.notification.application.port.outbound.NotificationPersistencePort
-import com.buddystudy.backend.notification.application.port.inbound.ProcessNotificationEventUseCase
-import com.buddystudy.backend.notification.application.service.NotificationSendPolicy
 import com.buddystudy.backend.study.application.port.outbound.PushNotificationPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import org.assertj.core.api.Assertions.assertThat
@@ -113,12 +111,6 @@ class PushStreamManagerTest {
                 else -> Answers.RETURNS_DEFAULTS.answer(invocation)
             }
         }
-        val notificationProcessor = mock(ProcessNotificationEventUseCase::class.java) { invocation ->
-            if (invocation.method.name == "process") 42L else Answers.RETURNS_DEFAULTS.answer(invocation)
-        }
-        val notificationSendPolicy = mock(NotificationSendPolicy::class.java) { invocation ->
-            if (invocation.method.name == "canSendPush") true else Answers.RETURNS_DEFAULTS.answer(invocation)
-        }
         runBlocking {
             `when`(userDevices.hasActiveSession(11, "device-1")).thenReturn(true)
             `when`(devices.findByDeviceId("device-1")).thenReturn(
@@ -136,8 +128,6 @@ class PushStreamManagerTest {
             devices = devices,
             userDevices = userDevices,
             notifications = notifications,
-            notificationProcessor = notificationProcessor,
-            notificationSendPolicy = notificationSendPolicy,
         )
         return Fixture(manager, notifications)
     }
@@ -148,6 +138,7 @@ class PushStreamManagerTest {
         userId: Long? = 11,
     ) = QuestionPushRequest(
         recordId = 10,
+        notificationId = 42,
         studyId = 77,
         deviceId = deviceId,
         userId = userId,

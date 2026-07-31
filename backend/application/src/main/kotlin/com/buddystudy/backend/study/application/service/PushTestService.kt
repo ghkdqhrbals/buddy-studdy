@@ -4,6 +4,9 @@ import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.common.application.json.JsonMapperProvider
+import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
+import com.buddystudy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystudy.backend.study.application.model.PushTestCommand
 import com.buddystudy.backend.study.application.model.PushTestResponse
 import com.buddystudy.backend.study.application.port.inbound.SendTestPushUseCase
@@ -11,19 +14,17 @@ import com.buddystudy.backend.study.application.port.outbound.ApnsAlert
 import com.buddystudy.backend.study.application.port.outbound.ApnsAps
 import com.buddystudy.backend.study.application.port.outbound.ApnsQuestionMessage
 import com.buddystudy.backend.study.application.port.outbound.ApnsQuestionPayload
-import com.buddystudy.backend.study.application.port.outbound.QuestionPushPublishPort
-import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystudy.backend.study.application.port.outbound.PushMessageType
 import com.buddystudy.backend.study.application.port.outbound.PushNotificationPort
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
-import java.time.Instant
+import java.util.UUID
 
 @Service
 class PushTestService(
     private val devices: DevicePort,
     private val pushNotifications: PushNotificationPort,
-    private val pushEvents: QuestionPushPublishPort,
+    private val notifications: PublishNotificationUseCase,
 ) : SendTestPushUseCase {
     override suspend fun sendTestPush(principal: Principal, command: PushTestCommand): PushTestResponse {
         val device = devices.findByDeviceId(principal.deviceId)
@@ -60,30 +61,38 @@ class PushTestService(
 
     override suspend fun publishTestPushEvent(principal: Principal, command: PushTestCommand): PushTestResponse {
         val recordId = command.recordId.toLongOrNull() ?: 0L
-        val request = QuestionPushRequest(
-            recordId = recordId,
-            studyId = command.studyId,
-            deviceId = principal.deviceId,
-            userId = principal.userId,
-            question = command.body.ifBlank { "BuddyStudy test push." },
-            expectedAnswerHint = null,
-            topic = command.topic.ifBlank { "Test" },
-            difficultyLevel = command.difficultyLevel.coerceIn(1, 10),
-            language = command.language.ifBlank { "ko" },
-            sound = command.sound.ifBlank { "default" },
-            intervalMinutes = 0,
-            title = command.title.ifBlank { "BuddyStudy" },
-            body = command.body.ifBlank { "BuddyStudy test push." },
-            deepLink = command.deepLink.ifBlank { "buddystudy://test-push" },
-            createdAt = Instant.now(),
+        val topic = command.topic.ifBlank { "Test" }
+        val published = notifications.publish(
+            NotificationRequestCommand(
+                eventId = "push-test-${UUID.randomUUID()}",
+                userId = principal.userId,
+                deviceId = principal.deviceId,
+                type = "ADMIN_MESSAGE",
+                title = command.title.ifBlank { "BuddyStudy" },
+                body = command.body.ifBlank { "BuddyStudy test push." },
+                threadType = "admin_message",
+                threadId = recordId.toString(),
+                deepLink = command.deepLink.ifBlank { "buddystudy://test-push" },
+                metadataJson = JsonMapperProvider.mapper.writeValueAsString(
+                    mapOf(
+                        "recordId" to recordId,
+                        "studyId" to command.studyId,
+                        "topic" to topic,
+                        "difficultyLevel" to command.difficultyLevel.coerceIn(1, 10),
+                        "language" to command.language.ifBlank { "ko" },
+                        "sound" to command.sound.ifBlank { "default" },
+                        "intervalMinutes" to 0,
+                    ),
+                ),
+                shouldPush = true,
+            ),
         )
-        val published = pushEvents.publishPush(request)
         return PushTestResponse(
-            sent = published != null,
-            provider = "PUSH_STREAM",
+            sent = published,
+            provider = "NOTIFICATION_STREAM",
             deviceId = principal.deviceId,
-            topic = request.topic,
-            recordId = request.recordId.toString(),
+            topic = topic,
+            recordId = recordId.toString(),
         )
     }
 }

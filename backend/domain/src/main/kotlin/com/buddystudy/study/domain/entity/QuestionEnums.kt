@@ -48,9 +48,3 @@ enum class AnswerGradingStatus {
     val terminal: Boolean
         get() = this == COMPLETED || this == FAILED
 }
-
-enum class QuestionPushOutboxStatus {
-    PENDING,
-    PROCESSING,
-    PUBLISHED,
-}

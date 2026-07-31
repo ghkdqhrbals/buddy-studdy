@@ -17,7 +17,6 @@ import com.buddystudy.backend.study.application.port.inbound.QuestionTranslation
 import com.buddystudy.backend.study.application.port.inbound.QuestionWriteResult
 import com.buddystudy.backend.study.application.port.outbound.QuestionGenerationSagaPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
-import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxAppendPort
 import com.buddystudy.backend.study.application.port.outbound.StreamInboxPort
 import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.study.domain.entity.StudyEntity
@@ -33,7 +32,6 @@ class QuestionTranslationExecutionWriteService(
     private val questions: QuestionPort,
     private val localizations: ContentLocalizationPort,
     private val notificationOutbox: RedisEventOutboxAppendPort,
-    private val pushOutbox: QuestionPushOutboxAppendPort,
     private val questionKeys: OpenAIQuestionKeyProvider,
 ) : QuestionTranslationExecutionWriteUseCase {
     @Transactional
@@ -110,10 +108,6 @@ class QuestionTranslationExecutionWriteService(
             question.toQuestionNotification(rootStudy, appLanguage),
             now,
         )
-        val pushId = pushOutbox.enqueue(
-            question.toQuestionPushRequest(rootStudy, appLanguage),
-            now,
-        )
         check(sagas.markCompleted(event.correlationId, now)) {
             "Question generation Saga did not enter COMPLETED."
         }
@@ -122,10 +116,7 @@ class QuestionTranslationExecutionWriteService(
         }
         return QuestionWriteResult(
             question = question,
-            outboxes = listOf(
-                OutboxReference(OutboxType.DOMAIN_EVENT, notificationId),
-                OutboxReference(OutboxType.QUESTION_PUSH, pushId),
-            ),
+            outboxes = listOf(OutboxReference(OutboxType.DOMAIN_EVENT, notificationId)),
         )
     }
 

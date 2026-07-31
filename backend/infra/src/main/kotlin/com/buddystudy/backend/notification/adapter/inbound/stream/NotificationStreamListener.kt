@@ -13,6 +13,7 @@ import com.buddystudy.backend.notification.application.port.inbound.Notification
 import com.buddystudy.backend.notification.application.port.inbound.ProcessNotificationEventUseCase
 import com.buddystudy.backend.notification.application.port.inbound.RecoverNotificationCommandUseCase
 import com.buddystudy.backend.notification.application.port.outbound.NotificationPersistencePort
+import com.buddystudy.backend.notification.application.service.NotificationSendPolicy
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushPublishPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystudy.backend.study.application.content.MarkdownContentPolicy
@@ -31,6 +32,7 @@ class NotificationStreamListener(
     private val userDevices: UserDevicePort,
     private val pushPublisher: QuestionPushPublishPort,
     private val notificationRecovery: RecoverNotificationCommandUseCase,
+    private val notificationSendPolicy: NotificationSendPolicy,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -124,17 +126,16 @@ class NotificationStreamListener(
             command.threadId,
             command.deepLink,
         )
-        if (command.shouldPush && command.type != DIRECT_PUSH_EVENT_TYPE) {
-            publishPush(notificationId, command)
-        } else {
+        if (!command.shouldPush) {
             logger.info(
-                "notification_push_skipped reason={} notificationId={} eventId={} userId={}",
-                if (command.type == DIRECT_PUSH_EVENT_TYPE) "dedicated_push_stream" else "should_push_false",
+                "notification_push_skipped reason=should_push_false notificationId={} eventId={} userId={}",
                 notificationId,
                 command.eventId,
                 command.userId,
             )
+            return
         }
+        publishPush(notificationId, command)
     }
 
     private suspend fun publishPush(notificationId: Long, command: NotificationRequestCommand) {
@@ -153,6 +154,17 @@ class NotificationStreamListener(
                 notificationId,
                 command.eventId,
                 command.userId,
+            )
+            return
+        }
+        if (!notificationSendPolicy.canSendPush(command.copy(deviceId = targetDevice.deviceId))) {
+            notifications.markPushFailed(notificationId, "Push policy denied.", Instant.now())
+            logger.info(
+                "notification_push_skipped reason=send_policy_denied notificationId={} eventId={} userId={} deviceId={}",
+                notificationId,
+                command.eventId,
+                command.userId,
+                targetDevice.deviceId,
             )
             return
         }
@@ -225,7 +237,6 @@ class NotificationStreamListener(
         const val CONSUMER = "buddystudy-notification"
         const val RECOVERY_CONSUMER = "buddystudy-notification-recovery"
         const val EVENT_TYPE = "NOTIFICATION_REQUESTED"
-        const val DIRECT_PUSH_EVENT_TYPE = "STUDY_QUESTION"
     }
 }
 

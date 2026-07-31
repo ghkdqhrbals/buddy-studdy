@@ -31,12 +31,14 @@ Application services depend on ports:
 
 - `QuestionCreationWriteUseCase`, `ScheduledQuestionWriteUseCase`, and
   `StudyRecordWriteUseCase` are inbound transaction boundaries.
-- `RedisEventOutboxAppendPort` and `QuestionPushOutboxAppendPort` append
-  durable messages.
+- `RedisEventOutboxAppendPort` appends durable domain and notification
+  messages. Notification payloads own their `shouldPush` delivery option.
 - `PublishOutboxUseCase` performs immediate publication.
 - `RecoverOutboxUseCase` performs scheduled recovery through the same
   publication service.
-- `DomainEventPublishPort` and `QuestionPushPublishPort` isolate Redis.
+- `DomainEventPublishPort` isolates durable outbox publication to Redis.
+  `QuestionPushPublishPort` is the downstream notification delivery boundary,
+  after an `app_notifications` row already exists.
 - `AfterCommitPort` registers immediate publication after an enclosing
   reactive transaction commits.
 
@@ -83,7 +85,7 @@ the outbox publisher it serves.
 
 ## Claiming and race handling
 
-Both outbox tables use:
+The `redis_event_outbox` table uses:
 
 - `status`: `PENDING`, `PROCESSING`, or `PUBLISHED`;
 - `next_attempt_at`;
@@ -114,11 +116,10 @@ required.
 
 ## Recovery
 
-`OutboxRecoveryScheduler` runs the managed
-`question-push-outbox-dispatch` job name for operational compatibility. Its
-job calls `RecoverOutboxUseCase`, which claims batches from both
-`redis_event_outbox` and `question_push_outbox`, then invokes the same
-publication and fenced status-update methods used by `publishNow`.
+`OutboxRecoveryScheduler` runs the managed `event-outbox-dispatch` job. It
+calls `RecoverOutboxUseCase`, which claims batches from
+`redis_event_outbox`, then invokes the same publication and fenced
+status-update methods used by `publishNow`.
 
 Retry delay uses bounded exponential backoff. A two-minute publication claim
 lease recovers process crashes. Stream-consumer idle recovery is separate:

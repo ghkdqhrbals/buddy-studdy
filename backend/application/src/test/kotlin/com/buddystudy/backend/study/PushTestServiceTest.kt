@@ -8,11 +8,10 @@ import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
-import com.buddystudy.backend.common.application.outbox.PublishedStreamRecord
+import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
+import com.buddystudy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystudy.backend.study.application.model.PushTestCommand
 import com.buddystudy.backend.study.application.port.outbound.ApnsQuestionMessage
-import com.buddystudy.backend.study.application.port.outbound.QuestionPushPublishPort
-import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystudy.backend.study.application.port.outbound.PushNotificationPort
 import com.buddystudy.backend.study.application.port.outbound.PushQuestionMessage
 import com.buddystudy.backend.study.application.service.PushTestService
@@ -32,7 +31,7 @@ class PushTestServiceTest {
             )
         )
         val push = CapturingPushNotificationPort()
-        val service = PushTestService(devices, push, FakePushEventPublisher())
+        val service = PushTestService(devices, push, CapturingNotificationPublisher())
 
         val response = service.sendTestPush(
             Principal(userId = 1, deviceId = "dev-1", sessionId = 10, anonymous = false),
@@ -64,7 +63,7 @@ class PushTestServiceTest {
         val service = PushTestService(
             FakeDevicePort(DeviceEntity(deviceId = "dev-1", userId = 1, apnsToken = "")),
             CapturingPushNotificationPort(),
-            FakePushEventPublisher(),
+            CapturingNotificationPublisher(),
         )
 
         assertThatThrownBy {
@@ -81,9 +80,9 @@ class PushTestServiceTest {
     }
 
     @Test
-    fun `publish test push event sends request to push stream publisher`(): Unit = runBlocking {
-        val pushEvents = FakePushEventPublisher()
-        val service = PushTestService(FakeDevicePort(), CapturingPushNotificationPort(), pushEvents)
+    fun `publish test push event sends one notification with push enabled`(): Unit = runBlocking {
+        val notifications = CapturingNotificationPublisher()
+        val service = PushTestService(FakeDevicePort(), CapturingPushNotificationPort(), notifications)
         val response = service.publishTestPushEvent(
             Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false),
             PushTestCommand(
@@ -100,19 +99,19 @@ class PushTestServiceTest {
         )
 
         assertThat(response.sent).isTrue()
-        assertThat(response.provider).isEqualTo("PUSH_STREAM")
+        assertThat(response.provider).isEqualTo("NOTIFICATION_STREAM")
         assertThat(response.recordId).isEqualTo("123")
-        val request = pushEvents.requests.single()
-        assertThat(request.recordId).isEqualTo(123)
-        assertThat(request.studyId).isEqualTo(55)
+        val request = notifications.commands.single()
         assertThat(request.deviceId).isEqualTo("dev-1")
         assertThat(request.userId).isEqualTo(7)
-        assertThat(request.topic).isEqualTo("Redis")
-        assertThat(request.difficultyLevel).isEqualTo(9)
-        assertThat(request.language).isEqualTo("en")
+        assertThat(request.type).isEqualTo("ADMIN_MESSAGE")
+        assertThat(request.shouldPush).isTrue()
         assertThat(request.title).isEqualTo("Title")
         assertThat(request.body).isEqualTo("Body")
         assertThat(request.deepLink).isEqualTo("buddystudy://studies/55")
+        assertThat(request.metadataJson).contains("\"recordId\":123")
+        assertThat(request.metadataJson).contains("\"studyId\":55")
+        assertThat(request.metadataJson).contains("\"topic\":\"Redis\"")
     }
 
     private class FakeDevicePort(private val device: DeviceEntity? = null) : DevicePort {
@@ -132,11 +131,12 @@ class PushTestServiceTest {
         }
     }
 
-    private class FakePushEventPublisher : QuestionPushPublishPort {
-        val requests = mutableListOf<QuestionPushRequest>()
-        override suspend fun publishPush(request: QuestionPushRequest): PublishedStreamRecord {
-            requests += request
-            return PublishedStreamRecord("notification.question-push.requested.v1", "1-0")
+    private class CapturingNotificationPublisher : PublishNotificationUseCase {
+        val commands = mutableListOf<NotificationRequestCommand>()
+
+        override suspend fun publish(command: NotificationRequestCommand): Boolean {
+            commands += command
+            return true
         }
     }
 }

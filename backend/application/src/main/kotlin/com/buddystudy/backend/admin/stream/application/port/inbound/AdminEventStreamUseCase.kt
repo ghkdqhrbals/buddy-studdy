@@ -1,7 +1,6 @@
 package com.buddystudy.backend.admin.stream.application.port.inbound
 
 import com.buddystudy.backend.admin.stream.application.model.AdminCursorPage
-import com.buddystudy.backend.admin.stream.application.model.AdminPushOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminRedisEventOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamInboxAttempt
@@ -42,9 +41,4 @@ interface AdminEventStreamUseCase {
         eventType: String?,
     ): AdminCursorPage<AdminRedisEventOutboxEntry>
 
-    suspend fun pushOutbox(
-        cursor: String?,
-        limit: Int,
-        status: String?,
-    ): AdminCursorPage<AdminPushOutboxEntry>
 }

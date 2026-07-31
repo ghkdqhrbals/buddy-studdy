@@ -359,25 +359,6 @@ internal fun QuestionEntity.toQuestionNotification(study: StudyEntity, appLangua
         shouldPush = true,
     )
 
-internal fun QuestionEntity.toQuestionPushRequest(study: StudyEntity, appLanguage: String): QuestionPushRequest =
-    QuestionPushRequest(
-        recordId = id,
-        studyId = studyId,
-        deviceId = deviceId,
-        userId = userId,
-        question = question,
-        expectedAnswerHint = hint,
-        topic = topic,
-        difficultyLevel = difficultyLevel,
-        language = appLanguage,
-        sound = study.notificationSound,
-        intervalMinutes = study.intervalMinutes,
-        title = QuestionNotificationContentPolicy.title(appLanguage),
-        body = MarkdownContentPolicy.plainText(question),
-        deepLink = "buddystudy://records/$id",
-        createdAt = createdAt,
-    )
-
 internal fun QuestionNotificationMetadata.toJson(): String =
     translateNotificationMetadataSerializationError {
         JsonMapperProvider.mapper.writeValueAsString(this)

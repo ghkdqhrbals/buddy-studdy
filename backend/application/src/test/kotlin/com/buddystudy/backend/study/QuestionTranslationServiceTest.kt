@@ -88,7 +88,6 @@ class QuestionTranslationServiceTest {
         assertThat(delivery.appLanguage).isEqualTo("en")
         assertThat(publisher.references).containsExactly(
             OutboxReference(OutboxType.DOMAIN_EVENT, 101),
-            OutboxReference(OutboxType.QUESTION_PUSH, 102),
         )
     }
 
@@ -137,7 +136,6 @@ class QuestionTranslationServiceTest {
         assertThat(writer.question?.id).isEqualTo(question.id)
         assertThat(publisher.references).containsExactly(
             OutboxReference(OutboxType.DOMAIN_EVENT, 101),
-            OutboxReference(OutboxType.QUESTION_PUSH, 102),
         )
     }
 
@@ -234,7 +232,6 @@ class QuestionTranslationServiceTest {
                 question = localizedQuestion,
                 outboxes = listOf(
                     OutboxReference(OutboxType.DOMAIN_EVENT, 101),
-                    OutboxReference(OutboxType.QUESTION_PUSH, 102),
                 ),
             )
         }

@@ -9,9 +9,7 @@ import com.buddystudy.backend.common.adapter.stream.StreamMessageContext
 import com.buddystudy.backend.common.adapter.stream.StreamOptions
 import com.buddystudy.backend.common.adapter.stream.StreamScheduler
 import com.buddystudy.backend.config.BuddyStudyProperties
-import com.buddystudy.backend.notification.application.port.inbound.ProcessNotificationEventUseCase
 import com.buddystudy.backend.notification.application.port.outbound.NotificationPersistencePort
-import com.buddystudy.backend.notification.application.service.NotificationSendPolicy
 import com.buddystudy.backend.study.adapter.outbound.stream.QuestionPushRequestedPayload
 import com.buddystudy.backend.study.application.port.outbound.ApnsQuestionMessage
 import com.buddystudy.backend.study.application.port.outbound.PushNotificationPort
@@ -67,8 +65,6 @@ class PushStreamManagerAnnotationTest {
         val notifications = mock(NotificationPersistencePort::class.java) { invocation ->
             if (invocation.method.name == "markPushSent") 1 else Answers.RETURNS_DEFAULTS.answer(invocation)
         }
-        val notificationProcessor = mock(ProcessNotificationEventUseCase::class.java)
-        val notificationSendPolicy = mock(NotificationSendPolicy::class.java)
         val payload = QuestionPushRequestedPayload(
             recordId = 10,
             notificationId = 42,
@@ -106,8 +102,6 @@ class PushStreamManagerAnnotationTest {
             devices = devices,
             userDevices = userDevices,
             notifications = notifications,
-            notificationProcessor = notificationProcessor,
-            notificationSendPolicy = notificationSendPolicy,
         )
 
         manager.deliver(payload, context)
@@ -121,7 +115,7 @@ class PushStreamManagerAnnotationTest {
             .single { it.method.name == "markPushSent" }
         assertThat(pushStatus.arguments[0]).isEqualTo(42L)
         assertThat(pushStatus.arguments[1]).isInstanceOf(Instant::class.java)
-        verifyNoInteractions(devices, userDevices, notificationProcessor, notificationSendPolicy)
+        verifyNoInteractions(devices, userDevices)
     }
 
     @Test
@@ -141,8 +135,6 @@ class PushStreamManagerAnnotationTest {
             devices = mock(DevicePort::class.java),
             userDevices = mock(UserDevicePort::class.java),
             notifications = notifications,
-            notificationProcessor = mock(ProcessNotificationEventUseCase::class.java),
-            notificationSendPolicy = mock(NotificationSendPolicy::class.java),
         )
         val payload = QuestionPushRequestedPayload(
             recordId = 12,

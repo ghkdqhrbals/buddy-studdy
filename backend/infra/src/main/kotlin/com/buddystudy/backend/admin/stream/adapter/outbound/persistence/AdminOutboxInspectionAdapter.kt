@@ -1,7 +1,6 @@
 package com.buddystudy.backend.admin.stream.adapter.outbound.persistence
 
 import com.buddystudy.backend.admin.stream.application.model.AdminCursorPage
-import com.buddystudy.backend.admin.stream.application.model.AdminPushOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminRedisEventOutboxEntry
 import com.buddystudy.backend.admin.stream.application.port.outbound.AdminOutboxInspectionPort
 import com.buddystudy.backend.common.adapter.outbound.security.SensitiveDataRedactor
@@ -47,32 +46,6 @@ class AdminOutboxInspectionAdapter(
         return entries.toCursorPage(limit) { it.id.toString() }
     }
 
-    override suspend fun pushes(
-        cursor: Long?,
-        limit: Int,
-        status: String?,
-    ): AdminCursorPage<AdminPushOutboxEntry> {
-        val where = buildList {
-            cursor?.let { add("id < :cursor") }
-            status?.let { add("status = :status") }
-        }.joinToString(prefix = if (cursor != null || status != null) "where " else "", separator = " and ")
-        var query = database.sql(
-            """
-            select
-                id, record_id, device_id, user_id, study_id, topic, stream_key, redis_record_id, status, attempts,
-                next_attempt_at, published_at, last_error, created_at, updated_at
-            from question_push_outbox
-            $where
-            order by id desc
-            limit :fetchLimit
-            """.trimIndent(),
-        ).bind("fetchLimit", limit + 1)
-        cursor?.let { query = query.bind("cursor", it) }
-        status?.let { query = query.bind("status", it) }
-        val entries = query.map { row, _ -> row.toPush() }.all().collectList().awaitSingle()
-        return entries.toCursorPage(limit) { it.id.toString() }
-    }
-
     private fun Row.toRedisEvent(): AdminRedisEventOutboxEntry =
         AdminRedisEventOutboxEntry(
             id = long("id"),
@@ -86,25 +59,6 @@ class AdminOutboxInspectionAdapter(
             attempts = int("attempts"),
             nextAttemptAt = instant("next_attempt_at"),
             claimedAt = nullableInstant("claimed_at"),
-            publishedAt = nullableInstant("published_at"),
-            lastError = nullableString("last_error"),
-            createdAt = instant("created_at"),
-            updatedAt = instant("updated_at"),
-        )
-
-    private fun Row.toPush(): AdminPushOutboxEntry =
-        AdminPushOutboxEntry(
-            id = long("id"),
-            recordId = long("record_id"),
-            deviceId = string("device_id"),
-            userId = nullableLong("user_id"),
-            studyId = nullableLong("study_id"),
-            topic = string("topic"),
-            streamKey = nullableString("stream_key"),
-            redisRecordId = nullableString("redis_record_id"),
-            status = string("status"),
-            attempts = int("attempts"),
-            nextAttemptAt = instant("next_attempt_at"),
             publishedAt = nullableInstant("published_at"),
             lastError = nullableString("last_error"),
             createdAt = instant("created_at"),

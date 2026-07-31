@@ -10,7 +10,6 @@ import java.time.Instant
 
 enum class OutboxType {
     DOMAIN_EVENT,
-    QUESTION_PUSH,
 }
 
 data class OutboxReference(

@@ -96,7 +96,7 @@ Example readiness response:
       "details": {
         "monitoredJobs": [
           "question-schedule",
-          "question-push-outbox-dispatch",
+          "event-outbox-dispatch",
           "user-stats-refresh",
           "admin-analytics-recent",
           "admin-analytics-correction"

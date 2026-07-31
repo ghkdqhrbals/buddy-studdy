@@ -1,13 +1,11 @@
 package com.buddystudy.backend.study.application.port.outbound
 
-import com.buddystudy.backend.common.application.outbox.OutboxReference
-import com.buddystudy.backend.common.application.outbox.OutboxType
 import com.buddystudy.backend.common.application.outbox.PublishedStreamRecord
 import java.time.Instant
 
 data class QuestionPushRequest(
     val recordId: Long,
-    val notificationId: Long? = null,
+    val notificationId: Long,
     val studyId: Long?,
     val deviceId: String,
     val userId: Long?,
@@ -23,75 +21,12 @@ data class QuestionPushRequest(
     val deepLink: String? = null,
     val createdAt: Instant = Instant.now(),
 ) {
-    val eventId: String get() = "question-push-${notificationId ?: recordId}-$deviceId"
+    val eventId: String get() = "question-push-$notificationId-$deviceId"
 }
 
 interface QuestionPushPublishPort {
     suspend fun publishPush(request: QuestionPushRequest): PublishedStreamRecord?
 }
-
-data class QuestionPushOutboxCommand(
-    val studyId: Long?,
-    val deviceId: String,
-    val userId: Long?,
-    val question: String,
-    val expectedAnswerHint: String?,
-    val topic: String,
-    val difficultyLevel: Int,
-    val language: String,
-    val sound: String?,
-    val intervalMinutes: Int,
-    val createdAt: Instant = Instant.now(),
-) {
-    fun toRequest(recordId: Long): QuestionPushRequest =
-        QuestionPushRequest(
-            recordId = recordId,
-            studyId = studyId,
-            createdAt = createdAt,
-            deviceId = deviceId,
-            userId = userId,
-            question = question,
-            expectedAnswerHint = expectedAnswerHint,
-            topic = topic,
-            difficultyLevel = difficultyLevel,
-            language = language,
-            sound = sound,
-            intervalMinutes = intervalMinutes,
-        )
-}
-
-interface QuestionPushOutboxAppendPort {
-    suspend fun enqueue(request: QuestionPushRequest, now: Instant = Instant.now()): Long
-}
-
-interface QuestionPushOutboxPort : QuestionPushOutboxAppendPort {
-    suspend fun claim(id: Long, now: Instant, staleBefore: Instant): ClaimedQuestionPushOutbox?
-    suspend fun claimBatch(now: Instant, staleBefore: Instant, limit: Int): List<ClaimedQuestionPushOutbox>
-    suspend fun markPublished(
-        id: Long,
-        claimToken: String,
-        publication: PublishedStreamRecord,
-        publishedAt: Instant,
-    ): Boolean
-    suspend fun markRetry(
-        id: Long,
-        claimToken: String,
-        attempts: Int,
-        nextAttemptAt: Instant,
-        error: String,
-        updatedAt: Instant,
-    ): Boolean
-}
-
-data class ClaimedQuestionPushOutbox(
-    val id: Long,
-    val request: QuestionPushRequest,
-    val attempts: Int,
-    val createdAt: Instant,
-    val claimToken: String,
-)
-
-fun Long.toQuestionPushOutboxReference(): OutboxReference = OutboxReference(OutboxType.QUESTION_PUSH, this)
 
 enum class PushMessageType {
     APNS,

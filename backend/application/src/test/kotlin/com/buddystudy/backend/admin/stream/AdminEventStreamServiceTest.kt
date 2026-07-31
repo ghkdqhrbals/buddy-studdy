@@ -1,7 +1,6 @@
 package com.buddystudy.backend.admin.stream
 
 import com.buddystudy.backend.admin.stream.application.model.AdminCursorPage
-import com.buddystudy.backend.admin.stream.application.model.AdminPushOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminRedisEventOutboxEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamEntry
 import com.buddystudy.backend.admin.stream.application.model.AdminStreamGroupSummary
@@ -53,10 +52,6 @@ class AdminEventStreamServiceTest {
             EventRequest(null, 20, "PENDING", "question.created"),
         )
 
-        service.pushOutbox("94", 25, " FAILED ")
-        assertThat(outboxes.pushRequest).isEqualTo(
-            PushRequest(94, 25, "FAILED"),
-        )
     }
 
     @Test
@@ -198,7 +193,6 @@ class AdminEventStreamServiceTest {
 
     private class RecordingOutboxPort : AdminOutboxInspectionPort {
         var eventRequest: EventRequest? = null
-        var pushRequest: PushRequest? = null
 
         override suspend fun redisEvents(
             cursor: Long?,
@@ -207,15 +201,6 @@ class AdminEventStreamServiceTest {
             eventType: String?,
         ): AdminCursorPage<AdminRedisEventOutboxEntry> {
             eventRequest = EventRequest(cursor, limit, status, eventType)
-            return AdminCursorPage(emptyList(), null, false, limit)
-        }
-
-        override suspend fun pushes(
-            cursor: Long?,
-            limit: Int,
-            status: String?,
-        ): AdminCursorPage<AdminPushOutboxEntry> {
-            pushRequest = PushRequest(cursor, limit, status)
             return AdminCursorPage(emptyList(), null, false, limit)
         }
     }
@@ -256,11 +241,6 @@ class AdminEventStreamServiceTest {
         val eventType: String?,
     )
 
-    private data class PushRequest(
-        val cursor: Long?,
-        val limit: Int,
-        val status: String?,
-    )
 
     private data class InboxRequest(
         val cursor: Long?,
