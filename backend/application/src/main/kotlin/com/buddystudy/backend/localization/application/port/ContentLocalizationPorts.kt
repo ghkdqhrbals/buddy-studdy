@@ -1,5 +1,6 @@
 package com.buddystudy.backend.localization.application.port
 
+import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.localization.application.model.ContentTranslationRequestedEvent
 import com.buddystudy.backend.localization.application.model.ContentTranslationResult
 import com.buddystudy.backend.localization.application.model.LocalizableContentType
@@ -73,4 +74,28 @@ interface ContentTranslationPort {
 
 interface ContentTranslationEventPort {
     suspend fun append(event: ContentTranslationRequestedEvent, now: Instant = Instant.now()): Long
+}
+
+interface ContentTranslationRequestAppendPort {
+    suspend fun appendRecordForSupportedLanguages(
+        question: QuestionEntity,
+        requestedAt: Instant,
+    ): List<OutboxReference>
+
+    suspend fun appendCommentForSupportedLanguages(
+        comment: QuestionCommentEntity,
+        requestedAt: Instant,
+    ): List<OutboxReference>
+
+    suspend fun appendRecord(
+        question: QuestionEntity,
+        targetLanguage: String,
+        requestedAt: Instant,
+    ): List<OutboxReference>
+
+    suspend fun appendComment(
+        comment: QuestionCommentEntity,
+        targetLanguage: String,
+        requestedAt: Instant,
+    ): OutboxReference?
 }

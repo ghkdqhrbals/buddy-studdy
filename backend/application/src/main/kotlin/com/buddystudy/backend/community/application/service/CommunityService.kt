@@ -5,6 +5,8 @@ import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.common.application.outbox.AfterCommitPort
+import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
 import com.buddystudy.backend.community.application.port.inbound.CommunityUseCase
 import com.buddystudy.backend.community.application.port.outbound.QuestionCommentPort
 import com.buddystudy.backend.community.application.port.outbound.FeedbackPort
@@ -22,8 +24,9 @@ import com.buddystudy.backend.study.application.model.TranslationViewMode
 import com.buddystudy.backend.localization.application.model.TextLocalizationSnapshot
 import com.buddystudy.backend.localization.application.port.ContentLanguageDetectionPort
 import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
+import com.buddystudy.backend.localization.application.port.ContentTranslationRequestAppendPort
 import com.buddystudy.backend.localization.application.port.RequestContentLocalizationUseCase
-import com.buddystudy.backend.localization.application.service.ContentLocalizationService
+import com.buddystudy.backend.localization.application.policy.ContentSourceHashPolicy
 import com.buddystudy.community.domain.entity.QuestionLikeEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.community.domain.entity.ReportEntity
@@ -72,6 +75,9 @@ class CommunityService(
     private val languageDetector: ContentLanguageDetectionPort,
     private val contentLocalizations: ContentLocalizationPort,
     private val localizationRequests: RequestContentLocalizationUseCase,
+    private val translationRequestManager: ContentTranslationRequestAppendPort,
+    private val afterCommit: AfterCommitPort,
+    private val outboxPublisher: PublishOutboxUseCase,
 ) : CommunityUseCase {
     @Transactional(readOnly = true)
     override suspend fun getPublicQuestions(
@@ -215,6 +221,7 @@ class CommunityService(
         val question = publicAnsweredQuestion(id)
         val fallbackLanguage = users.findById(principal.userId)?.appLanguage?.databaseValue
         val declaredLanguage = QuestionLanguage.normalize(sourceLanguage ?: fallbackLanguage)
+        val now = Instant.now()
         val saved = comments.save(
             QuestionCommentEntity(
                 questionId = id,
@@ -223,6 +230,10 @@ class CommunityService(
                 sourceLanguage = SupportedLanguage.fromLocale(languageDetector.detect(body, declaredLanguage)),
             ),
         )
+        val translationOutboxes = translationRequestManager.appendCommentForSupportedLanguages(saved, now)
+        if (translationOutboxes.isNotEmpty()) {
+            afterCommit.execute { outboxPublisher.publishNow(translationOutboxes) }
+        }
         incrementCommentCount(id, 1)
         reactions.publishCommented(id, saved.id, principal.userId)
         publishThreadNotification(
@@ -440,7 +451,7 @@ class CommunityService(
             )
         }
 
-        val hashes = ContentLocalizationService.recordHashes(question)
+        val hashes = ContentSourceHashPolicy.recordHashes(question)
         val snapshot = contentLocalizations.record(question.id, target)
         val questionReady = snapshot.question.readyFor(hashes.question)
         val answerReady = snapshot.answer.readyFor(hashes.answer)
@@ -504,7 +515,7 @@ class CommunityService(
         if (authorOriginal || viewMode == TranslationViewMode.ORIGINAL || source == target) {
             return ProjectedComment(comment, source, false)
         }
-        val sourceHash = ContentLocalizationService.sha256(comment.body)
+        val sourceHash = ContentSourceHashPolicy.sha256(comment.body)
         val snapshot = contentLocalizations.comment(comment.id, target)
         val ready = snapshot.readyFor(sourceHash)
         if (ready == null) {

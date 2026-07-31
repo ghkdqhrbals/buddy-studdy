@@ -1,12 +1,12 @@
 package com.buddystudy.backend.localization
 
+import com.buddystudy.backend.localization.application.policy.ContentSourceHashPolicy
 import com.buddystudy.backend.community.application.port.outbound.QuestionCommentPort
 import com.buddystudy.backend.localization.application.model.ContentTranslationRequestedEvent
 import com.buddystudy.backend.localization.application.model.ContentTranslationResult
 import com.buddystudy.backend.localization.application.model.LocalizableContentType
 import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
 import com.buddystudy.backend.localization.application.port.ContentTranslationPort
-import com.buddystudy.backend.localization.application.service.ContentLocalizationService
 import com.buddystudy.backend.localization.application.service.ContentTranslationProcessor
 import com.buddystudy.backend.study.application.model.StreamInboxClaim
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
@@ -60,7 +60,7 @@ class ContentTranslationProcessorTest {
             feedback = "핵심을 잘 설명했습니다.",
             aiResponseSourceLanguage = SupportedLanguage.KOREAN,
         )
-        val answerHash = ContentLocalizationService.recordHashes(question).answer!!
+        val answerHash = ContentSourceHashPolicy.recordHashes(question).answer!!
         val questions = Mockito.mock(QuestionPort::class.java)
         Mockito.`when`(questions.findQuestionById(question.id)).thenReturn(question)
         val translator = RecordingContentTranslator()
@@ -202,11 +202,11 @@ class ContentTranslationProcessorTest {
     )
 
     private fun questionEvent(question: QuestionEntity) = ContentTranslationRequestedEvent(
-        eventId = "content-translation-question-${question.id}-en-${ContentLocalizationService.recordHashes(question).question}",
+        eventId = "content-translation-question-${question.id}-en-${ContentSourceHashPolicy.recordHashes(question).question}",
         contentType = LocalizableContentType.QUESTION,
         contentId = question.id,
         targetLanguage = "en",
-        sourceHash = ContentLocalizationService.recordHashes(question).question,
+        sourceHash = ContentSourceHashPolicy.recordHashes(question).question,
         requestedAt = Instant.parse("2026-07-28T00:00:00Z"),
     )
 }

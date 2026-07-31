@@ -1,6 +1,7 @@
 package com.buddystudy.backend.study.application.service
 
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
 import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
 import com.buddystudy.study.domain.entity.AnswerGradingStatus
 import com.buddystudy.backend.study.application.openai.UserContentOpenAIKeyProvider
@@ -29,6 +30,7 @@ class AnswerGradingService(
     private val openAI: OpenAIPort,
     private val writer: AnswerGradingWriteUseCase,
     private val inbox: StreamInboxPort,
+    private val publisher: PublishOutboxUseCase,
 ) : ProcessAnswerGradingUseCase {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -99,7 +101,19 @@ class AnswerGradingService(
             return
         }
 
-        writer.complete(event, grade, Instant.now())
+        val completed = writer.complete(event, grade, Instant.now())
+        if (completed.outboxes.isNotEmpty()) {
+            runCatching { publisher.publishNow(completed.outboxes) }
+                .onFailure {
+                    log.warn(
+                        "answer_translation_immediate_publish_failed eventId={} requestId={} recordId={} error={}",
+                        event.eventId,
+                        event.requestId,
+                        event.recordId,
+                        it.message,
+                    )
+                }
+        }
         succeed(claim)
     }
 

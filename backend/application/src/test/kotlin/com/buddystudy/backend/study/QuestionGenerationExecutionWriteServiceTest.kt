@@ -8,22 +8,101 @@ import com.buddystudy.backend.study.application.model.QuestionGenerationSource
 import com.buddystudy.backend.study.application.model.QuestionGenerationStatus
 import com.buddystudy.backend.study.application.model.QuestionGenerationStep
 import com.buddystudy.backend.study.application.model.StreamInboxClaim
+import com.buddystudy.backend.study.application.model.PreparedQuestionGeneration
+import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
+import com.buddystudy.backend.study.application.openai.OpenAIQuestionKey
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
 import com.buddystudy.backend.study.application.openai.UserContentOpenAIKeyProvider
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
+import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.study.application.port.outbound.QuestionGenerationSagaPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StreamInboxPort
 import com.buddystudy.backend.study.application.service.QuestionGenerationExecutionWriteService
+import com.buddystudy.backend.localization.application.service.ContentTranslationRequestManager
+import com.buddystudy.backend.test.EmptyContentLocalizationPort
+import com.buddystudy.backend.test.RecordingContentTranslationEventPort
+import com.buddystudy.backend.localization.application.model.LocalizableContentType
+import com.buddystudy.common.domain.SupportedLanguage
+import com.buddystudy.study.domain.entity.QuestionEntity
+import org.assertj.core.api.Assertions.assertThat
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 import org.mockito.Mockito
 import java.time.Instant
 
 class QuestionGenerationExecutionWriteServiceTest {
+    @ParameterizedTest
+    @EnumSource(QuestionGenerationSource::class)
+    fun `completed manual or scheduled generation appends localization outboxes`(
+        source: QuestionGenerationSource,
+    ) = runBlocking<Unit> {
+        val now = Instant.parse("2026-07-31T12:00:00Z")
+        val sagas = Mockito.mock(QuestionGenerationSagaPort::class.java)
+        val inbox = Mockito.mock(StreamInboxPort::class.java)
+        val questions = Mockito.mock(QuestionPort::class.java)
+        val questionStats = Mockito.mock(QuestionStatsPort::class.java)
+        val embeddings = Mockito.mock(QuestionEmbeddingPort::class.java)
+        val coverage = Mockito.mock(QuestionCoveragePort::class.java)
+        val memberships = Mockito.mock(QuestionMembershipPort::class.java)
+        val outbox = RecordingGeneratedQuestionOutbox()
+        val translationEvents = RecordingContentTranslationEventPort()
+        val event = event(saga(now, source), now)
+        val claim = StreamInboxClaim(event.eventId, "generation", "claim-1", 1)
+        val saved = QuestionEntity(
+            id = 42,
+            userId = event.userId,
+            studyId = event.studyId,
+            topic = "Redis",
+            question = "컨슈머 그룹을 설명하세요.",
+            sourceLanguage = SupportedLanguage.KOREAN,
+            createdAt = now,
+            updatedAt = now,
+        )
+        val prepared = PreparedQuestionGeneration(
+            question = saved,
+            embedding = listOf(0.1f, 0.2f),
+            coverage = null,
+            questionKey = OpenAIQuestionKey("test-key", user = null),
+        )
+        Mockito.`when`(questions.save(saved)).thenReturn(saved)
+        Mockito.`when`(sagas.markTranslating(event.correlationId, saved.id, now)).thenReturn(true)
+        Mockito.`when`(inbox.markSucceeded(claim, now)).thenReturn(true)
+        val writer = QuestionGenerationExecutionWriteService(
+            sagas = sagas,
+            inbox = inbox,
+            questions = questions,
+            questionStats = questionStats,
+            questionEmbeddings = embeddings,
+            questionCoverage = coverage,
+            questionKeys = OpenAIQuestionKeyProvider(
+                UserContentOpenAIKeyProvider(
+                    BuddyStudyProperties(openai = BuddyStudyProperties.OpenAI(userContentApiKey = "test-key")),
+                ),
+                memberships,
+            ),
+            outbox = outbox,
+            translationRequests = ContentTranslationRequestManager(
+                EmptyContentLocalizationPort(),
+                translationEvents,
+            ),
+        )
+
+        val result = writer.complete(event, claim, prepared, now)
+
+        assertThat(result.outboxes.map { it.id }).containsExactly(90L, 1L, 2L)
+        assertThat(translationEvents.events.map { it.contentType to it.targetLanguage })
+            .containsExactlyInAnyOrder(
+                LocalizableContentType.QUESTION to "en",
+                LocalizableContentType.QUESTION to "ja",
+            )
+    }
+
     @Test
     fun `terminal failure refunds a quota reservation only once`(): Unit = runBlocking {
         val now = Instant.parse("2026-07-27T12:00:00Z")
@@ -124,15 +203,22 @@ class QuestionGenerationExecutionWriteServiceTest {
             memberships,
         ),
         outbox = Mockito.mock(RedisEventOutboxAppendPort::class.java),
+        translationRequests = ContentTranslationRequestManager(
+            EmptyContentLocalizationPort(),
+            RecordingContentTranslationEventPort(),
+        ),
     )
 
-    private fun saga(now: Instant) = QuestionGenerationSaga(
+    private fun saga(
+        now: Instant,
+        source: QuestionGenerationSource = QuestionGenerationSource.MANUAL,
+    ) = QuestionGenerationSaga(
         correlationId = "correlation-1",
         userId = 7,
         studyId = 11,
         topicId = 12,
         questionId = null,
-        source = QuestionGenerationSource.MANUAL,
+        source = source,
         status = QuestionGenerationStatus.GENERATING,
         currentStep = QuestionGenerationStep.GENERATING,
         idempotencyKey = "manual:test",
@@ -155,4 +241,16 @@ class QuestionGenerationExecutionWriteServiceTest {
         source = saga.source,
         occurredAt = now.minusSeconds(60),
     )
+
+    private class RecordingGeneratedQuestionOutbox : RedisEventOutboxAppendPort {
+        val events = mutableListOf<QuestionGeneratedEvent>()
+
+        override suspend fun appendNotification(command: NotificationRequestCommand, createdAt: Instant): Long =
+            error("Not expected.")
+
+        override suspend fun appendQuestionGenerated(event: QuestionGeneratedEvent, createdAt: Instant): Long {
+            events += event
+            return 90L
+        }
+    }
 }

@@ -4,6 +4,7 @@ import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.common.application.outbox.OutboxType
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxAppendPort
+import com.buddystudy.backend.localization.application.port.ContentTranslationRequestAppendPort
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKey
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
 import com.buddystudy.backend.study.application.model.GeneratedQuestionWithEmbedding
@@ -33,6 +34,7 @@ class ScheduledQuestionWriteService(
     private val questionCoverage: QuestionCoveragePort,
     private val questionKeys: OpenAIQuestionKeyProvider,
     private val notificationOutbox: RedisEventOutboxAppendPort,
+    private val translationRequests: ContentTranslationRequestAppendPort,
 ) : ScheduledQuestionWriteUseCase {
     @Transactional
     override suspend fun complete(
@@ -83,9 +85,10 @@ class ScheduledQuestionWriteService(
             ),
             now,
         )
+        val translationOutboxes = translationRequests.appendRecordForSupportedLanguages(saved, now)
         return QuestionWriteResult(
             question = saved,
-            outboxes = listOf(OutboxReference(OutboxType.DOMAIN_EVENT, generatedOutboxId)),
+            outboxes = listOf(OutboxReference(OutboxType.DOMAIN_EVENT, generatedOutboxId)) + translationOutboxes,
         )
     }
 

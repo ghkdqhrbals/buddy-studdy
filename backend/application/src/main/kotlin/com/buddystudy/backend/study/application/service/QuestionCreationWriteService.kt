@@ -3,6 +3,7 @@ package com.buddystudy.backend.study.application.service
 import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.common.application.outbox.OutboxType
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxAppendPort
+import com.buddystudy.backend.localization.application.port.ContentTranslationRequestAppendPort
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKey
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
 import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
@@ -27,6 +28,7 @@ class QuestionCreationWriteService(
     private val questionCoverage: QuestionCoveragePort,
     private val questionKeys: OpenAIQuestionKeyProvider,
     private val notificationOutbox: RedisEventOutboxAppendPort,
+    private val translationRequests: ContentTranslationRequestAppendPort,
 ) : QuestionCreationWriteUseCase {
     @Transactional
     override suspend fun saveQuestionWithOutboxes(
@@ -58,9 +60,10 @@ class QuestionCreationWriteService(
             ),
             now,
         )
+        val translationOutboxes = translationRequests.appendRecordForSupportedLanguages(savedQuestion, now)
         return QuestionWriteResult(
             question = savedQuestion,
-            outboxes = listOf(OutboxReference(OutboxType.DOMAIN_EVENT, generatedOutboxId)),
+            outboxes = listOf(OutboxReference(OutboxType.DOMAIN_EVENT, generatedOutboxId)) + translationOutboxes,
         )
     }
 }

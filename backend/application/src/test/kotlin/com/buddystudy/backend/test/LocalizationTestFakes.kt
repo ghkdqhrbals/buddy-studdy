@@ -9,6 +9,7 @@ import com.buddystudy.backend.localization.application.model.RecordSourceHashes
 import com.buddystudy.backend.localization.application.model.TextLocalizationSnapshot
 import com.buddystudy.backend.localization.application.port.ContentLanguageDetectionPort
 import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
+import com.buddystudy.backend.localization.application.port.ContentTranslationEventPort
 import com.buddystudy.backend.localization.application.port.RequestContentLocalizationUseCase
 import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.study.domain.QuestionLanguage
@@ -32,19 +33,19 @@ open class EmptyContentLocalizationPort : ContentLocalizationPort {
         sourceHashes: RecordSourceHashes,
         now: Instant,
         retryPendingBefore: Instant,
-    ) = listOf(
-        PendingContentTranslation(LocalizableContentType.QUESTION, sourceHashes.question, "request-question"),
-        PendingContentTranslation(
-            LocalizableContentType.ANSWER,
-            sourceHashes.answer ?: sourceHashes.question,
-            "request-answer",
-        ),
-        PendingContentTranslation(
-            LocalizableContentType.AI_RESPONSE,
-            sourceHashes.aiResponse ?: sourceHashes.question,
-            "request-ai-response",
-        ),
-    )
+    ) = buildList {
+        if (question.sourceLanguage.databaseValue != targetLanguage) {
+            add(PendingContentTranslation(LocalizableContentType.QUESTION, sourceHashes.question, "request-question-$targetLanguage"))
+        }
+        val answerSource = question.answerSourceLanguage ?: question.sourceLanguage
+        if (sourceHashes.answer != null && answerSource.databaseValue != targetLanguage) {
+            add(PendingContentTranslation(LocalizableContentType.ANSWER, sourceHashes.answer, "request-answer-$targetLanguage"))
+        }
+        val aiSource = question.aiResponseSourceLanguage ?: question.sourceLanguage
+        if (sourceHashes.aiResponse != null && aiSource.databaseValue != targetLanguage) {
+            add(PendingContentTranslation(LocalizableContentType.AI_RESPONSE, sourceHashes.aiResponse, "request-ai-response-$targetLanguage"))
+        }
+    }
 
     override suspend fun ensureCommentPending(
         comment: QuestionCommentEntity,
@@ -52,7 +53,11 @@ open class EmptyContentLocalizationPort : ContentLocalizationPort {
         sourceHash: String,
         now: Instant,
         retryPendingBefore: Instant,
-    ) = PendingContentTranslation(LocalizableContentType.COMMENT, sourceHash, "request-comment")
+    ) = if (comment.sourceLanguage.databaseValue == targetLanguage) {
+        null
+    } else {
+        PendingContentTranslation(LocalizableContentType.COMMENT, sourceHash, "request-comment-$targetLanguage")
+    }
 
     override suspend fun saveQuestionReady(
         question: QuestionEntity,
@@ -99,5 +104,14 @@ class RecordingLocalizationRequests : RequestContentLocalizationUseCase {
 
     override suspend fun requestComment(comment: QuestionCommentEntity, targetLanguage: String) {
         comments += comment.id to targetLanguage
+    }
+}
+
+class RecordingContentTranslationEventPort : ContentTranslationEventPort {
+    val events = mutableListOf<ContentTranslationRequestedEvent>()
+
+    override suspend fun append(event: ContentTranslationRequestedEvent, now: Instant): Long {
+        events += event
+        return events.size.toLong()
     }
 }

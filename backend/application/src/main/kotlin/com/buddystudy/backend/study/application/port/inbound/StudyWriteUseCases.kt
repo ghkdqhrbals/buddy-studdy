@@ -141,7 +141,7 @@ interface StudyRecordWriteUseCase {
         sourceLanguage: String,
         grade: GradedAnswer?,
         now: Instant,
-    ): QuestionEntity
+    ): QuestionWriteResult
 
     suspend fun skip(userId: Long, recordId: Long): QuestionEntity
     suspend fun delete(userId: Long, recordId: Long, now: Instant)
@@ -152,6 +152,11 @@ interface StudyRecordWriteUseCase {
 data class QueuedAnswerGrading(
     val question: QuestionEntity,
     val outboxes: List<OutboxReference>,
+)
+
+data class CompletedAnswerGrading(
+    val completed: Boolean,
+    val outboxes: List<OutboxReference> = emptyList(),
 )
 
 interface AnswerGradingWriteUseCase {
@@ -174,7 +179,7 @@ interface AnswerGradingWriteUseCase {
         event: AnswerGradingRequestedEvent,
         grade: GradedAnswer,
         now: Instant,
-    ): Boolean
+    ): CompletedAnswerGrading
 
     suspend fun fail(
         event: AnswerGradingRequestedEvent,

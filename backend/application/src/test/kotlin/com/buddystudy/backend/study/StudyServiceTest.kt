@@ -48,6 +48,9 @@ import com.buddystudy.study.domain.entity.StudyEntity
 import com.buddystudy.backend.test.EmptyContentLocalizationPort
 import com.buddystudy.backend.test.PassthroughLanguageDetector
 import com.buddystudy.backend.test.RecordingLocalizationRequests
+import com.buddystudy.backend.test.RecordingContentTranslationEventPort
+import com.buddystudy.backend.localization.application.service.ContentTranslationRequestManager
+import com.buddystudy.backend.localization.application.model.LocalizableContentType
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.data.domain.Page
@@ -70,19 +73,22 @@ class StudyServiceTest {
     private val questionKeys = OpenAIQuestionKeyProvider(UserContentOpenAIKeyProvider(properties), memberships)
     private val gradingProgress = FakeAnswerGradingProgressPort()
     private val notificationOutbox = FakeNotificationOutbox()
+    private val translationEvents = RecordingContentTranslationEventPort()
+    private val outboxPublisher = NoOpOutboxPublisher()
     private val recordWriter = StudyRecordWriteService(
         questions,
         questionCoverage,
         gradingProgress,
         notificationOutbox,
         PassthroughLanguageDetector(),
+        ContentTranslationRequestManager(EmptyContentLocalizationPort(), translationEvents),
     )
     private val service = StudyService(
         questions = questions,
         questionStats = questionStats,
         recordWriter = recordWriter,
         gradingWriter = recordWriter,
-        outboxPublisher = NoOpOutboxPublisher(),
+        outboxPublisher = outboxPublisher,
         users = users,
         languageDetector = PassthroughLanguageDetector(),
         contentLocalizations = EmptyContentLocalizationPort(),
@@ -178,6 +184,33 @@ class StudyServiceTest {
         assertThat(openAI.gradeCalls).isZero()
         assertThat(users.findByIdCalls).isEqualTo(1)
         assertThat(questionStats.findByIdCalls).isEqualTo(1)
+        assertThat(
+            translationEvents.events
+                .filter { it.contentType == LocalizableContentType.ANSWER }
+                .map { it.targetLanguage },
+        ).containsExactlyInAnyOrder("ko", "ja")
+        assertThat(outboxPublisher.published).isNotEmpty
+    }
+
+    @Test
+    fun `answer without grading still appends locale translation work`(): Unit = runBlocking {
+        users.row = UserEntity(
+            id = principal.userId,
+            providerId = "u7",
+            status = UserStatus.ACTIVE,
+            appLanguage = SupportedLanguage.ENGLISH,
+        )
+        questions.visibleRows += pendingQuestion(id = 504, topic = "Kotlin")
+
+        val response = service.answer(principal, recordId = 504, answer = "My answer", grade = false)
+
+        assertThat(response.answer).isEqualTo("My answer")
+        assertThat(
+            translationEvents.events
+                .filter { it.contentType == LocalizableContentType.ANSWER }
+                .map { it.targetLanguage },
+        ).containsExactlyInAnyOrder("ko", "ja")
+        assertThat(outboxPublisher.published).isNotEmpty
     }
 
     @Test
@@ -622,8 +655,12 @@ class StudyServiceTest {
     }
 
     private class NoOpOutboxPublisher : PublishOutboxUseCase {
-        override suspend fun publishNow(references: Collection<OutboxReference>): OutboxPublishSummary =
-            OutboxPublishSummary(references.size, references.size, 0)
+        val published = mutableListOf<OutboxReference>()
+
+        override suspend fun publishNow(references: Collection<OutboxReference>): OutboxPublishSummary {
+            published += references
+            return OutboxPublishSummary(references.size, references.size, 0)
+        }
     }
 
 }

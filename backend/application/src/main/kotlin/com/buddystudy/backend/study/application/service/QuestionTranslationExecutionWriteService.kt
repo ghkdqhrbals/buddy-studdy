@@ -1,11 +1,11 @@
 package com.buddystudy.backend.study.application.service
 
+import com.buddystudy.backend.localization.application.policy.ContentSourceHashPolicy
 import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.common.application.outbox.OutboxType
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxAppendPort
 import com.buddystudy.backend.localization.application.model.ContentTranslationResult
 import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
-import com.buddystudy.backend.localization.application.service.ContentLocalizationService
 import com.buddystudy.backend.study.application.model.ClaimedQuestionTranslation
 import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
 import com.buddystudy.backend.study.application.model.QuestionGenerationStatus
@@ -76,7 +76,7 @@ class QuestionTranslationExecutionWriteService(
         }
         if (translation != null) {
             val targetLanguage = QuestionLanguage.normalize(appLanguage)
-            val hashes = ContentLocalizationService.recordHashes(question)
+            val hashes = ContentSourceHashPolicy.recordHashes(question)
             localizations.ensureRecordPending(
                 question,
                 targetLanguage,

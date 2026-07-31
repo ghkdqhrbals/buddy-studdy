@@ -1,5 +1,6 @@
 package com.buddystudy.backend.localization
 
+import com.buddystudy.backend.localization.application.policy.ContentSourceHashPolicy
 import com.buddystudy.backend.common.application.outbox.AfterCommitPort
 import com.buddystudy.backend.common.application.outbox.OutboxPublishSummary
 import com.buddystudy.backend.common.application.outbox.OutboxReference
@@ -14,6 +15,7 @@ import com.buddystudy.backend.localization.application.model.TextLocalizationSna
 import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
 import com.buddystudy.backend.localization.application.port.ContentTranslationEventPort
 import com.buddystudy.backend.localization.application.service.ContentLocalizationService
+import com.buddystudy.backend.localization.application.service.ContentTranslationRequestManager
 import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.study.domain.entity.QuestionEntity
@@ -28,7 +30,11 @@ class ContentLocalizationServiceTest {
         val localizations = RecordingLocalizationPort()
         val events = RecordingTranslationEvents()
         val publisher = RecordingPublisher()
-        val service = ContentLocalizationService(localizations, events, ImmediateAfterCommit(), publisher)
+        val service = ContentLocalizationService(
+            ContentTranslationRequestManager(localizations, events),
+            ImmediateAfterCommit(),
+            publisher,
+        )
         val question = QuestionEntity(
             id = 42,
             topic = "Redis",
@@ -69,10 +75,10 @@ class ContentLocalizationServiceTest {
     @Test
     fun `changing only an answer preserves the question source hash`() {
         val original = QuestionEntity(id = 1, topic = "SQL", question = "인덱스를 설명하세요.", answer = "초안")
-        val originalHashes = ContentLocalizationService.recordHashes(original)
+        val originalHashes = ContentSourceHashPolicy.recordHashes(original)
 
         original.answer = "수정된 답변"
-        val changed = ContentLocalizationService.recordHashes(original)
+        val changed = ContentSourceHashPolicy.recordHashes(original)
 
         assertThat(changed.question).isEqualTo(originalHashes.question)
         assertThat(changed.answer).isNotEqualTo(originalHashes.answer)

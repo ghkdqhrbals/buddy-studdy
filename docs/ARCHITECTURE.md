@@ -131,7 +131,7 @@ runtime comparison or rollback does not fork application behavior.
   - Keeps three write boundaries explicit: `POST /api/v1/studies` creates a root, `POST /api/v1/studies/{parentStudyId}/topics` creates a descendant without generating a question or consuming quota, and `POST /api/v1/studies/{topicId}/questions` generates a question.
   - Authorizes study and topic creation with `study:create`, which has no monthly question requirement. Manual question generation uses the separate `question:create` permission and is the only one of these write paths guarded by monthly question quota.
   - Question generation is an asynchronous Choreography Saga. Submission reserves quota and stores the `QUEUED` Saga plus `QUESTION_GENERATION_REQUESTED` outbox in one transaction, then returns `202 Accepted` with a correlation ID. Generation and translation use separate Redis consumer groups and `(event_id, consumer_group)` Inbox leases; the canonical Saga advances through compare-and-set transitions. The iOS client polls `GET /api/v1/question-processes/{correlationId}` and resumes a persisted process after restart. See [`QUESTION_GENERATION_SAGA.md`](QUESTION_GENERATION_SAGA.md).
-  - Korean, English, and Japanese delivery preserves independent source languages for the question, user answer, AI response, and each comment. Missing locale reads atomically create separate `QUESTION`, `ANSWER`, and `AI_RESPONSE` `CONTENT_TRANSLATION_REQUESTED` Outbox events, return the original immediately, and let the `content-translation` Redis consumer create each derived read model outside the request transaction. Translation uses the configurable provider chain while retries and terminal failures remain isolated to each content part through the Redis Inbox consumer. A durable request token deduplicates concurrent misses, while `PENDING` or `FAILED` work older than five minutes receives a new token and is republished so provider recovery does not leave translations permanently stuck. Production LibreTranslate runs as an internal-only deployment module on the backend Docker network; the backend keeps OpenAI as the next provider in the chain. See [`QUESTION_LOCALIZATION.md`](QUESTION_LOCALIZATION.md).
+  - Korean, English, and Japanese delivery preserves independent source languages for the question, user answer, AI response, and each comment. Question generation (manual or scheduled), answer submission, grading completion, and comment creation atomically append the missing per-language `QUESTION`, `ANSWER`, `AI_RESPONSE`, or `COMMENT` `CONTENT_TRANSLATION_REQUESTED` rows to the shared transactional Outbox. Publication starts after commit; a failed immediate publish is recovered by the normal Outbox worker. Localized reads retain read-repair behavior: a missing or stale translation returns the original immediately and idempotently requeues only the missing part. Translation uses the configurable provider chain while retries and terminal failures remain isolated through the Redis Inbox consumer. A durable request token deduplicates concurrent write-through and read-repair requests, while `PENDING` or `FAILED` work older than five minutes receives a new token. Production LibreTranslate runs as an internal-only deployment module on the backend Docker network; the backend keeps OpenAI as the next provider in the chain. See [`QUESTION_LOCALIZATION.md`](QUESTION_LOCALIZATION.md).
   - Selects the next eligible active node from the complete root subtree by oldest `last_sent_at`, with never-selected nodes first and stable `sort_order`/`id` tie-breaking. Nodes already at their per-topic pending-question limit are excluded before selection, preventing one unanswered branch from starving the rest of the tree; the root backs off only when every active node is blocked.
   - Stores both manual and scheduled questions with the root study ID while copying the selected node's topic and difficulty into the question. Inactive nodes remain available for manual generation.
   - `POST /api/v1/studies/{id}/topic-suggestions` requests unique GPT suggestions for a parent node, and `PATCH /api/v1/studies/{id}/question-activation` changes only rotation participation.
@@ -187,7 +187,7 @@ Manual action / backend scheduled interval
 -> manual API returns 202 Accepted + correlationId
 -> generation consumer claims its Inbox row and advances Saga to GENERATING
 -> OpenAI runs outside the database transaction
--> generated question + QUESTION_GENERATED outbox advance Saga to TRANSLATING
+-> generated question + QUESTION_GENERATED outbox + locale translation outboxes advance Saga to TRANSLATING
 -> translation consumer resolves topic/question/hint through the configured provider chain
 -> localization snapshot and delivery outboxes are persisted in one transaction
 -> Saga advances to COMPLETED
@@ -202,13 +202,13 @@ User answer
 -> AppState.gradeCurrentAnswer or gradeRecord
 -> RemotePushBackendClient.gradeRecord
 -> backend atomically persists the submitted answer, grading correlation,
-   questionStatus=GRADING, and gradingStatus=QUEUED before OpenAI work
+   questionStatus=GRADING, gradingStatus=QUEUED, and answer translation outboxes before OpenAI work
 -> leaving the detail screen cancels only client polling
 -> reopening fetches /api/v1/studies/{studyId}, never the full tree page
 -> iOS merges pendingQuestion answer/grading state over stale local cache
 -> when pendingQuestion is absent, iOS displays latestQuestion with the submitted answer and AI response
 -> iOS resumes polling by the persisted grading correlation
--> backend calls OpenAI and persists score, feedback, and explanation
+-> backend calls OpenAI and persists score, feedback, explanation, and AI-response translation outboxes
 -> SettingsStore updates StudyRecord
 -> StatisticsView recalculates topic ranges from records
 -> backend stats are refreshed from MySQL records

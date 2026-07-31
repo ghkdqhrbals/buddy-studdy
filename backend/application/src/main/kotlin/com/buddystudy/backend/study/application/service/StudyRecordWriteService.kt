@@ -6,11 +6,14 @@ import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.common.application.outbox.OutboxType
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxAppendPort
 import com.buddystudy.backend.localization.application.port.ContentLanguageDetectionPort
+import com.buddystudy.backend.localization.application.port.ContentTranslationRequestAppendPort
 import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
 import com.buddystudy.study.domain.entity.AnswerGradingStatus
 import com.buddystudy.backend.study.application.port.outbound.AnswerGradingProgressPort
 import com.buddystudy.backend.study.application.port.inbound.AnswerGradingWriteUseCase
+import com.buddystudy.backend.study.application.port.inbound.CompletedAnswerGrading
 import com.buddystudy.backend.study.application.port.inbound.QueuedAnswerGrading
+import com.buddystudy.backend.study.application.port.inbound.QuestionWriteResult
 import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystudy.backend.study.application.port.inbound.StudyRecordWriteUseCase
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
@@ -30,6 +33,7 @@ class StudyRecordWriteService(
     private val gradingProgress: AnswerGradingProgressPort,
     private val redisOutbox: RedisEventOutboxAppendPort,
     private val languageDetector: ContentLanguageDetectionPort,
+    private val translationRequests: ContentTranslationRequestAppendPort,
 ) : StudyRecordWriteUseCase, AnswerGradingWriteUseCase {
     @Transactional
     override suspend fun answer(
@@ -39,7 +43,7 @@ class StudyRecordWriteService(
         sourceLanguage: String,
         grade: GradedAnswer?,
         now: Instant,
-    ): QuestionEntity {
+    ): QuestionWriteResult {
         val question = lockRecord(recordId, userId)
         if (question.gradingRequestId != null ||
             question.gradingStatus != null ||
@@ -86,7 +90,11 @@ class StudyRecordWriteService(
                 )
             }
         }
-        return questions.save(question)
+        val saved = questions.save(question)
+        return QuestionWriteResult(
+            question = saved,
+            outboxes = translationRequests.appendRecordForSupportedLanguages(saved, now),
+        )
     }
 
     @Transactional
@@ -176,7 +184,11 @@ class StudyRecordWriteService(
         question.gradingLastEventId = progress.id
         val saved = questions.save(question)
         val outboxId = redisOutbox.appendAnswerGrading(event, now)
-        return QueuedAnswerGrading(saved, listOf(OutboxReference(OutboxType.DOMAIN_EVENT, outboxId)))
+        val translationOutboxes = translationRequests.appendRecordForSupportedLanguages(saved, now)
+        return QueuedAnswerGrading(
+            saved,
+            listOf(OutboxReference(OutboxType.DOMAIN_EVENT, outboxId)) + translationOutboxes,
+        )
     }
 
     @Transactional
@@ -216,11 +228,13 @@ class StudyRecordWriteService(
         event: AnswerGradingRequestedEvent,
         grade: GradedAnswer,
         now: Instant,
-    ): Boolean {
+    ): CompletedAnswerGrading {
         val question = lockRecord(event.recordId, event.userId)
-        if (question.gradingRequestId != event.requestId) return false
-        if (question.score != null && question.gradingStatus == AnswerGradingStatus.COMPLETED) return true
-        if (question.gradingStatus == AnswerGradingStatus.FAILED) return false
+        if (question.gradingRequestId != event.requestId) return CompletedAnswerGrading(false)
+        if (question.score != null && question.gradingStatus == AnswerGradingStatus.COMPLETED) {
+            return CompletedAnswerGrading(true)
+        }
+        if (question.gradingStatus == AnswerGradingStatus.FAILED) return CompletedAnswerGrading(false)
         val record = question.toStudyRecord()
         question.applyGradingMetadata(grade)
         val aiResponseLanguage = languageDetector.detect(
@@ -258,8 +272,11 @@ class StudyRecordWriteService(
             now,
         )
         question.gradingLastEventId = progress.id
-        questions.save(question)
-        return true
+        val saved = questions.save(question)
+        return CompletedAnswerGrading(
+            completed = true,
+            outboxes = translationRequests.appendRecordForSupportedLanguages(saved, now),
+        )
     }
 
     @Transactional

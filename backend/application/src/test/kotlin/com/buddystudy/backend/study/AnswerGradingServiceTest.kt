@@ -1,6 +1,7 @@
 package com.buddystudy.backend.study
 
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
 import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
 import com.buddystudy.backend.study.application.model.AnswerGradingStatus
 import com.buddystudy.backend.study.application.model.StreamInboxClaim
@@ -55,6 +56,7 @@ class AnswerGradingServiceTest {
             openAI = openAI,
             writer = writer,
             inbox = inbox,
+            publisher = mock(PublishOutboxUseCase::class.java),
         )
 
         service.process(event, "study.answer-grading.requested.v1")

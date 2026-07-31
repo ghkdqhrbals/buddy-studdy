@@ -1,5 +1,6 @@
 package com.buddystudy.backend.localization.application.service
 
+import com.buddystudy.backend.localization.application.policy.ContentSourceHashPolicy
 import com.buddystudy.backend.community.application.port.outbound.QuestionCommentPort
 import com.buddystudy.backend.localization.application.model.ContentTranslationRequestedEvent
 import com.buddystudy.backend.localization.application.model.LocalizableContentType
@@ -87,7 +88,7 @@ class ContentTranslationProcessor(
         event: ContentTranslationRequestedEvent,
         question: QuestionEntity,
     ) {
-        val sourceHash = ContentLocalizationService.recordHashes(question).question
+        val sourceHash = ContentSourceHashPolicy.recordHashes(question).question
         if (sourceHash != event.sourceHash) return
         val fields = linkedMapOf<String, String?>(
             "topic" to question.topic,
@@ -113,7 +114,7 @@ class ContentTranslationProcessor(
         question: QuestionEntity,
     ) {
         val answer = question.answer?.takeIf(String::isNotBlank) ?: return
-        val sourceHash = ContentLocalizationService.recordHashes(question).answer
+        val sourceHash = ContentSourceHashPolicy.recordHashes(question).answer
         if (sourceHash == null || sourceHash != event.sourceHash) return
         val sourceLanguage = (question.answerSourceLanguage ?: question.sourceLanguage).databaseValue
         val result = translator.translate(
@@ -133,7 +134,7 @@ class ContentTranslationProcessor(
         event: ContentTranslationRequestedEvent,
         question: QuestionEntity,
     ) {
-        val sourceHash = ContentLocalizationService.recordHashes(question).aiResponse
+        val sourceHash = ContentSourceHashPolicy.recordHashes(question).aiResponse
         if (sourceHash == null || sourceHash != event.sourceHash) return
         val fields = linkedMapOf(
             "feedback" to question.feedback,
@@ -154,7 +155,7 @@ class ContentTranslationProcessor(
 
     private suspend fun processComment(event: ContentTranslationRequestedEvent) {
         val comment = comments.findById(event.contentId) ?: return
-        if (ContentLocalizationService.sha256(comment.body) != event.sourceHash) return
+        if (ContentSourceHashPolicy.sha256(comment.body) != event.sourceHash) return
         val result = translator.translate(
             fields = mapOf("body" to comment.body),
             sourceLanguages = mapOf("body" to comment.sourceLanguage.databaseValue),
@@ -170,6 +171,6 @@ class ContentTranslationProcessor(
         private const val INBOX_CORRELATION_ID_LENGTH = 36
 
         internal fun inboxCorrelationId(eventId: String): String =
-            ContentLocalizationService.sha256(eventId).take(INBOX_CORRELATION_ID_LENGTH)
+            ContentSourceHashPolicy.sha256(eventId).take(INBOX_CORRELATION_ID_LENGTH)
     }
 }

@@ -6,6 +6,10 @@ import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
+import com.buddystudy.backend.common.application.outbox.AfterCommitPort
+import com.buddystudy.backend.common.application.outbox.OutboxPublishSummary
+import com.buddystudy.backend.common.application.outbox.OutboxReference
+import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
 import com.buddystudy.backend.community.application.port.outbound.QuestionCommentPort
 import com.buddystudy.backend.community.application.port.outbound.FeedbackPort
 import com.buddystudy.backend.community.application.port.outbound.QuestionLikePort
@@ -29,6 +33,9 @@ import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.backend.test.EmptyContentLocalizationPort
 import com.buddystudy.backend.test.PassthroughLanguageDetector
 import com.buddystudy.backend.test.RecordingLocalizationRequests
+import com.buddystudy.backend.test.RecordingContentTranslationEventPort
+import com.buddystudy.backend.localization.application.service.ContentTranslationRequestManager
+import com.buddystudy.backend.localization.application.model.LocalizableContentType
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.data.domain.Page
@@ -46,6 +53,8 @@ class CommunityServiceTest {
     private val userBlocks = FakeUserBlockPort()
     private val notificationPublisher = FakeNotificationPublisher()
     private val reactionPublisher = FakeReactionPublisher()
+    private val translationEvents = RecordingContentTranslationEventPort()
+    private val translationPublisher = RecordingOutboxPublisher()
     private val service = CommunityService(
         users = users,
         questions = questions,
@@ -60,6 +69,12 @@ class CommunityServiceTest {
         languageDetector = PassthroughLanguageDetector(),
         contentLocalizations = EmptyContentLocalizationPort(),
         localizationRequests = RecordingLocalizationRequests(),
+        translationRequestManager = ContentTranslationRequestManager(
+            EmptyContentLocalizationPort(),
+            translationEvents,
+        ),
+        afterCommit = ImmediateAfterCommit(),
+        outboxPublisher = translationPublisher,
     )
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
@@ -200,6 +215,12 @@ class CommunityServiceTest {
         assertThat(notification.shouldPush).isTrue()
         assertThat(notification.title).isEqualTo("댓글")
         assertThat(reactionPublisher.events).containsExactly("QUESTION_COMMENTED:100:1:7")
+        assertThat(translationEvents.events.map { it.contentType to it.targetLanguage })
+            .containsExactlyInAnyOrder(
+                LocalizableContentType.COMMENT to "en",
+                LocalizableContentType.COMMENT to "ja",
+            )
+        assertThat(translationPublisher.published).hasSize(2)
     }
 
     @Test
@@ -441,6 +462,19 @@ class CommunityServiceTest {
         override suspend fun publish(command: NotificationRequestCommand): Boolean {
             rows += command
             return true
+        }
+    }
+
+    private class ImmediateAfterCommit : AfterCommitPort {
+        override suspend fun execute(action: suspend () -> Unit) = action()
+    }
+
+    private class RecordingOutboxPublisher : PublishOutboxUseCase {
+        val published = mutableListOf<OutboxReference>()
+
+        override suspend fun publishNow(references: Collection<OutboxReference>): OutboxPublishSummary {
+            published += references
+            return OutboxPublishSummary(references.size, references.size, 0)
         }
     }
 }

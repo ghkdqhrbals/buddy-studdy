@@ -22,7 +22,7 @@ import com.buddystudy.backend.community.adapter.outbound.persistence.QuestionCom
 import com.buddystudy.backend.localization.application.model.ContentTranslationResult
 import com.buddystudy.backend.localization.application.model.LocalizableContentType
 import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
-import com.buddystudy.backend.localization.application.service.ContentLocalizationService
+import com.buddystudy.backend.localization.application.policy.ContentSourceHashPolicy
 import com.buddystudy.account.domain.entity.UserMembershipTierEntity
 import com.buddystudy.account.domain.entity.UserProvider
 import com.buddystudy.account.domain.entity.UserStatus
@@ -606,7 +606,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
                 publicQuestion = true,
             )
         )
-        val sourceHashes = ContentLocalizationService.recordHashes(publicQuestion)
+        val sourceHashes = ContentSourceHashPolicy.recordHashes(publicQuestion)
         contentLocalizations.ensureRecordPending(
             publicQuestion,
             "en",
@@ -767,7 +767,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
                 createdAt = Instant.parse("2026-06-09T06:00:00Z"),
             )
         )
-        val hashes = ContentLocalizationService.recordHashes(question)
+        val hashes = ContentSourceHashPolicy.recordHashes(question)
         val firstRequestedAt = Instant.parse("2026-06-09T06:01:00Z")
 
         val first = contentLocalizations.ensureRecordPending(
@@ -838,7 +838,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
             commenter.clientSecret,
         ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
         val comment = comments.findById(created["id"].asLong())!!
-        val sourceHash = ContentLocalizationService.sha256(comment.body)
+        val sourceHash = ContentSourceHashPolicy.sha256(comment.body)
         contentLocalizations.ensureCommentPending(
             comment,
             "en",

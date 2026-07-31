@@ -3,6 +3,7 @@ package com.buddystudy.backend.study.application.service
 import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.common.application.outbox.OutboxType
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxAppendPort
+import com.buddystudy.backend.localization.application.port.ContentTranslationRequestAppendPort
 import com.buddystudy.backend.study.application.model.ClaimedQuestionGeneration
 import com.buddystudy.backend.study.application.model.PreparedQuestionGeneration
 import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
@@ -36,6 +37,7 @@ class QuestionGenerationExecutionWriteService(
     private val questionCoverage: QuestionCoveragePort,
     private val questionKeys: OpenAIQuestionKeyProvider,
     private val outbox: RedisEventOutboxAppendPort,
+    private val translationRequests: ContentTranslationRequestAppendPort,
 ) : QuestionGenerationExecutionWriteUseCase {
     @Transactional
     override suspend fun claim(
@@ -112,12 +114,13 @@ class QuestionGenerationExecutionWriteService(
             occurredAt = now,
         )
         val outboxId = outbox.appendQuestionGenerated(generatedEvent, now)
+        val translationOutboxes = translationRequests.appendRecordForSupportedLanguages(saved, now)
         check(inbox.markSucceeded(claim, now)) {
             "Question generation Inbox claim was lost before completion."
         }
         return QuestionWriteResult(
             question = saved,
-            outboxes = listOf(OutboxReference(OutboxType.DOMAIN_EVENT, outboxId)),
+            outboxes = listOf(OutboxReference(OutboxType.DOMAIN_EVENT, outboxId)) + translationOutboxes,
         )
     }
 

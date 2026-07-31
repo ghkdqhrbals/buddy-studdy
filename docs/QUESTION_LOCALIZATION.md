@@ -100,7 +100,9 @@ view=localized|original
 
 ## 비동기 번역
 
-번역 누락 조회는 작은 DB 트랜잭션 안에서 `PENDING` 행과 `CONTENT_TRANSLATION_REQUESTED` Outbox를 함께 저장한다. 질문, 사용자 답변, AI 응답은 각각 `QUESTION`, `ANSWER`, `AI_RESPONSE` 이벤트를 가지며 독립적으로 번역·재시도·실패 처리된다. 과거의 `RECORD` 이벤트는 배포 전 생성된 메시지를 비우기 위한 소비 호환 타입일 뿐 새로 발행하지 않는다. 각 번역 행의 durable request token이 Outbox 이벤트 ID를 결정하므로 동시 누락 조회는 하나의 이벤트로 수렴한다. 5분 이상 멈춘 `PENDING` 또는 `FAILED` 행은 새 token으로 재큐잉되어 번역 공급자 장애 복구 후 다시 처리된다.
+번역 작업은 쓰기 시점에 먼저 생성한다. 직접 질문과 예약 질문의 생성 완료, 사용자 답변 저장, AI 채점 완료, 댓글 저장은 원문 변경과 같은 DB 트랜잭션 안에서 지원 언어별 `PENDING` 행과 `CONTENT_TRANSLATION_REQUESTED` Outbox를 함께 저장한다. 커밋 후 즉시 publish를 시도하며, 실패하거나 프로세스가 종료되면 공용 Outbox recovery가 이어서 발행한다.
+
+조회 경로는 read-repair를 유지한다. 과거 데이터나 장애 때문에 번역이 누락된 경우 작은 별도 트랜잭션에서 같은 작업을 idempotent하게 보완하고 원문을 즉시 반환한다. 질문, 사용자 답변, AI 응답, 댓글은 각각 `QUESTION`, `ANSWER`, `AI_RESPONSE`, `COMMENT` 이벤트를 가지며 독립적으로 번역·재시도·실패 처리된다. 과거의 `RECORD` 이벤트는 배포 전 생성된 메시지를 비우기 위한 소비 호환 타입일 뿐 새로 발행하지 않는다. 각 번역 행의 durable request token이 Outbox 이벤트 ID를 결정하므로 쓰기와 동시 조회가 경합해도 하나의 이벤트로 수렴한다. 5분 이상 멈춘 `PENDING` 또는 `FAILED` 행은 새 token으로 재큐잉되어 번역 공급자 장애 복구 후 다시 처리된다.
 
 ```mermaid
 sequenceDiagram
@@ -111,23 +113,25 @@ sequenceDiagram
     participant Worker as Translation Consumer
     participant Provider
 
-    App->>API: GET ?tl=ja&view=localized
-    API->>DB: READY 번역 조회
-    API->>DB: PENDING + Outbox 저장
-    API-->>App: 원문 + PENDING
+    App->>API: 질문 생성, 답변 또는 댓글 저장
+    API->>DB: 원문 + PENDING + Outbox 원자 저장
+    API-->>App: 저장 결과
     DB->>Stream: 콘텐츠 ID와 hash 발행
     Stream->>Worker: Consumer Group 전달
     Worker->>DB: 원문 및 현재 hash 재조회
     Worker->>Provider: DB 트랜잭션 밖에서 번역
     Provider-->>Worker: 번역 결과
     Worker->>DB: hash 일치 시 READY 저장
-    App->>API: 조용한 재조회
+    App->>API: GET ?tl=ja&view=localized
     API-->>App: 번역문 + TRANSLATED
 ```
 
-- Redis Stream 이름은 `content-translation`이며 전용 Consumer Group을 사용한다.
+- Redis Stream은 `localization.content-translation.requested.v1`이며 전용 Consumer Group을 사용한다.
 - `PENDING` 행과 Outbox를 먼저 커밋한 뒤에만 즉시 publish를 시도한다.
   publish 실패나 프로세스 종료는 공용 Outbox recovery가 재처리한다.
+- 직접 생성과 예약 생성은 같은 질문 생성 완료 유스케이스를 사용하므로 동일한 번역 Outbox 정책을 적용한다.
+- 사용자 답변은 채점 요청 여부와 관계없이 저장 즉시 번역 Outbox를 만들고, 채점 완료 시 새 AI 응답 부분만 추가한다.
+- 댓글은 댓글 원문 저장과 번역 Outbox 생성을 한 트랜잭션에 묶는다.
 - 기존 Inbox claim, 재시도, auto-claim 구조를 재사용해 at-least-once로 처리한다.
 - 이벤트에는 원문을 넣지 않는다. 소비자가 콘텐츠 ID로 원문을 다시 읽는다.
 - source hash가 달라진 오래된 이벤트는 새 원문을 덮어쓰지 않고 성공 처리한다.

@@ -17,7 +17,7 @@ import com.buddystudy.backend.localization.application.model.RecordLocalizationS
 import com.buddystudy.backend.localization.application.port.ContentLanguageDetectionPort
 import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
 import com.buddystudy.backend.localization.application.port.RequestContentLocalizationUseCase
-import com.buddystudy.backend.localization.application.service.ContentLocalizationService
+import com.buddystudy.backend.localization.application.policy.ContentSourceHashPolicy
 import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.StudyEntity
@@ -25,6 +25,7 @@ import com.buddystudy.backend.study.application.port.inbound.BrowseRecordsUseCas
 import com.buddystudy.backend.study.application.port.inbound.AnswerGradingWriteUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudyRecordWriteUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudyUseCase
+import com.buddystudy.backend.study.application.port.inbound.QuestionWriteResult
 import com.buddystudy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSelection
@@ -65,7 +66,7 @@ class StudyService(
             ?.let(QuestionLanguage::normalize)
             ?: appLanguage
         val normalizedSourceLanguage = languageDetector.detect(answer, declaredSourceLanguage)
-        val saved = if (grade) {
+        val written = if (grade) {
             val queued = gradingWriter.queue(
                 userId = principal.userId,
                 recordId = recordId,
@@ -74,8 +75,10 @@ class StudyService(
                 aiResponseLanguage = appLanguage,
                 now = Instant.now(),
             )
-            outboxPublisher.publishNow(queued.outboxes)
-            queued.question
+            QuestionWriteResult(
+                queued.question,
+                queued.outboxes,
+            )
         } else {
             recordWriter.answer(
                 userId = principal.userId,
@@ -86,6 +89,8 @@ class StudyService(
                 now = Instant.now(),
             )
         }
+        outboxPublisher.publishNow(written.outboxes)
+        val saved = written.question
         return saved.toStudyRecord(questionStats.findById(saved.id)).toProjection()
             .toRecordResponse(answerAuthorOriginal = !saved.answer.isNullOrBlank())
     }
@@ -238,7 +243,7 @@ class StudyService(
                 !question.answer.isNullOrBlank(),
             )
         }
-        val hashes = ContentLocalizationService.recordHashes(question)
+        val hashes = ContentSourceHashPolicy.recordHashes(question)
         val snapshot = contentLocalizations.record(question.id, target)
         val questionReady = snapshot.question.readyFor(hashes.question)
         val aiReady = snapshot.aiResponse.readyFor(hashes.aiResponse)
