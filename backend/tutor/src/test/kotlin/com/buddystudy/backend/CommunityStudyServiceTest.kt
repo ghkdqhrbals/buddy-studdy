@@ -13,7 +13,6 @@ import com.buddystudy.backend.community.adapter.outbound.persistence.QuestionCom
 import com.buddystudy.backend.community.adapter.outbound.persistence.FeedbackRepository
 import com.buddystudy.backend.community.adapter.outbound.persistence.QuestionLikeRepository
 import com.buddystudy.backend.community.adapter.outbound.persistence.ReportRepository
-import com.buddystudy.backend.community.adapter.outbound.persistence.UserBlockRepository
 import com.buddystudy.backend.community.application.port.inbound.ReportQuestionCommand
 import com.buddystudy.backend.community.application.port.inbound.SubmitFeedbackCommand
 import com.buddystudy.backend.community.application.service.CommunityService
@@ -65,7 +64,6 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var comments: QuestionCommentRepository
     @Autowired lateinit var reports: ReportRepository
     @Autowired lateinit var feedbacks: FeedbackRepository
-    @Autowired lateinit var userBlocks: UserBlockRepository
 
     private lateinit var author: UserEntity
     private lateinit var viewer: UserEntity
@@ -78,7 +76,6 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
         listOf(
             "feedbacks",
             "reports",
-            "user_blocks",
             "question_comments",
             "question_likes",
             "question_stats",
@@ -311,41 +308,6 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
         assertThat(result.reporterUserId).isEqualTo(viewer.id)
         assertThat(result.reason).isEqualTo("spam")
         assertThat(result.message).isEqualTo("bad")
-    }
-
-    @Test
-    fun `blocked users disappear from public questions and comments`(): Unit = runBlocking {
-        val blockedQuestion = answeredPublicQuestion(author, topic = "Blocked author")
-        hiddenAuthor.allowPublicQuestions = true
-        users.save(hiddenAuthor)
-        val visibleQuestion = answeredPublicQuestion(hiddenAuthor, topic = "Visible author")
-        comments.save(
-            QuestionCommentEntity(
-                questionId = visibleQuestion.id,
-                userId = author.id,
-                body = "blocked comment",
-            ),
-        )
-
-        community.setUserBlocked(principal, author.id, blocked = true)
-
-        val page = community.getPublicQuestions(
-            principal = principal,
-            query = null,
-            language = "ko",
-            limit = 20,
-            offset = 0,
-        )
-        val commentPage = community.getComments(
-            id = visibleQuestion.id,
-            limit = 20,
-            offset = 0,
-            principal = principal,
-        )
-
-        assertThat(page.questions.map { it.id }).doesNotContain(blockedQuestion.id.toString())
-        assertThat(commentPage.comments).isEmpty()
-        assertThat(userBlocks.existsByBlockerUserIdAndBlockedUserId(viewer.id, author.id)).isTrue()
     }
 
     @Test

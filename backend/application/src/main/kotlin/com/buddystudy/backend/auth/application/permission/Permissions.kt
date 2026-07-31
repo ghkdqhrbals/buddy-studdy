@@ -28,7 +28,6 @@ object Permissions {
     const val PUBLIC_QUESTION_LIKE = "public-question:like"
     const val PUBLIC_QUESTION_COMMENT = "public-question:comment"
     const val PUBLIC_QUESTION_REPORT = "public-question:report"
-    const val PUBLIC_USER_BLOCK = "public-user:block"
     const val COMMENT_DELETE = "comment:delete"
     const val DEBUG_READ = "debug:read"
     const val TEST_PUSH_SEND = "test-push:send"

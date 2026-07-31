@@ -12,7 +12,6 @@ import com.buddystudy.backend.community.application.port.inbound.ReportQuestionC
 import com.buddystudy.backend.community.application.port.inbound.SubmitFeedbackCommand
 import com.buddystudy.backend.community.application.model.ReportQuestionResponse
 import com.buddystudy.backend.community.application.model.FeedbackResponse
-import com.buddystudy.backend.community.application.model.UserBlockResponse
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.responses.ApiResponse
@@ -137,24 +136,6 @@ class CommunityController(
         authentication: Authentication,
     ): ReportQuestionResponse = community.reportQuestion(id, body, authentication)
 
-    @Operation(summary = "Block a community user", description = "Hides the selected user's public questions and comments from the authenticated user.")
-    @PutMapping("/community/users/{userId}/block")
-    @RequirePermission(Permissions.PUBLIC_USER_BLOCK)
-    suspend fun blockUser(
-        @Parameter(description = "User id to block.", example = "42")
-        @PathVariable userId: Long,
-        authentication: Authentication,
-    ): UserBlockResponse = community.setUserBlocked(userId, true, authentication)
-
-    @Operation(summary = "Unblock a community user", description = "Makes the selected user's public questions and comments visible again.")
-    @DeleteMapping("/community/users/{userId}/block")
-    @RequirePermission(Permissions.PUBLIC_USER_BLOCK)
-    suspend fun unblockUser(
-        @Parameter(description = "User id to unblock.", example = "42")
-        @PathVariable userId: Long,
-        authentication: Authentication,
-    ): UserBlockResponse = community.setUserBlocked(userId, false, authentication)
-
     @Operation(summary = "Submit app feedback", description = "Stores product feedback from either a member or a registered device.")
     @PostMapping("/feedback")
     @ResponseStatus(HttpStatus.CREATED)
@@ -215,7 +196,6 @@ interface CommunityWebPort {
     suspend fun createComment(id: Long, body: CommunityCommentRequest, authentication: Authentication): Any
     suspend fun deleteComment(id: Long, commentId: Long, authentication: Authentication): Any
     suspend fun reportQuestion(id: Long, body: ReportQuestionRequest, authentication: Authentication): ReportQuestionResponse
-    suspend fun setUserBlocked(userId: Long, blocked: Boolean, authentication: Authentication): UserBlockResponse
     suspend fun submitFeedback(body: SubmitFeedbackRequest, deviceId: String?, authentication: Authentication?): FeedbackResponse
 }
 
@@ -262,13 +242,6 @@ class CommunityWebAdapter(
         community.reportQuestion(authentication.principalOrThrow(), id, body.toCommand())
         return ReportQuestionResponse()
     }
-
-    override suspend fun setUserBlocked(
-        userId: Long,
-        blocked: Boolean,
-        authentication: Authentication,
-    ): UserBlockResponse =
-        community.setUserBlocked(authentication.principalOrThrow(), userId, blocked)
 
     override suspend fun submitFeedback(
         body: SubmitFeedbackRequest,

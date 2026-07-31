@@ -4830,39 +4830,6 @@ final class AppState: ObservableObject {
         )
     }
 
-    func blockCommunityUser(_ user: CommunityUserProfile) async -> Bool {
-        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-block-user") else {
-            clearCommunityErrorForMissingRegistration(reason: "community-block-user")
-            return false
-        }
-
-        var didBlock = false
-        await actionRunner.run(
-            operation: {
-                try await communityUseCase.setUserBlocked(
-                    registration: registration,
-                    userID: user.id,
-                    blocked: true
-                )
-            },
-            onSuccess: { state in
-                guard state.blocked else {
-                    return
-                }
-                didBlock = true
-                let removedCount = communityQuestions.count { $0.author?.id == state.userID }
-                communityQuestions.removeAll { $0.author?.id == state.userID }
-                communityTotalCount = max(0, communityTotalCount - removedCount)
-                statusMessage = strings.userBlocked
-            },
-            onFailure: { error in
-                handleCommunityError(error)
-                log(.warning, "커뮤니티 사용자 차단 실패: \(error.localizedDescription)")
-            }
-        )
-        return didBlock
-    }
-
     func submitAppFeedback(content: String) async -> Bool {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "app-feedback") else {
             clearCommunityErrorForMissingRegistration(reason: "app-feedback")

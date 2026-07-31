@@ -150,18 +150,6 @@ struct RemoteCommunityRepository: CommunityRepository {
         )
     }
 
-    func setUserBlocked(
-        registration: RemotePushRegistration,
-        userID: Int,
-        blocked: Bool
-    ) async throws -> CommunityUserBlockState {
-        try await backendClient.setCommunityUserBlocked(
-            registration: registration,
-            userID: userID,
-            blocked: blocked
-        )
-    }
-
     func submitFeedback(
         registration: RemotePushRegistration,
         content: String

@@ -1132,7 +1132,6 @@ private struct MobileHomeView: View {
     @State private var editingStudyRoom: BackendStudyRoom?
     @State private var isAddingStudyCategory = false
     @State private var selectedCommunityQuestionRoute: CommunityQuestionRoute?
-    @State private var communityUserToBlock: CommunityUserProfile?
     @State private var notificationForwardRoute: NotificationForwardRoute?
     @State private var isHomeLoginPagePresented = false
     @State private var isShowingNotifications = false
@@ -1471,26 +1470,6 @@ private struct MobileHomeView: View {
         }
         .sheet(isPresented: $isShowingProfileSettings) {
             MobileProfileSettingsSheet()
-        }
-        .alert(
-            strings.blockUserTitle,
-            isPresented: Binding(
-                get: { communityUserToBlock != nil },
-                set: { if !$0 { communityUserToBlock = nil } }
-            ),
-            presenting: communityUserToBlock
-        ) { user in
-            Button(strings.cancel, role: .cancel) {
-                communityUserToBlock = nil
-            }
-            Button(strings.blockUser, role: .destructive) {
-                communityUserToBlock = nil
-                Task {
-                    await appState.blockCommunityUser(user)
-                }
-            }
-        } message: { user in
-            Text(strings.blockUserMessage(user.displayName))
         }
         .sheet(isPresented: $isShowingEmailSignIn) {
             EmailSignInSheet {
@@ -1855,15 +1834,6 @@ private struct MobileHomeView: View {
         .listRowBackground(Color.clear)
         .contextMenu {
             if appState.isCommunitySessionActive {
-                if let author = question.author,
-                   author.id != appState.communityProfile?.id {
-                    Button(role: .destructive) {
-                        communityUserToBlock = author
-                    } label: {
-                        Label(strings.blockUser, systemImage: "person.crop.circle.badge.xmark")
-                    }
-                }
-
                 Button(role: .destructive) {
                     Task {
                         await appState.reportCommunityQuestion(
@@ -7977,7 +7947,6 @@ enum CommunityQuestionDetailContentSource: Equatable {
 
 struct CommunityQuestionDetailView: View {
     @EnvironmentObject private var appState: AppState
-    @Environment(\.dismiss) private var dismiss
     var question: CommunityQuestion
     var contentSource: CommunityQuestionDetailContentSource
     @State private var displayQuestion: CommunityQuestion
@@ -7989,7 +7958,6 @@ struct CommunityQuestionDetailView: View {
     @State private var deletingCommentIDs: Set<String> = []
     @State private var isShowingOriginal = false
     @State private var originalAvailable: Bool
-    @State private var userToBlock: CommunityUserProfile?
     @FocusState private var isCommentInputFocused: Bool
 
     init(
@@ -8071,15 +8039,6 @@ struct CommunityQuestionDetailView: View {
             if contentSource == .community && appState.isCommunitySessionActive {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        if let author = displayQuestion.author,
-                           !appState.isCurrentCommunityUser(id: author.id) {
-                            Button(role: .destructive) {
-                                userToBlock = author
-                            } label: {
-                                Label(strings.blockUser, systemImage: "person.crop.circle.badge.xmark")
-                            }
-                        }
-
                         Button(role: .destructive) {
                             Task {
                                 await appState.reportCommunityQuestion(
@@ -8111,32 +8070,6 @@ struct CommunityQuestionDetailView: View {
             async let questionLoad: Void = loadQuestionDetail()
             async let commentsLoad: Void = loadCommentsIfAvailable()
             _ = await (questionLoad, commentsLoad)
-        }
-        .alert(
-            strings.blockUserTitle,
-            isPresented: Binding(
-                get: { userToBlock != nil },
-                set: { if !$0 { userToBlock = nil } }
-            ),
-            presenting: userToBlock
-        ) { user in
-            Button(strings.cancel, role: .cancel) {
-                userToBlock = nil
-            }
-            Button(strings.blockUser, role: .destructive) {
-                userToBlock = nil
-                Task {
-                    guard await appState.blockCommunityUser(user) else {
-                        return
-                    }
-                    comments.removeAll { $0.author.id == user.id }
-                    if displayQuestion.author?.id == user.id {
-                        dismiss()
-                    }
-                }
-            }
-        } message: { user in
-            Text(strings.blockUserMessage(user.displayName))
         }
     }
 
@@ -8251,16 +8184,6 @@ struct CommunityQuestionDetailView: View {
                         deleteTitle: strings.clear
                     ) {
                         deleteComment(comment)
-                    }
-                    .contextMenu {
-                        if canWriteCommunityReaction,
-                           !appState.isCurrentCommunityUser(id: comment.author.id) {
-                            Button(role: .destructive) {
-                                userToBlock = comment.author
-                            } label: {
-                                Label(strings.blockUser, systemImage: "person.crop.circle.badge.xmark")
-                            }
-                        }
                     }
                 }
             }

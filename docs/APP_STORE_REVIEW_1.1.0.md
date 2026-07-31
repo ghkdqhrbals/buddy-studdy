@@ -14,21 +14,21 @@
 - iPhone 6.9-inch and iPad 13-inch screenshot sets for all three locales
 - App privacy manifest embedded in the iOS target
 - In-app account deletion under Settings > Account Settings
-- Public-content reporting and user blocking
+- Public-content reporting
 - Sign in with Apple alongside Google and email login
 - Localized review notes describing the primary study and moderation flows
 - Age-rating declaration aligned with public questions, comments, and user-generated content
 
 ## Required release order
 
-1. Deploy the backend user-block and Sign in with Apple APIs plus the database migration.
+1. Deploy the backend and Sign in with Apple APIs plus the database migrations.
 2. Create and upload a new signed iOS build from the reviewed commit.
 3. Verify the uploaded build on a physical iPhone:
    - sign in;
    - accept required terms;
    - create a study and answer a question;
    - leave and reopen the answered question;
-   - browse, report, and block public content;
+   - browse and report public content;
    - delete the account;
    - open a push notification;
    - verify Korean, English, and Japanese UI and content switching;

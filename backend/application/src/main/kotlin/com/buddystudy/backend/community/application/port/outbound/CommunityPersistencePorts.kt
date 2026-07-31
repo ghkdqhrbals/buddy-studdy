@@ -4,7 +4,6 @@ import com.buddystudy.community.domain.entity.FeedbackEntity
 import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.community.domain.entity.QuestionLikeEntity
 import com.buddystudy.community.domain.entity.ReportEntity
-import com.buddystudy.community.domain.entity.UserBlockEntity
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 
@@ -24,13 +23,6 @@ interface QuestionCommentPort {
 
 interface ReportPort {
     suspend fun save(entity: ReportEntity): ReportEntity
-}
-
-interface UserBlockPort {
-    suspend fun save(entity: UserBlockEntity): UserBlockEntity
-    suspend fun exists(blockerUserId: Long, blockedUserId: Long): Boolean
-    suspend fun findBlockedUserIds(blockerUserId: Long): Set<Long>
-    suspend fun delete(blockerUserId: Long, blockedUserId: Long): Long
 }
 
 interface FeedbackPort {

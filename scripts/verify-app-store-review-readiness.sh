@@ -33,6 +33,6 @@ test "$(wc -m < "$review_notes" | tr -d " ")" -le 4000
 rg -q "PrivacyInfo.xcprivacy" "$project_root/StudyMate.xcodeproj/project.pbxproj"
 rg -q "com.apple.developer.applesignin" "$project_root/StudyMate/StudyMateiOS.entitlements"
 rg -q "Delete Account|회원탈퇴|アカウント" "$project_root/StudyMate/Views" "$project_root/StudyMate/Models"
-rg -q "Block user|사용자 차단|ユーザーをブロック" "$project_root/StudyMate"
+rg -q "Report|신고|報告" "$project_root/StudyMate"
 
 echo "App Store review source checks passed."

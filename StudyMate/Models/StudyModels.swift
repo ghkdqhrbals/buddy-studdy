@@ -3802,16 +3802,6 @@ struct AppStrings {
     var report: String { text("신고", "Report") }
     var reportSubmitted: String { text("신고를 접수했습니다.", "Report submitted.") }
     var reportReasonInappropriate: String { text("부적절한 질문", "Inappropriate question") }
-    var blockUser: String { text("사용자 차단", "Block user", "ユーザーをブロック") }
-    var blockUserTitle: String { text("이 사용자를 차단할까요?", "Block this user?", "このユーザーをブロックしますか？") }
-    func blockUserMessage(_ name: String) -> String {
-        text(
-            "\(name)의 질문과 댓글이 더 이상 표시되지 않습니다.",
-            "Questions and comments from \(name) will no longer appear.",
-            "\(name)さんの問題とコメントは今後表示されません。"
-        )
-    }
-    var userBlocked: String { text("사용자를 차단했습니다.", "User blocked.", "ユーザーをブロックしました。") }
     var googleLoginSetupRequired: String {
         text(
             "Google Login은 OAuth 클라이언트 설정 후 활성화됩니다.",

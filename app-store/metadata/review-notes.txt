@@ -16,8 +16,6 @@ Primary study flow
 Public community and moderation
 - Open Home > All Studies to browse public answered questions.
 - A signed-in reviewer can like, comment, or report a public question.
-- To block an abusive user, long-press a public question and choose Block user. The same action is available from the ellipsis menu on the question detail page and by long-pressing a comment.
-- Blocked users' public questions and comments are hidden immediately.
 
 Account and privacy
 - Account deletion is available in Settings > Account Settings > Delete Account.
