@@ -603,22 +603,25 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                             .tint(.accentColor)
                             .textSelection(.enabled)
 
-                        if submittedAnswer == nil &&
-                            gradingResult == nil &&
-                            !isGradingAnswer &&
-                            !isResolvingAnswerState {
-                            Button {
-                                onSkip()
-                            } label: {
-                                Image(systemName: "forward.fill")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 30, height: 30)
-                                    .background(Color.secondary.opacity(0.12), in: Circle())
+                        ZStack {
+                            if submittedAnswer == nil &&
+                                gradingResult == nil &&
+                                !isGradingAnswer &&
+                                !isResolvingAnswerState {
+                                Button {
+                                    onSkip()
+                                } label: {
+                                    Image(systemName: "forward.fill")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 30, height: 30)
+                                        .background(Color.secondary.opacity(0.12), in: Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(strings.skipQuestion)
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(strings.skipQuestion)
                         }
+                        .frame(width: 30, height: 30)
                     }
 
                     hintView
