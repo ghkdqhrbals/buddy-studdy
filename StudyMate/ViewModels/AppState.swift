@@ -1246,7 +1246,6 @@ final class AppState: ObservableObject {
         recordsState.pendingRecordsIncludingCurrent(
             currentQuestion: currentQuestion,
             gradingResult: gradingResult,
-            lastAnswer: lastAnswer,
             fallbackTopic: settings.topic,
             fallbackDifficulty: settings.difficulty,
             matches: studyRecordMatches
@@ -5882,11 +5881,12 @@ final class AppState: ObservableObject {
             return ""
         }
 
-        if let submittedAnswer = StudyAnswerPresentationPolicy.submittedAnswer(for: record) {
-            return submittedAnswer
-        }
-        let draft = localStudyRecordUseCase.loadAnswerDraft(recordID: record.id)
-        return draft
+        return answerForCurrentSession(record)
+    }
+
+    private func answerForCurrentSession(_ record: StudyRecord) -> String {
+        StudyAnswerPresentationPolicy.submittedAnswer(for: record)
+            ?? localStudyRecordUseCase.loadAnswerDraft(recordID: record.id)
     }
 
     func isAnswerGradingInProgress(for record: StudyRecord?) -> Bool {
@@ -7097,13 +7097,14 @@ final class AppState: ObservableObject {
             return
         }
 
+        let answer = answerForCurrentSession(record)
         notificationLandingMessage = nil
         currentQuestion = record.question
-        lastAnswer = record.answer ?? ""
+        lastAnswer = answer
         gradingResult = record.gradingResult
         currentStudySessionUseCase.saveCurrentQuestionState(
             question: record.question,
-            lastAnswer: record.answer ?? "",
+            lastAnswer: answer,
             gradingResult: record.gradingResult
         )
     }
@@ -7148,6 +7149,12 @@ final class AppState: ObservableObject {
             errorMessage = "답변을 입력하세요."
             return
         }
+        guard let record = studyRecord(matching: currentQuestion) else {
+            errorMessage = "이 질문은 백엔드 기록에 없어 채점할 수 없습니다. 새 질문을 다시 생성하세요."
+            statusMessage = nil
+            log(.warning, "현재 질문에 매칭되는 백엔드 기록이 없어 채점을 중단했습니다.")
+            return
+        }
         let sessionGeneration = communitySessionState.generation
 
         activateAnswerGrading(ownerID: pollingOwnerID)
@@ -7156,8 +7163,7 @@ final class AppState: ObservableObject {
         statusMessage = "답변을 채점 중입니다."
         lastAnswer = answerToGrade
         currentStudySessionUseCase.saveLastAnswer(answerToGrade)
-        localStudyRecordUseCase.updateAnswer(question: currentQuestion, answer: answerToGrade, onlyIfUngraded: true)
-        reloadStudyRecordsFromStore()
+        localStudyRecordUseCase.saveAnswerDraft(answerToGrade, recordID: record.id)
         log(.info, "현재 질문 답변 채점 요청을 전송합니다.")
 
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "grade-current-answer") else {
@@ -7165,14 +7171,6 @@ final class AppState: ObservableObject {
             statusMessage = nil
             finishAnswerGrading(ownerID: pollingOwnerID)
             log(.warning, "백엔드 등록이 없어 현재 질문 채점을 중단했습니다.")
-            return
-        }
-
-        guard let record = studyRecord(matching: currentQuestion) else {
-            errorMessage = "이 질문은 백엔드 기록에 없어 채점할 수 없습니다. 새 질문을 다시 생성하세요."
-            statusMessage = nil
-            finishAnswerGrading(ownerID: pollingOwnerID)
-            log(.warning, "현재 질문에 매칭되는 백엔드 기록이 없어 채점을 중단했습니다.")
             return
         }
 
@@ -7222,6 +7220,7 @@ final class AppState: ObservableObject {
     }
 
     private func applyGradedRecord(_ record: StudyRecord, answer: String) {
+        localStudyRecordUseCase.deleteAnswerDraft(recordID: record.id)
         currentQuestion = record.question
         lastAnswer = answer
         gradingResult = record.gradingResult
@@ -7970,6 +7969,13 @@ final class AppState: ObservableObject {
     private func persistAnswerDraft(_ draft: PendingAnswerDraft) {
         if let recordID = draft.recordID {
             localStudyRecordUseCase.saveAnswerDraft(draft.answer, recordID: recordID)
+            if let question = draft.question,
+               let currentQuestion,
+               Self.questionsMatch(currentQuestion, question) {
+                lastAnswer = draft.answer
+                currentStudySessionUseCase.saveLastAnswer(draft.answer)
+            }
+            return
         }
 
         guard let question = draft.question else {
@@ -7977,9 +7983,6 @@ final class AppState: ObservableObject {
             currentStudySessionUseCase.saveLastAnswer(draft.answer)
             return
         }
-
-        localStudyRecordUseCase.updateAnswer(question: question, answer: draft.answer, onlyIfUngraded: true)
-        updateLoadedStudyRecordAnswer(question: question, answer: draft.answer)
 
         if let currentQuestion,
            Self.questionsMatch(currentQuestion, question) {
@@ -7990,10 +7993,6 @@ final class AppState: ObservableObject {
         markCloudDataChanged(syncDelaySeconds: 4)
     }
 
-    private func updateLoadedStudyRecordAnswer(question: QuestionItem, answer: String) {
-        recordsState.updateAnswer(for: question, answer: answer, matches: studyRecordMatches)
-    }
-
     func selectStudyRecord(_ record: StudyRecord) {
         guard requirePageAccess(.studyDetail) else {
             return
@@ -8001,11 +8000,12 @@ final class AppState: ObservableObject {
 
         flushPendingAnswerDraftSave()
         notificationLandingMessage = nil
+        let answer = answerForCurrentSession(record)
         currentQuestion = record.question
-        lastAnswer = record.answer ?? ""
+        lastAnswer = answer
         gradingResult = record.gradingResult
         currentStudySessionUseCase.saveQuestion(record.question)
-        currentStudySessionUseCase.saveLastAnswer(record.answer ?? "")
+        currentStudySessionUseCase.saveLastAnswer(answer)
         currentStudySessionUseCase.saveGradingResult(record.gradingResult)
         showStudyScreen(categoryID: categoryID(forTopic: record.topic))
         focusedRecordRequest = nil
@@ -8149,7 +8149,7 @@ final class AppState: ObservableObject {
 
         let trimmedReply = replyText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !trimmedReply.isEmpty {
-            localStudyRecordUseCase.updateAnswer(
+            localStudyRecordUseCase.saveSubmittedAnswer(
                 question: record.question,
                 answer: trimmedReply,
                 onlyIfUngraded: false
@@ -8234,7 +8234,7 @@ final class AppState: ObservableObject {
             return false
         }
 
-        localStudyRecordUseCase.updateAnswer(
+        localStudyRecordUseCase.saveSubmittedAnswer(
             question: record.question,
             answer: trimmedReply,
             onlyIfUngraded: true
@@ -8335,7 +8335,7 @@ final class AppState: ObservableObject {
             return false
         }
 
-        localStudyRecordUseCase.updateAnswer(
+        localStudyRecordUseCase.saveSubmittedAnswer(
             question: question,
             answer: trimmedReply,
             onlyIfUngraded: true

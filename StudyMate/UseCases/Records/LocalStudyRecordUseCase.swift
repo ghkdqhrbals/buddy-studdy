@@ -15,8 +15,8 @@ struct LocalStudyRecordUseCase {
         repository.appendStudyRecord(question: question, settings: settings)
     }
 
-    func updateAnswer(question: QuestionItem, answer: String, onlyIfUngraded: Bool) {
-        repository.updateStudyRecordAnswer(question: question, answer: answer, onlyIfUngraded: onlyIfUngraded)
+    func saveSubmittedAnswer(question: QuestionItem, answer: String, onlyIfUngraded: Bool) {
+        repository.saveSubmittedAnswer(question: question, answer: answer, onlyIfUngraded: onlyIfUngraded)
     }
 
     func saveRecord(_ record: StudyRecord) {

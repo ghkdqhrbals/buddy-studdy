@@ -278,7 +278,11 @@ final class SettingsStore {
         recordStore.save(record)
     }
 
-    func updateStudyRecordAnswer(question: QuestionItem, answer: String, onlyIfUngraded: Bool = false) {
+    func saveSubmittedStudyRecordAnswer(
+        question: QuestionItem,
+        answer: String,
+        onlyIfUngraded: Bool = false
+    ) {
         if var record = recordStore.find(question: question) {
             guard !onlyIfUngraded || record.gradingResult == nil else {
                 return

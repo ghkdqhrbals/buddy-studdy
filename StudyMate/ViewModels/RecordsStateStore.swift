@@ -57,19 +57,6 @@ struct RecordsStateStore {
         isLoadingPage = false
     }
 
-    mutating func updateAnswer(
-        for question: QuestionItem,
-        answer: String,
-        matches: (StudyRecord, QuestionItem) -> Bool
-    ) {
-        guard let index = records.lastIndex(where: { matches($0, question) }),
-              records[index].gradingResult == nil else {
-            return
-        }
-
-        records[index].answer = answer
-    }
-
     func record(
         matching question: QuestionItem?,
         matches: (StudyRecord, QuestionItem) -> Bool
@@ -101,7 +88,6 @@ struct RecordsStateStore {
     func pendingRecordsIncludingCurrent(
         currentQuestion: QuestionItem?,
         gradingResult: GradingResult?,
-        lastAnswer: String,
         fallbackTopic: String,
         fallbackDifficulty: Difficulty,
         matches: (StudyRecord, QuestionItem) -> Bool
@@ -114,7 +100,6 @@ struct RecordsStateStore {
             pending.append(
                 StudyRecord(
                     question: currentQuestion,
-                    answer: lastAnswer.isEmpty ? nil : lastAnswer,
                     topic: fallbackTopic,
                     difficulty: fallbackDifficulty
                 )

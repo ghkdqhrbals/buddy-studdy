@@ -2101,7 +2101,10 @@ final class StudyMateTests: XCTestCase {
         store.saveIsRunning(true)
         store.saveQuestion(activeQuestion)
         store.appendStudyRecord(question: activeQuestion, settings: settings)
-        store.updateStudyRecordAnswer(question: activeQuestion, answer: "작성 중인 답변")
+        store.saveAnswerDraft(
+            "작성 중인 답변",
+            recordID: store.loadStudyRecords()[0].id
+        )
         store.saveLastAnswer("작성 중인 답변")
 
         let backend = FakeRemotePushBackendClient()
@@ -2337,7 +2340,10 @@ final class StudyMateTests: XCTestCase {
         store.saveSettings(localSettings)
         store.saveQuestion(localQuestion)
         store.appendStudyRecord(question: localQuestion, settings: localSettings)
-        store.updateStudyRecordAnswer(question: localQuestion, answer: "로컬 작성 중")
+        store.saveAnswerDraft(
+            "로컬 작성 중",
+            recordID: store.loadStudyRecords()[0].id
+        )
         store.saveLastAnswer("로컬 작성 중")
 
         let remoteState = CloudSyncState(
@@ -3631,9 +3637,12 @@ final class StudyMateTests: XCTestCase {
             createdAt: Date()
         )
         store.appendStudyRecord(question: question, settings: settings)
-        store.updateStudyRecordAnswer(question: question, answer: "프로세스는 자원을 갖고 스레드는 실행 흐름입니다.")
 
         let record = store.loadStudyRecords()[0]
+        store.saveAnswerDraft(
+            "프로세스는 자원을 갖고 스레드는 실행 흐름입니다.",
+            recordID: record.id
+        )
         let appState = AppState(settingsStore: store)
 
         appState.selectStudyRecord(record)
@@ -3641,8 +3650,52 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(appState.selectedTab, .study)
         XCTAssertEqual(appState.currentQuestion?.question, question.question)
         XCTAssertEqual(appState.lastAnswer, "프로세스는 자원을 갖고 스레드는 실행 흐름입니다.")
+        XCTAssertNil(store.loadStudyRecords()[0].answer)
         XCTAssertNil(appState.gradingResult)
         XCTAssertEqual(appState.pendingStudyRecords.count, 1)
+    }
+
+    @MainActor
+    func testAutosavingStudyRoomDraftDoesNotPromoteItToSubmittedAnswer() {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let settings = StudySettings(
+            topic: "운영체제",
+            difficulty: .intermediate,
+            customPrompt: "짧게",
+            intervalMinutes: 15
+        )
+        let question = QuestionItem(
+            question: "프로세스와 스레드의 차이는?",
+            expectedAnswerHint: nil,
+            createdAt: Date()
+        )
+        store.appendStudyRecord(question: question, settings: settings)
+        let record = store.loadStudyRecords()[0]
+        let appState = AppState(settingsStore: store)
+
+        appState.updateAnswer(
+            "작성 중인 답변은 아직 제출된 답변이 아닙니다.",
+            for: record
+        )
+        appState.flushPendingAnswerDraftSave()
+
+        let persistedRecord = store.loadStudyRecords()[0]
+        XCTAssertNil(persistedRecord.answer)
+        XCTAssertEqual(
+            store.loadAnswerDraft(recordID: record.id),
+            "작성 중인 답변은 아직 제출된 답변이 아닙니다."
+        )
+        XCTAssertEqual(
+            appState.answerDraft(for: persistedRecord),
+            "작성 중인 답변은 아직 제출된 답변이 아닙니다."
+        )
+        XCTAssertTrue(StudyAnswerPresentationPolicy.shouldShowEditor(for: persistedRecord))
     }
 
     @MainActor

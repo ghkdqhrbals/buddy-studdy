@@ -9,6 +9,83 @@ final class QuestionGenerationFlowTests: XCTestCase {
         super.tearDown()
     }
 
+    func testAutosavingStudyRoomDraftDoesNotPromoteItToSubmittedAnswer() {
+        let suiteName = "AnswerDraftFlowTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let settings = StudySettings(
+            topic: "운영체제",
+            difficulty: .intermediate,
+            customPrompt: "짧게",
+            intervalMinutes: 15
+        )
+        let question = QuestionItem(
+            question: "프로세스와 스레드의 차이는?",
+            expectedAnswerHint: nil,
+            createdAt: Date()
+        )
+        store.appendStudyRecord(question: question, settings: settings)
+        let record = store.loadStudyRecords()[0]
+        let appState = AppState(settingsStore: store)
+
+        appState.updateAnswer(
+            "작성 중인 답변은 아직 제출된 답변이 아닙니다.",
+            for: record
+        )
+        appState.flushPendingAnswerDraftSave()
+
+        let persistedRecord = store.loadStudyRecords()[0]
+        XCTAssertNil(persistedRecord.answer)
+        XCTAssertEqual(
+            store.loadAnswerDraft(recordID: record.id),
+            "작성 중인 답변은 아직 제출된 답변이 아닙니다."
+        )
+        XCTAssertEqual(
+            appState.answerDraft(for: persistedRecord),
+            "작성 중인 답변은 아직 제출된 답변이 아닙니다."
+        )
+        XCTAssertTrue(StudyAnswerPresentationPolicy.shouldShowEditor(for: persistedRecord))
+    }
+
+    func testReopeningPendingRecordRestoresDraftWithoutShowingSubmittedMessage() {
+        let suiteName = "AnswerDraftRestoreTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let settings = StudySettings(
+            topic: "네트워크",
+            difficulty: .level5,
+            customPrompt: "짧게",
+            intervalMinutes: 15
+        )
+        let question = QuestionItem(
+            question: "TCP 흐름 제어를 설명하세요.",
+            expectedAnswerHint: nil,
+            createdAt: Date()
+        )
+        store.appendStudyRecord(question: question, settings: settings)
+        let record = store.loadStudyRecords()[0]
+        store.saveAnswerDraft("수신 윈도우를 기준으로 전송량을 조절합니다.", recordID: record.id)
+        let appState = AppState(settingsStore: store)
+
+        appState.selectStudyRecord(record)
+
+        XCTAssertEqual(appState.lastAnswer, "수신 윈도우를 기준으로 전송량을 조절합니다.")
+        XCTAssertEqual(
+            appState.answerDraft(for: appState.studyRecords.first),
+            "수신 윈도우를 기준으로 전송량을 조절합니다."
+        )
+        XCTAssertNil(appState.studyRecords.first?.answer)
+        XCTAssertTrue(StudyAnswerPresentationPolicy.shouldShowEditor(for: appState.studyRecords.first))
+    }
+
     func testDeletedRecordIsNotReinsertedIntoAllStudiesByStaleCommunityPage() {
         let deletedQuestion = CommunityQuestion(
             id: "record-42",

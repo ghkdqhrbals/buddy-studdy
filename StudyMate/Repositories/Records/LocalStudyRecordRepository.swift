@@ -3,7 +3,7 @@ import Foundation
 protocol LocalStudyRecordRepository {
     func loadStudyRecords() -> [StudyRecord]
     func appendStudyRecord(question: QuestionItem, settings: StudySettings)
-    func updateStudyRecordAnswer(question: QuestionItem, answer: String, onlyIfUngraded: Bool)
+    func saveSubmittedAnswer(question: QuestionItem, answer: String, onlyIfUngraded: Bool)
     func saveStudyRecord(_ record: StudyRecord)
     func deleteStudyRecord(_ record: StudyRecord)
     func clearStudyRecords()
