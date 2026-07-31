@@ -38,6 +38,13 @@ jobs:
           set -euo pipefail
 
           docker network create buddystudy-net >/dev/null 2>&1 || true
+          if [ "$(docker info --format '{{.Swarm.LocalNodeState}}')" = "active" ] && \
+             ! docker network inspect buddystudy-swarm-net >/dev/null 2>&1; then
+            docker network create \
+              --driver overlay \
+              --attachable \
+              buddystudy-swarm-net >/dev/null
+          fi
           docker volume create buddystudy-libretranslate-models >/dev/null
           docker pull "${IMAGE_REF}"
 
@@ -53,6 +60,11 @@ jobs:
             -e LT_DISABLE_FILES_TRANSLATION=true \
             -v buddystudy-libretranslate-models:/home/libretranslate/.local \
             "${IMAGE_REF}"
+          if docker network inspect buddystudy-swarm-net >/dev/null 2>&1; then
+            docker network connect \
+              buddystudy-swarm-net \
+              buddystudy-libretranslate >/dev/null 2>&1 || true
+          fi
 
           for attempt in 1 2 3; do
             if ! docker inspect -f '{{.State.Running}}' buddystudy-libretranslate 2>/dev/null \

@@ -39,6 +39,9 @@ deployment.
   owns the `buddystudy-libretranslate` container and model volume; the backend
   workflow only injects
   `BUDDYSTUDY_TRANSLATION_BASE_URL=http://buddystudy-libretranslate:5000`.
+  When Swarm is active, the translation workflow also attaches the same
+  standalone container to `buddystudy-swarm-net` so translation redeploys do
+  not disconnect the backend service.
   The translation workflow pins a multi-architecture image and never publishes
   the service port on the host.
 - A job must have a module-specific name such as `deploy_backend`,

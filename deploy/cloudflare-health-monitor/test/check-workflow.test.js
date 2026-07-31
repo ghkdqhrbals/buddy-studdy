@@ -271,11 +271,11 @@ test("deploy repo docs prohibit Actions runtime and container health checks", ()
   const readme = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/README.md"), "utf8");
 
   assert.match(readme, /must not call backend `\/health` or readiness endpoints/i);
-  assert.match(readme, /must not inspect Docker `Health\.Status`/i);
-  assert.match(readme, /must not use indirect container health gates/i);
+  assert.match(readme, /must not\s+inspect Docker `Health\.Status`/i);
+  assert.match(readme, /must not\s+use indirect container health gates/i);
   assert.match(readme, /`docker compose up --wait`/i);
   assert.match(readme, /`docker compose wait`/i);
-  assert.match(readme, /must not call the Health Monitor Worker `\/check` endpoint/i);
+  assert.match(readme, /must not\s+call the Health Monitor Worker `\/check` endpoint/i);
 });
 
 test("deploy repo docs explain Grafana-owned outage alerting", () => {
@@ -407,7 +407,10 @@ test("repository workflow files do not run backend health probes in Actions", ()
 
   const errors = files.flatMap((file) => {
     const relativePath = path.relative(repoRoot, file);
-    return validateNoActionsRuntimeHealthChecks(fs.readFileSync(file, "utf8"), relativePath);
+    const workflow = fs.readFileSync(file, "utf8");
+    return /^\s*jobs\s*:/m.test(workflow)
+      ? validateNoActionsRuntimeHealthChecks(workflow, relativePath)
+      : [];
   });
 
   assert.deepEqual(errors, []);
@@ -422,11 +425,43 @@ test("image build workflows do not run health-check scanners or probes", () => {
   }
 });
 
-test("backend image does not define Docker health metadata", () => {
+test("backend image exposes dependency readiness to Docker Swarm", () => {
   const dockerfile = fs.readFileSync(path.join(repoRoot, "backend/Dockerfile"), "utf8");
 
-  assert.doesNotMatch(dockerfile, /^\s*HEALTHCHECK\b/im);
-  assert.doesNotMatch(dockerfile, /curl\s+-fsS\s+http:\/\/127\.0\.0\.1:8080\/health/);
+  assert.match(dockerfile, /microdnf install -y curl-minimal shadow-utils/);
+  assert.match(dockerfile, /apt-get install -y --no-install-recommends curl/);
+  assert.equal(
+    (dockerfile.match(/^HEALTHCHECK\b/gm) ?? []).length,
+    2,
+    "native and JVM runtime images must expose the same readiness contract",
+  );
+  assert.equal(
+    (dockerfile.match(/http:\/\/127\.0\.0\.1:8080\/api\/v1\/health\/dependencies/g) ?? []).length,
+    2,
+  );
+});
+
+test("Swarm stack gates replacement tasks on dependency readiness", () => {
+  const stack = fs.readFileSync(
+    path.join(repoRoot, "docs/deploy-repo-template/backend-swarm-stack.yml"),
+    "utf8",
+  );
+
+  assert.match(stack, /http:\/\/127\.0\.0\.1:8080\/api\/v1\/health\/dependencies/);
+  assert.match(stack, /order:\s*start-first/);
+  assert.match(stack, /failure_action:\s*rollback/);
+  assert.match(stack, /start_period:\s*120s/);
+  assert.match(stack, /monitor:\s*300s/);
+});
+
+test("translation deploy preserves Swarm backend connectivity", () => {
+  const workflow = fs.readFileSync(
+    path.join(repoRoot, "docs/deploy-repo-template/deploy-translation-server.yml"),
+    "utf8",
+  );
+
+  assert.match(workflow, /docker network inspect buddystudy-swarm-net/);
+  assert.match(workflow, /docker network connect[\s\S]*buddystudy-swarm-net[\s\S]*buddystudy-libretranslate/);
 });
 
 test("workflow scan rejects container health probes in Actions", () => {
