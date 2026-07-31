@@ -7,10 +7,11 @@ one workflow run just because they share a host.
 
 | Module | Workflow | Trigger | Runner | Owns |
 | --- | --- | --- | --- | --- |
-| Backend API | `Deploy BuddyStudy Backend` | `backend-image-published`, manual | EC2 self-hosted | Backend app rollout, backend env, backend nginx route, log-only MySQL runtime observer, backend-log multiline collection |
+| Backend API | `Deploy BuddyStudy Backend` | `backend-image-published`, manual | EC2 self-hosted | Docker Swarm backend service rollout, backend env, fixed backend nginx route, log-only MySQL runtime observer, backend-log multiline collection |
 | Translation server | `Deploy BuddyStudy Translation Server` | manual | EC2 self-hosted | Internal LibreTranslate runtime and persisted `ko`, `en`, `ja` model cache |
 | Backend network | `Configure BuddyStudy Backend Network` | manual | EC2 self-hosted | Redis administrator ingress on the backend security group |
 | Database cutover | `Migrate BuddyStudy PostgreSQL To MySQL` | manual, one-time | EC2 self-hosted | PostgreSQL backup, MySQL import, row-count and reference validation, automatic pre-cutover rollback |
+| Flyway V32 recovery | `Repair BuddyStudy Backend Flyway V32` | manual, one-time | EC2 self-hosted | Guarded removal of only the failed V32 history row and V32 partial check constraints |
 | Admin frontend | `Deploy BuddyStudy Admin Frontend` | `admin-frontend-image-published`, manual | EC2 self-hosted | Admin frontend container only |
 | iOS TestFlight | `Release iOS App` | `v*`, manual | GitHub-hosted macOS | Release planning, signed IPA build, artifact retention, and TestFlight upload as separate jobs |
 | Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, TestZone UI, Grafana, Loki, ERROR-log Slack alerting, monitoring auth and access audit, and the backend/FRC maintenance operator UI |
@@ -66,6 +67,20 @@ deployment.
   replacing the container.
 - EC2 self-hosted runners are deploy-only. They pull images and restart
   containers, but must not compile backend code or build Docker images.
+- The backend application is a single-replica Docker Swarm service named
+  `buddystudy_backend`. Updates use `start-first`, the image dependency health
+  check, a 90-second monitor window, and automatic rollback. This prevents an
+  unhealthy replacement task from taking traffic while retaining the previous
+  task during the update. A single Swarm node provides deployment continuity,
+  not host-level high availability.
+- The backend task is limited to 1.25 GiB memory and reserves 512 MiB so the
+  old and new task can overlap on the 4 GiB EC2 host without allowing two JVMs
+  to consume the entire machine. JVM heap remains 50% of its container limit.
+- Nginx routes to the fixed `buddystudy_backend:8080` service name on the
+  attachable `buddystudy-swarm-net` overlay. Ordinary backend updates never
+  rewrite the upstream. The first migration is staged with the old route
+  intact and requires one explicit `promote_swarm=true` run after the staged
+  task has been inspected.
 - Before pulling a backend release, the backend deploy removes only Docker
   images that are not referenced by any container. This keeps the small EC2
   disk from accumulating superseded release images without touching running
@@ -98,9 +113,11 @@ deployment.
   history and failure alerts but must not make a 15-minute readiness check stale.
   The answer-grading watchdog is a frequent critical job and belongs in the
   default monitored list.
-- Runtime health checks are not GitHub Actions deploy gates. GitHub Actions may
-  validate deploy mechanics such as image pull, container process survival, and
-  nginx syntax only.
+- Runtime health checks are not GitHub Actions deploy gates. GitHub Actions
+  validates image/config submission and Nginx syntax only. Docker Swarm owns
+  task health, replacement ordering, and rollback; Grafana owns continuous
+  outage alerting. A successful workflow is reported as staged, promoted, or
+  submitted rather than as runtime-health completion.
 - Shared infrastructure changes, such as nginx routing needed by multiple
   modules, must be called out in the workflow summary and kept backwards
   compatible with currently running containers.

@@ -17,6 +17,10 @@ Current workflow templates:
 
 - `deploy-backend.yml`: backend API runtime on EC2 with one compact,
   emoji-free Slack result attachment.
+- `backend-swarm-stack.yml`: backend Swarm service update, health, and rollback
+  policy consumed by `deploy-backend.yml`.
+- `repair-backend-flyway-v32.yml`: guarded one-time cleanup for a failed,
+  partially applied V32 migration.
 - `configure-backend-network.yml`: Redis administrator ingress on the backend
   EC2 security group.
 - `deploy-admin-frontend.yml`: admin frontend runtime on EC2.
@@ -83,8 +87,10 @@ Repository variables:
 ## Runtime Layout
 
 - `buddystudy-nginx`: public HTTPS proxy on host port `443`.
-- `buddystudy-backend-a`: blue slot for Spring Boot app on Docker network port `8080`.
-- `buddystudy-backend-b`: green slot for Spring Boot app on Docker network port `8080`.
+- `buddystudy_backend`: single-replica Docker Swarm service for the Spring Boot
+  app on overlay network port `8080`.
+- `buddystudy-swarm-net`: attachable overlay shared by Nginx, the backend
+  service, MySQL, Redis, and LibreTranslate.
 - `buddystudy-db`: MySQL on Docker network port `3306`, published to host port
   `3306` for approved administrator CIDRs.
 - `buddystudy-redis`: password-protected Redis on Docker network port `6379`,
@@ -208,21 +214,34 @@ The backend image must be built on a GitHub-hosted runner and pushed to GHCR
 before this workflow runs. The self-hosted EC2 runner only pulls the image and
 runs containers; it must not compile backend code or build Docker images.
 
-The deploy process uses a blue/green rolling pattern:
+The deploy process uses Docker Swarm rolling updates:
 
-1. New image starts on the inactive slot (`buddystudy-backend-a` or `...-b`).
-2. GitHub Actions validates only deploy mechanics: the new container process
-   does not immediately exit, and Nginx configuration is valid. It must not
-   call backend health or readiness endpoints, inspect Docker `Health.Status`,
-   or call the Health Monitor Worker `/check` endpoint.
-3. Certificate checks are refreshed, and both old/new slots can coexist briefly.
-4. Traffic is switched to the new slot, then the old slot is drained and removed with graceful stop.
+1. The workflow submits the immutable image to `buddystudy_backend`.
+2. Swarm starts the replacement task before stopping the current task.
+3. The image health check calls only
+   `/api/v1/health/dependencies`; `failure_action: rollback` restores the
+   previous task when the replacement does not become healthy in the update
+   monitor window.
+4. Nginx keeps the fixed `buddystudy_backend:8080` upstream, so routine updates
+   do not rewrite or race the proxy configuration.
+
+For the first migration only, run with `promote_swarm=false`, inspect the staged
+task and logs, then rerun the same image with `promote_swarm=true`. This switches
+Nginx once and removes the former A/B containers. A single Swarm node provides
+zero-downtime application replacement but does not provide host failover.
 
 Only one scheduler leader is active during overlap windows. MySQL advisory lock is used so only one running backend instance processes scheduled question dispatch at a time.
 
 The workflow uses Let's Encrypt with the `tls-alpn-01` challenge, so only port `443` needs to be public. If certificate issuance fails, a temporary self-signed certificate keeps the service reachable for debugging.
 
-GitHub Actions must not call backend `/health` or readiness endpoints, must not inspect Docker `Health.Status`, must not use indirect container health gates such as `docker compose up --wait` or `docker compose wait`, and must not call the Health Monitor Worker `/check` endpoint. Runtime server-down alerts are handled by Grafana alerting. The Cloudflare Worker remains available for explicit diagnostics, but its production Cron check is disabled.
+GitHub Actions must not call backend `/health` or readiness endpoints, must not
+inspect Docker `Health.Status`, must not use indirect container health gates
+such as `docker compose up --wait` or `docker compose wait`, and must not call
+the Health Monitor Worker `/check` endpoint. It reports a Swarm update as
+staged, promoted, or submitted. Swarm evaluates the image health check as the
+platform rollout policy, while runtime server-down alerts are handled by
+Grafana alerting. The Cloudflare Worker remains available for explicit
+diagnostics, but its production Cron check is disabled.
 
 Backend scheduler failures are emitted as `ERROR` logs with the throwable and
 run identifiers. Promtail stores the complete stack as one Loki event, and

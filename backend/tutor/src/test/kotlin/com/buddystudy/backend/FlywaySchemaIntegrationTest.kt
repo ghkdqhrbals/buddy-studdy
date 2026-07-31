@@ -60,6 +60,7 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
             where table_schema = database()
               and (
                 (table_name = 'users' and column_name in ('provider', 'status', 'avatar_mode', 'app_language'))
+                or (table_name = 'user_memberships' and column_name = 'status')
                 or (table_name = 'devices' and column_name in ('platform', 'apns_environment', 'language'))
                 or (table_name = 'questions' and column_name in ('status', 'source', 'grading_verdict', 'grading_status'))
               )
@@ -77,9 +78,10 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
             .awaitSingle()
             .associateBy { "${it.table}.${it.column}" }
 
-        assertThat(comments).hasSize(11)
+        assertThat(comments).hasSize(12)
         assertThat(comments.getValue("users.provider").comment).contains("APPLE", "GOOGLE", "EMAIL")
         assertThat(comments.getValue("users.status").comment).contains("PENDING_TERMS", "WITHDRAWN")
+        assertThat(comments.getValue("user_memberships.status").comment).contains("ACTIVE", "INACTIVE")
         assertThat(comments.getValue("users.app_language").comment).contains("ko", "en", "ja")
         assertThat(comments.getValue("devices.apns_environment").comment).contains("sandbox", "production")
         assertThat(comments.getValue("questions.status").comment).contains("ungraded", "graded", "skipped")
@@ -94,6 +96,7 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
               and constraint_name in (
                 'chk_users_provider',
                 'chk_users_status',
+                'chk_user_memberships_status',
                 'chk_devices_apns_environment',
                 'chk_questions_status',
                 'chk_questions_grading_status'
@@ -108,6 +111,7 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(checks).containsExactlyInAnyOrder(
             "chk_users_provider",
             "chk_users_status",
+            "chk_user_memberships_status",
             "chk_devices_apns_environment",
             "chk_questions_status",
             "chk_questions_grading_status",

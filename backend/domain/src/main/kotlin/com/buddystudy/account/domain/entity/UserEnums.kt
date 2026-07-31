@@ -23,4 +23,5 @@ enum class AvatarMode {
 
 enum class MembershipStatus {
     ACTIVE,
+    INACTIVE,
 }
