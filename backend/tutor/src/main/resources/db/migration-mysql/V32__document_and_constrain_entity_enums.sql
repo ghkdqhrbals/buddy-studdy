@@ -86,9 +86,9 @@ alter table users
 
 alter table user_memberships
     modify column status varchar(32) not null
-        comment 'Membership lifecycle state. Values: ACTIVE',
+        comment 'Membership lifecycle state. Values: ACTIVE, INACTIVE',
     add constraint chk_user_memberships_status
-        check (status in ('ACTIVE'));
+        check (status in ('ACTIVE', 'INACTIVE'));
 
 alter table devices
     modify column platform varchar(32) not null

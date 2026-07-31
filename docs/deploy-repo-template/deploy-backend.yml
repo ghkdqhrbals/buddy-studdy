@@ -19,6 +19,11 @@ on:
           - auto
           - native
           - jvm
+      promote_swarm:
+        description: "One-time cutover after the staged Swarm task is verified."
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: deploy-backend
@@ -33,8 +38,12 @@ jobs:
       IMAGE_REF: ${{ github.event.client_payload.image || inputs.image }}
       EXPECTED_BACKEND_RUNTIME: ${{ github.event.client_payload.backend_runtime || inputs.backend_runtime || 'auto' }}
       BACKEND_DOMAIN: api.ghkdqhrbals.org
+      PROMOTE_SWARM: ${{ inputs.promote_swarm || 'false' }}
 
     steps:
+      - name: Checkout deployment configuration
+        uses: actions/checkout@v4
+
       - name: Validate input
         run: |
           set -euo pipefail
@@ -211,12 +220,12 @@ jobs:
           OPENAI_API_KEY_SYSTEM=${OPENAI_API_KEY_SYSTEM}
           OPENAI_MODEL=gpt-5.4
           OPENAI_SYSTEM_MODEL=gpt-5.4
+          BUDDYSTUDY_TRANSLATION_BASE_URL=http://buddystudy-libretranslate:5000
           SMTP_HOST=${SMTP_HOST}
           SMTP_PORT=${SMTP_PORT}
           SMTP_USERNAME=${SMTP_USERNAME}
           SMTP_PASSWORD=${SMTP_PASSWORD}
           SMTP_FROM=${SMTP_FROM}
-          BUDDYSTUDY_TRANSLATION_BASE_URL=http://buddystudy-libretranslate:5000
           BACKEND_MASTER_KEY=${BACKEND_MASTER_KEY}
           BACKEND_API_TOKEN=${BACKEND_API_TOKEN}
           GOOGLE_IOS_CLIENT_ID=${GOOGLE_IOS_CLIENT_ID}
@@ -294,29 +303,31 @@ jobs:
           docker pull grafana/promtail:3.3.2
           docker pull docker:27-cli
 
-          wait_for_container_running() {
-            local container_name="$1"
-            local label="$2"
-            for attempt in $(seq 1 30); do
-              if docker inspect -f '{{.State.Running}}' "${container_name}" 2>/dev/null | grep -qx true; then
-                sleep 5
-                if docker inspect -f '{{.State.Running}}' "${container_name}" 2>/dev/null | grep -qx true; then
-                  return 0
-                fi
-              fi
-              if [ "$attempt" -eq 30 ]; then
-                echo "${label} did not stay running after ${attempt} attempts." >&2
-                docker logs "${container_name}" || true
-                return 1
-              fi
-              sleep 2
-            done
-          }
-
           docker network create buddystudy-net >/dev/null 2>&1 || true
           docker volume create buddystudy-mysql-data >/dev/null
           docker volume create buddystudy-redis-data >/dev/null
           docker volume create buddystudy-profile-photos >/dev/null
+
+          SWARM_STATE="$(docker info --format '{{.Swarm.LocalNodeState}}')"
+          case "${SWARM_STATE}" in
+            active)
+              ;;
+            inactive)
+              PRIVATE_ADDRESS="$(hostname -I | awk '{print $1}')"
+              docker swarm init --advertise-addr "${PRIVATE_ADDRESS}"
+              ;;
+            *)
+              echo "Docker Swarm is not usable in state ${SWARM_STATE}." >&2
+              exit 1
+              ;;
+          esac
+          if ! docker network inspect buddystudy-swarm-net >/dev/null 2>&1; then
+            docker network create \
+              --driver overlay \
+              --attachable \
+              buddystudy-swarm-net >/dev/null
+          fi
+          cp "${GITHUB_WORKSPACE}/deploy/backend/swarm-stack.yml" backend-stack.yml
 
           mkdir -p promtail
           if [ -n "${REMOTE_LOKI_PUSH_URL}" ]; then
@@ -444,6 +455,7 @@ jobs:
             fi
             sleep 2
           done
+          docker network connect buddystudy-swarm-net buddystudy-db >/dev/null 2>&1 || true
 
           docker rm -f buddystudy-redis >/dev/null 2>&1 || true
           docker run -d \
@@ -455,6 +467,7 @@ jobs:
             -v buddystudy-redis-data:/data \
             redis:7.4-alpine \
             sh -c 'exec redis-server --requirepass "$REDIS_PASSWORD" --appendonly yes --appendfsync everysec --save 900 1 --save 300 10 --save 60 10000'
+          docker network connect buddystudy-swarm-net buddystudy-redis >/dev/null 2>&1 || true
 
           sleep 2
           if [ "$(docker inspect -f '{{.State.Running}}' buddystudy-redis 2>/dev/null || true)" != "true" ]; then
@@ -466,45 +479,27 @@ jobs:
             echo "Redis host port 6379 was not published." >&2
             exit 1
           fi
+          if docker inspect buddystudy-libretranslate >/dev/null 2>&1; then
+            docker network connect buddystudy-swarm-net buddystudy-libretranslate >/dev/null 2>&1 || true
+          fi
 
-          BLUE_SLOT="buddystudy-backend-a"
-          GREEN_SLOT="buddystudy-backend-b"
-          LEGACY_SLOT="buddystudy-backend"
-          ACTIVE_SLOT="$(cat .active_backend_slot 2>/dev/null || true)"
-          if [ -n "${ACTIVE_SLOT}" ] && ! docker inspect -f '{{.State.Running}}' "${ACTIVE_SLOT}" 2>/dev/null | grep -qx true; then
-            ACTIVE_SLOT=""
-          fi
-          if [ -z "${ACTIVE_SLOT}" ]; then
-            if docker inspect -f '{{.State.Running}}' "${BLUE_SLOT}" 2>/dev/null | grep -qx true; then
-              ACTIVE_SLOT="${BLUE_SLOT}"
-            elif docker inspect -f '{{.State.Running}}' "${GREEN_SLOT}" 2>/dev/null | grep -qx true; then
-              ACTIVE_SLOT="${GREEN_SLOT}"
-            elif docker inspect -f '{{.State.Running}}' "${LEGACY_SLOT}" 2>/dev/null | grep -qx true; then
-              ACTIVE_SLOT="${LEGACY_SLOT}"
-            fi
-          fi
-          if [ "${ACTIVE_SLOT}" = "${BLUE_SLOT}" ]; then
-            NEW_SLOT="${GREEN_SLOT}"
-            OLD_SLOT="${BLUE_SLOT}"
-          else
-            NEW_SLOT="${BLUE_SLOT}"
-            OLD_SLOT="${ACTIVE_SLOT}"
-          fi
-          echo "Deploying ${IMAGE_REF} to ${NEW_SLOT}; active slot is ${OLD_SLOT:-none}."
+          export IMAGE_REF
+          docker stack config -c backend-stack.yml >/dev/null
+          docker stack deploy \
+            --with-registry-auth \
+            --detach=true \
+            -c backend-stack.yml \
+            buddystudy
 
-          docker rm -f "${NEW_SLOT}" >/dev/null 2>&1 || true
-          docker run -d \
-            --name "${NEW_SLOT}" \
-            --network buddystudy-net \
-            --restart unless-stopped \
-            --env-file .env \
-            -v buddystudy-profile-photos:/app/profile-photos \
-            "${IMAGE_REF}"
-
-          if ! wait_for_container_running "${NEW_SLOT}" "New backend slot ${NEW_SLOT}"; then
-            docker rm -f "${NEW_SLOT}" >/dev/null 2>&1 || true
-            exit 1
+          BACKEND_DEPLOYMENT_STATE="staged"
+          if [ -f .swarm_routing_enabled ]; then
+            BACKEND_DEPLOYMENT_STATE="submitted"
           fi
+          {
+            echo "BACKEND_DEPLOYMENT_STATE=${BACKEND_DEPLOYMENT_STATE}"
+            echo "BACKEND_SWARM_SERVICE=buddystudy_backend"
+          } >> "${GITHUB_ENV}"
+          echo "Submitted ${IMAGE_REF} to Swarm service buddystudy_backend."
 
           SSL_CERTIFICATE="/etc/letsencrypt/live/${BACKEND_DOMAIN}/fullchain.pem"
           SSL_CERTIFICATE_KEY="/etc/letsencrypt/live/${BACKEND_DOMAIN}/privkey.pem"
@@ -543,7 +538,6 @@ jobs:
           fi
 
           write_nginx_config() {
-            local backend_slot="$1"
             cat > nginx/nginx.conf <<NGINX
           events {}
 
@@ -576,7 +570,7 @@ jobs:
               }
 
               location / {
-                set \$backend http://${backend_slot}:8080;
+                set \$backend http://buddystudy_backend:8080;
                 proxy_pass \$backend;
                 proxy_http_version 1.1;
                 proxy_set_header Host \$host;
@@ -590,40 +584,43 @@ jobs:
           NGINX
           }
 
-          write_nginx_config "${NEW_SLOT}"
+          if [ -f .swarm_routing_enabled ] || [ "${PROMOTE_SWARM}" = "true" ]; then
+            write_nginx_config
 
-          if docker inspect buddystudy-nginx >/dev/null 2>&1; then
-            docker start buddystudy-nginx >/dev/null 2>&1 || true
-            docker network connect buddystudy-net buddystudy-nginx >/dev/null 2>&1 || true
-            docker exec buddystudy-nginx nginx -t
-            docker exec buddystudy-nginx nginx -s reload
-          else
-            docker run -d \
-              --name buddystudy-nginx \
-              --network buddystudy-net \
-              --restart unless-stopped \
-              -p 443:443 \
-              -v "$PWD/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
-              -v "$PWD/nginx/certs:/etc/nginx/certs:ro" \
-              -v "$PWD/letsencrypt:/etc/letsencrypt:ro" \
-              nginx:1.27-alpine
-          fi
-          if ! wait_for_container_running "${NEW_SLOT}" "Backend container ${NEW_SLOT}"; then
-            docker logs buddystudy-nginx || true
-            if [ -n "${OLD_SLOT}" ]; then
-              echo "Rolling Nginx back to ${OLD_SLOT}." >&2
-              write_nginx_config "${OLD_SLOT}"
-              docker exec buddystudy-nginx nginx -t || true
-              docker exec buddystudy-nginx nginx -s reload || true
+            if docker inspect buddystudy-nginx >/dev/null 2>&1; then
+              docker start buddystudy-nginx >/dev/null 2>&1 || true
+              docker network connect buddystudy-net buddystudy-nginx >/dev/null 2>&1 || true
+              docker network connect buddystudy-swarm-net buddystudy-nginx >/dev/null 2>&1 || true
+              docker exec buddystudy-nginx nginx -t
+              docker exec buddystudy-nginx nginx -s reload
+            else
+              docker run -d \
+                --name buddystudy-nginx \
+                --network buddystudy-swarm-net \
+                --restart unless-stopped \
+                -p 443:443 \
+                -v "$PWD/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
+                -v "$PWD/nginx/certs:/etc/nginx/certs:ro" \
+                -v "$PWD/letsencrypt:/etc/letsencrypt:ro" \
+                nginx:1.27-alpine
+              docker network connect buddystudy-net buddystudy-nginx >/dev/null 2>&1 || true
             fi
-            docker rm -f "${NEW_SLOT}" >/dev/null 2>&1 || true
-            exit 1
-          fi
 
-          printf '%s' "${NEW_SLOT}" > .active_backend_slot
-          if [ -n "${OLD_SLOT}" ] && [ "${OLD_SLOT}" != "${NEW_SLOT}" ]; then
-            docker stop --time 30 "${OLD_SLOT}" >/dev/null 2>&1 || true
-            docker rm "${OLD_SLOT}" >/dev/null 2>&1 || true
+            if [ "${PROMOTE_SWARM}" = "true" ] && [ ! -f .swarm_routing_enabled ]; then
+              touch .swarm_routing_enabled
+              BACKEND_DEPLOYMENT_STATE="promoted"
+              echo "BACKEND_DEPLOYMENT_STATE=${BACKEND_DEPLOYMENT_STATE}" >> "${GITHUB_ENV}"
+              echo "Nginx now routes backend traffic to buddystudy_backend."
+
+              for legacy_slot in buddystudy-backend-a buddystudy-backend-b buddystudy-backend; do
+                docker stop --time 45 "${legacy_slot}" >/dev/null 2>&1 || true
+                docker rm "${legacy_slot}" >/dev/null 2>&1 || true
+              done
+              rm -f .active_backend_slot
+            fi
+          else
+            echo "Swarm service is staged. Existing backend routing remains unchanged."
+            echo "Verify the Swarm task, then rerun manually with promote_swarm=true."
           fi
           docker image prune -f
 
@@ -692,7 +689,9 @@ jobs:
             echo "- Target: \`ec2\`"
             echo "- Image: \`${IMAGE_REF}\`"
             echo "- Runtime: \`${BACKEND_RUNTIME}\`"
-            echo "- Result: \`${{ job.status }}\`"
+            echo "- Workflow: \`${{ job.status }}\`"
+            echo "- Swarm state: \`${BACKEND_DEPLOYMENT_STATE:-not-submitted}\`"
+            echo "- Service: \`${BACKEND_SWARM_SERVICE:-buddystudy_backend}\`"
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Notify Slack
@@ -723,12 +722,19 @@ jobs:
           runtime = os.environ.get("BACKEND_RUNTIME") or os.environ.get("EXPECTED_BACKEND_RUNTIME") or "unknown"
           source_repository = os.environ.get("SOURCE_REPOSITORY", "")
           source_sha = os.environ.get("SOURCE_SHA", "")
+          deployment_state = os.environ.get("BACKEND_DEPLOYMENT_STATE", "not-submitted")
 
-          appearance = {
-              "success": ("#2EB67D", "완료"),
-              "cancelled": ("#ECB22E", "취소"),
-          }
-          color, status_label = appearance.get(status, ("#E01E5A", "실패"))
+          if status == "success":
+              state_labels = {
+                  "staged": "Swarm 스테이징됨",
+                  "promoted": "Swarm 승격됨",
+                  "submitted": "Swarm 업데이트 제출됨",
+              }
+              color, status_label = "#2EB67D", state_labels.get(deployment_state, "배포 요청됨")
+          elif status == "cancelled":
+              color, status_label = "#ECB22E", "취소"
+          else:
+              color, status_label = "#E01E5A", "실패"
           source_url = (
               f"https://github.com/{source_repository}/commit/{source_sha}"
               if source_repository and source_sha
