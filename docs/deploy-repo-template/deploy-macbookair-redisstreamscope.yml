@@ -41,7 +41,17 @@ jobs:
             exit 1
           fi
 
-          docker pull "${IMAGE_REF}"
+          public_docker_config="$(mktemp -d)"
+          cleanup() {
+            rm -f "${public_docker_config}/config.json"
+            rmdir "${public_docker_config}"
+          }
+          trap cleanup EXIT
+          printf '{"auths":{}}\n' > "${public_docker_config}/config.json"
+          docker --config "${public_docker_config}" pull "${IMAGE_REF}"
+          cleanup
+          trap - EXIT
+
           docker network create buddystudy-monitoring >/dev/null 2>&1 || true
           docker volume create buddystudy-redisstreamscope-data >/dev/null
 
