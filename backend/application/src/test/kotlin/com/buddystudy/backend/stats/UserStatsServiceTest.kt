@@ -177,6 +177,45 @@ class UserStatsServiceTest {
     }
 
     @Test
+    fun `activity topic order is stable when response counts are tied`(): Unit = runBlocking {
+        val today = LocalDate.now(java.time.ZoneOffset.UTC)
+        userStats.rows += UserStatsEntity(
+            userId = 7,
+            statDate = today,
+            topicKey = "zulu",
+            topic = "Zulu",
+            difficultyLevel = 5,
+            responseCount = 2,
+            scoreCount = 2,
+            scoreSum = 160,
+            bestScore = 90,
+            correctCount = 2,
+            latestAt = Instant.now(),
+        )
+        userStats.rows += UserStatsEntity(
+            userId = 7,
+            statDate = today,
+            topicKey = "alpha",
+            topic = "Alpha",
+            difficultyLevel = 5,
+            responseCount = 2,
+            scoreCount = 2,
+            scoreSum = 160,
+            bestScore = 90,
+            correctCount = 2,
+            latestAt = Instant.now(),
+        )
+
+        val response = service.activity(
+            principal,
+            startAt = today.atStartOfDay().toInstant(java.time.ZoneOffset.UTC),
+            endAt = today.plusDays(1).atStartOfDay().toInstant(java.time.ZoneOffset.UTC),
+        )
+
+        assertThat(response.days.single().topics).containsExactly("Alpha", "Zulu")
+    }
+
+    @Test
     fun `level range averages estimates across multiple levels by score count`(): Unit = runBlocking {
         userStats.rows += UserStatsEntity(
             userId = 7,

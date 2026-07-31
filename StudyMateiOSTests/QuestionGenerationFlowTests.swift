@@ -1123,6 +1123,50 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertEqual(ContentLanguageRecognizer.detect("OK", fallback: .japanese), "ja")
     }
 
+    func testStatisticsAutoRefreshIgnoresRapidTabReselection() {
+        let now = Date(timeIntervalSince1970: 1_785_427_200)
+
+        XCTAssertTrue(StatisticsAutoRefreshPolicy.shouldRefresh(lastRefreshAt: nil, now: now))
+        XCTAssertFalse(
+            StatisticsAutoRefreshPolicy.shouldRefresh(
+                lastRefreshAt: now,
+                now: now.addingTimeInterval(59)
+            )
+        )
+        XCTAssertTrue(
+            StatisticsAutoRefreshPolicy.shouldRefresh(
+                lastRefreshAt: now,
+                now: now.addingTimeInterval(60)
+            )
+        )
+    }
+
+    func testStatisticsTopicCaptionUsesStableNameTieBreak() {
+        XCTAssertEqual(
+            StatsTopicFocusPolicy.topTopic(from: ["Swift", "Redis", "Redis", "Swift"]),
+            "Redis"
+        )
+        XCTAssertEqual(
+            StatsTopicFocusPolicy.topTopic(from: ["Redis", "Swift", "Swift", "Redis"]),
+            "Redis"
+        )
+    }
+
+    func testStudyGrowthPeriodUsesStableUtcDayBounds() {
+        let morning = Date(timeIntervalSince1970: 1_785_369_600)
+        let evening = morning.addingTimeInterval(86_399)
+
+        let morningBounds = StudyGrowthPeriod.last30Days.bounds(now: morning)
+        let eveningBounds = StudyGrowthPeriod.last30Days.bounds(now: evening)
+
+        XCTAssertEqual(morningBounds.startAt, eveningBounds.startAt)
+        XCTAssertEqual(morningBounds.endAt, eveningBounds.endAt)
+        XCTAssertEqual(
+            morningBounds.endAt.timeIntervalSince(morningBounds.startAt),
+            30 * 86_400
+        )
+    }
+
     func testLocalizationMetadataDecodesMixedSourceAndDisplayLanguages() throws {
         let data = Data(
             """

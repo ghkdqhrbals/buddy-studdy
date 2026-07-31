@@ -106,6 +106,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 15. A `?` beside Growth by Study explains ability estimation, non-overlapping answer windows, minimum sample size, subtree aggregation, and capped topic weighting in plain language.
 16. Total graded learning records, total topic count, and measured topic count sit above the tree. Question-workflow completion is not presented as a learning-growth statistic. Declining and unmeasured nodes are distinguished within the circular nodes themselves; statistics do not duplicate them in a separate priority list.
 17. Selecting any node in the statistics tree opens its growth detail and a newest-first record list for that exact topic node. Records load in 30-item pages as the user scrolls and open the shared question-browse detail flow.
+18. Re-selecting the Statistics tab within one minute reuses the current snapshot instead of issuing duplicate requests. Growth windows use stable UTC day boundaries, and equal-count topics use a deterministic name tie-break so the `This Month` card cannot change when the underlying records have not changed. Pull-to-refresh always performs an explicit refresh.
 
 ### Settings
 

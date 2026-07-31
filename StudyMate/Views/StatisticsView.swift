@@ -3,7 +3,7 @@ import SwiftUI
 import UIKit
 #endif
 
-private enum StudyGrowthPeriod: String, CaseIterable, Identifiable {
+enum StudyGrowthPeriod: String, CaseIterable, Identifiable {
     case last30Days
     case last90Days
     case lastYear
@@ -31,11 +31,46 @@ private enum StudyGrowthPeriod: String, CaseIterable, Identifiable {
         case .lastYear:
             days = 365
         }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        let today = calendar.startOfDay(for: now)
         return (
-            Calendar.current.date(byAdding: .day, value: -days, to: now)
-                ?? now.addingTimeInterval(-Double(days) * 86_400),
-            now
+            calendar.date(byAdding: .day, value: -(days - 1), to: today)
+                ?? today.addingTimeInterval(-Double(days - 1) * 86_400),
+            calendar.date(byAdding: .day, value: 1, to: today)
+                ?? today.addingTimeInterval(86_400)
         )
+    }
+}
+
+enum StatisticsAutoRefreshPolicy {
+    static let minimumInterval: TimeInterval = 60
+
+    static func shouldRefresh(lastRefreshAt: Date?, now: Date = Date()) -> Bool {
+        guard let lastRefreshAt else {
+            return true
+        }
+        return now.timeIntervalSince(lastRefreshAt) >= minimumInterval
+    }
+}
+
+enum StatsTopicFocusPolicy {
+    static func topTopic(from topics: [String]) -> String? {
+        var counts: [String: Int] = [:]
+        topics.forEach { counts[$0, default: 0] += 1 }
+        return counts
+            .sorted { lhs, rhs in
+                if lhs.value != rhs.value {
+                    return lhs.value > rhs.value
+                }
+                return lhs.key.compare(
+                    rhs.key,
+                    options: [.caseInsensitive, .diacriticInsensitive],
+                    locale: Locale(identifier: "en_US_POSIX")
+                ) == .orderedAscending
+            }
+            .first?
+            .key
     }
 }
 
@@ -46,6 +81,7 @@ struct StatisticsView: View {
     @State private var selectedActivityYear = Calendar.current.component(.year, from: Date())
     @State private var selectedGrowthPeriod: StudyGrowthPeriod = .last90Days
     @State private var isShowingGrowthHelp = false
+    @State private var lastAutomaticRefreshAt: Date?
 
     private static let topicPageSize = 8
 
@@ -261,10 +297,21 @@ struct StatisticsView: View {
             if let newest = activityYearOptions.first, !activityYearOptions.contains(selectedActivityYear) {
                 selectedActivityYear = newest
             }
-            loadStats()
-            loadActivity()
-            loadStudyGrowth()
+            loadStatisticsIfNeeded()
         }
+    }
+
+    private func loadStatisticsIfNeeded(now: Date = Date()) {
+        guard StatisticsAutoRefreshPolicy.shouldRefresh(
+            lastRefreshAt: lastAutomaticRefreshAt,
+            now: now
+        ) else {
+            return
+        }
+        lastAutomaticRefreshAt = now
+        loadStats()
+        loadActivity()
+        loadStudyGrowth()
     }
 
     private func loadStats() {
@@ -1387,16 +1434,13 @@ private struct StatsAchievementSnapshot {
 
         let calendar = Calendar.current
         let now = Date()
-        var counts: [String: Int] = [:]
-        activity.days
+        let topics = activity.days
             .filter {
                 calendar.component(.year, from: $0.date) == calendar.component(.year, from: now)
                     && calendar.component(.month, from: $0.date) == calendar.component(.month, from: now)
             }
             .flatMap(\.topics)
-            .forEach { counts[$0, default: 0] += 1 }
-
-        return counts.max { $0.value < $1.value }?.key
+        return StatsTopicFocusPolicy.topTopic(from: topics)
     }
 
     private static func yearAnswerCount(from activity: BackendStatsActivity?) -> Int {
@@ -1412,12 +1456,7 @@ private struct StatsAchievementSnapshot {
             return nil
         }
 
-        var counts: [String: Int] = [:]
-        activity.days
-            .flatMap(\.topics)
-            .forEach { counts[$0, default: 0] += 1 }
-
-        return counts.max { $0.value < $1.value }?.key
+        return StatsTopicFocusPolicy.topTopic(from: activity.days.flatMap(\.topics))
     }
 
     private static func longestStreak(from activity: BackendStatsActivity?) -> Int {

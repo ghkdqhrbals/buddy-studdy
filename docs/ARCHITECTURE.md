@@ -328,6 +328,7 @@ Public community feed
 - A direct node needs six graded answers for growth. The previous and recent windows never overlap and contain three to five samples each.
 - Parent and root estimates include descendant nodes, cap each node's weight at five answers, and report measured-node coverage separately from total subtree size.
 - `GET /api/v1/stats/studies` returns root summaries plus a flat node list containing `studyId`, `parentStudyId`, and `rootStudyId`. Each root also carries a normalized five-axis profile: mean score, mean answered difficulty, completed/generated ratio, answered-topic coverage, and deepest answered tree coverage.
+- Statistics tab re-selection is freshness-gated for one minute while pull-to-refresh bypasses that gate. Rolling growth periods are expressed as exclusive UTC day bounds, and backend plus iOS topic selection use explicit deterministic tie-breaks so identical read-model data produces identical cards.
 - iOS reconstructs a stable pre-order list for the selected root. It lazily renders that full depth-indented list below the radar instead of requiring repeated branch navigation.
 - The iOS root overview maps every study's previous and current estimates onto the same 1–10 axis. The help sheet documents the exact window and weighting rules instead of asking users to infer them from the chart.
 

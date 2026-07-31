@@ -58,7 +58,11 @@ class StatsService(
                 answerCount = dayRows.sumOf { it.responseCount },
                 topicCount = dayRows.map { it.topicKey }.distinct().size,
                 topics = dayRows
-                    .sortedByDescending { it.responseCount }
+                    .sortedWith(
+                        compareByDescending<UserStatsEntity> { it.responseCount }
+                            .thenBy { it.topicKey }
+                            .thenBy { it.topic },
+                    )
                     .map { it.topic }
                     .distinct()
                     .take(4),
