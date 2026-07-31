@@ -1,4 +1,36 @@
 services:
+  incident-receiver:
+    image: node:22-alpine
+    container_name: buddystudy-incident-receiver
+    restart: unless-stopped
+    command:
+      - node
+      - /app/src/server.mjs
+    environment:
+      INCIDENT_RECEIVER_PORT: "3030"
+      INCIDENT_DATA_DIR: /data
+      GRAFANA_INCIDENT_HMAC_SECRET: ${GRAFANA_INCIDENT_HMAC_SECRET:?set GRAFANA_INCIDENT_HMAC_SECRET}
+      CODEX_AUTOFIX_GITHUB_TOKEN: ${CODEX_AUTOFIX_GITHUB_TOKEN:?set CODEX_AUTOFIX_GITHUB_TOKEN}
+      GITHUB_AUTOFIX_REPOSITORY: ${GITHUB_AUTOFIX_REPOSITORY:-ghkdqhrbals/buddy-studdy}
+      GITHUB_AUTOFIX_EVENT_TYPE: codex-incident-autofix
+      LOKI_BASE_URL: http://buddystudy-loki:3100
+      DEPLOYMENT_HISTORY_URL: http://buddystudy-testzone-service:3020
+    volumes:
+      - ./incident-receiver/src:/app/src:ro
+      - ${HOME}/buddystudy/monitoring/incident-receiver/data:/data
+    depends_on:
+      - loki
+      - testzone-service
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - monitoring
+
   api-dashboard:
     image: nginx:1.27-alpine
     container_name: buddystudy-api-dashboard
@@ -61,11 +93,13 @@ services:
       TESTZONE_INFLUX_BUCKET: ${TESTZONE_INFLUX_BUCKET:-testzone}
       TESTZONE_INFLUX_TOKEN: ${TESTZONE_INFLUX_TOKEN:?set TESTZONE_INFLUX_TOKEN}
       GRAFANA_SLACK_WEBHOOK_URL: ${GRAFANA_SLACK_WEBHOOK_URL:-${SLACK_WEBHOOK_URL:-}}
+      GRAFANA_INCIDENT_HMAC_SECRET: ${GRAFANA_INCIDENT_HMAC_SECRET:?set GRAFANA_INCIDENT_HMAC_SECRET}
     volumes:
       - ${HOME}/buddystudy/monitoring/grafana/data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
+      - incident-receiver
       - loki
       - testzone-influxdb
     networks:

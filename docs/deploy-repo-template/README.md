@@ -66,6 +66,13 @@ EC2 log forwarding to MacBook Air Loki:
 MacBook Air monitoring deploy:
 
 - `GRAFANA_ADMIN_PASSWORD`
+- `GRAFANA_INCIDENT_HMAC_SECRET`
+- `CODEX_AUTOFIX_GITHUB_TOKEN` (fine-grained token scoped to dispatch the BuddyStudy source repository workflow)
+
+BuddyStudy source repository incident auto-fix:
+
+- `OPENAI_API_KEY_CODEX_AUTOFIX` (dedicated to `openai/codex-action`; never reuse backend OpenAI keys)
+- `CODEX_AUTOFIX_SLACK_WEBHOOK_URL` (optional Draft PR notification)
 
 MacBook Air RedisStreamScope deploy:
 
@@ -109,6 +116,7 @@ Repository variables:
 - `buddystudy-redis-data`: persistent Docker volume for Redis AOF/RDB data.
 - `buddystudy-backend-data`: legacy SQLite volume, kept for historical safety and not deleted.
 - `buddystudy-promtail`: lightweight EC2 log sender. It scrapes Docker logs and forwards them to the MacBook Air Loki endpoint when `REMOTE_LOKI_PUSH_URL` is set.
+- `buddystudy-incident-receiver`: private Monitoring-network service that verifies Grafana HMAC alerts, enriches them from Loki and deployment history, deduplicates alert instances, and dispatches the bounded Codex auto-fix workflow. It has no published host port.
 - `buddystudy-mysql-data` retains live DB data across restarts and redeploys.
 - Nginx proxies `/health`, `/api/v1/health`, and `/api/v1/*` to the BuddyStudy Spring Boot app.
 - Other paths return 404 at Nginx.
@@ -177,6 +185,7 @@ The MacBook Air workflow creates or replaces:
   `$HOME/data/buddystudy/monitoring/loki/data` by default.
 - `buddystudy-grafana`: Grafana with persistent host data under
   `$HOME/data/buddystudy/monitoring/grafana/data` by default.
+- `buddystudy-incident-receiver`: Grafana ERROR webhook receiver with persistent incident reservations under `$HOME/data/buddystudy/monitoring/incident-receiver/data` by default.
 
 The separate TestZone workflow creates or replaces:
 
@@ -287,8 +296,11 @@ diagnostics, but its production Cron check is disabled.
 
 Backend scheduler failures are emitted as `ERROR` logs with the throwable and
 run identifiers. Promtail stores the complete stack as one Loki event, and
-Grafana alone sends the Slack notification. The backend application does not
-receive `SLACK_WEBHOOK_URL`. The template passes
+Grafana alone sends the Slack notification and independently calls the private,
+HMAC-signed incident receiver. The backend application does not receive Slack,
+GitHub, or Codex credentials. The incident receiver dispatches only a bounded,
+redacted `codex-incident-autofix` payload; a separate GitHub-hosted workflow may
+open a verified Draft PR but never merges or deploys it. The template passes
 `MONITORING_SCHEDULER_READINESS_ENABLED`,
 `MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES`,
 `MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES`, and

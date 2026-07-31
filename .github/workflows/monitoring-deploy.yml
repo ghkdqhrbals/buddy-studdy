@@ -26,6 +26,7 @@ jobs:
         run: |
           set -euo pipefail
           (cd monitoring/api-dashboard && npm ci && npm test)
+          (cd monitoring/incident-receiver && npm test)
 
   dispatch:
     name: Dispatch Monitoring Module

@@ -260,7 +260,18 @@ deployment.
   the exact Loki ERROR query; the raw Explore URL is not printed in the message.
   Loki and Sentry retain the full stack and diagnostic context. The link does
   not depend on the Logs Drilldown volume API. This Grafana path is the only
-  production path from backend application errors to Slack.
+  production path from backend application errors to Slack. The same contact
+  point also sends an HMAC-signed request over the private Monitoring Docker
+  network to `buddystudy-incident-receiver`. The receiver deduplicates the
+  Grafana alert instance, reads bounded redacted Loki context and the latest
+  successful backend deployment SHA, then dispatches
+  `codex-incident-autofix` to the source repository. The Codex job is
+  read-only with respect to GitHub, full backend verification runs in a
+  separate job, and only a final isolated job may open a labeled Draft PR.
+  It never merges or deploys automatically. Configure
+  `GRAFANA_INCIDENT_HMAC_SECRET` and `CODEX_AUTOFIX_GITHUB_TOKEN` in the
+  private deploy repository, and `OPENAI_API_KEY_CODEX_AUTOFIX` plus the
+  optional `CODEX_AUTOFIX_SLACK_WEBHOOK_URL` in the source repository.
   The Server Dashboard supports fixed and explicit From/To time ranges and
   reads the same structured Micrometer runtime samples as the provisioned
   Grafana Server Runtime dashboard. The same module publishes the fixed,

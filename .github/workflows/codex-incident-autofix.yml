@@ -1,0 +1,334 @@
+name: Codex Production Incident Auto-Fix
+
+on:
+  repository_dispatch:
+    types: [codex-incident-autofix]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codex-incident-${{ github.event.client_payload.incident.incident_id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate Incident
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      incident_id: ${{ steps.validate.outputs.incident_id }}
+      branch: ${{ steps.validate.outputs.branch }}
+      skip: ${{ steps.existing.outputs.skip }}
+      existing_pr: ${{ steps.existing.outputs.existing_pr }}
+    steps:
+      - name: Validate bounded receiver payload
+        id: validate
+        env:
+          INCIDENT_JSON: ${{ toJSON(github.event.client_payload.incident) }}
+        run: |
+          set -euo pipefail
+          if [ "${#INCIDENT_JSON}" -gt 60000 ]; then
+            echo "Incident payload exceeds 60 KB." >&2
+            exit 1
+          fi
+          incident_id="$(jq -er '.incident_id | select(test("^[a-f0-9]{24}$"))' <<<"${INCIDENT_JSON}")"
+          jq -e '
+            (.service == "buddystudy-backend")
+            and (.severity == "error")
+            and ((.log_context | type) == "string")
+            and ((.log_context | length) > 0)
+            and ((.log_context | length) <= 40000)
+          ' <<<"${INCIDENT_JSON}" >/dev/null
+          echo "incident_id=${incident_id}" >> "${GITHUB_OUTPUT}"
+          echo "branch=codex/incident-${incident_id}" >> "${GITHUB_OUTPUT}"
+
+      - name: Skip an incident that already has a pull request
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INCIDENT_BRANCH: ${{ steps.validate.outputs.branch }}
+        run: |
+          set -euo pipefail
+          existing_pr="$(gh pr list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --head "${INCIDENT_BRANCH}" \
+            --state all \
+            --json url \
+            --jq '.[0].url // ""')"
+          if [ -n "${existing_pr}" ]; then
+            echo "skip=true" >> "${GITHUB_OUTPUT}"
+            echo "existing_pr=${existing_pr}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "skip=false" >> "${GITHUB_OUTPUT}"
+            echo "existing_pr=" >> "${GITHUB_OUTPUT}"
+          fi
+
+  generate_fix:
+    name: Generate Bounded Patch
+    needs: validate
+    if: needs.validate.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prepare untrusted incident context
+        env:
+          INCIDENT_JSON: ${{ toJSON(github.event.client_payload.incident) }}
+        run: |
+          set -euo pipefail
+          mkdir -p .codex-incident
+          chmod 0700 .codex-incident
+          printf '%s' "${INCIDENT_JSON}" > .codex-incident/context.json
+          chmod 0600 .codex-incident/context.json
+          printf '\n.codex-incident/\n' >> .git/info/exclude
+
+      - name: Set up Java for backend verification
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: gradle
+          cache-dependency-path: backend/**/*.gradle*
+
+      - name: Run Codex against the incident
+        id: codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY_CODEX_AUTOFIX }}
+          prompt-file: .github/codex/prompts/production-incident-autofix.md
+          output-file: codex-final.md
+          model: gpt-5.6-sol
+          effort: high
+          sandbox: workspace-write
+          safety-strategy: drop-sudo
+
+      - name: Validate and serialize Codex patch
+        id: patch
+        run: |
+          set -euo pipefail
+          mkdir -p autofix-artifact
+          cp .codex-incident/context.json autofix-artifact/incident.json
+          rm -rf .codex-incident
+          git add -N backend docs
+          mapfile -t changed_files < <(git diff --name-only HEAD)
+          if [ "${#changed_files[@]}" -eq 0 ]; then
+            echo "Codex produced no patch." >&2
+            exit 1
+          fi
+          backend_changed=false
+          for changed_file in "${changed_files[@]}"; do
+            case "${changed_file}" in
+              backend/*) backend_changed=true ;;
+              docs/*) ;;
+              *)
+                echo "Codex changed a disallowed path: ${changed_file}" >&2
+                exit 1
+                ;;
+            esac
+          done
+          if [ "${backend_changed}" != "true" ]; then
+            echo "Incident patch must include a backend code or test change." >&2
+            exit 1
+          fi
+          git diff --check
+          if git diff HEAD | grep -E 'sk-(proj-|svcacct-)?[A-Za-z0-9_-]{12,}' >/dev/null; then
+            echo "Patch contains a value shaped like an OpenAI API key." >&2
+            exit 1
+          fi
+          git diff --binary HEAD > autofix-artifact/codex.patch
+          mv codex-final.md autofix-artifact/codex-final.md
+
+      - name: Upload untrusted patch artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-incident-patch-${{ needs.validate.outputs.incident_id }}
+          path: autofix-artifact
+          if-no-files-found: error
+          retention-days: 7
+
+  verify_patch:
+    name: Verify Backend Patch
+    needs: [validate, generate_fix]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download Codex patch
+        uses: actions/download-artifact@v4
+        with:
+          name: codex-incident-patch-${{ needs.validate.outputs.incident_id }}
+          path: autofix-artifact
+
+      - name: Apply patch
+        run: git apply --index autofix-artifact/codex.patch
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: gradle
+          cache-dependency-path: backend/**/*.gradle*
+
+      - name: Run backend tests
+        working-directory: backend
+        run: ./gradlew test
+
+      - name: Preserve verified patch
+        run: |
+          set -euo pipefail
+          git diff --cached --check
+          cp autofix-artifact/codex.patch autofix-artifact/verified.patch
+
+      - name: Upload verified patch
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-incident-verified-${{ needs.validate.outputs.incident_id }}
+          path: autofix-artifact
+          if-no-files-found: error
+          retention-days: 14
+
+  open_draft_pr:
+    name: Open Priority Draft PR
+    needs: [validate, verify_patch]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - name: Download verified patch
+        uses: actions/download-artifact@v4
+        with:
+          name: codex-incident-verified-${{ needs.validate.outputs.incident_id }}
+          path: autofix-artifact
+
+      - name: Commit verified patch
+        env:
+          INCIDENT_BRANCH: ${{ needs.validate.outputs.branch }}
+        run: |
+          set -euo pipefail
+          git apply --index autofix-artifact/verified.patch
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "${INCIDENT_BRANCH}"
+          git commit -m "fix: address production incident ${{ needs.validate.outputs.incident_id }}"
+          if git fetch origin "${INCIDENT_BRANCH}"; then
+            remote_sha="$(git rev-parse FETCH_HEAD)"
+            git push \
+              --force-with-lease="refs/heads/${INCIDENT_BRANCH}:${remote_sha}" \
+              origin "HEAD:refs/heads/${INCIDENT_BRANCH}"
+          else
+            git push origin "HEAD:refs/heads/${INCIDENT_BRANCH}"
+          fi
+
+      - name: Open draft pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INCIDENT_BRANCH: ${{ needs.validate.outputs.branch }}
+          INCIDENT_ID: ${{ needs.validate.outputs.incident_id }}
+          INCIDENT_SUMMARY: ${{ github.event.client_payload.incident.summary }}
+          INCIDENT_STARTS_AT: ${{ github.event.client_payload.incident.starts_at }}
+          DEPLOYED_SOURCE_SHA: ${{ github.event.client_payload.incident.source_sha }}
+          LOGS_URL: ${{ github.event.client_payload.incident.logs_url }}
+        run: |
+          set -euo pipefail
+          gh label create production-incident \
+            --repo "${GITHUB_REPOSITORY}" \
+            --color B60205 \
+            --description "Generated from a production error alert" \
+            --force
+          gh label create priority/P1 \
+            --repo "${GITHUB_REPOSITORY}" \
+            --color D93F0B \
+            --description "High-priority production reliability work" \
+            --force
+          {
+            echo "## Production incident"
+            echo
+            echo "- Incident: \`${INCIDENT_ID}\`"
+            echo "- Started: \`${INCIDENT_STARTS_AT}\`"
+            if [ -n "${DEPLOYED_SOURCE_SHA}" ]; then
+              echo "- Deployed source: \`${DEPLOYED_SOURCE_SHA}\`"
+            fi
+            if [ -n "${LOGS_URL}" ]; then
+              echo "- Logs: ${LOGS_URL}"
+            fi
+            echo
+            echo "${INCIDENT_SUMMARY}"
+            echo
+            echo "Codex generated this bounded backend patch from redacted Loki context."
+            echo "The full backend test suite passed before this draft PR was opened."
+            echo "Human review is required; this workflow never merges or deploys automatically."
+            echo
+            echo "<details><summary>Codex report</summary>"
+            echo
+            sed -n '1,240p' autofix-artifact/codex-final.md
+            echo
+            echo "</details>"
+          } > pr-body.md
+          pr_url="$(gh pr create \
+            --repo "${GITHUB_REPOSITORY}" \
+            --base "${{ github.event.repository.default_branch }}" \
+            --head "${INCIDENT_BRANCH}" \
+            --draft \
+            --label production-incident \
+            --label priority/P1 \
+            --title "[P1] Fix production incident ${INCIDENT_ID}" \
+            --body-file pr-body.md)"
+          echo "url=${pr_url}" >> "${GITHUB_OUTPUT}"
+
+      - name: Notify Slack with the draft PR
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.CODEX_AUTOFIX_SLACK_WEBHOOK_URL }}
+          PR_URL: ${{ steps.pr.outputs.url }}
+          INCIDENT_ID: ${{ needs.validate.outputs.incident_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
+            echo "CODEX_AUTOFIX_SLACK_WEBHOOK_URL is not configured; skipping PR notification."
+            exit 0
+          fi
+          jq -n \
+            --arg text "Production ERROR 자동수정 Draft PR이 생성되었습니다. Incident ${INCIDENT_ID}: ${PR_URL}" \
+            '{text: $text}' \
+            | curl -fsS -X POST -H 'Content-Type: application/json' --data @- "${SLACK_WEBHOOK_URL}"
+
+      - name: Summary
+        run: |
+          {
+            echo "## Codex incident auto-fix"
+            echo
+            echo "- Incident: \`${{ needs.validate.outputs.incident_id }}\`"
+            echo "- Draft PR: ${{ steps.pr.outputs.url }}"
+            echo "- Verification: backend full test suite"
+            echo "- Merge/deploy: human approval required"
+          } >> "${GITHUB_STEP_SUMMARY}"

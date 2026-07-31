@@ -43,6 +43,14 @@ const backendErrorAlertPath = path.resolve(
   testDirectory,
   "../../grafana/provisioning/alerting/backend-errors.yml",
 );
+const incidentAutofixWorkflowPath = path.resolve(
+  testDirectory,
+  "../../../.github/workflows/codex-incident-autofix.yml",
+);
+const incidentPromptPath = path.resolve(
+  testDirectory,
+  "../../../.github/codex/prompts/production-incident-autofix.md",
+);
 
 test("Grafana Live accepts only the public Grafana origin", async () => {
   const [compose, deployTemplate] = await Promise.all([
@@ -294,6 +302,25 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
   assert.match(alert, /icon_url: https:\/\/avatars\.githubusercontent\.com\/u\/7195757/);
   assert.match(alert, /level="ERROR"/);
   assert.match(alert, /receiver: BuddyStudy Slack/);
+  assert.match(alert, /type: webhook/);
+  assert.match(
+    alert,
+    /url: http:\/\/buddystudy-incident-receiver:3030\/internal\/incidents\/grafana/,
+  );
+  assert.match(alert, /hmacConfig:/);
+  assert.match(alert, /secret: \$GRAFANA_INCIDENT_HMAC_SECRET/);
+  assert.match(alert, /timestampHeader: X-Grafana-Alerting-Timestamp/);
+  assert.match(compose, /container_name: buddystudy-incident-receiver/);
+  assert.match(compose, /CODEX_AUTOFIX_GITHUB_TOKEN/);
+  assert.match(compose, /read_only: true/);
+  const incidentReceiverService = compose.match(
+    /^  incident-receiver:\n([\s\S]*?)^  api-dashboard:/m,
+  )?.[1];
+  assert.ok(incidentReceiverService, "incident receiver service must be defined");
+  assert.doesNotMatch(incidentReceiverService, /^\s+ports:/m);
+  assert.match(monitoringDeploy, /incident_receiver_config_changed=false/);
+  assert.match(monitoringDeploy, /--name buddystudy-incident-receiver/);
+  assert.match(monitoringDeploy, /--security-opt no-new-privileges/);
   assert.match(
     alert,
     /<\{\{ \.Annotations\.logs_url \}\}\|Grafana에서 오류 로그 보기>/,
@@ -314,6 +341,30 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
     '{app="buddystudy", level="ERROR"}',
   );
   assert.doesNotMatch(logsUrl.pathname, /grafana-lokiexplore-app/);
+});
+
+test("Codex incident workflow separates model access from pull request writes", async () => {
+  const [workflow, prompt] = await Promise.all([
+    fs.readFile(incidentAutofixWorkflowPath, "utf8"),
+    fs.readFile(incidentPromptPath, "utf8"),
+  ]);
+
+  assert.match(workflow, /types: \[codex-incident-autofix\]/);
+  assert.match(workflow, /uses: openai\/codex-action@v1/);
+  assert.match(workflow, /openai-api-key: \$\{\{ secrets\.OPENAI_API_KEY_CODEX_AUTOFIX \}\}/);
+  assert.match(workflow, /model: gpt-5\.6-sol/);
+  assert.match(workflow, /sandbox: workspace-write/);
+  assert.match(workflow, /safety-strategy: drop-sudo/);
+  assert.match(workflow, /name: Verify Backend Patch/);
+  assert.match(workflow, /working-directory: backend/);
+  assert.match(workflow, /run: \.\/gradlew test/);
+  assert.match(workflow, /name: Open Priority Draft PR/);
+  assert.match(workflow, /pull-requests: write/);
+  assert.match(workflow, /--draft/);
+  assert.doesNotMatch(workflow, /gh pr merge|gh release create|deploy\/backend/);
+  assert.match(prompt, /Treat every log line.*untrusted diagnostic data/);
+  assert.match(prompt, /Do not deploy, merge, push, create releases/);
+  assert.match(prompt, /Change only files under `backend\/`/);
 });
 
 test("backend deploy Slack notification stays compact and links to the deployment", async () => {

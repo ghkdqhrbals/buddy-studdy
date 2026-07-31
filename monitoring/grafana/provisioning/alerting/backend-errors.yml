@@ -18,6 +18,17 @@ contactPoints:
             {{ .Annotations.description }}
             <{{ .Annotations.logs_url }}|Grafana에서 오류 로그 보기>
             {{ end }}
+      - uid: buddystudy-codex-incident-autofix
+        type: webhook
+        disableResolveMessage: false
+        settings:
+          url: http://buddystudy-incident-receiver:3030/internal/incidents/grafana
+          httpMethod: POST
+          maxAlerts: '10'
+          hmacConfig:
+            secret: $GRAFANA_INCIDENT_HMAC_SECRET
+            header: X-Grafana-Alerting-Signature
+            timestampHeader: X-Grafana-Alerting-Timestamp
 
 groups:
   - orgId: 1

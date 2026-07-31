@@ -351,6 +351,13 @@ Public community feed
 - The administrator status API returns every registered job, while readiness freshness applies only to the configured frequent critical subset. Daily correction jobs remain visible without being incorrectly marked stale by the global 15-minute readiness threshold.
 - Monitoring `Manage > Batch Jobs` uses the authenticated admin APIs for job status, paginated run history, run details, and explicit retry. Redis Stream consumer polling and `@StreamScheduler` pending-entry recovery remain pipeline operations and are inspected under `Manage > Redis Streams`, not recorded as high-frequency batch runs.
 
+## Production Incident Auto-Fix
+
+- Grafana remains the only producer of backend ERROR notifications. Its provisioned contact point fans out to Slack and an HMAC-signed, private Monitoring webhook; the backend application has no Slack or GitHub credential.
+- `buddystudy-incident-receiver` has no host port. It deduplicates each `(Grafana fingerprint, startsAt)` on persistent disk, reads a bounded redacted ERROR context from Loki, joins the latest successful backend deployment SHA, and sends `codex-incident-autofix` to the source repository.
+- The GitHub workflow separates trust boundaries: the Codex job has source read access plus its dedicated OpenAI key, the verification job applies only the serialized patch and runs the full backend test suite, and only the final job receives branch/PR write permission.
+- Generated changes are restricted to backend code and directly relevant documentation. Successful verification creates a labeled Draft PR; automatic merge, release, tagging, deployment, and production access are prohibited. The full contract and recovery behavior are documented in `docs/observability/codex-incident-autofix.md`.
+
 ## Build And Verification
 
 Recommended local checks:

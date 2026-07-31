@@ -34,6 +34,8 @@ jobs:
         env:
           GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
           GRAFANA_SLACK_WEBHOOK_URL: ${{ secrets.GRAFANA_SLACK_WEBHOOK_URL }}
+          GRAFANA_INCIDENT_HMAC_SECRET: ${{ secrets.GRAFANA_INCIDENT_HMAC_SECRET }}
+          CODEX_AUTOFIX_GITHUB_TOKEN: ${{ secrets.CODEX_AUTOFIX_GITHUB_TOKEN }}
           LEGACY_SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           TESTZONE_ROOT: ${{ vars.MACBOOKAIR_TESTZONE_ROOT || '$HOME/buddystudy/monitoring/testzone' }}
           TESTZONE_INFLUX_ORG: ${{ vars.TESTZONE_INFLUX_ORG || 'buddystudy' }}
@@ -50,6 +52,12 @@ jobs:
             echo "Missing GitHub Actions secret: GRAFANA_SLACK_WEBHOOK_URL (or legacy SLACK_WEBHOOK_URL)" >&2
             exit 1
           fi
+          for required_secret in GRAFANA_INCIDENT_HMAC_SECRET CODEX_AUTOFIX_GITHUB_TOKEN; do
+            if [ -z "${!required_secret:-}" ]; then
+              echo "Missing GitHub Actions secret: ${required_secret}" >&2
+              exit 1
+            fi
+          done
 
           monitoring_root="$(eval echo "${MONITORING_ROOT}")"
           testzone_root="$(eval echo "${TESTZONE_ROOT}")"
@@ -62,6 +70,8 @@ jobs:
           mkdir -p \
             "${monitoring_root}/api-dashboard/public" \
             "${monitoring_root}/api-dashboard/logs" \
+            "${monitoring_root}/incident-receiver/src" \
+            "${monitoring_root}/incident-receiver/data" \
             "${monitoring_root}/grafana/provisioning/datasources" \
             "${monitoring_root}/grafana/provisioning/dashboards" \
             "${monitoring_root}/grafana/provisioning/plugins" \
@@ -82,6 +92,7 @@ jobs:
           grafana_config_changed=false
           grafana_gateway_config_changed=false
           api_dashboard_config_changed=false
+          incident_receiver_config_changed=false
           promtail_config_changed=false
 
           if file_differs \
@@ -112,6 +123,23 @@ jobs:
             "${MONITORING_SOURCE_DIR}/api-dashboard/nginx.conf" \
             "${monitoring_root}/api-dashboard/nginx.conf"; then
             api_dashboard_config_changed=true
+          fi
+          if ! diff -qr \
+            "${MONITORING_SOURCE_DIR}/incident-receiver/src" \
+            "${monitoring_root}/incident-receiver/src" >/dev/null 2>&1; then
+            incident_receiver_config_changed=true
+          fi
+
+          hmac_secret_hash="$(printf '%s' "${GRAFANA_INCIDENT_HMAC_SECRET}" | shasum -a 256 | awk '{print $1}')"
+          github_token_hash="$(printf '%s' "${CODEX_AUTOFIX_GITHUB_TOKEN}" | shasum -a 256 | awk '{print $1}')"
+          previous_hmac_secret_hash="$(cat "${monitoring_root}/incident-receiver/hmac-secret.sha256" 2>/dev/null || true)"
+          previous_github_token_hash="$(cat "${monitoring_root}/incident-receiver/github-token.sha256" 2>/dev/null || true)"
+          if [ "${hmac_secret_hash}" != "${previous_hmac_secret_hash}" ]; then
+            grafana_config_changed=true
+            incident_receiver_config_changed=true
+          fi
+          if [ "${github_token_hash}" != "${previous_github_token_hash}" ]; then
+            incident_receiver_config_changed=true
           fi
           if file_differs \
             "${MONITORING_SOURCE_DIR}/promtail/config/promtail.yml" \
@@ -146,6 +174,9 @@ jobs:
             "${monitoring_root}/api-dashboard/public/"
           cp "${MONITORING_SOURCE_DIR}/api-dashboard/nginx.conf" \
             "${monitoring_root}/api-dashboard/nginx.conf"
+          find "${monitoring_root}/incident-receiver/src" -mindepth 1 -delete
+          cp -R "${MONITORING_SOURCE_DIR}/incident-receiver/src/." \
+            "${monitoring_root}/incident-receiver/src/"
           cp "${MONITORING_SOURCE_DIR}/promtail/config/promtail.yml" \
             "${monitoring_root}/promtail/config/promtail.yml"
           cp "${MONITORING_SOURCE_DIR}/grafana-gateway/nginx.conf" \
@@ -162,6 +193,10 @@ jobs:
           grep -q 'job: monitoring-access' \
             "${monitoring_root}/promtail/config/promtail.yml"
           grep -Fq '<{{ .Annotations.logs_url }}|Grafana에서 오류 로그 보기>' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
+          grep -Fq 'http://buddystudy-incident-receiver:3030/internal/incidents/grafana' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
+          grep -Fq 'timestampHeader: X-Grafana-Alerting-Timestamp' \
             "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
 
           docker network create buddystudy-monitoring >/dev/null 2>&1 || true
@@ -224,6 +259,38 @@ jobs:
               -config.file=/etc/loki/local-config.yaml
           fi
 
+          if ! container_running buddystudy-incident-receiver \
+            || [ "${incident_receiver_config_changed}" = "true" ]; then
+            docker rm -f buddystudy-incident-receiver >/dev/null 2>&1 || true
+            docker run -d \
+              --name buddystudy-incident-receiver \
+              --network buddystudy-monitoring \
+              --restart unless-stopped \
+              --read-only \
+              --tmpfs /tmp \
+              --cap-drop ALL \
+              --security-opt no-new-privileges \
+              -e INCIDENT_RECEIVER_PORT=3030 \
+              -e INCIDENT_DATA_DIR=/data \
+              -e GRAFANA_INCIDENT_HMAC_SECRET="${GRAFANA_INCIDENT_HMAC_SECRET}" \
+              -e CODEX_AUTOFIX_GITHUB_TOKEN="${CODEX_AUTOFIX_GITHUB_TOKEN}" \
+              -e GITHUB_AUTOFIX_REPOSITORY=ghkdqhrbals/buddy-studdy \
+              -e GITHUB_AUTOFIX_EVENT_TYPE=codex-incident-autofix \
+              -e LOKI_BASE_URL=http://buddystudy-loki:3100 \
+              -e DEPLOYMENT_HISTORY_URL=http://buddystudy-testzone-service:3020 \
+              -v "${monitoring_root}/incident-receiver/src:/app/src:ro" \
+              -v "${monitoring_root}/incident-receiver/data:/data" \
+              node:22-alpine \
+              node /app/src/server.mjs
+          fi
+          printf '%s' "${hmac_secret_hash}" \
+            > "${monitoring_root}/incident-receiver/hmac-secret.sha256"
+          printf '%s' "${github_token_hash}" \
+            > "${monitoring_root}/incident-receiver/github-token.sha256"
+          chmod 0600 \
+            "${monitoring_root}/incident-receiver/hmac-secret.sha256" \
+            "${monitoring_root}/incident-receiver/github-token.sha256"
+
           if ! container_running buddystudy-grafana || [ "${grafana_config_changed}" = "true" ]; then
             docker rm -f buddystudy-grafana >/dev/null 2>&1 || true
             docker run -d \
@@ -241,6 +308,7 @@ jobs:
               -e TESTZONE_INFLUX_ORG="${TESTZONE_INFLUX_ORG}" \
               -e TESTZONE_INFLUX_BUCKET="${TESTZONE_INFLUX_BUCKET}" \
               -e GRAFANA_SLACK_WEBHOOK_URL="${GRAFANA_SLACK_WEBHOOK_URL}" \
+              -e GRAFANA_INCIDENT_HMAC_SECRET="${GRAFANA_INCIDENT_HMAC_SECRET}" \
               -v "${grafana_volume}:/var/lib/grafana" \
               -v "${monitoring_root}/grafana/provisioning:/etc/grafana/provisioning:ro" \
               -v "${monitoring_root}/grafana/dashboards:/var/lib/grafana/dashboards:ro" \
@@ -318,9 +386,11 @@ jobs:
           docker logs --tail 80 buddystudy-api-dashboard || true
           echo "Monitoring access collector startup log:"
           docker logs --tail 80 buddystudy-monitoring-promtail || true
+          echo "Incident receiver startup log:"
+          docker logs --tail 80 buddystudy-incident-receiver || true
 
           echo "MacBook Air monitoring module is running."
-          echo "Restarted components: loki=${loki_config_changed}, grafana=${grafana_config_changed}, grafana_gateway=${grafana_gateway_config_changed}, api_dashboard=${api_dashboard_config_changed}, promtail=${promtail_config_changed}"
+          echo "Restarted components: loki=${loki_config_changed}, grafana=${grafana_config_changed}, grafana_gateway=${grafana_gateway_config_changed}, api_dashboard=${api_dashboard_config_changed}, incident_receiver=${incident_receiver_config_changed}, promtail=${promtail_config_changed}"
           echo "API Logs: http://127.0.0.1:${API_DASHBOARD_PORT}"
           echo "TestZone: http://127.0.0.1:${API_DASHBOARD_PORT}/testzone.html"
           echo "Grafana: http://127.0.0.1:${GRAFANA_PORT}/"
