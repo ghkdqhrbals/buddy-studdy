@@ -487,7 +487,6 @@ jobs:
           docker stack config -c backend-stack.yml >/dev/null
           docker stack deploy \
             --with-registry-auth \
-            --detach=true \
             -c backend-stack.yml \
             buddystudy
 
