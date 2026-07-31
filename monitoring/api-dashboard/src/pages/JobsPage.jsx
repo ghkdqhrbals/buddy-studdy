@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { RefreshCw, RotateCcw } from "lucide-react";
 import { useMemo, useState } from "react";
 import { adminFetch } from "../admin/adminApi.js";
@@ -48,6 +53,7 @@ function JobsWorkspace() {
       return adminFetch(`/jobs/runs?${params}`);
     },
     refetchInterval: 30_000,
+    placeholderData: keepPreviousData,
   });
   const retryMutation = useMutation({
     mutationFn: (run) => adminFetch(
@@ -182,7 +188,7 @@ function JobsWorkspace() {
           rowKey={(run) => run.id}
           onRowClick={setSelectedRun}
           emptyText="No job runs found."
-          loading={runsQuery.isLoading || runsQuery.isFetching}
+          loading={runsQuery.isLoading}
         />
         <Pagination
           page={page}
@@ -238,13 +244,22 @@ function JobsWorkspace() {
 }
 
 export function JobsPage() {
+  const queryClient = useQueryClient();
   return (
     <>
       <PageHeader
         eyebrow="Manage"
         title="Batch jobs"
         description="Review what each scheduled job does, when it ran, how long it took, and what it produced."
-        actions={<Button variant="secondary" icon={RefreshCw} onClick={() => window.location.reload()}>Refresh</Button>}
+        actions={(
+          <Button
+            variant="secondary"
+            icon={RefreshCw}
+            onClick={() => queryClient.invalidateQueries({ queryKey: ["admin", "jobs"] })}
+          >
+            Refresh
+          </Button>
+        )}
       />
       <JobsWorkspace />
     </>

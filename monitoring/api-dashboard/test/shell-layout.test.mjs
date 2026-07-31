@@ -59,6 +59,12 @@ test("deployment administration shows auto-refreshed workflow history and rollou
   assert.match(app, /deployments\.html/);
   assert.match(page, /refetchInterval:\s*10_000/);
   assert.match(page, /\/deployments\?/);
+  assert.match(page, /summary\.current/);
+  assert.match(page, /placeholderData:\s*keepPreviousData/);
+  assert.doesNotMatch(page, /recent-summary/);
+  assert.doesNotMatch(page, /limit=100/);
+  assert.doesNotMatch(page, /window\.location\.reload/);
+  assert.doesNotMatch(page, /isLoading\s*\|\|\s*deploymentsQuery\.isFetching/);
   assert.match(page, /Deployment history/);
   assert.match(page, /Open GitHub Actions/);
   assert.match(page, /Pagination/);
@@ -66,6 +72,13 @@ test("deployment administration shows auto-refreshed workflow history and rollou
   assert.match(page, /ObjectInspector/);
   assert.doesNotMatch(page, /AdminGate/);
   assert.match(api, /\/testzone\/api/);
+});
+
+test("data tables preserve rendered rows while background refreshes are running", async () => {
+  const table = await source("components/AdminUI.jsx");
+  assert.match(table, /const initialLoading = loading && rows\.length === 0/);
+  assert.match(table, /\{rows\.map\(\(row\) =>/);
+  assert.doesNotMatch(table, /!loading && rows\.map/);
 });
 
 test("feedback administration reviews submissions and sends deep-linked user notifications", async () => {

@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { Plus, Save, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
 import { adminFetch } from "../admin/adminApi.js";
@@ -118,6 +123,7 @@ export function AdministratorsPage() {
       if (query) params.set("query", query);
       return adminFetch(`/operators?${params}`);
     },
+    placeholderData: keepPreviousData,
   });
   const operators = Array.isArray(operatorsQuery.data?.operators) ? operatorsQuery.data.operators : [];
   const total = Number(operatorsQuery.data?.totalCount) || 0;
@@ -176,7 +182,7 @@ export function AdministratorsPage() {
           rowKey={(operator) => operator.id}
           onRowClick={setSelected}
           emptyText={query ? "No administrators match this search." : "No administrator accounts found."}
-          loading={operatorsQuery.isLoading || operatorsQuery.isFetching}
+          loading={operatorsQuery.isLoading}
         />
         <Pagination
           page={page}

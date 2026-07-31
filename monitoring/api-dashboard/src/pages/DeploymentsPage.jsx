@@ -1,4 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useIsFetching,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { ExternalLink, RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
 import {
@@ -52,24 +57,16 @@ function DeploymentsWorkspace() {
     queryKey: ["deployments", service, status, offset],
     queryFn: () => deploymentFetch(`/deployments?${params}`),
     refetchInterval: 10_000,
-  });
-  const recentQuery = useQuery({
-    queryKey: ["deployments", "recent-summary"],
-    queryFn: () => deploymentFetch("/deployments?limit=100&offset=0"),
-    refetchInterval: 10_000,
+    placeholderData: keepPreviousData,
   });
   const deployments = Array.isArray(deploymentsQuery.data?.items)
     ? deploymentsQuery.data.items
     : [];
-  const recent = Array.isArray(recentQuery.data?.items) ? recentQuery.data.items : [];
+  const summary = deploymentsQuery.data?.summary || {};
   const total = Number(deploymentsQuery.data?.totalCount) || 0;
   const page = Math.floor(offset / PAGE_SIZE) + 1;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const since = Date.now() - 24 * 60 * 60 * 1000;
-  const active = recent.filter((entry) => ACTIVE_STATUSES.has(entry.status));
-  const succeeded = recent.filter((entry) => entry.status === "SUCCEEDED" && Date.parse(entry.startedAt) >= since);
-  const failed = recent.filter((entry) => entry.status === "FAILED" && Date.parse(entry.startedAt) >= since);
-  const current = active[0] || recent[0] || null;
+  const current = summary.current || null;
 
   const columns = useMemo(() => [
     {
@@ -126,14 +123,14 @@ function DeploymentsWorkspace() {
     },
   ], []);
 
-  const error = deploymentsQuery.error || recentQuery.error;
+  const error = deploymentsQuery.error;
   return (
     <>
       {error ? <InlineNotice tone="danger">{error.message}</InlineNotice> : null}
       <div className="metric-strip deployment-metric-strip">
-        <div><span>Active</span><strong>{active.length}</strong></div>
-        <div><span>Succeeded · 24h</span><strong>{succeeded.length}</strong></div>
-        <div><span>Failed · 24h</span><strong>{failed.length}</strong></div>
+        <div><span>Active</span><strong>{Number(summary.activeCount) || 0}</strong></div>
+        <div><span>Succeeded · 24h</span><strong>{Number(summary.succeeded24h) || 0}</strong></div>
+        <div><span>Failed · 24h</span><strong>{Number(summary.failed24h) || 0}</strong></div>
         <div><span>Latest artifact</span><strong title={current?.image || ""}>{shortImage(current?.image)}</strong></div>
       </div>
 
@@ -189,7 +186,7 @@ function DeploymentsWorkspace() {
           rowKey={(deployment) => deployment.id}
           onRowClick={setSelected}
           emptyText="No deployment events have been recorded."
-          loading={deploymentsQuery.isLoading || deploymentsQuery.isFetching}
+          loading={deploymentsQuery.isLoading}
         />
         <Pagination
           page={page}
@@ -240,13 +237,24 @@ function DeploymentsWorkspace() {
 }
 
 export function DeploymentsPage() {
+  const queryClient = useQueryClient();
+  const refreshing = useIsFetching({ queryKey: ["deployments"] }) > 0;
   return (
     <>
       <PageHeader
         eyebrow="Manage"
         title="Deployments"
         description="Track backend and operations rollouts from submission through their final workflow state."
-        actions={<Button variant="secondary" icon={RefreshCw} onClick={() => window.location.reload()}>Refresh</Button>}
+        actions={(
+          <Button
+            variant="secondary"
+            icon={RefreshCw}
+            busy={refreshing}
+            onClick={() => queryClient.invalidateQueries({ queryKey: ["deployments"] })}
+          >
+            Refresh
+          </Button>
+        )}
       />
       <DeploymentsWorkspace />
     </>

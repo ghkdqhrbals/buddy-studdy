@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { RefreshCw, Rocket, ShieldAlert, Square } from "lucide-react";
 import { useMemo, useState } from "react";
 import { adminFetch } from "../admin/adminApi.js";
@@ -199,6 +204,7 @@ function CampaignDrawer({ campaign, onClose, onChanged }) {
       if (status) parameters.set("status", status);
       return adminFetch(`/app-updates/${campaign.id}/users?${parameters}`);
     },
+    placeholderData: keepPreviousData,
   });
   const endMutation = useMutation({
     mutationFn: () => adminFetch(`/app-updates/${campaign.id}/end`, { method: "POST" }),
@@ -315,7 +321,7 @@ function CampaignDrawer({ campaign, onClose, onChanged }) {
           rows={users}
           rowKey={(row) => `${row.userId}-${row.deviceId}`}
           emptyText="No devices have entered this campaign."
-          loading={usersQuery.isLoading || usersQuery.isFetching}
+          loading={usersQuery.isLoading}
         />
         <Pagination
           page={page}
@@ -337,6 +343,7 @@ export function AppUpdatesWorkspace() {
     queryKey: ["admin", "app-update-campaigns", offset],
     queryFn: () => adminFetch(`/app-updates?limit=${PAGE_SIZE}&offset=${offset}`),
     refetchInterval: 10_000,
+    placeholderData: keepPreviousData,
   });
   const campaigns = Array.isArray(campaignQuery.data?.campaigns) ? campaignQuery.data.campaigns : [];
   const total = Number(campaignQuery.data?.totalCount) || 0;
@@ -405,7 +412,7 @@ export function AppUpdatesWorkspace() {
           rowKey={(row) => row.id}
           onRowClick={setSelected}
           emptyText="No update campaigns yet."
-          loading={campaignQuery.isLoading || campaignQuery.isFetching}
+          loading={campaignQuery.isLoading}
         />
         <Pagination
           page={page}

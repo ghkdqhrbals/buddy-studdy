@@ -57,6 +57,7 @@ export function SearchField({
 }
 
 export function DataTable({ columns, rows, rowKey, onRowClick, emptyText, loading }) {
+  const initialLoading = loading && rows.length === 0;
   return (
     <div className="table-frame">
       <table className="data-table">
@@ -64,7 +65,7 @@ export function DataTable({ columns, rows, rowKey, onRowClick, emptyText, loadin
           <tr>{columns.map((column) => <th key={column.key}>{column.label}</th>)}</tr>
         </thead>
         <tbody>
-          {!loading && rows.map((row) => (
+          {rows.map((row) => (
             <tr
               key={rowKey(row)}
               className={onRowClick ? "clickable-row" : ""}
@@ -85,8 +86,8 @@ export function DataTable({ columns, rows, rowKey, onRowClick, emptyText, loadin
           ))}
         </tbody>
       </table>
-      {loading ? <div className="table-state"><RefreshCw className="spin" size={18} /> Loading data...</div> : null}
-      {!loading && rows.length === 0 ? (
+      {initialLoading ? <div className="table-state"><RefreshCw className="spin" size={18} /> Loading data...</div> : null}
+      {!initialLoading && rows.length === 0 ? (
         <div className="table-state"><Database size={18} /> {emptyText}</div>
       ) : null}
     </div>

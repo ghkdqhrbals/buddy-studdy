@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { RefreshCw, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { adminFetch } from "../admin/adminApi.js";
@@ -38,6 +38,7 @@ function useCursorPage(queryKey, pathBuilder, dependencies, enabled = true) {
     queryKey: [...queryKey, cursor, ...dependencies],
     queryFn: () => adminFetch(pathBuilder(cursor)),
     enabled,
+    placeholderData: keepPreviousData,
   });
   function reset() {
     setCursorStack([""]);
@@ -250,7 +251,7 @@ function StreamsWorkspace() {
               rowKey={(row) => `${mode}-${row.id}`}
               onRowClick={setSelected}
               emptyText={mode === "streams" ? "No stream entries found." : "No outbox entries found."}
-              loading={currentQuery.isLoading || currentQuery.isFetching}
+              loading={currentQuery.isLoading}
             />
             {!exactEntryId ? (
               <Pagination

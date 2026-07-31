@@ -103,7 +103,7 @@ test("deployment events require a bearer token and upsert paginated history", as
     deployRunId: "1234",
     deployUrl: "https://github.com/ghkdqhrbals/personal-deploy/actions/runs/1234",
     actor: "operator",
-    startedAt: "2026-07-31T00:00:00.000Z",
+    startedAt: new Date().toISOString(),
   };
 
   const unauthorized = await fetch(`${app.baseUrl}/api/deployments/events`, {
@@ -146,6 +146,10 @@ test("deployment events require a bearer token and upsert paginated history", as
   assert.equal(history.items[0].status, "SUCCEEDED");
   assert.equal(history.items[0].phase, "promoted");
   assert.equal(history.items[0].durationMs, 60_000);
+  assert.equal(history.summary.activeCount, 0);
+  assert.equal(history.summary.succeeded24h, 1);
+  assert.equal(history.summary.failed24h, 0);
+  assert.equal(history.summary.current.id, event.id);
 
   const detail = await fetch(`${app.baseUrl}/api/deployments/${encodeURIComponent(event.id)}`)
     .then((response) => response.json());

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   Activity,
   ChevronDown,
@@ -124,6 +124,7 @@ function PendingList({ topic, group }) {
     queryFn: () => adminFetch(streamPendingPath(topic, group, { cursor, limit: PENDING_PAGE_SIZE })),
     enabled: Boolean(topic && group),
     refetchInterval: 5_000,
+    placeholderData: keepPreviousData,
   });
   const rows = Array.isArray(query.data?.items) ? query.data.items : [];
 
@@ -204,6 +205,7 @@ function InboxAttemptList({ group }) {
     })),
     enabled: Boolean(group),
     refetchInterval: 5_000,
+    placeholderData: keepPreviousData,
   });
   const rows = Array.isArray(query.data?.items) ? query.data.items : [];
 

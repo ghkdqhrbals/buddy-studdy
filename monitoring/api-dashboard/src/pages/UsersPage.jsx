@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { Save } from "lucide-react";
 import { useMemo, useState } from "react";
 import { adminFetch } from "../admin/adminApi.js";
@@ -104,6 +109,7 @@ function UsersWorkspace() {
       if (query) params.set("query", query);
       return adminFetch(`/users?${params}`);
     },
+    placeholderData: keepPreviousData,
   });
   const users = Array.isArray(usersQuery.data?.users) ? usersQuery.data.users : [];
   const tiers = Array.isArray(tiersQuery.data) ? tiersQuery.data : [];
@@ -173,7 +179,7 @@ function UsersWorkspace() {
           rowKey={(user) => user.id}
           onRowClick={setSelected}
           emptyText={query ? "No users match this search." : "No users found."}
-          loading={usersQuery.isLoading || usersQuery.isFetching}
+          loading={usersQuery.isLoading}
         />
         <Pagination
           page={page}

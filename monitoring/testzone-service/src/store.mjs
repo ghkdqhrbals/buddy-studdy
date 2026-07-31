@@ -399,9 +399,28 @@ export class TestZoneStore {
       (!normalizedService || deployment.service.toLowerCase() === normalizedService)
       && (!normalizedStatus || deployment.status === normalizedStatus)
     ));
+    const since = Date.now() - 24 * 60 * 60 * 1000;
+    const activeStatuses = new Set(["QUEUED", "RUNNING"]);
+    const current = this.state.deployments.find((deployment) => activeStatuses.has(deployment.status))
+      || this.state.deployments[0]
+      || null;
     return {
       items: structuredClone(values.slice(offset, offset + limit)),
       totalCount: values.length,
+      summary: {
+        activeCount: this.state.deployments.filter(
+          (deployment) => activeStatuses.has(deployment.status),
+        ).length,
+        succeeded24h: this.state.deployments.filter(
+          (deployment) => deployment.status === "SUCCEEDED"
+            && Date.parse(deployment.startedAt) >= since,
+        ).length,
+        failed24h: this.state.deployments.filter(
+          (deployment) => deployment.status === "FAILED"
+            && Date.parse(deployment.startedAt) >= since,
+        ).length,
+        current: current ? structuredClone(current) : null,
+      },
     };
   }
 

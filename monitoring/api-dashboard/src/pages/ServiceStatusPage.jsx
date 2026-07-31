@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { CalendarClock, Power, RefreshCw, XCircle } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { adminFetch } from "../admin/adminApi.js";
@@ -225,6 +230,7 @@ function ServiceStatusWorkspace() {
     queryKey: ["admin", "app-control-maintenance", "history", offset],
     queryFn: () => adminFetch(`/app-updates/maintenance/history?limit=${PAGE_SIZE}&offset=${offset}`),
     refetchInterval: 10_000,
+    placeholderData: keepPreviousData,
   });
   const items = Array.isArray(historyQuery.data?.items) ? historyQuery.data.items : [];
   const total = Number(historyQuery.data?.totalCount) || 0;
@@ -272,6 +278,7 @@ function ServiceStatusWorkspace() {
 }
 
 export function ServiceStatusPage() {
+  const queryClient = useQueryClient();
   const [surface, setSurface] = useState("updates");
 
   useEffect(() => {
@@ -289,7 +296,11 @@ export function ServiceStatusPage() {
         title="App control"
         description="Publish update guidance and full-screen maintenance through Firebase Remote Config."
         actions={
-          <Button variant="secondary" icon={RefreshCw} onClick={() => window.location.reload()}>
+          <Button
+            variant="secondary"
+            icon={RefreshCw}
+            onClick={() => queryClient.invalidateQueries({ queryKey: ["admin"] })}
+          >
             Refresh
           </Button>
         }

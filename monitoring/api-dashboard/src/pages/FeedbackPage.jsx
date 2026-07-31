@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { CheckCircle2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { adminFetch } from "../admin/adminApi.js";
@@ -40,6 +45,7 @@ function FeedbackWorkspace() {
       if (status !== "ALL") params.set("status", status);
       return adminFetch(`/feedback?${params}`);
     },
+    placeholderData: keepPreviousData,
   });
   const reviewMutation = useMutation({
     mutationFn: () => adminFetch(`/feedback/${selected.id}/review`, { method: "PATCH" }),
@@ -113,7 +119,7 @@ function FeedbackWorkspace() {
           rowKey={(item) => item.id}
           onRowClick={setSelected}
           emptyText="No feedback found."
-          loading={feedbackQuery.isLoading || feedbackQuery.isFetching}
+          loading={feedbackQuery.isLoading}
         />
         <Pagination
           page={page}
