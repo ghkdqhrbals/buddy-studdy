@@ -4,9 +4,15 @@ import com.buddystudy.backend.admin.analytics.application.model.AdminDailyMetric
 import com.buddystudy.backend.admin.analytics.application.model.AdminLoginResponse
 import com.buddystudy.backend.admin.analytics.application.model.AdminMetricSeries
 import com.buddystudy.backend.admin.analytics.application.model.AdminMetricsResponse
+import com.buddystudy.backend.admin.analytics.application.model.AdminOperatorPageResponse
+import com.buddystudy.backend.admin.analytics.application.model.AdminOperatorSummary
+import com.buddystudy.backend.admin.analytics.application.model.AdminSessionResponse
+import com.buddystudy.backend.admin.analytics.application.model.CreateAdminOperatorCommand
+import com.buddystudy.backend.admin.analytics.application.model.UpdateAdminOperatorCommand
 import com.buddystudy.backend.admin.analytics.application.port.inbound.AdminAnalyticsAggregationUseCase
 import com.buddystudy.backend.admin.analytics.application.port.inbound.AdminAnalyticsUseCase
 import com.buddystudy.backend.admin.analytics.application.port.outbound.AdminAnalyticsMetricPort
+import com.buddystudy.backend.admin.analytics.application.port.outbound.AdminOperatorPort
 import com.buddystudy.backend.admin.analytics.application.port.outbound.AdminAnalyticsSourcePort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
@@ -29,6 +35,7 @@ class AdminAnalyticsService(
     private val properties: BuddyStudyProperties,
     private val metrics: AdminAnalyticsMetricPort,
     private val source: AdminAnalyticsSourcePort,
+    private val operators: AdminOperatorPort,
 ) : AdminAnalyticsUseCase, AdminAnalyticsAggregationUseCase {
     private val exposedMetricKeys = setOf(
         "daily_active_users",
@@ -49,16 +56,81 @@ class AdminAnalyticsService(
     }
 
     override suspend fun login(username: String, password: String): AdminLoginResponse {
-        if (properties.admin.password.isBlank()) {
-            throw ApiException(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.RESOURCE_NOT_FOUND, "Admin login is not configured.")
+        val now = Instant.now()
+        val normalizedUsername = username.trim().lowercase()
+        var principal = operators.authenticate(normalizedUsername, password, now)
+        if (principal == null && operators.activeStatus(normalizedUsername) == null) {
+            if (properties.admin.password.isBlank()) {
+                throw ApiException(HttpStatus.SERVICE_UNAVAILABLE, ApiErrorCode.RESOURCE_NOT_FOUND, "Admin login is not configured.")
+            }
+            if (
+                constantTimeEquals(normalizedUsername, properties.admin.username.trim().lowercase()) &&
+                constantTimeEquals(password, properties.admin.password)
+            ) {
+                principal = operators.ensureBootstrap(
+                    username = normalizedUsername,
+                    displayName = "Primary administrator",
+                    password = password,
+                )
+            }
         }
-        if (!constantTimeEquals(username, properties.admin.username) || !constantTimeEquals(password, properties.admin.password)) {
+        if (principal == null || principal.status != "ACTIVE") {
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Invalid admin credentials.")
         }
-        val now = Instant.now()
         val expiresAt = now.plusSeconds(properties.admin.tokenHours.coerceAtLeast(1) * 3_600)
-        val token = createAdminToken(now, expiresAt)
-        return AdminLoginResponse(token, expiresAt)
+        val token = createAdminToken(principal.username, now, expiresAt)
+        return AdminLoginResponse(token, expiresAt, principal.username)
+    }
+
+    override suspend fun session(adminToken: String): AdminSessionResponse =
+        AdminSessionResponse(authenticatedUsername(adminToken))
+
+    override suspend fun operators(
+        adminToken: String,
+        query: String?,
+        limit: Int,
+        offset: Int,
+    ): AdminOperatorPageResponse {
+        authenticatedUsername(adminToken)
+        return operators.operators(query?.trim()?.takeIf { it.isNotEmpty() }, limit.coerceIn(1, 100), offset.coerceAtLeast(0))
+    }
+
+    override suspend fun createOperator(
+        adminToken: String,
+        command: CreateAdminOperatorCommand,
+    ): AdminOperatorSummary {
+        val actor = authenticatedUsername(adminToken)
+        val normalized = command.copy(
+            username = validatedUsername(command.username),
+            displayName = validatedDisplayName(command.displayName),
+            password = validatedPassword(command.password),
+        )
+        return operators.create(normalized, actor)
+            ?: throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR, "Administrator username is already in use.")
+    }
+
+    override suspend fun updateOperator(
+        adminToken: String,
+        operatorId: Long,
+        command: UpdateAdminOperatorCommand,
+    ): AdminOperatorSummary {
+        val actor = authenticatedUsername(adminToken)
+        val normalizedStatus = command.status?.trim()?.uppercase()?.also {
+            if (it !in setOf("ACTIVE", "DISABLED")) {
+                throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Invalid administrator status.")
+            }
+        }
+        val normalized = UpdateAdminOperatorCommand(
+            displayName = command.displayName?.let(::validatedDisplayName),
+            status = normalizedStatus,
+            password = command.password?.takeIf { it.isNotBlank() }?.let(::validatedPassword),
+        )
+        return try {
+            operators.update(operatorId, normalized, actor)
+                ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Administrator account was not found.")
+        } catch (error: IllegalArgumentException) {
+            throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR, error.message.orEmpty())
+        }
     }
 
     @Transactional
@@ -89,18 +161,15 @@ class AdminAnalyticsService(
     }
 
     override suspend fun validate(adminToken: String) {
-        try {
-            validateAdminToken(adminToken)
-        } catch (error: Exception) {
-            throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Invalid admin token.")
-        }
+        authenticatedUsername(adminToken)
     }
 
-    private suspend fun createAdminToken(now: Instant, expiresAt: Instant): String {
+    private suspend fun createAdminToken(username: String, now: Instant, expiresAt: Instant): String {
         val header = mapOf("alg" to "HS256", "typ" to "JWT")
         val payload = mapOf(
             "sub" to "admin",
             "admin" to true,
+            "admin_username" to username,
             "iat" to now.epochSecond,
             "exp" to expiresAt.epochSecond,
         )
@@ -108,7 +177,20 @@ class AdminAnalyticsService(
         return "$signingInput.${base64Url(hmacSha256(signingInput))}"
     }
 
-    private suspend fun validateAdminToken(adminToken: String) {
+    private suspend fun authenticatedUsername(adminToken: String): String {
+        try {
+            val username = validateAdminToken(adminToken)
+            val active = operators.activeStatus(username)
+            if (active == false || (active == null && username != properties.admin.username.trim().lowercase())) {
+                error("inactive admin")
+            }
+            return username
+        } catch (error: Exception) {
+            throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Invalid admin token.")
+        }
+    }
+
+    private suspend fun validateAdminToken(adminToken: String): String {
         val parts = adminToken.split(".")
         require(parts.size == 3) { "invalid token parts" }
         val signingInput = "${parts[0]}.${parts[1]}"
@@ -120,7 +202,28 @@ class AdminAnalyticsService(
         require(claims["sub"] == "admin" && claims["admin"] == true) { "not an admin token" }
         val exp = (claims["exp"] as? Number)?.toLong() ?: error("missing exp")
         require(Instant.now().epochSecond < exp) { "expired admin token" }
+        return (claims["admin_username"] as? String)
+            ?.trim()
+            ?.lowercase()
+            ?.takeIf { it.isNotEmpty() }
+            ?: properties.admin.username.trim().lowercase()
     }
+
+    private fun validatedUsername(value: String): String {
+        val normalized = value.trim().lowercase()
+        if (!normalized.matches(Regex("[a-z0-9][a-z0-9._-]{2,63}"))) {
+            throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Administrator username must be 3-64 lowercase letters, numbers, dots, underscores, or hyphens.")
+        }
+        return normalized
+    }
+
+    private fun validatedDisplayName(value: String): String =
+        value.trim().takeIf { it.length in 2..100 }
+            ?: throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Administrator display name must be 2-100 characters.")
+
+    private fun validatedPassword(value: String): String =
+        value.takeIf { it.length in 12..128 }
+            ?: throw ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Administrator password must be 12-128 characters.")
 
     private suspend fun hmacSha256(value: String): ByteArray {
         val mac = Mac.getInstance("HmacSHA256")

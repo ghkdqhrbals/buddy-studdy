@@ -1,8 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink, LogOut, RefreshCw } from "lucide-react";
+import { ExternalLink, RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
-import { AdminGate } from "../admin/AdminGate.jsx";
-import { useAdminSession } from "../admin/AdminSessionContext.jsx";
 import {
   DataTable,
   DetailDrawer,
@@ -242,21 +240,15 @@ function DeploymentsWorkspace() {
 }
 
 export function DeploymentsPage() {
-  const { authenticated, logout } = useAdminSession();
   return (
     <>
       <PageHeader
         eyebrow="Manage"
         title="Deployments"
         description="Track backend and operations rollouts from submission through their final workflow state."
-        actions={authenticated ? (
-          <>
-            <Button variant="secondary" icon={RefreshCw} onClick={() => window.location.reload()}>Refresh</Button>
-            <Button variant="ghost" icon={LogOut} onClick={logout}>Sign out</Button>
-          </>
-        ) : null}
+        actions={<Button variant="secondary" icon={RefreshCw} onClick={() => window.location.reload()}>Refresh</Button>}
       />
-      <AdminGate>{authenticated ? <DeploymentsWorkspace /> : null}</AdminGate>
+      <DeploymentsWorkspace />
     </>
   );
 }

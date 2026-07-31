@@ -62,7 +62,6 @@ EC2 log forwarding to MacBook Air Loki:
 MacBook Air monitoring deploy:
 
 - `GRAFANA_ADMIN_PASSWORD`
-- `API_DASHBOARD_BASIC_AUTH_HTPASSWD`
 
 MacBook Air TestZone deploy:
 
@@ -161,7 +160,8 @@ runs-on: [self-hosted, macOS, ARM64, macbook-air, monitoring]
 
 The MacBook Air workflow creates or replaces:
 
-- `buddystudy-api-dashboard`: API Logs dashboard reverse proxy with Basic Auth.
+- `buddystudy-api-dashboard`: API Logs dashboard reverse proxy using the
+  backend administrator bearer session.
 - `buddystudy-loki`: Loki with persistent host data under
   `$HOME/data/buddystudy/monitoring/loki/data` by default.
 - `buddystudy-grafana`: Grafana with persistent host data under

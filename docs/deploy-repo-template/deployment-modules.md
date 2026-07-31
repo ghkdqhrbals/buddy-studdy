@@ -264,9 +264,15 @@ deployment.
   username, and path remain JSON fields instead of Loki labels.
   The same authenticated gateway serves one React monitoring shell for API
   Logs, API Performance, TestZone, Deployments, Users & Quotas, Redis Streams,
-  Access & Audit, and Settings. It proxies `/backend/api/` to the backend admin
-  API. Deployments auto-refreshes every ten seconds and keeps a maximum of 500
-  workflow records in TestZone's persisted data directory.
+  Access & Audit, Administrators, and Settings. It proxies `/backend/api/` to
+  the backend admin API. The React shell owns a single login page and redirects
+  an unauthenticated visit back to its original destination after login. The
+  backend database stores administrator accounts as BCrypt hashes; the legacy
+  environment administrator is imported on its first successful login.
+  Monitoring Nginx validates that same bearer session before forwarding Loki
+  and TestZone requests, so dashboard Basic Auth and `.htpasswd` deployment
+  secrets are not used. Deployments auto-refreshes every ten seconds and keeps
+  a maximum of 500 workflow records in TestZone's persisted data directory.
   Users & Quotas provides bounded user search, 20-row pagination,
   membership-tier allowance editing, and per-user tier/allowance overrides.
   These controls are internal-only and must not be linked from the consumer

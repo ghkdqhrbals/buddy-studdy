@@ -3,22 +3,39 @@ import {
   clearAdminSession,
   loginAdmin as requestLogin,
   readAdminSession,
+  validateAdminSession,
 } from "./adminApi.js";
 
 const AdminSessionContext = createContext(null);
 
 export function AdminSessionProvider({ children }) {
   const [session, setSession] = useState(readAdminSession);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const handleExpiry = () => setSession(null);
+    let active = true;
+    validateAdminSession()
+      .then((validated) => {
+        if (active) setSession(validated);
+      })
+      .finally(() => {
+        if (active) setReady(true);
+      });
+    const handleExpiry = () => {
+      setSession(null);
+      setReady(true);
+    };
     window.addEventListener("monitoring:admin-session-expired", handleExpiry);
-    return () => window.removeEventListener("monitoring:admin-session-expired", handleExpiry);
+    return () => {
+      active = false;
+      window.removeEventListener("monitoring:admin-session-expired", handleExpiry);
+    };
   }, []);
 
   const login = useCallback(async (username, password) => {
     const next = await requestLogin(username, password);
     setSession(next);
+    setReady(true);
     return next;
   }, []);
 
@@ -33,8 +50,8 @@ export function AdminSessionProvider({ children }) {
   }, []);
 
   const value = useMemo(
-    () => ({ authenticated: Boolean(session), session, login, logout, expire }),
-    [expire, login, logout, session],
+    () => ({ authenticated: Boolean(session), ready, session, login, logout, expire }),
+    [expire, login, logout, ready, session],
   );
 
   return (

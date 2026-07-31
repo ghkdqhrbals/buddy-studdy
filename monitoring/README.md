@@ -14,13 +14,15 @@ This directory is the source of truth for the MacBook Air Grafana/Loki setup.
 
 ## Access Control
 
-- `api-dashboard` is protected with nginx Basic Auth.
-- Set `API_DASHBOARD_BASIC_AUTH_HTPASSWD` to a full htpasswd line before starting the stack.
-- Generate the value with:
-
-```sh
-docker run --rm httpd:2.4-alpine htpasswd -nbB admin 'your-password'
-```
+- `api-dashboard` uses the backend administrator session for both monitoring
+  and Manage pages. An unauthenticated browser is redirected to
+  `/login.html`, then returned to its original page after sign-in.
+- Administrator accounts are stored as BCrypt password hashes in the backend
+  database and managed under `Manage > Administrators`. The configured
+  `ADMIN_USERNAME` and `ADMIN_PASSWORD` account is imported on its first
+  successful login so existing deployments keep access during migration.
+- Nginx validates the same bearer session before proxying Loki and TestZone
+  requests. There is no separate dashboard Basic Auth credential.
 
 - Loki and both public gateway ports are bound to `127.0.0.1` only.
   Routingflare exposes the authenticated monitoring gateway and the Grafana

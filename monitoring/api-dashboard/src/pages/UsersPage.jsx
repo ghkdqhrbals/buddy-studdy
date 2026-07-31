@@ -1,9 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { LogOut, Save } from "lucide-react";
+import { Save } from "lucide-react";
 import { useMemo, useState } from "react";
-import { AdminGate } from "../admin/AdminGate.jsx";
 import { adminFetch } from "../admin/adminApi.js";
-import { useAdminSession } from "../admin/AdminSessionContext.jsx";
 import {
   DataTable,
   DetailDrawer,
@@ -225,16 +223,14 @@ function UsersWorkspace() {
 }
 
 export function UsersPage() {
-  const { authenticated, logout } = useAdminSession();
   return (
     <>
       <PageHeader
         eyebrow="Manage"
         title="Users & quotas"
         description="Search accounts, manage question capacity, and send a direct push to a selected user."
-        actions={authenticated ? <Button variant="ghost" icon={LogOut} onClick={logout}>Sign out</Button> : null}
       />
-      <AdminGate><UsersWorkspace /></AdminGate>
+      <UsersWorkspace />
     </>
   );
 }

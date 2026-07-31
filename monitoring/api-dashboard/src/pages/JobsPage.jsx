@@ -1,9 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { LogOut, RefreshCw, RotateCcw } from "lucide-react";
+import { RefreshCw, RotateCcw } from "lucide-react";
 import { useMemo, useState } from "react";
-import { AdminGate } from "../admin/AdminGate.jsx";
 import { adminFetch } from "../admin/adminApi.js";
-import { useAdminSession } from "../admin/AdminSessionContext.jsx";
 import {
   DataTable,
   DetailDrawer,
@@ -240,21 +238,15 @@ function JobsWorkspace() {
 }
 
 export function JobsPage() {
-  const { authenticated, logout } = useAdminSession();
   return (
     <>
       <PageHeader
         eyebrow="Manage"
         title="Batch jobs"
         description="Review what each scheduled job does, when it ran, how long it took, and what it produced."
-        actions={authenticated ? (
-          <>
-            <Button variant="secondary" icon={RefreshCw} onClick={() => window.location.reload()}>Refresh</Button>
-            <Button variant="ghost" icon={LogOut} onClick={logout}>Sign out</Button>
-          </>
-        ) : null}
+        actions={<Button variant="secondary" icon={RefreshCw} onClick={() => window.location.reload()}>Refresh</Button>}
       />
-      <AdminGate>{authenticated ? <JobsWorkspace /> : null}</AdminGate>
+      <JobsWorkspace />
     </>
   );
 }

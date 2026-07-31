@@ -21,10 +21,12 @@ test("all monitoring pages load the shared React application", async () => {
     "audit.html",
     "settings.html",
     "users.html",
+    "administrators.html",
     "feedback.html",
     "jobs.html",
     "streams.html",
     "deployments.html",
+    "login.html",
   ]) {
     const html = await text(page);
     assert.match(html, /id="monitoring-react-root"/);
@@ -40,6 +42,7 @@ test("all monitoring pages load the shared React application", async () => {
   const navigation = await source("app/navigation.js");
   assert.match(navigation, /Access & Audit/);
   assert.match(navigation, /Users & Quotas/);
+  assert.match(navigation, /Administrators/);
   assert.match(navigation, /User Feedback/);
   assert.match(navigation, /Batch Jobs/);
   assert.match(navigation, /Redis Streams/);
@@ -61,7 +64,7 @@ test("deployment administration shows auto-refreshed workflow history and rollou
   assert.match(page, /Pagination/);
   assert.match(page, /DetailDrawer/);
   assert.match(page, /ObjectInspector/);
-  assert.match(page, /AdminGate/);
+  assert.doesNotMatch(page, /AdminGate/);
   assert.match(api, /\/testzone\/api/);
 });
 
@@ -109,7 +112,7 @@ test("app control administration publishes update campaigns and manages maintena
   assert.match(app, /service-status\.html/);
   assert.match(page, /App updates/);
   assert.match(page, /Maintenance/);
-  assert.match(page, /AdminGate/);
+  assert.doesNotMatch(page, /AdminGate/);
   assert.match(page, /Start maintenance/);
   assert.match(page, /Schedule maintenance/);
   assert.match(page, /End maintenance/);
@@ -146,6 +149,37 @@ test("user administration is searchable, paginated, and keeps plans internal", a
   assert.match(adminApi, /sessionStorage/);
   assert.match(adminApi, /Authorization: `Bearer \$\{session\.token\}`/);
   assert.doesNotMatch(page, /payment|billing/i);
+});
+
+test("monitoring uses one full-page administrator session and manages database accounts", async () => {
+  const boundary = await source("admin/AdminAuthBoundary.jsx");
+  const login = await source("pages/LoginPage.jsx");
+  const operators = await source("pages/AdministratorsPage.jsx");
+  const api = await source("admin/adminApi.js");
+  const shell = await source("app/AppShell.jsx");
+  assert.match(boundary, /const LOGIN_PATH = "\/login\.html"/);
+  assert.match(boundary, /\$\{LOGIN_PATH\}\?next=\$\{next\}/);
+  assert.match(boundary, /Checking administrator session/);
+  assert.match(login, /Administrator sign in/);
+  assert.match(login, /safeNextPath/);
+  assert.match(operators, /Add administrator/);
+  assert.match(operators, /\/operators/);
+  assert.match(operators, /const PAGE_SIZE = 20/);
+  assert.match(operators, /BCrypt hashes/);
+  assert.match(api, /\/session/);
+  assert.match(api, /installAuthenticatedFetch/);
+  assert.match(shell, /nav-session-button/);
+  assert.match(shell, /window\.location\.replace\("\/login\.html"\)/);
+  for (const page of [
+    "pages/UsersPage.jsx",
+    "pages/FeedbackPage.jsx",
+    "pages/JobsPage.jsx",
+    "pages/StreamsPage.jsx",
+    "pages/DeploymentsPage.jsx",
+    "pages/ServiceStatusPage.jsx",
+  ]) {
+    assert.doesNotMatch(await source(page), /AdminGate/);
+  }
 });
 
 test("Redis Stream administration lives in monitoring Manage with bounded cursor navigation", async () => {

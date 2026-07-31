@@ -1,6 +1,7 @@
 const API_ROOT = "/backend/api/v1/admin";
 const TOKEN_KEY = "buddystudy.monitoring.admin.token";
 const TOKEN_EXPIRY_KEY = "buddystudy.monitoring.admin.expires-at";
+const USERNAME_KEY = "buddystudy.monitoring.admin.username";
 
 export class AdminApiError extends Error {
   constructor(message, status = 0, body = null) {
@@ -22,18 +23,21 @@ export function readAdminSession() {
     clearAdminSession();
     return null;
   }
-  return { token, expiresAt };
+  return { token, expiresAt, username: stored(USERNAME_KEY) };
 }
 
-export function storeAdminSession({ token, expiresAt = "" }) {
+export function storeAdminSession({ token, expiresAt = "", username = "" }) {
   window.sessionStorage.setItem(TOKEN_KEY, token);
   if (expiresAt) window.sessionStorage.setItem(TOKEN_EXPIRY_KEY, expiresAt);
   else window.sessionStorage.removeItem(TOKEN_EXPIRY_KEY);
+  if (username) window.sessionStorage.setItem(USERNAME_KEY, username);
+  else window.sessionStorage.removeItem(USERNAME_KEY);
 }
 
 export function clearAdminSession() {
   window.sessionStorage.removeItem(TOKEN_KEY);
   window.sessionStorage.removeItem(TOKEN_EXPIRY_KEY);
+  window.sessionStorage.removeItem(USERNAME_KEY);
 }
 
 function notifySessionExpired() {
@@ -61,9 +65,49 @@ export async function loginAdmin(username, password, signal) {
   if (!response.ok || !token) {
     throw new AdminApiError(errorMessage(body, "Sign in failed"), response.status, body);
   }
-  const session = { token, expiresAt: body.expiresAt || "" };
+  const session = { token, expiresAt: body.expiresAt || "", username: body.username || username };
   storeAdminSession(session);
   return session;
+}
+
+export async function validateAdminSession() {
+  const session = readAdminSession();
+  if (!session) return null;
+  const response = await fetch(`${API_ROOT}/session`, {
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${session.token}`,
+    },
+  });
+  const body = await jsonBody(response);
+  if (!response.ok || !body?.username) {
+    clearAdminSession();
+    if (response.status === 401) notifySessionExpired();
+    return null;
+  }
+  const validated = { ...session, username: body.username };
+  storeAdminSession(validated);
+  return validated;
+}
+
+export function installAuthenticatedFetch() {
+  if (window.__buddystudyAuthenticatedFetchInstalled) return;
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = async (input, init = {}) => {
+    const url = typeof input === "string" ? input : input?.url || "";
+    const protectedPath = url.startsWith("/loki/") || url.startsWith("/testzone/api/");
+    if (!protectedPath) return originalFetch(input, init);
+    const session = readAdminSession();
+    const headers = new Headers(init.headers || (typeof input === "object" ? input.headers : undefined));
+    if (session?.token) headers.set("Authorization", `Bearer ${session.token}`);
+    const response = await originalFetch(input, { ...init, headers });
+    if (response.status === 401) {
+      clearAdminSession();
+      notifySessionExpired();
+    }
+    return response;
+  };
+  window.__buddystudyAuthenticatedFetchInstalled = true;
 }
 
 export async function adminFetch(path, options = {}) {

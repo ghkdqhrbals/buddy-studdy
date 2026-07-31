@@ -2,7 +2,11 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MonitoringApp } from "./MonitoringApp.jsx";
 import { AdminSessionProvider } from "./admin/AdminSessionContext.jsx";
+import { AdminAuthBoundary } from "./admin/AdminAuthBoundary.jsx";
+import { installAuthenticatedFetch } from "./admin/adminApi.js";
 import "./styles/manage.css";
+
+installAuthenticatedFetch();
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -20,7 +24,9 @@ const queryClient = new QueryClient({
 createRoot(document.querySelector("#monitoring-react-root")).render(
   <QueryClientProvider client={queryClient}>
     <AdminSessionProvider>
-      <MonitoringApp />
+      <AdminAuthBoundary>
+        <MonitoringApp />
+      </AdminAuthBoundary>
     </AdminSessionProvider>
   </QueryClientProvider>,
 );

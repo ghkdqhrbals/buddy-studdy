@@ -1,5 +1,6 @@
-import { Activity, ChevronDown, Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Activity, ChevronDown, LogOut, Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useAdminSession } from "../admin/AdminSessionContext.jsx";
 import {
   NAV_COLLAPSED_KEY,
   NAV_GROUP_KEY,
@@ -42,6 +43,7 @@ function NavItem({ item, collapsed, currentPath }) {
 }
 
 export function AppShell({ children, contentClassName = "" }) {
+  const { logout, session } = useAdminSession();
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [openGroups, setOpenGroups] = useState(() => storedJson(NAV_GROUP_KEY, {}));
 
@@ -134,11 +136,25 @@ export function AppShell({ children, contentClassName = "" }) {
         </nav>
 
         <footer className="react-nav-footer">
-          <span>Status console</span>
-          <strong className="version-full">v{UI_VERSION}</strong>
-          <strong className="version-compact" title={`Monitoring UI v${UI_VERSION}`}>
-            v{compactVersion}
-          </strong>
+          <button
+            type="button"
+            className="nav-session-button"
+            onClick={() => {
+              logout();
+              window.location.replace("/login.html");
+            }}
+            title={`Sign out ${session?.username || ""}`}
+          >
+            <LogOut size={15} aria-hidden="true" />
+            <span>{session?.username || "Administrator"}</span>
+          </button>
+          <div className="nav-version">
+            <span>Status console</span>
+            <strong className="version-full">v{UI_VERSION}</strong>
+            <strong className="version-compact" title={`Monitoring UI v${UI_VERSION}`}>
+              v{compactVersion}
+            </strong>
+          </div>
         </footer>
       </aside>
 

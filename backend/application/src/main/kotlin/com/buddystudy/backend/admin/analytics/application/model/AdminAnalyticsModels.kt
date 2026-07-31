@@ -6,6 +6,7 @@ import java.time.LocalDate
 data class AdminLoginResponse(
     val adminToken: String,
     val expiresAt: Instant,
+    val username: String,
 )
 
 data class AdminDailyMetricPoint(

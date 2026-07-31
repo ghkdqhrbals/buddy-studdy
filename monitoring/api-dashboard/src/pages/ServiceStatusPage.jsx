@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarClock, Power, RefreshCw, XCircle } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { AdminGate } from "../admin/AdminGate.jsx";
 import { adminFetch } from "../admin/adminApi.js";
 import {
   DataTable,
@@ -295,7 +294,7 @@ export function ServiceStatusPage() {
           </Button>
         }
       />
-      <AdminGate>
+      <section className="workspace-section app-control-workspace">
         <div className="app-control-surface-tabs">
           <SegmentedTabs
             value={surface}
@@ -308,7 +307,7 @@ export function ServiceStatusPage() {
           />
         </div>
         {surface === "updates" ? <AppUpdatesWorkspace /> : <ServiceStatusWorkspace />}
-      </AdminGate>
+      </section>
     </>
   );
 }

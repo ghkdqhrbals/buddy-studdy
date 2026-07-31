@@ -1,9 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, LogOut } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { AdminGate } from "../admin/AdminGate.jsx";
 import { adminFetch } from "../admin/adminApi.js";
-import { useAdminSession } from "../admin/AdminSessionContext.jsx";
 import { AdminNotificationComposer } from "../components/AdminNotificationComposer.jsx";
 import {
   DataTable,
@@ -181,16 +179,14 @@ function FeedbackWorkspace() {
 }
 
 export function FeedbackPage() {
-  const { authenticated, logout } = useAdminSession();
   return (
     <>
       <PageHeader
         eyebrow="Manage"
         title="User feedback"
         description="Review product feedback and send a targeted in-app message or deep-linked push."
-        actions={authenticated ? <Button variant="ghost" icon={LogOut} onClick={logout}>Sign out</Button> : null}
       />
-      <AdminGate><FeedbackWorkspace /></AdminGate>
+      <FeedbackWorkspace />
     </>
   );
 }

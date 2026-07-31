@@ -4,7 +4,13 @@ import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.backend.admin.analytics.application.model.AdminDailyMetricPoint
 import com.buddystudy.backend.admin.analytics.application.port.outbound.AdminAnalyticsMetricPort
+import com.buddystudy.backend.admin.analytics.application.port.outbound.AdminOperatorPort
 import com.buddystudy.backend.admin.analytics.application.port.outbound.AdminAnalyticsSourcePort
+import com.buddystudy.backend.admin.analytics.application.model.AdminOperatorPageResponse
+import com.buddystudy.backend.admin.analytics.application.model.AdminOperatorPrincipal
+import com.buddystudy.backend.admin.analytics.application.model.AdminOperatorSummary
+import com.buddystudy.backend.admin.analytics.application.model.CreateAdminOperatorCommand
+import com.buddystudy.backend.admin.analytics.application.model.UpdateAdminOperatorCommand
 import com.buddystudy.backend.admin.analytics.application.service.AdminAnalyticsService
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
@@ -13,6 +19,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.LocalDate
+import java.time.Instant
 
 class AdminAnalyticsServiceTest {
     private val properties = BuddyStudyProperties().apply {
@@ -22,7 +29,8 @@ class AdminAnalyticsServiceTest {
     }
     private val metrics = FakeMetricPort()
     private val source = FakeSourcePort()
-    private val service = AdminAnalyticsService(properties, metrics, source)
+    private val operators = FakeOperatorPort()
+    private val service = AdminAnalyticsService(properties, metrics, source, operators)
 
     @Test
     fun `default admin credentials are admin admin`(): Unit = runBlocking {
@@ -30,6 +38,7 @@ class AdminAnalyticsServiceTest {
             BuddyStudyProperties().apply { crypto.masterKey = "test-master-key" },
             FakeMetricPort(),
             FakeSourcePort(),
+            FakeOperatorPort(),
         )
 
         val token = defaultService.login("admin", "admin").adminToken
@@ -59,6 +68,30 @@ class AdminAnalyticsServiceTest {
             .isInstanceOf(ApiException::class.java)
             .extracting("code")
             .isEqualTo(ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN)
+    }
+
+    @Test
+    fun `legacy administrator is persisted and additional operators can be managed`(): Unit = runBlocking {
+        val login = service.login("admin", "secret")
+        val created = service.createOperator(
+            login.adminToken,
+            CreateAdminOperatorCommand("operator.two", "Second operator", "secure-password-123"),
+        )
+
+        assertThat(login.username).isEqualTo("admin")
+        assertThat(created.username).isEqualTo("operator.two")
+        assertThat(service.operators(login.adminToken, null, 20, 0).operators)
+            .extracting<String> { it.username }
+            .containsExactly("admin", "operator.two")
+
+        service.updateOperator(
+            login.adminToken,
+            created.id,
+            UpdateAdminOperatorCommand(status = "DISABLED", displayName = null, password = null),
+        )
+
+        assertThatThrownBy { runBlocking { service.login("operator.two", "secure-password-123") } }
+            .isInstanceOf(ApiException::class.java)
     }
 
     @Test
@@ -137,5 +170,89 @@ class AdminAnalyticsServiceTest {
     private class FakeSourcePort : AdminAnalyticsSourcePort {
         val rows = mutableMapOf<LocalDate, List<AdminDailyMetricPoint>>()
         override suspend fun collectDailyMetrics(date: LocalDate): List<AdminDailyMetricPoint> = rows[date].orEmpty()
+    }
+
+    private class FakeOperatorPort : AdminOperatorPort {
+        private val records = linkedMapOf<Long, Record>()
+        private var nextId = 1L
+
+        override suspend fun authenticate(
+            username: String,
+            password: String,
+            authenticatedAt: Instant,
+        ): AdminOperatorPrincipal? =
+            records.values.firstOrNull {
+                it.username == username && it.password == password && it.status == "ACTIVE"
+            }?.also { it.lastLoginAt = authenticatedAt }?.principal()
+
+        override suspend fun activeStatus(username: String): Boolean? =
+            records.values.firstOrNull { it.username == username }?.status?.let { it == "ACTIVE" }
+
+        override suspend fun ensureBootstrap(
+            username: String,
+            displayName: String,
+            password: String,
+        ): AdminOperatorPrincipal {
+            val existing = records.values.firstOrNull { it.username == username }
+            if (existing != null) return existing.principal()
+            val record = Record(nextId++, username, displayName, password, "ACTIVE")
+            records[record.id] = record
+            return record.principal()
+        }
+
+        override suspend fun operators(query: String?, limit: Int, offset: Int): AdminOperatorPageResponse {
+            val matches = records.values.filter {
+                query == null || it.username.contains(query, true) || it.displayName.contains(query, true)
+            }
+            return AdminOperatorPageResponse(
+                matches.drop(offset).take(limit).map(Record::summary),
+                matches.size.toLong(),
+                limit,
+                offset,
+            )
+        }
+
+        override suspend fun create(
+            command: CreateAdminOperatorCommand,
+            createdBy: String,
+        ): AdminOperatorSummary? {
+            if (records.values.any { it.username == command.username }) return null
+            val record = Record(nextId++, command.username, command.displayName, command.password, "ACTIVE")
+            records[record.id] = record
+            return record.summary()
+        }
+
+        override suspend fun update(
+            operatorId: Long,
+            command: UpdateAdminOperatorCommand,
+            updatedBy: String,
+        ): AdminOperatorSummary? {
+            val current = records[operatorId] ?: return null
+            current.displayName = command.displayName ?: current.displayName
+            current.status = command.status ?: current.status
+            current.password = command.password ?: current.password
+            return current.summary()
+        }
+
+        private data class Record(
+            val id: Long,
+            val username: String,
+            var displayName: String,
+            var password: String,
+            var status: String,
+            var lastLoginAt: Instant? = null,
+            val createdAt: Instant = Instant.parse("2026-01-01T00:00:00Z"),
+        ) {
+            fun principal() = AdminOperatorPrincipal(id, username, displayName, status)
+            fun summary() = AdminOperatorSummary(
+                id,
+                username,
+                displayName,
+                status,
+                lastLoginAt,
+                createdAt,
+                createdAt,
+            )
+        }
     }
 }

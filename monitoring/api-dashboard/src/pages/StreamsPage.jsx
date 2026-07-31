@@ -1,9 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { LogOut, RefreshCw, Search } from "lucide-react";
+import { RefreshCw, Search } from "lucide-react";
 import { useMemo, useState } from "react";
-import { AdminGate } from "../admin/AdminGate.jsx";
 import { adminFetch } from "../admin/adminApi.js";
-import { useAdminSession } from "../admin/AdminSessionContext.jsx";
 import {
   DataTable,
   DetailDrawer,
@@ -279,16 +277,14 @@ function StreamsWorkspace() {
 }
 
 export function StreamsPage() {
-  const { authenticated, logout } = useAdminSession();
   return (
     <>
       <PageHeader
         eyebrow="Manage"
         title="Redis event inspection"
         description="Monitor consumer-group offsets, lag, pending deliveries, retries, stream entries, and delivery outboxes."
-        actions={authenticated ? <Button variant="ghost" icon={LogOut} onClick={logout}>Sign out</Button> : null}
       />
-      <AdminGate><StreamsWorkspace /></AdminGate>
+      <StreamsWorkspace />
     </>
   );
 }
