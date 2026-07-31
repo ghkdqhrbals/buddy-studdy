@@ -2,7 +2,9 @@ package com.buddystudy.backend
 
 import com.buddystudy.backend.common.application.outbox.PublishedStreamRecord
 import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionPushOutboxRepository
+import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.study.domain.entity.QuestionPushOutboxEntity
+import com.buddystudy.study.domain.entity.QuestionPushOutboxStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -48,10 +50,10 @@ class QuestionPushOutboxRepositoryTest : MySqlIntegrationTestSupport() {
         val claim = claims.single()
         val publication = PublishedStreamRecord("notification.question-push.requested.v1", "1-0")
         assertThat(outbox.markPublished(item.id, "wrong-token", publication, now)).isFalse()
-        assertThat(outbox.findById(item.id)!!.status).isEqualTo("PROCESSING")
+        assertThat(outbox.findById(item.id)!!.status).isEqualTo(QuestionPushOutboxStatus.PROCESSING)
         assertThat(outbox.markPublished(item.id, claim.claimToken, publication, now)).isTrue()
         val published = outbox.findById(item.id)!!
-        assertThat(published.status).isEqualTo("PUBLISHED")
+        assertThat(published.status).isEqualTo(QuestionPushOutboxStatus.PUBLISHED)
         assertThat(published.streamKey).isEqualTo(publication.streamKey)
         assertThat(published.redisRecordId).isEqualTo(publication.recordId)
     }
@@ -98,10 +100,10 @@ class QuestionPushOutboxRepositoryTest : MySqlIntegrationTestSupport() {
                 expectedAnswerHint = null,
                 topic = "Kotlin",
                 difficultyLevel = 3,
-                language = "ko",
+                language = SupportedLanguage.KOREAN,
                 sound = "default",
                 intervalMinutes = 15,
-                status = "PENDING",
+                status = QuestionPushOutboxStatus.PENDING,
                 nextAttemptAt = now.minusSeconds(1),
                 createdAt = now.minusSeconds(10),
                 updatedAt = now.minusSeconds(10),
@@ -125,10 +127,10 @@ class QuestionPushOutboxRepositoryTest : MySqlIntegrationTestSupport() {
                 expectedAnswerHint = "Hint",
                 topic = "Kotlin",
                 difficultyLevel = 7,
-                language = "ko",
+                language = SupportedLanguage.KOREAN,
                 sound = "default",
                 intervalMinutes = 15,
-                status = "PENDING",
+                status = QuestionPushOutboxStatus.PENDING,
                 nextAttemptAt = now.minusSeconds(1),
                 createdAt = now.minusSeconds(10),
                 updatedAt = now.minusSeconds(10),

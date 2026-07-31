@@ -9,7 +9,7 @@ fun QuestionEntity.applyReadyQuestionLocalization(
     targetLanguage: String,
 ): QuestionEntity {
     val target = QuestionLanguage.normalize(targetLanguage)
-    if (QuestionLanguage.normalize(sourceLanguage) == target) return this
+    if (QuestionLanguage.normalize(sourceLanguage.databaseValue) == target) return this
     val expectedHash = ContentLocalizationService.recordHashes(this).question
     val localized = snapshot.question
         ?.takeIf { it.status == "READY" && it.sourceHash == expectedHash }

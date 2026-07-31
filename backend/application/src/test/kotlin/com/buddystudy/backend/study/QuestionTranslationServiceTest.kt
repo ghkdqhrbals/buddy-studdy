@@ -1,6 +1,8 @@
 package com.buddystudy.backend.study
 
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.account.domain.entity.UserStatus
+import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.outbox.OutboxPublishSummary
 import com.buddystudy.backend.common.application.outbox.OutboxReference
@@ -38,13 +40,18 @@ class QuestionTranslationServiceTest {
             question = "Redis Stream의 consumer group을 설명하세요.",
             hint = "pending entry를 포함하세요.",
             topic = "메시지 큐",
-            sourceLanguage = "ko",
+            sourceLanguage = SupportedLanguage.KOREAN,
         )
         val rootStudy = StudyEntity(id = 11, userId = 7, topic = "Backend")
         val topicStudy = StudyEntity(id = 12, userId = 7, parentStudyId = 11, topic = "Redis")
         val questions = TranslationQuestionPort(original)
         val users = TranslationUserPort(
-            UserEntity(id = 7, providerId = "user-7", status = "ACTIVE", appLanguage = "en-US"),
+            UserEntity(
+                id = 7,
+                providerId = "user-7",
+                status = UserStatus.ACTIVE,
+                appLanguage = SupportedLanguage.ENGLISH,
+            ),
         )
         val studies = TranslationStudyPort(listOf(rootStudy, topicStudy))
         val translations = RecordingTranslationPort()
@@ -94,7 +101,7 @@ class QuestionTranslationServiceTest {
             question = "Explain Redis Stream pending entries.",
             hint = "Include recovery.",
             topic = "Redis",
-            sourceLanguage = "en",
+            sourceLanguage = SupportedLanguage.ENGLISH,
         )
         val rootStudy = StudyEntity(id = 11, userId = 7, topic = "Backend")
         val topicStudy = StudyEntity(id = 12, userId = 7, parentStudyId = 11, topic = "Redis")
@@ -115,7 +122,12 @@ class QuestionTranslationServiceTest {
             questions = TranslationQuestionPort(question),
             translations = RecordingTranslationPort(),
             users = TranslationUserPort(
-                UserEntity(id = 7, providerId = "user-7", status = "ACTIVE", appLanguage = "en"),
+                UserEntity(
+                    id = 7,
+                    providerId = "user-7",
+                    status = UserStatus.ACTIVE,
+                    appLanguage = SupportedLanguage.ENGLISH,
+                ),
             ),
             studies = TranslationStudyPort(listOf(rootStudy, topicStudy)),
             writer = writer,

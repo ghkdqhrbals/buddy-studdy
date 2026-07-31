@@ -23,10 +23,15 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.service.StudySyncService
 import com.buddystudy.backend.study.application.service.StudyService
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.account.domain.entity.UserProvider
+import com.buddystudy.account.domain.entity.UserStatus
 import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.community.domain.entity.QuestionLikeEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.AnswerGradingStatus
+import com.buddystudy.study.domain.entity.QuestionSource
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
+import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.StudyEntity
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -413,10 +418,10 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
 
     private fun user(providerId: String, name: String, allowPublic: Boolean): UserEntity =
         UserEntity(
-            provider = "EMAIL",
+            provider = UserProvider.EMAIL,
             providerId = "$providerId@example.com",
             email = "$providerId@example.com",
-            status = "ACTIVE",
+            status = UserStatus.ACTIVE,
             displayName = name,
             allowPublicQuestions = allowPublic,
             createdAt = now,
@@ -442,7 +447,7 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
                 difficultyLevel = 6,
                 scheduledFor = createdAt,
                 sentAt = createdAt,
-                status = "graded",
+                status = QuestionStatus.GRADED,
                 answer = "Answer for $topic",
                 score = score,
                 correct = score?.let { true },
@@ -450,8 +455,8 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
                 explanation = score?.let { "Because" },
                 answeredAt = createdAt.plusSeconds(30),
                 gradedAt = score?.let { createdAt.plusSeconds(40) },
-                gradingStatus = gradingStatus,
-                source = "manual",
+                gradingStatus = gradingStatus?.let(AnswerGradingStatus::valueOf),
+                source = QuestionSource.MANUAL,
                 publicQuestion = publicQuestion,
                 deletedAt = deletedAt,
                 createdAt = createdAt,
@@ -469,8 +474,8 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
                 difficultyLevel = 4,
                 scheduledFor = createdAt,
                 sentAt = createdAt,
-                status = "ungraded",
-                source = "scheduled",
+                status = QuestionStatus.UNGRADED,
+                source = QuestionSource.SCHEDULED,
                 publicQuestion = true,
                 createdAt = createdAt,
                 updatedAt = createdAt,

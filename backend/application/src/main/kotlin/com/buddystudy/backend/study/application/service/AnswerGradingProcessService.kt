@@ -4,7 +4,7 @@ import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.study.application.model.AnswerGradingProcessResponse
-import com.buddystudy.backend.study.application.model.AnswerGradingStatus
+import com.buddystudy.study.domain.entity.AnswerGradingStatus
 import com.buddystudy.backend.study.application.model.toResponse
 import com.buddystudy.backend.study.application.port.inbound.GetAnswerGradingProcessUseCase
 import com.buddystudy.backend.study.application.port.outbound.AnswerGradingProgressPort
@@ -27,7 +27,6 @@ class AnswerGradingProcessService(
             principal.userId,
         ) ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Answer grading process not found.")
         val status = question.gradingStatus
-            ?.let { runCatching { AnswerGradingStatus.valueOf(it) }.getOrNull() }
             ?: throw ApiException(
                 HttpStatus.CONFLICT,
                 ApiErrorCode.VALIDATION_ERROR,

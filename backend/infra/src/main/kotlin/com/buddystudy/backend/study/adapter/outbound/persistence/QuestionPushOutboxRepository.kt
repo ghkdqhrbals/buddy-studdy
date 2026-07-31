@@ -1,5 +1,6 @@
 package com.buddystudy.backend.study.adapter.outbound.persistence
 
+import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.backend.config.saveEntity
 import com.buddystudy.backend.common.application.outbox.PublishedStreamRecord
 import com.buddystudy.backend.study.application.content.QuestionNotificationContentPolicy
@@ -7,6 +8,7 @@ import com.buddystudy.backend.study.application.port.outbound.ClaimedQuestionPus
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushOutboxPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import com.buddystudy.study.domain.entity.QuestionPushOutboxEntity
+import com.buddystudy.study.domain.entity.QuestionPushOutboxStatus
 import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.data.r2dbc.core.R2dbcEntityTemplate
@@ -32,10 +34,10 @@ class QuestionPushOutboxRepository(
                 expectedAnswerHint = request.expectedAnswerHint,
                 topic = request.topic,
                 difficultyLevel = request.difficultyLevel,
-                language = request.language,
+                language = SupportedLanguage.fromLocale(request.language),
                 sound = request.sound,
                 intervalMinutes = request.intervalMinutes,
-                status = PENDING,
+                status = QuestionPushOutboxStatus.PENDING,
                 attempts = 0,
                 nextAttemptAt = now,
                 createdAt = request.createdAt,
@@ -225,10 +227,10 @@ class QuestionPushOutboxRepository(
                 expectedAnswerHint = expectedAnswerHint,
                 topic = topic,
                 difficultyLevel = difficultyLevel,
-                language = language,
+                language = language.databaseValue,
                 sound = sound,
                 intervalMinutes = intervalMinutes,
-                title = QuestionNotificationContentPolicy.title(language),
+                title = QuestionNotificationContentPolicy.title(language.databaseValue),
                 body = QuestionNotificationContentPolicy.preview(question),
                 deepLink = "buddystudy://records/$recordId",
             ),

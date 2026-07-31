@@ -1,6 +1,8 @@
 package com.buddystudy.backend.study
 
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.account.domain.entity.UserStatus
+import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
@@ -34,7 +36,12 @@ class QuestionNotificationRecoveryServiceTest {
             questions = QuestionPortFixture(question),
             studies = StudyPortFixture(study),
             users = UserPortFixture(
-                UserEntity(id = 7, providerId = "user-7", status = "ACTIVE", appLanguage = "ja-JP"),
+                UserEntity(
+                    id = 7,
+                    providerId = "user-7",
+                    status = UserStatus.ACTIVE,
+                    appLanguage = SupportedLanguage.JAPANESE,
+                ),
             ),
         )
 

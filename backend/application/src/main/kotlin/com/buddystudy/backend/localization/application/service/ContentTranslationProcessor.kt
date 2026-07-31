@@ -94,7 +94,7 @@ class ContentTranslationProcessor(
             "question" to question.question,
             "hint" to question.hint,
         )
-        val sources = fields.keys.associateWith { question.sourceLanguage }
+        val sources = fields.keys.associateWith { question.sourceLanguage.databaseValue }
         val result = translator.translate(
             fields.filterValues { !it.isNullOrBlank() },
             sources,
@@ -115,7 +115,7 @@ class ContentTranslationProcessor(
         val answer = question.answer?.takeIf(String::isNotBlank) ?: return
         val sourceHash = ContentLocalizationService.recordHashes(question).answer
         if (sourceHash == null || sourceHash != event.sourceHash) return
-        val sourceLanguage = question.answerSourceLanguage ?: question.sourceLanguage
+        val sourceLanguage = (question.answerSourceLanguage ?: question.sourceLanguage).databaseValue
         val result = translator.translate(
             fields = mapOf("answer" to answer),
             sourceLanguages = mapOf("answer" to sourceLanguage),
@@ -140,7 +140,7 @@ class ContentTranslationProcessor(
             "explanation" to question.explanation,
         ).filterValues { !it.isNullOrBlank() }
         if (fields.isEmpty()) return
-        val sourceLanguage = question.aiResponseSourceLanguage ?: question.sourceLanguage
+        val sourceLanguage = (question.aiResponseSourceLanguage ?: question.sourceLanguage).databaseValue
         val translated = translator.translate(
             fields = fields,
             sourceLanguages = fields.keys.associateWith { sourceLanguage },
@@ -157,7 +157,7 @@ class ContentTranslationProcessor(
         if (ContentLocalizationService.sha256(comment.body) != event.sourceHash) return
         val result = translator.translate(
             fields = mapOf("body" to comment.body),
-            sourceLanguages = mapOf("body" to comment.sourceLanguage),
+            sourceLanguages = mapOf("body" to comment.sourceLanguage.databaseValue),
             targetLanguage = event.targetLanguage,
         )
         localizations.saveCommentReady(comment, event.targetLanguage, event.sourceHash, result, Instant.now())

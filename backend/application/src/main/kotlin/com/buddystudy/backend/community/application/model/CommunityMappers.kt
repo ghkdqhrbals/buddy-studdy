@@ -9,9 +9,9 @@ import com.buddystudy.backend.study.application.model.translatedLocalization
 
 fun QuestionCommentEntity.toResponse(
     author: UserProfileResponse,
-    requestedLanguage: String = sourceLanguage,
+    requestedLanguage: String = sourceLanguage.databaseValue,
     viewMode: TranslationViewMode = TranslationViewMode.LOCALIZED,
-    displayLanguage: String = sourceLanguage,
+    displayLanguage: String = sourceLanguage.databaseValue,
     translationPending: Boolean = true,
     authorOriginal: Boolean = false,
 ) = CommunityCommentResponse(
@@ -21,22 +21,22 @@ fun QuestionCommentEntity.toResponse(
     createdAt,
     author,
     if (authorOriginal) {
-        authorOriginalLocalization(sourceLanguage, requestedLanguage)
+        authorOriginalLocalization(sourceLanguage.databaseValue, requestedLanguage)
     } else if (
         viewMode == TranslationViewMode.LOCALIZED &&
         com.buddystudy.study.domain.QuestionLanguage.normalize(displayLanguage) ==
         com.buddystudy.study.domain.QuestionLanguage.normalize(requestedLanguage) &&
-        com.buddystudy.study.domain.QuestionLanguage.normalize(sourceLanguage) !=
+        com.buddystudy.study.domain.QuestionLanguage.normalize(sourceLanguage.databaseValue) !=
         com.buddystudy.study.domain.QuestionLanguage.normalize(requestedLanguage)
     ) {
-        translatedLocalization(sourceLanguage, requestedLanguage)
+        translatedLocalization(sourceLanguage.databaseValue, requestedLanguage)
     } else {
         originalLocalization(
-            sourceLanguage = sourceLanguage,
+            sourceLanguage = sourceLanguage.databaseValue,
             requestedLanguage = requestedLanguage,
             viewMode = viewMode,
             pending = viewMode == TranslationViewMode.LOCALIZED &&
-                com.buddystudy.study.domain.QuestionLanguage.normalize(sourceLanguage) !=
+                com.buddystudy.study.domain.QuestionLanguage.normalize(sourceLanguage.databaseValue) !=
                 com.buddystudy.study.domain.QuestionLanguage.normalize(requestedLanguage) &&
                 translationPending,
         )

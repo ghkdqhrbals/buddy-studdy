@@ -3,6 +3,7 @@ package com.buddystudy.backend.study
 import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.auth.domain.entity.DeviceEntity
+import com.buddystudy.auth.domain.entity.ApnsEnvironment
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
@@ -27,7 +28,7 @@ class PushTestServiceTest {
                 deviceId = "dev-1",
                 userId = 1,
                 apnsToken = "apns-token",
-                apnsEnvironment = "sandbox",
+                apnsEnvironment = ApnsEnvironment.SANDBOX,
             )
         )
         val push = CapturingPushNotificationPort()

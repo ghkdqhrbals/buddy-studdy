@@ -46,14 +46,14 @@ class QuestionTranslationService(
                 question = question.question,
                 hint = question.hint,
                 sourceLanguage = event.sourceLanguage,
-                targetLanguage = QuestionLanguage.normalize(user.appLanguage),
+                targetLanguage = QuestionLanguage.normalize(user.appLanguage.databaseValue),
             )
             val result = writer.complete(
                 event = event,
                 claim = claimed.inbox,
                 translation = translation,
                 rootStudy = rootStudy,
-                appLanguage = QuestionLanguage.normalize(user.appLanguage),
+                appLanguage = QuestionLanguage.normalize(user.appLanguage.databaseValue),
                 now = Instant.now(),
             )
             runCatching { publisher.publishNow(result.outboxes) }

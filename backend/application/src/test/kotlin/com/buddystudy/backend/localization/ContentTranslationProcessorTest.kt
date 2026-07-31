@@ -12,6 +12,7 @@ import com.buddystudy.backend.study.application.model.StreamInboxClaim
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.StreamInboxPort
 import com.buddystudy.backend.test.EmptyContentLocalizationPort
+import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.study.domain.entity.QuestionEntity
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -53,11 +54,11 @@ class ContentTranslationProcessorTest {
             id = 58,
             topic = "MySQL",
             question = "인덱스를 설명하세요.",
-            sourceLanguage = "ko",
+            sourceLanguage = SupportedLanguage.KOREAN,
             answer = "인덱스는 조회를 빠르게 하는 자료구조입니다.",
-            answerSourceLanguage = "ko",
+            answerSourceLanguage = SupportedLanguage.KOREAN,
             feedback = "핵심을 잘 설명했습니다.",
-            aiResponseSourceLanguage = "ko",
+            aiResponseSourceLanguage = SupportedLanguage.KOREAN,
         )
         val answerHash = ContentLocalizationService.recordHashes(question).answer!!
         val questions = Mockito.mock(QuestionPort::class.java)
@@ -197,7 +198,7 @@ class ContentTranslationProcessorTest {
         id = 58,
         topic = "MySQL",
         question = "인덱스를 설명하세요.",
-        sourceLanguage = "ko",
+        sourceLanguage = SupportedLanguage.KOREAN,
     )
 
     private fun questionEvent(question: QuestionEntity) = ContentTranslationRequestedEvent(

@@ -2,7 +2,7 @@ package com.buddystudy.backend.study.application.port.inbound
 
 import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
-import com.buddystudy.backend.study.application.model.AnswerGradingStatus
+import com.buddystudy.study.domain.entity.AnswerGradingStatus
 import com.buddystudy.backend.study.application.model.GeneratedQuestionWithEmbedding
 import com.buddystudy.backend.study.application.model.QueuedQuestionGeneration
 import com.buddystudy.backend.study.application.model.ClaimedQuestionGeneration

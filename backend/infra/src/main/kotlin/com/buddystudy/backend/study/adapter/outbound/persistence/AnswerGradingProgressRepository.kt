@@ -1,7 +1,7 @@
 package com.buddystudy.backend.study.adapter.outbound.persistence
 
 import com.buddystudy.backend.study.application.model.AnswerGradingProgress
-import com.buddystudy.backend.study.application.model.AnswerGradingStatus
+import com.buddystudy.study.domain.entity.AnswerGradingStatus
 import com.buddystudy.backend.study.application.port.outbound.AnswerGradingProgressPort
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.reactive.asFlow

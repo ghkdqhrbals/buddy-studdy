@@ -25,7 +25,7 @@ class QuestionNotificationRecoveryService(
         val userId = question.userId ?: return null
         val studyId = question.studyId ?: return null
         val study = studies.findByIdAndUserId(studyId, userId) ?: return null
-        val appLanguage = QuestionLanguage.normalize(users.findById(userId)?.appLanguage)
+        val appLanguage = QuestionLanguage.normalize(users.findById(userId)?.appLanguage?.databaseValue)
         return question.toQuestionNotification(study, appLanguage).copy(eventId = eventId)
     }
 

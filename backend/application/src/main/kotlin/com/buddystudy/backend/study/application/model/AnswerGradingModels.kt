@@ -2,19 +2,7 @@ package com.buddystudy.backend.study.application.model
 
 import java.time.Instant
 
-enum class AnswerGradingStatus {
-    QUEUED,
-    ANALYZING_EVIDENCE,
-    CRITIQUING,
-    JUDGING,
-    ADJUDICATING,
-    COMPLETED,
-    FAILED,
-    ;
-
-    val terminal: Boolean
-        get() = this == COMPLETED || this == FAILED
-}
+typealias AnswerGradingStatus = com.buddystudy.study.domain.entity.AnswerGradingStatus
 
 data class AnswerGradingRequestedEvent(
     val eventId: String,

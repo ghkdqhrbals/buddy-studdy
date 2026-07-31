@@ -7,7 +7,7 @@ import com.buddystudy.backend.common.application.outbox.OutboxType
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxAppendPort
 import com.buddystudy.backend.localization.application.port.ContentLanguageDetectionPort
 import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
-import com.buddystudy.backend.study.application.model.AnswerGradingStatus
+import com.buddystudy.study.domain.entity.AnswerGradingStatus
 import com.buddystudy.backend.study.application.port.outbound.AnswerGradingProgressPort
 import com.buddystudy.backend.study.application.port.inbound.AnswerGradingWriteUseCase
 import com.buddystudy.backend.study.application.port.inbound.QueuedAnswerGrading
@@ -107,9 +107,7 @@ class StudyRecordWriteService(
         now: Instant,
     ): QueuedAnswerGrading {
         val question = lockRecord(recordId, userId)
-        val currentStatus = question.gradingStatus?.let {
-            runCatching { AnswerGradingStatus.valueOf(it) }.getOrNull()
-        }
+        val currentStatus = question.gradingStatus
         if (question.score != null || (currentStatus != null && !currentStatus.terminal)) {
             return QueuedAnswerGrading(question, emptyList())
         }
@@ -125,7 +123,7 @@ class StudyRecordWriteService(
         )
         question.apply(question.toStudyRecord().answer(answer, sourceLanguage, now))
         question.gradingRequestId = requestId
-        question.gradingStatus = AnswerGradingStatus.QUEUED.name
+        question.gradingStatus = AnswerGradingStatus.QUEUED
         question.gradingError = null
         question.gradingRequestedAt = now
         question.gradingStartedAt = null
@@ -144,13 +142,13 @@ class StudyRecordWriteService(
         require(!status.terminal) { "Terminal grading status must use complete or fail." }
         val question = lockRecord(event.recordId, event.userId)
         if (question.gradingRequestId != event.requestId || question.score != null) return false
-        if (question.gradingStatus == AnswerGradingStatus.FAILED.name ||
-            question.gradingStatus == AnswerGradingStatus.COMPLETED.name
+        if (question.gradingStatus == AnswerGradingStatus.FAILED ||
+            question.gradingStatus == AnswerGradingStatus.COMPLETED
         ) {
             return false
         }
-        if (question.gradingStatus == status.name) return true
-        question.gradingStatus = status.name
+        if (question.gradingStatus == status) return true
+        question.gradingStatus = status
         question.gradingStartedAt = question.gradingStartedAt ?: now
         question.updatedAt = now
         questions.save(question)
@@ -166,8 +164,8 @@ class StudyRecordWriteService(
     ): Boolean {
         val question = lockRecord(event.recordId, event.userId)
         if (question.gradingRequestId != event.requestId) return false
-        if (question.score != null && question.gradingStatus == AnswerGradingStatus.COMPLETED.name) return true
-        if (question.gradingStatus == AnswerGradingStatus.FAILED.name) return false
+        if (question.score != null && question.gradingStatus == AnswerGradingStatus.COMPLETED) return true
+        if (question.gradingStatus == AnswerGradingStatus.FAILED) return false
         val record = question.toStudyRecord()
         question.applyGradingMetadata(grade)
         val aiResponseLanguage = languageDetector.detect(
@@ -184,7 +182,7 @@ class StudyRecordWriteService(
                 now,
             ),
         )
-        question.gradingStatus = AnswerGradingStatus.COMPLETED.name
+        question.gradingStatus = AnswerGradingStatus.COMPLETED
         question.gradingError = null
         questions.save(question)
         if (question.conceptId != null && question.angleKey != null) {
@@ -215,12 +213,12 @@ class StudyRecordWriteService(
     ) {
         val question = lockRecord(event.recordId, event.userId)
         if (question.gradingRequestId != event.requestId || question.score != null) return
-        if (question.gradingStatus == AnswerGradingStatus.FAILED.name ||
-            question.gradingStatus == AnswerGradingStatus.COMPLETED.name
+        if (question.gradingStatus == AnswerGradingStatus.FAILED ||
+            question.gradingStatus == AnswerGradingStatus.COMPLETED
         ) {
             return
         }
-        question.gradingStatus = AnswerGradingStatus.FAILED.name
+        question.gradingStatus = AnswerGradingStatus.FAILED
         question.gradingError = errorMessage.take(255)
         question.updatedAt = now
         questions.save(question)

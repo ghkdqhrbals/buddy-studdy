@@ -3,8 +3,12 @@ package com.buddystudy.backend.profile
 import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.account.domain.entity.AvatarMode
+import com.buddystudy.account.domain.entity.UserProvider
+import com.buddystudy.account.domain.entity.UserStatus
 import com.buddystudy.avatar.domain.entity.AvatarCategoryEntity
 import com.buddystudy.avatar.domain.entity.AvatarItemEntity
+import com.buddystudy.avatar.domain.entity.AvatarSlot
 import com.buddystudy.auth.domain.entity.DeviceEntity
 import com.buddystudy.auth.domain.entity.UserDeviceEntity
 import com.buddystudy.backend.auth.Principal
@@ -57,10 +61,10 @@ class ProfileServiceAccountDeletionTest {
     fun `update profile returns the requested avatar symbol and color`(): Unit = runBlocking {
         val activeUser = users.save(
             UserEntity(
-                provider = "GOOGLE",
+                provider = UserProvider.GOOGLE,
                 providerId = "google-subject",
                 email = "user@example.com",
-                status = "ACTIVE",
+                status = UserStatus.ACTIVE,
                 displayName = "Jamma",
                 avatarSymbolName = "pixel-cat-laptop",
                 avatarColorSeed = "avatar-color-mint",
@@ -94,9 +98,9 @@ class ProfileServiceAccountDeletionTest {
     fun `update profile persists public question visibility preference`(): Unit = runBlocking {
         val activeUser = users.save(
             UserEntity(
-                provider = "GOOGLE",
+                provider = UserProvider.GOOGLE,
                 providerId = "public-question-preference",
-                status = "ACTIVE",
+                status = UserStatus.ACTIVE,
                 displayName = "Jamma",
                 allowPublicQuestions = true,
             )
@@ -117,13 +121,13 @@ class ProfileServiceAccountDeletionTest {
     fun `switching to a pixel avatar removes the legacy profile photo`(): Unit = runBlocking {
         val activeUser = users.save(
             UserEntity(
-                provider = "GOOGLE",
+                provider = UserProvider.GOOGLE,
                 providerId = "pixel-user",
                 email = "pixel@example.com",
-                status = "ACTIVE",
+                status = UserStatus.ACTIVE,
                 displayName = "Pixel User",
                 avatarUrl = "https://api.example.com/api/v1/profile/photo/1",
-                avatarMode = "PHOTO",
+                avatarMode = AvatarMode.PHOTO,
             )
         )
         photos.save(activeUser.id, "image/jpeg", "photo".toByteArray())
@@ -146,10 +150,10 @@ class ProfileServiceAccountDeletionTest {
     fun `withdraw disables member and emits cleanup event before reconnecting current device anonymously`(): Unit = runBlocking {
         val activeUser = users.save(
             UserEntity(
-                provider = "GOOGLE",
+                provider = UserProvider.GOOGLE,
                 providerId = "google-subject",
                 email = "user@example.com",
-                status = "ACTIVE",
+                status = UserStatus.ACTIVE,
                 displayName = "Jamma",
                 createdAt = Instant.now(),
                 updatedAt = Instant.now(),
@@ -188,14 +192,14 @@ class ProfileServiceAccountDeletionTest {
         assertThat(response.accessToken).isNotBlank()
         assertThat(deletion.started).containsExactly(activeUser.id)
         assertThat(users.findByProviderAndProviderId("GOOGLE", "google-subject")).isNull()
-        assertThat(users.findById(activeUser.id)?.status).isEqualTo("WITHDRAWN")
+        assertThat(users.findById(activeUser.id)?.status).isEqualTo(UserStatus.WITHDRAWN)
         val withdrawalEvent = withdrawalEvents.events.single()
         assertThat(withdrawalEvent.userId).isEqualTo(activeUser.id)
         assertThat(withdrawalEvent.deviceIds).containsExactly("dev-current")
         val anonymousUserId = devices.findByDeviceId("dev-current")?.userId
         assertThat(anonymousUserId).isNotNull()
         assertThat(anonymousUserId).isNotEqualTo(activeUser.id)
-        assertThat(users.findById(anonymousUserId!!)!!.status).isEqualTo("ANONYMOUS")
+        assertThat(users.findById(anonymousUserId!!)!!.status).isEqualTo(UserStatus.ANONYMOUS)
         assertThat(roles.grants).contains(anonymousUserId to Roles.ANONYMOUS_USER)
         assertThat(userDevices.findActiveByUserId(activeUser.id)).isEmpty()
         assertThat(userDevices.findAllByUserId(activeUser.id)).hasSize(1)
@@ -215,9 +219,9 @@ class ProfileServiceAccountDeletionTest {
             userDevices.revokeAllForUser(userId, now)
             devices.detachUser(userId, now)
             users.findById(userId)?.apply {
-                provider = "WITHDRAWN"
+                provider = UserProvider.WITHDRAWN
                 providerId = "withdrawn-$userId"
-                status = "WITHDRAWN"
+                status = UserStatus.WITHDRAWN
                 email = ""
                 displayName = "Withdrawn-$userId"
                 passwordHash = null
@@ -259,10 +263,10 @@ class ProfileServiceAccountDeletionTest {
             ids.mapNotNull { users[it] }.toMutableList()
 
         override suspend fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity? =
-            users.values.firstOrNull { it.provider == provider && it.providerId == providerId }
+            users.values.firstOrNull { it.provider.name == provider && it.providerId == providerId }
 
         override suspend fun findByEmailAndProvider(email: String, provider: String): UserEntity? =
-            users.values.firstOrNull { it.provider == provider && it.email == email }
+            users.values.firstOrNull { it.provider.name == provider && it.email == email }
 
         fun deleteById(id: Long) {
             users.remove(id)
@@ -345,22 +349,22 @@ class ProfileServiceAccountDeletionTest {
 
     private class InMemoryAvatarCatalogPort : AvatarCatalogPort {
         private val categories = listOf(
-            AvatarCategoryEntity(key = "bases", titleKo = "캐릭터", titleEn = "Base", slot = "base", required = true, sortOrder = 10),
-            AvatarCategoryEntity(key = "backgrounds", titleKo = "배경", titleEn = "Background", slot = "background", required = true, sortOrder = 20),
-            AvatarCategoryEntity(key = "tops", titleKo = "상의", titleEn = "Top", slot = "top", sortOrder = 30),
-            AvatarCategoryEntity(key = "bottoms", titleKo = "하의", titleEn = "Bottom", slot = "bottom", sortOrder = 40),
-            AvatarCategoryEntity(key = "shoes", titleKo = "신발", titleEn = "Shoes", slot = "shoes", sortOrder = 50),
-            AvatarCategoryEntity(key = "hats", titleKo = "모자", titleEn = "Hat", slot = "hat", sortOrder = 60),
-            AvatarCategoryEntity(key = "items", titleKo = "소품", titleEn = "Item", slot = "item", sortOrder = 70),
+            AvatarCategoryEntity(key = "bases", titleKo = "캐릭터", titleEn = "Base", slot = AvatarSlot.BASE, required = true, sortOrder = 10),
+            AvatarCategoryEntity(key = "backgrounds", titleKo = "배경", titleEn = "Background", slot = AvatarSlot.BACKGROUND, required = true, sortOrder = 20),
+            AvatarCategoryEntity(key = "tops", titleKo = "상의", titleEn = "Top", slot = AvatarSlot.TOP, sortOrder = 30),
+            AvatarCategoryEntity(key = "bottoms", titleKo = "하의", titleEn = "Bottom", slot = AvatarSlot.BOTTOM, sortOrder = 40),
+            AvatarCategoryEntity(key = "shoes", titleKo = "신발", titleEn = "Shoes", slot = AvatarSlot.SHOES, sortOrder = 50),
+            AvatarCategoryEntity(key = "hats", titleKo = "모자", titleEn = "Hat", slot = AvatarSlot.HAT, sortOrder = 60),
+            AvatarCategoryEntity(key = "items", titleKo = "소품", titleEn = "Item", slot = AvatarSlot.ITEM, sortOrder = 70),
         )
         private val items = listOf(
-            AvatarItemEntity(key = "base-cat", category = "bases", slot = "base", displayNameKo = "고양이", displayNameEn = "Cat", assetName = "ProfileAvatarCatLaptop", sortOrder = 10),
-            AvatarItemEntity(key = "background-teal", category = "backgrounds", slot = "background", displayNameKo = "청록", displayNameEn = "Teal", colorHex = "#2A9BA8", sortOrder = 20),
-            AvatarItemEntity(key = "top-hoodie-blue", category = "tops", slot = "top", displayNameKo = "후디", displayNameEn = "Hoodie", colorHex = "#1D4ED8", sortOrder = 30),
-            AvatarItemEntity(key = "bottom-denim-pants", category = "bottoms", slot = "bottom", displayNameKo = "데님", displayNameEn = "Denim", colorHex = "#1E3A8A", sortOrder = 40),
-            AvatarItemEntity(key = "shoes-white-sneakers", category = "shoes", slot = "shoes", displayNameKo = "스니커즈", displayNameEn = "Sneakers", colorHex = "#F8FAFC", sortOrder = 50),
-            AvatarItemEntity(key = "hat-beanie-navy", category = "hats", slot = "hat", displayNameKo = "비니", displayNameEn = "Beanie", colorHex = "#0F172A", sortOrder = 60),
-            AvatarItemEntity(key = "item-laptop", category = "items", slot = "item", displayNameKo = "노트북", displayNameEn = "Laptop", colorHex = "#64748B", sortOrder = 70),
+            AvatarItemEntity(key = "base-cat", category = "bases", slot = AvatarSlot.BASE, displayNameKo = "고양이", displayNameEn = "Cat", assetName = "ProfileAvatarCatLaptop", sortOrder = 10),
+            AvatarItemEntity(key = "background-teal", category = "backgrounds", slot = AvatarSlot.BACKGROUND, displayNameKo = "청록", displayNameEn = "Teal", colorHex = "#2A9BA8", sortOrder = 20),
+            AvatarItemEntity(key = "top-hoodie-blue", category = "tops", slot = AvatarSlot.TOP, displayNameKo = "후디", displayNameEn = "Hoodie", colorHex = "#1D4ED8", sortOrder = 30),
+            AvatarItemEntity(key = "bottom-denim-pants", category = "bottoms", slot = AvatarSlot.BOTTOM, displayNameKo = "데님", displayNameEn = "Denim", colorHex = "#1E3A8A", sortOrder = 40),
+            AvatarItemEntity(key = "shoes-white-sneakers", category = "shoes", slot = AvatarSlot.SHOES, displayNameKo = "스니커즈", displayNameEn = "Sneakers", colorHex = "#F8FAFC", sortOrder = 50),
+            AvatarItemEntity(key = "hat-beanie-navy", category = "hats", slot = AvatarSlot.HAT, displayNameKo = "비니", displayNameEn = "Beanie", colorHex = "#0F172A", sortOrder = 60),
+            AvatarItemEntity(key = "item-laptop", category = "items", slot = AvatarSlot.ITEM, displayNameKo = "노트북", displayNameEn = "Laptop", colorHex = "#64748B", sortOrder = 70),
         )
 
         override suspend fun activeCategories(): List<AvatarCategoryEntity> = categories

@@ -24,7 +24,7 @@ class AnswerGradingProcessServiceTest {
                 id = 10,
                 userId = 7,
                 gradingRequestId = "queued-request",
-                gradingStatus = AnswerGradingStatus.QUEUED.name,
+                gradingStatus = AnswerGradingStatus.QUEUED,
                 updatedAt = Instant.parse("2026-07-27T00:00:00Z"),
             ),
         )
@@ -68,7 +68,7 @@ class AnswerGradingProcessServiceTest {
                 id = 10,
                 userId = 7,
                 gradingRequestId = "current-request",
-                gradingStatus = AnswerGradingStatus.COMPLETED.name,
+                gradingStatus = AnswerGradingStatus.COMPLETED,
                 updatedAt = Instant.parse("2026-07-27T00:00:02Z"),
             ),
         )

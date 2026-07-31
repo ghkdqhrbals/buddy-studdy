@@ -107,7 +107,7 @@ class QuestionGenerationExecutionWriteService(
             studyId = event.studyId,
             topicId = event.topicId,
             source = event.source,
-            sourceLanguage = saved.sourceLanguage,
+            sourceLanguage = saved.sourceLanguage.databaseValue,
             generatedAt = now,
             occurredAt = now,
         )

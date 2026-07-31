@@ -5,13 +5,21 @@ import kotlinx.coroutines.reactive.awaitSingle
 
 import com.buddystudy.backend.auth.adapter.outbound.persistence.UserRepository
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.account.domain.entity.UserProvider
+import com.buddystudy.account.domain.entity.UserStatus
 import com.buddystudy.auth.domain.entity.DeviceEntity
+import com.buddystudy.auth.domain.entity.ApnsEnvironment
+import com.buddystudy.auth.domain.entity.DevicePlatform
+import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.backend.auth.adapter.outbound.persistence.DeviceRepository
 import com.buddystudy.backend.study.adapter.outbound.persistence.StudyQuestionCoveragePersistenceAdapter
 import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionRepository
 import com.buddystudy.backend.study.adapter.outbound.persistence.StudyRepository
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.GradingVerdict
+import com.buddystudy.study.domain.entity.QuestionSource
+import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.StudyEntity
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -40,6 +48,151 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var questions: QuestionRepository
     @Autowired lateinit var questionCoverage: StudyQuestionCoveragePersistenceAdapter
     @Autowired lateinit var databaseClient: DatabaseClient
+
+    @Test
+    fun `enum columns expose allowed values through database comments and checks`(): Unit = runBlocking {
+        data class ColumnComment(val table: String, val column: String, val comment: String)
+
+        val comments = databaseClient.sql(
+            """
+            select table_name, column_name, column_comment
+            from information_schema.columns
+            where table_schema = database()
+              and (
+                (table_name = 'users' and column_name in ('provider', 'status', 'avatar_mode', 'app_language'))
+                or (table_name = 'devices' and column_name in ('platform', 'apns_environment', 'language'))
+                or (table_name = 'questions' and column_name in ('status', 'source', 'grading_verdict', 'grading_status'))
+              )
+            """.trimIndent(),
+        )
+            .map { row, _ ->
+                ColumnComment(
+                    table = row.get("table_name", String::class.java)!!,
+                    column = row.get("column_name", String::class.java)!!,
+                    comment = row.get("column_comment", String::class.java)!!,
+                )
+            }
+            .all()
+            .collectList()
+            .awaitSingle()
+            .associateBy { "${it.table}.${it.column}" }
+
+        assertThat(comments).hasSize(11)
+        assertThat(comments.getValue("users.provider").comment).contains("APPLE", "GOOGLE", "EMAIL")
+        assertThat(comments.getValue("users.status").comment).contains("PENDING_TERMS", "WITHDRAWN")
+        assertThat(comments.getValue("users.app_language").comment).contains("ko", "en", "ja")
+        assertThat(comments.getValue("devices.apns_environment").comment).contains("sandbox", "production")
+        assertThat(comments.getValue("questions.status").comment).contains("ungraded", "graded", "skipped")
+        assertThat(comments.getValue("questions.grading_status").comment).contains("QUEUED", "COMPLETED", "FAILED")
+
+        val checks = databaseClient.sql(
+            """
+            select constraint_name
+            from information_schema.table_constraints
+            where constraint_schema = database()
+              and constraint_type = 'CHECK'
+              and constraint_name in (
+                'chk_users_provider',
+                'chk_users_status',
+                'chk_devices_apns_environment',
+                'chk_questions_status',
+                'chk_questions_grading_status'
+              )
+            """.trimIndent(),
+        )
+            .map { row, _ -> row.get("constraint_name", String::class.java)!! }
+            .all()
+            .collectList()
+            .awaitSingle()
+
+        assertThat(checks).containsExactlyInAnyOrder(
+            "chk_users_provider",
+            "chk_users_status",
+            "chk_devices_apns_environment",
+            "chk_questions_status",
+            "chk_questions_grading_status",
+        )
+    }
+
+    @Test
+    fun `R2DBC persists typed enums using their documented varchar values`(): Unit = runBlocking {
+        val user = users.save(
+            UserEntity(
+                provider = UserProvider.APPLE,
+                providerId = "enum-contract-apple",
+                email = "enum-contract@example.com",
+                status = UserStatus.PENDING_TERMS,
+                appLanguage = SupportedLanguage.JAPANESE,
+                displayName = "Enum-Contract-0001",
+            ),
+        )
+        val device = devices.save(
+            DeviceEntity(
+                deviceId = "enum-contract-device",
+                clientSecretHash = "enum-contract-secret",
+                userId = user.id,
+                platform = DevicePlatform.IOS,
+                apnsEnvironment = ApnsEnvironment.SANDBOX,
+                language = SupportedLanguage.ENGLISH,
+            ),
+        )
+        val question = questions.save(
+            QuestionEntity(
+                deviceId = device.deviceId,
+                userId = user.id,
+                question = "Enum persistence?",
+                topic = "Persistence",
+                sourceLanguage = SupportedLanguage.JAPANESE,
+                status = QuestionStatus.UNGRADED,
+                source = QuestionSource.MANUAL,
+            ),
+        )
+
+        val raw = databaseClient.sql(
+            """
+            select u.provider, u.status, u.app_language,
+                   d.platform, d.apns_environment, d.language,
+                   q.source_language, q.status as question_status, q.source as question_source
+            from users u
+            join devices d on d.user_id = u.id
+            join questions q on q.user_id = u.id
+            where u.id = :userId and d.id = :deviceId and q.id = :questionId
+            """.trimIndent(),
+        )
+            .bind("userId", user.id)
+            .bind("deviceId", device.id)
+            .bind("questionId", question.id)
+            .map { row, _ ->
+                listOf(
+                    row.get("provider", String::class.java)!!,
+                    row.get("status", String::class.java)!!,
+                    row.get("app_language", String::class.java)!!,
+                    row.get("platform", String::class.java)!!,
+                    row.get("apns_environment", String::class.java)!!,
+                    row.get("language", String::class.java)!!,
+                    row.get("source_language", String::class.java)!!,
+                    row.get("question_status", String::class.java)!!,
+                    row.get("question_source", String::class.java)!!,
+                )
+            }
+            .one()
+            .awaitSingle()
+
+        assertThat(raw).containsExactly(
+            "APPLE",
+            "PENDING_TERMS",
+            "ja",
+            "ios",
+            "sandbox",
+            "en",
+            "ja",
+            "ungraded",
+            "manual",
+        )
+        assertThat(users.findById(user.id)?.appLanguage).isEqualTo(SupportedLanguage.JAPANESE)
+        assertThat(devices.findById(device.id)?.apnsEnvironment).isEqualTo(ApnsEnvironment.SANDBOX)
+        assertThat(questions.findById(question.id)?.source).isEqualTo(QuestionSource.MANUAL)
+    }
 
     @Test
     fun `current legal documents match the published fixed copies`(): Unit = runBlocking {
@@ -188,27 +341,28 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
     fun `flyway schema supports user openai settings`(): Unit = runBlocking {
         val saved = users.save(
             UserEntity(
-                provider = "EMAIL",
+                provider = UserProvider.EMAIL,
                 providerId = "flyway@example.com",
                 email = "flyway@example.com",
-                status = "ACTIVE",
+                status = UserStatus.ACTIVE,
                 displayName = "Flyway-User-0001",
                 openaiApiKeyCipher = "cipher",
             )
         )
 
         assertThat(saved.id).isPositive()
-        assertThat(users.findByProviderAndProviderId("EMAIL", "flyway@example.com")?.openaiApiKeyCipher).isEqualTo("cipher")
+        assertThat(users.findByProviderAndProviderId(UserProvider.EMAIL, "flyway@example.com")?.openaiApiKeyCipher)
+            .isEqualTo("cipher")
     }
 
     @Test
     fun `registered display names are unique while anonymous buddy names can repeat`(): Unit = runBlocking {
         users.save(
             UserEntity(
-                provider = "EMAIL",
+                provider = UserProvider.EMAIL,
                 providerId = "unique-name-one@example.com",
                 email = "unique-name-one@example.com",
-                status = "ACTIVE",
+                status = UserStatus.ACTIVE,
                 displayName = "Bright-Fox-4321",
             )
         )
@@ -217,18 +371,18 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
             runBlocking {
                 users.save(
                     UserEntity(
-                        provider = "GOOGLE",
+                        provider = UserProvider.GOOGLE,
                         providerId = "unique-name-google",
                         email = "unique-name-two@example.com",
-                        status = "PENDING_TERMS",
+                        status = UserStatus.PENDING_TERMS,
                         displayName = "bright-fox-4321",
                     )
                 )
             }
         }.hasMessageContaining("uq_users_display_name_key")
 
-        users.save(UserEntity(provider = "ANONYMOUS", providerId = "anonymous-one", displayName = "Buddy"))
-        users.save(UserEntity(provider = "ANONYMOUS", providerId = "anonymous-two", displayName = "Buddy"))
+        users.save(UserEntity(provider = UserProvider.ANONYMOUS, providerId = "anonymous-one", displayName = "Buddy"))
+        users.save(UserEntity(provider = UserProvider.ANONYMOUS, providerId = "anonymous-two", displayName = "Buddy"))
     }
 
     @Test
@@ -255,7 +409,7 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
                 topic = "Redis",
                 gradingRubricJson = """{"version":"question-rubric-v1","criteria":[]}""",
                 gradingAssessmentJson = """{"criteria":[]}""",
-                gradingVerdict = "PARTIALLY_CORRECT",
+                gradingVerdict = GradingVerdict.PARTIALLY_CORRECT,
                 gradingConfidence = 0.91,
                 gradingPolicyVersion = "ai-judge-v1",
                 gradingModel = "test-model",
@@ -266,7 +420,7 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
 
         assertThat(reloaded?.gradingRubricJson).contains("question-rubric-v1")
         assertThat(reloaded?.gradingAssessmentJson).contains("criteria")
-        assertThat(reloaded?.gradingVerdict).isEqualTo("PARTIALLY_CORRECT")
+        assertThat(reloaded?.gradingVerdict).isEqualTo(GradingVerdict.PARTIALLY_CORRECT)
         assertThat(reloaded?.gradingConfidence).isEqualTo(0.91)
         assertThat(reloaded?.gradingPolicyVersion).isEqualTo("ai-judge-v1")
         assertThat(reloaded?.gradingModel).isEqualTo("test-model")
@@ -276,10 +430,10 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
     fun `flyway schema supports nested question coverage tree`(): Unit = runBlocking {
         val user = users.save(
             UserEntity(
-                provider = "EMAIL",
+                provider = UserProvider.EMAIL,
                 providerId = "coverage-tree@example.com",
                 email = "coverage-tree@example.com",
-                status = "ACTIVE",
+                status = UserStatus.ACTIVE,
                 displayName = "Coverage-Tree-0001",
             )
         )
@@ -337,10 +491,10 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
         val now = java.time.Instant.parse("2030-01-01T00:00:00Z")
         val user = users.save(
             UserEntity(
-                provider = "EMAIL",
+                provider = UserProvider.EMAIL,
                 providerId = "schedule-lease@example.com",
                 email = "schedule-lease@example.com",
-                status = "ACTIVE",
+                status = UserStatus.ACTIVE,
                 displayName = "Schedule-Lease-0001",
             ),
         )

@@ -3,6 +3,8 @@ package com.buddystudy.backend.study
 import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.account.domain.entity.UserStatus
+import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
@@ -40,6 +42,7 @@ import com.buddystudy.backend.study.application.model.AnswerGradingStatus
 import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
 import com.buddystudy.backend.study.application.port.outbound.AnswerGradingProgressPort
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.study.domain.entity.StudyEntity
 import com.buddystudy.backend.test.EmptyContentLocalizationPort
@@ -151,7 +154,12 @@ class StudyServiceTest {
 
     @Test
     fun `graded answer is queued without waiting for OpenAI`(): Unit = runBlocking {
-        users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
+        users.row = UserEntity(
+            id = principal.userId,
+            providerId = "u7",
+            status = UserStatus.ACTIVE,
+            appLanguage = SupportedLanguage.ENGLISH,
+        )
         questions.visibleRows += pendingQuestion(id = 501, topic = "Kotlin")
         questionStats.rows += QuestionStatsEntity(questionId = 501, viewCount = 5)
 
@@ -189,7 +197,12 @@ class StudyServiceTest {
 
     @Test
     fun `queued grading does not update coverage before the consumer completes`(): Unit = runBlocking {
-        users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
+        users.row = UserEntity(
+            id = principal.userId,
+            providerId = "u7",
+            status = UserStatus.ACTIVE,
+            appLanguage = SupportedLanguage.ENGLISH,
+        )
         questions.visibleRows += pendingQuestion(id = 502, topic = "Redis").apply {
             conceptId = 11
             conceptKey = "replication"
@@ -214,7 +227,7 @@ class StudyServiceTest {
     }
 
     private fun gradedQuestion(id: Long, topic: String) = question(id, topic).apply {
-        status = "graded"
+        status = QuestionStatus.GRADED
         answer = "Answer"
         score = 90
         correct = true
@@ -225,7 +238,7 @@ class StudyServiceTest {
     }
 
     private fun pendingQuestion(id: Long, topic: String) = question(id, topic).apply {
-        status = "ungraded"
+        status = QuestionStatus.UNGRADED
     }
 
     private fun question(id: Long, topic: String) = QuestionEntity(

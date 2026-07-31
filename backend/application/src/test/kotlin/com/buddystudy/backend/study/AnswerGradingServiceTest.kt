@@ -41,7 +41,7 @@ class AnswerGradingServiceTest {
                 id = 10,
                 userId = 7,
                 gradingRequestId = event.requestId,
-                gradingStatus = AnswerGradingStatus.COMPLETED.name,
+                gradingStatus = AnswerGradingStatus.COMPLETED,
             ),
         )
         val properties = BuddyStudyProperties().apply {

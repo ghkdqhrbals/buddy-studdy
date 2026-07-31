@@ -12,6 +12,8 @@ import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.study.application.service.StudySyncService
 import com.buddystudy.backend.test.EmptyContentLocalizationPort
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.AnswerGradingStatus
+import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.study.domain.entity.StudyEntity
 import org.assertj.core.api.Assertions.assertThat
@@ -38,7 +40,7 @@ class StudySyncServiceTest {
             answer = "A process owns resources while a thread is an execution flow."
             answeredAt = Instant.parse("2026-06-10T00:05:00Z")
             gradingRequestId = "grading-101"
-            gradingStatus = "JUDGING"
+            gradingStatus = AnswerGradingStatus.JUDGING
         }
         questions.pendingRows += pendingQuestion(id = 102, studyId = 12, topic = "Kotlin")
         questionStats.rows += QuestionStatsEntity(questionId = 101, viewCount = 3)
@@ -212,7 +214,7 @@ class StudySyncServiceTest {
         difficultyLevel = 5,
         scheduledFor = Instant.parse("2026-06-10T00:00:00Z"),
         sentAt = Instant.parse("2026-06-10T00:00:00Z"),
-        status = "ungraded",
+        status = QuestionStatus.UNGRADED,
         createdAt = Instant.parse("2026-06-10T00:00:00Z").plusSeconds(id),
         updatedAt = Instant.parse("2026-06-10T00:00:00Z").plusSeconds(id),
     )

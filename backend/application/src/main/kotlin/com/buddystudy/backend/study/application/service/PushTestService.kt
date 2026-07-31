@@ -36,7 +36,7 @@ class PushTestService(
             recordId = command.recordId.ifBlank { "test" },
             topic = command.topic.ifBlank { "Test" },
             token = token,
-            environment = device.apnsEnvironment.ifBlank { "production" },
+            environment = device.apnsEnvironment.databaseValue,
             payload = ApnsQuestionPayload(
                 aps = ApnsAps(
                     alert = ApnsAlert(

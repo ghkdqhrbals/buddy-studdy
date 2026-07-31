@@ -34,7 +34,7 @@ class StudyTreeService(
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Parent study not found.")
         val root = StudyTreeSelector.rootFor(parent, allStudies)
         val existingKeys = allStudies.map { it.topic.normalizedStudyTopicKey() }.toSet()
-        val language = users.findById(principal.userId)?.appLanguage ?: "ko"
+        val language = users.findById(principal.userId)?.appLanguage?.databaseValue ?: "ko"
         val requestedCount = count.coerceIn(1, MAX_CHILDREN)
         val path = StudyTreeSelector.pathFromRoot(parent, allStudies)
         val childDepth = path.size

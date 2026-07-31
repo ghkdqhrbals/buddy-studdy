@@ -20,6 +20,7 @@ import com.buddystudy.study.domain.StudyRoomSettingsCommand
 import com.buddystudy.study.domain.StudyRoomSettingsState
 import com.buddystudy.study.domain.StudyRoomSettingsUpdate
 import com.buddystudy.study.domain.QuestionLanguage
+import com.buddystudy.common.domain.SupportedLanguage
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -45,7 +46,9 @@ class SettingsService(
             if (encryptedKey != null) {
                 user.openaiApiKeyCipher = encryptedKey
             }
-            user.appLanguage = QuestionLanguage.normalize(command.appLanguage.ifBlank { user.appLanguage })
+            user.appLanguage = SupportedLanguage.fromLocale(
+                QuestionLanguage.normalize(command.appLanguage.ifBlank { user.appLanguage.databaseValue }),
+            )
             user.updatedAt = now
             users.save(user)
         }
@@ -125,7 +128,9 @@ class SettingsService(
             if (encryptedKey != null) {
                 user.openaiApiKeyCipher = encryptedKey
             }
-            user.appLanguage = QuestionLanguage.normalize(command.appLanguage.ifBlank { user.appLanguage })
+            user.appLanguage = SupportedLanguage.fromLocale(
+                QuestionLanguage.normalize(command.appLanguage.ifBlank { user.appLanguage.databaseValue }),
+            )
             user.updatedAt = now
             users.save(user)
         }

@@ -3,6 +3,7 @@ package com.buddystudy.backend.community
 import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.community.application.port.outbound.QuestionCommentPort
@@ -23,6 +24,7 @@ import com.buddystudy.community.domain.entity.QuestionLikeEntity
 import com.buddystudy.community.domain.entity.ReportEntity
 import com.buddystudy.community.domain.entity.UserBlockEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.backend.test.EmptyContentLocalizationPort
 import com.buddystudy.backend.test.PassthroughLanguageDetector
@@ -86,7 +88,12 @@ class CommunityServiceTest {
 
     @Test
     fun `public question v2 returns canonical question text`(): Unit = runBlocking {
-        users.rows += UserEntity(id = 7, providerId = "viewer", displayName = "Viewer", appLanguage = "en")
+        users.rows += UserEntity(
+            id = 7,
+            providerId = "viewer",
+            displayName = "Viewer",
+            appLanguage = SupportedLanguage.ENGLISH,
+        )
         users.rows += UserEntity(id = 10, providerId = "author", displayName = "Author")
         questions.rows += publicQuestion(id = 100, userId = 10, topic = "원본 주제")
         val response = service.getPublicQuestionsV2(principal, query = null, language = "en", limit = 20, offset = 0)
@@ -225,7 +232,7 @@ class CommunityServiceTest {
         topic = topic,
         difficultyLevel = 5,
         scheduledFor = Instant.parse("2026-06-10T00:00:00Z"),
-        status = "graded",
+        status = QuestionStatus.GRADED,
         answer = "Answer",
         score = 90,
         correct = true,

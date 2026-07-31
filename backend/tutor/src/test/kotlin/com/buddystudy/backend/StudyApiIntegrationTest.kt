@@ -24,8 +24,12 @@ import com.buddystudy.backend.localization.application.model.LocalizableContentT
 import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
 import com.buddystudy.backend.localization.application.service.ContentLocalizationService
 import com.buddystudy.account.domain.entity.UserMembershipTierEntity
+import com.buddystudy.account.domain.entity.UserProvider
+import com.buddystudy.account.domain.entity.UserStatus
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.QuestionSource
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
+import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.StudyEntity
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -98,7 +102,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
             {
               "apnsToken": "test-token",
               "platform": "ios",
-              "apnsEnvironment": "development",
+              "apnsEnvironment": "sandbox",
               "language": "ko",
               "timezone": "Asia/Seoul"
             }
@@ -165,8 +169,8 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
                 difficultyLevel = 2,
                 scheduledFor = Instant.parse("2026-06-09T00:00:00Z"),
                 sentAt = Instant.parse("2026-06-09T00:00:00Z"),
-                status = "ungraded",
-                source = "scheduled",
+                status = QuestionStatus.UNGRADED,
+                source = QuestionSource.SCHEDULED,
                 publicQuestion = false,
                 createdAt = Instant.parse("2026-06-09T00:00:00Z"),
                 updatedAt = Instant.parse("2026-06-09T00:00:00Z"),
@@ -183,7 +187,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
                 difficultyLevel = 2,
                 scheduledFor = Instant.parse("2026-06-09T01:00:00Z"),
                 sentAt = Instant.parse("2026-06-09T01:00:00Z"),
-                status = "graded",
+                status = QuestionStatus.GRADED,
                 answer = "랭킹처럼 score가 필요한 목록에 씁니다.",
                 score = 88,
                 correct = true,
@@ -191,7 +195,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
                 explanation = "score 기반 정렬이 핵심입니다.",
                 answeredAt = Instant.parse("2026-06-09T01:01:00Z"),
                 gradedAt = Instant.parse("2026-06-09T01:01:10Z"),
-                source = "manual",
+                source = QuestionSource.MANUAL,
                 publicQuestion = true,
                 createdAt = Instant.parse("2026-06-09T01:00:00Z"),
                 updatedAt = Instant.parse("2026-06-09T01:01:10Z"),
@@ -208,9 +212,9 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
                 difficultyLevel = 2,
                 scheduledFor = Instant.parse("2026-06-09T01:30:00Z"),
                 sentAt = Instant.parse("2026-06-09T01:30:00Z"),
-                status = "skipped",
+                status = QuestionStatus.SKIPPED,
                 skippedAt = Instant.parse("2026-06-09T01:31:00Z"),
-                source = "manual",
+                source = QuestionSource.MANUAL,
                 publicQuestion = true,
                 createdAt = Instant.parse("2026-06-09T01:30:00Z"),
                 updatedAt = Instant.parse("2026-06-09T01:31:00Z"),
@@ -227,7 +231,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
                 difficultyLevel = 6,
                 scheduledFor = Instant.parse("2026-06-09T02:00:00Z"),
                 sentAt = Instant.parse("2026-06-09T02:00:00Z"),
-                status = "graded",
+                status = QuestionStatus.GRADED,
                 answer = "뷰가 소유하는 observable object를 유지할 때 씁니다.",
                 score = 92,
                 correct = true,
@@ -235,7 +239,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
                 explanation = "StateObject is retained by the view lifecycle.",
                 answeredAt = Instant.parse("2026-06-09T02:01:00Z"),
                 gradedAt = Instant.parse("2026-06-09T02:01:10Z"),
-                source = "manual",
+                source = QuestionSource.MANUAL,
                 publicQuestion = true,
                 createdAt = Instant.parse("2026-06-09T02:00:00Z"),
                 updatedAt = Instant.parse("2026-06-09T02:01:10Z"),
@@ -332,7 +336,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
             {
               "apnsToken": "test-token-create-study",
               "platform": "ios",
-              "apnsEnvironment": "development",
+              "apnsEnvironment": "sandbox",
               "language": "ko",
               "timezone": "Asia/Seoul"
             }
@@ -935,7 +939,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
             {
               "apnsToken": "test-token-$label",
               "platform": "ios",
-              "apnsEnvironment": "development",
+              "apnsEnvironment": "sandbox",
               "language": "ko",
               "timezone": "Asia/Seoul"
             }
@@ -952,8 +956,8 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         registerDevice(label).also { activateRegisteredUser(it.deviceId) }
 
     private suspend fun activateRegisteredUser(deviceId: String) {
-        val user = users.findByProviderAndProviderId("ANONYMOUS", deviceId) ?: return
-        user.status = "ACTIVE"
+        val user = users.findByProviderAndProviderId(UserProvider.ANONYMOUS, deviceId) ?: return
+        user.status = UserStatus.ACTIVE
         users.save(user)
         roles.grantRoleIfMissing(user.id, Roles.REGISTERED_USER)
         databaseClient.sql(
@@ -1027,7 +1031,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         difficultyLevel = 3,
         scheduledFor = createdAt,
         sentAt = createdAt,
-        status = "graded",
+        status = QuestionStatus.GRADED,
         answer = "Answer for $topic",
         score = 87,
         correct = true,
@@ -1035,7 +1039,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         explanation = "Because",
         answeredAt = createdAt.plusSeconds(30),
         gradedAt = createdAt.plusSeconds(40),
-        source = "manual",
+        source = QuestionSource.MANUAL,
         publicQuestion = publicQuestion,
         createdAt = createdAt,
         updatedAt = createdAt,
@@ -1058,8 +1062,8 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         difficultyLevel = 3,
         scheduledFor = createdAt,
         sentAt = createdAt,
-        status = "ungraded",
-        source = "scheduled",
+        status = QuestionStatus.UNGRADED,
+        source = QuestionSource.SCHEDULED,
         publicQuestion = true,
         createdAt = createdAt,
         updatedAt = createdAt,

@@ -1,5 +1,6 @@
 package com.buddystudy.study.domain.entity
 
+import com.buddystudy.common.domain.SupportedLanguage
 import org.springframework.data.relational.core.mapping.Column
 import org.springframework.data.annotation.Id
 import org.springframework.data.relational.core.mapping.Table
@@ -17,10 +18,10 @@ class QuestionPushOutboxEntity(
     var expectedAnswerHint: String? = null,
     var topic: String = "",
     var difficultyLevel: Int = 5,
-    var language: String = "ko",
+    var language: SupportedLanguage = SupportedLanguage.KOREAN,
     var sound: String? = null,
     var intervalMinutes: Int = 15,
-    var status: String = "PENDING",
+    var status: QuestionPushOutboxStatus = QuestionPushOutboxStatus.PENDING,
     var attempts: Int = 0,
     var nextAttemptAt: Instant = Instant.now(),
     var claimedAt: Instant? = null,

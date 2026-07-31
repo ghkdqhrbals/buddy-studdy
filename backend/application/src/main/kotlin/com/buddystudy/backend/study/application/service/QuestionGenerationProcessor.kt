@@ -70,7 +70,7 @@ class QuestionGenerationProcessor(
                 event = event,
                 rootStudy = rootStudy,
                 topicStudy = topicStudy,
-                appLanguage = QuestionLanguage.normalize(user.appLanguage),
+                appLanguage = QuestionLanguage.normalize(user.appLanguage.databaseValue),
                 questionKey = questionKey,
             )
             val result = writer.complete(event, claimed.inbox, prepared, Instant.now())

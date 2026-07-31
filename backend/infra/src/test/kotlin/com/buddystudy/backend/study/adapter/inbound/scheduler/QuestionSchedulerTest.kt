@@ -1,6 +1,8 @@
 package com.buddystudy.backend.study.adapter.inbound.scheduler
 
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.account.domain.entity.UserStatus
+import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.outbox.OutboxPublishSummary
 import com.buddystudy.backend.common.application.outbox.OutboxReference
@@ -141,7 +143,12 @@ class QuestionSchedulerTest {
 
     private class UserPortFixture : UserPort by unsupportedPort() {
         override suspend fun findById(id: Long) =
-            UserEntity(id = id, providerId = "user-$id", status = "ACTIVE", appLanguage = "ko")
+            UserEntity(
+                id = id,
+                providerId = "user-$id",
+                status = UserStatus.ACTIVE,
+                appLanguage = SupportedLanguage.KOREAN,
+            )
     }
 
     private class RecordingGenerationRequests : QuestionGenerationRequestWriteUseCase {

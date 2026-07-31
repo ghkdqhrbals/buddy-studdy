@@ -1,5 +1,6 @@
 package com.buddystudy.auth.domain.entity
 
+import com.buddystudy.common.domain.SupportedLanguage
 import org.springframework.data.relational.core.mapping.Column
 import org.springframework.data.annotation.Id
 import org.springframework.data.relational.core.mapping.Table
@@ -15,9 +16,9 @@ class DeviceEntity(
     var userId: Long? = null,
     var googleSessionExpiresAt: Instant? = null,
     var apnsToken: String = "",
-    var platform: String = "ios",
-    var apnsEnvironment: String = "production",
-    var language: String = "ko",
+    var platform: DevicePlatform = DevicePlatform.IOS,
+    var apnsEnvironment: ApnsEnvironment = ApnsEnvironment.PRODUCTION,
+    var language: SupportedLanguage = SupportedLanguage.KOREAN,
     var timezone: String = "Asia/Seoul",
     var appVersion: String? = null,
     var appBuild: String? = null,

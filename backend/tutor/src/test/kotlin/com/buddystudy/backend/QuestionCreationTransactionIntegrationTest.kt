@@ -1,6 +1,8 @@
 package com.buddystudy.backend
 
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.account.domain.entity.UserProvider
+import com.buddystudy.account.domain.entity.UserStatus
 import com.buddystudy.backend.auth.adapter.outbound.persistence.UserRepository
 import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionRepository
 import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionStatsRepository
@@ -10,6 +12,9 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingC
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
 import com.buddystudy.backend.study.application.service.QuestionCreationWriteService
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.common.domain.SupportedLanguage
+import com.buddystudy.study.domain.entity.QuestionSource
+import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.StudyEntity
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -46,10 +51,10 @@ class QuestionCreationTransactionIntegrationTest : MySqlIntegrationTestSupport()
         val now = Instant.parse("2030-02-01T00:00:00Z")
         val user = users.save(
             UserEntity(
-                provider = "EMAIL",
+                provider = UserProvider.EMAIL,
                 providerId = "question-rollback@example.com",
                 email = "question-rollback@example.com",
-                status = "ACTIVE",
+                status = UserStatus.ACTIVE,
                 displayName = "Question-Rollback-0001",
             ),
         )
@@ -66,10 +71,10 @@ class QuestionCreationTransactionIntegrationTest : MySqlIntegrationTestSupport()
             studyId = study.id,
             question = "This question must be rolled back.",
             topic = study.topic,
-            sourceLanguage = "en",
+            sourceLanguage = SupportedLanguage.ENGLISH,
             difficultyLevel = 3,
-            status = "ungraded",
-            source = "manual",
+            status = QuestionStatus.UNGRADED,
+            source = QuestionSource.MANUAL,
             createdAt = now,
             updatedAt = now,
         )

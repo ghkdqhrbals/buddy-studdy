@@ -7,14 +7,14 @@ import com.fasterxml.jackson.module.kotlin.readValue
 fun UserEntity.toProfile() = UserProfileResponse(
     id = id,
     displayName = displayName,
-    status = status,
-    provider = provider,
+    status = status.name,
+    provider = provider.name,
     email = email,
     bio = bio,
     avatarUrl = avatarUrl,
     avatarSymbolName = avatarSymbolName,
     avatarColorSeed = avatarColorSeed,
-    avatarMode = avatarMode,
+    avatarMode = avatarMode.name,
     avatarConfig = avatarConfig.toAvatarConfigMap(),
     allowPublicQuestions = allowPublicQuestions,
 )

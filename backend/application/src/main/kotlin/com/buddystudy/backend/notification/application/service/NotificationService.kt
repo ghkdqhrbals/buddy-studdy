@@ -13,6 +13,8 @@ import com.buddystudy.backend.notification.application.port.inbound.Notification
 import com.buddystudy.backend.notification.application.port.inbound.ProcessNotificationEventUseCase
 import com.buddystudy.backend.notification.application.port.outbound.NotificationPersistencePort
 import com.buddystudy.notification.domain.entity.AppNotificationEntity
+import com.buddystudy.notification.domain.entity.NotificationThreadType
+import com.buddystudy.notification.domain.entity.NotificationType
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
@@ -61,7 +63,12 @@ class NotificationService(
             notification.updatedAt = now
             notificationStore.save(notification)
             if (notification.userId != null && notification.threadType != null && notification.threadId != null) {
-                notificationStore.markUserThreadRead(notification.userId!!, notification.threadType!!, notification.threadId!!, now)
+                notificationStore.markUserThreadRead(
+                    notification.userId!!,
+                    notification.threadType!!.databaseValue,
+                    notification.threadId!!,
+                    now,
+                )
             }
         }
         return NotificationMutationResponse()
@@ -107,10 +114,10 @@ class NotificationService(
                     userId = command.userId,
                     deviceId = command.deviceId,
                     actorUserId = command.actorUserId,
-                    type = command.type,
+                    type = NotificationType.valueOf(command.type.uppercase()),
                     title = command.title.take(160),
                     body = command.body,
-                    threadType = command.threadType,
+                    threadType = command.threadType?.let(NotificationThreadType::fromDatabaseValue),
                     threadId = command.threadId,
                     deepLink = command.deepLink,
                     metadataJson = command.metadataJson,
@@ -136,10 +143,10 @@ class NotificationService(
     private suspend fun toResponse(notification: AppNotificationEntity): AppNotificationResponse =
         AppNotificationResponse(
             id = notification.id.toString(),
-            type = notification.type,
+            type = notification.type.name,
             title = notification.title,
             body = notification.body,
-            threadType = notification.threadType,
+            threadType = notification.threadType?.databaseValue,
             threadId = notification.threadId,
             deepLink = notification.deepLink,
             isRead = notification.readAt != null,

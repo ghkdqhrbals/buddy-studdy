@@ -1,7 +1,7 @@
 package com.buddystudy.backend.study.application.port.outbound
 
 import com.buddystudy.backend.study.application.model.AnswerGradingProgress
-import com.buddystudy.backend.study.application.model.AnswerGradingStatus
+import com.buddystudy.study.domain.entity.AnswerGradingStatus
 import java.time.Instant
 
 interface AnswerGradingProgressPort {

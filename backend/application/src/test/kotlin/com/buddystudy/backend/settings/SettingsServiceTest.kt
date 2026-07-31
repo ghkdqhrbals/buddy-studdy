@@ -3,6 +3,7 @@ package com.buddystudy.backend.settings
 import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.account.domain.entity.UserStatus
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.config.BuddyStudyProperties
@@ -38,7 +39,7 @@ class SettingsServiceTest {
 
     @Test
     fun `upsert schedule loads existing studies by topics in one query`(): Unit = runBlocking {
-        users.row = UserEntity(id = 7, providerId = "u7", status = "ACTIVE")
+        users.row = UserEntity(id = 7, providerId = "u7", status = UserStatus.ACTIVE)
         studies.rows += StudyEntity(id = 11, userId = 7, deviceId = "dev-1", topic = "Kotlin")
 
         service.upsertSchedule(
@@ -60,7 +61,7 @@ class SettingsServiceTest {
 
     @Test
     fun `upsert schedule with unchanged interval keeps existing due time`(): Unit = runBlocking {
-        users.row = UserEntity(id = 7, providerId = "u7", status = "ACTIVE")
+        users.row = UserEntity(id = 7, providerId = "u7", status = UserStatus.ACTIVE)
         val existingDueAt = Instant.parse("2026-06-10T00:30:00Z")
         studies.rows += StudyEntity(
             id = 11,
@@ -87,7 +88,7 @@ class SettingsServiceTest {
 
     @Test
     fun `upsert schedule with changed interval replaces existing scheduled job`(): Unit = runBlocking {
-        users.row = UserEntity(id = 7, providerId = "u7", status = "ACTIVE")
+        users.row = UserEntity(id = 7, providerId = "u7", status = UserStatus.ACTIVE)
         val existingDueAt = Instant.parse("2026-06-10T00:30:00Z")
         studies.rows += StudyEntity(
             id = 11,
@@ -113,7 +114,7 @@ class SettingsServiceTest {
 
     @Test
     fun `enabling schedule repairs a tree with no active question topic`(): Unit = runBlocking {
-        users.row = UserEntity(id = 7, providerId = "u7", status = "ACTIVE")
+        users.row = UserEntity(id = 7, providerId = "u7", status = UserStatus.ACTIVE)
         val root = StudyEntity(
             id = 11,
             userId = 7,
@@ -152,7 +153,7 @@ class SettingsServiceTest {
 
     @Test
     fun `upsert schedule without a topic does not create a default study`(): Unit = runBlocking {
-        users.row = UserEntity(id = 7, providerId = "u7", status = "ACTIVE")
+        users.row = UserEntity(id = 7, providerId = "u7", status = UserStatus.ACTIVE)
 
         val response = service.upsertSchedule(
             principal,
@@ -167,7 +168,7 @@ class SettingsServiceTest {
 
     @Test
     fun `upsert schedule preserves an explicitly requested SwiftUI study`(): Unit = runBlocking {
-        users.row = UserEntity(id = 7, providerId = "u7", status = "ACTIVE")
+        users.row = UserEntity(id = 7, providerId = "u7", status = UserStatus.ACTIVE)
 
         service.upsertSchedule(
             principal,
@@ -179,7 +180,7 @@ class SettingsServiceTest {
 
     @Test
     fun `settings reports the system OpenAI key used for question generation`(): Unit = runBlocking {
-        users.row = UserEntity(id = 7, providerId = "u7", status = "ACTIVE")
+        users.row = UserEntity(id = 7, providerId = "u7", status = UserStatus.ACTIVE)
         studies.rows += StudyEntity(id = 11, userId = 7, deviceId = "dev-1", topic = "Kotlin")
 
         val response = service.settings(principal)

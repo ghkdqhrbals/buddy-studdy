@@ -9,6 +9,8 @@ import com.buddystudy.auth.domain.AccountUser
 import com.buddystudy.auth.domain.PushTokenUpdate
 import com.buddystudy.auth.domain.entity.DeviceEntity
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.account.domain.entity.UserStatus
+import com.buddystudy.auth.domain.entity.ApnsEnvironment
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.AppleIdentityPort
 import com.buddystudy.backend.auth.application.port.outbound.EmailVerificationCodePort
@@ -94,9 +96,9 @@ class LoginService(
         val user = device.userId
             ?.let { users.findById(it) ?: error("Authenticated user not found: $it") }
             ?: sessions.ensureAnonymousUser(device).also { roles.grantRoleIfMissing(it.id, Roles.ANONYMOUS_USER) }
-        val expiresAt = if (user.status == "ANONYMOUS") null else Instant.now().plusSeconds(90 * 86_400)
+        val expiresAt = if (user.status == UserStatus.ANONYMOUS) null else Instant.now().plusSeconds(90 * 86_400)
         val session = sessions.saveSession(user.id, device.deviceId, Instant.now(), expiresAt)
-        return Principal(user.id, device.deviceId, session.id, user.status == "ANONYMOUS", user.status)
+        return Principal(user.id, device.deviceId, session.id, user.status == UserStatus.ANONYMOUS, user.status.name)
     }
 
     @Transactional
@@ -139,8 +141,8 @@ class LoginService(
                 val device = deviceById[session.deviceId] ?: return@mapNotNull null
                 LoggedInDeviceResponse(
                     deviceId = session.deviceId,
-                    platform = device.platform,
-                    apnsEnvironment = device.apnsEnvironment,
+                    platform = device.platform.databaseValue,
+                    apnsEnvironment = device.apnsEnvironment.databaseValue,
                     timezone = device.timezone,
                     lastLoginAt = session.lastLoginAt,
                     lastSeenAt = session.lastSeenAt,
@@ -189,13 +191,13 @@ class LoginService(
         return authenticatedLogins.attachAppleIdentity(principal, identity, Instant.now())
     }
 
-    private suspend fun UserEntity.toAccountUser() = AccountUser(id = id, status = status)
+    private suspend fun UserEntity.toAccountUser() = AccountUser(id = id, status = status.name)
 
     private suspend fun DeviceEntity.toAccountDevice() = AccountDevice(deviceId = deviceId, userId = userId)
 
     private suspend fun DeviceEntity.apply(update: PushTokenUpdate) {
         apnsToken = update.apnsToken
-        apnsEnvironment = update.apnsEnvironment
+        apnsEnvironment = ApnsEnvironment.fromDatabaseValue(update.apnsEnvironment.lowercase())
         updatedAt = update.updatedAt
     }
 

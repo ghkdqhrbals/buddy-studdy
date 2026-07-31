@@ -13,6 +13,7 @@ import com.buddystudy.backend.notification.application.port.outbound.Notificatio
 import com.buddystudy.backend.notification.application.service.NotificationPublicationService
 import com.buddystudy.backend.notification.application.service.NotificationService
 import com.buddystudy.notification.domain.entity.AppNotificationEntity
+import com.buddystudy.notification.domain.entity.NotificationThreadType
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -92,9 +93,9 @@ class NotificationServiceTest {
 
     @Test
     fun `mark read for user notification marks all user devices by thread`(): Unit = runBlocking {
-        val first = store.save(AppNotificationEntity(eventId = "u1", userId = 10, deviceId = "dev-1", threadType = "comment", threadId = "100", title = "First", body = "Body"))
-        val second = store.save(AppNotificationEntity(eventId = "u2", userId = 10, deviceId = "dev-2", threadType = "comment", threadId = "100", title = "Second", body = "Body"))
-        store.save(AppNotificationEntity(eventId = "device", userId = null, deviceId = "dev-1", threadType = "comment", threadId = "100", title = "Device", body = "Body"))
+        val first = store.save(AppNotificationEntity(eventId = "u1", userId = 10, deviceId = "dev-1", threadType = NotificationThreadType.COMMENT, threadId = "100", title = "First", body = "Body"))
+        val second = store.save(AppNotificationEntity(eventId = "u2", userId = 10, deviceId = "dev-2", threadType = NotificationThreadType.COMMENT, threadId = "100", title = "Second", body = "Body"))
+        store.save(AppNotificationEntity(eventId = "device", userId = null, deviceId = "dev-1", threadType = NotificationThreadType.COMMENT, threadId = "100", title = "Device", body = "Body"))
 
         service.markRead(principal, first.id)
 
@@ -106,8 +107,8 @@ class NotificationServiceTest {
     @Test
     fun `mark read for device notification only marks current device notification`(): Unit = runBlocking {
         val anonymous = Principal(userId = 20, deviceId = "dev-anon", sessionId = 2, anonymous = true)
-        val currentDevice = store.save(AppNotificationEntity(eventId = "device", userId = null, deviceId = "dev-anon", threadType = "question", threadId = "200", title = "Device", body = "Body"))
-        store.save(AppNotificationEntity(eventId = "other-device", userId = null, deviceId = "dev-other", threadType = "question", threadId = "200", title = "Other", body = "Body"))
+        val currentDevice = store.save(AppNotificationEntity(eventId = "device", userId = null, deviceId = "dev-anon", threadType = NotificationThreadType.QUESTION, threadId = "200", title = "Device", body = "Body"))
+        store.save(AppNotificationEntity(eventId = "other-device", userId = null, deviceId = "dev-other", threadType = NotificationThreadType.QUESTION, threadId = "200", title = "Other", body = "Body"))
 
         service.markRead(anonymous, currentDevice.id)
 
@@ -247,7 +248,7 @@ class NotificationServiceTest {
             var count = 0
             rows.filter {
                 it.userId == userId &&
-                    it.threadType == threadType &&
+                    it.threadType?.databaseValue == threadType &&
                     it.threadId == threadId &&
                     it.readAt == null &&
                     it.deletedAt == null

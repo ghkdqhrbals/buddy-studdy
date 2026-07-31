@@ -146,7 +146,7 @@ class QuestionGenerationRequestWriteService(
         rootStudy: com.buddystudy.study.domain.entity.StudyEntity,
         user: UserEntity,
     ) {
-        val appLanguage = QuestionLanguage.normalize(user.appLanguage)
+        val appLanguage = QuestionLanguage.normalize(user.appLanguage.databaseValue)
         val room = StudyRoom.of(
             topicStudy.toStudyRoomSchedule(
                 appLanguage = appLanguage,
@@ -281,7 +281,9 @@ class QuestionGenerationProcessService(
         val saga = sagas.findByCorrelationId(correlationId)
             ?.takeIf { it.userId == principal.userId }
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Question process not found.")
-        val language = QuestionLanguage.normalize(users.findById(principal.userId)?.appLanguage)
+        val language = QuestionLanguage.normalize(
+            users.findById(principal.userId)?.appLanguage?.databaseValue,
+        )
         val question = saga.questionId
             ?.let { questions.findByIdAndUserIdAndDeletedAtIsNull(it, principal.userId) }
             ?.let { entity ->

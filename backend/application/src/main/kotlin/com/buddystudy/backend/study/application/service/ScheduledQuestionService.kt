@@ -43,7 +43,7 @@ class ScheduledQuestionService(
                 .map { it.root.userId }
                 .distinct()
                 .associateWith { userId ->
-                    QuestionLanguage.normalize(users.findById(userId)?.appLanguage)
+                    QuestionLanguage.normalize(users.findById(userId)?.appLanguage?.databaseValue)
                 }
             val pendingCounts = pendingCounts(contexts, languageByUserId)
             contexts.forEach { context ->

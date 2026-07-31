@@ -10,6 +10,7 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.stats.domain.entity.UserStatsEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -379,7 +380,7 @@ class UserStatsServiceTest {
         topic = topic,
         difficultyLevel = difficultyLevel,
         scheduledFor = Instant.parse(answeredAt),
-        status = "graded",
+        status = QuestionStatus.GRADED,
         answer = "Answer",
         score = score,
         correct = correct,

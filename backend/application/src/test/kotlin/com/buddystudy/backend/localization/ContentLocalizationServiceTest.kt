@@ -15,6 +15,7 @@ import com.buddystudy.backend.localization.application.port.ContentLocalizationP
 import com.buddystudy.backend.localization.application.port.ContentTranslationEventPort
 import com.buddystudy.backend.localization.application.service.ContentLocalizationService
 import com.buddystudy.community.domain.entity.QuestionCommentEntity
+import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.study.domain.entity.QuestionEntity
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -33,12 +34,12 @@ class ContentLocalizationServiceTest {
             topic = "Redis",
             question = "컨슈머 그룹을 설명하세요.",
             hint = "**PEL**을 포함하세요.",
-            sourceLanguage = "ko",
+            sourceLanguage = SupportedLanguage.KOREAN,
             answer = "Consumer groups divide work.",
-            answerSourceLanguage = "en",
+            answerSourceLanguage = SupportedLanguage.ENGLISH,
             feedback = "핵심을 잘 설명했습니다.",
             explanation = "각 소비자는 서로 다른 메시지를 처리합니다.",
-            aiResponseSourceLanguage = "ko",
+            aiResponseSourceLanguage = SupportedLanguage.KOREAN,
         )
 
         service.requestRecord(question, "ja")

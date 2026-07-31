@@ -3,6 +3,7 @@ package com.buddystudy.backend
 import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.auth.domain.entity.DeviceEntity
+import com.buddystudy.auth.domain.entity.ApnsEnvironment
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishedMessage
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
 import com.buddystudy.backend.common.adapter.stream.RedisStreamObjectPublisher
@@ -124,7 +125,7 @@ class PushStreamManagerTest {
                 DeviceEntity(
                     deviceId = "device-1",
                     apnsToken = "apns-token",
-                    apnsEnvironment = "sandbox",
+                    apnsEnvironment = ApnsEnvironment.SANDBOX,
                 ),
             )
         }

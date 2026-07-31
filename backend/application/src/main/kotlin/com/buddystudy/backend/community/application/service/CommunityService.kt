@@ -1,5 +1,6 @@
 package com.buddystudy.backend.community.application.service
 
+import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
@@ -212,14 +213,14 @@ class CommunityService(
         sourceLanguage: String?,
     ): CommunityCommentResponse {
         val question = publicAnsweredQuestion(id)
-        val fallbackLanguage = users.findById(principal.userId)?.appLanguage
+        val fallbackLanguage = users.findById(principal.userId)?.appLanguage?.databaseValue
         val declaredLanguage = QuestionLanguage.normalize(sourceLanguage ?: fallbackLanguage)
         val saved = comments.save(
             QuestionCommentEntity(
                 questionId = id,
                 userId = principal.userId,
                 body = body.take(1000),
-                sourceLanguage = languageDetector.detect(body, declaredLanguage),
+                sourceLanguage = SupportedLanguage.fromLocale(languageDetector.detect(body, declaredLanguage)),
             ),
         )
         incrementCommentCount(id, 1)
@@ -384,7 +385,7 @@ class CommunityService(
     private suspend fun community(
         q: QuestionEntity,
         context: CommunityContext,
-        requestedLanguage: String = q.sourceLanguage,
+        requestedLanguage: String = q.sourceLanguage.databaseValue,
         viewMode: TranslationViewMode = TranslationViewMode.LOCALIZED,
     ): CommunityQuestionResponse {
         val projected = localizedRecord(
@@ -419,9 +420,13 @@ class CommunityService(
         preserveAnswerOriginal: Boolean,
     ): ProjectedRecord {
         val target = QuestionLanguage.normalize(requestedLanguage)
-        val questionSource = QuestionLanguage.normalize(question.sourceLanguage)
-        val answerSource = QuestionLanguage.normalize(question.answerSourceLanguage ?: question.sourceLanguage)
-        val aiSource = QuestionLanguage.normalize(question.aiResponseSourceLanguage ?: question.sourceLanguage)
+        val questionSource = QuestionLanguage.normalize(question.sourceLanguage.databaseValue)
+        val answerSource = QuestionLanguage.normalize(
+            (question.answerSourceLanguage ?: question.sourceLanguage).databaseValue,
+        )
+        val aiSource = QuestionLanguage.normalize(
+            (question.aiResponseSourceLanguage ?: question.sourceLanguage).databaseValue,
+        )
         if (viewMode == TranslationViewMode.ORIGINAL) {
             return ProjectedRecord(
                 question,
@@ -495,7 +500,7 @@ class CommunityService(
         authorOriginal: Boolean,
     ): ProjectedComment {
         val target = QuestionLanguage.normalize(requestedLanguage)
-        val source = QuestionLanguage.normalize(comment.sourceLanguage)
+        val source = QuestionLanguage.normalize(comment.sourceLanguage.databaseValue)
         if (authorOriginal || viewMode == TranslationViewMode.ORIGINAL || source == target) {
             return ProjectedComment(comment, source, false)
         }
@@ -585,7 +590,9 @@ class CommunityService(
     }
 
     private suspend fun localizedCommentTitle(ownerUserId: Long?): String {
-        return when (QuestionLanguage.normalize(ownerUserId?.let { users.findById(it)?.appLanguage })) {
+        return when (
+            QuestionLanguage.normalize(ownerUserId?.let { users.findById(it)?.appLanguage?.databaseValue })
+        ) {
             QuestionLanguage.ENGLISH -> "Comment"
             QuestionLanguage.JAPANESE -> "コメント"
             else -> "댓글"
@@ -644,13 +651,13 @@ private suspend fun QuestionEntity.toPublicQuestionState() = PublicQuestionState
     explanation = explanation,
     topic = topic,
     difficultyLevel = difficultyLevel,
-    status = status,
-    source = source,
+    status = status.databaseValue,
+    source = source.databaseValue,
     createdAt = createdAt,
     answeredAt = answeredAt,
-    questionSourceLanguage = sourceLanguage,
-    answerSourceLanguage = answerSourceLanguage,
-    aiResponseSourceLanguage = aiResponseSourceLanguage,
+    questionSourceLanguage = sourceLanguage.databaseValue,
+    answerSourceLanguage = answerSourceLanguage?.databaseValue,
+    aiResponseSourceLanguage = aiResponseSourceLanguage?.databaseValue,
 )
 
 private suspend fun QuestionStatsEntity.toPublicQuestionStats() = PublicQuestionStats(

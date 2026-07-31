@@ -64,13 +64,13 @@ class ContentLocalizationPersistenceAdapter(
         retryPendingBefore: Instant,
     ): List<PendingContentTranslation> {
         val pendingContent = mutableListOf<PendingContentTranslation>()
-        if (QuestionLanguage.normalize(question.sourceLanguage) != targetLanguage) {
+        if (QuestionLanguage.normalize(question.sourceLanguage.databaseValue) != targetLanguage) {
             upsertPending(
                 table = "question_localizations",
                 idColumn = "question_id",
                 id = question.id,
                 targetLanguage = targetLanguage,
-                sourceLanguage = question.sourceLanguage,
+                sourceLanguage = question.sourceLanguage.databaseValue,
                 sourceHash = sourceHashes.question,
                 values = mapOf(
                     "topic" to question.topic,
@@ -89,14 +89,14 @@ class ContentLocalizationPersistenceAdapter(
         }
         question.answer?.takeIf(String::isNotBlank)?.let { answer ->
             val source = question.answerSourceLanguage ?: question.sourceLanguage
-            if (QuestionLanguage.normalize(source) != targetLanguage) {
+            if (QuestionLanguage.normalize(source.databaseValue) != targetLanguage) {
                 val sourceHash = sourceHashes.answer ?: return@let
                 upsertPending(
                     "answer_localizations",
                     "question_id",
                     question.id,
                     targetLanguage,
-                    source,
+                    source.databaseValue,
                     sourceHash,
                     mapOf("answer" to answer),
                     now,
@@ -113,13 +113,13 @@ class ContentLocalizationPersistenceAdapter(
         if (!question.feedback.isNullOrBlank() || !question.explanation.isNullOrBlank()) {
             val source = question.aiResponseSourceLanguage ?: question.sourceLanguage
             val aiResponseHash = sourceHashes.aiResponse
-            if (QuestionLanguage.normalize(source) != targetLanguage && aiResponseHash != null) {
+            if (QuestionLanguage.normalize(source.databaseValue) != targetLanguage && aiResponseHash != null) {
                 upsertPending(
                     "grading_localizations",
                     "question_id",
                     question.id,
                     targetLanguage,
-                    source,
+                    source.databaseValue,
                     aiResponseHash,
                     mapOf(
                         "feedback" to question.feedback,
@@ -147,13 +147,13 @@ class ContentLocalizationPersistenceAdapter(
         now: Instant,
         retryPendingBefore: Instant,
     ): PendingContentTranslation? {
-        if (QuestionLanguage.normalize(comment.sourceLanguage) == targetLanguage) return null
+        if (QuestionLanguage.normalize(comment.sourceLanguage.databaseValue) == targetLanguage) return null
         return upsertPending(
             "question_comment_localizations",
             "comment_id",
             comment.id,
             targetLanguage,
-            comment.sourceLanguage,
+            comment.sourceLanguage.databaseValue,
             sourceHash,
             mapOf("body" to comment.body),
             now,

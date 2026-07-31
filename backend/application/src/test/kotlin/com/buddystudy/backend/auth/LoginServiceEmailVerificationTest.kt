@@ -3,8 +3,10 @@ package com.buddystudy.backend.auth
 import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.account.domain.entity.UserStatus
 import com.buddystudy.auth.domain.entity.DeviceEntity
 import com.buddystudy.auth.domain.entity.UserDeviceEntity
+import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.backend.auth.application.port.inbound.EmailLoginCommand
 import com.buddystudy.backend.auth.application.port.inbound.PushTokenCommand
 import com.buddystudy.backend.auth.application.port.inbound.RegisterDeviceCommand
@@ -137,7 +139,7 @@ class LoginServiceEmailVerificationTest {
         assertThat(devices.count()).isEqualTo(1)
         assertThat(users.countByProviderAndProviderId("ANONYMOUS", first.deviceId)).isEqualTo(1)
         assertThat(devices.findByDeviceId(first.deviceId)?.apnsToken).isEqualTo("second-token")
-        assertThat(devices.findByDeviceId(first.deviceId)?.language).isEqualTo("en")
+        assertThat(devices.findByDeviceId(first.deviceId)?.language).isEqualTo(SupportedLanguage.ENGLISH)
         assertThat(login.token(second.deviceId, second.clientSecret).accessToken).isNotBlank()
     }
 
@@ -242,7 +244,7 @@ class LoginServiceEmailVerificationTest {
 
         val user = users.findByEmailAndProvider("new@example.com", "EMAIL")
         assertThat(user).isNotNull
-        assertThat(user?.status).isEqualTo("PENDING_TERMS")
+        assertThat(user?.status).isEqualTo(UserStatus.PENDING_TERMS)
         assertThat(user?.passwordHash).isEqualTo(sha256("password123"))
         assertThat(response.profile.displayName).matches("[A-Z][a-z]+-[A-Z][a-z]+-\\d{4}")
         assertThat(response.profile.displayName).isNotEqualTo("new")
@@ -405,13 +407,13 @@ class LoginServiceEmailVerificationTest {
         }
         override suspend fun findAllById(ids: Iterable<Long>): MutableList<UserEntity> = ids.mapNotNull { users[it] }.toMutableList()
         override suspend fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity? =
-            users.values.firstOrNull { it.provider == provider && it.providerId == providerId }
+            users.values.firstOrNull { it.provider.name == provider && it.providerId == providerId }
 
         override suspend fun findByEmailAndProvider(email: String, provider: String): UserEntity? =
-            users.values.firstOrNull { it.email == email && it.provider == provider }
+            users.values.firstOrNull { it.email == email && it.provider.name == provider }
 
         fun countByProviderAndProviderId(provider: String, providerId: String): Int =
-            users.values.count { it.provider == provider && it.providerId == providerId }
+            users.values.count { it.provider.name == provider && it.providerId == providerId }
     }
 
     private class InMemoryDevicePort : DevicePort {

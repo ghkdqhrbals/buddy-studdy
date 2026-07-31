@@ -23,7 +23,7 @@ class AnswerGradingTimeoutServiceTest {
             id = 31,
             userId = 7,
             gradingRequestId = "request-31",
-            gradingStatus = AnswerGradingStatus.JUDGING.name,
+            gradingStatus = AnswerGradingStatus.JUDGING,
             gradingRequestedAt = now.minusSeconds(600),
         )
         Mockito.`when`(questions.findStalledGradings(cutoff, 100)).thenReturn(listOf(stalled))

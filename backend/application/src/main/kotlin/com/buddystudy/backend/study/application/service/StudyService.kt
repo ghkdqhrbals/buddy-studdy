@@ -57,7 +57,9 @@ class StudyService(
         sourceLanguage: String?,
         grade: Boolean,
     ): StudyRecordResponse {
-        val appLanguage = QuestionLanguage.normalize(users.findById(principal.userId)?.appLanguage)
+        val appLanguage = QuestionLanguage.normalize(
+            users.findById(principal.userId)?.appLanguage?.databaseValue,
+        )
         val declaredSourceLanguage = sourceLanguage
             ?.takeIf { QuestionLanguage.normalize(it) in QuestionLanguage.supported }
             ?.let(QuestionLanguage::normalize)
@@ -192,13 +194,13 @@ class StudyService(
         return map { question ->
             val projected = project(
                 question,
-                requestedLanguage ?: question.sourceLanguage,
+                requestedLanguage ?: question.sourceLanguage.databaseValue,
                 viewMode,
             )
             projected.question.toStudyRecord(statsByQuestionId[question.id])
                 .toProjection()
                 .toRecordResponse(
-                    requestedLanguage = requestedLanguage ?: question.sourceLanguage,
+                    requestedLanguage = requestedLanguage ?: question.sourceLanguage.databaseValue,
                     viewMode = viewMode,
                     questionDisplayLanguage = projected.questionDisplayLanguage,
                     answerDisplayLanguage = projected.answerDisplayLanguage,
@@ -217,9 +219,13 @@ class StudyService(
         viewMode: TranslationViewMode,
     ): ProjectedRecord {
         val target = QuestionLanguage.normalize(requestedLanguage)
-        val questionSource = QuestionLanguage.normalize(question.sourceLanguage)
-        val answerSource = QuestionLanguage.normalize(question.answerSourceLanguage ?: question.sourceLanguage)
-        val aiSource = QuestionLanguage.normalize(question.aiResponseSourceLanguage ?: question.sourceLanguage)
+        val questionSource = QuestionLanguage.normalize(question.sourceLanguage.databaseValue)
+        val answerSource = QuestionLanguage.normalize(
+            (question.answerSourceLanguage ?: question.sourceLanguage).databaseValue,
+        )
+        val aiSource = QuestionLanguage.normalize(
+            (question.aiResponseSourceLanguage ?: question.sourceLanguage).databaseValue,
+        )
         if (viewMode == TranslationViewMode.ORIGINAL) {
             return ProjectedRecord(
                 question,

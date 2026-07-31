@@ -1,5 +1,6 @@
 package com.buddystudy.backend.study.adapter.outbound.persistence
 
+import com.buddystudy.account.domain.entity.MembershipStatus
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPlan
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionQuotaStatus
@@ -21,7 +22,7 @@ class QuestionMembershipPersistenceAdapter(
 ) : QuestionMembershipPort {
 
     override suspend fun activePlanForUser(userId: Long): QuestionMembershipPlan? {
-        val membership = memberships.findFirstByUserIdAndStatusOrderByUpdatedAtDesc(userId, "ACTIVE")
+        val membership = memberships.findFirstByUserIdAndStatusOrderByUpdatedAtDesc(userId, MembershipStatus.ACTIVE)
         val now = Instant.now()
         val tierCode = if (
             membership == null || membership.startedAt.isAfter(now) || membership.expiresAt?.isAfter(now) == false

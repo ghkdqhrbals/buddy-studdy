@@ -3,6 +3,7 @@ package com.buddystudy.backend.study.application.model
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.study.application.port.outbound.AiGradingAssessment
 import com.buddystudy.study.domain.StudyRecordProjection
+import com.buddystudy.study.domain.entity.AnswerGradingStatus
 
 fun StudyRecordProjection.toRecordResponse(
     requestedLanguage: String = questionSourceLanguage,

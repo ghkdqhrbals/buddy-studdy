@@ -1,5 +1,6 @@
 package com.buddystudy.backend.profile.application.service
 
+import com.buddystudy.account.domain.entity.AvatarMode
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.TokenProvider
 import com.buddystudy.backend.auth.application.model.AccessTokenResponse
@@ -69,7 +70,7 @@ class ProfileService(
     override suspend fun updateAvatar(principal: Principal, command: AvatarUpdateCommand): UserProfileResponse {
         val user = user(principal.userId)
         val config = validateAvatarConfig(command.avatarConfig, user.id)
-        user.avatarMode = command.avatarMode.ifBlank { BUILDER_AVATAR_MODE }.take(32)
+        user.avatarMode = command.avatarMode.toAvatarMode(default = AvatarMode.BUILDER)
         user.avatarConfig = config.toAvatarConfigJson()
         profilePhotos.delete(user.id)
         user.avatarUrl = null
@@ -104,7 +105,7 @@ class ProfileService(
         command.avatarColorSeed?.let { user.avatarColorSeed = it.take(64) }
         command.allowPublicQuestions?.let { user.allowPublicQuestions = it }
         command.avatarMode?.let { requestedMode ->
-            user.avatarMode = requestedMode.take(32)
+            user.avatarMode = requestedMode.toAvatarMode(default = user.avatarMode)
             if (!requestedMode.equals(PHOTO_AVATAR_MODE, ignoreCase = true)) {
                 profilePhotos.delete(user.id)
                 user.avatarUrl = null
@@ -164,7 +165,7 @@ class ProfileService(
         devices.save(device)
         roles.grantRoleIfMissing(anonymousUser.id, Roles.ANONYMOUS_USER)
         val session = sessions.saveSession(anonymousUser.id, device.deviceId, now, null)
-        val token = tokenService.create(anonymousUser.id, device.deviceId, session.id, true, anonymousUser.status)
+        val token = tokenService.create(anonymousUser.id, device.deviceId, session.id, true, anonymousUser.status.name)
         return AccessTokenResponse(token.first, token.second)
     }
 
@@ -180,7 +181,7 @@ class ProfileService(
         val requested = (defaultAvatarConfig + input)
             .mapValues { (_, value) -> value.trim() }
             .filterValues { it.isNotBlank() }
-        val categoriesBySlot = avatarCatalog.activeCategories().associateBy { it.slot }
+        val categoriesBySlot = avatarCatalog.activeCategories().associateBy { it.slot.databaseValue }
         val availableItemsByKey = avatarCatalog.availableItems(userId).associateBy { it.key }
         val normalized = requested.mapValues { (slot, itemKey) ->
             val category = categoriesBySlot[slot]
@@ -196,8 +197,8 @@ class ProfileService(
         categoriesBySlot.values
             .filter { it.required }
             .forEach { category ->
-                if (normalized[category.slot].isNullOrBlank()) {
-                    throw validation("Avatar slot ${category.slot} is required.")
+                if (normalized[category.slot.databaseValue].isNullOrBlank()) {
+                    throw validation("Avatar slot ${category.slot.databaseValue} is required.")
                 }
             }
 
@@ -226,8 +227,16 @@ class ProfileService(
         else -> itemKey
     }
 
+    private suspend fun String.toAvatarMode(default: AvatarMode): AvatarMode {
+        val value = trim()
+        if (value.isEmpty()) {
+            return default
+        }
+        return runCatching { AvatarMode.valueOf(value.uppercase()) }
+            .getOrElse { throw validation("Unsupported avatar mode: $value") }
+    }
+
     companion object {
-        private const val BUILDER_AVATAR_MODE = "BUILDER"
         private const val PHOTO_AVATAR_MODE = "PHOTO"
         private const val PIXEL_AVATAR_MODE = "PIXEL"
 

@@ -1,6 +1,7 @@
 package com.buddystudy.backend.study.application.model
 
 import com.buddystudy.backend.common.application.model.PageResponse
+import com.buddystudy.study.domain.entity.AnswerGradingStatus
 import java.time.Instant
 
 data class QuestionItemResponse(val question: String, val expectedAnswerHint: String? = null, val createdAt: Instant)

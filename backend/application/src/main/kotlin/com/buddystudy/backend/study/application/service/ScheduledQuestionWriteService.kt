@@ -1,5 +1,6 @@
 package com.buddystudy.backend.study.application.service
 
+import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.common.application.outbox.OutboxType
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxAppendPort
@@ -77,7 +78,7 @@ class ScheduledQuestionWriteService(
                 eventId = "question-generated-${saved.id}",
                 questionId = saved.id,
                 userId = scheduleStudy.userId,
-                sourceLanguage = saved.sourceLanguage,
+                sourceLanguage = saved.sourceLanguage.databaseValue,
                 generatedAt = now,
             ),
             now,
@@ -123,12 +124,12 @@ private fun StudyEntity.toScheduledQuestion(
         question = question,
         hint = hint,
         topic = topicStudy.topic,
-        sourceLanguage = appLanguage,
+        sourceLanguage = SupportedLanguage.fromLocale(appLanguage),
         difficultyLevel = topicStudy.difficultyLevel,
         scheduledFor = nextDueAt ?: now,
         sentAt = now,
-        status = "ungraded",
-        source = "scheduled",
+        status = com.buddystudy.study.domain.entity.QuestionStatus.UNGRADED,
+        source = com.buddystudy.study.domain.entity.QuestionSource.SCHEDULED,
         publicQuestion = true,
         createdAt = now,
         updatedAt = now,

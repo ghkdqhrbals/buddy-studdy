@@ -1,7 +1,7 @@
 package com.buddystudy.backend.study.application.service
 
 import com.buddystudy.backend.config.BuddyStudyProperties
-import com.buddystudy.backend.study.application.model.AnswerGradingStatus
+import com.buddystudy.study.domain.entity.AnswerGradingStatus
 import com.buddystudy.backend.study.application.port.inbound.ExpireStalledAnswerGradingsUseCase
 import com.buddystudy.backend.study.application.port.outbound.AnswerGradingProgressPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort

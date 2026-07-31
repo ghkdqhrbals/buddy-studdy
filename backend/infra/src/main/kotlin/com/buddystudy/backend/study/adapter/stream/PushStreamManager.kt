@@ -174,7 +174,7 @@ class PushStreamManager(
         return PreparedPush(
             request = request.copy(notificationId = notificationId),
             apnsToken = apnsToken,
-            apnsEnvironment = device.apnsEnvironment.ifBlank { "production" },
+            apnsEnvironment = device.apnsEnvironment.databaseValue,
         )
     }
 

@@ -93,6 +93,7 @@ runtime comparison or rollback does not fork application behavior.
   - The backend is organized as multi-module hexagonal architecture: `domain`, `application`, `infra`, and executable `tutor`.
   - Incoming web/scheduler/stream handlers live in `backend/infra`, persistence/OpenAI/APNs/Redis integrations live in `backend/infra`, and use-case services live in `backend/application` behind inbound port interfaces.
   - Spring Data Relational entities live in `backend/domain`; outbound adapters use coroutine repositories, `R2dbcEntityTemplate`, or `DatabaseClient` for explicit SQL.
+  - Closed entity attributes such as provider, lifecycle status, language, platform, source, and notification type use Kotlin enums. Spring Data R2DBC stores enum names as `VARCHAR`; enums with lowercase external database codes use explicit reading and writing converters. Flyway migrations document every entity-backed table and constrained column with MySQL comments, list allowed enum values, and add matching `CHECK` constraints. Free-form text, identifiers, and extensible catalog codes remain strings.
   - Topic-level statistics calculation is separated into `backend/application/src/main/kotlin/com/buddystudy/backend/stats/StatsService.kt` and is consumed by study application services.
   - Public base URL: `https://api.ghkdqhrbals.org`.
   - Runs behind Nginx on host port `443`.

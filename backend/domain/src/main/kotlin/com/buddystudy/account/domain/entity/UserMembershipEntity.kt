@@ -12,7 +12,7 @@ class UserMembershipEntity(
     var userId: Long = 0,
     var tier: String = "TIER1",
     var monthlyQuestionLimitOverride: Int? = null,
-    var status: String = "ACTIVE",
+    var status: MembershipStatus = MembershipStatus.ACTIVE,
     var startedAt: Instant = Instant.now(),
     var expiresAt: Instant? = null,
     var createdAt: Instant = Instant.now(),
