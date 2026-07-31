@@ -90,12 +90,20 @@ detail = api_request(
   token,
   query: {
     "fields[appStoreReviewDetails]" =>
-      "contactFirstName,contactLastName,contactPhone,contactEmail,demoAccountName,demoAccountRequired,notes"
+      "contactFirstName,contactLastName,contactPhone,contactEmail,demoAccountName,demoAccountPassword,demoAccountRequired,notes"
   }
 ).fetch("data")
 
 notes_path = File.expand_path(ENV.fetch("APP_STORE_REVIEW_NOTES_PATH", DEFAULT_NOTES_PATH))
-notes = File.read(notes_path).strip
+demo_account_name = detail.dig("attributes", "demoAccountName").to_s
+demo_account_password = detail.dig("attributes", "demoAccountPassword").to_s
+abort "App Review demo account name is empty" if demo_account_name.empty?
+abort "App Review demo account password is empty" if demo_account_password.empty?
+
+notes = File.read(notes_path)
+  .gsub("{{DEMO_ACCOUNT_NAME}}", demo_account_name)
+  .gsub("{{DEMO_ACCOUNT_PASSWORD}}", demo_account_password)
+  .strip
 abort "Review notes are empty" if notes.empty?
 abort "Review notes exceed 4,000 characters" if notes.length > 4_000
 

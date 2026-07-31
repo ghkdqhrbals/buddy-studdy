@@ -1,7 +1,8 @@
 BuddyStudy 1.1.0 review guide
 
 Sign-in
-- Use the demo account configured in App Review Information.
+- Test ID: {{DEMO_ACCOUNT_NAME}}
+- Test password: {{DEMO_ACCOUNT_PASSWORD}}
 - The review account is already active and does not require creating a new account.
 - Sign in with Apple, Google login, and email login are available from the login screen.
 
