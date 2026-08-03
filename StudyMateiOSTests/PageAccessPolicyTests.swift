@@ -19,6 +19,21 @@ final class CommunityQuestionResultPresentationTests: XCTestCase {
             CommunityQuestionResultPresentation(score: 0, difficulty: 10)
         )
     }
+
+    func testCompactResultCopyIncludesScoreAndDifficultyInEveryLanguage() {
+        XCTAssertEqual(
+            AppStrings(language: .korean).communityQuestionResult(score: 8, difficulty: 2),
+            "8점 · 난이도 2"
+        )
+        XCTAssertEqual(
+            AppStrings(language: .english).communityQuestionResult(score: 8, difficulty: 2),
+            "8 pts · Difficulty 2"
+        )
+        XCTAssertEqual(
+            AppStrings(language: .japanese).communityQuestionResult(score: 8, difficulty: 2),
+            "8点 · 難易度 2"
+        )
+    }
 }
 
 final class CommunityQuestionActionPolicyTests: XCTestCase {

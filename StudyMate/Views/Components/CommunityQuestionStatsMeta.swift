@@ -79,22 +79,18 @@ struct CommunityQuestionStatsMeta: View {
     }
 
     private func learningResult(_ result: CommunityQuestionResultPresentation) -> some View {
-        HStack(spacing: 10) {
-            Text(strings.answerScoreValue(result.score))
-                .font(.title3.weight(.bold))
-                .foregroundStyle(.primary)
-                .monospacedDigit()
-
-            Divider()
-                .frame(height: 24)
-
-            CommunityQuestionDifficultyScale(difficulty: result.difficulty)
-
-            Text("\(result.difficulty)")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-        }
+        Text(
+            strings.communityQuestionResult(
+                score: result.score,
+                difficulty: result.difficulty
+            )
+        )
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .monospacedDigit()
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(Color.secondary.opacity(0.1), in: Capsule())
         .fixedSize(horizontal: true, vertical: false)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(

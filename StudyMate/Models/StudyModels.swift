@@ -3281,8 +3281,12 @@ struct AppStrings {
     var studyTopic: String { text("공부할 주제", "Study topic") }
     var difficulty: String { text("난이도", "Difficulty") }
     var answerScore: String { text("답변 점수", "Answer score", "回答スコア") }
-    func answerScoreValue(_ score: Int) -> String {
-        text("\(score)점", "\(score) pts", "\(score)点")
+    func communityQuestionResult(score: Int, difficulty: Int) -> String {
+        text(
+            "\(score)점 · 난이도 \(difficulty)",
+            "\(score) pts · Difficulty \(difficulty)",
+            "\(score)点 · 難易度 \(difficulty)"
+        )
     }
     var questionDifficulty: String { text("질문 난이도", "Question difficulty", "問題の難易度") }
     var difficultyScaleHint: String { text("1은 가장 쉬움, 10은 전문가 수준입니다.", "1 is easiest, 10 is expert-level.") }
