@@ -21,6 +21,29 @@ final class CommunityQuestionResultPresentationTests: XCTestCase {
     }
 }
 
+final class CommunityQuestionActionPolicyTests: XCTestCase {
+    func testOwnerCanManageWithoutReportingOwnQuestion() {
+        let policy = CommunityQuestionActionPolicy(isSignedIn: true, isOwner: true)
+
+        XCTAssertTrue(policy.canManage)
+        XCTAssertFalse(policy.canReport)
+    }
+
+    func testSignedInViewerCanReportAnotherUsersQuestion() {
+        let policy = CommunityQuestionActionPolicy(isSignedIn: true, isOwner: false)
+
+        XCTAssertFalse(policy.canManage)
+        XCTAssertTrue(policy.canReport)
+    }
+
+    func testGuestOnlyGetsTheOpenAction() {
+        let policy = CommunityQuestionActionPolicy(isSignedIn: false, isOwner: false)
+
+        XCTAssertFalse(policy.canManage)
+        XCTAssertFalse(policy.canReport)
+    }
+}
+
 final class PageAccessPolicyTests: XCTestCase {
     @MainActor
     func testNotificationStudyListRouteUsesExistingHomeMyStudiesScreen() {

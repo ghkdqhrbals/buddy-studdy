@@ -8509,7 +8509,6 @@ final class AppState: ObservableObject {
             onSuccess: { _ in
                 await self.refreshBackendStudyIfPossible(updateVisibleQuestion: false)
                 await self.loadCommunityQuestions(reset: true, userInitiated: false)
-                self.restoreCommunityQuestions(ids: clearedRecordIDs)
                 await self.syncRemotePushScheduleIfPossible(reason: "clear-records")
             },
             onFailure: { _ in
@@ -8567,7 +8566,6 @@ final class AppState: ObservableObject {
             onSuccess: { _ in
                 await self.refreshBackendStudyIfPossible(updateVisibleQuestion: false)
                 await self.loadCommunityQuestions(reset: true, userInitiated: false)
-                self.restoreCommunityQuestion(id: record.id)
                 await self.syncRemotePushScheduleIfPossible(reason: "delete-record")
             },
             onFailure: { _ in
@@ -8616,7 +8614,6 @@ final class AppState: ObservableObject {
                     self.removeCommunityQuestion(id: backendRecord.id)
                 }
                 await self.loadCommunityQuestions(reset: true, userInitiated: false)
-                self.restoreCommunityQuestion(id: backendRecord.id)
             },
             onFailure: { _ in
                 self.localStudyRecordUseCase.saveRecord(record)

@@ -79,27 +79,16 @@ struct CommunityQuestionStatsMeta: View {
     }
 
     private func learningResult(_ result: CommunityQuestionResultPresentation) -> some View {
-        HStack(spacing: 12) {
-            Text("\(result.score)")
-                .font(.title2.weight(.bold))
+        HStack(spacing: 10) {
+            Text(strings.answerScoreValue(result.score))
+                .font(.title3.weight(.bold))
                 .foregroundStyle(.primary)
                 .monospacedDigit()
 
             Divider()
                 .frame(height: 24)
 
-            HStack(spacing: 4) {
-                ForEach(1...10, id: \.self) { level in
-                    Circle()
-                        .fill(
-                            level == result.difficulty
-                                ? Color.primary
-                                : Color.secondary.opacity(0.24)
-                        )
-                        .frame(width: 6, height: 6)
-                }
-            }
-            .accessibilityHidden(true)
+            CommunityQuestionDifficultyScale(difficulty: result.difficulty)
 
             Text("\(result.difficulty)")
                 .font(.caption.weight(.semibold))
@@ -164,6 +153,31 @@ struct CommunityQuestionStatsMeta: View {
     }
 }
 
+struct CommunityQuestionDifficultyScale: View {
+    var difficulty: Int
+    var dotSize: CGFloat = 6
+    var spacing: CGFloat = 4
+
+    private var clampedDifficulty: Int {
+        min(max(difficulty, 1), 10)
+    }
+
+    var body: some View {
+        HStack(spacing: spacing) {
+            ForEach(1...10, id: \.self) { level in
+                Circle()
+                    .fill(
+                        level == clampedDifficulty
+                            ? Color.primary
+                            : Color.secondary.opacity(0.22)
+                    )
+                    .frame(width: dotSize, height: dotSize)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
 struct CommunityQuestionResultPresentation: Equatable {
     let score: Int
     let difficulty: Int
@@ -171,5 +185,15 @@ struct CommunityQuestionResultPresentation: Equatable {
     init(score: Int, difficulty: Int) {
         self.score = min(max(score, 0), 100)
         self.difficulty = min(max(difficulty, 1), 10)
+    }
+}
+
+struct CommunityQuestionActionPolicy: Equatable {
+    let canManage: Bool
+    let canReport: Bool
+
+    init(isSignedIn: Bool, isOwner: Bool) {
+        canManage = isSignedIn && isOwner
+        canReport = isSignedIn && !isOwner
     }
 }

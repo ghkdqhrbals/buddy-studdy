@@ -3281,6 +3281,9 @@ struct AppStrings {
     var studyTopic: String { text("공부할 주제", "Study topic") }
     var difficulty: String { text("난이도", "Difficulty") }
     var answerScore: String { text("답변 점수", "Answer score", "回答スコア") }
+    func answerScoreValue(_ score: Int) -> String {
+        text("\(score)점", "\(score) pts", "\(score)点")
+    }
     var questionDifficulty: String { text("질문 난이도", "Question difficulty", "問題の難易度") }
     var difficultyScaleHint: String { text("1은 가장 쉬움, 10은 전문가 수준입니다.", "1 is easiest, 10 is expert-level.") }
     func questionInterval(minutes: Int) -> String { text("질문 간격: \(minutes)분", "Question interval: \(minutes) min", "質問間隔：\(minutes)分") }
@@ -3802,6 +3805,24 @@ struct AppStrings {
         )
     }
     var report: String { text("신고", "Report") }
+    var openQuestion: String { text("질문 보기", "View question", "質問を見る") }
+    var questionActions: String { text("질문 옵션", "Question options", "質問のオプション") }
+    var deleteQuestion: String { text("질문 삭제", "Delete question", "質問を削除") }
+    var deleteQuestionConfirmation: String {
+        text(
+            "이 질문과 답변 기록을 삭제할까요?",
+            "Delete this question and its answer record?",
+            "この質問と回答履歴を削除しますか？"
+        )
+    }
+    var reportQuestion: String { text("질문 신고", "Report question", "質問を報告") }
+    var reportQuestionConfirmation: String {
+        text(
+            "이 질문을 부적절한 콘텐츠로 신고할까요?",
+            "Report this question as inappropriate?",
+            "この質問を不適切なコンテンツとして報告しますか？"
+        )
+    }
     var reportSubmitted: String { text("신고를 접수했습니다.", "Report submitted.") }
     var reportReasonInappropriate: String { text("부적절한 질문", "Inappropriate question") }
     var googleLoginSetupRequired: String {

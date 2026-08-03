@@ -1147,6 +1147,8 @@ private struct MobileHomeView: View {
     @State private var isShowingSettings = false
     @State private var isShowingFeedback = false
     @State private var isShowingEmailSignIn = false
+    @State private var pendingCommunityQuestionDeletion: CommunityQuestion?
+    @State private var pendingCommunityQuestionReport: CommunityQuestion?
     @State private var isSearchVisible = false
     @State private var homeStudySearchText = ""
     @State private var submittedHomeStudySearchText = ""
@@ -1542,6 +1544,42 @@ private struct MobileHomeView: View {
                 }
             }
         }
+        .confirmationDialog(
+            strings.deleteQuestionConfirmation,
+            isPresented: Binding(
+                get: { pendingCommunityQuestionDeletion != nil },
+                set: { if !$0 { pendingCommunityQuestionDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(strings.deleteQuestion, role: .destructive) {
+                if let question = pendingCommunityQuestionDeletion {
+                    deleteOwnedCommunityQuestion(question)
+                }
+                pendingCommunityQuestionDeletion = nil
+            }
+            Button(strings.cancel, role: .cancel) {
+                pendingCommunityQuestionDeletion = nil
+            }
+        }
+        .confirmationDialog(
+            strings.reportQuestionConfirmation,
+            isPresented: Binding(
+                get: { pendingCommunityQuestionReport != nil },
+                set: { if !$0 { pendingCommunityQuestionReport = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(strings.reportQuestion, role: .destructive) {
+                if let question = pendingCommunityQuestionReport {
+                    reportCommunityQuestion(question)
+                }
+                pendingCommunityQuestionReport = nil
+            }
+            Button(strings.cancel, role: .cancel) {
+                pendingCommunityQuestionReport = nil
+            }
+        }
         .navigationDestination(item: $selectedCommunityQuestionRoute) { route in
             NotificationCommunityQuestionDestination(questionID: route.id)
         }
@@ -1835,31 +1873,111 @@ private struct MobileHomeView: View {
     }
 
     private func communityQuestionRow(_ question: CommunityQuestion) -> some View {
-        Button {
-            selectedCommunityQuestionRoute = CommunityQuestionRoute(id: question.id)
-        } label: {
-            MobileCommunityQuestionRow(question: question, strings: strings)
+        HStack(alignment: .top, spacing: 2) {
+            Button {
+                openCommunityQuestion(question)
+            } label: {
+                MobileCommunityQuestionRow(question: question, strings: strings)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            communityQuestionActionsMenu(question)
         }
-        .buttonStyle(.plain)
-        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 10))
         .listRowBackground(Color.clear)
         .contextMenu {
-            if appState.isCommunitySessionActive {
-                Button(role: .destructive) {
-                    Task {
-                        await appState.reportCommunityQuestion(
-                            question,
-                            reason: strings.reportReasonInappropriate
-                        )
-                    }
-                } label: {
-                    Label(strings.report, systemImage: "exclamationmark.bubble")
-                }
-            }
+            communityQuestionActions(question)
         }
         .onAppear {
             appState.shouldLoadNextCommunityQuestion(after: question.id)
         }
+    }
+
+    private func communityQuestionActionsMenu(_ question: CommunityQuestion) -> some View {
+        Menu {
+            communityQuestionActions(question)
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(strings.questionActions)
+    }
+
+    @ViewBuilder
+    private func communityQuestionActions(_ question: CommunityQuestion) -> some View {
+        Button {
+            openCommunityQuestion(question)
+        } label: {
+            Label(strings.openQuestion, systemImage: "arrow.up.right")
+        }
+
+        let policy = communityQuestionActionPolicy(question)
+        if policy.canManage {
+            Button {
+                makeOwnedCommunityQuestionPrivate(question)
+            } label: {
+                Label(strings.makeQuestionPrivate, systemImage: "lock.fill")
+            }
+
+            Button(role: .destructive) {
+                pendingCommunityQuestionDeletion = question
+            } label: {
+                Label(strings.deleteQuestion, systemImage: "trash")
+            }
+        } else if policy.canReport {
+            Button(role: .destructive) {
+                pendingCommunityQuestionReport = question
+            } label: {
+                Label(strings.reportQuestion, systemImage: "exclamationmark.bubble")
+            }
+        }
+    }
+
+    private func communityQuestionActionPolicy(_ question: CommunityQuestion) -> CommunityQuestionActionPolicy {
+        CommunityQuestionActionPolicy(
+            isSignedIn: appState.isCommunitySessionActive,
+            isOwner: question.author.map { appState.isCurrentCommunityUser(id: $0.id) } ?? false
+        )
+    }
+
+    private func openCommunityQuestion(_ question: CommunityQuestion) {
+        selectedCommunityQuestionRoute = CommunityQuestionRoute(id: question.id)
+    }
+
+    private func makeOwnedCommunityQuestionPrivate(_ question: CommunityQuestion) {
+        Task {
+            guard let record = await recordForCommunityQuestionAction(question) else { return }
+            appState.updateStudyRecordPublicity(record, isPublic: false)
+        }
+    }
+
+    private func deleteOwnedCommunityQuestion(_ question: CommunityQuestion) {
+        Task {
+            guard let record = await recordForCommunityQuestionAction(question) else { return }
+            appState.deleteStudyRecord(record)
+        }
+    }
+
+    private func reportCommunityQuestion(_ question: CommunityQuestion) {
+        Task {
+            await appState.reportCommunityQuestion(
+                question,
+                reason: strings.reportReasonInappropriate
+            )
+        }
+    }
+
+    private func recordForCommunityQuestionAction(_ question: CommunityQuestion) async -> StudyRecord? {
+        if let record = appState.studyRecords.first(where: { $0.id == question.id }) {
+            return record
+        }
+        return await appState.loadStudyRecordDetail(recordID: question.id)
     }
 
     private var isHomeSearchActive: Bool {
@@ -7934,6 +8052,7 @@ enum CommunityQuestionDetailContentSource: Equatable {
 
 struct CommunityQuestionDetailView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
     var question: CommunityQuestion
     var contentSource: CommunityQuestionDetailContentSource
     @State private var displayQuestion: CommunityQuestion
@@ -7944,6 +8063,8 @@ struct CommunityQuestionDetailView: View {
     @State private var isSendingComment = false
     @State private var deletingCommentIDs: Set<String> = []
     @State private var isShowingOriginal = false
+    @State private var isShowingDeleteConfirmation = false
+    @State private var isShowingReportConfirmation = false
     @State private var originalAvailable: Bool
     @FocusState private var isCommentInputFocused: Bool
 
@@ -8026,15 +8147,31 @@ struct CommunityQuestionDetailView: View {
             if contentSource == .community && appState.isCommunitySessionActive {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        Button(role: .destructive) {
-                            Task {
-                                await appState.reportCommunityQuestion(
-                                    displayQuestion,
-                                    reason: strings.reportReasonInappropriate
-                                )
+                        let policy = CommunityQuestionActionPolicy(
+                            isSignedIn: appState.isCommunitySessionActive,
+                            isOwner: displayQuestion.author.map {
+                                appState.isCurrentCommunityUser(id: $0.id)
+                            } ?? false
+                        )
+
+                        if policy.canManage {
+                            Button {
+                                makeQuestionPrivate()
+                            } label: {
+                                Label(strings.makeQuestionPrivate, systemImage: "lock.fill")
                             }
-                        } label: {
-                            Label(strings.report, systemImage: "exclamationmark.bubble")
+
+                            Button(role: .destructive) {
+                                isShowingDeleteConfirmation = true
+                            } label: {
+                                Label(strings.deleteQuestion, systemImage: "trash")
+                            }
+                        } else if policy.canReport {
+                            Button(role: .destructive) {
+                                isShowingReportConfirmation = true
+                            } label: {
+                                Label(strings.reportQuestion, systemImage: "exclamationmark.bubble")
+                            }
                         }
                     } label: {
                         MobileToolbarIconButtonLabel(systemName: "ellipsis")
@@ -8049,6 +8186,31 @@ struct CommunityQuestionDetailView: View {
                     isCommentInputFocused = false
                 }
             }
+        }
+        .confirmationDialog(
+            strings.deleteQuestionConfirmation,
+            isPresented: $isShowingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(strings.deleteQuestion, role: .destructive) {
+                deleteQuestion()
+            }
+            Button(strings.cancel, role: .cancel) {}
+        }
+        .confirmationDialog(
+            strings.reportQuestionConfirmation,
+            isPresented: $isShowingReportConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(strings.reportQuestion, role: .destructive) {
+                Task {
+                    await appState.reportCommunityQuestion(
+                        displayQuestion,
+                        reason: strings.reportReasonInappropriate
+                    )
+                }
+            }
+            Button(strings.cancel, role: .cancel) {}
         }
         .task(id: displayQuestion.id) {
             if contentSource.showsCommunityInteractions {
@@ -8083,7 +8245,14 @@ struct CommunityQuestionDetailView: View {
                     Text(displayQuestion.topic.isEmpty ? "Swift" : displayQuestion.topic)
                         .lineLimit(1)
 
-                    Text("Lv.\(displayQuestion.difficultyLevel)")
+                    CommunityQuestionDifficultyScale(
+                        difficulty: displayQuestion.difficultyLevel,
+                        dotSize: 4,
+                        spacing: 3
+                    )
+
+                    Text("\(min(max(displayQuestion.difficultyLevel, 1), 10))")
+                        .monospacedDigit()
                         .fixedSize(horizontal: true, vertical: false)
 
                     if let answeredAt = displayQuestion.answeredAt {
@@ -8100,6 +8269,29 @@ struct CommunityQuestionDetailView: View {
                 Spacer(minLength: 0)
             }
         }
+    }
+
+    private func makeQuestionPrivate() {
+        Task {
+            guard let record = await recordForQuestionAction() else { return }
+            appState.updateStudyRecordPublicity(record, isPublic: false)
+            dismiss()
+        }
+    }
+
+    private func deleteQuestion() {
+        Task {
+            guard let record = await recordForQuestionAction() else { return }
+            appState.deleteStudyRecord(record)
+            dismiss()
+        }
+    }
+
+    private func recordForQuestionAction() async -> StudyRecord? {
+        if let record = appState.studyRecords.first(where: { $0.id == displayQuestion.id }) {
+            return record
+        }
+        return await appState.loadStudyRecordDetail(recordID: displayQuestion.id)
     }
 
     private var communityActions: some View {
