@@ -11,6 +11,10 @@ const serverRuntimeDashboardPath = path.resolve(
   testDirectory,
   "../../grafana/dashboards/buddystudy-server-runtime.json",
 );
+const apiLogsDashboardPath = path.resolve(
+  testDirectory,
+  "../../grafana/dashboards/buddystudy-logs.json",
+);
 const grafanaDashboardDirectory = path.resolve(
   testDirectory,
   "../../grafana/dashboards",
@@ -127,6 +131,24 @@ test("server runtime dashboard emits bounded Loki metric series", async () => {
     assert.match(expression, /\| json \w+="\w+" \| unwrap \w+/);
     assert.doesNotMatch(expression, /\| json \| unwrap/);
   }
+});
+
+test("API request table uses bounded log rows instead of request-cardinality metrics", async () => {
+  const dashboard = JSON.parse(
+    await fs.readFile(apiLogsDashboardPath, "utf8"),
+  );
+  const panel = dashboard.panels.find((candidate) => candidate.title === "API Requests");
+  const target = panel?.targets?.[0];
+
+  assert.ok(panel, "API Requests panel must be provisioned");
+  assert.equal(target?.queryType, "range");
+  assert.equal(target?.maxLines, 1000);
+  assert.match(target?.expr ?? "", /^\{container=~"\.\+"\}/);
+  assert.match(target?.expr ?? "", /\| line_format /);
+  assert.doesNotMatch(target?.expr ?? "", /count_over_time|sum by \(loggedAt, requestId/);
+  assert.equal(panel.transformations?.[0]?.id, "extractFields");
+  assert.equal(panel.transformations?.[0]?.options?.source, "Line");
+  assert.equal(panel.transformations?.[0]?.options?.format, "regexp");
 });
 
 test("Grafana dashboards use supported fixed color field configuration", async () => {
