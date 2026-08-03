@@ -80,40 +80,31 @@ struct CommunityQuestionStatsMeta: View {
 
     private func learningResult(_ result: CommunityQuestionResultPresentation) -> some View {
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("\(result.score)")
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(.primary)
-                    .monospacedDigit()
-
-                Text(strings.answerScore)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: true, vertical: false)
-            }
+            Text("\(result.score)")
+                .font(.title2.weight(.bold))
+                .foregroundStyle(.primary)
+                .monospacedDigit()
 
             Divider()
-                .frame(height: 35)
+                .frame(height: 24)
 
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 4) {
-                    ForEach(1...10, id: \.self) { level in
-                        Circle()
-                            .fill(
-                                level == result.difficulty
-                                    ? Color.primary
-                                    : Color.secondary.opacity(0.24)
-                            )
-                            .frame(width: 6, height: 6)
-                    }
+            HStack(spacing: 4) {
+                ForEach(1...10, id: \.self) { level in
+                    Circle()
+                        .fill(
+                            level == result.difficulty
+                                ? Color.primary
+                                : Color.secondary.opacity(0.24)
+                        )
+                        .frame(width: 6, height: 6)
                 }
-                .accessibilityHidden(true)
-
-                Text("\(strings.questionDifficulty) \(result.difficulty)")
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: true, vertical: false)
             }
+            .accessibilityHidden(true)
+
+            Text("\(result.difficulty)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
         }
         .fixedSize(horizontal: true, vertical: false)
         .accessibilityElement(children: .ignore)
