@@ -250,14 +250,20 @@ deployment.
   login screen instead of rendering a dashboard shell that fails with
   `Unauthorized`. Grafana Live accepts WebSocket connections only from
   `https://grafana.lowfidev.cloud`, matching the public gateway origin. The
-  The dedicated Grafana gateway restores `grafana.lowfidev.cloud`, HTTPS, and
+  dedicated Grafana gateway restores `grafana.lowfidev.cloud`, HTTPS, and
   port 443 after Routingflare consumes the original host header. This keeps
   Grafana Live origin checks aligned with its public HTTPS `root_url`.
   Grafana also provisions a Loki alert for backend `level=ERROR` events and
   sends it to the `BuddyStudy Slack` contact point through the dedicated
   `GRAFANA_SLACK_WEBHOOK_URL` app identity. Slack contains the incident
-  summary and a compact `Grafana에서 오류 로그 보기` hyperlink whose target is
-  the exact Loki ERROR query; the raw Explore URL is not printed in the message.
+  summary, the millisecond-precision timestamp parsed from the original log,
+  and the error location. API incidents show the HTTP method, full production
+  request URL, and root stack-frame location; background incidents show the
+  logger component.
+  A compact `Grafana에서 오류 로그 보기` hyperlink targets the Loki ERROR
+  query without printing the raw Explore URL in the message. API and background
+  failures are separate alert rules so request metadata is never fabricated for
+  scheduler, stream-consumer, or application-startup failures.
   Loki and Sentry retain the full stack and diagnostic context. The link does
   not depend on the Logs Drilldown volume API. This Grafana path is the only
   production path from backend application errors to Slack. The same contact
