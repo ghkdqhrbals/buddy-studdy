@@ -183,3 +183,18 @@ data class ApplyAppleNotificationCommand(
     val notification: VerifiedAppleNotification,
     val occurredAt: Instant,
 )
+
+data class BillingFulfillmentJobClaim(
+    val jobId: Long,
+    val invoiceId: Long,
+    val attempts: Int,
+    val maxAttempts: Int,
+    val claimToken: UUID,
+)
+
+data class BillingRecoveryResult(
+    val claimed: Int,
+    val completed: Int,
+    val retried: Int,
+    val compensationRequired: Int,
+)

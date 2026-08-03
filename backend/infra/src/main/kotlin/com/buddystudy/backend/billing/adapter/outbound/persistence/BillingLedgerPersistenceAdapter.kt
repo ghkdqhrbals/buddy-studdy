@@ -10,6 +10,7 @@ import com.buddystudy.backend.billing.application.model.BillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.BillingInvoiceEvent
 import com.buddystudy.backend.billing.application.model.BillingInvoicePage
 import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
+import com.buddystudy.backend.billing.application.model.BillingFulfillmentJobClaim
 import com.buddystudy.backend.billing.application.model.BillingTierProduct
 import com.buddystudy.backend.billing.application.model.PaymentHistoryEntry
 import com.buddystudy.backend.billing.application.model.RecordVerifiedPaymentCommand
@@ -321,6 +322,71 @@ class BillingLedgerPersistenceAdapter(
             now = now,
         )
         return requireInvoiceSummary(invoiceId)
+    }
+
+    @Transactional
+    override suspend fun claimDueFulfillmentJobs(
+        now: Instant,
+        staleBefore: Instant,
+        limit: Int,
+    ): List<BillingFulfillmentJobClaim> {
+        val claimToken = UUID.randomUUID()
+        val claims = database.sql(
+            """
+            select id, invoice_id, attempts, max_attempts
+            from billing_jobs
+            where job_type = 'FULFILLMENT'
+              and (
+                (status = 'PENDING' and next_attempt_at <= :now)
+                or (status = 'PROCESSING' and claimed_at <= :staleBefore)
+              )
+            order by next_attempt_at, id
+            limit :limit
+            for update skip locked
+            """.trimIndent(),
+        ).bind("now", now.utc()).bind("staleBefore", staleBefore.utc()).bind("limit", limit.coerceIn(1, 100))
+            .map { row, _ ->
+                BillingFulfillmentJobClaim(
+                    jobId = row.long("id"),
+                    invoiceId = row.long("invoice_id"),
+                    attempts = row.int("attempts"),
+                    maxAttempts = row.int("max_attempts"),
+                    claimToken = claimToken,
+                )
+            }.all().collectList().awaitSingle()
+
+        for (claim in claims) {
+            database.sql(
+                """
+                update billing_jobs
+                set status = 'PROCESSING', claimed_at = :now, claim_token = :claimToken,
+                    updated_at = :now
+                where id = :jobId
+                """.trimIndent(),
+            ).bind("now", now.utc()).bind("claimToken", claimToken.toString()).bind("jobId", claim.jobId)
+                .fetch().rowsUpdated().awaitSingle()
+        }
+        return claims
+    }
+
+    @Transactional
+    override suspend fun rescheduleFulfillmentJob(
+        claim: BillingFulfillmentJobClaim,
+        error: String,
+        nextAttemptAt: Instant,
+        now: Instant,
+    ) {
+        database.sql(
+            """
+            update billing_jobs
+            set status = 'PENDING', attempts = least(attempts + 1, max_attempts),
+                next_attempt_at = :nextAttemptAt, claimed_at = null, claim_token = null,
+                last_error = :error, updated_at = :now
+            where id = :jobId and status = 'PROCESSING' and claim_token = :claimToken
+            """.trimIndent(),
+        ).bind("nextAttemptAt", nextAttemptAt.utc()).bind("error", error.take(4000)).bind("now", now.utc())
+            .bind("jobId", claim.jobId).bind("claimToken", claim.claimToken.toString())
+            .fetch().rowsUpdated().awaitSingle()
     }
 
     override suspend fun invoice(userId: Long, invoiceId: Long): BillingInvoiceDetail? {

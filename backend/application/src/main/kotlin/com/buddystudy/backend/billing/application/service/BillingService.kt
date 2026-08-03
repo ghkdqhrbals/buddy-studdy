@@ -7,6 +7,7 @@ import com.buddystudy.backend.billing.application.model.BillingCatalog
 import com.buddystudy.backend.billing.application.model.BillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.BillingInvoicePage
 import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
+import com.buddystudy.backend.billing.application.model.BillingRecoveryResult
 import com.buddystudy.backend.billing.application.model.CreateBillingCheckoutCommand
 import com.buddystudy.backend.billing.application.model.RecordVerifiedPaymentCommand
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
@@ -14,6 +15,7 @@ import com.buddystudy.backend.billing.application.model.SyncAppleTransactionComm
 import com.buddystudy.backend.billing.application.model.VerifiedAppleTransaction
 import com.buddystudy.backend.billing.application.port.inbound.AppleBillingNotificationUseCase
 import com.buddystudy.backend.billing.application.port.inbound.BillingUseCase
+import com.buddystudy.backend.billing.application.port.inbound.BillingRecoveryUseCase
 import com.buddystudy.backend.billing.application.port.outbound.AppleBillingVerificationPort
 import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
@@ -31,7 +33,7 @@ class BillingService(
     private val verifier: AppleBillingVerificationPort,
     private val ledger: BillingLedgerPort,
     private val clock: Clock = Clock.systemUTC(),
-) : BillingUseCase, AppleBillingNotificationUseCase {
+) : BillingUseCase, AppleBillingNotificationUseCase, BillingRecoveryUseCase {
     override suspend fun catalog(principal: Principal): BillingCatalog {
         requireRegistered(principal)
         val now = clock.instant()
@@ -116,18 +118,9 @@ class BillingService(
             ),
         )
 
-        return try {
-            ledger.fulfill(recorded.id, now)
-        } catch (error: Exception) {
-            // This call is a separate transaction. A failed membership grant must never roll back
-            // the already committed proof that Apple charged the user.
-            ledger.requireCompensation(
-                invoiceId = recorded.id,
-                reason = error.message?.take(1000) ?: error.javaClass.simpleName,
-                now = clock.instant(),
-            )
-            throw error
-        }
+        // This is deliberately a separate transaction. If the process dies after payment evidence
+        // commits, the fulfillment job created above remains available to the recovery worker.
+        return ledger.fulfill(recorded.id, now)
     }
 
     override suspend fun invoices(principal: Principal, limit: Int, offset: Int): BillingInvoicePage {
@@ -204,16 +197,7 @@ class BillingService(
                     ),
                 )
                 if (notification.notificationType in FULFILLMENT_NOTIFICATION_TYPES) {
-                    try {
-                        ledger.fulfill(recorded.id, now)
-                    } catch (error: Exception) {
-                        ledger.requireCompensation(
-                            recorded.id,
-                            error.message?.take(1000) ?: error.javaClass.simpleName,
-                            clock.instant(),
-                        )
-                        throw error
-                    }
+                    ledger.fulfill(recorded.id, now)
                 }
             }
             ledger.applyAppleNotification(ApplyAppleNotificationCommand(notification, clock.instant()))
@@ -226,6 +210,43 @@ class BillingService(
             throw error
         }
     }
+
+    override suspend fun recoverDueFulfillments(): BillingRecoveryResult {
+        val now = clock.instant()
+        val claims = ledger.claimDueFulfillmentJobs(
+            now = now,
+            staleBefore = now.minus(FULFILLMENT_CLAIM_LEASE),
+            limit = FULFILLMENT_RECOVERY_BATCH_SIZE,
+        )
+        var completed = 0
+        var retried = 0
+        var compensationRequired = 0
+        for (claim in claims) {
+            try {
+                ledger.fulfill(claim.invoiceId, clock.instant())
+                completed += 1
+            } catch (error: Exception) {
+                val reason = (error.message ?: error.javaClass.name).take(4000)
+                if (claim.attempts + 1 >= claim.maxAttempts) {
+                    ledger.requireCompensation(claim.invoiceId, reason, clock.instant())
+                    compensationRequired += 1
+                } else {
+                    val retryAt = clock.instant().plus(fulfillmentRetryDelay(claim.attempts + 1))
+                    ledger.rescheduleFulfillmentJob(claim, reason, retryAt, clock.instant())
+                    retried += 1
+                }
+            }
+        }
+        return BillingRecoveryResult(
+            claimed = claims.size,
+            completed = completed,
+            retried = retried,
+            compensationRequired = compensationRequired,
+        )
+    }
+
+    private fun fulfillmentRetryDelay(attempt: Int): Duration =
+        Duration.ofSeconds((5L shl (attempt - 1).coerceIn(0, 4)).coerceAtMost(60))
 
     private fun requireRegistered(principal: Principal) {
         if (principal.anonymous || principal.status != "ACTIVE") {
@@ -318,5 +339,7 @@ class BillingService(
         val SHA256 = Regex("^[0-9a-f]{64}$")
         val IDEMPOTENCY_KEY = Regex("^[A-Za-z0-9._:-]{8,191}$")
         val FULFILLMENT_NOTIFICATION_TYPES = setOf("SUBSCRIBED", "DID_RENEW", "ONE_TIME_CHARGE", "OFFER_REDEEMED")
+        val FULFILLMENT_CLAIM_LEASE: Duration = Duration.ofMinutes(2)
+        const val FULFILLMENT_RECOVERY_BATCH_SIZE = 25
     }
 }

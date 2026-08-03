@@ -7,6 +7,7 @@ import com.buddystudy.backend.billing.application.model.AdminBillingInvoicePage
 import com.buddystudy.backend.billing.application.model.BillingAction
 import com.buddystudy.backend.billing.application.model.BillingCatalog
 import com.buddystudy.backend.billing.application.model.BillingClientAction
+import com.buddystudy.backend.billing.application.model.BillingFulfillmentJobClaim
 import com.buddystudy.backend.billing.application.model.BillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.BillingInvoicePage
 import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
@@ -129,7 +130,7 @@ class BillingServiceTest {
     }
 
     @Test
-    fun `membership transaction rollback records compensation in a new boundary`() {
+    fun `membership fulfillment failure leaves verified payment for durable recovery`() {
         val ledger = FakeLedger(token, product).apply { fulfillmentError = IllegalStateException("membership rollback") }
         val service = service(ledger)
 
@@ -138,7 +139,38 @@ class BillingServiceTest {
         }
 
         assertEquals(1, ledger.recordedPayments.size)
-        assertEquals(listOf(99L), ledger.compensatedInvoices)
+        assertTrue(ledger.compensatedInvoices.isEmpty())
+    }
+
+    @Test
+    fun `recovery completes a fulfillment abandoned by a dead backend process`() = runBlocking {
+        val claim = BillingFulfillmentJobClaim(10, 99, 0, 3, UUID.randomUUID())
+        val ledger = FakeLedger(token, product).apply { fulfillmentClaims += claim }
+        val service = service(ledger)
+
+        val result = service.recoverDueFulfillments()
+
+        assertEquals(1, result.claimed)
+        assertEquals(1, result.completed)
+        assertEquals(InvoiceStatus.COMPLETED, ledger.lastFulfillmentStatus)
+    }
+
+    @Test
+    fun `recovery retries transient errors and requires compensation only after max attempts`() = runBlocking {
+        val retryClaim = BillingFulfillmentJobClaim(10, 99, 0, 3, UUID.randomUUID())
+        val finalClaim = BillingFulfillmentJobClaim(11, 100, 2, 3, UUID.randomUUID())
+        val ledger = FakeLedger(token, product).apply {
+            fulfillmentClaims += listOf(retryClaim, finalClaim)
+            fulfillmentError = IllegalStateException("membership unavailable")
+        }
+        val service = service(ledger)
+
+        val result = service.recoverDueFulfillments()
+
+        assertEquals(1, result.retried)
+        assertEquals(1, result.compensationRequired)
+        assertEquals(listOf(retryClaim), ledger.rescheduledClaims)
+        assertEquals(listOf(100L), ledger.compensatedInvoices)
     }
 
     @Test
@@ -228,9 +260,12 @@ class BillingServiceTest {
         val recordedPayments = mutableListOf<RecordVerifiedPaymentCommand>()
         val pendingCheckoutKeys = mutableListOf<String>()
         val compensatedInvoices = mutableListOf<Long>()
+        val fulfillmentClaims = mutableListOf<BillingFulfillmentJobClaim>()
+        val rescheduledClaims = mutableListOf<BillingFulfillmentJobClaim>()
         val recordedNotifications = mutableListOf<String>()
         val failedNotifications = mutableListOf<String>()
         var appliedNotifications = 0
+        var lastFulfillmentStatus: InvoiceStatus? = null
 
         override suspend fun findOrCreateAppAccountToken(userId: Long, now: Instant): UUID {
             tokenReads += 1
@@ -260,11 +295,25 @@ class BillingServiceTest {
         }
         override suspend fun fulfill(invoiceId: Long, now: Instant): BillingInvoiceSummary {
             fulfillmentError?.let { throw it }
+            lastFulfillmentStatus = InvoiceStatus.COMPLETED
             return invoice(InvoiceStatus.COMPLETED)
         }
         override suspend fun requireCompensation(invoiceId: Long, reason: String, now: Instant): BillingInvoiceSummary {
             compensatedInvoices += invoiceId
             return invoice(InvoiceStatus.FAILED)
+        }
+        override suspend fun claimDueFulfillmentJobs(
+            now: Instant,
+            staleBefore: Instant,
+            limit: Int,
+        ): List<BillingFulfillmentJobClaim> = fulfillmentClaims.take(limit)
+        override suspend fun rescheduleFulfillmentJob(
+            claim: BillingFulfillmentJobClaim,
+            error: String,
+            nextAttemptAt: Instant,
+            now: Instant,
+        ) {
+            rescheduledClaims += claim
         }
         override suspend fun invoice(userId: Long, invoiceId: Long): BillingInvoiceDetail? = null
         override suspend fun invoices(userId: Long, limit: Int, offset: Int) = BillingInvoicePage(limit, offset, emptyList())

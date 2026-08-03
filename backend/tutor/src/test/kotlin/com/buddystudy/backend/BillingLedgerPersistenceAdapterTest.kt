@@ -129,6 +129,71 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
+    fun `verified charge fulfillment can be reclaimed after backend process death`(): Unit = runBlocking {
+        val fixture = fixture("crash-recovery")
+        val checkout = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            fixture.product,
+            fixture.idempotencyKey,
+            fixture.now,
+        )
+        val transaction = fixture.transaction()
+        val recorded = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                userId = fixture.userId,
+                tierProduct = fixture.product,
+                transaction = transaction,
+                invoiceNumber = checkout.invoiceNumber,
+                source = BillingEventSource.CLIENT,
+                eventId = "apple-transaction:${transaction.transactionId}",
+                occurredAt = fixture.now.plusSeconds(1),
+            ),
+        )
+
+        val abandonedClaim = ledger.claimDueFulfillmentJobs(
+            fixture.now.plusSeconds(2),
+            fixture.now.minusSeconds(120),
+            10,
+        ).single { it.invoiceId == recorded.id }
+
+        // No completion or release call simulates SIGKILL after the job was claimed.
+        val reclaimed = ledger.claimDueFulfillmentJobs(
+            fixture.now.plusSeconds(200),
+            fixture.now.plusSeconds(80),
+            10,
+        ).single { it.invoiceId == recorded.id }
+        assertThat(reclaimed.claimToken).isNotEqualTo(abandonedClaim.claimToken)
+
+        ledger.rescheduleFulfillmentJob(
+            reclaimed,
+            "temporary membership database outage",
+            fixture.now.plusSeconds(210),
+            fixture.now.plusSeconds(200),
+        )
+        assertThat(
+            ledger.claimDueFulfillmentJobs(
+                fixture.now.plusSeconds(205),
+                fixture.now.plusSeconds(85),
+                10,
+            ),
+        ).noneMatch { it.invoiceId == recorded.id }
+
+        val retry = ledger.claimDueFulfillmentJobs(
+            fixture.now.plusSeconds(211),
+            fixture.now.plusSeconds(90),
+            10,
+        ).single { it.invoiceId == recorded.id }
+        assertThat(retry.attempts).isEqualTo(1)
+        val completed = ledger.fulfill(retry.invoiceId, fixture.now.plusSeconds(212))
+
+        assertThat(completed.status).isEqualTo(InvoiceStatus.COMPLETED)
+        assertThat(
+            longValue("select count(*) from billing_jobs where invoice_id = ${recorded.id} and status = 'COMPLETED'"),
+        ).isEqualTo(1)
+    }
+
+    @Test
     fun `verified payment completes normal invoice and Apple refund completes a linked refund invoice`(): Unit = runBlocking {
         val fixture = fixture("refund")
         val checkout = ledger.createPendingInvoice(

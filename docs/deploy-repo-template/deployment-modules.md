@@ -126,7 +126,9 @@ deployment.
   aggregation is an authenticated on-demand backend operation and is not
   registered as a scheduled or manually retryable batch job.
   The answer-grading watchdog is a frequent critical job and belongs in the
-  default monitored list.
+  default monitored list. Apple payment evidence is recovered by the
+  `billing-fulfillment-recovery` managed job, which also belongs in the default
+  monitored list so a verified charge cannot remain unfulfilled silently.
 - Runtime health checks are not GitHub Actions deploy gates. GitHub Actions
   validates image/config submission and Nginx syntax only. Docker Swarm owns
   task health, replacement ordering, and rollback; Grafana owns continuous

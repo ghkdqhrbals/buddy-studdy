@@ -8,6 +8,7 @@ import com.buddystudy.backend.billing.application.model.BillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.BillingInvoicePage
 import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
 import com.buddystudy.backend.billing.application.model.BillingTierProduct
+import com.buddystudy.backend.billing.application.model.BillingFulfillmentJobClaim
 import com.buddystudy.backend.billing.application.model.RecordVerifiedPaymentCommand
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
 import com.buddystudy.backend.billing.application.model.VerifiedAppleNotification
@@ -47,6 +48,21 @@ interface BillingLedgerPort {
 
     /** REQUIRES_NEW boundary used after fulfillment rollback; never marks an Apple refund as completed. */
     suspend fun requireCompensation(invoiceId: Long, reason: String, now: Instant): BillingInvoiceSummary
+
+    /** Claims pending or abandoned fulfillment work so a process crash cannot strand a verified charge. */
+    suspend fun claimDueFulfillmentJobs(
+        now: Instant,
+        staleBefore: Instant,
+        limit: Int,
+    ): List<BillingFulfillmentJobClaim>
+
+    /** Releases a claimed attempt with bounded backoff after a recoverable fulfillment failure. */
+    suspend fun rescheduleFulfillmentJob(
+        claim: BillingFulfillmentJobClaim,
+        error: String,
+        nextAttemptAt: Instant,
+        now: Instant,
+    )
 
     suspend fun invoice(userId: Long, invoiceId: Long): BillingInvoiceDetail?
     suspend fun invoices(userId: Long, limit: Int, offset: Int): BillingInvoicePage

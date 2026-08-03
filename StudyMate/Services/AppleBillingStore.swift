@@ -121,7 +121,7 @@ final class AppleBillingStore: ObservableObject {
         try await AppStore.showManageSubscriptions(in: scene)
     }
 
-    private static func backendEnvironment(_ transaction: Transaction) -> String {
+    static func backendEnvironment(_ transaction: Transaction) -> String {
         switch transaction.environment {
         case .production:
             return "PRODUCTION"

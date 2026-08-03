@@ -2,6 +2,9 @@ import Foundation
 import Combine
 import CryptoKit
 import OSLog
+#if os(iOS)
+import StoreKit
+#endif
 
 private let appStateLogger = Logger(subsystem: "io.github.ghkdqhrbals.StudyMate", category: "app")
 private let appAuthLogger = Logger(subsystem: "io.github.ghkdqhrbals.StudyMate", category: "auth")
@@ -101,6 +104,10 @@ final class AppState: ObservableObject {
     private static let clipboardSettingsReadIntervalMilliseconds: UInt64 = 16
     private static let clipboardStickyReadIntervalMilliseconds: UInt64 = 6
     private static let recentLocalSettingsMutationWindow: TimeInterval = 300
+    #if os(iOS)
+    private static let appleBillingRecoveryAttempts = 3
+    private static let appleBillingRecoveryDelayNanoseconds: [UInt64] = [3_000_000_000, 9_000_000_000]
+    #endif
 
     @Published var settings: StudySettings
     @Published var draftSettings: StudySettings
@@ -638,6 +645,11 @@ final class AppState: ObservableObject {
     private var answerSubmissionRecordIDs: Set<String> = []
     private var appControlBoundaryTask: Task<Void, Never>?
     private var appControlPolicy: AppControlRemotePolicy?
+    #if os(iOS)
+    private var appleBillingUpdatesTask: Task<Void, Never>?
+    private var appleBillingRecoveryTask: Task<Void, Never>?
+    private var recoveringAppleTransactionIDs = Set<UInt64>()
+    #endif
     private var appControlResolution = AppControlResolution.normal
     private var didStartAppControlListener = false
     private var appControlRefreshTask: Task<Bool, Never>?
@@ -1965,6 +1977,10 @@ final class AppState: ObservableObject {
         answerGradingPollingTask?.cancel()
         appControlBoundaryTask?.cancel()
         appControlRefreshTask?.cancel()
+        #if os(iOS)
+        appleBillingUpdatesTask?.cancel()
+        appleBillingRecoveryTask?.cancel()
+        #endif
         appControlProvider.stopListening()
     }
 
@@ -1974,6 +1990,9 @@ final class AppState: ObservableObject {
         }
 
         didStart = true
+        #if os(iOS)
+        startAppleBillingTransactionListener()
+        #endif
         #if DEBUG
         if isAppStoreScreenshotFixtureEnabled {
             return
@@ -2011,6 +2030,9 @@ final class AppState: ObservableObject {
         await refreshNotificationUnreadCount()
         await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
         await resumePendingQuestionGenerationIfNeeded(reason: "startup")
+        #if os(iOS)
+        await recoverUnfinishedAppleTransactions(reason: "startup")
+        #endif
         _ = await notificationService.requestAuthorizationIfNeeded(language: settings.appLanguage)
         await validateAPIKeyOnStartup()
         #if os(macOS)
@@ -2047,6 +2069,9 @@ final class AppState: ObservableObject {
         await refreshPermissionEvaluations(reason: "foreground")
         await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
         await resumePendingQuestionGenerationIfNeeded(reason: "foreground")
+        #if os(iOS)
+        await recoverUnfinishedAppleTransactions(reason: "foreground")
+        #endif
         if isCloudSyncEnabled {
             await syncCloudNow(updateVisibleQuestion: false)
             await ensureCloudQuestionPushSubscription()
@@ -4790,6 +4815,11 @@ final class AppState: ObservableObject {
             pageAccess: backendAccessState.pageAccess
         )
         setCommunitySessionSignedIn(true)
+        #if os(iOS)
+        Task { @MainActor [weak self] in
+            await self?.recoverUnfinishedAppleTransactions(reason: "sign-in")
+        }
+        #endif
     }
 
     func withdrawCommunityAccount() async -> Bool {
@@ -5982,6 +6012,101 @@ final class AppState: ObservableObject {
         await refreshQuestionQuota()
         return invoice
     }
+
+    #if os(iOS)
+    private func startAppleBillingTransactionListener() {
+        guard appleBillingUpdatesTask == nil else {
+            return
+        }
+        appleBillingUpdatesTask = Task { @MainActor [weak self] in
+            for await verification in Transaction.updates {
+                guard !Task.isCancelled else {
+                    return
+                }
+                await self?.reconcileAppleTransaction(verification, reason: "storekit-update")
+            }
+        }
+    }
+
+    private func recoverUnfinishedAppleTransactions(reason: String) async {
+        guard isCommunitySessionActive, appleBillingRecoveryTask == nil else {
+            return
+        }
+        let task = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+            for await verification in Transaction.unfinished {
+                guard !Task.isCancelled else {
+                    return
+                }
+                await reconcileAppleTransaction(verification, reason: reason)
+            }
+        }
+        appleBillingRecoveryTask = task
+        await task.value
+        appleBillingRecoveryTask = nil
+    }
+
+    private func reconcileAppleTransaction(
+        _ verification: VerificationResult<Transaction>,
+        reason: String
+    ) async {
+        guard case .verified(let transaction) = verification else {
+            log(.error, "검증되지 않은 StoreKit 거래는 완료 처리하지 않았습니다. reason=\(reason)")
+            return
+        }
+        guard isCommunitySessionActive,
+              !recoveringAppleTransactionIDs.contains(transaction.id) else {
+            return
+        }
+
+        recoveringAppleTransactionIDs.insert(transaction.id)
+        defer { recoveringAppleTransactionIDs.remove(transaction.id) }
+
+        if billingCatalog == nil {
+            await refreshBilling()
+        }
+        guard let expectedToken = billingCatalog?.appAccountToken,
+              transaction.appAccountToken == expectedToken else {
+            log(
+                .warning,
+                "현재 로그인 계정과 다른 StoreKit 거래를 보류했습니다. transactionID=\(transaction.id), reason=\(reason)"
+            )
+            return
+        }
+
+        for attempt in 1...Self.appleBillingRecoveryAttempts {
+            do {
+                _ = try await syncAppleBillingTransaction(
+                    signedTransaction: verification.jwsRepresentation,
+                    environment: AppleBillingStore.backendEnvironment(transaction),
+                    invoiceNumber: nil
+                )
+                await transaction.finish()
+                log(
+                    .info,
+                    "미완료 StoreKit 거래를 복구했습니다. transactionID=\(transaction.id), attempt=\(attempt), reason=\(reason)"
+                )
+                return
+            } catch {
+                log(
+                    .warning,
+                    "StoreKit 거래 백엔드 동기화를 보류했습니다. transactionID=\(transaction.id), " +
+                        "attempt=\(attempt), reason=\(reason), error=\(error.localizedDescription)"
+                )
+                guard attempt < Self.appleBillingRecoveryAttempts else {
+                    return
+                }
+                let delay = Self.appleBillingRecoveryDelayNanoseconds[attempt - 1]
+                try? await Task.sleep(nanoseconds: delay)
+                guard !Task.isCancelled else {
+                    return
+                }
+            }
+        }
+    }
+    #endif
 
     func createAppleBillingCheckout(productID: String) async throws -> BackendBillingInvoice {
         guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),

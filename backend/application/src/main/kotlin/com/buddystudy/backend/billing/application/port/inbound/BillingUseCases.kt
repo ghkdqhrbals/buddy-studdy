@@ -6,6 +6,7 @@ import com.buddystudy.backend.billing.application.model.BillingCatalog
 import com.buddystudy.backend.billing.application.model.BillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.BillingInvoicePage
 import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
+import com.buddystudy.backend.billing.application.model.BillingRecoveryResult
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoicePage
 import com.buddystudy.backend.billing.application.model.CreateBillingCheckoutCommand
@@ -33,6 +34,10 @@ interface BillingUseCase {
 
 interface AppleBillingNotificationUseCase {
     suspend fun receive(signedPayload: String)
+}
+
+interface BillingRecoveryUseCase {
+    suspend fun recoverDueFulfillments(): BillingRecoveryResult
 }
 
 interface AdminBillingUseCase {

@@ -69,11 +69,31 @@ new invoice because each renewal is a separate charge.
 
 ## Transaction boundaries and compensation
 
-Payment evidence is committed before membership fulfillment. Fulfillment runs
-in a separate transaction. If membership work rolls back, a `REQUIRES_NEW`
-boundary records `COMPENSATION_REQUIRED`, fails the fulfillment job, creates a
-compensation job, and creates a required compensation action. This preserves
-proof of the charge even when the entitlement transaction fails.
+Payment evidence and a `PENDING` fulfillment job commit atomically before
+membership fulfillment. Fulfillment runs in a separate transaction. A managed
+recovery job claims due work every five seconds and also reclaims `PROCESSING`
+work whose two-minute lease expired after process death. Transient failures use
+bounded backoff. Only the third failed attempt records
+`COMPENSATION_REQUIRED`, fails the fulfillment job, creates a compensation job,
+and creates a required compensation action. This preserves proof of the charge
+and avoids treating one transient database failure as a refund case.
+
+The iOS client finishes a StoreKit transaction only after the backend returns a
+successfully fulfilled invoice. It observes `Transaction.updates` for the app
+lifetime and replays `Transaction.unfinished` after sign-in, startup, and every
+foreground transition. Therefore the failure cases converge as follows:
+
+| Failure point | Durable source | Recovery |
+| --- | --- | --- |
+| Backend unavailable before checkout | No Apple charge exists | Retry checkout |
+| App exits after Apple approval but before API sync | StoreKit unfinished transaction | iOS resends the same JWS |
+| Backend exits before payment commit | StoreKit unfinished transaction | iOS or Apple notification resends JWS |
+| Backend exits after payment commit but before entitlement commit | `payments`, `payments_history`, and `billing_jobs` | Backend recovery job fulfills membership |
+| Backend commits but its response is lost | Apple transaction ID and existing invoice | Client retry returns the same idempotent result |
+
+The Apple transaction ID is the payment idempotency key. Duplicate client
+callbacks, server notifications, and foreground recovery cannot create a
+second payment or grant the membership twice.
 
 Apple does not provide a server API that lets BuddyStudy unilaterally issue an
 App Store refund or cancel a user's subscription. iOS starts the system refund
@@ -151,6 +171,9 @@ real purchases can complete.
   bundle ID, product mapping, `appAccountToken`, invoice, and transaction data.
   Apple does not sign Xcode-local test data, so this environment is never
   enabled by the production profile.
+- Xcode-local transactions do not produce App Store Server Notifications, so
+  development recovery deliberately uses the same StoreKit unfinished-
+  transaction replay path as production.
 - To exercise Apple's actual Sandbox, run a development-signed build without
   the scheme StoreKit configuration and sign in with an App Store Connect
   Sandbox Apple Account. Those transactions are marked `SANDBOX` and use the
