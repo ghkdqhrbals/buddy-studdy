@@ -36,7 +36,6 @@ Current workflow templates:
   monitoring, Grafana, and RedisStreamScope.
 - `deploy-testzone.yml`: TestZone k6 execution service and InfluxDB on MacBook
   Air.
-- `deploy-monitoring.yml`: legacy EC2-local monitoring fallback only.
 
 ## Required Secrets
 
@@ -195,14 +194,11 @@ The separate TestZone workflow creates or replaces:
   deploys them from TestZone.
 
 EC2 does not run Loki or Grafana. It runs only `buddystudy-promtail` when
-`REMOTE_LOKI_PUSH_URL` is configured.
+`REMOTE_LOKI_PUSH_URL` is configured. Grafana and Loki are owned exclusively
+by `deploy-macbookair-monitoring.yml`; do not add an EC2-local fallback.
 
 Prometheus and Redis exporter containers are not part of this production
 monitoring profile.
-
-The legacy EC2-local monitoring workflow `deploy-monitoring.yml` is kept only
-as a fallback template. Prefer `deploy-macbookair-monitoring.yml` for the
-current cost-saving EC2 layout.
 
 ## RedisStreamScope Deploy
 
