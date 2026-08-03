@@ -92,7 +92,7 @@
       },
       "targets": [
         {
-          "expr": "topk(20, sum by (method, path) (rate({container=~\"buddystudy-backend.*\"} |= \"api_exchange \" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\"` [1m])))",
+          "expr": "topk(20, sum by (method, path) (rate({app=\"buddystudy\"} |= \"api_exchange \" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\"` [1m])))",
           "legendFormat": "{{method}} {{path}}",
           "refId": "A"
         }
@@ -149,12 +149,12 @@
       },
       "targets": [
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json processCpuPercent=\"processCpuPercent\" | unwrap processCpuPercent | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json processCpuPercent=\"processCpuPercent\" | unwrap processCpuPercent | __error__=\"\" [1m]))",
           "legendFormat": "process",
           "refId": "A"
         },
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json systemCpuPercent=\"systemCpuPercent\" | unwrap systemCpuPercent | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json systemCpuPercent=\"systemCpuPercent\" | unwrap systemCpuPercent | __error__=\"\" [1m]))",
           "legendFormat": "system",
           "refId": "B"
         }
@@ -209,22 +209,22 @@
       },
       "targets": [
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json processResidentMemoryBytes=\"processResidentMemoryBytes\" | unwrap processResidentMemoryBytes | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json processResidentMemoryBytes=\"processResidentMemoryBytes\" | unwrap processResidentMemoryBytes | __error__=\"\" [1m]))",
           "legendFormat": "resident",
           "refId": "A"
         },
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json heapUsedBytes=\"heapUsedBytes\" | unwrap heapUsedBytes | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json heapUsedBytes=\"heapUsedBytes\" | unwrap heapUsedBytes | __error__=\"\" [1m]))",
           "legendFormat": "heap",
           "refId": "B"
         },
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json nonHeapUsedBytes=\"nonHeapUsedBytes\" | unwrap nonHeapUsedBytes | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json nonHeapUsedBytes=\"nonHeapUsedBytes\" | unwrap nonHeapUsedBytes | __error__=\"\" [1m]))",
           "legendFormat": "non-heap",
           "refId": "C"
         },
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json reactorNettyDirectMemoryBytes=\"reactorNettyDirectMemoryBytes\" | unwrap reactorNettyDirectMemoryBytes | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json reactorNettyDirectMemoryBytes=\"reactorNettyDirectMemoryBytes\" | unwrap reactorNettyDirectMemoryBytes | __error__=\"\" [1m]))",
           "legendFormat": "direct",
           "refId": "D"
         }
@@ -279,12 +279,12 @@
       },
       "targets": [
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json threadsLive=\"threadsLive\" | unwrap threadsLive | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json threadsLive=\"threadsLive\" | unwrap threadsLive | __error__=\"\" [1m]))",
           "legendFormat": "live",
           "refId": "A"
         },
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json threadsBlocked=\"threadsBlocked\" | unwrap threadsBlocked | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json threadsBlocked=\"threadsBlocked\" | unwrap threadsBlocked | __error__=\"\" [1m]))",
           "legendFormat": "blocked",
           "refId": "B"
         }
@@ -339,12 +339,12 @@
       },
       "targets": [
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json gcCollectionsTotal=\"gcCollectionsTotal\" | unwrap gcCollectionsTotal | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json gcCollectionsTotal=\"gcCollectionsTotal\" | unwrap gcCollectionsTotal | __error__=\"\" [1m]))",
           "legendFormat": "collections",
           "refId": "A"
         },
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json gcCollectionTimeMsTotal=\"gcCollectionTimeMsTotal\" | unwrap gcCollectionTimeMsTotal | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json gcCollectionTimeMsTotal=\"gcCollectionTimeMsTotal\" | unwrap gcCollectionTimeMsTotal | __error__=\"\" [1m]))",
           "legendFormat": "time ms",
           "refId": "B"
         }
@@ -399,12 +399,12 @@
       },
       "targets": [
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json reactorNettyActiveConnections=\"reactorNettyActiveConnections\" | unwrap reactorNettyActiveConnections | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json reactorNettyActiveConnections=\"reactorNettyActiveConnections\" | unwrap reactorNettyActiveConnections | __error__=\"\" [1m]))",
           "legendFormat": "active connections",
           "refId": "A"
         },
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json reactorNettyEventLoopPendingTasks=\"reactorNettyEventLoopPendingTasks\" | unwrap reactorNettyEventLoopPendingTasks | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json reactorNettyEventLoopPendingTasks=\"reactorNettyEventLoopPendingTasks\" | unwrap reactorNettyEventLoopPendingTasks | __error__=\"\" [1m]))",
           "legendFormat": "pending tasks",
           "refId": "B"
         }
@@ -458,12 +458,12 @@
       },
       "targets": [
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json rootDiskUsedBytes=\"rootDiskUsedBytes\" | unwrap rootDiskUsedBytes | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json rootDiskUsedBytes=\"rootDiskUsedBytes\" | unwrap rootDiskUsedBytes | __error__=\"\" [1m]))",
           "legendFormat": "used",
           "refId": "A"
         },
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json rootDiskTotalBytes=\"rootDiskTotalBytes\" | unwrap rootDiskTotalBytes | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json rootDiskTotalBytes=\"rootDiskTotalBytes\" | unwrap rootDiskTotalBytes | __error__=\"\" [1m]))",
           "legendFormat": "total",
           "refId": "B"
         }
@@ -517,12 +517,12 @@
       },
       "targets": [
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json networkReceiveBytesTotal=\"networkReceiveBytesTotal\" | unwrap networkReceiveBytesTotal | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json networkReceiveBytesTotal=\"networkReceiveBytesTotal\" | unwrap networkReceiveBytesTotal | __error__=\"\" [1m]))",
           "legendFormat": "received",
           "refId": "A"
         },
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json networkTransmitBytesTotal=\"networkTransmitBytesTotal\" | unwrap networkTransmitBytesTotal | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json networkTransmitBytesTotal=\"networkTransmitBytesTotal\" | unwrap networkTransmitBytesTotal | __error__=\"\" [1m]))",
           "legendFormat": "transmitted",
           "refId": "B"
         }
@@ -588,12 +588,12 @@
       },
       "targets": [
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json availableProcessors=\"availableProcessors\" | unwrap availableProcessors | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json availableProcessors=\"availableProcessors\" | unwrap availableProcessors | __error__=\"\" [1m]))",
           "legendFormat": "CPU cores",
           "refId": "A"
         },
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json hostMemoryTotalBytes=\"hostMemoryTotalBytes\" | unwrap hostMemoryTotalBytes | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json hostMemoryTotalBytes=\"hostMemoryTotalBytes\" | unwrap hostMemoryTotalBytes | __error__=\"\" [1m]))",
           "legendFormat": "memory maximum",
           "refId": "B"
         }
@@ -650,17 +650,17 @@
       },
       "targets": [
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json hostMemoryUsedBytes=\"hostMemoryUsedBytes\" | unwrap hostMemoryUsedBytes | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json hostMemoryUsedBytes=\"hostMemoryUsedBytes\" | unwrap hostMemoryUsedBytes | __error__=\"\" [1m]))",
           "legendFormat": "used",
           "refId": "A"
         },
         {
-          "expr": "min(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json hostMemoryAvailableBytes=\"hostMemoryAvailableBytes\" | unwrap hostMemoryAvailableBytes | __error__=\"\" [1m]))",
+          "expr": "min(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json hostMemoryAvailableBytes=\"hostMemoryAvailableBytes\" | unwrap hostMemoryAvailableBytes | __error__=\"\" [1m]))",
           "legendFormat": "available",
           "refId": "B"
         },
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json hostMemoryTotalBytes=\"hostMemoryTotalBytes\" | unwrap hostMemoryTotalBytes | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json hostMemoryTotalBytes=\"hostMemoryTotalBytes\" | unwrap hostMemoryTotalBytes | __error__=\"\" [1m]))",
           "legendFormat": "maximum",
           "refId": "C"
         }
@@ -728,27 +728,27 @@
       },
       "targets": [
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolAllocated=\"dbPoolAllocated\" | unwrap dbPoolAllocated | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolAllocated=\"dbPoolAllocated\" | unwrap dbPoolAllocated | __error__=\"\" [1m]))",
           "legendFormat": "allocated",
           "refId": "A"
         },
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolAcquired=\"dbPoolAcquired\" | unwrap dbPoolAcquired | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolAcquired=\"dbPoolAcquired\" | unwrap dbPoolAcquired | __error__=\"\" [1m]))",
           "legendFormat": "acquired",
           "refId": "B"
         },
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolIdle=\"dbPoolIdle\" | unwrap dbPoolIdle | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolIdle=\"dbPoolIdle\" | unwrap dbPoolIdle | __error__=\"\" [1m]))",
           "legendFormat": "idle",
           "refId": "C"
         },
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolPending=\"dbPoolPending\" | unwrap dbPoolPending | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolPending=\"dbPoolPending\" | unwrap dbPoolPending | __error__=\"\" [1m]))",
           "legendFormat": "pending",
           "refId": "D"
         },
         {
-          "expr": "max(last_over_time({container=~\"buddystudy-backend.*\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolMaxAllocated=\"dbPoolMaxAllocated\" | unwrap dbPoolMaxAllocated | __error__=\"\" [1m]))",
+          "expr": "max(last_over_time({app=\"buddystudy\"} |= \"runtime_metrics \" | pattern \"<_> runtime_metrics <runtime>\" | line_format \"{{.runtime}}\" | drop runtime | json dbPoolMaxAllocated=\"dbPoolMaxAllocated\" | unwrap dbPoolMaxAllocated | __error__=\"\" [1m]))",
           "legendFormat": "pool max",
           "refId": "E"
         }
@@ -946,7 +946,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate({container=~\"buddystudy-backend.*\"} |~ \"redis_(stream_(publish|consume)_succeeded|outbox_published)\" [1m]))",
+          "expr": "sum(rate({app=\"buddystudy\"} |~ \"redis_(stream_(publish|consume)_succeeded|outbox_published)\" [1m]))",
           "legendFormat": "successful operations",
           "refId": "A"
         }
@@ -1004,7 +1004,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate({container=~\"buddystudy-backend.*\"} |~ \"redis_.*(failed|retry_scheduled)\" [1m]))",
+          "expr": "sum(rate({app=\"buddystudy\"} |~ \"redis_.*(failed|retry_scheduled)\" [1m]))",
           "legendFormat": "failures",
           "refId": "A"
         }
@@ -1031,5 +1031,5 @@
   "timezone": "browser",
   "title": "BuddyStudy Server Dashboard",
   "uid": "buddystudy-server-runtime",
-  "version": 8
+  "version": 9
 }

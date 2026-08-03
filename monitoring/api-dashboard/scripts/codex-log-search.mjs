@@ -12,7 +12,7 @@ import {
 const DEFAULT_LIMIT = 20;
 const DEFAULT_RANGE_MS = 60 * 60 * 1000;
 const DEFAULT_DASHBOARD_URL = "https://grafana.lowfidev.cloud";
-const API_EXCHANGE_QUERY = '{container=~".+"} |= "api_exchange"';
+const API_EXCHANGE_QUERY = '{app="buddystudy"} |= "api_exchange"';
 
 main().catch((error) => {
   console.error(error.message);
@@ -147,7 +147,7 @@ function compareByTime(a, b, sort) {
 
 async function loadDetails(lokiBaseUrl, request) {
   const requestMs = Number(BigInt(request.nanoseconds) / 1_000_000n);
-  const values = await lokiQueryRange(lokiBaseUrl, `{container=~".+"} |= "${request.requestId}"`, {
+  const values = await lokiQueryRange(lokiBaseUrl, `{app="buddystudy"} |= "${request.requestId}"`, {
     startNs: ns(requestMs - 10 * 60 * 1000),
     endNs: ns(requestMs + 10 * 60 * 1000),
     limit: 200,

@@ -83,7 +83,7 @@
   "timezone": "browser",
   "uid": "buddystudy-logs",
   "title": "BuddyStudy API Logs",
-  "version": 3,
+  "version": 4,
   "panels": [
     {
       "datasource": {
@@ -327,7 +327,7 @@
           },
           "direction": "backward",
           "editorMode": "code",
-          "expr": "{container=~\".+\"} |= \"api_exchange\" | regexp `api_exchange \\{\"requestId\":\"(?P<requestId>[^\"]+)\",\"clientIp\":\"(?P<clientIp>[^\"]*)\".*\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"status\":(?P<status>[0-9]+).*\"durationMs\":\"?(?P<durationMs>[0-9.]+).*?(?:\"code\":\"(?P<errorCode>[^\"]+)\")?.*?(?:\"reason\":\"(?P<reason>[^\"]+)\")?` | line_format `method={{.method}} path={{.path}} status={{.status}} durationMs={{.durationMs}} errorCode={{.errorCode}} reason={{.reason}} clientIp={{.clientIp}} requestId={{.requestId}}`",
+          "expr": "{app=\"buddystudy\"} |= \"api_exchange\" | regexp `api_exchange \\{\"requestId\":\"(?P<requestId>[^\"]+)\",\"clientIp\":\"(?P<clientIp>[^\"]*)\".*\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"status\":(?P<status>[0-9]+).*\"durationMs\":\"?(?P<durationMs>[0-9.]+).*?(?:\"code\":\"(?P<errorCode>[^\"]+)\")?.*?(?:\"reason\":\"(?P<reason>[^\"]+)\")?` | line_format `method={{.method}} path={{.path}} status={{.status}} durationMs={{.durationMs}} errorCode={{.errorCode}} reason={{.reason}} clientIp={{.clientIp}} requestId={{.requestId}}`",
           "maxLines": 1000,
           "queryType": "range",
           "refId": "A"
@@ -445,7 +445,7 @@
           "editorMode": "code",
           "maxLines": 1,
           "queryType": "range",
-          "expr": "{container=~\".+\"} |= \"${requestId:raw}\" |= \"api_exchange\" | regexp `\"request\":(?P<request>\\{.*\\}),\"response\":` | line_format `{{.request}}`",
+          "expr": "{app=\"buddystudy\"} |= \"${requestId:raw}\" |= \"api_exchange\" | regexp `\"request\":(?P<request>\\{.*\\}),\"response\":` | line_format `{{.request}}`",
           "refId": "A"
         }
       ],
@@ -514,7 +514,7 @@
           "editorMode": "code",
           "maxLines": 1,
           "queryType": "range",
-          "expr": "{container=~\".+\"} |= \"${requestId:raw}\" |= \"api_exchange\" | regexp `\"response\":(?P<response>\\{.*\\})\\}$` | line_format `{{.response}}`",
+          "expr": "{app=\"buddystudy\"} |= \"${requestId:raw}\" |= \"api_exchange\" | regexp `\"response\":(?P<response>\\{.*\\})\\}$` | line_format `{{.response}}`",
           "refId": "A"
         }
       ],
@@ -583,7 +583,7 @@
           "editorMode": "code",
           "maxLines": 3,
           "queryType": "range",
-          "expr": "{container=~\".+\"} |= \"${requestId:raw}\" |= \"api_exchange\"",
+          "expr": "{app=\"buddystudy\"} |= \"${requestId:raw}\" |= \"api_exchange\"",
           "refId": "A"
         }
       ],
@@ -650,7 +650,7 @@
           },
           "direction": "backward",
           "editorMode": "code",
-          "expr": "{container=~\".+\"} |= \"${requestId:raw}\" |= \"api_error\"",
+          "expr": "{app=\"buddystudy\"} |= \"${requestId:raw}\" |= \"api_error\"",
           "maxLines": 20,
           "queryType": "range",
           "refId": "A"
@@ -718,7 +718,7 @@
           },
           "direction": "backward",
           "editorMode": "code",
-          "expr": "{container=~\".+\"} |= \"${requestId:raw}\"",
+          "expr": "{app=\"buddystudy\"} |= \"${requestId:raw}\"",
           "maxLines": 500,
           "queryType": "range",
           "refId": "A"

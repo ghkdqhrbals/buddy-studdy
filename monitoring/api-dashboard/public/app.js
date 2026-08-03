@@ -58,8 +58,8 @@ const els = {
   timeSortButton: document.querySelector("#timeSortButton"),
 };
 
-const API_EXCHANGE_QUERY = '{container=~".+"} |= "api_exchange"';
-const TIMELINE_QUERY = 'sum(count_over_time(({container=~".+"} |= "api_exchange")[$__range]))';
+const API_EXCHANGE_QUERY = '{app="buddystudy"} |= "api_exchange"';
+const TIMELINE_QUERY = 'sum(count_over_time(({app="buddystudy"} |= "api_exchange")[$__range]))';
 
 function nowMs() {
   return Date.now();
@@ -425,7 +425,7 @@ async function loadDetails(request) {
   const requestMs = Number(BigInt(request.nanoseconds) / 1_000_000n);
   const startNs = ns(requestMs - 10 * 60 * 1000);
   const endNs = ns(requestMs + 10 * 60 * 1000);
-  const query = `{container=~".+"} |= "${request.requestId}"`;
+  const query = `{app="buddystudy"} |= "${request.requestId}"`;
   const values = await lokiQueryRange(query, { startNs, endNs, limit: 200, direction: "forward" });
   const logs = values.map(parseRelatedLog).sort((a, b) => Number(BigInt(a.nanoseconds) - BigInt(b.nanoseconds)));
   const errors = values

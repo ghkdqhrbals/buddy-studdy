@@ -55,6 +55,13 @@ const incidentPromptPath = path.resolve(
   testDirectory,
   "../../../.github/codex/prompts/production-incident-autofix.md",
 );
+const monitoringLogQueryPaths = [
+  "../public/app.js",
+  "../public/performance.js",
+  "../public/metrics.js",
+  "../public/system.js",
+  "../scripts/codex-log-search.mjs",
+].map((relativePath) => path.resolve(testDirectory, relativePath));
 
 test("Grafana Live accepts only the public Grafana origin", async () => {
   const [compose, deployTemplate] = await Promise.all([
@@ -122,7 +129,7 @@ test("server runtime dashboard emits bounded Loki metric series", async () => {
   assert.ok(unwrappedExpressions.length > 0);
 
   for (const expression of runtimeExpressions) {
-    assert.match(expression, /\{container=~"buddystudy-backend\.\*"\}/);
+    assert.match(expression, /\{app="buddystudy"\}/);
   }
 
   for (const expression of unwrappedExpressions) {
@@ -143,12 +150,45 @@ test("API request table uses bounded log rows instead of request-cardinality met
   assert.ok(panel, "API Requests panel must be provisioned");
   assert.equal(target?.queryType, "range");
   assert.equal(target?.maxLines, 1000);
-  assert.match(target?.expr ?? "", /^\{container=~"\.\+"\}/);
+  assert.match(target?.expr ?? "", /^\{app="buddystudy"\}/);
   assert.match(target?.expr ?? "", /\| line_format /);
   assert.doesNotMatch(target?.expr ?? "", /count_over_time|sum by \(loggedAt, requestId/);
   assert.equal(panel.transformations?.[0]?.id, "extractFields");
   assert.equal(panel.transformations?.[0]?.options?.source, "Line");
   assert.equal(panel.transformations?.[0]?.options?.format, "regexp");
+});
+
+test("monitoring log queries use the stable backend app label", async () => {
+  const querySources = await Promise.all(
+    monitoringLogQueryPaths.map((queryPath) => fs.readFile(queryPath, "utf8")),
+  );
+
+  for (const source of querySources) {
+    assert.match(source, /\{app="buddystudy"\}/);
+    assert.doesNotMatch(source, /\{container=~/);
+  }
+});
+
+test("Grafana dashboards do not depend on the optional container label", async () => {
+  const dashboardFiles = (await fs.readdir(grafanaDashboardDirectory))
+    .filter((fileName) => fileName.endsWith(".json"));
+
+  for (const fileName of dashboardFiles) {
+    const dashboard = JSON.parse(
+      await fs.readFile(path.join(grafanaDashboardDirectory, fileName), "utf8"),
+    );
+    const expressions = (dashboard.panels ?? []).flatMap((panel) =>
+      (panel.targets ?? []).map((target) => target.expr ?? ""),
+    );
+
+    for (const expression of expressions) {
+      assert.doesNotMatch(
+        expression,
+        /\{container=~/,
+        `${fileName} must select backend logs by app label`,
+      );
+    }
+  }
 });
 
 test("Grafana dashboards use supported fixed color field configuration", async () => {
