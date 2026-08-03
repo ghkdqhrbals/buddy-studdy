@@ -1673,6 +1673,64 @@ final class QuestionGenerationFlowTests: XCTestCase {
         )
     }
 
+    func testBillingCheckoutCreatesPendingInvoiceBeforeStoreKitPurchase() async throws {
+        let client = makeClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/v1/billing/checkouts")
+            let body = try JSONSerialization.jsonObject(with: Self.bodyData(from: request)) as? [String: String]
+            XCTAssertEqual(body?["productId"], "io.github.ghkdqhrbals.StudyMate.tier2.monthly")
+            XCTAssertEqual(body?["idempotencyKey"], "ios-checkout-test")
+            return Self.pendingInvoiceResponse(for: request)
+        }
+
+        let invoice = try await client.createBillingCheckout(
+            registration: Self.signedInRegistration,
+            productID: "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+            idempotencyKey: "ios-checkout-test"
+        )
+
+        XCTAssertEqual(invoice.type, "NORMAL")
+        XCTAssertEqual(invoice.status, "WAITING")
+        XCTAssertNil(invoice.paymentId)
+    }
+
+    func testBillingTransactionSyncIncludesPendingInvoiceNumber() async throws {
+        let invoiceNumber = UUID(uuidString: "9f041446-e898-4ef7-974d-91ac70e1a89b")!
+        let client = makeClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/v1/billing/apple/transactions")
+            let body = try JSONSerialization.jsonObject(with: Self.bodyData(from: request)) as? [String: String]
+            XCTAssertEqual(body?["signedTransaction"], "signed-jws")
+            XCTAssertEqual(body?["environment"], "SANDBOX")
+            XCTAssertEqual(body?["invoiceNumber"]?.lowercased(), invoiceNumber.uuidString.lowercased())
+            return Self.pendingInvoiceResponse(for: request)
+        }
+
+        _ = try await client.syncAppleTransaction(
+            registration: Self.signedInRegistration,
+            signedTransaction: "signed-jws",
+            environment: "SANDBOX",
+            invoiceNumber: invoiceNumber
+        )
+    }
+
+    func testBillingCheckoutCanBeAbandonedAfterUserCancellation() async throws {
+        let invoiceNumber = UUID(uuidString: "9f041446-e898-4ef7-974d-91ac70e1a89b")!
+        let client = makeClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(
+                request.url?.path,
+                "/api/v1/billing/checkouts/9f041446-e898-4ef7-974d-91ac70e1a89b/abandon"
+            )
+            return Self.pendingInvoiceResponse(for: request)
+        }
+
+        _ = try await client.abandonBillingCheckout(
+            registration: Self.signedInRegistration,
+            invoiceNumber: invoiceNumber
+        )
+    }
+
     private func makeClient(
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> RemotePushBackendClient {
@@ -1711,6 +1769,35 @@ final class QuestionGenerationFlowTests: XCTestCase {
             headerFields: ["Content-Type": "application/json"]
         )!
         return (response, Data(body.utf8))
+    }
+
+    private static func pendingInvoiceResponse(for request: URLRequest) -> (HTTPURLResponse, Data) {
+        response(
+            for: request,
+            statusCode: 200,
+            body: """
+            {
+              "id": 41,
+              "invoiceNumber": "9f041446-e898-4ef7-974d-91ac70e1a89b",
+              "type": "NORMAL",
+              "originalInvoiceId": null,
+              "tierCode": "TIER2",
+              "productId": "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+              "status": "WAITING",
+              "version": 1,
+              "paymentId": null,
+              "transactionId": null,
+              "originalTransactionId": null,
+              "paymentStatus": null,
+              "priceMilliunits": null,
+              "currency": null,
+              "purchaseAt": null,
+              "expiresAt": null,
+              "createdAt": "2026-08-03T00:00:00Z",
+              "updatedAt": "2026-08-03T00:00:00Z"
+            }
+            """
+        )
     }
 
     private static func bodyData(from request: URLRequest) throws -> Data {

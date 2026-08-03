@@ -6,6 +6,7 @@ import com.buddystudy.billing.domain.BillingEnvironment
 import com.buddystudy.billing.domain.BillingEventSource
 import com.buddystudy.billing.domain.BillingProductType
 import com.buddystudy.billing.domain.InvoiceStatus
+import com.buddystudy.billing.domain.InvoiceType
 import com.buddystudy.billing.domain.PaymentStatus
 import java.time.Instant
 import java.util.UUID
@@ -28,6 +29,12 @@ data class BillingCatalog(
 data class SyncAppleTransactionCommand(
     val signedTransaction: String,
     val environment: BillingEnvironment,
+    val invoiceNumber: UUID? = null,
+)
+
+data class CreateBillingCheckoutCommand(
+    val productId: String,
+    val idempotencyKey: String,
 )
 
 data class VerifiedAppleTransaction(
@@ -64,6 +71,8 @@ data class VerifiedAppleNotification(
 data class BillingInvoiceSummary(
     val id: Long,
     val invoiceNumber: UUID,
+    val type: InvoiceType,
+    val originalInvoiceId: Long?,
     val tierCode: String,
     val productId: String,
     val status: InvoiceStatus,
@@ -164,6 +173,8 @@ data class RecordVerifiedPaymentCommand(
     val userId: Long,
     val tierProduct: BillingTierProduct,
     val transaction: VerifiedAppleTransaction,
+    val invoiceNumber: UUID?,
+    val source: BillingEventSource,
     val eventId: String,
     val occurredAt: Instant,
 )

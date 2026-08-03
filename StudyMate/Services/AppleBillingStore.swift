@@ -47,7 +47,9 @@ final class AppleBillingStore: ObservableObject {
     func purchase(
         _ tierProduct: TierProduct,
         appAccountToken: UUID,
-        synchronize: @escaping (String, String) async throws -> BackendBillingInvoice
+        prepareCheckout: @escaping (String) async throws -> BackendBillingInvoice,
+        synchronize: @escaping (String, String, UUID?) async throws -> BackendBillingInvoice,
+        abandonCheckout: @escaping (UUID) async throws -> Void
     ) async throws -> PurchaseOutcome {
         guard processingProductID == nil else {
             throw AppleBillingStoreError.purchaseAlreadyInProgress
@@ -55,6 +57,9 @@ final class AppleBillingStore: ObservableObject {
         processingProductID = tierProduct.id
         defer { processingProductID = nil }
 
+        // The backend owns the order lifecycle. Persist a WAITING/NORMAL invoice before StoreKit
+        // presents a sheet so every user-initiated attempt has an invoice aggregate.
+        let checkout = try await prepareCheckout(tierProduct.id)
         let result = try await tierProduct.product.purchase(options: [.appAccountToken(appAccountToken)])
         switch result {
         case .success(let verification):
@@ -68,13 +73,15 @@ final class AppleBillingStore: ObservableObject {
             // and grants the tier. A backend failure leaves the transaction available for recovery.
             let invoice = try await synchronize(
                 verification.jwsRepresentation,
-                Self.backendEnvironment(transaction)
+                Self.backendEnvironment(transaction),
+                checkout.invoiceNumber
             )
             await transaction.finish()
             return .purchased(invoice)
         case .pending:
             return .pending
         case .userCancelled:
+            try? await abandonCheckout(checkout.invoiceNumber)
             return .cancelled
         @unknown default:
             throw AppleBillingStoreError.unknownPurchaseResult
@@ -83,7 +90,7 @@ final class AppleBillingStore: ObservableObject {
 
     func restore(
         appAccountToken: UUID,
-        synchronize: @escaping (String, String) async throws -> BackendBillingInvoice
+        synchronize: @escaping (String, String, UUID?) async throws -> BackendBillingInvoice
     ) async throws -> [BackendBillingInvoice] {
         try await AppStore.sync()
         var restored: [BackendBillingInvoice] = []
@@ -94,7 +101,8 @@ final class AppleBillingStore: ObservableObject {
             }
             let invoice = try await synchronize(
                 verification.jwsRepresentation,
-                Self.backendEnvironment(transaction)
+                Self.backendEnvironment(transaction),
+                nil
             )
             await transaction.finish()
             restored.append(invoice)

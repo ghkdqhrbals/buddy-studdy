@@ -43,6 +43,30 @@ Invoice changes must pass `InvoiceStateMachine`. Apple notification events are
 idempotent and are the only authority for final refund, refund-decline,
 revocation, renewal-status, and expiration states.
 
+For a user-initiated purchase, BuddyStudy creates a `NORMAL` invoice before
+presenting the StoreKit sheet. `INVOICE_CREATED` projects it as `WAITING`
+without a payment row. Payment verification and membership fulfillment remain
+detailed events while the public invoice status stays `WAITING`. It becomes
+`COMPLETED` only after the verified Apple payment has successfully applied the
+membership entitlement and monthly question allowance. StoreKit user
+cancellation or fulfillment failure makes it `FAILED`; StoreKit's `.pending`
+result deliberately keeps it `WAITING` for later approval or server-notification
+recovery.
+
+Invoice projection status is intentionally limited to `WAITING`, `COMPLETED`,
+and `FAILED`. Invoice type is `NORMAL` (일반) or `REFUND` (환불). A refund never
+rewrites the completed normal invoice: it creates a separate `REFUND` invoice
+linked by `original_invoice_id`. The refund invoice is `WAITING` during Apple
+review, `COMPLETED` when Apple confirms the refund, and `FAILED` when Apple
+declines or reverses it. Detailed provider and compensation states remain in
+`invoice_events`, `payments`, `payments_history`, and `billing_actions`.
+
+The checkout idempotency key is scoped to the authenticated user. The client
+includes the returned `invoiceNumber` when synchronizing JWS. Initial-purchase
+notifications that arrive before the client callback recover the newest matching
+pending invoice by stable `appAccountToken`, user, and product; renewals create a
+new invoice because each renewal is a separate charge.
+
 ## Transaction boundaries and compensation
 
 Payment evidence is committed before membership fulfillment. Fulfillment runs
@@ -63,6 +87,8 @@ Apple server notification, and no admin endpoint can forge a completed refund.
 User endpoints:
 
 - `GET /api/v1/billing/catalog`
+- `POST /api/v1/billing/checkouts`
+- `POST /api/v1/billing/checkouts/{invoiceNumber}/abandon`
 - `POST /api/v1/billing/apple/transactions`
 - `GET /api/v1/billing/invoices`
 - `GET /api/v1/billing/invoices/{invoiceId}`
@@ -80,9 +106,11 @@ Admin endpoints:
 - `POST /api/v1/admin/billing/invoices/{invoiceId}/refund-requests`
 - `POST /api/v1/admin/billing/invoices/{invoiceId}/cancellation-requests`
 
-All mutation endpoints require a validated idempotency key. Admin endpoints use
-the existing monitoring administrator session. The monitoring UI exposes the
-flow at `/orders.html`.
+Checkout creation and billing actions require a validated idempotency key. The
+transaction-sync endpoint is idempotent by Apple's transaction ID, and checkout
+abandonment is idempotent by invoice state. Admin endpoints use the existing
+monitoring administrator session. The monitoring UI exposes the flow at
+`/orders.html`.
 
 ## Production setup
 

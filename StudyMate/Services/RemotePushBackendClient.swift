@@ -366,10 +366,22 @@ protocol RemotePushBackendClientProtocol {
         registration: RemotePushRegistration
     ) async throws -> BackendBillingCatalog
 
+    func createBillingCheckout(
+        registration: RemotePushRegistration,
+        productID: String,
+        idempotencyKey: String
+    ) async throws -> BackendBillingInvoice
+
+    func abandonBillingCheckout(
+        registration: RemotePushRegistration,
+        invoiceNumber: UUID
+    ) async throws -> BackendBillingInvoice
+
     func syncAppleTransaction(
         registration: RemotePushRegistration,
         signedTransaction: String,
-        environment: String
+        environment: String,
+        invoiceNumber: UUID?
     ) async throws -> BackendBillingInvoice
 
     func fetchBillingInvoices(
@@ -607,7 +619,23 @@ extension RemotePushBackendClientProtocol {
     func syncAppleTransaction(
         registration: RemotePushRegistration,
         signedTransaction: String,
-        environment: String
+        environment: String,
+        invoiceNumber: UUID?
+    ) async throws -> BackendBillingInvoice {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func createBillingCheckout(
+        registration: RemotePushRegistration,
+        productID: String,
+        idempotencyKey: String
+    ) async throws -> BackendBillingInvoice {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func abandonBillingCheckout(
+        registration: RemotePushRegistration,
+        invoiceNumber: UUID
     ) async throws -> BackendBillingInvoice {
         throw RemotePushBackendError.invalidResponse
     }
@@ -1145,10 +1173,45 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return try decoder.decode(BackendBillingCatalog.self, from: data)
     }
 
+    func createBillingCheckout(
+        registration: RemotePushRegistration,
+        productID: String,
+        idempotencyKey: String
+    ) async throws -> BackendBillingInvoice {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "billing", "checkouts")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(
+            BillingCheckoutRequest(productId: productID, idempotencyKey: idempotencyKey)
+        )
+        let data = try await perform(request)
+        return try decoder.decode(BackendBillingInvoice.self, from: data)
+    }
+
+    func abandonBillingCheckout(
+        registration: RemotePushRegistration,
+        invoiceNumber: UUID
+    ) async throws -> BackendBillingInvoice {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint(
+                "api", "v1", "billing", "checkouts",
+                invoiceNumber.uuidString.lowercased(), "abandon"
+            )
+        )
+        request.httpMethod = "POST"
+        let data = try await perform(request)
+        return try decoder.decode(BackendBillingInvoice.self, from: data)
+    }
+
     func syncAppleTransaction(
         registration: RemotePushRegistration,
         signedTransaction: String,
-        environment: String
+        environment: String,
+        invoiceNumber: UUID?
     ) async throws -> BackendBillingInvoice {
         var request = authenticatedRequest(
             registration: registration,
@@ -1159,7 +1222,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.httpBody = try encoder.encode(
             AppleTransactionSyncRequest(
                 signedTransaction: signedTransaction,
-                environment: environment
+                environment: environment,
+                invoiceNumber: invoiceNumber
             )
         )
         let data = try await perform(request)
@@ -2461,6 +2525,12 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     private struct AppleTransactionSyncRequest: Encodable {
         var signedTransaction: String
         var environment: String
+        var invoiceNumber: UUID?
+    }
+
+    private struct BillingCheckoutRequest: Encodable {
+        var productId: String
+        var idempotencyKey: String
     }
 
     private struct BillingActionRequest: Encodable {
@@ -2665,6 +2735,8 @@ struct BackendBillingTierProduct: Decodable, Equatable, Identifiable {
 struct BackendBillingInvoice: Decodable, Equatable, Identifiable {
     var id: Int64
     var invoiceNumber: UUID
+    var type: String? = nil
+    var originalInvoiceId: Int64? = nil
     var tierCode: String
     var productId: String
     var status: String
@@ -2681,8 +2753,9 @@ struct BackendBillingInvoice: Decodable, Equatable, Identifiable {
     var updatedAt: Date
 
     var isRefundable: Bool {
-        ["FULFILLED", "CANCELLATION_REQUESTED", "REFUND_DECLINED", "REFUND_REVERSED", "COMPENSATION_REQUIRED"]
-            .contains(status)
+        (type ?? "NORMAL") == "NORMAL"
+            && status == "COMPLETED"
+            && paymentStatus.map { ["SETTLED", "REFUND_DECLINED", "REFUND_REVERSED"].contains($0) } == true
     }
 
     var isSubscription: Bool {
@@ -2690,7 +2763,7 @@ struct BackendBillingInvoice: Decodable, Equatable, Identifiable {
     }
 
     var isCancellable: Bool {
-        isSubscription && ["FULFILLED", "REFUND_DECLINED", "REFUND_REVERSED"].contains(status)
+        (type ?? "NORMAL") == "NORMAL" && isSubscription && status == "COMPLETED"
     }
 }
 

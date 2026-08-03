@@ -6106,7 +6106,7 @@ private struct MobileQuestionUsageView: View {
     private func invoiceRow(_ invoice: BackendBillingInvoice) -> some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .firstTextBaseline) {
-                Text(invoice.tierCode)
+                Text(invoice.type == "REFUND" ? invoiceTypeText("REFUND") : invoice.tierCode)
                     .font(.headline)
                 Spacer(minLength: 10)
                 Text(invoiceAmount(invoice))
@@ -6154,7 +6154,9 @@ private struct MobileQuestionUsageView: View {
                 let outcome = try await billingStore.purchase(
                     tierProduct,
                     appAccountToken: appAccountToken,
-                    synchronize: appState.syncAppleBillingTransaction
+                    prepareCheckout: appState.createAppleBillingCheckout,
+                    synchronize: appState.syncAppleBillingTransaction,
+                    abandonCheckout: appState.abandonAppleBillingCheckout
                 )
                 switch outcome {
                 case .purchased:
@@ -6250,12 +6252,23 @@ private struct MobileQuestionUsageView: View {
 
     private func invoiceAmount(_ invoice: BackendBillingInvoice) -> String {
         guard let raw = invoice.priceMilliunits, let currency = invoice.currency else { return "-" }
-        let amount = Decimal(raw) / 1_000_000
+        let sign: Decimal = invoice.type == "REFUND" ? -1 : 1
+        let amount = sign * Decimal(raw) / 1_000_000
         return amount.formatted(.currency(code: currency))
+    }
+
+    private func invoiceTypeText(_ type: String) -> String {
+        switch (strings.language, type) {
+        case (.korean, "REFUND"): return "환불"
+        case (.english, "REFUND"): return "Refund"
+        case (.japanese, "REFUND"): return "返金"
+        default: return type
+        }
     }
 
     private func statusText(_ status: String) -> String {
         let korean = [
+            "WAITING": "처리 중", "COMPLETED": "완료",
             "PENDING_PAYMENT": "결제 대기", "PAYMENT_VERIFIED": "결제 확인", "FULFILLMENT_PENDING": "적용 중",
             "FULFILLED": "적용 완료", "CANCELLATION_REQUESTED": "취소 요청", "CANCELLED": "취소됨",
             "REFUND_REQUESTED": "환불 요청", "REFUND_PENDING": "환불 심사 중", "REFUNDED": "환불 완료",
@@ -6263,6 +6276,7 @@ private struct MobileQuestionUsageView: View {
             "FAILED": "실패", "EXPIRED": "만료"
         ]
         let english = [
+            "WAITING": "Processing", "COMPLETED": "Completed",
             "PENDING_PAYMENT": "Payment pending", "PAYMENT_VERIFIED": "Payment verified", "FULFILLMENT_PENDING": "Activating",
             "FULFILLED": "Active", "CANCELLATION_REQUESTED": "Cancellation requested", "CANCELLED": "Cancelled",
             "REFUND_REQUESTED": "Refund requested", "REFUND_PENDING": "Refund pending", "REFUNDED": "Refunded",
@@ -6270,6 +6284,7 @@ private struct MobileQuestionUsageView: View {
             "FAILED": "Failed", "EXPIRED": "Expired"
         ]
         let japanese = [
+            "WAITING": "処理中", "COMPLETED": "完了",
             "PENDING_PAYMENT": "支払い待ち", "PAYMENT_VERIFIED": "支払い確認済み", "FULFILLMENT_PENDING": "適用中",
             "FULFILLED": "有効", "CANCELLATION_REQUESTED": "キャンセル申請中", "CANCELLED": "キャンセル済み",
             "REFUND_REQUESTED": "返金申請中", "REFUND_PENDING": "返金審査中", "REFUNDED": "返金済み",
@@ -6284,7 +6299,7 @@ private struct MobileQuestionUsageView: View {
     }
 
     private func statusColor(_ status: String) -> Color {
-        if ["FULFILLED", "REFUNDED"].contains(status) { return .green }
+        if ["COMPLETED", "FULFILLED", "REFUNDED"].contains(status) { return .green }
         if ["FAILED", "REFUND_DECLINED", "COMPENSATION_REQUIRED"].contains(status) { return .red }
         return .secondary
     }

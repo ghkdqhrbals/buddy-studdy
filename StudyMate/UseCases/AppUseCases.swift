@@ -206,10 +206,20 @@ struct TermsUseCase {
 @MainActor
 protocol BillingRepository {
     func catalog(registration: RemotePushRegistration) async throws -> BackendBillingCatalog
+    func createCheckout(
+        registration: RemotePushRegistration,
+        productID: String,
+        idempotencyKey: String
+    ) async throws -> BackendBillingInvoice
+    func abandonCheckout(
+        registration: RemotePushRegistration,
+        invoiceNumber: UUID
+    ) async throws -> BackendBillingInvoice
     func syncAppleTransaction(
         registration: RemotePushRegistration,
         signedTransaction: String,
-        environment: String
+        environment: String,
+        invoiceNumber: UUID?
     ) async throws -> BackendBillingInvoice
     func invoices(registration: RemotePushRegistration, limit: Int, offset: Int) async throws -> BackendBillingInvoicePage
     func requestRefund(
@@ -238,15 +248,39 @@ struct RemoteBillingRepository: BillingRepository {
         try await backendClient.fetchBillingCatalog(registration: registration)
     }
 
+    func createCheckout(
+        registration: RemotePushRegistration,
+        productID: String,
+        idempotencyKey: String
+    ) async throws -> BackendBillingInvoice {
+        try await backendClient.createBillingCheckout(
+            registration: registration,
+            productID: productID,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func abandonCheckout(
+        registration: RemotePushRegistration,
+        invoiceNumber: UUID
+    ) async throws -> BackendBillingInvoice {
+        try await backendClient.abandonBillingCheckout(
+            registration: registration,
+            invoiceNumber: invoiceNumber
+        )
+    }
+
     func syncAppleTransaction(
         registration: RemotePushRegistration,
         signedTransaction: String,
-        environment: String
+        environment: String,
+        invoiceNumber: UUID?
     ) async throws -> BackendBillingInvoice {
         try await backendClient.syncAppleTransaction(
             registration: registration,
             signedTransaction: signedTransaction,
-            environment: environment
+            environment: environment,
+            invoiceNumber: invoiceNumber
         )
     }
 
@@ -295,15 +329,36 @@ struct BillingUseCase {
         try await repository.catalog(registration: registration)
     }
 
+    func createCheckout(
+        registration: RemotePushRegistration,
+        productID: String,
+        idempotencyKey: String
+    ) async throws -> BackendBillingInvoice {
+        try await repository.createCheckout(
+            registration: registration,
+            productID: productID,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func abandonCheckout(
+        registration: RemotePushRegistration,
+        invoiceNumber: UUID
+    ) async throws -> BackendBillingInvoice {
+        try await repository.abandonCheckout(registration: registration, invoiceNumber: invoiceNumber)
+    }
+
     func syncAppleTransaction(
         registration: RemotePushRegistration,
         signedTransaction: String,
-        environment: String
+        environment: String,
+        invoiceNumber: UUID?
     ) async throws -> BackendBillingInvoice {
         try await repository.syncAppleTransaction(
             registration: registration,
             signedTransaction: signedTransaction,
-            environment: environment
+            environment: environment,
+            invoiceNumber: invoiceNumber
         )
     }
 

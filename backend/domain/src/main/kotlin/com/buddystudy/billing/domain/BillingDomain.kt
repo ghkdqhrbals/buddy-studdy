@@ -17,21 +17,15 @@ enum class BillingProductType {
     NON_RENEWING_SUBSCRIPTION,
 }
 
+enum class InvoiceType(val desc: String) {
+    NORMAL("일반"),
+    REFUND("환불"),
+}
+
 enum class InvoiceStatus {
-    PENDING_PAYMENT,
-    PAYMENT_VERIFIED,
-    FULFILLMENT_PENDING,
-    FULFILLED,
-    CANCELLATION_REQUESTED,
-    CANCELLED,
-    REFUND_REQUESTED,
-    REFUND_PENDING,
-    REFUNDED,
-    REFUND_DECLINED,
-    REFUND_REVERSED,
-    COMPENSATION_REQUIRED,
+    WAITING,
+    COMPLETED,
     FAILED,
-    EXPIRED,
 }
 
 enum class InvoiceEventType {
@@ -116,59 +110,56 @@ enum class BillingEventSource {
  * Every transition is intentionally enumerated so a duplicated or out-of-order Apple event fails closed.
  */
 object InvoiceStateMachine {
-    private val transitions: Map<Pair<InvoiceStatus, InvoiceEventType>, InvoiceStatus> = buildMap {
-        allow(InvoiceStatus.PENDING_PAYMENT, InvoiceEventType.PAYMENT_VERIFIED, InvoiceStatus.PAYMENT_VERIFIED)
-        allow(InvoiceStatus.PAYMENT_VERIFIED, InvoiceEventType.FULFILLMENT_STARTED, InvoiceStatus.FULFILLMENT_PENDING)
-        allow(InvoiceStatus.FULFILLMENT_PENDING, InvoiceEventType.FULFILLED, InvoiceStatus.FULFILLED)
-        allow(InvoiceStatus.PAYMENT_VERIFIED, InvoiceEventType.COMPENSATION_REQUIRED, InvoiceStatus.COMPENSATION_REQUIRED)
-        allow(InvoiceStatus.FULFILLMENT_PENDING, InvoiceEventType.COMPENSATION_REQUIRED, InvoiceStatus.COMPENSATION_REQUIRED)
-        allow(InvoiceStatus.FULFILLMENT_PENDING, InvoiceEventType.FULFILLMENT_FAILED, InvoiceStatus.COMPENSATION_REQUIRED)
+    private data class Key(val type: InvoiceType, val status: InvoiceStatus, val event: InvoiceEventType)
 
-        listOf(InvoiceStatus.FULFILLED, InvoiceStatus.REFUND_DECLINED, InvoiceStatus.REFUND_REVERSED).forEach {
-            allow(it, InvoiceEventType.CANCELLATION_REQUESTED, InvoiceStatus.CANCELLATION_REQUESTED)
-            allow(it, InvoiceEventType.REFUND_REQUESTED, InvoiceStatus.REFUND_REQUESTED)
-            allow(it, InvoiceEventType.REFUNDED, InvoiceStatus.REFUNDED)
-            allow(it, InvoiceEventType.PAYMENT_REVOKED, InvoiceStatus.REFUNDED)
-            allow(it, InvoiceEventType.EXPIRED, InvoiceStatus.EXPIRED)
-        }
-        allow(InvoiceStatus.CANCELLATION_REQUESTED, InvoiceEventType.CANCELLED, InvoiceStatus.CANCELLED)
-        allow(InvoiceStatus.CANCELLATION_REQUESTED, InvoiceEventType.CANCELLATION_REVERSED, InvoiceStatus.FULFILLED)
-        allow(InvoiceStatus.CANCELLATION_REQUESTED, InvoiceEventType.REFUND_REQUESTED, InvoiceStatus.REFUND_REQUESTED)
-        allow(InvoiceStatus.CANCELLATION_REQUESTED, InvoiceEventType.REFUNDED, InvoiceStatus.REFUNDED)
-        allow(InvoiceStatus.CANCELLATION_REQUESTED, InvoiceEventType.EXPIRED, InvoiceStatus.EXPIRED)
+    private val transitions: Map<Key, InvoiceStatus> = buildMap {
+        allowWaiting(InvoiceType.NORMAL, InvoiceEventType.PAYMENT_VERIFIED)
+        allowWaiting(InvoiceType.NORMAL, InvoiceEventType.FULFILLMENT_STARTED)
+        allow(InvoiceType.NORMAL, InvoiceStatus.WAITING, InvoiceEventType.FULFILLED, InvoiceStatus.COMPLETED)
+        allow(InvoiceType.NORMAL, InvoiceStatus.WAITING, InvoiceEventType.CANCELLED, InvoiceStatus.FAILED)
+        allow(InvoiceType.NORMAL, InvoiceStatus.WAITING, InvoiceEventType.COMPENSATION_REQUIRED, InvoiceStatus.FAILED)
+        allow(InvoiceType.NORMAL, InvoiceStatus.WAITING, InvoiceEventType.FULFILLMENT_FAILED, InvoiceStatus.FAILED)
 
-        allow(InvoiceStatus.REFUND_REQUESTED, InvoiceEventType.REFUND_PENDING, InvoiceStatus.REFUND_PENDING)
-        allow(InvoiceStatus.REFUND_REQUESTED, InvoiceEventType.REFUNDED, InvoiceStatus.REFUNDED)
-        allow(InvoiceStatus.REFUND_REQUESTED, InvoiceEventType.REFUND_DECLINED, InvoiceStatus.REFUND_DECLINED)
-        allow(InvoiceStatus.REFUND_PENDING, InvoiceEventType.REFUNDED, InvoiceStatus.REFUNDED)
-        allow(InvoiceStatus.REFUND_PENDING, InvoiceEventType.REFUND_DECLINED, InvoiceStatus.REFUND_DECLINED)
-        allow(InvoiceStatus.REFUND_DECLINED, InvoiceEventType.REFUND_REQUESTED, InvoiceStatus.REFUND_REQUESTED)
-        allow(InvoiceStatus.REFUNDED, InvoiceEventType.REFUND_REVERSED, InvoiceStatus.REFUND_REVERSED)
-        allow(InvoiceStatus.REFUND_REVERSED, InvoiceEventType.REFUND_REQUESTED, InvoiceStatus.REFUND_REQUESTED)
-        allow(InvoiceStatus.REFUND_REVERSED, InvoiceEventType.EXPIRED, InvoiceStatus.EXPIRED)
+        listOf(
+            InvoiceEventType.CANCELLATION_REQUESTED,
+            InvoiceEventType.CANCELLATION_REVERSED,
+            InvoiceEventType.CANCELLED,
+            InvoiceEventType.EXPIRED,
+        ).forEach { allowCompleted(InvoiceType.NORMAL, it) }
 
-        allow(InvoiceStatus.COMPENSATION_REQUIRED, InvoiceEventType.REFUND_REQUESTED, InvoiceStatus.REFUND_REQUESTED)
-        allow(InvoiceStatus.COMPENSATION_REQUIRED, InvoiceEventType.REFUND_PENDING, InvoiceStatus.REFUND_PENDING)
-        allow(InvoiceStatus.COMPENSATION_REQUIRED, InvoiceEventType.REFUNDED, InvoiceStatus.REFUNDED)
-        allow(InvoiceStatus.COMPENSATION_REQUIRED, InvoiceEventType.REFUND_DECLINED, InvoiceStatus.REFUND_DECLINED)
+        allowWaiting(InvoiceType.REFUND, InvoiceEventType.REFUND_REQUESTED)
+        allowWaiting(InvoiceType.REFUND, InvoiceEventType.REFUND_PENDING)
+        allow(InvoiceType.REFUND, InvoiceStatus.WAITING, InvoiceEventType.REFUNDED, InvoiceStatus.COMPLETED)
+        allow(InvoiceType.REFUND, InvoiceStatus.WAITING, InvoiceEventType.PAYMENT_REVOKED, InvoiceStatus.COMPLETED)
+        allow(InvoiceType.REFUND, InvoiceStatus.WAITING, InvoiceEventType.REFUND_DECLINED, InvoiceStatus.FAILED)
+        allow(InvoiceType.REFUND, InvoiceStatus.COMPLETED, InvoiceEventType.REFUND_REVERSED, InvoiceStatus.FAILED)
     }
 
-    fun next(current: InvoiceStatus, event: InvoiceEventType): InvoiceStatus =
-        transitions[current to event]
-            ?: throw IllegalInvoiceTransition(current, event)
+    fun next(type: InvoiceType, current: InvoiceStatus, event: InvoiceEventType): InvoiceStatus =
+        transitions[Key(type, current, event)]
+            ?: throw IllegalInvoiceTransition(type, current, event)
 
-    fun canApply(current: InvoiceStatus, event: InvoiceEventType): Boolean = transitions.containsKey(current to event)
+    fun canApply(type: InvoiceType, current: InvoiceStatus, event: InvoiceEventType): Boolean =
+        transitions.containsKey(Key(type, current, event))
 
-    private fun MutableMap<Pair<InvoiceStatus, InvoiceEventType>, InvoiceStatus>.allow(
+    private fun MutableMap<Key, InvoiceStatus>.allow(
+        type: InvoiceType,
         from: InvoiceStatus,
         event: InvoiceEventType,
         to: InvoiceStatus,
     ) {
-        put(from to event, to)
+        put(Key(type, from, event), to)
     }
+
+    private fun MutableMap<Key, InvoiceStatus>.allowWaiting(type: InvoiceType, event: InvoiceEventType) =
+        allow(type, InvoiceStatus.WAITING, event, InvoiceStatus.WAITING)
+
+    private fun MutableMap<Key, InvoiceStatus>.allowCompleted(type: InvoiceType, event: InvoiceEventType) =
+        allow(type, InvoiceStatus.COMPLETED, event, InvoiceStatus.COMPLETED)
 }
 
 class IllegalInvoiceTransition(
+    val type: InvoiceType,
     val current: InvoiceStatus,
     val event: InvoiceEventType,
-) : IllegalStateException("Invoice transition is not allowed: $current + $event")
+) : IllegalStateException("Invoice transition is not allowed: $type/$current + $event")

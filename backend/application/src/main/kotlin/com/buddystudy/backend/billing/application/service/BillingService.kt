@@ -7,6 +7,7 @@ import com.buddystudy.backend.billing.application.model.BillingCatalog
 import com.buddystudy.backend.billing.application.model.BillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.BillingInvoicePage
 import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
+import com.buddystudy.backend.billing.application.model.CreateBillingCheckoutCommand
 import com.buddystudy.backend.billing.application.model.RecordVerifiedPaymentCommand
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
 import com.buddystudy.backend.billing.application.model.SyncAppleTransactionCommand
@@ -17,11 +18,13 @@ import com.buddystudy.backend.billing.application.port.outbound.AppleBillingVeri
 import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.billing.domain.BillingEventSource
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.util.UUID
 
 @Service
 class BillingService(
@@ -36,6 +39,36 @@ class BillingService(
             appAccountToken = ledger.findOrCreateAppAccountToken(principal.userId, now),
             products = ledger.enabledTierProducts(),
         )
+    }
+
+    override suspend fun createCheckout(
+        principal: Principal,
+        command: CreateBillingCheckoutCommand,
+    ): BillingInvoiceSummary {
+        requireRegistered(principal)
+        val productId = command.productId.trim()
+        if (!PRODUCT_ID.matches(productId)) invalidTransaction()
+        validateIdempotencyKey(command.idempotencyKey)
+        val product = ledger.enabledTierProduct(productId)
+            ?: throw billingError(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.BILLING_TRANSACTION_INVALID,
+                "The App Store product is not enabled for a BuddyStudy tier.",
+            )
+        val now = clock.instant()
+        val token = ledger.findOrCreateAppAccountToken(principal.userId, now)
+        return ledger.createPendingInvoice(
+            userId = principal.userId,
+            appAccountToken = token,
+            tierProduct = product,
+            idempotencyKey = command.idempotencyKey.trim(),
+            now = now,
+        )
+    }
+
+    override suspend fun abandonCheckout(principal: Principal, invoiceNumber: UUID): BillingInvoiceSummary {
+        requireRegistered(principal)
+        return ledger.abandonPendingInvoice(principal.userId, invoiceNumber, clock.instant())
     }
 
     override suspend fun syncAppleTransaction(
@@ -76,6 +109,8 @@ class BillingService(
                 userId = principal.userId,
                 tierProduct = product,
                 transaction = transaction,
+                invoiceNumber = command.invoiceNumber,
+                source = BillingEventSource.CLIENT,
                 eventId = "apple-transaction:${transaction.transactionId}",
                 occurredAt = now,
             ),
@@ -162,6 +197,8 @@ class BillingService(
                         userId = userId,
                         tierProduct = product,
                         transaction = transaction,
+                        invoiceNumber = null,
+                        source = BillingEventSource.APPLE_NOTIFICATION,
                         eventId = "apple-transaction:${transaction.transactionId}",
                         occurredAt = now,
                     ),
@@ -225,15 +262,19 @@ class BillingService(
     }
 
     private fun validateActionCommand(command: RequestBillingActionCommand) {
-        if (!IDEMPOTENCY_KEY.matches(command.idempotencyKey.trim())) {
+        validateIdempotencyKey(command.idempotencyKey)
+        if ((command.reason?.length ?: 0) > 1000) {
+            throw billingError(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Reason is too long.")
+        }
+    }
+
+    private fun validateIdempotencyKey(value: String) {
+        if (!IDEMPOTENCY_KEY.matches(value.trim())) {
             throw billingError(
                 HttpStatus.UNPROCESSABLE_ENTITY,
                 ApiErrorCode.VALIDATION_ERROR,
                 "A valid idempotency key is required.",
             )
-        }
-        if ((command.reason?.length ?: 0) > 1000) {
-            throw billingError(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Reason is too long.")
         }
     }
 

@@ -5959,7 +5959,8 @@ final class AppState: ObservableObject {
 
     func syncAppleBillingTransaction(
         signedTransaction: String,
-        environment: String
+        environment: String,
+        invoiceNumber: UUID?
     ) async throws -> BackendBillingInvoice {
         guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "billing-transaction") else {
@@ -5972,13 +5973,52 @@ final class AppState: ObservableObject {
                 try await self.billingUseCase.syncAppleTransaction(
                     registration: recoveredRegistration,
                     signedTransaction: signedTransaction,
-                    environment: environment
+                    environment: environment,
+                    invoiceNumber: invoiceNumber
                 )
             }
         )
         await refreshBilling()
         await refreshQuestionQuota()
         return invoice
+    }
+
+    func createAppleBillingCheckout(productID: String) async throws -> BackendBillingInvoice {
+        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
+              let registration = await registrationWithAccessToken(storedRegistration, reason: "billing-checkout") else {
+            throw AppStateError.missingRemotePushRegistration
+        }
+        let invoice = try await performWithBackendIdentityRecovery(
+            registration: registration,
+            reason: "billing-checkout",
+            operation: { recoveredRegistration in
+                try await self.billingUseCase.createCheckout(
+                    registration: recoveredRegistration,
+                    productID: productID,
+                    idempotencyKey: "ios-checkout-\(UUID().uuidString.lowercased())"
+                )
+            }
+        )
+        await refreshBilling()
+        return invoice
+    }
+
+    func abandonAppleBillingCheckout(invoiceNumber: UUID) async throws {
+        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
+              let registration = await registrationWithAccessToken(storedRegistration, reason: "billing-checkout-abandon") else {
+            throw AppStateError.missingRemotePushRegistration
+        }
+        _ = try await performWithBackendIdentityRecovery(
+            registration: registration,
+            reason: "billing-checkout-abandon",
+            operation: { recoveredRegistration in
+                try await self.billingUseCase.abandonCheckout(
+                    registration: recoveredRegistration,
+                    invoiceNumber: invoiceNumber
+                )
+            }
+        )
+        await refreshBilling()
     }
 
     func requestBillingRefund(paymentID: Int64) async throws -> BackendBillingAction {

@@ -15,6 +15,7 @@ import com.buddystudy.backend.billing.application.model.PaymentHistoryEntry
 import com.buddystudy.backend.billing.application.model.RecordVerifiedPaymentCommand
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
 import com.buddystudy.backend.billing.application.model.VerifiedAppleNotification
+import com.buddystudy.backend.billing.application.model.VerifiedAppleTransaction
 import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
@@ -26,6 +27,7 @@ import com.buddystudy.billing.domain.BillingProductType
 import com.buddystudy.billing.domain.InvoiceEventType
 import com.buddystudy.billing.domain.InvoiceStateMachine
 import com.buddystudy.billing.domain.InvoiceStatus
+import com.buddystudy.billing.domain.InvoiceType
 import com.buddystudy.billing.domain.PaymentHistoryEventType
 import com.buddystudy.billing.domain.PaymentStatus
 import io.r2dbc.spi.Row
@@ -97,6 +99,68 @@ class BillingLedgerPersistenceAdapter(
             .one().awaitSingleOrNull()
 
     @Transactional
+    override suspend fun createPendingInvoice(
+        userId: Long,
+        appAccountToken: UUID,
+        tierProduct: BillingTierProduct,
+        idempotencyKey: String,
+        now: Instant,
+    ): BillingInvoiceSummary {
+        lockAndValidateAccount(userId, appAccountToken)
+        existingCheckoutInvoice(userId, idempotencyKey)?.let { existing ->
+            if (existing.productId != tierProduct.productId) {
+                throw billingFailure(
+                    ApiErrorCode.BILLING_TRANSACTION_CONFLICT,
+                    "The checkout idempotency key is already used for another product.",
+                    HttpStatus.CONFLICT,
+                )
+            }
+            return requireInvoiceSummary(existing.invoiceId)
+        }
+        val invoiceId = insertPendingInvoice(
+            userId = userId,
+            tierProduct = tierProduct,
+            appAccountToken = appAccountToken,
+            source = BillingEventSource.CLIENT,
+            actorUserId = userId,
+            correlationId = idempotencyKey,
+            now = now,
+        )
+        return requireInvoiceSummary(invoiceId)
+    }
+
+    @Transactional
+    override suspend fun abandonPendingInvoice(
+        userId: Long,
+        invoiceNumber: UUID,
+        now: Instant,
+    ): BillingInvoiceSummary {
+        val invoice = lockInvoiceByNumber(invoiceNumber)
+            ?.takeIf { it.userId == userId }
+            ?: throw billingFailure(ApiErrorCode.RESOURCE_NOT_FOUND, "Invoice not found.", HttpStatus.NOT_FOUND)
+        if (invoice.status == InvoiceStatus.FAILED && lockPaymentByInvoice(invoice.id) == null) {
+            return requireInvoiceSummary(invoice.id)
+        }
+        if (invoice.type != InvoiceType.NORMAL || invoice.status != InvoiceStatus.WAITING || lockPaymentByInvoice(invoice.id) != null) {
+            throw billingFailure(
+                ApiErrorCode.BILLING_ACTION_NOT_ALLOWED,
+                "Only a pending checkout can be abandoned.",
+                HttpStatus.CONFLICT,
+            )
+        }
+        appendInvoiceEvent(
+            invoice.id,
+            "checkout-abandoned:${invoice.invoiceNumber}",
+            InvoiceEventType.CANCELLED,
+            BillingEventSource.CLIENT,
+            userId,
+            "StoreKit purchase sheet was cancelled before a transaction was created.",
+            now,
+        )
+        return requireInvoiceSummary(invoice.id)
+    }
+
+    @Transactional
     override suspend fun recordVerifiedPayment(command: RecordVerifiedPaymentCommand): BillingInvoiceSummary {
         lockAndValidateAccount(command.userId, command.transaction.appAccountToken)
 
@@ -113,40 +177,34 @@ class BillingLedgerPersistenceAdapter(
         }
 
         validateProductMapping(command)
-        val invoiceNumber = UUID.randomUUID()
         val now = command.occurredAt
-        database.sql(
-            """
-            insert into invoices (
-                invoice_number, user_id, tier_code, provider, product_id, app_account_token,
-                currency, subtotal_milliunits, tax_milliunits, total_milliunits,
-                status, version, latest_event_sequence, paid_at, expires_at, created_at, updated_at
-            ) values (
-                :invoiceNumber, :userId, :tierCode, 'APPLE', :productId, :appAccountToken,
-                :currency, :price, 0, :price,
-                'PENDING_PAYMENT', 1, 1, null, :expiresAt, :now, :now
-            )
-            """.trimIndent(),
-        ).bind("invoiceNumber", invoiceNumber.toString())
-            .bind("userId", command.userId)
-            .bind("tierCode", command.tierProduct.tierCode)
-            .bind("productId", command.transaction.productId)
-            .bind("appAccountToken", command.transaction.appAccountToken.toString().lowercase())
-            .bindNullable("currency", command.transaction.currency, String::class.java)
-            .bindNullable("price", command.transaction.priceMilliunits, java.lang.Long::class.java)
-            .bindNullable("expiresAt", command.transaction.expiresAt?.utc(), LocalDateTime::class.java)
-            .bind("now", now.utc())
-            .fetch().rowsUpdated().awaitSingle()
-        val invoiceId = lastInsertedId()
-
-        insertInitialInvoiceEvent(invoiceId, invoiceNumber, command.userId, now)
+        val requestedInvoice = command.invoiceNumber?.let { invoiceNumber ->
+            lockInvoiceByNumber(invoiceNumber)
+                ?: throw billingFailure(ApiErrorCode.RESOURCE_NOT_FOUND, "Pending invoice not found.", HttpStatus.NOT_FOUND)
+        }
+        if (requestedInvoice != null) validatePendingInvoice(requestedInvoice, command)
+        val fallbackInvoice = if (requestedInvoice == null && isInitialPurchase(command.transaction)) {
+            lockLatestPendingInvoice(command.userId, command.tierProduct.productId)
+        } else {
+            null
+        }
+        val invoiceId = (requestedInvoice ?: fallbackInvoice)?.id ?: insertPendingInvoice(
+            userId = command.userId,
+            tierProduct = command.tierProduct,
+            appAccountToken = command.transaction.appAccountToken,
+            source = command.source,
+            actorUserId = command.userId.takeIf { command.source == BillingEventSource.CLIENT },
+            correlationId = null,
+            now = now,
+        )
+        updatePendingInvoiceFromTransaction(invoiceId, command.transaction, now)
         val paymentId = insertPayment(invoiceId, command)
         insertPaymentHistory(
             paymentId = paymentId,
             invoiceId = invoiceId,
             eventId = command.eventId,
             eventType = PaymentHistoryEventType.VERIFIED,
-            source = BillingEventSource.CLIENT,
+            source = command.source,
             fromStatus = null,
             toStatus = PaymentStatus.VERIFIED,
             providerNotificationUUID = null,
@@ -157,7 +215,7 @@ class BillingLedgerPersistenceAdapter(
             invoiceId = invoiceId,
             eventId = "invoice-payment-verified:${command.transaction.transactionId}",
             eventType = InvoiceEventType.PAYMENT_VERIFIED,
-            source = BillingEventSource.CLIENT,
+            source = command.source,
             actorUserId = command.userId,
             reason = null,
             occurredAt = now,
@@ -171,15 +229,15 @@ class BillingLedgerPersistenceAdapter(
     override suspend fun fulfill(invoiceId: Long, now: Instant): BillingInvoiceSummary {
         val locked = lockInvoice(invoiceId)
             ?: throw billingFailure(ApiErrorCode.RESOURCE_NOT_FOUND, "Invoice not found.", HttpStatus.NOT_FOUND)
-        if (locked.status in FULFILLMENT_TERMINAL_STATES) return requireInvoiceSummary(invoiceId)
-        if (locked.status !in setOf(InvoiceStatus.PAYMENT_VERIFIED, InvoiceStatus.FULFILLMENT_PENDING)) {
+        if (locked.status == InvoiceStatus.COMPLETED) return requireInvoiceSummary(invoiceId)
+        if (locked.type != InvoiceType.NORMAL || locked.status != InvoiceStatus.WAITING) {
             throw billingFailure(
                 ApiErrorCode.BILLING_ACTION_NOT_ALLOWED,
                 "Invoice cannot be fulfilled from ${locked.status}.",
                 HttpStatus.CONFLICT,
             )
         }
-        if (locked.status == InvoiceStatus.PAYMENT_VERIFIED) {
+        if (!hasInvoiceEvent(invoiceId, InvoiceEventType.FULFILLMENT_STARTED)) {
             appendInvoiceEvent(
                 invoiceId,
                 "invoice-fulfillment-started:${locked.invoiceNumber}",
@@ -228,8 +286,8 @@ class BillingLedgerPersistenceAdapter(
     override suspend fun requireCompensation(invoiceId: Long, reason: String, now: Instant): BillingInvoiceSummary {
         val locked = lockInvoice(invoiceId)
             ?: throw billingFailure(ApiErrorCode.RESOURCE_NOT_FOUND, "Invoice not found.", HttpStatus.NOT_FOUND)
-        if (locked.status == InvoiceStatus.COMPENSATION_REQUIRED) return requireInvoiceSummary(invoiceId)
-        if (locked.status !in setOf(InvoiceStatus.PAYMENT_VERIFIED, InvoiceStatus.FULFILLMENT_PENDING)) {
+        if (locked.status == InvoiceStatus.FAILED) return requireInvoiceSummary(invoiceId)
+        if (locked.type != InvoiceType.NORMAL || locked.status != InvoiceStatus.WAITING) {
             return requireInvoiceSummary(invoiceId)
         }
         val payment = lockPaymentByInvoice(invoiceId)
@@ -312,15 +370,28 @@ class BillingLedgerPersistenceAdapter(
         val invoice = lockInvoice(payment.invoiceId)
             ?: throw billingFailure(ApiErrorCode.INTERNAL_SERVER_ERROR, "Payment invoice is missing.")
         existingAction(userId, BillingActionType.REFUND, command.idempotencyKey)?.let { return it }
-        if (!InvoiceStateMachine.canApply(invoice.status, InvoiceEventType.REFUND_REQUESTED)) {
+        if (
+            invoice.type != InvoiceType.NORMAL ||
+            invoice.status != InvoiceStatus.COMPLETED ||
+            payment.status !in REFUNDABLE_PAYMENT_STATES
+        ) {
             throw billingFailure(
                 ApiErrorCode.BILLING_ACTION_NOT_ALLOWED,
                 "A refund cannot be requested while the invoice is ${invoice.status}.",
                 HttpStatus.CONFLICT,
             )
         }
+        val refundInvoiceId = insertRefundInvoice(
+            originalInvoice = invoice,
+            source = source,
+            actorUserId = userId.takeIf { source == BillingEventSource.CLIENT },
+            correlationId = command.idempotencyKey,
+            now = now,
+        )
+        val refundInvoice = lockInvoice(refundInvoiceId)
+            ?: throw billingFailure(ApiErrorCode.INTERNAL_SERVER_ERROR, "Refund invoice could not be locked.")
         appendInvoiceEvent(
-            invoice.id,
+            refundInvoice.id,
             "refund-requested:${source.name.lowercase()}:${userId}:${command.idempotencyKey}",
             InvoiceEventType.REFUND_REQUESTED,
             source,
@@ -337,9 +408,10 @@ class BillingLedgerPersistenceAdapter(
             null,
             command.reason,
             now,
+            historyInvoiceId = refundInvoice.id,
         )
         return insertActionIfAbsent(
-            invoice,
+            refundInvoice,
             payment,
             BillingActionType.REFUND,
             BillingActionStatus.AWAITING_APPLE,
@@ -379,7 +451,11 @@ class BillingLedgerPersistenceAdapter(
                 HttpStatus.CONFLICT,
             )
         }
-        if (!InvoiceStateMachine.canApply(invoice.status, InvoiceEventType.CANCELLATION_REQUESTED)) {
+        if (
+            invoice.type != InvoiceType.NORMAL ||
+            invoice.status != InvoiceStatus.COMPLETED ||
+            !InvoiceStateMachine.canApply(invoice.type, invoice.status, InvoiceEventType.CANCELLATION_REQUESTED)
+        ) {
             throw billingFailure(
                 ApiErrorCode.BILLING_ACTION_NOT_ALLOWED,
                 "Cancellation cannot be requested while the invoice is ${invoice.status}.",
@@ -472,7 +548,7 @@ class BillingLedgerPersistenceAdapter(
         val results = spec.map { row, _ -> row.adminInvoice() }.all().collectList().awaitSingle()
         var countSpec = database.sql(
             "select count(*) as total_count from invoices i " +
-                "join users u on u.id = i.user_id left join payments p on p.invoice_id = i.id" + where,
+                "join users u on u.id = i.user_id left join payments p on p.invoice_id = coalesce(i.original_invoice_id, i.id)" + where,
         )
         if (query != null) {
             countSpec = countSpec.bind("query", query).bind("likeQuery", "%$query%")
@@ -530,7 +606,7 @@ class BillingLedgerPersistenceAdapter(
         when (notification.notificationType) {
             "DID_CHANGE_RENEWAL_STATUS" -> when (notification.subtype) {
                 "AUTO_RENEW_DISABLED" -> {
-                    if (InvoiceStateMachine.canApply(invoice.status, InvoiceEventType.CANCELLATION_REQUESTED)) {
+                    if (InvoiceStateMachine.canApply(invoice.type, invoice.status, InvoiceEventType.CANCELLATION_REQUESTED)) {
                         appendInvoiceEvent(
                             invoice.id,
                             "apple-cancellation-requested:${notification.notificationUUID}",
@@ -549,7 +625,7 @@ class BillingLedgerPersistenceAdapter(
                     )
                 }
                 "AUTO_RENEW_ENABLED" -> {
-                    if (InvoiceStateMachine.canApply(invoice.status, InvoiceEventType.CANCELLATION_REVERSED)) {
+                    if (InvoiceStateMachine.canApply(invoice.type, invoice.status, InvoiceEventType.CANCELLATION_REVERSED)) {
                         appendInvoiceEvent(
                             invoice.id,
                             "apple-cancellation-reversed:${notification.notificationUUID}",
@@ -569,32 +645,38 @@ class BillingLedgerPersistenceAdapter(
                 }
             }
             "REFUND" -> {
+                val refundInvoice = requireRefundInvoice(invoice, notification, now)
                 transitionPayment(payment, PaymentStatus.REFUNDED, PaymentHistoryEventType.REFUNDED,
                     "apple-refund:${notification.notificationUUID}", BillingEventSource.APPLE_NOTIFICATION,
-                    notification.notificationUUID, null, now)
-                appendIfAllowed(invoice.id, InvoiceEventType.REFUNDED, notification, now)
-                completeActions(invoice.id, setOf(BillingActionType.REFUND, BillingActionType.COMPENSATION), BillingActionStatus.COMPLETED, now)
+                    notification.notificationUUID, null, now, historyInvoiceId = refundInvoice.id)
+                appendIfAllowed(refundInvoice.id, InvoiceEventType.REFUNDED, notification, now)
+                completeActions(refundInvoice.id, setOf(BillingActionType.REFUND, BillingActionType.COMPENSATION), BillingActionStatus.COMPLETED, now)
+                completeActions(invoice.id, setOf(BillingActionType.COMPENSATION), BillingActionStatus.COMPLETED, now)
                 deactivateMembership(payment.originalTransactionId, invoice.id, now)
             }
             "REFUND_DECLINED" -> {
+                val refundInvoice = requireRefundInvoice(invoice, notification, now)
                 transitionPayment(payment, PaymentStatus.REFUND_DECLINED, PaymentHistoryEventType.REFUND_DECLINED,
                     "apple-refund-declined:${notification.notificationUUID}", BillingEventSource.APPLE_NOTIFICATION,
-                    notification.notificationUUID, null, now)
-                appendIfAllowed(invoice.id, InvoiceEventType.REFUND_DECLINED, notification, now)
-                completeActions(invoice.id, setOf(BillingActionType.REFUND, BillingActionType.COMPENSATION), BillingActionStatus.DECLINED, now)
+                    notification.notificationUUID, null, now, historyInvoiceId = refundInvoice.id)
+                appendIfAllowed(refundInvoice.id, InvoiceEventType.REFUND_DECLINED, notification, now)
+                completeActions(refundInvoice.id, setOf(BillingActionType.REFUND, BillingActionType.COMPENSATION), BillingActionStatus.DECLINED, now)
+                completeActions(invoice.id, setOf(BillingActionType.COMPENSATION), BillingActionStatus.DECLINED, now)
             }
             "REFUND_REVERSED" -> {
+                val refundInvoice = lockLatestRefundInvoice(invoice.id, setOf(InvoiceStatus.COMPLETED))
                 transitionPayment(payment, PaymentStatus.REFUND_REVERSED, PaymentHistoryEventType.REFUND_REVERSED,
                     "apple-refund-reversed:${notification.notificationUUID}", BillingEventSource.APPLE_NOTIFICATION,
-                    notification.notificationUUID, null, now)
-                appendIfAllowed(invoice.id, InvoiceEventType.REFUND_REVERSED, notification, now)
+                    notification.notificationUUID, null, now, historyInvoiceId = refundInvoice?.id ?: invoice.id)
+                refundInvoice?.let { appendIfAllowed(it.id, InvoiceEventType.REFUND_REVERSED, notification, now) }
                 reactivateMembership(invoice, payment, now)
             }
             "REVOKE" -> {
+                val refundInvoice = requireRefundInvoice(invoice, notification, now)
                 transitionPayment(payment, PaymentStatus.REVOKED, PaymentHistoryEventType.REVOKED,
                     "apple-revoked:${notification.notificationUUID}", BillingEventSource.APPLE_NOTIFICATION,
-                    notification.notificationUUID, null, now)
-                appendIfAllowed(invoice.id, InvoiceEventType.PAYMENT_REVOKED, notification, now)
+                    notification.notificationUUID, null, now, historyInvoiceId = refundInvoice.id)
+                appendIfAllowed(refundInvoice.id, InvoiceEventType.PAYMENT_REVOKED, notification, now)
                 deactivateMembership(payment.originalTransactionId, invoice.id, now)
             }
             "EXPIRED", "GRACE_PERIOD_EXPIRED" -> {
@@ -602,16 +684,34 @@ class BillingLedgerPersistenceAdapter(
                 deactivateMembership(payment.originalTransactionId, invoice.id, now)
             }
             "CONSUMPTION_REQUEST" -> {
-                var current = lockInvoice(invoice.id) ?: return
-                if (InvoiceStateMachine.canApply(current.status, InvoiceEventType.REFUND_REQUESTED)) {
-                    appendIfAllowed(invoice.id, InvoiceEventType.REFUND_REQUESTED, notification, now)
-                    current = lockInvoice(invoice.id) ?: return
+                val refundInvoice = requireRefundInvoice(invoice, notification, now)
+                var current = lockInvoice(refundInvoice.id) ?: return
+                if (InvoiceStateMachine.canApply(current.type, current.status, InvoiceEventType.REFUND_REQUESTED)) {
+                    appendIfAllowed(refundInvoice.id, InvoiceEventType.REFUND_REQUESTED, notification, now)
+                    current = lockInvoice(refundInvoice.id) ?: return
                 }
-                if (InvoiceStateMachine.canApply(current.status, InvoiceEventType.REFUND_PENDING)) {
-                    appendIfAllowed(invoice.id, InvoiceEventType.REFUND_PENDING, notification, now)
+                if (InvoiceStateMachine.canApply(current.type, current.status, InvoiceEventType.REFUND_PENDING)) {
+                    appendIfAllowed(refundInvoice.id, InvoiceEventType.REFUND_PENDING, notification, now)
                 }
             }
         }
+    }
+
+    private suspend fun requireRefundInvoice(
+        originalInvoice: LockedInvoice,
+        notification: VerifiedAppleNotification,
+        now: Instant,
+    ): LockedInvoice {
+        lockLatestRefundInvoice(originalInvoice.id, setOf(InvoiceStatus.WAITING))?.let { return it }
+        val id = insertRefundInvoice(
+            originalInvoice = originalInvoice,
+            source = BillingEventSource.APPLE_NOTIFICATION,
+            actorUserId = null,
+            correlationId = notification.notificationUUID,
+            now = now,
+        )
+        return lockInvoice(id)
+            ?: throw billingFailure(ApiErrorCode.INTERNAL_SERVER_ERROR, "Refund invoice could not be locked.")
     }
 
     private suspend fun appendIfAllowed(
@@ -621,7 +721,7 @@ class BillingLedgerPersistenceAdapter(
         now: Instant,
     ) {
         val current = lockInvoice(invoiceId) ?: return
-        if (!InvoiceStateMachine.canApply(current.status, type)) return
+        if (!InvoiceStateMachine.canApply(current.type, current.status, type)) return
         appendInvoiceEvent(
             invoiceId,
             "apple-notification:${notification.notificationUUID}:$type",
@@ -646,7 +746,7 @@ class BillingLedgerPersistenceAdapter(
     ) {
         val invoice = lockInvoice(invoiceId)
             ?: throw billingFailure(ApiErrorCode.RESOURCE_NOT_FOUND, "Invoice not found.", HttpStatus.NOT_FOUND)
-        val nextStatus = InvoiceStateMachine.next(invoice.status, eventType)
+        val nextStatus = InvoiceStateMachine.next(invoice.type, invoice.status, eventType)
         val nextSequence = invoice.sequence + 1
         database.sql(
             """
@@ -697,25 +797,142 @@ class BillingLedgerPersistenceAdapter(
         }
     }
 
+    private suspend fun insertPendingInvoice(
+        userId: Long,
+        tierProduct: BillingTierProduct,
+        appAccountToken: UUID,
+        source: BillingEventSource,
+        actorUserId: Long?,
+        correlationId: String?,
+        now: Instant,
+    ): Long {
+        val invoiceNumber = UUID.randomUUID()
+        database.sql(
+            """
+            insert into invoices (
+                invoice_number, type, original_invoice_id, user_id, tier_code, provider, product_id, app_account_token,
+                currency, subtotal_milliunits, tax_milliunits, total_milliunits,
+                status, version, latest_event_sequence, paid_at, expires_at, created_at, updated_at
+            ) values (
+                :invoiceNumber, 'NORMAL', null, :userId, :tierCode, 'APPLE', :productId, :appAccountToken,
+                null, null, null, null,
+                'WAITING', 1, 1, null, null, :now, :now
+            )
+            """.trimIndent(),
+        ).bind("invoiceNumber", invoiceNumber.toString())
+            .bind("userId", userId)
+            .bind("tierCode", tierProduct.tierCode)
+            .bind("productId", tierProduct.productId)
+            .bind("appAccountToken", appAccountToken.toString().lowercase())
+            .bind("now", now.utc())
+            .fetch().rowsUpdated().awaitSingle()
+        val invoiceId = lastInsertedId()
+        insertInitialInvoiceEvent(
+            invoiceId = invoiceId,
+            invoiceNumber = invoiceNumber,
+            source = source,
+            actorUserId = actorUserId,
+            correlationId = correlationId,
+            now = now,
+        )
+        return invoiceId
+    }
+
+    private suspend fun insertRefundInvoice(
+        originalInvoice: LockedInvoice,
+        source: BillingEventSource,
+        actorUserId: Long?,
+        correlationId: String?,
+        now: Instant,
+    ): Long {
+        require(originalInvoice.type == InvoiceType.NORMAL) { "A refund invoice must reference a NORMAL invoice." }
+        val invoiceNumber = UUID.randomUUID()
+        val inserted = database.sql(
+            """
+            insert into invoices (
+                invoice_number, type, original_invoice_id, user_id, tier_code, provider, product_id,
+                app_account_token, currency, subtotal_milliunits, tax_milliunits, total_milliunits,
+                status, version, latest_event_sequence, paid_at, expires_at, created_at, updated_at
+            )
+            select :invoiceNumber, 'REFUND', i.id, i.user_id, i.tier_code, i.provider, i.product_id,
+                   i.app_account_token, i.currency, i.subtotal_milliunits, i.tax_milliunits, i.total_milliunits,
+                   'WAITING', 1, 1, i.paid_at, i.expires_at, :now, :now
+            from invoices i
+            where i.id = :originalInvoiceId and i.type = 'NORMAL'
+            """.trimIndent(),
+        ).bind("invoiceNumber", invoiceNumber.toString().lowercase())
+            .bind("originalInvoiceId", originalInvoice.id)
+            .bind("now", now.utc())
+            .fetch().rowsUpdated().awaitSingle()
+        if (inserted != 1L) {
+            throw billingFailure(ApiErrorCode.INTERNAL_SERVER_ERROR, "Refund invoice could not be created.")
+        }
+        val invoiceId = lastInsertedId()
+        insertInitialInvoiceEvent(
+            invoiceId = invoiceId,
+            invoiceNumber = invoiceNumber,
+            source = source,
+            actorUserId = actorUserId,
+            correlationId = correlationId,
+            now = now,
+        )
+        return invoiceId
+    }
+
+    private suspend fun updatePendingInvoiceFromTransaction(
+        invoiceId: Long,
+        transaction: VerifiedAppleTransaction,
+        now: Instant,
+    ) {
+        val changed = database.sql(
+            """
+            update invoices
+            set currency = :currency,
+                subtotal_milliunits = :price,
+                tax_milliunits = case when :price is null then null else 0 end,
+                total_milliunits = :price,
+                expires_at = :expiresAt,
+                updated_at = :now
+            where id = :invoiceId and type = 'NORMAL' and status = 'WAITING'
+            """.trimIndent(),
+        ).bindNullable("currency", transaction.currency, String::class.java)
+            .bindNullable("price", transaction.priceMilliunits, java.lang.Long::class.java)
+            .bindNullable("expiresAt", transaction.expiresAt?.utc(), LocalDateTime::class.java)
+            .bind("now", now.utc())
+            .bind("invoiceId", invoiceId)
+            .fetch().rowsUpdated().awaitSingle()
+        if (changed != 1L) {
+            throw billingFailure(
+                ApiErrorCode.BILLING_TRANSACTION_CONFLICT,
+                "Invoice is no longer awaiting payment.",
+                HttpStatus.CONFLICT,
+            )
+        }
+    }
+
     private suspend fun insertInitialInvoiceEvent(
         invoiceId: Long,
         invoiceNumber: UUID,
-        userId: Long,
+        source: BillingEventSource,
+        actorUserId: Long?,
+        correlationId: String?,
         now: Instant,
     ) {
         database.sql(
             """
             insert into invoice_events (
                 invoice_id, event_id, sequence_number, event_type, source, from_status, to_status,
-                actor_user_id, occurred_at, created_at
+                correlation_id, actor_user_id, occurred_at, created_at
             ) values (
-                :invoiceId, :eventId, 1, 'INVOICE_CREATED', 'SYSTEM', null, 'PENDING_PAYMENT',
-                :userId, :now, :now
+                :invoiceId, :eventId, 1, 'INVOICE_CREATED', :source, null, 'WAITING',
+                :correlationId, :actorUserId, :now, :now
             )
             """.trimIndent(),
         ).bind("invoiceId", invoiceId)
             .bind("eventId", "invoice-created:$invoiceNumber")
-            .bind("userId", userId)
+            .bind("source", source.name)
+            .bindNullable("correlationId", correlationId, String::class.java)
+            .bindNullable("actorUserId", actorUserId, java.lang.Long::class.java)
             .bind("now", now.utc())
             .fetch().rowsUpdated().awaitSingle()
     }
@@ -773,6 +990,7 @@ class BillingLedgerPersistenceAdapter(
         notificationUUID: String?,
         reason: String?,
         now: Instant,
+        historyInvoiceId: Long = payment.invoiceId,
     ) {
         if (payment.status == toStatus) return
         val changed = database.sql(
@@ -790,7 +1008,7 @@ class BillingLedgerPersistenceAdapter(
             throw billingFailure(ApiErrorCode.BILLING_TRANSACTION_CONFLICT, "Payment version changed concurrently.", HttpStatus.CONFLICT)
         }
         insertPaymentHistory(
-            payment.id, payment.invoiceId, eventId, eventType, source,
+            payment.id, historyInvoiceId, eventId, eventType, source,
             payment.status, toStatus, notificationUUID, reason, now,
         )
     }
@@ -983,10 +1201,94 @@ class BillingLedgerPersistenceAdapter(
             ExistingPayment(row.long("invoice_id"), row.long("user_id"), row.string("product_id"))
         }.one().awaitSingleOrNull()
 
+    private suspend fun existingCheckoutInvoice(userId: Long, idempotencyKey: String): ExistingCheckout? =
+        database.sql(
+            """
+            select i.id as invoice_id, i.product_id
+            from invoice_events e
+            join invoices i on i.id = e.invoice_id
+            where e.event_type = 'INVOICE_CREATED'
+              and e.source = 'CLIENT'
+              and e.actor_user_id = :userId
+              and e.correlation_id = :idempotencyKey
+            limit 1
+            """.trimIndent(),
+        ).bind("userId", userId)
+            .bind("idempotencyKey", idempotencyKey)
+            .map { row, _ -> ExistingCheckout(row.long("invoice_id"), row.string("product_id")) }
+            .one().awaitSingleOrNull()
+
+    private suspend fun lockInvoiceByNumber(invoiceNumber: UUID): LockedInvoice? =
+        database.sql(
+            """
+            select id, invoice_number, type, original_invoice_id, user_id, tier_code, product_id, status, version, latest_event_sequence
+            from invoices where invoice_number = :invoiceNumber for update
+            """.trimIndent(),
+        ).bind("invoiceNumber", invoiceNumber.toString().lowercase())
+            .map { row, _ -> row.lockedInvoice() }.one().awaitSingleOrNull()
+
+    private suspend fun lockLatestPendingInvoice(userId: Long, productId: String): LockedInvoice? =
+        database.sql(
+            """
+            select id, invoice_number, type, original_invoice_id, user_id, tier_code, product_id, status, version, latest_event_sequence
+            from invoices
+            where user_id = :userId and provider = 'APPLE' and product_id = :productId
+              and type = 'NORMAL' and status = 'WAITING'
+            order by created_at desc, id desc
+            limit 1 for update
+            """.trimIndent(),
+        ).bind("userId", userId).bind("productId", productId)
+            .map { row, _ -> row.lockedInvoice() }.one().awaitSingleOrNull()
+
+    private suspend fun lockLatestRefundInvoice(originalInvoiceId: Long, statuses: Set<InvoiceStatus>): LockedInvoice? {
+        val names = statuses.joinToString(",") { "'${it.name}'" }
+        return database.sql(
+            """
+            select id, invoice_number, type, original_invoice_id, user_id, tier_code, product_id,
+                   status, version, latest_event_sequence
+            from invoices
+            where type = 'REFUND' and original_invoice_id = :originalInvoiceId and status in ($names)
+            order by created_at desc, id desc
+            limit 1 for update
+            """.trimIndent(),
+        ).bind("originalInvoiceId", originalInvoiceId)
+            .map { row, _ -> row.lockedInvoice() }.one().awaitSingleOrNull()
+    }
+
+    private suspend fun hasInvoiceEvent(invoiceId: Long, eventType: InvoiceEventType): Boolean =
+        database.sql(
+            "select count(*) as count_value from invoice_events where invoice_id = :invoiceId and event_type = :eventType",
+        ).bind("invoiceId", invoiceId).bind("eventType", eventType.name)
+            .map { row, _ -> row.long("count_value") > 0 }.one().awaitSingle()
+
+    private fun validatePendingInvoice(invoice: LockedInvoice, command: RecordVerifiedPaymentCommand) {
+        if (
+            invoice.userId != command.userId ||
+            invoice.productId != command.tierProduct.productId ||
+            invoice.tierCode != command.tierProduct.tierCode
+        ) {
+            throw billingFailure(
+                ApiErrorCode.BILLING_TRANSACTION_CONFLICT,
+                "The verified transaction does not match the pending invoice.",
+                HttpStatus.CONFLICT,
+            )
+        }
+        if (invoice.type != InvoiceType.NORMAL || invoice.status != InvoiceStatus.WAITING) {
+            throw billingFailure(
+                ApiErrorCode.BILLING_TRANSACTION_CONFLICT,
+                "Invoice is no longer awaiting payment.",
+                HttpStatus.CONFLICT,
+            )
+        }
+    }
+
+    private fun isInitialPurchase(transaction: VerifiedAppleTransaction): Boolean =
+        transaction.transactionId == transaction.originalTransactionId
+
     private suspend fun lockInvoice(invoiceId: Long): LockedInvoice? =
         database.sql(
             """
-            select id, invoice_number, user_id, tier_code, product_id, status, version, latest_event_sequence
+            select id, invoice_number, type, original_invoice_id, user_id, tier_code, product_id, status, version, latest_event_sequence
             from invoices where id = :id for update
             """.trimIndent(),
         ).bind("id", invoiceId).map { row, _ -> row.lockedInvoice() }.one().awaitSingleOrNull()
@@ -1073,6 +1375,8 @@ class BillingLedgerPersistenceAdapter(
     private fun Row.invoiceSummary() = BillingInvoiceSummary(
         id = long("invoice_id"),
         invoiceNumber = UUID.fromString(string("invoice_number")),
+        type = InvoiceType.valueOf(string("invoice_type")),
+        originalInvoiceId = nullableLong("original_invoice_id"),
         tierCode = string("tier_code"),
         productId = string("product_id"),
         status = InvoiceStatus.valueOf(string("invoice_status")),
@@ -1090,7 +1394,9 @@ class BillingLedgerPersistenceAdapter(
     )
 
     private fun Row.lockedInvoice() = LockedInvoice(
-        id = long("id"), invoiceNumber = UUID.fromString(string("invoice_number")), userId = long("user_id"),
+        id = long("id"), invoiceNumber = UUID.fromString(string("invoice_number")),
+        type = InvoiceType.valueOf(string("type")), originalInvoiceId = nullableLong("original_invoice_id"),
+        userId = long("user_id"),
         tierCode = string("tier_code"), productId = string("product_id"),
         status = InvoiceStatus.valueOf(string("status")), version = long("version"),
         sequence = long("latest_event_sequence"),
@@ -1151,9 +1457,12 @@ class BillingLedgerPersistenceAdapter(
     ) = ApiException(status, code, message)
 
     private data class ExistingPayment(val invoiceId: Long, val userId: Long, val productId: String)
+    private data class ExistingCheckout(val invoiceId: Long, val productId: String)
     private data class LockedInvoice(
         val id: Long,
         val invoiceNumber: UUID,
+        val type: InvoiceType,
+        val originalInvoiceId: Long?,
         val userId: Long,
         val tierCode: String,
         val productId: String,
@@ -1175,11 +1484,10 @@ class BillingLedgerPersistenceAdapter(
     )
 
     private companion object {
-        val FULFILLMENT_TERMINAL_STATES = setOf(
-            InvoiceStatus.FULFILLED, InvoiceStatus.CANCELLATION_REQUESTED, InvoiceStatus.CANCELLED,
-            InvoiceStatus.REFUND_REQUESTED, InvoiceStatus.REFUND_PENDING, InvoiceStatus.REFUNDED,
-            InvoiceStatus.REFUND_DECLINED, InvoiceStatus.REFUND_REVERSED, InvoiceStatus.EXPIRED,
-            InvoiceStatus.COMPENSATION_REQUIRED,
+        val REFUNDABLE_PAYMENT_STATES = setOf(
+            PaymentStatus.SETTLED,
+            PaymentStatus.REFUND_DECLINED,
+            PaymentStatus.REFUND_REVERSED,
         )
 
         const val LOCK_PAYMENT_SQL = """
@@ -1189,14 +1497,15 @@ class BillingLedgerPersistenceAdapter(
         """
 
         const val INVOICE_SUMMARY_SQL = """
-            select i.id as invoice_id, i.invoice_number, i.tier_code, i.product_id,
+            select i.id as invoice_id, i.invoice_number, i.type as invoice_type, i.original_invoice_id,
+                   i.tier_code, i.product_id,
                    i.status as invoice_status, i.version as invoice_version,
                    p.id as payment_id, p.provider_transaction_id, p.provider_original_transaction_id,
                    p.status as payment_status, p.price_milliunits, p.currency, p.purchase_at,
                    coalesce(p.expires_at, i.expires_at) as expires_at,
                    i.created_at, i.updated_at
             from invoices i
-            left join payments p on p.invoice_id = i.id
+            left join payments p on p.invoice_id = coalesce(i.original_invoice_id, i.id)
         """
 
         const val ACTION_SQL = """
@@ -1208,7 +1517,8 @@ class BillingLedgerPersistenceAdapter(
         """
 
         const val ADMIN_INVOICE_SQL = """
-            select i.id as invoice_id, i.invoice_number, i.tier_code, i.product_id,
+            select i.id as invoice_id, i.invoice_number, i.type as invoice_type, i.original_invoice_id,
+                   i.tier_code, i.product_id,
                    i.status as invoice_status, i.version as invoice_version,
                    p.id as payment_id, p.provider_transaction_id, p.provider_original_transaction_id,
                    p.status as payment_status, p.price_milliunits, p.currency, p.purchase_at,
@@ -1216,7 +1526,7 @@ class BillingLedgerPersistenceAdapter(
                    i.created_at, i.updated_at,
                    u.id as user_id, u.email as user_email, u.display_name as user_display_name
             from invoices i
-            left join payments p on p.invoice_id = i.id
+            left join payments p on p.invoice_id = coalesce(i.original_invoice_id, i.id)
             join users u on u.id = i.user_id
         """
     }

@@ -27,7 +27,19 @@ interface BillingLedgerPort {
     suspend fun enabledTierProducts(): List<BillingTierProduct>
     suspend fun enabledTierProduct(productId: String): BillingTierProduct?
 
-    /** Atomically appends invoice/payment events, advances projections, and creates fulfillment work. */
+    /** Creates the event-sourced NORMAL/WAITING invoice before StoreKit is opened. */
+    suspend fun createPendingInvoice(
+        userId: Long,
+        appAccountToken: UUID,
+        tierProduct: BillingTierProduct,
+        idempotencyKey: String,
+        now: Instant,
+    ): BillingInvoiceSummary
+
+    /** Idempotently closes a checkout when StoreKit reports userCancelled before a transaction exists. */
+    suspend fun abandonPendingInvoice(userId: Long, invoiceNumber: UUID, now: Instant): BillingInvoiceSummary
+
+    /** Atomically attaches a verified payment to a PENDING invoice and creates fulfillment work. */
     suspend fun recordVerifiedPayment(command: RecordVerifiedPaymentCommand): BillingInvoiceSummary
 
     /** Separate transaction boundary: grants the tier and settles the invoice/payment projections. */

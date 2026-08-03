@@ -20,34 +20,19 @@ import { InlineNotice } from "../components/InlineNotice.jsx";
 import { formatDateTime, statusTone } from "../lib/format.js";
 
 const PAGE_SIZE = 30;
-const STATUSES = [
-  "",
-  "PENDING_PAYMENT",
-  "PAYMENT_VERIFIED",
-  "FULFILLMENT_PENDING",
-  "FULFILLED",
-  "CANCELLATION_REQUESTED",
-  "CANCELLED",
-  "REFUND_REQUESTED",
-  "REFUND_PENDING",
-  "REFUNDED",
-  "REFUND_DECLINED",
-  "REFUND_REVERSED",
-  "COMPENSATION_REQUIRED",
-  "FAILED",
-  "EXPIRED",
-];
+const STATUSES = ["", "WAITING", "COMPLETED", "FAILED"];
 
 function amount(invoice) {
   if (invoice.priceMilliunits == null || !invoice.currency) return "-";
   const value = Number(invoice.priceMilliunits) / 1_000_000;
   if (!Number.isFinite(value)) return "-";
   try {
-    return new Intl.NumberFormat("ko-KR", {
+    const formatted = new Intl.NumberFormat("ko-KR", {
       style: "currency",
       currency: invoice.currency,
       maximumFractionDigits: invoice.currency === "KRW" ? 0 : 2,
     }).format(value);
+    return invoice.type === "REFUND" ? `-${formatted}` : formatted;
   } catch {
     return `${value.toLocaleString()} ${invoice.currency}`;
   }
@@ -68,14 +53,11 @@ function ActionForm({ invoice, onCompleted }) {
     ),
     onSuccess: onCompleted,
   });
-  const refundable = [
-    "FULFILLED",
-    "CANCELLATION_REQUESTED",
-    "REFUND_DECLINED",
-    "REFUND_REVERSED",
-    "COMPENSATION_REQUIRED",
-  ].includes(invoice.status) && Boolean(invoice.paymentId);
-  const cancellable = ["FULFILLED", "REFUND_DECLINED", "REFUND_REVERSED"].includes(invoice.status)
+  const refundable = (invoice.type || "NORMAL") === "NORMAL"
+    && invoice.status === "COMPLETED"
+    && ["SETTLED", "REFUND_DECLINED", "REFUND_REVERSED"].includes(invoice.paymentStatus)
+    && Boolean(invoice.paymentId);
+  const cancellable = (invoice.type || "NORMAL") === "NORMAL" && invoice.status === "COMPLETED"
     && Boolean(invoice.originalTransactionId);
 
   return (
@@ -173,6 +155,7 @@ function OrderDetail({ selected, onClose }) {
         <>
           <div className="detail-summary">
             <div><span>Status</span><strong><StatusBadge tone={statusTone(invoice.status)}>{invoice.status}</StatusBadge></strong></div>
+            <div><span>Type</span><strong>{invoice.type || "NORMAL"}</strong></div>
             <div><span>Tier</span><strong>{invoice.tierCode}</strong></div>
             <div><span>Amount</span><strong>{amount(invoice)}</strong></div>
             <div><span>Purchased</span><strong>{formatDateTime(invoice.purchaseAt || invoice.createdAt)}</strong></div>
@@ -181,6 +164,7 @@ function OrderDetail({ selected, onClose }) {
             <h3>Provider identifiers</h3>
             <dl>
               <div><dt>Invoice number</dt><dd>{invoice.invoiceNumber}</dd></div>
+              <div><dt>Original invoice</dt><dd>{invoice.originalInvoiceId || "-"}</dd></div>
               <div><dt>Transaction</dt><dd>{invoice.transactionId || "-"}</dd></div>
               <div><dt>Original transaction</dt><dd>{invoice.originalTransactionId || "-"}</dd></div>
               <div><dt>Product</dt><dd>{invoice.productId}</dd></div>
@@ -230,7 +214,7 @@ function OrdersWorkspace() {
       label: "Invoice",
       render: (row) => (
         <div className="primary-cell">
-          <strong>#{row.invoice.id} · {row.invoice.tierCode}</strong>
+          <strong>#{row.invoice.id} · {row.invoice.type || "NORMAL"} · {row.invoice.tierCode}</strong>
           <span className="mono">{row.invoice.invoiceNumber}</span>
         </div>
       ),

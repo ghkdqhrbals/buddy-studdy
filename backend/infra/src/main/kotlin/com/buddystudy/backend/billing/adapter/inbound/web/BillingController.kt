@@ -6,6 +6,7 @@ import com.buddystudy.backend.billing.application.model.BillingCatalog
 import com.buddystudy.backend.billing.application.model.BillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.BillingInvoicePage
 import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
+import com.buddystudy.backend.billing.application.model.CreateBillingCheckoutCommand
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
 import com.buddystudy.backend.billing.application.model.SyncAppleTransactionCommand
 import com.buddystudy.backend.billing.application.port.inbound.AppleBillingNotificationUseCase
@@ -29,6 +30,7 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import java.util.UUID
 
 @RestController
 @RequestMapping("/api/v1/billing")
@@ -38,6 +40,18 @@ class BillingController(
     @GetMapping("/catalog")
     suspend fun catalog(authentication: Authentication): BillingCatalog =
         billing.catalog(authentication.principalOrThrow())
+
+    @PostMapping("/checkouts")
+    suspend fun createCheckout(
+        authentication: Authentication,
+        @Valid @RequestBody request: CreateBillingCheckoutRequest,
+    ): BillingInvoiceSummary = billing.createCheckout(authentication.principalOrThrow(), request)
+
+    @PostMapping("/checkouts/{invoiceNumber}/abandon")
+    suspend fun abandonCheckout(
+        authentication: Authentication,
+        @PathVariable invoiceNumber: UUID,
+    ): BillingInvoiceSummary = billing.abandonCheckout(authentication.principalOrThrow(), invoiceNumber)
 
     @PostMapping("/apple/transactions")
     suspend fun syncAppleTransaction(
@@ -98,6 +112,18 @@ data class SyncAppleTransactionRequest(
     @field:NotBlank
     @field:Pattern(regexp = "SANDBOX|PRODUCTION|XCODE")
     var environment: String = "PRODUCTION",
+    var invoiceNumber: UUID? = null,
+)
+
+data class CreateBillingCheckoutRequest(
+    @field:NotBlank
+    @field:Size(max = 191)
+    @field:Pattern(regexp = "[A-Za-z0-9._-]+")
+    var productId: String = "",
+    @field:NotBlank
+    @field:Size(min = 8, max = 191)
+    @field:Pattern(regexp = "[A-Za-z0-9._:-]+")
+    var idempotencyKey: String = "",
 )
 
 data class BillingActionRequest(
@@ -117,6 +143,8 @@ data class AppleServerNotificationRequest(
 
 interface BillingWebPort {
     suspend fun catalog(principal: Principal): BillingCatalog
+    suspend fun createCheckout(principal: Principal, request: CreateBillingCheckoutRequest): BillingInvoiceSummary
+    suspend fun abandonCheckout(principal: Principal, invoiceNumber: UUID): BillingInvoiceSummary
     suspend fun syncAppleTransaction(principal: Principal, request: SyncAppleTransactionRequest): BillingInvoiceSummary
     suspend fun invoices(principal: Principal, limit: Int, offset: Int): BillingInvoicePage
     suspend fun invoice(principal: Principal, invoiceId: Long): BillingInvoiceDetail
@@ -138,6 +166,17 @@ class BillingWebAdapter(
 ) : BillingWebPort {
     override suspend fun catalog(principal: Principal): BillingCatalog = billing.catalog(principal)
 
+    override suspend fun createCheckout(
+        principal: Principal,
+        request: CreateBillingCheckoutRequest,
+    ): BillingInvoiceSummary = billing.createCheckout(
+        principal,
+        CreateBillingCheckoutCommand(request.productId.trim(), request.idempotencyKey.trim()),
+    )
+
+    override suspend fun abandonCheckout(principal: Principal, invoiceNumber: UUID): BillingInvoiceSummary =
+        billing.abandonCheckout(principal, invoiceNumber)
+
     override suspend fun syncAppleTransaction(
         principal: Principal,
         request: SyncAppleTransactionRequest,
@@ -146,6 +185,7 @@ class BillingWebAdapter(
         SyncAppleTransactionCommand(
             signedTransaction = request.signedTransaction.trim(),
             environment = request.environment.toBillingEnvironment(),
+            invoiceNumber = request.invoiceNumber,
         ),
     )
 

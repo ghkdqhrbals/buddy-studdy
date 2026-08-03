@@ -41,9 +41,9 @@ class AdminBillingServiceTest {
             }
         }
 
-        service.invoices("  buyer@example.com  ", " fulfilled ", 500, -4)
+        service.invoices("  buyer@example.com  ", " completed ", 500, -4)
 
-        assertEquals(listOf("buyer@example.com", "FULFILLED", 100, 0), captured)
+        assertEquals(listOf("buyer@example.com", "COMPLETED", 100, 0), captured)
     }
 
     @Test

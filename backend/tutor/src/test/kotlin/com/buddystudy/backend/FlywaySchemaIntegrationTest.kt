@@ -83,7 +83,7 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
             from information_schema.columns
             where table_schema = database()
               and (
-                (table_name = 'invoices' and column_name = 'status')
+                (table_name = 'invoices' and column_name in ('type', 'status'))
                 or (table_name = 'payments' and column_name = 'status')
                 or (table_name = 'billing_actions' and column_name in ('action_type', 'status'))
               )
@@ -96,7 +96,8 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
             )
         }.all().collectList().awaitSingle().associate { "${it.first}.${it.second}" to it.third }
 
-        assertThat(comments.getValue("invoices.status")).contains("FULFILLED", "COMPENSATION_REQUIRED", "REFUNDED")
+        assertThat(comments.getValue("invoices.type")).contains("NORMAL", "REFUND")
+        assertThat(comments.getValue("invoices.status")).contains("WAITING", "COMPLETED", "FAILED")
         assertThat(comments.getValue("payments.status")).contains("SETTLED", "REFUND_PENDING", "REVOKED")
         assertThat(comments.getValue("billing_actions.action_type")).contains("REFUND", "CANCELLATION", "COMPENSATION")
         assertThat(comments.getValue("billing_actions.status")).contains("AWAITING_APPLE", "COMPLETED", "DECLINED")

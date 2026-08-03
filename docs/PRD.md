@@ -70,7 +70,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 14. Tree nodes are circular. The tree supports vertical/horizontal layout, pinch and button zoom, draggable saved positions, layout reset, and multi-select activation, pause, and deletion.
 15. Root creation, descendant topic creation, and question generation are separate API/client methods. Creating a root or descendant never consumes monthly question allowance.
 16. The Profile > Usage page shows the current monthly question allowance, remaining count, and exact reset time. When the allowance is exhausted, question creation is blocked with a localized inline explanation.
-17. Membership allowances are TIER1 30, TIER2 300, and TIER3 1,000 questions per monthly window. TIER2 and TIER3 each offer monthly and annual StoreKit subscriptions; both durations grant the same tier allowance.
+17. Membership allowances are TIER1 30, TIER2 300, and TIER3 1,000 questions per monthly window. TIER2 and TIER3 each offer monthly and annual StoreKit subscriptions; both durations grant the same tier allowance. A paid purchase creates an event-sourced `NORMAL/WAITING` invoice before StoreKit is presented; only backend-verified Apple JWS followed by successful membership and quota fulfillment may mark it `COMPLETED`. Refunds use separate linked `REFUND` invoices. Invoice status is limited to `WAITING`, `COMPLETED`, and `FAILED`.
 18. Root study rows omit level metadata. Level is presented only where it affects a specific tree topic.
 19. A tree node with an unanswered question shows one red badge at its upper-right corner; the node action menu remains separate at the lower-right corner.
 20. Study deletion always requires an explicit destructive confirmation.

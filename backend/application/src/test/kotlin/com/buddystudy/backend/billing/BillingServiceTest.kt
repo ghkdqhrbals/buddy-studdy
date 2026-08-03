@@ -11,6 +11,7 @@ import com.buddystudy.backend.billing.application.model.BillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.BillingInvoicePage
 import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
 import com.buddystudy.backend.billing.application.model.BillingTierProduct
+import com.buddystudy.backend.billing.application.model.CreateBillingCheckoutCommand
 import com.buddystudy.backend.billing.application.model.RecordVerifiedPaymentCommand
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
 import com.buddystudy.backend.billing.application.model.SyncAppleTransactionCommand
@@ -24,8 +25,10 @@ import com.buddystudy.backend.common.application.error.ApiRuntimeException
 import com.buddystudy.billing.domain.BillingActionStatus
 import com.buddystudy.billing.domain.BillingActionType
 import com.buddystudy.billing.domain.BillingEnvironment
+import com.buddystudy.billing.domain.BillingEventSource
 import com.buddystudy.billing.domain.BillingProductType
 import com.buddystudy.billing.domain.InvoiceStatus
+import com.buddystudy.billing.domain.InvoiceType
 import com.buddystudy.billing.domain.PaymentStatus
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -40,6 +43,7 @@ import java.util.UUID
 class BillingServiceTest {
     private val now = Instant.parse("2026-08-03T00:00:00Z")
     private val token = UUID.fromString("3f0c5f50-6521-4ba0-a990-73500e915f57")
+    private val invoiceNumber = UUID.fromString("2306d81d-1323-48c4-bb2b-a40cc48f70da")
     private val transaction = VerifiedAppleTransaction(
         transactionId = "200000000000001",
         originalTransactionId = "200000000000000",
@@ -63,7 +67,7 @@ class BillingServiceTest {
     private val product = BillingTierProduct(
         tierCode = "TIER2",
         description = "Extended",
-        monthlyQuestionLimit = 1000,
+        monthlyQuestionLimit = 300,
         productId = transaction.productId,
         productType = transaction.productType,
         billingPeriod = "P1M",
@@ -94,6 +98,21 @@ class BillingServiceTest {
 
         assertEquals(ApiErrorCode.BILLING_TRANSACTION_CONFLICT, error.errorCode)
         assertEquals(0, ledger.recordedPayments.size)
+    }
+
+    @Test
+    fun `checkout creates pending invoice before StoreKit transaction`() = runBlocking {
+        val ledger = FakeLedger(token, product)
+        val service = service(ledger)
+
+        val result = service.createCheckout(
+            principal(),
+            CreateBillingCheckoutCommand(product.productId, "checkout-request-1"),
+        )
+
+        assertEquals(InvoiceStatus.WAITING, result.status)
+        assertEquals(listOf("checkout-request-1"), ledger.pendingCheckoutKeys)
+        assertTrue(ledger.recordedPayments.isEmpty())
     }
 
     @Test
@@ -129,8 +148,10 @@ class BillingServiceTest {
 
         val result = service.syncAppleTransaction(principal(), syncCommand())
 
-        assertEquals(InvoiceStatus.FULFILLED, result.status)
+        assertEquals(InvoiceStatus.COMPLETED, result.status)
         assertEquals(1, ledger.recordedPayments.size)
+        assertEquals(invoiceNumber, ledger.recordedPayments.single().invoiceNumber)
+        assertEquals(BillingEventSource.CLIENT, ledger.recordedPayments.single().source)
     }
 
     @Test
@@ -147,6 +168,8 @@ class BillingServiceTest {
 
         assertEquals(listOf(notification.notificationUUID), ledger.recordedNotifications)
         assertEquals(listOf(notification.notificationUUID), ledger.failedNotifications)
+        assertEquals(BillingEventSource.APPLE_NOTIFICATION, ledger.recordedPayments.single().source)
+        assertEquals(null, ledger.recordedPayments.single().invoiceNumber)
     }
 
     @Test
@@ -179,7 +202,11 @@ class BillingServiceTest {
     )
 
     private fun principal(anonymous: Boolean = false) = Principal(733, "device", 1, anonymous, if (anonymous) "ANONYMOUS" else "ACTIVE")
-    private fun syncCommand() = SyncAppleTransactionCommand("${"a".repeat(32)}.${"b".repeat(32)}.${"c".repeat(32)}", BillingEnvironment.SANDBOX)
+    private fun syncCommand() = SyncAppleTransactionCommand(
+        "${"a".repeat(32)}.${"b".repeat(32)}.${"c".repeat(32)}",
+        BillingEnvironment.SANDBOX,
+        invoiceNumber,
+    )
     private fun notification() = VerifiedAppleNotification(
         notificationUUID = "notification-1",
         notificationType = "DID_CHANGE_RENEWAL_STATUS",
@@ -199,6 +226,7 @@ class BillingServiceTest {
         var notificationApplyError: Exception? = null
         var notificationIsNew = true
         val recordedPayments = mutableListOf<RecordVerifiedPaymentCommand>()
+        val pendingCheckoutKeys = mutableListOf<String>()
         val compensatedInvoices = mutableListOf<Long>()
         val recordedNotifications = mutableListOf<String>()
         val failedNotifications = mutableListOf<String>()
@@ -211,17 +239,32 @@ class BillingServiceTest {
         override suspend fun userIdForAppAccountToken(appAccountToken: UUID): Long? = 733
         override suspend fun enabledTierProducts(): List<BillingTierProduct> = listOfNotNull(product)
         override suspend fun enabledTierProduct(productId: String): BillingTierProduct? = product?.takeIf { it.productId == productId }
+        override suspend fun createPendingInvoice(
+            userId: Long,
+            appAccountToken: UUID,
+            tierProduct: BillingTierProduct,
+            idempotencyKey: String,
+            now: Instant,
+        ): BillingInvoiceSummary {
+            pendingCheckoutKeys += idempotencyKey
+            return invoice(InvoiceStatus.WAITING)
+        }
+        override suspend fun abandonPendingInvoice(
+            userId: Long,
+            invoiceNumber: UUID,
+            now: Instant,
+        ): BillingInvoiceSummary = invoice(InvoiceStatus.FAILED)
         override suspend fun recordVerifiedPayment(command: RecordVerifiedPaymentCommand): BillingInvoiceSummary {
             recordedPayments += command
-            return invoice(InvoiceStatus.PAYMENT_VERIFIED)
+            return invoice(InvoiceStatus.WAITING)
         }
         override suspend fun fulfill(invoiceId: Long, now: Instant): BillingInvoiceSummary {
             fulfillmentError?.let { throw it }
-            return invoice(InvoiceStatus.FULFILLED)
+            return invoice(InvoiceStatus.COMPLETED)
         }
         override suspend fun requireCompensation(invoiceId: Long, reason: String, now: Instant): BillingInvoiceSummary {
             compensatedInvoices += invoiceId
-            return invoice(InvoiceStatus.COMPENSATION_REQUIRED)
+            return invoice(InvoiceStatus.FAILED)
         }
         override suspend fun invoice(userId: Long, invoiceId: Long): BillingInvoiceDetail? = null
         override suspend fun invoices(userId: Long, limit: Int, offset: Int) = BillingInvoicePage(limit, offset, emptyList())
@@ -258,6 +301,8 @@ class BillingServiceTest {
         private fun invoice(status: InvoiceStatus) = BillingInvoiceSummary(
             id = 99,
             invoiceNumber = UUID.fromString("2306d81d-1323-48c4-bb2b-a40cc48f70da"),
+            type = InvoiceType.NORMAL,
+            originalInvoiceId = null,
             tierCode = "TIER2",
             productId = "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
             status = status,
