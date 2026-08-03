@@ -39,7 +39,10 @@ struct CommunityFeedStateStore {
     }
 
     mutating func applyPage(_ response: CommunityQuestionsResponse, offset normalizedOffset: Int, reset: Bool) {
-        let visibleQuestions = response.questions.filter { !hiddenQuestionIDs.contains($0.id) }
+        let visibleQuestions = response.questions.filter {
+            $0.status.caseInsensitiveCompare("graded") == .orderedSame &&
+                !hiddenQuestionIDs.contains($0.id)
+        }
         let hiddenResponseCount = response.questions.count - visibleQuestions.count
         if reset {
             questions = visibleQuestions

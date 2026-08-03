@@ -293,6 +293,7 @@ class StudyRecordWriteService(
             return
         }
         question.gradingStatus = AnswerGradingStatus.FAILED
+        question.status = QuestionStatus.FAILED
         question.gradingError = errorMessage.take(255)
         question.updatedAt = now
         val progress = gradingProgress.append(
@@ -300,7 +301,7 @@ class StudyRecordWriteService(
             event.userId,
             event.requestId,
             AnswerGradingStatus.FAILED,
-            QuestionStatus.GRADING,
+            QuestionStatus.FAILED,
             question.gradingError,
             now,
         )

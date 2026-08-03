@@ -1,6 +1,5 @@
 package com.buddystudy.backend.study.application.service
 
-import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.port.inbound.QuestionGenerationRequestWriteUseCase
@@ -8,7 +7,7 @@ import com.buddystudy.backend.study.application.port.inbound.RunQuestionSchedule
 import com.buddystudy.backend.study.application.port.inbound.ScheduledQuestionWriteUseCase
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
-import com.buddystudy.study.domain.QuestionLanguage
+import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.StudyEntity
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -18,7 +17,6 @@ import java.time.Instant
 class ScheduledQuestionService(
     private val properties: BuddyStudyProperties,
     private val studies: StudyPort,
-    private val users: UserPort,
     private val questions: QuestionPort,
     private val requestWriter: QuestionGenerationRequestWriteUseCase,
     private val scheduleWriter: ScheduledQuestionWriteUseCase,
@@ -39,15 +37,9 @@ class ScheduledQuestionService(
                 val allStudies = studies.findAllByUserId(root.userId)
                 ScheduledStudyContext(root, allStudies, StudyTreeSelector.activeTopics(root, allStudies))
             }
-            val languageByUserId = contexts
-                .map { it.root.userId }
-                .distinct()
-                .associateWith { userId ->
-                    QuestionLanguage.normalize(users.findById(userId)?.appLanguage?.databaseValue)
-                }
-            val pendingCounts = pendingCounts(contexts, languageByUserId)
+            val latestStatuses = latestStatuses(contexts)
             contexts.forEach { context ->
-                enqueueOne(context, languageByUserId.getValue(context.root.userId), pendingCounts, now)
+                enqueueOne(context, latestStatuses, now)
             }
             processed += dueStudies.size
         }
@@ -58,8 +50,7 @@ class ScheduledQuestionService(
 
     private suspend fun enqueueOne(
         context: ScheduledStudyContext,
-        language: String,
-        pendingCounts: Map<Pair<Long, String>, Long>,
+        latestStatuses: Map<Long, QuestionStatus>,
         now: Instant,
     ) {
         val root = context.root
@@ -68,9 +59,8 @@ class ScheduledQuestionService(
             log.info("scheduled_question_skipped_no_active_topic userId={} rootStudyId={}", root.userId, root.id)
             return
         }
-        val maxPending = properties.scheduler.maxPendingPerStudy.coerceAtLeast(1)
         val blockedTopicIds = context.activeTopics
-            .filter { (pendingCounts[it.id to language] ?: 0L) >= maxPending }
+            .filter { latestStatuses[it.id]?.allowsNextQuestion == false }
             .mapTo(mutableSetOf(), StudyEntity::id)
         val topic = StudyTreeSelector.nextActiveTopic(root, context.allStudies, blockedTopicIds)
         if (topic == null) {
@@ -134,20 +124,13 @@ class ScheduledQuestionService(
         }
     }
 
-    private suspend fun pendingCounts(
+    private suspend fun latestStatuses(
         contexts: List<ScheduledStudyContext>,
-        languageByUserId: Map<Long, String>,
-    ): Map<Pair<Long, String>, Long> {
-        val studyIdsByLanguage = contexts
-            .groupBy { languageByUserId.getValue(it.root.userId) }
-            .mapValues { (_, grouped) -> grouped.flatMap { it.activeTopics.map(StudyEntity::id) }.distinct() }
+    ): Map<Long, QuestionStatus> {
+        val studyIds = contexts.flatMap { it.activeTopics.map(StudyEntity::id) }.distinct()
         return buildMap {
-            studyIdsByLanguage.forEach { (language, studyIds) ->
-                studyIds.chunked(PENDING_COUNT_BATCH_SIZE).forEach { chunk ->
-                    questions.countPendingByStudyIdsAndLanguage(chunk, language).forEach { (studyId, count) ->
-                        put(studyId to language, count)
-                    }
-                }
+            studyIds.chunked(PENDING_COUNT_BATCH_SIZE).forEach { chunk ->
+                putAll(questions.findLatestStatusesByStudyIds(chunk))
             }
         }
     }

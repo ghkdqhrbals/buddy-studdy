@@ -1,9 +1,5 @@
 package com.buddystudy.backend.study.adapter.inbound.scheduler
 
-import com.buddystudy.account.domain.entity.UserEntity
-import com.buddystudy.account.domain.entity.UserStatus
-import com.buddystudy.common.domain.SupportedLanguage
-import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.outbox.OutboxPublishSummary
 import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.common.application.outbox.OutboxType
@@ -28,9 +24,12 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.study.application.service.ScheduledQuestionService
 import com.buddystudy.study.domain.entity.StudyEntity
+import com.buddystudy.study.domain.entity.QuestionStatus
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 import java.time.Instant
 
 class QuestionSchedulerTest {
@@ -66,15 +65,18 @@ class QuestionSchedulerTest {
         assertThat(studies.claimDueCalls).isEqualTo(2)
     }
 
-    @Test
-    fun `scheduled run rotates past a topic that already has a pending question`(): Unit = runBlocking {
+    @ParameterizedTest
+    @EnumSource(value = QuestionStatus::class, names = ["UNGRADED", "GRADING"])
+    fun `scheduled run rotates past a topic whose latest question is in progress`(
+        status: QuestionStatus,
+    ): Unit = runBlocking {
         val now = Instant.parse("2026-07-27T00:00:00Z")
         val root = study(21, 8, "Backend", null, now).apply { activeForQuestions = false }
         val blocked = study(22, 8, "Redis", 21, now).apply { activeForQuestions = true }
         val available = study(23, 8, "Kafka", 21, now).apply { activeForQuestions = true }
         val studies = RecordingStudies(listOf(root, blocked, available))
         val requests = RecordingGenerationRequests()
-        val questions = PendingQuestionPort(mapOf(22L to 1L))
+        val questions = LatestQuestionStatusPort(mapOf(22L to status))
         val scheduler = service(studies, requests, RecordingPublisher(), questions)
 
         scheduler.runDueQuestions()
@@ -82,17 +84,38 @@ class QuestionSchedulerTest {
         assertThat(requests.topics.map(StudyEntity::id)).containsExactly(23)
     }
 
+    @ParameterizedTest
+    @EnumSource(value = QuestionStatus::class, names = ["FAILED", "GRADED", "SKIPPED"])
+    fun `scheduled run can reuse a topic whose latest question is terminal`(
+        status: QuestionStatus,
+    ): Unit = runBlocking {
+        val now = Instant.parse("2026-07-27T00:00:00Z")
+        val root = study(31, 9, "Backend", null, now).apply { activeForQuestions = false }
+        val topic = study(32, 9, "Redis", 31, now).apply { activeForQuestions = true }
+        val studies = RecordingStudies(listOf(root, topic))
+        val requests = RecordingGenerationRequests()
+        val scheduler = service(
+            studies,
+            requests,
+            RecordingPublisher(),
+            LatestQuestionStatusPort(mapOf(topic.id to status)),
+        )
+
+        scheduler.runDueQuestions()
+
+        assertThat(requests.topics.map(StudyEntity::id)).containsExactly(topic.id)
+    }
+
     private fun service(
         studies: RecordingStudies,
         requests: RecordingGenerationRequests,
         publisher: RecordingPublisher,
-        questions: QuestionPort = PendingQuestionPort(emptyMap()),
+        questions: QuestionPort = LatestQuestionStatusPort(emptyMap()),
     ) = ScheduledQuestionService(
         properties = BuddyStudyProperties(
             scheduler = BuddyStudyProperties.Scheduler(enabled = true, maxPendingPerStudy = 1, batchSize = 10),
         ),
         studies = studies,
-        users = UserPortFixture(),
         questions = questions,
         requestWriter = requests,
         scheduleWriter = RecordingScheduleWriter(),
@@ -132,23 +155,12 @@ class QuestionSchedulerTest {
         override suspend fun findAllByUserId(userId: Long): List<StudyEntity> = rows.filter { it.userId == userId }
     }
 
-    private class PendingQuestionPort(
-        private val pending: Map<Long, Long>,
+    private class LatestQuestionStatusPort(
+        private val statuses: Map<Long, QuestionStatus>,
     ) : QuestionPort by unsupportedPort() {
-        override suspend fun countPendingByStudyIdsAndLanguage(
+        override suspend fun findLatestStatusesByStudyIds(
             studyIds: Collection<Long>,
-            language: String,
-        ): Map<Long, Long> = pending.filterKeys(studyIds::contains)
-    }
-
-    private class UserPortFixture : UserPort by unsupportedPort() {
-        override suspend fun findById(id: Long) =
-            UserEntity(
-                id = id,
-                providerId = "user-$id",
-                status = UserStatus.ACTIVE,
-                appLanguage = SupportedLanguage.KOREAN,
-            )
+        ): Map<Long, QuestionStatus> = statuses.filterKeys(studyIds::contains)
     }
 
     private class RecordingGenerationRequests : QuestionGenerationRequestWriteUseCase {

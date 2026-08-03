@@ -1955,6 +1955,7 @@ enum QuestionStatus: String, Codable, Equatable {
     case ungraded = "UNGRADED"
     case grading = "GRADING"
     case graded = "GRADED"
+    case failed = "FAILED"
     case skipped = "SKIPPED"
 
     init(from decoder: Decoder) throws {

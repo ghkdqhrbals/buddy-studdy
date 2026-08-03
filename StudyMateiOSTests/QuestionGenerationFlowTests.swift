@@ -10,6 +10,15 @@ final class QuestionGenerationFlowTests: XCTestCase {
         super.tearDown()
     }
 
+    func testQuestionStatusDecodesFailedAsTerminalBackendState() throws {
+        let decoded = try JSONDecoder().decode(
+            QuestionStatus.self,
+            from: Data(#""FAILED""#.utf8)
+        )
+
+        XCTAssertEqual(decoded, .failed)
+    }
+
     func testOpeningStudyOnlyPersistsSelectionWithoutUpdatingBackendSettings() async throws {
         let suiteName = "StudyNavigationSettingsTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -295,7 +304,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
             ),
             topic: "Swift",
             difficultyLevel: 5,
-            status: "COMPLETED",
+            status: "GRADED",
             source: "STUDY",
             createdAt: Date(timeIntervalSince1970: 1_000),
             answeredAt: Date(timeIntervalSince1970: 1_100),
@@ -326,7 +335,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
                 gradingResult: nil,
                 topic: "Swift",
                 difficultyLevel: 5,
-                status: "COMPLETED",
+                status: "GRADED",
                 source: "STUDY",
                 createdAt: Date(timeIntervalSince1970: TimeInterval(index)),
                 answeredAt: nil,
@@ -347,6 +356,37 @@ final class QuestionGenerationFlowTests: XCTestCase {
 
         XCTAssertTrue(state.questions.isEmpty)
         XCTAssertEqual(state.totalCount, 0)
+    }
+
+    func testAllStudiesKeepsOnlySuccessfullyGradedQuestions() {
+        let questions = ["GRADED", "FAILED", "GRADING", "UNGRADED"].enumerated().map { index, status in
+            CommunityQuestion(
+                id: "record-\(index)",
+                question: "Question \(index)",
+                answer: "Answer \(index)",
+                gradingResult: nil,
+                topic: "Swift",
+                difficultyLevel: 5,
+                status: status,
+                source: "STUDY",
+                createdAt: Date(timeIntervalSince1970: TimeInterval(index)),
+                answeredAt: Date(timeIntervalSince1970: TimeInterval(index + 10)),
+                author: nil
+            )
+        }
+        let response = CommunityQuestionsResponse(
+            questions: questions,
+            totalCount: questions.count,
+            limit: 20,
+            offset: 0
+        )
+        var state = CommunityFeedStateStore()
+
+        state.applyPage(response, offset: 0, reset: true)
+
+        XCTAssertEqual(state.questions.map(\.status), ["GRADED"])
+        XCTAssertEqual(state.totalCount, 1)
+        XCTAssertEqual(state.offset, 4)
     }
 
     func testCreateQuestionSendsIdempotencyKeyAndDecodesAcceptedProcess() async throws {

@@ -35,7 +35,7 @@ class AnswerGradingTimeoutService(
                 userId = userId,
                 requestId = requestId,
                 status = AnswerGradingStatus.FAILED,
-                questionStatus = QuestionStatus.GRADING,
+                questionStatus = QuestionStatus.FAILED,
                 errorMessage = TIMEOUT_MESSAGE,
                 occurredAt = now,
             )

@@ -29,6 +29,8 @@ class R2dbcConnectionDetailsConfigTest {
         assertThat(StringToNotificationThreadTypeConverter.convert("comment")).isEqualTo(NotificationThreadType.COMMENT)
         assertThat(QuestionStatusToStringConverter.convert(QuestionStatus.UNGRADED)).isEqualTo("ungraded")
         assertThat(QuestionStatusToStringConverter.convert(QuestionStatus.GRADING)).isEqualTo("grading")
+        assertThat(QuestionStatusToStringConverter.convert(QuestionStatus.FAILED)).isEqualTo("failed")
+        assertThat(StringToQuestionStatusConverter.convert("failed")).isEqualTo(QuestionStatus.FAILED)
         assertThat(StringToQuestionStatusConverter.convert("skipped")).isEqualTo(QuestionStatus.SKIPPED)
         assertThat(QuestionSourceToStringConverter.convert(QuestionSource.SCHEDULED)).isEqualTo("scheduled")
         assertThat(StringToQuestionSourceConverter.convert("manual")).isEqualTo(QuestionSource.MANUAL)

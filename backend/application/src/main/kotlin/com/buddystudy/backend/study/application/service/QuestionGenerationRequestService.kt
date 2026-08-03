@@ -11,7 +11,6 @@ import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.common.application.outbox.OutboxType
 import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxAppendPort
-import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.model.QueuedQuestionGeneration
 import com.buddystudy.backend.study.application.model.QuestionGenerationAcceptedResponse
 import com.buddystudy.backend.study.application.model.QuestionGenerationErrorResponse
@@ -33,8 +32,6 @@ import com.buddystudy.backend.study.application.model.toRecordResponse
 import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
 import com.buddystudy.backend.localization.application.service.applyReadyQuestionLocalization
 import com.buddystudy.study.domain.QuestionLanguage
-import com.buddystudy.study.domain.StudyRoom
-import com.buddystudy.study.domain.StudyRoomPendingLimitExceeded
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -76,7 +73,6 @@ class QuestionGenerationRequestService(
 
 @Service
 class QuestionGenerationRequestWriteService(
-    private val properties: BuddyStudyProperties,
     private val studies: StudyPort,
     private val questions: QuestionPort,
     private val users: UserPort,
@@ -100,7 +96,7 @@ class QuestionGenerationRequestWriteService(
             ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "User not found.")
         val userStudies = studies.findAllByUserId(userId)
         val rootStudy = StudyTreeSelector.rootFor(requestedStudy, userStudies)
-        ensureQuestionCanBeCreated(requestedStudy, rootStudy, user)
+        ensureQuestionCanBeCreated(requestedStudy)
         ensureNoActiveGeneration(userId, requestedStudy.id)
 
         return enqueue(
@@ -123,7 +119,7 @@ class QuestionGenerationRequestWriteService(
         existing(scheduleStudy.userId, idempotencyKey)?.let { return it }
         val user = users.findById(scheduleStudy.userId)
             ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "User not found.")
-        ensureQuestionCanBeCreated(topicStudy, scheduleStudy, user)
+        ensureQuestionCanBeCreated(topicStudy)
         ensureNoActiveGeneration(scheduleStudy.userId, topicStudy.id)
         val queued = enqueue(
             user = user,
@@ -143,21 +139,9 @@ class QuestionGenerationRequestWriteService(
 
     private suspend fun ensureQuestionCanBeCreated(
         topicStudy: com.buddystudy.study.domain.entity.StudyEntity,
-        rootStudy: com.buddystudy.study.domain.entity.StudyEntity,
-        user: UserEntity,
     ) {
-        val appLanguage = QuestionLanguage.normalize(user.appLanguage.databaseValue)
-        val room = StudyRoom.of(
-            topicStudy.toStudyRoomSchedule(
-                appLanguage = appLanguage,
-                questionStudyId = topicStudy.id,
-                questionSettings = rootStudy,
-            ),
-            questions.countPendingForStudyAndLanguage(topicStudy.id, appLanguage),
-        )
-        try {
-            room.canCreateQuestion(properties.scheduler.maxPendingPerStudy)
-        } catch (_: StudyRoomPendingLimitExceeded) {
+        val latestStatus = questions.findLatestStatusByStudyId(topicStudy.id)
+        if (latestStatus != null && !latestStatus.allowsNextQuestion) {
             throw ApiException(
                 HttpStatus.CONFLICT,
                 ApiErrorCode.STUDY_PENDING_QUESTION_EXISTS,

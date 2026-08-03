@@ -242,6 +242,31 @@ class StudyServiceTest {
     }
 
     @Test
+    fun `terminal grading failure moves the question to failed status`(): Unit = runBlocking {
+        val now = Instant.parse("2026-08-03T01:00:00Z")
+        val question = pendingQuestion(id = 505, topic = "Kotlin").apply {
+            status = QuestionStatus.GRADING
+            gradingRequestId = "request-505"
+            gradingStatus = AnswerGradingStatus.JUDGING
+        }
+        questions.visibleRows += question
+        val event = AnswerGradingRequestedEvent(
+            eventId = "event-505",
+            requestId = "request-505",
+            recordId = 505,
+            userId = principal.userId,
+            requestedAt = now.minusSeconds(10),
+            responseLanguage = "en",
+        )
+
+        recordWriter.fail(event, "Provider failed.", now)
+
+        assertThat(question.status).isEqualTo(QuestionStatus.FAILED)
+        assertThat(question.gradingStatus).isEqualTo(AnswerGradingStatus.FAILED)
+        assertThat(question.gradingError).isEqualTo("Provider failed.")
+    }
+
+    @Test
     fun `delete soft deletes graded record`(): Unit = runBlocking {
         questions.visibleRows += gradedQuestion(id = 601, topic = "Redis")
 

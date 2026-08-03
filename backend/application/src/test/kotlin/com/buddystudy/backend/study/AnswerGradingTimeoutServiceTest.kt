@@ -46,6 +46,7 @@ class AnswerGradingTimeoutServiceTest {
             ),
         ).thenReturn(true)
         var terminalStatus: AnswerGradingStatus? = null
+        var terminalQuestionStatus: QuestionStatus? = null
         val progress = object : AnswerGradingProgressPort {
             override suspend fun append(
                 recordId: Long,
@@ -57,6 +58,7 @@ class AnswerGradingTimeoutServiceTest {
                 occurredAt: Instant,
             ): AnswerGradingProgress {
                 terminalStatus = status
+                terminalQuestionStatus = questionStatus
                 return AnswerGradingProgress(
                     id = 1,
                     recordId = recordId,
@@ -83,5 +85,6 @@ class AnswerGradingTimeoutServiceTest {
 
         assertThat(service.expireStalled(now)).isEqualTo(1)
         assertThat(terminalStatus).isEqualTo(AnswerGradingStatus.FAILED)
+        assertThat(terminalQuestionStatus).isEqualTo(QuestionStatus.FAILED)
     }
 }

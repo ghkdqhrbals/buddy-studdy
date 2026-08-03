@@ -1,6 +1,7 @@
 package com.buddystudy.backend.study.application.port.outbound
 
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.study.domain.entity.StudyEntity
 import org.springframework.data.domain.Page
@@ -91,6 +92,8 @@ interface QuestionPort {
     suspend fun findLatestPendingByStudyIdsAndLanguage(studyIds: Collection<Long>, language: String): List<QuestionEntity> =
         findLatestPendingByStudyIds(studyIds)
     suspend fun findLatestCompletedByStudyIdAndUserId(studyId: Long, userId: Long): QuestionEntity? = null
+    suspend fun findLatestStatusByStudyId(studyId: Long): QuestionStatus? = null
+    suspend fun findLatestStatusesByStudyIds(studyIds: Collection<Long>): Map<Long, QuestionStatus> = emptyMap()
     suspend fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity>
     suspend fun findVisibleByUserAndLanguage(
         userId: Long,

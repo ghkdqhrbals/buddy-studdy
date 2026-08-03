@@ -6,10 +6,16 @@ enum class QuestionStatus(
     UNGRADED("ungraded"),
     GRADING("grading"),
     GRADED("graded"),
+    FAILED("failed"),
     SKIPPED("skipped"),
     ;
 
+    val allowsNextQuestion: Boolean
+        get() = this in COMPLETED_STATUSES || this == SKIPPED
+
     companion object {
+        val COMPLETED_STATUSES: Set<QuestionStatus> = setOf(FAILED, GRADED)
+
         fun fromDatabaseValue(value: String): QuestionStatus =
             entries.firstOrNull { it.databaseValue == value }
                 ?: error("Unsupported question status database value: $value")

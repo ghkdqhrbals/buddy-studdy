@@ -42,6 +42,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.context.annotation.Bean
+import org.springframework.data.domain.Pageable
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.test.context.TestPropertySource
 import java.net.URI
@@ -92,6 +93,93 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         questions.deleteAll()
         studies.deleteAll()
         Unit
+    }
+
+    @Test
+    fun `latest failed or graded question permits another question while in-progress latest question blocks it`(): Unit =
+        runBlocking {
+            val owner = registerActiveUser("latest-question-status")
+            val study = createStudy(owner, "Latest status")
+            val base = Instant.parse("2026-08-03T00:00:00Z")
+            questions.save(
+                QuestionEntity(
+                    deviceId = owner.deviceId,
+                    userId = study.userId,
+                    studyId = study.id,
+                    question = "Older pending question",
+                    topic = study.topic,
+                    status = QuestionStatus.UNGRADED,
+                    createdAt = base,
+                    updatedAt = base,
+                ),
+            )
+            questions.save(
+                QuestionEntity(
+                    deviceId = owner.deviceId,
+                    userId = study.userId,
+                    studyId = study.id,
+                    question = "Latest failed question",
+                    topic = study.topic,
+                    status = QuestionStatus.FAILED,
+                    gradingStatus = com.buddystudy.study.domain.entity.AnswerGradingStatus.FAILED,
+                    createdAt = base.plusSeconds(1),
+                    updatedAt = base.plusSeconds(1),
+                ),
+            )
+
+            assertThat(questions.findLatestStatusByStudyId(study.id)).isEqualTo(QuestionStatus.FAILED)
+            assertThat(questions.countPendingForStudy(study.id)).isZero()
+
+            questions.save(
+                QuestionEntity(
+                    deviceId = owner.deviceId,
+                    userId = study.userId,
+                    studyId = study.id,
+                    question = "Latest grading question",
+                    topic = study.topic,
+                    status = QuestionStatus.GRADING,
+                    createdAt = base.plusSeconds(2),
+                    updatedAt = base.plusSeconds(2),
+                ),
+            )
+
+            assertThat(questions.findLatestStatusByStudyId(study.id)).isEqualTo(QuestionStatus.GRADING)
+            assertThat(questions.countPendingForStudy(study.id)).isEqualTo(1)
+        }
+
+    @Test
+    fun `all studies exposes only successfully graded questions`(): Unit = runBlocking {
+        val owner = registerActiveUser("public-graded-only")
+        val study = createStudy(owner, "Public status")
+        val graded = questions.save(
+            gradedQuestion(
+                deviceId = owner.deviceId,
+                userId = study.userId,
+                studyId = study.id,
+                topic = study.topic,
+                question = "Successfully graded",
+                createdAt = Instant.parse("2026-08-03T00:00:00Z"),
+                publicQuestion = true,
+            ),
+        )
+        questions.save(
+            gradedQuestion(
+                deviceId = owner.deviceId,
+                userId = study.userId,
+                studyId = study.id,
+                topic = study.topic,
+                question = "Failed grading",
+                createdAt = Instant.parse("2026-08-03T00:00:01Z"),
+                publicQuestion = true,
+            ).apply {
+                status = QuestionStatus.FAILED
+                gradingStatus = com.buddystudy.study.domain.entity.AnswerGradingStatus.FAILED
+            },
+        )
+
+        val page = questions.findPublicAnswered(Pageable.ofSize(20))
+
+        assertThat(page.content.map(QuestionEntity::id)).containsExactly(graded.id)
     }
 
     @Test

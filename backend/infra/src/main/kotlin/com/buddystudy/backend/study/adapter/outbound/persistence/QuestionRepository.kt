@@ -7,6 +7,7 @@ import com.buddystudy.backend.common.adapter.outbound.persistence.indexedBindMar
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.QuestionStatus
 import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.data.domain.Page
@@ -72,6 +73,7 @@ class QuestionRepository(
                     .and("grading_status").`in`(NON_TERMINAL_GRADING_STATUSES),
             ),
             Update.update("grading_status", "FAILED")
+                .set("status", QuestionStatus.FAILED.databaseValue)
                 .set("grading_error", error.take(255))
                 .set("updated_at", now),
             QuestionEntity::class.java,
@@ -208,17 +210,63 @@ class QuestionRepository(
             QuestionEntity::class.java,
         ).next().awaitSingleOrNull()
 
+    override suspend fun findLatestStatusByStudyId(studyId: Long): QuestionStatus? =
+        template.databaseClient.sql(
+            """
+            select status
+            from questions
+            where study_id = :studyId and deleted_at is null
+            order by created_at desc, id desc
+            limit 1
+            """.trimIndent(),
+        )
+            .bind("studyId", studyId)
+            .map { row, _ -> QuestionStatus.fromDatabaseValue(row.get("status", String::class.java)!!) }
+            .one()
+            .awaitSingleOrNull()
+
+    override suspend fun findLatestStatusesByStudyIds(studyIds: Collection<Long>): Map<Long, QuestionStatus> {
+        if (studyIds.isEmpty()) return emptyMap()
+        val studyMarkers = indexedBindMarkers("studyId", studyIds.size)
+        return template.databaseClient.sql(
+            """
+            select study_id, status
+            from (
+                select q.study_id, q.status,
+                       row_number() over (
+                           partition by q.study_id
+                           order by q.created_at desc, q.id desc
+                       ) as study_rank
+                from questions q
+                where q.study_id in ($studyMarkers) and q.deleted_at is null
+            ) ranked
+            where study_rank = 1
+            """.trimIndent(),
+        )
+            .bindIndexed("studyId", studyIds.toList())
+            .map { row, _ ->
+                row.get("study_id", java.lang.Long::class.java)!!.toLong() to
+                    QuestionStatus.fromDatabaseValue(row.get("status", String::class.java)!!)
+            }
+            .all()
+            .collectList()
+            .awaitSingle()
+            .toMap()
+    }
+
     private suspend fun findLatestPendingByStudyIdsInternal(studyIds: Collection<Long>): List<QuestionEntity> {
         if (studyIds.isEmpty()) return emptyList()
         val studyMarkers = indexedBindMarkers("studyId", studyIds.size)
         val ids = template.databaseClient.sql(
             """
             select id from (
-                select q.id, row_number() over (partition by q.study_id order by q.created_at desc, q.id desc) as study_rank
+                select q.id, q.status,
+                       row_number() over (partition by q.study_id order by q.created_at desc, q.id desc) as study_rank
                 from questions q
                 where q.study_id in ($studyMarkers) and q.deleted_at is null
-                  and q.score is null and q.skipped_at is null
-            ) ranked where study_rank = 1
+            ) ranked
+            where study_rank = 1
+              and status not in ('graded', 'failed', 'skipped')
             """.trimIndent(),
         ).bindIndexed("studyId", studyIds.toList())
             .map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }
@@ -311,26 +359,15 @@ class QuestionRepository(
     ): List<String> = recentTexts("user_id", userId, topic, pageable, QuestionLanguage.normalize(language))
 
     override suspend fun countPendingForStudy(studyId: Long): Long =
-        template.count(Query.query(pendingCriteria().and("study_id").`is`(studyId)), QuestionEntity::class.java)
-            .awaitSingle()
+        if (findLatestStatusByStudyId(studyId)?.allowsNextQuestion == false) 1L else 0L
 
     override suspend fun countPendingForStudyAndLanguage(studyId: Long, language: String): Long =
         countPendingForStudy(studyId)
 
     override suspend fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long> {
-        if (studyIds.isEmpty()) return emptyMap()
-        val studyMarkers = indexedBindMarkers("studyId", studyIds.size)
-        return template.databaseClient.sql(
-            """
-            select study_id, count(*) as pending_count from questions
-            where study_id in ($studyMarkers) and deleted_at is null and skipped_at is null and score is null
-            group by study_id
-            """.trimIndent(),
-        ).bindIndexed("studyId", studyIds.toList())
-            .map { row, _ ->
-                row.get("study_id", java.lang.Long::class.java)!!.toLong() to
-                    row.get("pending_count", java.lang.Long::class.java)!!.toLong()
-            }.all().collectList().awaitSingle().toMap()
+        return findLatestStatusesByStudyIds(studyIds)
+            .filterValues { !it.allowsNextQuestion }
+            .mapValues { 1L }
     }
 
     override suspend fun countPendingByStudyIdsAndLanguage(
@@ -458,7 +495,11 @@ class QuestionRepository(
     }
 
     private fun pendingCriteria(): Criteria =
-        Criteria.where("deleted_at").isNull.and("score").isNull.and("skipped_at").isNull
+        Criteria.where("deleted_at").isNull
+            .and("skipped_at").isNull
+            .and("status").notIn(
+                (QuestionStatus.COMPLETED_STATUSES + QuestionStatus.SKIPPED).map(QuestionStatus::databaseValue),
+            )
 
     private suspend fun recentTexts(
         column: String,
@@ -675,7 +716,8 @@ class QuestionRepository(
             .awaitSingle().toInt()
 
     private companion object {
-        const val PUBLIC_ANSWER_CONDITION = "q.answer is not null and length(trim(q.answer)) > 0"
+        const val PUBLIC_ANSWER_CONDITION =
+            "q.status = 'graded' and q.answer is not null and length(trim(q.answer)) > 0"
 
         val NON_TERMINAL_GRADING_STATUSES = listOf(
             "QUEUED",
