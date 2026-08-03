@@ -16,6 +16,7 @@ data class AdminUserSummary(
     val currentPeriodQuestionLimitOverride: Int?,
     val usedCount: Int,
     val remainingCount: Int,
+    val periodStartedAt: Instant,
     val resetAt: Instant,
     val createdAt: Instant,
     val appVersion: String? = null,

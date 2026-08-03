@@ -289,6 +289,7 @@ class AdminManagementPersistenceAdapter(
             currentPeriodQuestionLimitOverride = usage.questionLimitOverride,
             usedCount = usage.usedCount,
             remainingCount = (effectiveLimit - usage.usedCount).coerceAtLeast(0),
+            periodStartedAt = period.startedAt,
             resetAt = period.resetAt,
             createdAt = createdAt,
             appVersion = appVersion,

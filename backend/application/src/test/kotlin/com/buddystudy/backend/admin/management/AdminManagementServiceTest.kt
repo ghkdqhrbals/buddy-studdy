@@ -122,6 +122,7 @@ class AdminManagementServiceTest {
             currentPeriodQuestionLimitOverride = currentPeriodQuestionLimitOverride,
             usedCount = 0,
             remainingCount = monthlyLimit,
+            periodStartedAt = Instant.parse("2026-07-01T00:00:00Z"),
             resetAt = Instant.parse("2026-08-01T00:00:00Z"),
             createdAt = Instant.parse("2026-07-01T00:00:00Z"),
         )

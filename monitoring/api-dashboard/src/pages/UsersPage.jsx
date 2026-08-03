@@ -4,7 +4,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Save } from "lucide-react";
+import { CalendarRange, Plus, RotateCcw, Save } from "lucide-react";
 import { useMemo, useState } from "react";
 import { adminFetch } from "../admin/adminApi.js";
 import {
@@ -22,6 +22,18 @@ import { AdminNotificationComposer } from "../components/AdminNotificationCompos
 import { formatDateTime, statusTone } from "../lib/format.js";
 
 const PAGE_SIZE = 20;
+const LIMIT_PRESETS = [10, 50, 100];
+
+function formatQuestionCount(value) {
+  return Number(value || 0).toLocaleString();
+}
+
+function quotaUsagePercent(user) {
+  const limit = Number(user.monthlyLimit) || 0;
+  const used = Number(user.usedCount) || 0;
+  if (limit <= 0) return used > 0 ? 100 : 0;
+  return Math.min(100, Math.round((used / limit) * 100));
+}
 
 function MembershipEditor({ user, tiers, onSaved }) {
   const [tierCode, setTierCode] = useState(user.tierCode);
@@ -38,8 +50,10 @@ function MembershipEditor({ user, tiers, onSaved }) {
   });
   return (
     <section className="drawer-section">
-      <h3>Membership controls</h3>
-      <p>Plan and personal limits continue to apply after the current quota period resets.</p>
+      <h3>Default limit after reset</h3>
+      <p className="section-description">
+        This membership limit applies now when no current-period override exists, and continues after every reset.
+      </p>
       <div className="form-grid">
         <label className="field">
           <span>Internal plan</span>
@@ -67,38 +81,132 @@ function MembershipEditor({ user, tiers, onSaved }) {
   );
 }
 
-function CurrentPeriodQuotaEditor({ user, onSaved }) {
-  const [override, setOverride] = useState(user.currentPeriodQuestionLimitOverride ?? "");
+function CurrentPeriodQuotaEditor({ user, membershipLimit, onSaved }) {
+  const currentLimit = Number(user.monthlyLimit) || 0;
+  const usedCount = Number(user.usedCount) || 0;
+  const [targetLimit, setTargetLimit] = useState(String(currentLimit));
+  const parsedTargetLimit = targetLimit === "" ? Number.NaN : Number(targetLimit);
+  const isValidTarget = Number.isInteger(parsedTargetLimit)
+    && parsedTargetLimit >= 0
+    && parsedTargetLimit <= 1_000_000;
+  const projectedRemaining = isValidTarget ? Math.max(parsedTargetLimit - usedCount, 0) : null;
+  const limitDelta = isValidTarget ? parsedTargetLimit - currentLimit : 0;
+  const usagePercent = quotaUsagePercent(user);
+  const limitSource = user.currentPeriodQuestionLimitOverride != null
+    ? "Current-period override"
+    : user.monthlyLimitOverride != null
+      ? "Personal recurring limit"
+      : `${user.tierCode} plan default`;
   const mutation = useMutation({
-    mutationFn: () => adminFetch(`/users/${user.id}/quota/current-period`, {
+    mutationFn: (questionLimitOverride) => adminFetch(`/users/${user.id}/quota/current-period`, {
       method: "PATCH",
-      body: JSON.stringify({
-        questionLimitOverride: override === "" ? null : Number(override),
-      }),
+      body: JSON.stringify({ questionLimitOverride }),
     }),
     onSuccess: onSaved,
   });
   return (
-    <section className="drawer-section">
-      <h3>Current quota period</h3>
-      <p>
-        Override this user&apos;s total question allowance only until {formatDateTime(user.resetAt)}.
-        Clear the field to return to the membership limit immediately.
-      </p>
-      <label className="field">
-        <span>Question limit for this period</span>
-        <input
-          type="number"
-          min="0"
-          max="1000000"
-          value={override}
-          placeholder="Use membership limit"
-          onChange={(event) => setOverride(event.target.value)}
-        />
-      </label>
+    <section className="drawer-section quota-manager">
+      <div className="quota-manager-heading">
+        <div>
+          <span className="quota-eyebrow">Current allowance</span>
+          <h3>Questions in this quota period</h3>
+        </div>
+        <StatusBadge tone={user.remainingCount > 0 ? "success" : "warning"}>{limitSource}</StatusBadge>
+      </div>
+
+      <div className="quota-stat-grid">
+        <div><span>Current limit</span><strong>{formatQuestionCount(currentLimit)}</strong><small>questions total</small></div>
+        <div><span>Used</span><strong>{formatQuestionCount(usedCount)}</strong><small>{usagePercent}% consumed</small></div>
+        <div><span>Remaining</span><strong>{formatQuestionCount(user.remainingCount)}</strong><small>available now</small></div>
+      </div>
+      <div
+        className="quota-progress"
+        role="progressbar"
+        aria-label="Question quota used"
+        aria-valuemin="0"
+        aria-valuemax={currentLimit}
+        aria-valuenow={Math.min(usedCount, currentLimit)}
+      >
+        <span style={{ width: `${usagePercent}%` }} />
+      </div>
+
+      <div className="quota-period">
+        <CalendarRange size={19} aria-hidden="true" />
+        <div>
+          <span>Applies to this quota period only</span>
+          <strong>{formatDateTime(user.periodStartedAt)} → {formatDateTime(user.resetAt)}</strong>
+          <small>The override expires automatically at the reset time.</small>
+        </div>
+      </div>
+
+      <div className="quota-target-editor">
+        <div>
+          <h4>Set the total limit until reset</h4>
+          <p>Enter the total allowance, or add a common extension to the current limit.</p>
+        </div>
+        <label className="field quota-limit-field">
+          <span>New total limit</span>
+          <div className="quota-number-input">
+            <input
+              type="number"
+              min="0"
+              max="1000000"
+              value={targetLimit}
+              onChange={(event) => setTargetLimit(event.target.value)}
+            />
+            <span>questions</span>
+          </div>
+        </label>
+        <div className="quota-presets" aria-label="Quick question limit extensions">
+          {LIMIT_PRESETS.map((increment) => (
+            <button
+              type="button"
+              key={increment}
+              onClick={() => setTargetLimit(String(currentLimit + increment))}
+            >
+              <Plus size={13} aria-hidden="true" />{increment}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {isValidTarget ? (
+        <div className="quota-change-preview" data-change={limitDelta === 0 ? "none" : limitDelta > 0 ? "increase" : "decrease"}>
+          <div><span>Current</span><strong>{formatQuestionCount(currentLimit)}</strong></div>
+          <span className="quota-change-arrow" aria-hidden="true">→</span>
+          <div><span>New limit</span><strong>{formatQuestionCount(parsedTargetLimit)}</strong></div>
+          <div><span>Available after update</span><strong>{formatQuestionCount(projectedRemaining)}</strong></div>
+          <small>{limitDelta === 0 ? "No change" : `${limitDelta > 0 ? "+" : ""}${formatQuestionCount(limitDelta)} questions`}</small>
+        </div>
+      ) : (
+        <InlineNotice tone="warning" compact>Enter a whole number between 0 and 1,000,000.</InlineNotice>
+      )}
+      {isValidTarget && parsedTargetLimit < usedCount ? (
+        <InlineNotice tone="warning" compact>
+          This user already used {formatQuestionCount(usedCount)} questions, so the remaining allowance will be 0.
+        </InlineNotice>
+      ) : null}
+
       <div className="drawer-form-actions">
         {mutation.error ? <InlineNotice tone="danger" compact>{mutation.error.message}</InlineNotice> : null}
-        <Button icon={Save} busy={mutation.isPending} onClick={() => mutation.mutate()}>Save current period</Button>
+        {user.currentPeriodQuestionLimitOverride != null ? (
+          <Button
+            variant="ghost"
+            icon={RotateCcw}
+            busy={mutation.isPending}
+            onClick={() => mutation.mutate(null)}
+          >
+            Restore default ({formatQuestionCount(membershipLimit)})
+          </Button>
+        ) : null}
+        <Button
+          icon={Save}
+          busy={mutation.isPending}
+          disabled={!isValidTarget || parsedTargetLimit === currentLimit}
+          onClick={() => mutation.mutate(parsedTargetLimit)}
+        >
+          Update until reset
+        </Button>
       </div>
     </section>
   );
@@ -171,7 +279,13 @@ function UsersWorkspace() {
     {
       key: "usage",
       label: "Usage",
-      render: (user) => <span className="usage-cell"><strong>{user.usedCount}</strong> / {user.monthlyLimit}<small>{user.remainingCount} remaining</small></span>,
+      render: (user) => (
+        <span className="usage-cell quota-table-usage">
+          <span><strong>{formatQuestionCount(user.usedCount)}</strong> of {formatQuestionCount(user.monthlyLimit)}</span>
+          <span className="quota-table-progress"><i style={{ width: `${quotaUsagePercent(user)}%` }} /></span>
+          <small>{formatQuestionCount(user.remainingCount)} remaining</small>
+        </span>
+      ),
     },
     { key: "tierCode", label: "Plan", render: (user) => <StatusBadge>{user.tierCode}</StatusBadge> },
     { key: "resetAt", label: "Reset", render: (user) => formatDateTime(user.resetAt) },
@@ -236,24 +350,27 @@ function UsersWorkspace() {
       >
         {selected ? (
           <>
-            <div className="detail-summary">
-              <div><span>Status</span><StatusBadge tone={statusTone(selected.status)}>{selected.status}</StatusBadge></div>
-              <div><span>Provider</span><strong>{selected.provider}</strong></div>
-              <div><span>Remaining</span><strong>{selected.remainingCount} / {selected.monthlyLimit}</strong></div>
-              <div><span>Reset</span><strong>{formatDateTime(selected.resetAt)}</strong></div>
-            </div>
-            <MembershipEditor
-              key={`${selected.id}-${selected.tierCode}-${selected.monthlyLimitOverride}`}
+            <CurrentPeriodQuotaEditor
+              key={`${selected.id}-${selected.currentPeriodQuestionLimitOverride}-${selected.resetAt}`}
               user={selected}
-              tiers={tiers}
+              membershipLimit={selected.monthlyLimitOverride
+                ?? tiers.find((tier) => tier.tierCode === selected.tierCode)?.monthlyQuestionLimit
+                ?? selected.monthlyLimit}
               onSaved={(updated) => {
                 setSelected(updated);
                 refresh();
               }}
             />
-            <CurrentPeriodQuotaEditor
-              key={`${selected.id}-${selected.currentPeriodQuestionLimitOverride}-${selected.resetAt}`}
+            <div className="detail-summary user-account-summary">
+              <div><span>Status</span><StatusBadge tone={statusTone(selected.status)}>{selected.status}</StatusBadge></div>
+              <div><span>Provider</span><strong>{selected.provider}</strong></div>
+              <div><span>Plan</span><strong>{selected.tierCode}</strong></div>
+              <div><span>User ID</span><strong>{selected.id}</strong></div>
+            </div>
+            <MembershipEditor
+              key={`${selected.id}-${selected.tierCode}-${selected.monthlyLimitOverride}`}
               user={selected}
+              tiers={tiers}
               onSaved={(updated) => {
                 setSelected(updated);
                 refresh();

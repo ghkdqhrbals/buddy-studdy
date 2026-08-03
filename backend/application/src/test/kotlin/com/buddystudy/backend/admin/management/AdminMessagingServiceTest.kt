@@ -206,6 +206,7 @@ class AdminMessagingServiceTest {
             currentPeriodQuestionLimitOverride = null,
             usedCount = 0,
             remainingCount = 30,
+            periodStartedAt = Instant.parse("2026-07-01T00:00:00Z"),
             resetAt = Instant.parse("2026-08-01T00:00:00Z"),
             createdAt = Instant.parse("2026-07-01T00:00:00Z"),
         )
