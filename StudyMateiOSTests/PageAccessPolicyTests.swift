@@ -2,6 +2,41 @@ import XCTest
 @testable import StudyMate
 
 final class PageAccessPolicyTests: XCTestCase {
+    @MainActor
+    func testNotificationStudyListRouteUsesExistingHomeMyStudiesScreen() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let appState = AppState(settingsStore: SettingsStore(defaults: defaults))
+
+        XCTAssertTrue(appState.openRouteFromNotification(.studyList))
+
+        XCTAssertEqual(appState.mobileVisibleTab, .home)
+        XCTAssertEqual(appState.appRouteRequest?.route, .studyList)
+        XCTAssertEqual(appState.appRouteRequest?.presentation, .direct)
+        XCTAssertNil(appState.homeStudyRoute)
+    }
+
+    @MainActor
+    func testNotificationHomeRouteDoesNotCreateNestedStudyListDestination() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let appState = AppState(settingsStore: SettingsStore(defaults: defaults))
+
+        XCTAssertTrue(appState.openRouteFromNotification(.home))
+
+        XCTAssertEqual(appState.mobileVisibleTab, .home)
+        XCTAssertNil(appState.appRouteRequest)
+        XCTAssertNil(appState.homeStudyRoute)
+    }
+
     func testAppLanguageResolvesSupportedPreferredLanguagesInOrder() {
         XCTAssertEqual(AppLanguage.preferred(from: ["ko-KR"]), .korean)
         XCTAssertEqual(AppLanguage.preferred(from: ["en-GB"]), .english)

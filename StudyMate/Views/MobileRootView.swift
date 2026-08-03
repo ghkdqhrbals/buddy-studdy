@@ -251,10 +251,10 @@ private struct MobileNotificationsTab: View {
             return
         }
 
-        if request.route == .home {
+        if request.route == .home || request.route == .studyList {
             forwardedRoute = nil
             appState.appRouteRequest = nil
-            appState.setSelectedTab(.home)
+            appState.openRoute(request.route)
             return
         }
 
@@ -1107,6 +1107,14 @@ private struct CommunityQuestionRoute: Identifiable, Hashable {
 private struct NotificationForwardRoute: Identifiable, Hashable {
     let id = UUID()
     var route: AppRoute
+
+    init?(route: AppRoute) {
+        guard route != .home,
+              route != .studyList else {
+            return nil
+        }
+        self.route = route
+    }
 }
 
 private enum MobileHomeFeedItem: Identifiable {
@@ -1548,10 +1556,13 @@ private struct MobileHomeView: View {
             guard appState.mobileVisibleTab == .home else {
                 return
             }
-            if request.route == .home {
+            if request.route == .home || request.route == .studyList {
                 notificationForwardRoute = nil
                 isShowingNotifications = false
                 appState.appRouteRequest = nil
+                if request.route == .studyList {
+                    selectedHomeScope = .my
+                }
                 return
             }
             notificationForwardRoute = NotificationForwardRoute(route: request.route)
@@ -2157,6 +2168,10 @@ private struct MobileNotificationsView: View {
                         } else if route == .home {
                             forwardedRoute = nil
                             isPresented = false
+                        } else if route == .studyList {
+                            forwardedRoute = nil
+                            isPresented = false
+                            appState.openRoute(route)
                         } else {
                             forwardedRoute = NotificationForwardRoute(route: route)
                         }
@@ -2336,7 +2351,7 @@ private struct NotificationRouteDestination: View {
         case .publicQuestions:
             NotificationPublicQuestionsDestination()
         case .studyList:
-            NotificationStudyListDestination()
+            EmptyView()
         case .statistics:
             StatisticsView()
                 .padding(.horizontal, 16)
@@ -2349,7 +2364,7 @@ private struct NotificationRouteDestination: View {
         case .profile:
             MobileProfileSettingsSheet()
         case .home:
-            NotificationStudyListDestination()
+            EmptyView()
         }
     }
 
@@ -4333,35 +4348,6 @@ struct StudyEditorSheet: View {
 
     private var resolvedDifficulty: Int {
         min(max(Int(difficultyLevel.rounded()), 1), 10)
-    }
-}
-
-private struct NotificationStudyListDestination: View {
-    @EnvironmentObject private var appState: AppState
-
-    private var strings: AppStrings {
-        appState.strings
-    }
-
-    var body: some View {
-        List(appState.studyCategoriesForDisplay) { category in
-            NavigationLink {
-                StudyView(preferredCategoryID: category.id)
-                    .padding(.horizontal, 16)
-                    .navigationTitle(category.title)
-                    .navigationBarTitleDisplayMode(.inline)
-            } label: {
-                MobileHomeCategoryRow(
-                    category: category,
-                    hasPendingQuestion: appState.pendingQuestionCount(for: category) > 0,
-                    strings: strings
-                )
-            }
-        }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .navigationTitle(strings.tabStudy)
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

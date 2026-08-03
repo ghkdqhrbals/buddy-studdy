@@ -844,6 +844,14 @@ final class AppState: ObservableObject {
             .info,
             "push_route_applying route=\(route), selectedTabBefore=\(selectedTab)"
         )
+        if route == .home || route == .studyList {
+            let opened = openRoute(route)
+            log(
+                .info,
+                "push_route_applied route=\(route), selectedTab=home, presentation=direct"
+            )
+            return opened
+        }
         selectedTab = .notifications
         homeStudyRoute = nil
         appRouteRequest = AppRouteRequest(route: route, presentation: .notificationInbox)
@@ -860,6 +868,7 @@ final class AppState: ObservableObject {
         case .home:
             selectedTab = .home
             homeStudyRoute = nil
+            appRouteRequest = nil
             return true
         case .studyList, .publicQuestions:
             selectedTab = .home
