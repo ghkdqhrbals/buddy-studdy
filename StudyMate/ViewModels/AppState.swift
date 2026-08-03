@@ -5510,7 +5510,11 @@ final class AppState: ObservableObject {
         }
 
         if settings.selectedStudyCategoryID != targetCategory.id {
-            persistSettings(settings.withSelectedCategoryID(targetCategory.id), apiKey: apiKey)
+            persistSettings(
+                settings.withSelectedCategoryID(targetCategory.id),
+                apiKey: apiKey,
+                syncBackendSchedule: false
+            )
         }
 
         applyPreferredPendingRecord(for: targetCategory)

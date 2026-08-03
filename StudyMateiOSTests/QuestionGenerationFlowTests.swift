@@ -10,6 +10,41 @@ final class QuestionGenerationFlowTests: XCTestCase {
         super.tearDown()
     }
 
+    func testOpeningStudyOnlyPersistsSelectionWithoutUpdatingBackendSettings() async throws {
+        let suiteName = "StudyNavigationSettingsTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let first = StudyCategory(id: "11", title: "Redis")
+        let second = StudyCategory(id: "12", title: "Redis Streams")
+        let store = SettingsStore(defaults: defaults, usesSecureBackendIdentityStorage: false)
+        store.saveSettings(
+            StudySettings(
+                topic: first.title,
+                difficulty: .intermediate,
+                customPrompt: "",
+                intervalMinutes: 30,
+                studyCategories: [first, second],
+                selectedStudyCategoryID: first.id
+            )
+        )
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        let requests = LockedRequestCounter()
+        let client = makeClient { request in
+            requests.increment()
+            return Self.response(for: request, statusCode: 200, body: "{}")
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+
+        appState.openStudyCategory(second.id)
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(appState.settings.selectedStudyCategoryID, second.id)
+        XCTAssertEqual(store.loadSettings().selectedStudyCategoryID, second.id)
+        XCTAssertEqual(requests.value, 0)
+    }
+
     func testAutosavingStudyRoomDraftDoesNotPromoteItToSubmittedAnswer() {
         let suiteName = "AnswerDraftFlowTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
