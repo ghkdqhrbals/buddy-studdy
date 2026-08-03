@@ -98,8 +98,7 @@ Example readiness response:
           "question-schedule",
           "event-outbox-dispatch",
           "user-stats-refresh",
-          "admin-analytics-recent",
-          "admin-analytics-correction"
+          "answer-grading-watchdog"
         ],
         "thresholdSeconds": 900,
         "startupGraceSeconds": 900,

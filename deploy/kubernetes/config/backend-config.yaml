@@ -45,4 +45,4 @@ data:
   MONITORING_SCHEDULER_READINESS_ENABLED: "true"
   MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES: "15"
   MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES: "15"
-  MONITORING_SCHEDULER_MONITORED_JOBS: "question-schedule,event-outbox-dispatch,user-stats-refresh,admin-analytics-recent,answer-grading-watchdog"
+  MONITORING_SCHEDULER_MONITORED_JOBS: "question-schedule,event-outbox-dispatch,user-stats-refresh,answer-grading-watchdog"

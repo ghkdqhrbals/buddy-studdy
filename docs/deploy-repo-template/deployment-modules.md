@@ -121,9 +121,10 @@ deployment.
   restricts that port to the same approved administrator CIDRs as MySQL. Redis
   starts before the backend; Actions verifies only process survival and port
   publication while application readiness and Grafana verify runtime behavior.
-- Scheduler readiness includes only jobs expected to succeed within the
-  readiness freshness window. Daily correction jobs remain visible in run
-  history and failure alerts but must not make a 15-minute readiness check stale.
+- Scheduler readiness includes every registered managed job, all of which are
+  expected to succeed within the readiness freshness window. Admin analytics
+  aggregation is an authenticated on-demand backend operation and is not
+  registered as a scheduled or manually retryable batch job.
   The answer-grading watchdog is a frequent critical job and belongs in the
   default monitored list.
 - Runtime health checks are not GitHub Actions deploy gates. GitHub Actions

@@ -120,7 +120,7 @@ jobs:
           MONITORING_SCHEDULER_READINESS_ENABLED: ${{ vars.MONITORING_SCHEDULER_READINESS_ENABLED || 'true' }}
           MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES: ${{ vars.MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES || '15' }}
           MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES: ${{ vars.MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES || '15' }}
-          MONITORING_SCHEDULER_MONITORED_JOBS: ${{ vars.MONITORING_SCHEDULER_MONITORED_JOBS || 'question-schedule,event-outbox-dispatch,user-stats-refresh,admin-analytics-recent,answer-grading-watchdog' }}
+          MONITORING_SCHEDULER_MONITORED_JOBS: ${{ vars.MONITORING_SCHEDULER_MONITORED_JOBS || 'question-schedule,event-outbox-dispatch,user-stats-refresh,answer-grading-watchdog' }}
           REMOTE_LOKI_PUSH_URL: ${{ vars.REMOTE_LOKI_PUSH_URL || '' }}
           REMOTE_LOKI_BASIC_AUTH_USER: ${{ secrets.REMOTE_LOKI_BASIC_AUTH_USER || '' }}
           REMOTE_LOKI_BASIC_AUTH_PASSWORD: ${{ secrets.REMOTE_LOKI_BASIC_AUTH_PASSWORD || '' }}

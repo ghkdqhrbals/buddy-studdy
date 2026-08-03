@@ -74,7 +74,7 @@ class MonitoringConfigurationGuardTest {
     fun `prod scheduler allows managed jobs that are intentionally excluded from readiness monitoring`(): Unit = runBlocking {
         contextRunner
             .withBean("questionScheduleJob", ManagedJob::class.java, Supplier { fakeJob("question-schedule") })
-            .withBean("adminCorrectionJob", ManagedJob::class.java, Supplier { fakeJob("admin-analytics-correction") })
+            .withBean("maintenanceJob", ManagedJob::class.java, Supplier { fakeJob("maintenance-cleanup") })
             .withPropertyValues(
                 "spring.profiles.active=prod",
                 "buddystudy.scheduler.enabled=true",

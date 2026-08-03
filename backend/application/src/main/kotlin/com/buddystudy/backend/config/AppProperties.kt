@@ -110,14 +110,10 @@ data class BuddyStudyProperties(
             "question-schedule",
             "event-outbox-dispatch",
             "user-stats-refresh",
-            "admin-analytics-recent",
             "answer-grading-watchdog",
         ),
     )
     data class Analytics(
-        var enabled: Boolean = true,
-        var recentDays: Long = 2,
-        var correctionDays: Long = 30,
         var datasource: AnalyticsDataSource = AnalyticsDataSource(),
     )
     data class AnalyticsDataSource(

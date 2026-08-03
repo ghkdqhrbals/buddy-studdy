@@ -33,7 +33,7 @@ data:
   MONITORING_ADMIN_BASE_URL: https://api.ghkdqhrbals.org/admin
   MONITORING_ENVIRONMENT_NAME: development
   MONITORING_SCHEDULER_FAILURE_ALERT_REPEAT_SECONDS: "300"
-  MONITORING_SCHEDULER_MONITORED_JOBS: question-schedule,event-outbox-dispatch,user-stats-refresh,admin-analytics-recent,answer-grading-watchdog
+  MONITORING_SCHEDULER_MONITORED_JOBS: question-schedule,event-outbox-dispatch,user-stats-refresh,answer-grading-watchdog
   MONITORING_SCHEDULER_READINESS_ENABLED: "true"
   MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES: "15"
   MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES: "15"

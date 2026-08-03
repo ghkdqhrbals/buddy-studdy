@@ -737,12 +737,12 @@ test("kubernetes backend probes use dependency readiness while external monitor 
   assert.match(workerConfig, /api\.ghkdqhrbals\.org\/api\/v1\/health\/readiness/);
 });
 
-test("scheduler readiness monitors frequent jobs and excludes daily correction", () => {
+test("scheduler readiness monitors every registered managed job", () => {
   const applicationConfig = fs.readFileSync(path.join(repoRoot, "backend/tutor/src/main/resources/application.yml"), "utf8");
   const backendConfig = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/config/backend-config.yaml"), "utf8");
   const combinedManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/deploy.yaml"), "utf8");
   const deployTemplate = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"), "utf8");
-  const requiredJobs = managedJobNames().filter((jobName) => jobName !== "admin-analytics-correction");
+  const requiredJobs = managedJobNames();
 
   assert.ok(requiredJobs.length > 0, "expected at least one ManagedJob implementation");
   for (const jobName of requiredJobs) {
@@ -751,10 +751,6 @@ test("scheduler readiness monitors frequent jobs and excludes daily correction",
     assert.match(combinedManifest, new RegExp(`MONITORING_SCHEDULER_MONITORED_JOBS:.*${jobName}`));
     assert.match(deployTemplate, new RegExp(`MONITORING_SCHEDULER_MONITORED_JOBS:.*${jobName}`));
     assert.match(deployTemplate, new RegExp(`MONITORING_SCHEDULER_MONITORED_JOBS=\\$\\{MONITORING_SCHEDULER_MONITORED_JOBS\\}`));
-  }
-  for (const config of [applicationConfig, backendConfig, combinedManifest, deployTemplate]) {
-    const readinessLine = config.split("\n").find((line) => line.includes("MONITORING_SCHEDULER_MONITORED_JOBS") || line.includes("scheduler-monitored-jobs"));
-    assert.doesNotMatch(readinessLine ?? "", /admin-analytics-correction/);
   }
 });
 
@@ -782,7 +778,7 @@ test("kubernetes backend config does not depend on an external stream service", 
   }
 });
 
-test("backend scheduler seeds every job but readiness defaults include only frequent jobs", () => {
+test("backend scheduler seeds and monitors every registered managed job", () => {
   const appProperties = fs.readFileSync(
     path.join(repoRoot, "backend/application/src/main/kotlin/com/buddystudy/backend/config/AppProperties.kt"),
     "utf8",
@@ -795,19 +791,13 @@ test("backend scheduler seeds every job but readiness defaults include only freq
     .join("\n");
 
   const managedJobs = managedJobNames();
-  const readinessJobs = managedJobs.filter((jobName) => jobName !== "admin-analytics-correction");
-  for (const jobName of readinessJobs) {
+  for (const jobName of managedJobs) {
     assert.match(appProperties, new RegExp(`"${jobName}"`), `AppProperties default must monitor ${jobName}`);
     assert.match(applicationConfig, new RegExp(`scheduler-monitored-jobs:.*${jobName}`), `application.yml default must monitor ${jobName}`);
   }
   for (const jobName of managedJobs) {
     assert.match(migrations, new RegExp(`'${jobName}'`), `Flyway scheduler seed must include ${jobName}`);
   }
-  assert.doesNotMatch(appProperties, /schedulerMonitoredJobs:[\s\S]*"admin-analytics-correction"/);
-  assert.doesNotMatch(
-    applicationConfig.split("\n").find((line) => line.includes("scheduler-monitored-jobs")) ?? "",
-    /admin-analytics-correction/,
-  );
 });
 
 test("kubernetes production apply path does not include placeholder backend secret", () => {

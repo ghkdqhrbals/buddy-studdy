@@ -142,14 +142,6 @@ class AdminAnalyticsService(
     }
 
     @Transactional
-    override suspend fun refreshRecent(referenceDate: LocalDate): Int =
-        refreshRange(referenceDate.minusDays((properties.analytics.recentDays - 1).coerceAtLeast(0)), referenceDate)
-
-    @Transactional
-    override suspend fun refreshCorrection(referenceDate: LocalDate): Int =
-        refreshRange(referenceDate.minusDays((properties.analytics.correctionDays - 1).coerceAtLeast(0)), referenceDate)
-
-    @Transactional
     override suspend fun refreshRange(startDate: LocalDate, endDate: LocalDate): Int =
         refreshDates(normalizedRange(startDate, endDate))
 

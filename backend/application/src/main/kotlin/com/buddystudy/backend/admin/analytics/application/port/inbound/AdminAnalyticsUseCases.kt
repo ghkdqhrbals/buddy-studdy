@@ -25,7 +25,5 @@ interface AdminAnalyticsUseCase {
 }
 
 interface AdminAnalyticsAggregationUseCase {
-    suspend fun refreshRecent(referenceDate: LocalDate): Int
-    suspend fun refreshCorrection(referenceDate: LocalDate): Int
     suspend fun refreshRange(startDate: LocalDate, endDate: LocalDate): Int
 }

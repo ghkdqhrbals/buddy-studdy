@@ -33,10 +33,10 @@ class ManagedJobExecutionServiceTest {
 
     @Test
     fun `execute records successful job run`(): Unit = runBlocking {
-        val result = service.execute(FakeJob("admin-analytics-recent") { "rows=18" }, JobTriggerType.SCHEDULED)
+        val result = service.execute(FakeJob("event-outbox-dispatch") { "published=18" }, JobTriggerType.SCHEDULED)
 
         assertThat(result.status).isEqualTo(JobRunStatus.SUCCESS)
-        assertThat(result.summary).isEqualTo("rows=18")
+        assertThat(result.summary).isEqualTo("published=18")
         assertThat(runs.rows.single().status).isEqualTo(JobRunStatus.SUCCESS)
         assertThat(runs.rows.single().durationMs).isNotNull()
     }
@@ -105,7 +105,7 @@ class ManagedJobExecutionServiceTest {
     @Test
     fun `retry keeps retry source run id`(): Unit = runBlocking {
         val result = service.execute(
-            FakeJob("admin-analytics-correction") { "corrected" },
+            FakeJob("user-stats-refresh") { "refreshed" },
             JobTriggerType.RETRY,
             retryOfRunId = 42,
             createdBy = "admin",
@@ -251,26 +251,26 @@ class ManagedJobExecutionServiceTest {
 
     @Test
     fun `find statuses returns unmonitored registered jobs with operator metadata`(): Unit = runBlocking {
-        val correction = object : ManagedJob {
-            override val name = "admin-analytics-correction"
-            override val displayName = "Admin analytics correction"
-            override val description = "Recalculates the correction window."
-            override suspend fun run(): String = "rows=0"
+        val maintenance = object : ManagedJob {
+            override val name = "maintenance-cleanup"
+            override val displayName = "Maintenance cleanup"
+            override val description = "Removes expired temporary data."
+            override suspend fun run(): String = "deleted=0"
         }
         runs.snapshots += ScheduledJobSnapshot(
-            jobName = correction.name,
+            jobName = maintenance.name,
             enabled = true,
-            scheduleType = "CRON",
-            scheduleValue = "0 20 3 * * *",
+            scheduleType = "MANUAL",
+            scheduleValue = "operator-triggered",
             latestRun = null,
         )
-        val serviceWithCatalog = ManagedJobExecutionService(runs, locks, properties, listOf(correction))
+        val serviceWithCatalog = ManagedJobExecutionService(runs, locks, properties, listOf(maintenance))
 
         val response = serviceWithCatalog.findStatuses()
 
-        val status = response.jobs.single { it.jobName == correction.name }
-        assertThat(status.displayName).isEqualTo(correction.displayName)
-        assertThat(status.description).isEqualTo(correction.description)
+        val status = response.jobs.single { it.jobName == maintenance.name }
+        assertThat(status.displayName).isEqualTo(maintenance.displayName)
+        assertThat(status.description).isEqualTo(maintenance.description)
         assertThat(status.monitored).isFalse()
         assertThat(status.stale).isFalse()
     }

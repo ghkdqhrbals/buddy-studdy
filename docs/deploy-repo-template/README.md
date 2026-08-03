@@ -301,9 +301,9 @@ open a verified Draft PR but never merges or deploys it. The template passes
 `MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES`,
 `MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES`, and
 `MONITORING_SCHEDULER_MONITORED_JOBS` into the backend so Docker deployments
-use the same scheduler readiness policy as Kubernetes. Only frequent jobs belong
-in this 15-minute readiness list. Daily correction jobs remain visible through
-their ERROR logs and must not make readiness stale between scheduled runs.
+use the same scheduler readiness policy as Kubernetes. Only frequent managed
+jobs belong in this 15-minute readiness list. Admin analytics is refreshed only
+by an explicit authenticated operator request and is not a managed batch job.
 Grafana alerting owns continuous server-down detection. The Cloudflare Worker
 scheduled check is disabled in production to avoid periodic KV writes.
 

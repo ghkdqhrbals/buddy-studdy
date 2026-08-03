@@ -44,10 +44,10 @@ class ScheduledJobRunPersistenceAdapterTest {
 
     @Test
     fun `stores job run lifecycle without blocking jdbc`(): Unit = runBlocking {
-        val started = adapter.start("admin-analytics-recent", JobTriggerType.SCHEDULED, null, "system")
+        val started = adapter.start("event-outbox-dispatch", JobTriggerType.SCHEDULED, null, "system")
 
         val finished = adapter.finish(started.id, JobRunStatus.SUCCESS, "rows=9", null, 17)
-        val page = adapter.findRuns("admin-analytics-recent", null, 10, 0)
+        val page = adapter.findRuns("event-outbox-dispatch", null, 10, 0)
 
         assertThat(finished.status).isEqualTo(JobRunStatus.SUCCESS)
         assertThat(finished.summary).isEqualTo("rows=9")
