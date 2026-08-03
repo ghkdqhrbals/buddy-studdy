@@ -6,6 +6,7 @@ import com.buddystudy.backend.billing.application.model.RecordVerifiedPaymentCom
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
 import com.buddystudy.backend.billing.application.model.VerifiedAppleNotification
 import com.buddystudy.backend.billing.application.model.VerifiedAppleTransaction
+import com.buddystudy.backend.billing.application.model.VerifiedRevenueCatEvent
 import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPort
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.billing.domain.BillingActionStatus
@@ -41,9 +42,15 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var ledger: BillingLedgerPort
     @Autowired lateinit var database: DatabaseClient
     private val createdUserIds = mutableListOf<Long>()
+    private val createdRevenueCatEventIds = mutableListOf<String>()
 
     @AfterEach
     fun cleanUpBillingFixtures(): Unit = runBlocking {
+        createdRevenueCatEventIds.forEach { eventId ->
+            database.sql("delete from revenuecat_billing_events where event_id = :eventId")
+                .bind("eventId", eventId).fetch().rowsUpdated().awaitSingle()
+        }
+        createdRevenueCatEventIds.clear()
         createdUserIds.asReversed().forEach { userId ->
             execute("delete from billing_actions where user_id = $userId")
             execute("delete from billing_jobs where invoice_id in (select id from invoices where user_id = $userId)")
@@ -56,6 +63,42 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
             execute("delete from users where id = $userId")
         }
         createdUserIds.clear()
+    }
+
+    @Test
+    fun `failed RevenueCat receipt remains retryable and duplicate processed delivery is ignored`(): Unit = runBlocking {
+        val eventId = "rc-${UUID.randomUUID()}"
+        createdRevenueCatEventIds += eventId
+        val event = VerifiedRevenueCatEvent(
+            eventId = eventId,
+            eventType = "TEST",
+            appUserId = null,
+            aliases = emptyList(),
+            store = "APP_STORE",
+            productId = null,
+            transactionId = null,
+            originalTransactionId = null,
+            environment = BillingEnvironment.SANDBOX,
+            priceMilliunits = null,
+            currency = null,
+            purchasedAt = null,
+            expiresAt = null,
+            eventAt = Instant.parse("2032-08-04T00:00:00Z"),
+            cancelReason = null,
+            signedPayloadSha256 = "c".repeat(64),
+        )
+
+        assertThat(ledger.recordRevenueCatEvent(event, event.eventAt)).isTrue()
+        ledger.markRevenueCatEventFailed(eventId, "temporary failure", event.eventAt.plusSeconds(1))
+        assertThat(ledger.recordRevenueCatEvent(event, event.eventAt.plusSeconds(2))).isTrue()
+        assertThat(ledger.applyRevenueCatEvent(event, event.eventAt.plusSeconds(3))).isTrue()
+        assertThat(ledger.recordRevenueCatEvent(event, event.eventAt.plusSeconds(4))).isFalse()
+        assertThat(
+            database.sql("select processing_status from revenuecat_billing_events where event_id = :eventId")
+                .bind("eventId", eventId)
+                .map { row -> row.get("processing_status", String::class.java)!! }
+                .one().awaitSingle(),
+        ).isEqualTo("IGNORED")
     }
 
     @Test

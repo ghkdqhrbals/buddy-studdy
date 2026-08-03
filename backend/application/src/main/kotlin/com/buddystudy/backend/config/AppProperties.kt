@@ -126,6 +126,7 @@ data class BuddyStudyProperties(
     )
     data class Billing(
         var apple: Apple = Apple(),
+        var revenueCat: RevenueCat = RevenueCat(),
     )
     data class Apple(
         var bundleId: String = "io.github.ghkdqhrbals.StudyMate",
@@ -137,6 +138,11 @@ data class BuddyStudyProperties(
         ),
         var enableOnlineChecks: Boolean = true,
         var allowXcodeEnvironment: Boolean = false,
+    )
+    data class RevenueCat(
+        var webhookSigningSecret: String = "",
+        var projectId: String = "",
+        var appId: String = "",
     )
 }
 

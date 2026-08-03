@@ -4,6 +4,15 @@ import XCTest
 @testable import StudyMate
 
 final class ArchitecturePolicyTests: XCTestCase {
+    func testRevenueCatRequiresAnApplePublicSDKKey() {
+        XCTAssertTrue(RevenueCatBillingBridge.isValidPublicSDKKey("appl_public_sdk_key"))
+        XCTAssertTrue(RevenueCatBillingBridge.isValidPublicSDKKey("  appl_public_sdk_key\n"))
+        XCTAssertFalse(RevenueCatBillingBridge.isValidPublicSDKKey(nil))
+        XCTAssertFalse(RevenueCatBillingBridge.isValidPublicSDKKey(""))
+        XCTAssertFalse(RevenueCatBillingBridge.isValidPublicSDKKey("$(REVENUECAT_PUBLIC_SDK_KEY)"))
+        XCTAssertFalse(RevenueCatBillingBridge.isValidPublicSDKKey("sk_live_secret"))
+    }
+
     func testHomeStudyScopesAreLocalizedForAllSupportedLanguages() {
         let korean = AppStrings(language: .korean)
         let english = AppStrings(language: .english)

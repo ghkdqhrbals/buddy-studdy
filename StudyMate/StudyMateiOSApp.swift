@@ -1110,6 +1110,7 @@ final class StudyMateiOSAppDelegate: NSObject, UIApplicationDelegate {
     ) -> Bool {
         AppAnalytics.start()
         SentryMonitoring.start()
+        RevenueCatBillingBridge.shared.start()
         // A notification response can arrive before the SwiftUI bootstrap task creates AppState.
         // Install the delegate during application launch so the response is queued instead of lost.
         StudyNotificationDelegate.shared.register()

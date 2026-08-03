@@ -106,6 +106,10 @@ buddystudy:
       root-certificates-base64: ${APPLE_IAP_ROOT_CERTIFICATES_BASE64:}
       enable-online-checks: ${APPLE_IAP_ENABLE_ONLINE_CHECKS:true}
       allow-xcode-environment: ${APPLE_IAP_ALLOW_XCODE_ENVIRONMENT:false}
+    revenue-cat:
+      webhook-signing-secret: ${REVENUECAT_WEBHOOK_SIGNING_SECRET:}
+      project-id: ${REVENUECAT_PROJECT_ID:}
+      app-id: ${REVENUECAT_APP_ID:}
     recovery:
       enabled: ${BILLING_RECOVERY_ENABLED:true}
       poll-ms: ${BILLING_RECOVERY_POLL_MS:5000}

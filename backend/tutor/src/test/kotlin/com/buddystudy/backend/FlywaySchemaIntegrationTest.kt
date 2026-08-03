@@ -59,7 +59,7 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
               and table_name in (
                 'membership_tier_products', 'apple_billing_accounts', 'invoices', 'invoice_events',
                 'payments', 'payments_history', 'billing_actions', 'billing_jobs',
-                'apple_billing_notifications'
+                'apple_billing_notifications', 'revenuecat_billing_events'
               )
             """.trimIndent(),
         ).map { row, _ -> row.get("table_name", String::class.java)!! }
@@ -75,6 +75,7 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
             "billing_actions",
             "billing_jobs",
             "apple_billing_notifications",
+            "revenuecat_billing_events",
         )
 
         val comments = databaseClient.sql(
@@ -86,6 +87,7 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
                 (table_name = 'invoices' and column_name in ('type', 'status'))
                 or (table_name = 'payments' and column_name = 'status')
                 or (table_name = 'billing_actions' and column_name in ('action_type', 'status'))
+                or (table_name = 'revenuecat_billing_events' and column_name = 'processing_status')
               )
             """.trimIndent(),
         ).map { row, _ ->
@@ -101,6 +103,8 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(comments.getValue("payments.status")).contains("SETTLED", "REFUND_PENDING", "REVOKED")
         assertThat(comments.getValue("billing_actions.action_type")).contains("REFUND", "CANCELLATION", "COMPENSATION")
         assertThat(comments.getValue("billing_actions.status")).contains("AWAITING_APPLE", "COMPLETED", "DECLINED")
+        assertThat(comments.getValue("revenuecat_billing_events.processing_status"))
+            .contains("RECEIVED", "PROCESSED", "IGNORED", "FAILED")
 
         data class TierProduct(
             val tierCode: String,

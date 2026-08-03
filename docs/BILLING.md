@@ -38,6 +38,9 @@ or has a different product type is rejected before an invoice is written.
   maximum of three attempts.
 - `apple_billing_notifications` deduplicates signed App Store Server
   Notifications V2 by notification UUID.
+- `revenuecat_billing_events` stores raw-body hashes and processing state for
+  authenticated RevenueCat webhook events. It never replaces the Apple
+  transaction ledger.
 
 Invoice changes must pass `InvoiceStateMachine`. Apple notification events are
 idempotent and are the only authority for final refund, refund-decline,
@@ -92,8 +95,16 @@ foreground transition. Therefore the failure cases converge as follows:
 | Backend commits but its response is lost | Apple transaction ID and existing invoice | Client retry returns the same idempotent result |
 
 The Apple transaction ID is the payment idempotency key. Duplicate client
-callbacks, server notifications, and foreground recovery cannot create a
-second payment or grant the membership twice.
+callbacks, Apple server notifications, RevenueCat webhooks, and foreground
+recovery cannot create a second payment or grant the membership twice.
+
+RevenueCat runs in StoreKit 2 observer mode (`purchasesAreCompletedBy: .myApp`).
+BuddyStudy remains responsible for finishing transactions after backend
+fulfillment. The stable Apple `appAccountToken` is also the RevenueCat App User
+ID, so a purchase can be recovered without matching on email or device. The
+direct signed-JWS endpoint is the primary path; RevenueCat purchase and
+lifecycle webhooks are an independently delivered recovery path. Both converge
+on the same Apple transaction ID and invoice event ledger.
 
 Apple does not provide a server API that lets BuddyStudy unilaterally issue an
 App Store refund or cancel a user's subscription. iOS starts the system refund
@@ -118,6 +129,15 @@ User endpoints:
 Apple public webhook:
 
 - `POST /api/v1/billing/apple/notifications`
+
+RevenueCat public webhook:
+
+- `POST /api/v1/billing/revenuecat/webhooks`
+
+RevenueCat signs the exact raw request body with
+`X-RevenueCat-Webhook-Signature`. The backend rejects stale timestamps and
+invalid HMAC-SHA256 signatures before recording an event. Delivery is
+at-least-once and is deduplicated by RevenueCat event ID.
 
 Admin endpoints:
 
@@ -147,6 +167,14 @@ monitoring administrator session. The monitoring UI exposes the flow at
    trust material.
 5. Production online certificate checks remain enabled. Xcode StoreKit
    transactions are accepted only in the development profile.
+6. Add the RevenueCat Apple public SDK key as the iOS release secret
+   `REVENUECAT_PUBLIC_SDK_KEY`. Add `REVENUECAT_WEBHOOK_SIGNING_SECRET`,
+   `REVENUECAT_PROJECT_ID`, and `REVENUECAT_APP_ID` to the backend application
+   secret. Configure the RevenueCat webhook URL as
+   `https://api.ghkdqhrbals.org/api/v1/billing/revenuecat/webhooks`.
+7. RevenueCat must use observer mode and the same four App Store product IDs.
+   It is a recovery and subscription-lifecycle input, not an authority that can
+   manufacture an Apple refund.
 
 The committed App Store Connect source of truth is
 `app-store/billing/subscriptions.json`. Product metadata can take up to one hour

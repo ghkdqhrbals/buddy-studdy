@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		D40000000000000000000001 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = D40000000000000000000002 /* MarkdownUI */; };
 		E50000000000000000000001 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = E50000000000000000000002 /* Sentry */; };
+		C80000000000000000000001 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = C80000000000000000000002 /* RevenueCat */; };
 		E50000000000000000000003 /* SentryMonitoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = E50000000000000000000004 /* SentryMonitoring.swift */; };
 		B10000000000000000000002 /* AppleBillingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* AppleBillingStore.swift */; };
 		B90000000000000000000002 /* StudyMateDev.storekit in Resources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000001 /* StudyMateDev.storekit */; };
@@ -449,6 +450,7 @@
 			files = (
 				F60000000000000000000006 /* FirebaseAnalyticsCore in Frameworks */,
 				F70000000000000000000006 /* FirebaseRemoteConfig in Frameworks */,
+				C80000000000000000000001 /* RevenueCat in Frameworks */,
 				D40000000000000000000001 /* MarkdownUI in Frameworks */,
 				E50000000000000000000001 /* Sentry in Frameworks */,
 			);
@@ -1018,6 +1020,7 @@
 			);
 			name = StudyMateiOS;
 			packageProductDependencies = (
+				C80000000000000000000002 /* RevenueCat */,
 				D40000000000000000000002 /* MarkdownUI */,
 				E50000000000000000000002 /* Sentry */,
 				F60000000000000000000007 /* FirebaseAnalyticsCore */,
@@ -1076,6 +1079,7 @@
 			mainGroup = 110000000000000000000060;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				C80000000000000000000003 /* XCRemoteSwiftPackageReference "purchases-ios" */,
 				D40000000000000000000003 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 				E50000000000000000000005 /* XCLocalSwiftPackageReference "Packages/SentrySDK" */,
 				F60000000000000000000008 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
@@ -1817,6 +1821,14 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		C80000000000000000000003 /* XCRemoteSwiftPackageReference "purchases-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/RevenueCat/purchases-ios.git";
+			requirement = {
+				kind = exactVersion;
+				version = 5.83.0;
+			};
+		};
 		D40000000000000000000003 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui";
@@ -1836,6 +1848,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		C80000000000000000000002 /* RevenueCat */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C80000000000000000000003 /* XCRemoteSwiftPackageReference "purchases-ios" */;
+			productName = RevenueCat;
+		};
 		D40000000000000000000002 /* MarkdownUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = D40000000000000000000003 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;

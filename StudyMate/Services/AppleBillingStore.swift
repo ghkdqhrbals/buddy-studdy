@@ -1,7 +1,78 @@
 import Foundation
 import Combine
 import StoreKit
+import RevenueCat
 import UIKit
+
+@MainActor
+final class RevenueCatBillingBridge {
+    static let shared = RevenueCatBillingBridge()
+
+    private(set) var isEnabled = false
+
+    private init() {}
+
+    nonisolated static func isValidPublicSDKKey(_ value: String?) -> Bool {
+        guard let value else { return false }
+        let normalizedKey = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !normalizedKey.isEmpty
+            && !normalizedKey.contains("$(")
+            && normalizedKey.hasPrefix("appl_")
+    }
+
+    func start() {
+        guard !Purchases.isConfigured,
+              let apiKey = Bundle.main.object(forInfoDictionaryKey: "RevenueCatPublicSDKKey") as? String else {
+            isEnabled = Purchases.isConfigured
+            return
+        }
+        let normalizedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Self.isValidPublicSDKKey(normalizedKey) else {
+            return
+        }
+
+        #if DEBUG
+        Purchases.logLevel = .debug
+        #else
+        Purchases.logLevel = .warn
+        #endif
+        Purchases.configure(
+            withAPIKey: normalizedKey,
+            appUserID: nil,
+            purchasesAreCompletedBy: .myApp,
+            storeKitVersion: .storeKit2
+        )
+        isEnabled = true
+    }
+
+    func identify(appAccountToken: UUID) async throws {
+        start()
+        guard isEnabled else { return }
+        let appUserID = appAccountToken.uuidString.lowercased()
+        guard Purchases.shared.appUserID != appUserID else { return }
+        _ = try await Purchases.shared.logIn(appUserID)
+    }
+
+    func record(_ purchaseResult: StoreKit.Product.PurchaseResult) async {
+        guard isEnabled else { return }
+        do {
+            _ = try await Purchases.shared.recordPurchase(purchaseResult)
+        } catch {
+            // BuddyStudy owns transaction completion. RevenueCat outages must not prevent the
+            // verified Apple transaction from reaching our durable invoice ledger.
+        }
+    }
+
+    func syncPurchases() async throws {
+        guard isEnabled else { return }
+        _ = try await Purchases.shared.syncPurchases()
+    }
+
+    func logOut() async {
+        guard isEnabled, !Purchases.shared.isAnonymous else { return }
+        _ = try? await Purchases.shared.logOut()
+    }
+}
 
 @MainActor
 final class AppleBillingStore: ObservableObject {
@@ -27,6 +98,7 @@ final class AppleBillingStore: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         do {
+            try await RevenueCatBillingBridge.shared.identify(appAccountToken: catalog.appAccountToken)
             let storeProducts = try await Product.products(for: catalog.products.map(\.productId))
             let byIdentifier = Dictionary(uniqueKeysWithValues: storeProducts.map { ($0.id, $0) })
             products = catalog.products
@@ -60,7 +132,9 @@ final class AppleBillingStore: ObservableObject {
         // The backend owns the order lifecycle. Persist a WAITING/NORMAL invoice before StoreKit
         // presents a sheet so every user-initiated attempt has an invoice aggregate.
         let checkout = try await prepareCheckout(tierProduct.id)
+        try await RevenueCatBillingBridge.shared.identify(appAccountToken: appAccountToken)
         let result = try await tierProduct.product.purchase(options: [.appAccountToken(appAccountToken)])
+        await RevenueCatBillingBridge.shared.record(result)
         switch result {
         case .success(let verification):
             guard case .verified(let transaction) = verification else {
@@ -92,7 +166,9 @@ final class AppleBillingStore: ObservableObject {
         appAccountToken: UUID,
         synchronize: @escaping (String, String, UUID?) async throws -> BackendBillingInvoice
     ) async throws -> [BackendBillingInvoice] {
+        try await RevenueCatBillingBridge.shared.identify(appAccountToken: appAccountToken)
         try await AppStore.sync()
+        try await RevenueCatBillingBridge.shared.syncPurchases()
         var restored: [BackendBillingInvoice] = []
         for await verification in Transaction.currentEntitlements {
             guard case .verified(let transaction) = verification,

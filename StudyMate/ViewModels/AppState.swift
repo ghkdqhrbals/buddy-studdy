@@ -4333,6 +4333,11 @@ final class AppState: ObservableObject {
         billingInvoices = []
         billingErrorMessage = nil
         isLoadingBilling = false
+        #if os(iOS)
+        Task { @MainActor in
+            await RevenueCatBillingBridge.shared.logOut()
+        }
+        #endif
         updateNotificationState { state in
             state.reset()
         }
@@ -5978,8 +5983,12 @@ final class AppState: ObservableObject {
                     try await self.billingUseCase.invoices(registration: recoveredRegistration)
                 }
             )
-            billingCatalog = try await catalog
+            let resolvedCatalog = try await catalog
+            billingCatalog = resolvedCatalog
             billingInvoices = try await invoices.invoices
+            #if os(iOS)
+            try await RevenueCatBillingBridge.shared.identify(appAccountToken: resolvedCatalog.appAccountToken)
+            #endif
             billingErrorMessage = nil
         } catch {
             billingErrorMessage = error.localizedDescription

@@ -18,6 +18,7 @@ import com.buddystudy.backend.billing.application.model.RequestBillingActionComm
 import com.buddystudy.backend.billing.application.model.SyncAppleTransactionCommand
 import com.buddystudy.backend.billing.application.model.VerifiedAppleNotification
 import com.buddystudy.backend.billing.application.model.VerifiedAppleTransaction
+import com.buddystudy.backend.billing.application.model.VerifiedRevenueCatEvent
 import com.buddystudy.backend.billing.application.port.outbound.AppleBillingVerificationPort
 import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPort
 import com.buddystudy.backend.billing.application.service.BillingService
@@ -336,6 +337,9 @@ class BillingServiceTest {
         override suspend fun markAppleNotificationFailed(notificationUUID: String, error: String, now: Instant) {
             failedNotifications += notificationUUID
         }
+        override suspend fun recordRevenueCatEvent(event: VerifiedRevenueCatEvent, now: Instant): Boolean = true
+        override suspend fun applyRevenueCatEvent(event: VerifiedRevenueCatEvent, now: Instant): Boolean = true
+        override suspend fun markRevenueCatEventFailed(eventId: String, error: String, now: Instant) = Unit
         override suspend fun adminInvoices(
             query: String?, status: String?, limit: Int, offset: Int,
         ): AdminBillingInvoicePage = AdminBillingInvoicePage(limit, offset, 0, emptyList())

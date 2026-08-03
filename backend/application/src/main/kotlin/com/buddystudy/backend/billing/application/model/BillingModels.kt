@@ -68,6 +68,30 @@ data class VerifiedAppleNotification(
     val transaction: VerifiedAppleTransaction?,
 )
 
+data class RevenueCatWebhookRequest(
+    val rawBody: ByteArray,
+    val signature: String,
+)
+
+data class VerifiedRevenueCatEvent(
+    val eventId: String,
+    val eventType: String,
+    val appUserId: String?,
+    val aliases: List<String>,
+    val store: String?,
+    val productId: String?,
+    val transactionId: String?,
+    val originalTransactionId: String?,
+    val environment: BillingEnvironment?,
+    val priceMilliunits: Long?,
+    val currency: String?,
+    val purchasedAt: Instant?,
+    val expiresAt: Instant?,
+    val eventAt: Instant,
+    val cancelReason: String?,
+    val signedPayloadSha256: String,
+)
+
 data class BillingInvoiceSummary(
     val id: Long,
     val invoiceNumber: UUID,

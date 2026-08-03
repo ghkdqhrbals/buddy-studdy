@@ -8,9 +8,11 @@ import com.buddystudy.backend.billing.application.model.BillingInvoicePage
 import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
 import com.buddystudy.backend.billing.application.model.CreateBillingCheckoutCommand
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
+import com.buddystudy.backend.billing.application.model.RevenueCatWebhookRequest
 import com.buddystudy.backend.billing.application.model.SyncAppleTransactionCommand
 import com.buddystudy.backend.billing.application.port.inbound.AppleBillingNotificationUseCase
 import com.buddystudy.backend.billing.application.port.inbound.BillingUseCase
+import com.buddystudy.backend.billing.application.port.inbound.RevenueCatBillingNotificationUseCase
 import com.buddystudy.backend.common.adapter.inbound.web.principalOrThrow
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
@@ -28,6 +30,7 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import java.util.UUID
@@ -105,6 +108,21 @@ class AppleBillingNotificationController(
     }
 }
 
+@RestController
+@RequestMapping("/api/v1/billing/revenuecat/webhooks")
+class RevenueCatBillingNotificationController(
+    private val notifications: RevenueCatBillingNotificationWebPort,
+) {
+    @PostMapping
+    suspend fun receive(
+        @RequestHeader("X-RevenueCat-Webhook-Signature") signature: String,
+        @RequestBody rawBody: ByteArray,
+    ): ResponseEntity<Unit> {
+        notifications.receive(rawBody, signature)
+        return ResponseEntity.ok().build()
+    }
+}
+
 data class SyncAppleTransactionRequest(
     @field:NotBlank
     @field:Size(min = 64, max = 200_000)
@@ -158,6 +176,10 @@ interface BillingWebPort {
 
 interface AppleBillingNotificationWebPort {
     suspend fun receive(request: AppleServerNotificationRequest)
+}
+
+interface RevenueCatBillingNotificationWebPort {
+    suspend fun receive(rawBody: ByteArray, signature: String)
 }
 
 @Component
@@ -232,4 +254,12 @@ class AppleBillingNotificationWebAdapter(
 ) : AppleBillingNotificationWebPort {
     override suspend fun receive(request: AppleServerNotificationRequest) =
         notifications.receive(request.signedPayload.trim())
+}
+
+@Component
+class RevenueCatBillingNotificationWebAdapter(
+    private val notifications: RevenueCatBillingNotificationUseCase,
+) : RevenueCatBillingNotificationWebPort {
+    override suspend fun receive(rawBody: ByteArray, signature: String) =
+        notifications.receive(RevenueCatWebhookRequest(rawBody, signature.trim()))
 }

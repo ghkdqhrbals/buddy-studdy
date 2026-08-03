@@ -47,6 +47,10 @@ buddystudy:
       root-certificates-base64: ${APPLE_IAP_ROOT_CERTIFICATES_BASE64:${local-secret.APPLE_IAP_ROOT_CERTIFICATES_BASE64:}}
       enable-online-checks: ${APPLE_IAP_ENABLE_ONLINE_CHECKS:true}
       allow-xcode-environment: ${APPLE_IAP_ALLOW_XCODE_ENVIRONMENT:true}
+    revenue-cat:
+      webhook-signing-secret: ${REVENUECAT_WEBHOOK_SIGNING_SECRET:${local-secret.REVENUECAT_WEBHOOK_SIGNING_SECRET:}}
+      project-id: ${REVENUECAT_PROJECT_ID:${local-secret.REVENUECAT_PROJECT_ID:}}
+      app-id: ${REVENUECAT_APP_ID:${local-secret.REVENUECAT_APP_ID:}}
   firebase:
     remote-config:
       project-id: ${FIREBASE_PROJECT_ID:${local-secret.FIREBASE_PROJECT_ID:}}

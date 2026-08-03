@@ -11,6 +11,7 @@ import com.buddystudy.backend.billing.application.model.AdminBillingInvoiceDetai
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoicePage
 import com.buddystudy.backend.billing.application.model.CreateBillingCheckoutCommand
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
+import com.buddystudy.backend.billing.application.model.RevenueCatWebhookRequest
 import com.buddystudy.backend.billing.application.model.SyncAppleTransactionCommand
 
 interface BillingUseCase {
@@ -34,6 +35,10 @@ interface BillingUseCase {
 
 interface AppleBillingNotificationUseCase {
     suspend fun receive(signedPayload: String)
+}
+
+interface RevenueCatBillingNotificationUseCase {
+    suspend fun receive(request: RevenueCatWebhookRequest)
 }
 
 interface BillingRecoveryUseCase {

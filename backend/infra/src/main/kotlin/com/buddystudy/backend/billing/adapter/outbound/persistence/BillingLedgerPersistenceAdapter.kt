@@ -17,6 +17,7 @@ import com.buddystudy.backend.billing.application.model.RecordVerifiedPaymentCom
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
 import com.buddystudy.backend.billing.application.model.VerifiedAppleNotification
 import com.buddystudy.backend.billing.application.model.VerifiedAppleTransaction
+import com.buddystudy.backend.billing.application.model.VerifiedRevenueCatEvent
 import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
@@ -592,6 +593,79 @@ class BillingLedgerPersistenceAdapter(
         markNotification(notificationUUID, "FAILED", error.take(4000), now)
     }
 
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    override suspend fun recordRevenueCatEvent(
+        event: com.buddystudy.backend.billing.application.model.VerifiedRevenueCatEvent,
+        now: Instant,
+    ): Boolean {
+        val inserted = database.sql(
+            """
+            insert ignore into revenuecat_billing_events (
+                event_id, event_type, app_user_id, store, product_id, transaction_id,
+                environment, signed_payload_sha256, processing_status, event_at, received_at, updated_at
+            ) values (
+                :eventId, :eventType, :appUserId, :store, :productId, :transactionId,
+                :environment, :hash, 'RECEIVED', :eventAt, :now, :now
+            )
+            """.trimIndent(),
+        ).bind("eventId", event.eventId)
+            .bind("eventType", event.eventType)
+            .bindNullable("appUserId", event.appUserId, String::class.java)
+            .bindNullable("store", event.store, String::class.java)
+            .bindNullable("productId", event.productId, String::class.java)
+            .bindNullable("transactionId", event.transactionId, String::class.java)
+            .bindNullable("environment", event.environment?.name, String::class.java)
+            .bind("hash", event.signedPayloadSha256)
+            .bind("eventAt", event.eventAt.utc())
+            .bind("now", now.utc())
+            .fetch().rowsUpdated().awaitSingle()
+        if (inserted == 1L) return true
+
+        return database.sql(
+            """
+            update revenuecat_billing_events
+            set processing_status = 'RECEIVED', last_error = null, updated_at = :now
+            where event_id = :eventId and processing_status = 'FAILED'
+            """.trimIndent(),
+        ).bind("now", now.utc()).bind("eventId", event.eventId)
+            .fetch().rowsUpdated().awaitSingle() == 1L
+    }
+
+    @Transactional
+    override suspend fun applyRevenueCatEvent(
+        event: VerifiedRevenueCatEvent,
+        now: Instant,
+    ): Boolean {
+        if (event.eventType in REVENUECAT_PURCHASE_EVENTS) {
+            markRevenueCatEvent(event.eventId, "PROCESSED", null, now)
+            return true
+        }
+        val mapped = event.toProviderNotification() ?: run {
+            markRevenueCatEvent(event.eventId, "IGNORED", null, now)
+            return true
+        }
+        val transactionId = event.transactionId
+            ?: throw billingFailure(ApiErrorCode.BILLING_TRANSACTION_INVALID, "RevenueCat lifecycle event has no transaction ID.")
+        val payment = lockPaymentByTransaction(transactionId)
+            ?: throw billingFailure(ApiErrorCode.RESOURCE_NOT_FOUND, "RevenueCat transaction has not reached the payment ledger yet.")
+        val invoice = lockInvoice(payment.invoiceId)
+            ?: throw billingFailure(ApiErrorCode.INTERNAL_SERVER_ERROR, "RevenueCat payment invoice is missing.")
+        applyProviderLifecycle(
+            invoice = invoice,
+            payment = payment,
+            command = ApplyAppleNotificationCommand(mapped, now),
+            source = BillingEventSource.REVENUECAT_WEBHOOK,
+            eventPrefix = "revenuecat",
+        )
+        markRevenueCatEvent(event.eventId, "PROCESSED", null, now)
+        return true
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    override suspend fun markRevenueCatEventFailed(eventId: String, error: String, now: Instant) {
+        markRevenueCatEvent(eventId, "FAILED", error.take(4000), now)
+    }
+
     override suspend fun adminInvoices(
         query: String?,
         status: String?,
@@ -666,6 +740,8 @@ class BillingLedgerPersistenceAdapter(
         invoice: LockedInvoice,
         payment: LockedPayment,
         command: ApplyAppleNotificationCommand,
+        source: BillingEventSource = BillingEventSource.APPLE_NOTIFICATION,
+        eventPrefix: String = "apple",
     ) {
         val notification = command.notification
         val now = command.occurredAt
@@ -675,9 +751,9 @@ class BillingLedgerPersistenceAdapter(
                     if (InvoiceStateMachine.canApply(invoice.type, invoice.status, InvoiceEventType.CANCELLATION_REQUESTED)) {
                         appendInvoiceEvent(
                             invoice.id,
-                            "apple-cancellation-requested:${notification.notificationUUID}",
+                            "$eventPrefix-cancellation-requested:${notification.notificationUUID}",
                             InvoiceEventType.CANCELLATION_REQUESTED,
-                            BillingEventSource.APPLE_NOTIFICATION,
+                            source,
                             null,
                             null,
                             now,
@@ -694,9 +770,9 @@ class BillingLedgerPersistenceAdapter(
                     if (InvoiceStateMachine.canApply(invoice.type, invoice.status, InvoiceEventType.CANCELLATION_REVERSED)) {
                         appendInvoiceEvent(
                             invoice.id,
-                            "apple-cancellation-reversed:${notification.notificationUUID}",
+                            "$eventPrefix-cancellation-reversed:${notification.notificationUUID}",
                             InvoiceEventType.CANCELLATION_REVERSED,
-                            BillingEventSource.APPLE_NOTIFICATION,
+                            source,
                             null,
                             null,
                             now,
@@ -711,53 +787,53 @@ class BillingLedgerPersistenceAdapter(
                 }
             }
             "REFUND" -> {
-                val refundInvoice = requireRefundInvoice(invoice, notification, now)
+                val refundInvoice = requireRefundInvoice(invoice, notification, now, source)
                 transitionPayment(payment, PaymentStatus.REFUNDED, PaymentHistoryEventType.REFUNDED,
-                    "apple-refund:${notification.notificationUUID}", BillingEventSource.APPLE_NOTIFICATION,
+                    "$eventPrefix-refund:${notification.notificationUUID}", source,
                     notification.notificationUUID, null, now, historyInvoiceId = refundInvoice.id)
-                appendIfAllowed(refundInvoice.id, InvoiceEventType.REFUNDED, notification, now)
+                appendIfAllowed(refundInvoice.id, InvoiceEventType.REFUNDED, notification, now, source, eventPrefix)
                 completeActions(refundInvoice.id, setOf(BillingActionType.REFUND, BillingActionType.COMPENSATION), BillingActionStatus.COMPLETED, now)
                 completeActions(invoice.id, setOf(BillingActionType.COMPENSATION), BillingActionStatus.COMPLETED, now)
                 deactivateMembership(payment.originalTransactionId, invoice.id, now)
             }
             "REFUND_DECLINED" -> {
-                val refundInvoice = requireRefundInvoice(invoice, notification, now)
+                val refundInvoice = requireRefundInvoice(invoice, notification, now, source)
                 transitionPayment(payment, PaymentStatus.REFUND_DECLINED, PaymentHistoryEventType.REFUND_DECLINED,
-                    "apple-refund-declined:${notification.notificationUUID}", BillingEventSource.APPLE_NOTIFICATION,
+                    "$eventPrefix-refund-declined:${notification.notificationUUID}", source,
                     notification.notificationUUID, null, now, historyInvoiceId = refundInvoice.id)
-                appendIfAllowed(refundInvoice.id, InvoiceEventType.REFUND_DECLINED, notification, now)
+                appendIfAllowed(refundInvoice.id, InvoiceEventType.REFUND_DECLINED, notification, now, source, eventPrefix)
                 completeActions(refundInvoice.id, setOf(BillingActionType.REFUND, BillingActionType.COMPENSATION), BillingActionStatus.DECLINED, now)
                 completeActions(invoice.id, setOf(BillingActionType.COMPENSATION), BillingActionStatus.DECLINED, now)
             }
             "REFUND_REVERSED" -> {
                 val refundInvoice = lockLatestRefundInvoice(invoice.id, setOf(InvoiceStatus.COMPLETED))
                 transitionPayment(payment, PaymentStatus.REFUND_REVERSED, PaymentHistoryEventType.REFUND_REVERSED,
-                    "apple-refund-reversed:${notification.notificationUUID}", BillingEventSource.APPLE_NOTIFICATION,
+                    "$eventPrefix-refund-reversed:${notification.notificationUUID}", source,
                     notification.notificationUUID, null, now, historyInvoiceId = refundInvoice?.id ?: invoice.id)
-                refundInvoice?.let { appendIfAllowed(it.id, InvoiceEventType.REFUND_REVERSED, notification, now) }
+                refundInvoice?.let { appendIfAllowed(it.id, InvoiceEventType.REFUND_REVERSED, notification, now, source, eventPrefix) }
                 reactivateMembership(invoice, payment, now)
             }
             "REVOKE" -> {
-                val refundInvoice = requireRefundInvoice(invoice, notification, now)
+                val refundInvoice = requireRefundInvoice(invoice, notification, now, source)
                 transitionPayment(payment, PaymentStatus.REVOKED, PaymentHistoryEventType.REVOKED,
-                    "apple-revoked:${notification.notificationUUID}", BillingEventSource.APPLE_NOTIFICATION,
+                    "$eventPrefix-revoked:${notification.notificationUUID}", source,
                     notification.notificationUUID, null, now, historyInvoiceId = refundInvoice.id)
-                appendIfAllowed(refundInvoice.id, InvoiceEventType.PAYMENT_REVOKED, notification, now)
+                appendIfAllowed(refundInvoice.id, InvoiceEventType.PAYMENT_REVOKED, notification, now, source, eventPrefix)
                 deactivateMembership(payment.originalTransactionId, invoice.id, now)
             }
             "EXPIRED", "GRACE_PERIOD_EXPIRED" -> {
-                appendIfAllowed(invoice.id, InvoiceEventType.EXPIRED, notification, now)
+                appendIfAllowed(invoice.id, InvoiceEventType.EXPIRED, notification, now, source, eventPrefix)
                 deactivateMembership(payment.originalTransactionId, invoice.id, now)
             }
             "CONSUMPTION_REQUEST" -> {
-                val refundInvoice = requireRefundInvoice(invoice, notification, now)
+                val refundInvoice = requireRefundInvoice(invoice, notification, now, source)
                 var current = lockInvoice(refundInvoice.id) ?: return
                 if (InvoiceStateMachine.canApply(current.type, current.status, InvoiceEventType.REFUND_REQUESTED)) {
-                    appendIfAllowed(refundInvoice.id, InvoiceEventType.REFUND_REQUESTED, notification, now)
+                    appendIfAllowed(refundInvoice.id, InvoiceEventType.REFUND_REQUESTED, notification, now, source, eventPrefix)
                     current = lockInvoice(refundInvoice.id) ?: return
                 }
                 if (InvoiceStateMachine.canApply(current.type, current.status, InvoiceEventType.REFUND_PENDING)) {
-                    appendIfAllowed(refundInvoice.id, InvoiceEventType.REFUND_PENDING, notification, now)
+                    appendIfAllowed(refundInvoice.id, InvoiceEventType.REFUND_PENDING, notification, now, source, eventPrefix)
                 }
             }
         }
@@ -767,11 +843,12 @@ class BillingLedgerPersistenceAdapter(
         originalInvoice: LockedInvoice,
         notification: VerifiedAppleNotification,
         now: Instant,
+        source: BillingEventSource = BillingEventSource.APPLE_NOTIFICATION,
     ): LockedInvoice {
         lockLatestRefundInvoice(originalInvoice.id, setOf(InvoiceStatus.WAITING))?.let { return it }
         val id = insertRefundInvoice(
             originalInvoice = originalInvoice,
-            source = BillingEventSource.APPLE_NOTIFICATION,
+            source = source,
             actorUserId = null,
             correlationId = notification.notificationUUID,
             now = now,
@@ -785,14 +862,16 @@ class BillingLedgerPersistenceAdapter(
         type: InvoiceEventType,
         notification: com.buddystudy.backend.billing.application.model.VerifiedAppleNotification,
         now: Instant,
+        source: BillingEventSource = BillingEventSource.APPLE_NOTIFICATION,
+        eventPrefix: String = "apple-notification",
     ) {
         val current = lockInvoice(invoiceId) ?: return
         if (!InvoiceStateMachine.canApply(current.type, current.status, type)) return
         appendInvoiceEvent(
             invoiceId,
-            "apple-notification:${notification.notificationUUID}:$type",
+            "$eventPrefix:${notification.notificationUUID}:$type",
             type,
-            BillingEventSource.APPLE_NOTIFICATION,
+            source,
             null,
             notification.subtype,
             now,
@@ -1234,6 +1313,44 @@ class BillingLedgerPersistenceAdapter(
             .fetch().rowsUpdated().awaitSingle()
     }
 
+    private suspend fun markRevenueCatEvent(eventId: String, status: String, error: String?, now: Instant) {
+        database.sql(
+            """
+            update revenuecat_billing_events
+            set processing_status = :status, processed_at = :processedAt, last_error = :error, updated_at = :now
+            where event_id = :eventId
+            """.trimIndent(),
+        ).bind("status", status)
+            .bindNullable("processedAt", if (status in setOf("PROCESSED", "IGNORED")) now.utc() else null, LocalDateTime::class.java)
+            .bindNullable("error", error, String::class.java)
+            .bind("now", now.utc())
+            .bind("eventId", eventId)
+            .fetch().rowsUpdated().awaitSingle()
+    }
+
+    private fun VerifiedRevenueCatEvent.toProviderNotification(): VerifiedAppleNotification? {
+        val mapped = when (eventType) {
+            "CANCELLATION" -> if (cancelReason == "CUSTOMER_SUPPORT") {
+                "REFUND" to null
+            } else {
+                "DID_CHANGE_RENEWAL_STATUS" to "AUTO_RENEW_DISABLED"
+            }
+            "UNCANCELLATION" -> "DID_CHANGE_RENEWAL_STATUS" to "AUTO_RENEW_ENABLED"
+            "EXPIRATION" -> "EXPIRED" to cancelReason
+            "REFUND_REVERSED" -> "REFUND_REVERSED" to null
+            else -> return null
+        }
+        return VerifiedAppleNotification(
+            notificationUUID = "revenuecat:$eventId".take(191),
+            notificationType = mapped.first,
+            subtype = mapped.second,
+            environment = environment ?: return null,
+            signedAt = eventAt,
+            signedPayloadSha256 = signedPayloadSha256,
+            transaction = null,
+        )
+    }
+
     private suspend fun lockAndValidateAccount(userId: Long, token: UUID) {
         val owner = database.sql(
             "select user_id from apple_billing_accounts where app_account_token = :token for update",
@@ -1550,6 +1667,7 @@ class BillingLedgerPersistenceAdapter(
     )
 
     private companion object {
+        val REVENUECAT_PURCHASE_EVENTS = setOf("INITIAL_PURCHASE", "RENEWAL", "NON_RENEWING_PURCHASE")
         val REFUNDABLE_PAYMENT_STATES = setOf(
             PaymentStatus.SETTLED,
             PaymentStatus.REFUND_DECLINED,

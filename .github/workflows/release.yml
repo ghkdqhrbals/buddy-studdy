@@ -125,6 +125,7 @@ jobs:
       IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
       IOS_APP_STORE_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_APP_STORE_PROVISIONING_PROFILE_BASE64 }}
       GOOGLE_SERVICE_INFO_PLIST_BASE64: ${{ secrets.GOOGLE_SERVICE_INFO_PLIST_BASE64 }}
+      REVENUECAT_PUBLIC_SDK_KEY: ${{ secrets.REVENUECAT_PUBLIC_SDK_KEY }}
       RELEASE_VERSION: ${{ needs.plan_ios_release.outputs.release_version }}
       RELEASE_BUILD_NUMBER: ${{ needs.plan_ios_release.outputs.release_build_number }}
       ARTIFACT_NAME: ${{ needs.plan_ios_release.outputs.artifact_name }}
@@ -146,7 +147,8 @@ jobs:
             IOS_DISTRIBUTION_CERTIFICATE_P12_BASE64 \
             IOS_DISTRIBUTION_CERTIFICATE_PASSWORD \
             IOS_APP_STORE_PROVISIONING_PROFILE_BASE64 \
-            GOOGLE_SERVICE_INFO_PLIST_BASE64; do
+            GOOGLE_SERVICE_INFO_PLIST_BASE64 \
+            REVENUECAT_PUBLIC_SDK_KEY; do
             if [ -z "${!name}" ]; then
               echo "Missing GitHub Actions secret: ${name}" >&2
               missing=1
@@ -270,6 +272,7 @@ jobs:
             -archivePath build/StudyMateiOS.xcarchive \
             IOS_PROVISIONING_PROFILE_NAME="${IOS_PROVISIONING_PROFILE_NAME}" \
             DEVELOPMENT_TEAM="${APPLE_TEAM_ID}" \
+            REVENUECAT_PUBLIC_SDK_KEY="${REVENUECAT_PUBLIC_SDK_KEY}" \
             MARKETING_VERSION="${RELEASE_VERSION}" \
             CURRENT_PROJECT_VERSION="${RELEASE_BUILD_NUMBER}"
 

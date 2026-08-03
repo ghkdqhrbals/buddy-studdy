@@ -101,6 +101,7 @@ enum class BillingJobStatus {
 enum class BillingEventSource {
     CLIENT,
     APPLE_NOTIFICATION,
+    REVENUECAT_WEBHOOK,
     SYSTEM,
     ADMIN,
 }

@@ -13,6 +13,8 @@ import com.buddystudy.backend.billing.application.model.RecordVerifiedPaymentCom
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
 import com.buddystudy.backend.billing.application.model.VerifiedAppleNotification
 import com.buddystudy.backend.billing.application.model.VerifiedAppleTransaction
+import com.buddystudy.backend.billing.application.model.RevenueCatWebhookRequest
+import com.buddystudy.backend.billing.application.model.VerifiedRevenueCatEvent
 import com.buddystudy.billing.domain.BillingEnvironment
 import java.time.Instant
 import java.util.UUID
@@ -20,6 +22,10 @@ import java.util.UUID
 interface AppleBillingVerificationPort {
     suspend fun verifyTransaction(signedTransaction: String, environment: BillingEnvironment): VerifiedAppleTransaction
     suspend fun verifyNotification(signedPayload: String): VerifiedAppleNotification
+}
+
+interface RevenueCatWebhookVerificationPort {
+    suspend fun verify(request: RevenueCatWebhookRequest): VerifiedRevenueCatEvent
 }
 
 interface BillingLedgerPort {
@@ -90,6 +96,15 @@ interface BillingLedgerPort {
 
     /** REQUIRES_NEW boundary: preserves processing failure details after the apply transaction rolls back. */
     suspend fun markAppleNotificationFailed(notificationUUID: String, error: String, now: Instant)
+
+    /** REQUIRES_NEW receipt used to deduplicate RevenueCat's at-least-once webhook delivery. */
+    suspend fun recordRevenueCatEvent(event: VerifiedRevenueCatEvent, now: Instant): Boolean
+
+    /** Applies a verified RevenueCat lifecycle event and completes its receipt atomically. */
+    suspend fun applyRevenueCatEvent(event: VerifiedRevenueCatEvent, now: Instant): Boolean
+
+    /** REQUIRES_NEW failure update so processing errors survive transaction rollback. */
+    suspend fun markRevenueCatEventFailed(eventId: String, error: String, now: Instant)
 
     suspend fun adminInvoices(query: String?, status: String?, limit: Int, offset: Int): AdminBillingInvoicePage
     suspend fun adminInvoice(invoiceId: Long): AdminBillingInvoiceDetail?
