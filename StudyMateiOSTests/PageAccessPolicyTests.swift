@@ -1,6 +1,26 @@
 import XCTest
 @testable import StudyMate
 
+final class CommunityQuestionResultPresentationTests: XCTestCase {
+    func testKeepsValidScoreAndDifficulty() {
+        let presentation = CommunityQuestionResultPresentation(score: 94, difficulty: 4)
+
+        XCTAssertEqual(presentation.score, 94)
+        XCTAssertEqual(presentation.difficulty, 4)
+    }
+
+    func testClampsScoreAndDifficultyToDisplayedRanges() {
+        XCTAssertEqual(
+            CommunityQuestionResultPresentation(score: 101, difficulty: 0),
+            CommunityQuestionResultPresentation(score: 100, difficulty: 1)
+        )
+        XCTAssertEqual(
+            CommunityQuestionResultPresentation(score: -1, difficulty: 11),
+            CommunityQuestionResultPresentation(score: 0, difficulty: 10)
+        )
+    }
+}
+
 final class PageAccessPolicyTests: XCTestCase {
     @MainActor
     func testNotificationStudyListRouteUsesExistingHomeMyStudiesScreen() {

@@ -5,14 +5,9 @@ struct CommunityQuestionTopMeta: View {
 
     var body: some View {
         HStack(spacing: 7) {
-            HStack(spacing: 5) {
-                Text(question.topic.isEmpty ? "Swift" : question.topic)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-
-                Text("Lv.\(question.difficultyLevel)")
-                    .fixedSize(horizontal: true, vertical: false)
-            }
+            Text(question.topic.isEmpty ? "Swift" : question.topic)
+                .lineLimit(1)
+                .truncationMode(.tail)
 
             if let author = question.author, !author.displayName.isEmpty {
                 HStack(spacing: 4) {
@@ -50,12 +45,85 @@ struct CommunityQuestionTopMeta: View {
 
 struct CommunityQuestionStatsMeta: View {
     var question: CommunityQuestion
+    var strings: AppStrings
 
     var body: some View {
-        HStack(spacing: 8) {
-            if let score = question.gradingResult?.score {
-                scoreMetric(score)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                if let result = resultPresentation {
+                    learningResult(result)
+                    Spacer(minLength: 4)
+                }
+                engagementMetrics
             }
+
+            VStack(alignment: .leading, spacing: 9) {
+                if let result = resultPresentation {
+                    learningResult(result)
+                }
+                engagementMetrics
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var resultPresentation: CommunityQuestionResultPresentation? {
+        guard let score = question.gradingResult?.score else {
+            return nil
+        }
+
+        return CommunityQuestionResultPresentation(
+            score: score,
+            difficulty: question.difficultyLevel
+        )
+    }
+
+    private func learningResult(_ result: CommunityQuestionResultPresentation) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("\(result.score)")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.primary)
+                    .monospacedDigit()
+
+                Text(strings.answerScore)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+
+            Divider()
+                .frame(height: 35)
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 4) {
+                    ForEach(1...10, id: \.self) { level in
+                        Circle()
+                            .fill(
+                                level == result.difficulty
+                                    ? Color.primary
+                                    : Color.secondary.opacity(0.24)
+                            )
+                            .frame(width: 6, height: 6)
+                    }
+                }
+                .accessibilityHidden(true)
+
+                Text("\(strings.questionDifficulty) \(result.difficulty)")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "\(strings.answerScore) \(result.score), \(strings.questionDifficulty) \(result.difficulty)"
+        )
+    }
+
+    private var engagementMetrics: some View {
+        HStack(spacing: 9) {
             metric(systemImage: question.isLikedByMe ? "heart.fill" : "heart", value: question.likeCount)
                 .foregroundStyle(question.isLikedByMe ? .red : .secondary)
                 .transaction { transaction in
@@ -63,20 +131,10 @@ struct CommunityQuestionStatsMeta: View {
                 }
             metric(systemImage: "bubble.right", value: question.commentCount)
             metric(systemImage: "eye", value: question.viewCount)
-
-            Spacer(minLength: 0)
         }
         .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)
         .lineLimit(1)
-    }
-
-    private func scoreMetric(_ score: Int) -> some View {
-        HStack(spacing: 3) {
-            Image(systemName: "checkmark.seal")
-            Text("\(min(max(score, 0), 100))/100")
-                .monospacedDigit()
-        }
         .fixedSize(horizontal: true, vertical: false)
     }
 
@@ -112,5 +170,15 @@ struct CommunityQuestionStatsMeta: View {
         }
 
         return String(format: "%.1f%@", rounded, suffix)
+    }
+}
+
+struct CommunityQuestionResultPresentation: Equatable {
+    let score: Int
+    let difficulty: Int
+
+    init(score: Int, difficulty: Int) {
+        self.score = min(max(score, 0), 100)
+        self.difficulty = min(max(difficulty, 1), 10)
     }
 }

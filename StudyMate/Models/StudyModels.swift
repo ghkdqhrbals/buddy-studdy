@@ -3280,6 +3280,8 @@ struct AppStrings {
     var appLanguage: String { text("언어", "Language") }
     var studyTopic: String { text("공부할 주제", "Study topic") }
     var difficulty: String { text("난이도", "Difficulty") }
+    var answerScore: String { text("답변 점수", "Answer score", "回答スコア") }
+    var questionDifficulty: String { text("질문 난이도", "Question difficulty", "問題の難易度") }
     var difficultyScaleHint: String { text("1은 가장 쉬움, 10은 전문가 수준입니다.", "1 is easiest, 10 is expert-level.") }
     func questionInterval(minutes: Int) -> String { text("질문 간격: \(minutes)분", "Question interval: \(minutes) min", "質問間隔：\(minutes)分") }
     var recommendedPrompt: String { text("추천 프롬프트", "Recommended Prompt") }

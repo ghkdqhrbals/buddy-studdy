@@ -1838,7 +1838,7 @@ private struct MobileHomeView: View {
         Button {
             selectedCommunityQuestionRoute = CommunityQuestionRoute(id: question.id)
         } label: {
-            MobileCommunityQuestionRow(question: question)
+            MobileCommunityQuestionRow(question: question, strings: strings)
         }
         .buttonStyle(.plain)
         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
@@ -2563,7 +2563,7 @@ private struct NotificationPublicQuestionsDestination: View {
                     Button {
                         selectedQuestionRoute = CommunityQuestionRoute(id: question.id)
                     } label: {
-                        MobileCommunityQuestionRow(question: question)
+                        MobileCommunityQuestionRow(question: question, strings: strings)
                     }
                     .buttonStyle(.plain)
                 }
@@ -7899,6 +7899,7 @@ private struct MobileFeedbackView: View {
 
 private struct MobileCommunityQuestionRow: View {
     var question: CommunityQuestion
+    var strings: AppStrings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -7910,7 +7911,7 @@ private struct MobileCommunityQuestionRow: View {
                 .lineLimit(2)
                 .truncationMode(.tail)
 
-            CommunityQuestionStatsMeta(question: question)
+            CommunityQuestionStatsMeta(question: question, strings: strings)
         }
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
