@@ -3249,6 +3249,7 @@ struct AppStrings {
     var studySettings: String { text("학습 설정", "Study Settings") }
     var studyCategories: String { text("내 학습", "My Studies") }
     var homeScopeMy: String { text("내 학습", "My Studies") }
+    var homeScopeStudyTree: String { text("내 학습트리", "My Study Tree") }
     var homeScopeAll: String { text("모든 학습들", "All Studies") }
     var myStudyLoginHelp: String {
         text(

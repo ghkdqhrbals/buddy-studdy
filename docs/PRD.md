@@ -60,7 +60,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
    question, user answer, and AI response.
 6. Grading result, feedback, and explanation are stored in records.
 7. Ungraded pending questions are capped at 3.
-8. My Studies shows root studies first. Selecting one opens an unlimited-depth study tree whose orientation can be switched between vertical and horizontal.
+8. Home exposes separate All Studies, My Studies, and My Study Tree scopes. My Studies opens root studies directly, while My Study Tree preserves hierarchical topic browsing and opens an unlimited-depth study tree whose orientation can be switched between vertical and horizontal.
 9. A root study owns the question schedule, OpenAI model, and the single question flow. The backend owns the question prompt; iOS study creation and editing do not expose prompt overrides. Descendant nodes own only their topic, difficulty level, ordering, and question-rotation activation.
 10. Adding a tree node opens GPT topic recommendations by default. The user can select one or more recommendations and add them together with one shared difficulty, or switch to manual topic entry. Duplicate normalized topic names are rejected across the user's studies.
 11. Topic recommendations use a shared system catalog before generating new entries. The catalog manages up to five descendant levels and up to ten children per opened branch; missing children are generated once and become reusable suggestions.

@@ -241,6 +241,7 @@ enum JapaneseAppStrings {
         "More": "もっと",
         "Move the app to Trash and delete local settings and caches.": "アプリをゴミ箱に移動し、ローカル設定とキャッシュを削除します。",
         "My Studies": "マイ学習",
+        "My Study Tree": "学習ツリー",
         "My Study": "マイ学習",
         "My Study Detail": "マイ学習の詳細",
         "Name": "名前",

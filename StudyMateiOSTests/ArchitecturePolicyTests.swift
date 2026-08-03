@@ -2,6 +2,24 @@ import XCTest
 @testable import StudyMate
 
 final class ArchitecturePolicyTests: XCTestCase {
+    func testHomeStudyScopesAreLocalizedForAllSupportedLanguages() {
+        let korean = AppStrings(language: .korean)
+        let english = AppStrings(language: .english)
+        let japanese = AppStrings(language: .japanese)
+
+        XCTAssertEqual(korean.homeScopeAll, "모든 학습들")
+        XCTAssertEqual(korean.homeScopeMy, "내 학습")
+        XCTAssertEqual(korean.homeScopeStudyTree, "내 학습트리")
+
+        XCTAssertEqual(english.homeScopeAll, "All Studies")
+        XCTAssertEqual(english.homeScopeMy, "My Studies")
+        XCTAssertEqual(english.homeScopeStudyTree, "My Study Tree")
+
+        XCTAssertEqual(japanese.homeScopeAll, "すべての学習")
+        XCTAssertEqual(japanese.homeScopeMy, "マイ学習")
+        XCTAssertEqual(japanese.homeScopeStudyTree, "学習ツリー")
+    }
+
     func testFeedbackPromptLeadsWithCreditRewardInEveryLanguage() {
         XCTAssertEqual(
             AppStrings(language: .korean).feedbackPromptTitle,

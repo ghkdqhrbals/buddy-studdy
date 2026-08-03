@@ -1168,10 +1168,10 @@ private struct MobileHomeView: View {
     private var activeSearchText: Binding<String> {
         Binding(
             get: {
-                selectedHomeScope == .my ? homeStudySearchText : appState.communitySearchText
+                selectedHomeScope.isPersonal ? homeStudySearchText : appState.communitySearchText
             },
             set: { newValue in
-                if selectedHomeScope == .my {
+                if selectedHomeScope.isPersonal {
                     homeStudySearchText = newValue
                 } else {
                     appState.communitySearchText = newValue
@@ -1311,7 +1311,7 @@ private struct MobileHomeView: View {
     }
 
     private var isRefreshingMyStudyContent: Bool {
-        selectedHomeScope == .my && isRefreshingSelectedHomeScope
+        selectedHomeScope.isPersonal && isRefreshingSelectedHomeScope
     }
 
     private var isRefreshingCommunityContent: Bool {
@@ -1430,7 +1430,7 @@ private struct MobileHomeView: View {
         .onChange(of: selectedHomeScope) { _, newScope in
             appState.logMobileAuthView(
                 "mobile_home_scope_change",
-                page: newScope == .my ? .myStudies : .publicQuestions,
+                page: newScope.isPersonal ? .myStudies : .publicQuestions,
                 reason: "selectedHomeScope",
                 extra: ["scope=\(String(describing: newScope))"]
             )
@@ -1656,7 +1656,7 @@ private struct MobileHomeView: View {
 
     @ViewBuilder
     private var homeContentSection: some View {
-        if selectedHomeScope == .my, !appState.isCommunitySessionActive {
+        if selectedHomeScope.isPersonal, !appState.isCommunitySessionActive {
             myStudyLoginSection
                 .onAppear {
                     appState.logMobileAuthView(
@@ -1666,12 +1666,21 @@ private struct MobileHomeView: View {
                     )
                 }
         } else if selectedHomeScope == .my {
-            myStudySection
+            myStudyListSection
                 .onAppear {
                     appState.logMobileAuthView(
                         "mobile_render_protected_content",
                         page: .myStudies,
                         reason: "home-my-study"
+                    )
+                }
+        } else if selectedHomeScope == .tree {
+            myStudyTreeSection
+                .onAppear {
+                    appState.logMobileAuthView(
+                        "mobile_render_protected_content",
+                        page: .myStudies,
+                        reason: "home-my-study-tree"
                     )
                 }
         } else {
@@ -1700,33 +1709,54 @@ private struct MobileHomeView: View {
         }
     }
 
-    private var myStudySection: some View {
+    private var myStudyListSection: some View {
         Section {
-            if filteredStudyCategories.isEmpty {
-                if isRefreshingMyStudyContent {
-                    MobileHomeRefreshIndicator()
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, 34)
-                        .listRowSeparator(.hidden)
-                } else {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(strings.noMatchingTopics)
-                            .font(.subheadline.weight(.semibold))
-
-                        Text(strings.noMatchingTopicsDescription)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            personalStudyEmptyOrLoadingContent {
+                ForEach(filteredStudyCategories) { category in
+                    Button {
+                        appState.openStudyCategory(category.id)
+                    } label: {
+                        MobileHomeCategoryRow(
+                            category: category,
+                            hasPendingQuestion: appState.pendingQuestionCount(for: category) > 0,
+                            strings: strings
+                        )
                     }
-                    .padding(.vertical, 8)
-                }
-            } else {
-                if isRefreshingMyStudyContent {
-                    MobileHomeRefreshIndicator()
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, 8)
-                        .listRowSeparator(.hidden)
-                }
+                    .buttonStyle(.plain)
+                    .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .contextMenu {
+                        Button {
+                            editingStudyCategory = category
+                        } label: {
+                            Label(strings.editStudyCategory, systemImage: "pencil")
+                        }
 
+                        Button {
+                            appState.openStudyTree(category.id)
+                        } label: {
+                            Label(
+                                strings.viewFullStudyTree,
+                                systemImage: "point.3.connected.trianglepath.dotted"
+                            )
+                        }
+                    }
+                }
+                .onMove { offsets, destination in
+                    guard trimmedHomeStudySearchText.isEmpty else {
+                        return
+                    }
+
+                    appState.moveStudyCategories(from: offsets, to: destination)
+                }
+            }
+        }
+    }
+
+    private var myStudyTreeSection: some View {
+        Section {
+            personalStudyEmptyOrLoadingContent {
                 ForEach(filteredStudyCategories) { category in
                     myStudyCategoryRow(category)
                 }
@@ -1738,6 +1768,39 @@ private struct MobileHomeView: View {
                     appState.moveStudyCategories(from: offsets, to: destination)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func personalStudyEmptyOrLoadingContent<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        if filteredStudyCategories.isEmpty {
+            if isRefreshingMyStudyContent {
+                MobileHomeRefreshIndicator()
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 34)
+                    .listRowSeparator(.hidden)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(strings.noMatchingTopics)
+                        .font(.subheadline.weight(.semibold))
+
+                    Text(strings.noMatchingTopicsDescription)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 8)
+            }
+        } else {
+            if isRefreshingMyStudyContent {
+                MobileHomeRefreshIndicator()
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 8)
+                    .listRowSeparator(.hidden)
+            }
+
+            content()
         }
     }
 
@@ -1985,7 +2048,7 @@ private struct MobileHomeView: View {
     }
 
     private var shouldShowHomeAddToolbarButton: Bool {
-        !isHomeSearchActive && selectedHomeScope == .my && appState.isCommunitySessionActive
+        !isHomeSearchActive && selectedHomeScope.isPersonal && appState.isCommunitySessionActive
     }
 
     private var profileToolbarControl: some View {
@@ -2060,7 +2123,7 @@ private struct MobileHomeView: View {
     @ViewBuilder
     private func homeToolbarItems(strings: AppStrings) -> some View {
         HStack(spacing: 16) {
-            if selectedHomeScope == .my, appState.isCommunitySessionActive {
+            if selectedHomeScope.isPersonal, appState.isCommunitySessionActive {
                 Button {
                     isAddingStudyCategory = true
                 } label: {
@@ -2132,7 +2195,7 @@ private struct MobileHomeView: View {
         if clearText {
             setActiveSearchText("")
             submittedHomeStudySearchText = ""
-            if selectedHomeScope == .my {
+            if selectedHomeScope.isPersonal {
                 appState.clearBackendStudySearchResults()
             }
         }
@@ -2144,7 +2207,7 @@ private struct MobileHomeView: View {
 
     @MainActor
     private func setActiveSearchText(_ value: String) {
-        if selectedHomeScope == .my {
+        if selectedHomeScope.isPersonal {
             homeStudySearchText = value
         } else {
             appState.communitySearchText = value
@@ -2174,7 +2237,7 @@ private struct MobileHomeView: View {
     @MainActor
     private func refreshHomeData(for scope: HomeFeedScope) async {
         switch scope {
-        case .my:
+        case .my, .tree:
             await appState.refreshVisibleData()
         case .all:
             hasLoadedCommunityQuestions = true
@@ -2204,7 +2267,7 @@ private struct MobileHomeView: View {
             Task {
                 await appState.loadCommunityQuestions(reset: true, userInitiated: true)
             }
-        case .my:
+        case .my, .tree:
             let query = trimmedHomeStudySearchText
             submittedHomeStudySearchText = query
             guard !query.isEmpty else {
@@ -2222,15 +2285,22 @@ private struct MobileHomeView: View {
 private enum HomeFeedScope: String, CaseIterable, Identifiable {
     case all
     case my
+    case tree
 
     var id: String {
         rawValue
+    }
+
+    var isPersonal: Bool {
+        self != .all
     }
 
     func title(strings: AppStrings) -> String {
         switch self {
         case .my:
             strings.homeScopeMy
+        case .tree:
+            strings.homeScopeStudyTree
         case .all:
             strings.homeScopeAll
         }
