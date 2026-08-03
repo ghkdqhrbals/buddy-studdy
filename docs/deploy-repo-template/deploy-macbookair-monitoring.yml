@@ -192,7 +192,7 @@ jobs:
             "${monitoring_root}/api-dashboard/nginx.conf"
           grep -q 'job: monitoring-access' \
             "${monitoring_root}/promtail/config/promtail.yml"
-          grep -Fq '<{{ .Annotations.logs_url }}|Grafana에서 오류 로그 보기>' \
+          grep -Fq '<{{ .Annotations.logs_url }}|오류 로그 보기>' \
             "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
           grep -Fq 'http://buddystudy-incident-receiver:3030/internal/incidents/grafana' \
             "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"

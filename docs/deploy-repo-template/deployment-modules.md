@@ -264,7 +264,7 @@ deployment.
   alert links query the original millisecond timestamp and logger. Their Explore
   range starts at the captured event timestamp rather than a moving relative
   window, so reopening a Slack notification still targets the same Loki event.
-  A compact `Grafana에서 오류 로그 보기` hyperlink targets the Loki ERROR
+  A compact `오류 로그 보기` hyperlink targets the Loki ERROR
   event without printing the raw Explore URL in the message. API and background
   failures are separate alert rules so request metadata is never fabricated for
   scheduler, stream-consumer, or application-startup failures.

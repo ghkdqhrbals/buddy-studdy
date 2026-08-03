@@ -64,7 +64,7 @@ This directory is the source of truth for the MacBook Air Grafana/Loki setup.
     the `GRAFANA_ADMIN_PASSWORD` deployment secret on every rollout.
   - Anonymous access is disabled; unauthenticated users see the login screen
     instead of a protected default dashboard.
-  - Backend ERROR alerts show a compact `Grafana에서 오류 로그 보기` hyperlink
+  - Backend ERROR alerts show a compact `오류 로그 보기` hyperlink
     in Slack instead of printing the raw Explore URL. API links use the captured
     `requestId`, while background links use the original timestamp and logger;
     both ranges start at the event time instead of a moving `now-15m` window.
