@@ -16,6 +16,7 @@ import org.springframework.web.bind.support.WebExchangeBindException
 import org.springframework.web.reactive.resource.NoResourceFoundException
 import org.springframework.web.server.ServerWebExchange
 import org.springframework.web.server.ServerWebInputException
+import org.springframework.web.util.DisconnectedClientHelper
 import java.util.UUID
 
 data class ApiErrorEnvelope(val error: ApiError)
@@ -153,6 +154,9 @@ class ErrorHandler(
 
     @ExceptionHandler(Exception::class)
     fun fallback(error: Exception, exchange: ServerWebExchange): ResponseEntity<ApiErrorEnvelope> {
+        if (DisconnectedClientHelper.isClientDisconnectedException(error)) {
+            throw error
+        }
         return internalServerError(error, exchange)
     }
 

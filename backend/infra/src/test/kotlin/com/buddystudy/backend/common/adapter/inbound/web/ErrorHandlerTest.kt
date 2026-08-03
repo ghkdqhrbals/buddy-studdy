@@ -7,6 +7,7 @@ import com.buddystudy.backend.common.application.error.ApiRuntimeException
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.boot.test.system.CapturedOutput
@@ -18,6 +19,7 @@ import org.springframework.http.MediaType
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest
 import org.springframework.mock.web.server.MockServerWebExchange
 import org.springframework.web.reactive.resource.NoResourceFoundException
+import reactor.netty.channel.AbortedException
 import java.net.URI
 import java.util.Locale
 
@@ -125,6 +127,16 @@ class ErrorHandlerTest {
         assertThat(output.all).doesNotContain("requestId=req-compact")
         assertThat(output.all).doesNotContain("clientIp=203.0.113.10")
         assertThat(output.all).doesNotContain("\tat ")
+    }
+
+    @Test
+    fun `client disconnect bypasses internal server error handling`(output: CapturedOutput) {
+        val exchange = exchange("GET", "/api/v1/studies", "req-disconnected")
+        val error = AbortedException(IllegalStateException("connection closed"))
+
+        assertThatThrownBy { handler.fallback(error, exchange) }
+            .isSameAs(error)
+        assertThat(output.all).doesNotContain("api_error")
     }
 
     @Test
