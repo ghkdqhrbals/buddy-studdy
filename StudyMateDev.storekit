@@ -1,0 +1,188 @@
+{
+  "identifier" : "4E385282-68D2-41E0-8206-E10E7D3A9D80",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+    "_applicationInternalID" : "6774108938",
+    "_developerTeamID" : "4CL25TC734",
+    "_failTransactionsEnabled" : false,
+    "_locale" : "ko_KR",
+    "_renewalBillingIssuesEnabled" : false,
+    "_storefront" : "KOR",
+    "_storeKitErrors" : [
+
+    ],
+    "_timeRate" : 0
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "879D5DB9-F67F-48BC-A991-F596853EF18F",
+      "localizations" : [
+
+      ],
+      "name" : "BuddyStudy Membership",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "7900",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "6797527129",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "월 300회 질문",
+              "displayName" : "티어 2 월간",
+              "locale" : "ko_KR"
+            },
+            {
+              "description" : "300 questions per month",
+              "displayName" : "Tier 2 Monthly",
+              "locale" : "en_US"
+            },
+            {
+              "description" : "月300回の質問",
+              "displayName" : "ティア2 月間",
+              "locale" : "ja_JP"
+            }
+          ],
+          "productID" : "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "BuddyStudy Tier 2 Monthly",
+          "subscriptionGroupID" : "879D5DB9-F67F-48BC-A991-F596853EF18F",
+          "type" : "RecurringSubscription",
+          "winBackOffers" : [
+
+          ]
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "69000",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "6797527085",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "월 300회 질문",
+              "displayName" : "티어 2 연간",
+              "locale" : "ko_KR"
+            },
+            {
+              "description" : "300 questions per month",
+              "displayName" : "Tier 2 Annual",
+              "locale" : "en_US"
+            },
+            {
+              "description" : "月300回の質問",
+              "displayName" : "ティア2 年間",
+              "locale" : "ja_JP"
+            }
+          ],
+          "productID" : "io.github.ghkdqhrbals.StudyMate.tier2.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "BuddyStudy Tier 2 Annual",
+          "subscriptionGroupID" : "879D5DB9-F67F-48BC-A991-F596853EF18F",
+          "type" : "RecurringSubscription",
+          "winBackOffers" : [
+
+          ]
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "17900",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "6797527130",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "월 1,000회 질문",
+              "displayName" : "티어 3 월간",
+              "locale" : "ko_KR"
+            },
+            {
+              "description" : "1,000 questions per month",
+              "displayName" : "Tier 3 Monthly",
+              "locale" : "en_US"
+            },
+            {
+              "description" : "月1,000回の質問",
+              "displayName" : "ティア3 月間",
+              "locale" : "ja_JP"
+            }
+          ],
+          "productID" : "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "BuddyStudy Tier 3 Monthly",
+          "subscriptionGroupID" : "879D5DB9-F67F-48BC-A991-F596853EF18F",
+          "type" : "RecurringSubscription",
+          "winBackOffers" : [
+
+          ]
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "149000",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "6797527227",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "월 1,000회 질문",
+              "displayName" : "티어 3 연간",
+              "locale" : "ko_KR"
+            },
+            {
+              "description" : "1,000 questions per month",
+              "displayName" : "Tier 3 Annual",
+              "locale" : "en_US"
+            },
+            {
+              "description" : "月1,000回の質問",
+              "displayName" : "ティア3 年間",
+              "locale" : "ja_JP"
+            }
+          ],
+          "productID" : "io.github.ghkdqhrbals.StudyMate.tier3.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "BuddyStudy Tier 3 Annual",
+          "subscriptionGroupID" : "879D5DB9-F67F-48BC-A991-F596853EF18F",
+          "type" : "RecurringSubscription",
+          "winBackOffers" : [
+
+          ]
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

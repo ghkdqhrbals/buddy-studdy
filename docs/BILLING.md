@@ -137,3 +137,24 @@ not tester creation, through the public API.
 StoreKit products and server notifications still require App Store Connect
 agreements, tax/banking setup, review screenshots, and review approval before
 real purchases can complete.
+
+## Development and Sandbox setup
+
+- The shared `StudyMateiOS` Debug launch action uses `StudyMateDev.storekit`.
+  Simulator and Xcode-launched device purchases therefore return `XCODE`
+  transactions while still creating the same backend `NORMAL/WAITING` invoice
+  before the StoreKit sheet and synchronizing the transaction JWS afterward.
+- The same launch action injects `BUDDYSTUDY_BACKEND_BASE_URL=https://api.lowfidev.cloud`,
+  keeping the local StoreKit transaction and its pending invoice on the dev
+  backend even when the installation previously selected the production API.
+- The backend `dev` profile accepts `XCODE` transactions and verifies their
+  bundle ID, product mapping, `appAccountToken`, invoice, and transaction data.
+  Apple does not sign Xcode-local test data, so this environment is never
+  enabled by the production profile.
+- To exercise Apple's actual Sandbox, run a development-signed build without
+  the scheme StoreKit configuration and sign in with an App Store Connect
+  Sandbox Apple Account. Those transactions are marked `SANDBOX` and use the
+  same dev API and invoice lifecycle.
+- `StudyMateDev.storekit` and `app-store/billing/subscriptions.json` must retain
+  identical product IDs and Korean base prices; the iOS policy test guards this
+  contract.

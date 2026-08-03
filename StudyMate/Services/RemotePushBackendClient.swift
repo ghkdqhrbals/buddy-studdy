@@ -170,10 +170,11 @@ struct EmailVerificationCodeResult: Equatable {
 
 @MainActor
 struct BackendBaseURLConfiguration: Equatable {
-    static let defaultDebugBaseURL = URL(string: "https://lowfidev.cloud")!
+    static let defaultDebugBaseURL = URL(string: "https://api.lowfidev.cloud")!
 
     var isDebuggingEnabled: Bool
     var debugBackendBaseURL: String
+    var launchBackendBaseURL: String? = ProcessInfo.processInfo.environment["BUDDYSTUDY_BACKEND_BASE_URL"]
 
     var normalizedDebugBackendBaseURL: String {
         Self.normalizedDebugBackendBaseURL(debugBackendBaseURL)
@@ -184,6 +185,10 @@ struct BackendBaseURLConfiguration: Equatable {
     }
 
     var effectiveBaseURL: URL {
+        if let launchBackendBaseURL,
+           let launchURL = Self.resolvedDebugBackendURL(from: launchBackendBaseURL) {
+            return launchURL
+        }
         guard isDebuggingEnabled else {
             return RemotePushBackendClient.defaultBaseURL
         }
@@ -209,8 +214,16 @@ struct BackendBaseURLConfiguration: Equatable {
             return trimmedURL
         }
 
-        return String(trimmedURL.drop { $0 == "/" })
+        let normalizedURL = String(trimmedURL.drop { $0 == "/" })
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        switch normalizedURL.lowercased() {
+        case "https://lowfidev.cloud":
+            return "https://api.lowfidev.cloud"
+        case "http://lowfidev.cloud":
+            return "http://api.lowfidev.cloud"
+        default:
+            return normalizedURL
+        }
     }
 
     static func resolvedDebugBackendURL(from value: String) -> URL? {

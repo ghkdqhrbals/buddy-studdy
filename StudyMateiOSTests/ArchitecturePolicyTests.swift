@@ -1,3 +1,5 @@
+import StoreKit
+import StoreKitTest
 import XCTest
 @testable import StudyMate
 
@@ -2608,6 +2610,91 @@ final class ArchitecturePolicyTests: XCTestCase {
             XCTAssertTrue(diagnostic.contains("kind=keyNotFound"))
             XCTAssertTrue(diagnostic.contains("path=$.body"))
         }
+    }
+
+    func testDevelopmentStoreKitCatalogMatchesServerOwnedProductCatalog() throws {
+        let root = try repositoryRoot()
+        let storeKitData = try Data(contentsOf: root.appendingPathComponent("StudyMateDev.storekit"))
+        let appStoreData = try Data(
+            contentsOf: root.appendingPathComponent("app-store/billing/subscriptions.json")
+        )
+        let storeKit = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: storeKitData) as? [String: Any]
+        )
+        let appStore = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: appStoreData) as? [String: Any]
+        )
+        let groups = try XCTUnwrap(storeKit["subscriptionGroups"] as? [[String: Any]])
+        let subscriptions = groups.flatMap { $0["subscriptions"] as? [[String: Any]] ?? [] }
+        let configuredProducts = Dictionary(
+            uniqueKeysWithValues: try subscriptions.map { subscription in
+                (
+                    try XCTUnwrap(subscription["productID"] as? String),
+                    try XCTUnwrap(subscription["displayPrice"] as? String)
+                )
+            }
+        )
+        let products = try XCTUnwrap(appStore["products"] as? [[String: Any]])
+        let serverProducts = Dictionary(
+            uniqueKeysWithValues: try products.map { product in
+                (
+                    try XCTUnwrap(product["productId"] as? String),
+                    try XCTUnwrap(product["customerPrice"] as? String)
+                )
+            }
+        )
+
+        XCTAssertEqual(configuredProducts, serverProducts)
+
+        let scheme = try String(
+            contentsOf: root.appendingPathComponent(
+                "StudyMate.xcodeproj/xcshareddata/xcschemes/StudyMateiOS.xcscheme"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(scheme.contains("../../StudyMateDev.storekit"))
+        XCTAssertTrue(scheme.contains("BUDDYSTUDY_BACKEND_BASE_URL"))
+        XCTAssertTrue(scheme.contains("https://api.lowfidev.cloud"))
+    }
+
+    @MainActor
+    func testDevelopmentLaunchBackendOverridesPersistedProductionSelection() {
+        let configuration = BackendBaseURLConfiguration(
+            isDebuggingEnabled: false,
+            debugBackendBaseURL: "",
+            launchBackendBaseURL: "https://api.lowfidev.cloud"
+        )
+
+        XCTAssertEqual(configuration.effectiveBaseURL.absoluteString, "https://api.lowfidev.cloud")
+    }
+
+    @MainActor
+    func testLegacyDevelopmentBackendURLMigratesToAPIHost() {
+        let configuration = BackendBaseURLConfiguration(
+            isDebuggingEnabled: true,
+            debugBackendBaseURL: "https://lowfidev.cloud",
+            launchBackendBaseURL: nil
+        )
+
+        XCTAssertEqual(configuration.normalizedDebugBackendBaseURL, "https://api.lowfidev.cloud")
+        XCTAssertEqual(configuration.effectiveBaseURL.absoluteString, "https://api.lowfidev.cloud")
+    }
+
+    func testDevelopmentStoreKitConfigurationLoadsAllPaidProducts() async throws {
+        let session = try SKTestSession(configurationFileNamed: "StudyMateDev")
+        session.disableDialogs = true
+        session.clearTransactions()
+        let expectedProductIDs: Set<String> = [
+            "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+            "io.github.ghkdqhrbals.StudyMate.tier2.yearly",
+            "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+            "io.github.ghkdqhrbals.StudyMate.tier3.yearly",
+        ]
+
+        let products = try await Product.products(for: expectedProductIDs)
+
+        XCTAssertEqual(Set(products.map(\.id)), expectedProductIDs)
+        XCTAssertTrue(products.allSatisfy { $0.type == .autoRenewable })
     }
 
     private func repositoryRoot() throws -> URL {

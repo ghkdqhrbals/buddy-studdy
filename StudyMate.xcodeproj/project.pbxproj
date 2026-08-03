@@ -11,6 +11,7 @@
 		E50000000000000000000001 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = E50000000000000000000002 /* Sentry */; };
 		E50000000000000000000003 /* SentryMonitoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = E50000000000000000000004 /* SentryMonitoring.swift */; };
 		B10000000000000000000002 /* AppleBillingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* AppleBillingStore.swift */; };
+		B90000000000000000000002 /* StudyMateDev.storekit in Resources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000001 /* StudyMateDev.storekit */; };
 		110000000000000000000101 /* StudyMateApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000001 /* StudyMateApp.swift */; };
 		110000000000000000000102 /* StudyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000002 /* StudyModels.swift */; };
 		1100000000000000000001E0 /* JapaneseAppStrings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000E0 /* JapaneseAppStrings.swift */; };
@@ -416,6 +417,7 @@
 		120000000000000000000204 /* PageAccessPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageAccessPolicyTests.swift; sourceTree = "<group>"; };
 		120000000000000000000206 /* AvatarBuilderAssetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarBuilderAssetTests.swift; sourceTree = "<group>"; };
 		120000000000000000000208 /* QuestionGenerationFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionGenerationFlowTests.swift; sourceTree = "<group>"; };
+		B90000000000000000000001 /* StudyMateDev.storekit */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = StudyMateDev.storekit; sourceTree = "<group>"; };
 		F70000000000000000000020 /* AppControlPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppControlPolicyTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -458,6 +460,7 @@
 		110000000000000000000060 = {
 			isa = PBXGroup;
 			children = (
+				B90000000000000000000001 /* StudyMateDev.storekit */,
 				110000000000000000000061 /* StudyMate */,
 				110000000000000000000066 /* StudyMateTests */,
 				120000000000000000000066 /* StudyMateiOSTests */,
@@ -1115,6 +1118,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B90000000000000000000002 /* StudyMateDev.storekit in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

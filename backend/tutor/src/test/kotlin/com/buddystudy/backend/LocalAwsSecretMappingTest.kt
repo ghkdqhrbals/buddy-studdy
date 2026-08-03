@@ -67,6 +67,17 @@ class LocalAwsSecretMappingTest {
     }
 
     @Test
+    fun `development profile accepts sandbox and local StoreKit transactions`() {
+        contextRunner.run { context ->
+            val apple = context.getBean(BuddyStudyProperties::class.java).billing.apple
+
+            assertThat(apple.bundleId).isEqualTo("io.github.ghkdqhrbals.StudyMate")
+            assertThat(apple.appAppleId).isEqualTo(6774108938)
+            assertThat(apple.allowXcodeEnvironment).isTrue()
+        }
+    }
+
+    @Test
     fun `local smtp settings are sourced from the namespaced aws secret`() {
         contextRunner
             .withPropertyValues(

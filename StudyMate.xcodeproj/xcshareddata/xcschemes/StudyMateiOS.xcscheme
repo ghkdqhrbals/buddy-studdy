@@ -77,6 +77,16 @@
             ReferencedContainer = "container:StudyMate.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <StoreKitConfigurationFileReference
+         identifier = "../../StudyMateDev.storekit">
+      </StoreKitConfigurationFileReference>
+      <EnvironmentVariables>
+         <EnvironmentVariable
+            key = "BUDDYSTUDY_BACKEND_BASE_URL"
+            value = "https://api.lowfidev.cloud"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+      </EnvironmentVariables>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"
