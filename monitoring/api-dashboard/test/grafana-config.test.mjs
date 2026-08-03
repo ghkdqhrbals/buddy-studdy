@@ -342,8 +342,9 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
   assert.match(alert, /username: Grafana/);
   assert.match(alert, /icon_url: https:\/\/avatars\.githubusercontent\.com\/u\/7195757/);
   assert.match(alert, /level="ERROR"/);
-  assert.match(alert, /sum by \(occurred_at, logger, method, path, origin\)/);
+  assert.match(alert, /sum by \(occurred_at, logger, request_id, method, path, origin\)/);
   assert.match(alert, /\|= "api_error"/);
+  assert.match(alert, /requestId=\(\?P<request_id>/);
   assert.match(alert, /method=\(\?P<method>/);
   assert.match(alert, /path=\(\?P<path>/);
   assert.match(alert, /origin=\(\?P<origin>/);
@@ -376,28 +377,48 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
   assert.match(alert, /\*발생 시각:\* `\{\{ \.Annotations\.occurred_at \}\}`/);
   assert.match(alert, /\*요청 위치:\* `\{\{ \.Annotations\.request_location \}\}`/);
   assert.match(alert, /\*코드 위치:\* `\{\{ \.Annotations\.code_location \}\}`/);
+  assert.match(alert, /\*로그 식별자:\* `\{\{ \.Annotations\.log_identity \}\}`/);
   assert.match(alert, /occurred_at: '\{\{ \$labels\.occurred_at \}\}'/);
   assert.match(
     alert,
     /request_location: '\{\{ \$labels\.method \}\} https:\/\/api\.ghkdqhrbals\.org\{\{ \$labels\.path \}\}'/,
   );
   assert.match(alert, /code_location: '\{\{ \$labels\.origin \}\} · \{\{ \$labels\.logger \}\}'/);
+  assert.match(alert, /log_identity: 'requestId=\{\{ \$labels\.request_id \}\}'/);
   assert.doesNotMatch(alert, /Logs: \{\{ \.Annotations\.logs_url \}\}/);
-  const logsUrlValue = alert.match(/^\s+logs_url: (\S+)$/m)?.[1];
-  assert.ok(logsUrlValue, "Slack alert must include a Grafana logs URL");
-  const logsUrl = new URL(logsUrlValue);
-  assert.equal(logsUrl.origin, "https://grafana.lowfidev.cloud");
-  assert.equal(logsUrl.pathname, "/explore");
-  assert.equal(logsUrl.searchParams.get("schemaVersion"), "1");
-  assert.equal(logsUrl.searchParams.get("orgId"), "1");
-  const panes = JSON.parse(logsUrl.searchParams.get("panes"));
-  assert.deepEqual(panes.backendErrors.range, { from: "now-15m", to: "now" });
-  assert.equal(panes.backendErrors.datasource, "buddystudy-loki");
-  assert.equal(
-    panes.backendErrors.queries[0].expr,
-    '{app="buddystudy", level="ERROR"}',
+  const logsUrlValues = [...alert.matchAll(/^\s+logs_url: (.+)$/gm)].map((match) => match[1]);
+  assert.equal(logsUrlValues.length, 2, "Both Slack alerts must include a Grafana logs URL");
+  const occurredAt = "2026-08-03T09:09:23.029Z";
+  const apiLogsUrl = new URL(
+    logsUrlValues[0]
+      .replaceAll("{{ $labels.request_id }}", "req-exact-error")
+      .replaceAll("{{ $labels.occurred_at }}", occurredAt),
   );
-  assert.doesNotMatch(logsUrl.pathname, /grafana-lokiexplore-app/);
+  const operationalLogsUrl = new URL(
+    logsUrlValues[1]
+      .replaceAll("{{ $labels.occurred_at }}", occurredAt)
+      .replaceAll("{{ $labels.logger }}", "c.b.StreamConsumer"),
+  );
+  for (const logsUrl of [apiLogsUrl, operationalLogsUrl]) {
+    assert.equal(logsUrl.origin, "https://grafana.lowfidev.cloud");
+    assert.equal(logsUrl.pathname, "/explore");
+    assert.equal(logsUrl.searchParams.get("schemaVersion"), "1");
+    assert.equal(logsUrl.searchParams.get("orgId"), "1");
+    assert.doesNotMatch(logsUrl.pathname, /grafana-lokiexplore-app/);
+  }
+  const apiPanes = JSON.parse(apiLogsUrl.searchParams.get("panes"));
+  assert.deepEqual(apiPanes.backendErrors.range, { from: occurredAt, to: "now" });
+  assert.equal(apiPanes.backendErrors.datasource, "buddystudy-loki");
+  assert.equal(
+    apiPanes.backendErrors.queries[0].expr,
+    '{app="buddystudy"} |= "api_error" |= "requestId=req-exact-error"',
+  );
+  const operationalPanes = JSON.parse(operationalLogsUrl.searchParams.get("panes"));
+  assert.deepEqual(operationalPanes.backendErrors.range, { from: occurredAt, to: "now" });
+  assert.equal(
+    operationalPanes.backendErrors.queries[0].expr,
+    '{app="buddystudy", level="ERROR"} |= "2026-08-03T09:09:23.029Z" |= "c.b.StreamConsumer"',
+  );
 });
 
 test("Codex incident workflow separates model access from pull request writes", async () => {

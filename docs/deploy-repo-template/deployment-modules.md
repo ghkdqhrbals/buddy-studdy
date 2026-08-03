@@ -259,9 +259,12 @@ deployment.
   summary, the millisecond-precision timestamp parsed from the original log,
   and the error location. API incidents show the HTTP method, full production
   request URL, and root stack-frame location; background incidents show the
-  logger component.
+  logger component. API alert links query the exact `requestId`; background
+  alert links query the original millisecond timestamp and logger. Their Explore
+  range starts at the captured event timestamp rather than a moving relative
+  window, so reopening a Slack notification still targets the same Loki event.
   A compact `Grafana에서 오류 로그 보기` hyperlink targets the Loki ERROR
-  query without printing the raw Explore URL in the message. API and background
+  event without printing the raw Explore URL in the message. API and background
   failures are separate alert rules so request metadata is never fabricated for
   scheduler, stream-consumer, or application-startup failures.
   Loki and Sentry retain the full stack and diagnostic context. The link does
