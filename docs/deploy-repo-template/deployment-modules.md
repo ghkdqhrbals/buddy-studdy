@@ -7,7 +7,7 @@ one workflow run just because they share a host.
 
 | Module | Workflow | Trigger | Runner | Owns |
 | --- | --- | --- | --- | --- |
-| Backend API | `Deploy BuddyStudy Backend` | `backend-image-published`, manual | EC2 self-hosted | Docker Swarm backend service rollout, backend env, fixed backend nginx route, log-only MySQL runtime observer, backend-log multiline collection |
+| Backend API | `Deploy BuddyStudy Backend` | `backend-image-published`, manual | EC2 self-hosted | Docker Swarm backend service rollout, backend env, fixed backend nginx route, standard application/runtime metrics, backend-log multiline collection |
 | Translation server | `Deploy BuddyStudy Translation Server` | manual | EC2 self-hosted | Internal LibreTranslate runtime and persisted `ko`, `en`, `ja` model cache |
 | Backend network | `Configure BuddyStudy Backend Network` | manual | EC2 self-hosted | Redis administrator ingress on the backend security group |
 | Database cutover | `Migrate BuddyStudy PostgreSQL To MySQL` | manual, one-time | EC2 self-hosted | PostgreSQL backup, MySQL import, row-count and reference validation, automatic pre-cutover rollback |
@@ -190,12 +190,12 @@ deployment.
   before foreign keys existed; only those missing nullable references are
   normalized to `NULL`. The migration summary records each normalization count,
   while source and destination table counts must still match exactly.
-- The backend deploy runs `buddystudy-db-metrics`, a port-free Docker CLI
-  observer that logs MySQL container CPU, total/active connections, and
-  the live `max_connections` setting every 30 seconds. Promtail forwards these
-  `database_runtime` records to Loki. The observer receives its MySQL password
-  through a private container environment, never logs it, and is not a
-  Prometheus/exporter service.
+- Production does not run a custom MySQL metrics container. Database pressure
+  is observed through the backend's standard Micrometer R2DBC pool gauges,
+  including allocated, acquired, idle, pending, and configured maximum
+  connections. Adding a database exporter requires an explicitly approved
+  Prometheus-compatible metrics backend; do not emulate one with a custom
+  Docker CLI polling script.
 - Backend exceptions logged at `ERROR` include the throwable and bounded
   operation identifiers. EC2 Promtail joins each Java stack trace into one Loki
   event, extracts `level=ERROR`, and preserves the full event for Grafana.

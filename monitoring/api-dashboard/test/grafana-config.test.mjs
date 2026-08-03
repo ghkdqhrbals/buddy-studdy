@@ -39,10 +39,6 @@ const iosDeployNotificationTemplatePath = path.resolve(
   testDirectory,
   "../../../docs/deploy-repo-template/scripts/notify_ios_release.py",
 );
-const databaseCollectorPath = path.resolve(
-  testDirectory,
-  "../../scripts/database-runtime-collector.sh",
-);
 const backendErrorAlertPath = path.resolve(
   testDirectory,
   "../../grafana/provisioning/alerting/backend-errors.yml",
@@ -232,7 +228,7 @@ test("server runtime dashboard separates server, database, and Redis signals", a
 
   assert.equal(dashboard.title, "BuddyStudy Server Dashboard");
   assert.match(dashboard.description, /JVM.*Reactor Netty.*R2DBC.*Redis/);
-  assert.ok(dashboard.panels.length >= 16);
+  assert.ok(dashboard.panels.length >= 14);
   assert.deepEqual(rows, ["Server", "Database", "Redis"]);
   for (const title of [
     "API RPS by endpoint",
@@ -246,8 +242,6 @@ test("server runtime dashboard separates server, database, and Redis signals", a
     "Node capacity",
     "Node memory",
     "R2DBC connection pool",
-    "MySQL CPU",
-    "MySQL connections",
     "Redis activity",
     "Redis failures",
   ]) {
@@ -283,14 +277,8 @@ test("server runtime dashboard separates server, database, and Redis signals", a
     panels.get("R2DBC connection pool")?.targets.at(-1)?.expr ?? "",
     /dbPoolMaxAllocated/,
   );
-  assert.match(
-    panels.get("MySQL CPU")?.targets[0].expr ?? "",
-    /databaseCpuPercent/,
-  );
-  assert.match(
-    panels.get("MySQL connections")?.targets[2].expr ?? "",
-    /databaseMaxConnections/,
-  );
+  assert.ok(!panels.has("MySQL CPU"));
+  assert.ok(!panels.has("MySQL connections"));
   assert.match(panels.get("Redis activity")?.targets[0].expr ?? "", /redis_/);
   assert.match(panels.get("Redis failures")?.targets[0].expr ?? "", /failed\|retry_scheduled/);
 
@@ -303,8 +291,6 @@ test("server runtime dashboard separates server, database, and Redis signals", a
     "Root disk",
     "Network counters",
     "R2DBC connection pool",
-    "MySQL CPU",
-    "MySQL connections",
   ]) {
     for (const target of panels.get(title)?.targets ?? []) {
       assert.match(
@@ -316,26 +302,19 @@ test("server runtime dashboard separates server, database, and Redis signals", a
   }
 });
 
-test("backend deploy starts a log-only MySQL runtime collector", async () => {
-  const [deployTemplate, swarmStackTemplate, collector] = await Promise.all([
+test("backend deploy removes the legacy MySQL collector without replacing it", async () => {
+  const [deployTemplate, swarmStackTemplate] = await Promise.all([
     fs.readFile(backendDeployTemplatePath, "utf8"),
     fs.readFile(backendSwarmStackTemplatePath, "utf8"),
-    fs.readFile(databaseCollectorPath, "utf8"),
   ]);
 
-  assert.match(deployTemplate, /docker pull docker:27-cli/);
-  assert.match(deployTemplate, /--name buddystudy-db-metrics/);
-  assert.match(deployTemplate, /database-runtime-collector\.sh:\/collector\.sh:ro/);
-  assert.match(deployTemplate, /DATABASE_METRICS_INTERVAL_SECONDS=30/);
+  assert.match(deployTemplate, /docker rm -f buddystudy-db-metrics/);
+  assert.doesNotMatch(deployTemplate, /docker pull docker:27-cli/);
+  assert.doesNotMatch(deployTemplate, /--name buddystudy-db-metrics/);
+  assert.doesNotMatch(deployTemplate, /database-runtime-collector\.sh/);
   assert.match(deployTemplate, /PROFILE_PHOTO_PUBLIC_BASE_URL=https:\/\/\$\{BACKEND_DOMAIN\}/);
   assert.match(deployTemplate, /docker volume create buddystudy-profile-photos/);
   assert.match(swarmStackTemplate, /buddystudy-profile-photos:\/app\/profile-photos/);
-  assert.match(collector, /docker stats --no-stream/);
-  assert.match(collector, /@@max_connections/);
-  assert.match(collector, /performance_schema\.threads/);
-  assert.match(collector, /databaseCpuPercent/);
-  assert.match(collector, /databaseMaxConnections/);
-  assert.doesNotMatch(collector, /POSTGRES_PASSWORD/);
 });
 
 test("backend errors are one labeled Loki event and alert Slack", async () => {
