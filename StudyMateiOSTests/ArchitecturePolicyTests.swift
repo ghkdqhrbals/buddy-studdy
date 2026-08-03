@@ -2,6 +2,21 @@ import XCTest
 @testable import StudyMate
 
 final class ArchitecturePolicyTests: XCTestCase {
+    func testFeedbackPromptLeadsWithCreditRewardInEveryLanguage() {
+        XCTAssertEqual(
+            AppStrings(language: .korean).feedbackPromptTitle,
+            "의견을 남겨주시면 무료 크레딧을 드려요!"
+        )
+        XCTAssertEqual(
+            AppStrings(language: .english).feedbackPromptTitle,
+            "Share your feedback and receive free credits!"
+        )
+        XCTAssertEqual(
+            AppStrings(language: .japanese).feedbackPromptTitle,
+            "ご意見をいただいた方に無料クレジットをプレゼント！"
+        )
+    }
+
     func testIOSBundleDeclaresEverySupportedAppLanguage() throws {
         let root = try repositoryRoot()
         let infoPlistURL = root.appendingPathComponent("StudyMate/iOSInfo.plist")

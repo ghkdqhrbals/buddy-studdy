@@ -3885,12 +3885,18 @@ struct AppStrings {
     var hint: String { text("힌트", "Hint") }
     var feedback: String { text("피드백", "Feedback") }
     var feedbackLink: String { text("피드백 보내기", "Send feedback") }
-    var feedbackPromptTitle: String { text("BuddyStudy를 더 좋게 만들어 주세요", "Help improve BuddyStudy") }
+    var feedbackPromptTitle: String {
+        text(
+            "의견을 남겨주시면 무료 크레딧을 드려요!",
+            "Share your feedback and receive free credits!",
+            "ご意見をいただいた方に無料クレジットをプレゼント！"
+        )
+    }
     var feedbackPromptBody: String {
         text(
-            "피드백 주는 분들께 무료 크레딧을 더 드려요!",
-            "Share feedback and receive extra credits for free!",
-            "フィードバックをくださった方に無料クレジットを追加します！"
+            "여러분의 아이디어를 기다리고 있어요.",
+            "We're looking forward to your ideas.",
+            "皆さんのアイデアをお待ちしています。"
         )
     }
     var feedbackMessage: String { text("내용", "Message") }
