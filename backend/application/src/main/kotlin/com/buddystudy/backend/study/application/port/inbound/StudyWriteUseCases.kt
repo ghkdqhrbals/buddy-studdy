@@ -62,20 +62,27 @@ interface QuestionGenerationExecutionWriteUseCase {
 
     suspend fun complete(
         event: QuestionGenerationRequestedEvent,
-        claim: StreamInboxClaim,
         prepared: PreparedQuestionGeneration,
         now: Instant,
     ): QuestionWriteResult
+
+    suspend fun succeed(claim: StreamInboxClaim, now: Instant)
 
     suspend fun retry(claim: StreamInboxClaim, error: String, now: Instant)
 
     suspend fun fail(
         event: QuestionGenerationRequestedEvent,
-        claim: StreamInboxClaim,
         errorCode: String,
         errorMessage: String,
         now: Instant,
     ): OutboxReference?
+
+    suspend fun completeFailure(
+        claim: StreamInboxClaim,
+        errorCode: String,
+        errorMessage: String,
+        now: Instant,
+    )
 }
 
 interface QuestionDeliveryWriteUseCase {
@@ -96,21 +103,23 @@ interface QuestionTranslationExecutionWriteUseCase {
 
     suspend fun complete(
         event: QuestionGeneratedEvent,
-        claim: StreamInboxClaim,
         translation: TranslatedQuestionContent?,
         rootStudy: StudyEntity,
         appLanguage: String,
         now: Instant,
     ): QuestionWriteResult
 
+    suspend fun succeed(claim: StreamInboxClaim, now: Instant)
+
     suspend fun retry(claim: StreamInboxClaim, error: String, now: Instant)
 
     suspend fun fail(
         event: QuestionGeneratedEvent,
-        claim: StreamInboxClaim,
         errorMessage: String,
         now: Instant,
     ): OutboxReference?
+
+    suspend fun completeFailure(claim: StreamInboxClaim, errorMessage: String, now: Instant)
 }
 
 interface QuestionGenerationRollbackWriteUseCase {
@@ -122,9 +131,10 @@ interface QuestionGenerationRollbackWriteUseCase {
 
     suspend fun complete(
         event: QuestionGenerationRollbackRequestedEvent,
-        claim: StreamInboxClaim,
         now: Instant,
     )
+
+    suspend fun succeed(claim: StreamInboxClaim, now: Instant)
 
     suspend fun retry(claim: StreamInboxClaim, error: String, now: Instant)
 }

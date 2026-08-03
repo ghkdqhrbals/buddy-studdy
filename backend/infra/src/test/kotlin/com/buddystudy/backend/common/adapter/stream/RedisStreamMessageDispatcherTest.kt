@@ -5,6 +5,7 @@ import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumerO
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
+import com.buddystudy.backend.common.application.stream.StreamRetryScheduledException
 import java.time.Duration
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -82,6 +83,28 @@ class RedisStreamMessageDispatcherTest {
         assertThat(failures.retryable.single())
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessage("handler failed")
+    }
+
+    @Test
+    fun `handler scheduled retry is not recorded a second time by dispatcher`() = runBlocking {
+        val streams = RecordingConsumerOperations()
+        val failures = RecordingFailureHistory()
+        val dispatcher = dispatcher(streams, failures)
+
+        dispatcher.dispatch(
+            bean = SampleHandler(),
+            method = handlerMethod("retryScheduled"),
+            eventType = "SAMPLE",
+            payloadType = SamplePayload::class.java,
+            group = "sample-group",
+            options = StreamOptions.ACK,
+            message = message("""{"value":31}"""),
+            claimed = true,
+        )
+
+        assertThat(streams.acknowledged).isEmpty()
+        assertThat(failures.retryable).isEmpty()
+        assertThat(failures.terminal).isEmpty()
     }
 
     @Test
@@ -257,6 +280,12 @@ class RedisStreamMessageDispatcherTest {
         @Suppress("unused", "UNUSED_PARAMETER")
         private suspend fun fail(payload: SamplePayload, context: StreamMessageContext) {
             throw IllegalStateException("handler failed")
+        }
+
+        @Suppress("unused", "UNUSED_PARAMETER")
+        private suspend fun retryScheduled(payload: SamplePayload, context: StreamMessageContext) {
+            val cause = IllegalStateException("handler failed")
+            throw StreamRetryScheduledException(cause.message!!, cause)
         }
 
         @Suppress("unused", "UNUSED_PARAMETER")

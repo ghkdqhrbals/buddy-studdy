@@ -86,6 +86,7 @@ class QuestionTranslationServiceTest {
         assertThat(delivery.question?.topic).isEqualTo("Message queues")
         assertThat(delivery.rootStudy?.id).isEqualTo(rootStudy.id)
         assertThat(delivery.appLanguage).isEqualTo("en")
+        assertThat(delivery.steps).containsExactly("complete", "succeed")
         assertThat(publisher.references).containsExactly(
             OutboxReference(OutboxType.DOMAIN_EVENT, 101),
         )
@@ -185,6 +186,7 @@ class QuestionTranslationServiceTest {
         var rootStudy: StudyEntity? = null
         var appLanguage: String? = null
         var translation: TranslatedQuestionContent? = null
+        val steps = mutableListOf<String>()
 
         override suspend fun claim(event: QuestionGeneratedEvent, now: Instant, streamKey: String) =
             ClaimedQuestionTranslation(
@@ -212,12 +214,12 @@ class QuestionTranslationServiceTest {
 
         override suspend fun complete(
             event: QuestionGeneratedEvent,
-            claim: StreamInboxClaim,
             translation: TranslatedQuestionContent?,
             rootStudy: StudyEntity,
             appLanguage: String,
             now: Instant,
         ): QuestionWriteResult {
+            steps += "complete"
             val localizedQuestion = completedQuestion
             translation?.let {
                 localizedQuestion.topic = it.topic
@@ -238,12 +240,17 @@ class QuestionTranslationServiceTest {
 
         override suspend fun retry(claim: StreamInboxClaim, error: String, now: Instant) = Unit
 
+        override suspend fun succeed(claim: StreamInboxClaim, now: Instant) {
+            steps += "succeed"
+        }
+
         override suspend fun fail(
             event: QuestionGeneratedEvent,
-            claim: StreamInboxClaim,
             errorMessage: String,
             now: Instant,
         ): OutboxReference? = null
+
+        override suspend fun completeFailure(claim: StreamInboxClaim, errorMessage: String, now: Instant) = Unit
     }
 
     private class RecordingPublisher(

@@ -2,6 +2,7 @@ package com.buddystudy.backend.study.application.service
 
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
+import com.buddystudy.backend.common.application.stream.StreamRetryScheduledException
 import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
 import com.buddystudy.backend.study.application.model.TranslatedQuestionContent
 import com.buddystudy.backend.study.application.port.inbound.ProcessQuestionTranslationUseCase
@@ -27,7 +28,7 @@ class QuestionTranslationService(
 
     override suspend fun process(event: QuestionGeneratedEvent, streamKey: String) {
         val claimed = writer.claim(event, Instant.now(), streamKey) ?: return
-        try {
+        val result = try {
             val question = checkNotNull(questions.findQuestionById(event.questionId)) {
                 "Question was not found for translation."
             }
@@ -48,36 +49,21 @@ class QuestionTranslationService(
                 sourceLanguage = event.sourceLanguage,
                 targetLanguage = QuestionLanguage.normalize(user.appLanguage.databaseValue),
             )
-            val result = writer.complete(
+            writer.complete(
                 event = event,
-                claim = claimed.inbox,
                 translation = translation,
                 rootStudy = rootStudy,
                 appLanguage = QuestionLanguage.normalize(user.appLanguage.databaseValue),
                 now = Instant.now(),
             )
-            runCatching { publisher.publishNow(result.outboxes) }
-                .onFailure {
-                    log.warn(
-                        "question_delivery_immediate_publish_failed correlationId={} questionId={} error={}",
-                        event.correlationId,
-                        event.questionId,
-                        it.message,
-                    )
-                }
-            log.info(
-                "question_generation_saga_completed correlationId={} questionId={} source={}",
-                event.correlationId,
-                event.questionId,
-                event.source,
-            )
         } catch (error: Exception) {
             val message = error.message ?: error.javaClass.simpleName
             if (claimed.inbox.attempt < MAX_ATTEMPTS) {
                 writer.retry(claimed.inbox, message, Instant.now())
-                throw error
+                throw StreamRetryScheduledException(message, error)
             }
-            val rollbackOutbox = writer.fail(event, claimed.inbox, message, Instant.now())
+            val rollbackOutbox = writer.fail(event, message, Instant.now())
+            writer.completeFailure(claimed.inbox, message, Instant.now())
             rollbackOutbox?.let { reference ->
                 runCatching { publisher.publishNow(listOf(reference)) }
                     .onFailure {
@@ -97,7 +83,24 @@ class QuestionTranslationService(
                 error.javaClass.name,
                 message,
             )
+            return
         }
+        writer.succeed(claimed.inbox, Instant.now())
+        runCatching { publisher.publishNow(result.outboxes) }
+            .onFailure {
+                log.warn(
+                    "question_delivery_immediate_publish_failed correlationId={} questionId={} error={}",
+                    event.correlationId,
+                    event.questionId,
+                    it.message,
+                )
+            }
+        log.info(
+            "question_generation_saga_completed correlationId={} questionId={} source={}",
+            event.correlationId,
+            event.questionId,
+            event.source,
+        )
     }
 
     private suspend fun translatedContent(

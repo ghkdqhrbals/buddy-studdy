@@ -1,6 +1,7 @@
 package com.buddystudy.backend.localization
 
 import com.buddystudy.backend.localization.application.policy.ContentSourceHashPolicy
+import com.buddystudy.backend.common.application.stream.StreamRetryScheduledException
 import com.buddystudy.backend.community.application.port.outbound.QuestionCommentPort
 import com.buddystudy.backend.localization.application.model.ContentTranslationRequestedEvent
 import com.buddystudy.backend.localization.application.model.ContentTranslationResult
@@ -151,8 +152,9 @@ class ContentTranslationProcessorTest {
             processor.process(questionEvent(question))
         }.exceptionOrNull()
 
-        assertThat(failure).isInstanceOf(IllegalStateException::class.java)
+        assertThat(failure).isInstanceOf(StreamRetryScheduledException::class.java)
             .hasMessage("translation provider unavailable")
+        assertThat(failure?.cause).isInstanceOf(IllegalStateException::class.java)
         assertThat(inbox.retryFailures).containsExactly(
             IllegalStateException::class.java.name to "translation provider unavailable",
         )

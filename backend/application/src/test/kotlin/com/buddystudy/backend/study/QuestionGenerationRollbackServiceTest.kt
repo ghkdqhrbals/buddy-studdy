@@ -1,5 +1,7 @@
 package com.buddystudy.backend.study
 
+import com.buddystudy.backend.common.application.stream.StreamRetryScheduledException
+import com.buddystudy.backend.study.application.model.ClaimedQuestionGenerationRollback
 import com.buddystudy.backend.study.application.model.QuestionGenerationRollbackRequestedEvent
 import com.buddystudy.backend.study.application.model.QuestionGenerationSaga
 import com.buddystudy.backend.study.application.model.QuestionGenerationSource
@@ -12,6 +14,8 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionMembership
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StreamInboxPort
+import com.buddystudy.backend.study.application.port.inbound.QuestionGenerationRollbackWriteUseCase
+import com.buddystudy.backend.study.application.service.QuestionGenerationRollbackService
 import com.buddystudy.backend.study.application.service.QuestionGenerationRollbackWriteService
 import com.buddystudy.study.domain.entity.QuestionEntity
 import java.time.Instant
@@ -22,6 +26,48 @@ import org.junit.jupiter.api.Test
 import org.mockito.Mockito
 
 class QuestionGenerationRollbackServiceTest {
+    @Test
+    fun `processor finalizes inbox only after compensation completes`(): Unit = runBlocking {
+        val now = Instant.parse("2026-08-03T01:00:00Z")
+        val saga = failedSaga(now, questionId = 42)
+        val event = rollbackEvent(saga, now)
+        val writer = RecordingRollbackWriter(
+            ClaimedQuestionGenerationRollback(
+                saga,
+                StreamInboxClaim(event.eventId, "rollback", "claim-1", 1),
+            ),
+        )
+
+        QuestionGenerationRollbackService(writer).process(event, "study.question-generation.rollback-requested.v1")
+
+        assertThat(writer.steps).containsExactly("claim", "complete", "succeed")
+    }
+
+    @Test
+    fun `processor schedules retry without succeeding inbox when compensation fails`(): Unit = runBlocking {
+        val now = Instant.parse("2026-08-03T01:00:00Z")
+        val saga = failedSaga(now, questionId = 42)
+        val event = rollbackEvent(saga, now)
+        val writer = RecordingRollbackWriter(
+            ClaimedQuestionGenerationRollback(
+                saga,
+                StreamInboxClaim(event.eventId, "rollback", "claim-1", 1),
+            ),
+            failCompensation = true,
+        )
+
+        assertThatThrownBy {
+            runBlocking {
+                QuestionGenerationRollbackService(writer).process(
+                    event,
+                    "study.question-generation.rollback-requested.v1",
+                )
+            }
+        }.isInstanceOf(StreamRetryScheduledException::class.java)
+
+        assertThat(writer.steps).containsExactly("claim", "complete", "retry")
+    }
+
     @Test
     fun `rollback removes generated data and refunds the quota reservation once`(): Unit = runBlocking {
         val now = Instant.parse("2026-08-03T01:00:00Z")
@@ -53,13 +99,17 @@ class QuestionGenerationRollbackServiceTest {
         Mockito.`when`(inbox.markSucceeded(claim, now)).thenReturn(true)
         val writer = QuestionGenerationRollbackWriteService(sagas, inbox, questions, stats, coverage, memberships)
 
-        writer.complete(event, claim, now)
+        writer.complete(event, now)
 
         Mockito.verify(coverage).rollbackAsked(91, "tradeoffs", now)
         Mockito.verify(stats).deleteByQuestionId(question.id)
         Mockito.verify(questions).deleteGeneratedForRollback(question.id, saga.userId)
         Mockito.verify(memberships).refundMonthlySystemQuestion(saga.userId, saga.quotaPeriodStartedAt, now)
         Mockito.verify(sagas).markRollbackCompleted(saga.correlationId, now)
+        Mockito.verifyNoInteractions(inbox)
+
+        writer.succeed(claim, now)
+
         Mockito.verify(inbox).markSucceeded(claim, now)
     }
 
@@ -80,11 +130,15 @@ class QuestionGenerationRollbackServiceTest {
         Mockito.`when`(inbox.markSucceeded(claim, now)).thenReturn(true)
         val writer = QuestionGenerationRollbackWriteService(sagas, inbox, questions, stats, coverage, memberships)
 
-        writer.complete(event, claim, now)
+        writer.complete(event, now)
 
         Mockito.verifyNoInteractions(questions, stats, coverage)
         Mockito.verify(memberships).refundMonthlySystemQuestion(saga.userId, saga.quotaPeriodStartedAt, now)
         Mockito.verify(sagas).markRollbackCompleted(saga.correlationId, now)
+        Mockito.verifyNoInteractions(inbox)
+
+        writer.succeed(claim, now)
+
         Mockito.verify(inbox).markSucceeded(claim, now)
     }
 
@@ -146,7 +200,7 @@ class QuestionGenerationRollbackServiceTest {
         Mockito.`when`(questions.findQuestionById(otherUsersQuestion.id)).thenReturn(otherUsersQuestion)
         val writer = QuestionGenerationRollbackWriteService(sagas, inbox, questions, stats, coverage, memberships)
 
-        assertThatThrownBy { runBlocking { writer.complete(event, claim, now) } }
+        assertThatThrownBy { runBlocking { writer.complete(event, now) } }
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("owner does not match")
 
@@ -186,4 +240,33 @@ class QuestionGenerationRollbackServiceTest {
             failedStep = saga.failedStep ?: QuestionGenerationStep.GENERATING,
             occurredAt = now,
         )
+
+    private class RecordingRollbackWriter(
+        private val claimed: ClaimedQuestionGenerationRollback,
+        private val failCompensation: Boolean = false,
+    ) : QuestionGenerationRollbackWriteUseCase {
+        val steps = mutableListOf<String>()
+
+        override suspend fun claim(
+            event: QuestionGenerationRollbackRequestedEvent,
+            now: Instant,
+            streamKey: String,
+        ): ClaimedQuestionGenerationRollback {
+            steps += "claim"
+            return claimed
+        }
+
+        override suspend fun complete(event: QuestionGenerationRollbackRequestedEvent, now: Instant) {
+            steps += "complete"
+            if (failCompensation) error("Compensation failed.")
+        }
+
+        override suspend fun succeed(claim: StreamInboxClaim, now: Instant) {
+            steps += "succeed"
+        }
+
+        override suspend fun retry(claim: StreamInboxClaim, error: String, now: Instant) {
+            steps += "retry"
+        }
+    }
 }

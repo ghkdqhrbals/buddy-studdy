@@ -1,6 +1,7 @@
 package com.buddystudy.backend.localization.application.service
 
 import com.buddystudy.backend.localization.application.policy.ContentSourceHashPolicy
+import com.buddystudy.backend.common.application.stream.StreamRetryScheduledException
 import com.buddystudy.backend.community.application.port.outbound.QuestionCommentPort
 import com.buddystudy.backend.localization.application.model.ContentTranslationRequestedEvent
 import com.buddystudy.backend.localization.application.model.LocalizableContentType
@@ -61,7 +62,7 @@ class ContentTranslationProcessor(
                     errorType,
                     errorMessage,
                 )
-                throw error
+                throw StreamRetryScheduledException(errorMessage, error)
             }
             localizations.markFailed(event, errorMessage, now)
             check(inbox.markFailed(claim, errorType, errorMessage, now))

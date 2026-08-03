@@ -2,6 +2,7 @@ package com.buddystudy.backend.common.adapter.stream
 
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumerOperations
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
+import com.buddystudy.backend.common.application.stream.StreamRetryScheduledException
 import kotlinx.coroutines.CancellationException
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
@@ -85,6 +86,21 @@ class RedisStreamMessageDispatcher(
         } catch (error: Throwable) {
             if (error.isFatalStreamWorkerFailure()) throw error
             val rootError = error.unwrapReflectionFailure()
+            if (rootError is StreamRetryScheduledException) {
+                logger.warn(
+                    "redis_stream_retry_already_scheduled stream={} redisRecordId={} eventId={} eventType={} " +
+                        "group={} claimed={} errorType={} error={}",
+                    message.streamKey,
+                    message.recordId,
+                    context.eventId,
+                    actualEventType,
+                    group,
+                    claimed,
+                    rootError.cause?.javaClass?.name ?: rootError.javaClass.name,
+                    rootError.cause?.message ?: rootError.message,
+                )
+                return
+            }
             logFailure(method, message, actualEventType, group, options, claimed, rootError)
             if (failureHistory.recordRetryable(message, group, rootError) == RedisStreamFailureDisposition.DISCARD) {
                 discard(message, group)

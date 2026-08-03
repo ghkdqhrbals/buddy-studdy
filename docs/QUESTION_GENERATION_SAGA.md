@@ -112,9 +112,12 @@ Monitoring `Manage > Redis Streams > Consumer group > Inbox processing
 history`.
 
 Claiming a lease and recording its success, retry, or terminal failure are
-independent `REQUIRES_NEW` transactions. They are intentionally not atomic with
-the handler's business transaction: if business work rolls back, the Inbox
-still preserves both receipt and failure history for recovery and diagnosis.
+independent `REQUIRES_NEW` transactions. A handler always commits its business
+state and durable outbox before it finalizes the Inbox lease. This ordering is
+mandatory: an Inbox row must never become terminal while the corresponding
+business transaction can still roll back. If the process stops between those
+commits, replay observes the already-committed Saga state and safely finalizes
+the Inbox without repeating the business effect.
 
 ## Event And Transaction Sequence
 
@@ -150,6 +153,7 @@ Generation consumer group
     - insert question and related projections
     - Saga GENERATING -> TRANSLATING with questionId
     - insert QUESTION_GENERATED outbox
+  after transaction B commits:
     - mark generation Inbox SUCCEEDED
          |
          v
@@ -165,6 +169,7 @@ Translation consumer group
     - persist localized content
     - insert notification and push outboxes
     - Saga TRANSLATING -> COMPLETED
+  after transaction D commits:
     - mark translation Inbox SUCCEEDED
 ```
 
@@ -176,21 +181,25 @@ Generation or translation consumer exhausts its retry budget
   transaction E:
     - Saga -> FAILED with failedStep and error metadata
     - insert QUESTION_GENERATION_ROLLBACK_REQUESTED outbox
-    - close the failed step Inbox entry
   |
-  | commit, then publish through the normal outbox path
+  | commit
+  +--> close the failed step Inbox entry as FAILED
+  |
+  | publish through the normal outbox path
   v
 Redis question-generation-rollback stream
   |
   v
 Rollback consumer group
-  transaction F:
+  claim transaction:
     - claim its own Inbox lease
+  transaction F:
     - remove the ungraded generated question and dependent projections, if present
     - reverse the coverage reservation, if present
     - decrement the monthly question usage once
     - set quota_refunded_at and rollback_completed_at
-    - close the rollback Inbox entry
+  after transaction F commits:
+    - close the rollback Inbox entry as SUCCEEDED
   |
   v
 FAILED becomes terminal and the topic can accept a new generation request
@@ -227,10 +236,15 @@ column.
   longer than the database lease, preventing Redis from transferring a message
   while the original database claim is still valid.
 - A retryable failure records `RETRY_SCHEDULED`, releases the Inbox lease
-  immediately, and leaves quota reserved.
+  immediately, and leaves quota reserved. The handler raises an explicit
+  already-scheduled signal so the common Redis dispatcher does not claim the
+  same Inbox row and increment the attempt a second time.
 - After the retry limit, the worker marks the Saga `FAILED`, records the failed
   step, and appends a rollback event in the same transaction. It does not
   modify quota or generated data directly.
+- The failed worker closes its Inbox only after the failed Saga and rollback
+  outbox commit. The rollback worker likewise closes its Inbox only after all
+  compensation effects commit.
 - The rollback consumer hard-deletes only the ungraded generated question and
   its dependent projections, reverses its coverage reservation, and refunds
   quota in one transaction.

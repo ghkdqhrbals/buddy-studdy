@@ -65,6 +65,17 @@ class QuestionGenerationExecutionWriteService(
                     "Question generation Saga did not enter GENERATING."
                 }
             QuestionGenerationStatus.GENERATING -> Unit
+            QuestionGenerationStatus.FAILED -> {
+                check(
+                    inbox.markFailed(
+                        inboxClaim,
+                        saga.errorCode ?: "QUESTION_GENERATION_FAILED",
+                        saga.errorMessage ?: "Question generation failed.",
+                        now,
+                    ),
+                ) { "Failed to close a failed generation Inbox claim." }
+                return null
+            }
             else -> {
                 check(inbox.markSucceeded(inboxClaim, now)) {
                     "Failed to close a terminal generation Inbox claim."
@@ -82,7 +93,6 @@ class QuestionGenerationExecutionWriteService(
     @Transactional
     override suspend fun complete(
         event: QuestionGenerationRequestedEvent,
-        claim: StreamInboxClaim,
         prepared: PreparedQuestionGeneration,
         now: Instant,
     ): QuestionWriteResult {
@@ -116,13 +126,17 @@ class QuestionGenerationExecutionWriteService(
         )
         val outboxId = outbox.appendQuestionGenerated(generatedEvent, now)
         val translationOutboxes = translationRequests.appendRecordForSupportedLanguages(saved, now)
-        check(inbox.markSucceeded(claim, now)) {
-            "Question generation Inbox claim was lost before completion."
-        }
         return QuestionWriteResult(
             question = saved,
             outboxes = listOf(OutboxReference(OutboxType.DOMAIN_EVENT, outboxId)) + translationOutboxes,
         )
+    }
+
+    @Transactional
+    override suspend fun succeed(claim: StreamInboxClaim, now: Instant) {
+        check(inbox.markSucceeded(claim, now)) {
+            "Question generation Inbox claim was lost before completion."
+        }
     }
 
     @Transactional
@@ -135,7 +149,6 @@ class QuestionGenerationExecutionWriteService(
     @Transactional
     override suspend fun fail(
         event: QuestionGenerationRequestedEvent,
-        claim: StreamInboxClaim,
         errorCode: String,
         errorMessage: String,
         now: Instant,
@@ -161,10 +174,19 @@ class QuestionGenerationExecutionWriteService(
                 ),
             )
         }
+        return rollbackOutbox
+    }
+
+    @Transactional
+    override suspend fun completeFailure(
+        claim: StreamInboxClaim,
+        errorCode: String,
+        errorMessage: String,
+        now: Instant,
+    ) {
         check(inbox.markFailed(claim, errorCode, errorMessage, now)) {
             "Question generation Inbox claim was lost before terminal failure."
         }
-        return rollbackOutbox
     }
 
     companion object {

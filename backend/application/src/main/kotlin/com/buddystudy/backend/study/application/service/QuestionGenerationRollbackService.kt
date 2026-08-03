@@ -1,5 +1,6 @@
 package com.buddystudy.backend.study.application.service
 
+import com.buddystudy.backend.common.application.stream.StreamRetryScheduledException
 import com.buddystudy.backend.study.application.model.ClaimedQuestionGenerationRollback
 import com.buddystudy.backend.study.application.model.QuestionGenerationRollbackRequestedEvent
 import com.buddystudy.backend.study.application.model.QuestionGenerationStatus
@@ -27,17 +28,19 @@ class QuestionGenerationRollbackService(
     override suspend fun process(event: QuestionGenerationRollbackRequestedEvent, streamKey: String) {
         val claimed = writer.claim(event, Instant.now(), streamKey) ?: return
         try {
-            writer.complete(event, claimed.inbox, Instant.now())
-            log.info(
-                "question_generation_rollback_completed correlationId={} questionId={} failedStep={}",
-                event.correlationId,
-                event.questionId,
-                event.failedStep,
-            )
+            writer.complete(event, Instant.now())
         } catch (error: Exception) {
-            writer.retry(claimed.inbox, error.message ?: error.javaClass.simpleName, Instant.now())
-            throw error
+            val message = error.message ?: error.javaClass.simpleName
+            writer.retry(claimed.inbox, message, Instant.now())
+            throw StreamRetryScheduledException(message, error)
         }
+        writer.succeed(claimed.inbox, Instant.now())
+        log.info(
+            "question_generation_rollback_completed correlationId={} questionId={} failedStep={}",
+            event.correlationId,
+            event.questionId,
+            event.failedStep,
+        )
     }
 }
 
@@ -81,7 +84,6 @@ class QuestionGenerationRollbackWriteService(
     @Transactional
     override suspend fun complete(
         event: QuestionGenerationRollbackRequestedEvent,
-        claim: StreamInboxClaim,
         now: Instant,
     ) {
         val saga = sagas.findByCorrelationId(event.correlationId)
@@ -116,6 +118,10 @@ class QuestionGenerationRollbackWriteService(
                 "Question generation Saga rollback completion was not recorded."
             }
         }
+    }
+
+    @Transactional
+    override suspend fun succeed(claim: StreamInboxClaim, now: Instant) {
         check(inbox.markSucceeded(claim, now)) {
             "Question generation rollback Inbox claim was lost before completion."
         }

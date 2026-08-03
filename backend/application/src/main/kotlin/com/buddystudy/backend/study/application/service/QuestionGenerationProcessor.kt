@@ -2,6 +2,7 @@ package com.buddystudy.backend.study.application.service
 
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
+import com.buddystudy.backend.common.application.stream.StreamRetryScheduledException
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.model.GeneratedQuestionWithEmbedding
 import com.buddystudy.backend.study.application.model.PreparedQuestionGeneration
@@ -51,8 +52,7 @@ class QuestionGenerationProcessor(
 
     override suspend fun process(event: QuestionGenerationRequestedEvent, streamKey: String) {
         val claimed = writer.claim(event, Instant.now(), streamKey) ?: return
-        var questionKey: OpenAIQuestionKey? = null
-        try {
+        val result = try {
             val saga = claimed.saga
             val user = checkNotNull(users.findById(saga.userId)) {
                 "Question owner was not found."
@@ -65,7 +65,7 @@ class QuestionGenerationProcessor(
             check(StudyTreeSelector.rootFor(topicStudy, userStudies).id == rootStudy.id) {
                 "Question topic does not belong to the requested root study."
             }
-            questionKey = questionKeys.resolveReservedQuestionGeneration(user, saga.quotaPeriodStartedAt)
+            val questionKey = questionKeys.resolveReservedQuestionGeneration(user, saga.quotaPeriodStartedAt)
             val prepared = prepare(
                 event = event,
                 rootStudy = rootStudy,
@@ -73,33 +73,23 @@ class QuestionGenerationProcessor(
                 appLanguage = QuestionLanguage.normalize(user.appLanguage.databaseValue),
                 questionKey = questionKey,
             )
-            val result = writer.complete(event, claimed.inbox, prepared, Instant.now())
-            runCatching { publisher.publishNow(result.outboxes) }
-                .onFailure {
-                    log.warn(
-                        "question_generated_immediate_publish_failed correlationId={} questionId={} error={}",
-                        event.correlationId,
-                        result.question.id,
-                        it.message,
-                    )
-                }
-            log.info(
-                "question_generation_completed correlationId={} questionId={} source={}",
-                event.correlationId,
-                result.question.id,
-                event.source,
-            )
+            writer.complete(event, prepared, Instant.now())
         } catch (error: Exception) {
             val message = error.message ?: error.javaClass.simpleName
             if (claimed.inbox.attempt < MAX_ATTEMPTS) {
                 writer.retry(claimed.inbox, message, Instant.now())
-                throw error
+                throw StreamRetryScheduledException(message, error)
             }
             val rollbackOutbox = writer.fail(
                 event = event,
-                claim = claimed.inbox,
                 errorCode = "QUESTION_GENERATION_FAILED",
                 errorMessage = "질문을 생성하지 못했습니다.",
+                now = Instant.now(),
+            )
+            writer.completeFailure(
+                claim = claimed.inbox,
+                errorCode = "QUESTION_GENERATION_FAILED",
+                errorMessage = message,
                 now = Instant.now(),
             )
             rollbackOutbox?.let { reference ->
@@ -119,7 +109,24 @@ class QuestionGenerationProcessor(
                 error.javaClass.name,
                 message,
             )
+            return
         }
+        writer.succeed(claimed.inbox, Instant.now())
+        runCatching { publisher.publishNow(result.outboxes) }
+            .onFailure {
+                log.warn(
+                    "question_generated_immediate_publish_failed correlationId={} questionId={} error={}",
+                    event.correlationId,
+                    result.question.id,
+                    it.message,
+                )
+            }
+        log.info(
+            "question_generation_completed correlationId={} questionId={} source={}",
+            event.correlationId,
+            result.question.id,
+            event.source,
+        )
     }
 
     private suspend fun prepare(

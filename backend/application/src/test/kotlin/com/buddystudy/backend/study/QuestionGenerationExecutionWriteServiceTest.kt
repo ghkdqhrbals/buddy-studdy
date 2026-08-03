@@ -73,7 +73,6 @@ class QuestionGenerationExecutionWriteServiceTest {
         )
         Mockito.`when`(questions.save(saved)).thenReturn(saved)
         Mockito.`when`(sagas.markTranslating(event.correlationId, saved.id, now)).thenReturn(true)
-        Mockito.`when`(inbox.markSucceeded(claim, now)).thenReturn(true)
         val writer = QuestionGenerationExecutionWriteService(
             sagas = sagas,
             inbox = inbox,
@@ -94,7 +93,7 @@ class QuestionGenerationExecutionWriteServiceTest {
             ),
         )
 
-        val result = writer.complete(event, claim, prepared, now)
+        val result = writer.complete(event, prepared, now)
 
         assertThat(result.outboxes.map { it.id }).containsExactly(90L, 1L, 2L)
         assertThat(translationEvents.events.map { it.contentType to it.targetLanguage })
@@ -102,6 +101,12 @@ class QuestionGenerationExecutionWriteServiceTest {
                 LocalizableContentType.QUESTION to "en",
                 LocalizableContentType.QUESTION to "ja",
             )
+        Mockito.verifyNoInteractions(inbox)
+
+        Mockito.`when`(inbox.markSucceeded(claim, now)).thenReturn(true)
+        writer.succeed(claim, now)
+
+        Mockito.verify(inbox).markSucceeded(claim, now)
     }
 
     @Test
@@ -138,14 +143,12 @@ class QuestionGenerationExecutionWriteServiceTest {
 
         val first = writer.fail(
             event,
-            firstClaim,
             "QUESTION_GENERATION_FAILED",
             "Generation failed.",
             now,
         )
         val duplicate = writer.fail(
             event,
-            duplicateClaim,
             "QUESTION_GENERATION_FAILED",
             "Generation failed.",
             now,
@@ -170,6 +173,13 @@ class QuestionGenerationExecutionWriteServiceTest {
             null,
             now,
         )
+        Mockito.verifyNoInteractions(inbox)
+
+        writer.completeFailure(firstClaim, "QUESTION_GENERATION_FAILED", "Generation failed.", now)
+        writer.completeFailure(duplicateClaim, "QUESTION_GENERATION_FAILED", "Generation failed.", now)
+
+        Mockito.verify(inbox).markFailed(firstClaim, "QUESTION_GENERATION_FAILED", "Generation failed.", now)
+        Mockito.verify(inbox).markFailed(duplicateClaim, "QUESTION_GENERATION_FAILED", "Generation failed.", now)
     }
 
     @Test

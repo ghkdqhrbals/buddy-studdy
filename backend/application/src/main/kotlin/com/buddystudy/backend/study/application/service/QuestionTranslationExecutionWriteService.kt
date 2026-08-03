@@ -48,11 +48,18 @@ class QuestionTranslationExecutionWriteService(
             now = now,
         ) ?: return null
         val saga = sagas.findByCorrelationId(event.correlationId)
-        if (
-            saga == null ||
-            saga.status != QuestionGenerationStatus.TRANSLATING ||
-            saga.questionId != event.questionId
-        ) {
+        if (saga?.status == QuestionGenerationStatus.FAILED) {
+            check(
+                inbox.markFailed(
+                    inboxClaim,
+                    saga.errorCode ?: "QUESTION_TRANSLATION_FAILED",
+                    saga.errorMessage ?: "Question translation failed.",
+                    now,
+                ),
+            ) { "Failed to close a failed translation Inbox claim." }
+            return null
+        }
+        if (saga == null || saga.status != QuestionGenerationStatus.TRANSLATING || saga.questionId != event.questionId) {
             check(inbox.markSucceeded(inboxClaim, now)) {
                 "Failed to close a terminal translation Inbox claim."
             }
@@ -64,7 +71,6 @@ class QuestionTranslationExecutionWriteService(
     @Transactional
     override suspend fun complete(
         event: QuestionGeneratedEvent,
-        claim: StreamInboxClaim,
         translation: TranslatedQuestionContent?,
         rootStudy: StudyEntity,
         appLanguage: String,
@@ -110,13 +116,17 @@ class QuestionTranslationExecutionWriteService(
         check(sagas.markCompleted(event.correlationId, now)) {
             "Question generation Saga did not enter COMPLETED."
         }
-        check(inbox.markSucceeded(claim, now)) {
-            "Question translation Inbox claim was lost before completion."
-        }
         return QuestionWriteResult(
             question = question,
             outboxes = listOf(OutboxReference(OutboxType.DOMAIN_EVENT, notificationId)),
         )
+    }
+
+    @Transactional
+    override suspend fun succeed(claim: StreamInboxClaim, now: Instant) {
+        check(inbox.markSucceeded(claim, now)) {
+            "Question translation Inbox claim was lost before completion."
+        }
     }
 
     @Transactional
@@ -129,7 +139,6 @@ class QuestionTranslationExecutionWriteService(
     @Transactional
     override suspend fun fail(
         event: QuestionGeneratedEvent,
-        claim: StreamInboxClaim,
         errorMessage: String,
         now: Instant,
     ): OutboxReference? {
@@ -154,10 +163,14 @@ class QuestionTranslationExecutionWriteService(
                 ),
             )
         }
+        return rollbackOutbox
+    }
+
+    @Transactional
+    override suspend fun completeFailure(claim: StreamInboxClaim, errorMessage: String, now: Instant) {
         check(inbox.markFailed(claim, "QUESTION_TRANSLATION_FAILED", errorMessage, now)) {
             "Question translation Inbox claim was lost before terminal failure."
         }
-        return rollbackOutbox
     }
 
     companion object {
