@@ -342,14 +342,15 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
   assert.match(alert, /username: Grafana/);
   assert.match(alert, /icon_url: https:\/\/avatars\.githubusercontent\.com\/u\/7195757/);
   assert.match(alert, /level="ERROR"/);
-  assert.match(alert, /sum by \(occurred_at, logger, request_id, method, path, origin\)/);
+  assert.match(alert, /sum by \(occurred_at, request_id, error_type, error_message\)/);
   assert.match(alert, /\|= "api_error"/);
   assert.match(alert, /requestId=\(\?P<request_id>/);
-  assert.match(alert, /method=\(\?P<method>/);
-  assert.match(alert, /path=\(\?P<path>/);
-  assert.match(alert, /origin=\(\?P<origin>/);
+  assert.match(alert, /rootCauseType=\(\?P<error_type>/);
+  assert.match(alert, /rootCauseMessage=\(\?P<error_message>/);
+  assert.doesNotMatch(alert, /\(\?P<method>|\(\?P<path>|\(\?P<origin>/);
   assert.match(alert, /uid: buddystudy-backend-operational-error-log/);
   assert.match(alert, /!~ "api_\(error\|exchange\|response\)"/);
+  assert.match(alert, /sum by \(occurred_at, logger, error_message\)/);
   assert.match(alert, /receiver: BuddyStudy Slack/);
   assert.match(alert, /type: webhook/);
   assert.match(
@@ -372,19 +373,14 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
   assert.match(monitoringDeploy, /--security-opt no-new-privileges/);
   assert.match(
     alert,
-    /<\{\{ \.Annotations\.logs_url \}\}\|Grafana에서 오류 로그 보기>/,
+    /<\{\{ \.Annotations\.logs_url \}\}\|오류 로그 보기>/,
   );
-  assert.match(alert, /\*발생 시각:\* `\{\{ \.Annotations\.occurred_at \}\}`/);
-  assert.match(alert, /\*요청 위치:\* `\{\{ \.Annotations\.request_location \}\}`/);
-  assert.match(alert, /\*코드 위치:\* `\{\{ \.Annotations\.code_location \}\}`/);
-  assert.match(alert, /\*로그 식별자:\* `\{\{ \.Annotations\.log_identity \}\}`/);
+  assert.match(alert, /title: Backend 오류/);
+  assert.match(alert, /\*\{\{ \.Annotations\.error \}\}\*/);
+  assert.doesNotMatch(alert, /발생 시각|요청 위치|코드 위치|로그 식별자/);
   assert.match(alert, /occurred_at: '\{\{ \$labels\.occurred_at \}\}'/);
-  assert.match(
-    alert,
-    /request_location: '\{\{ \$labels\.method \}\} https:\/\/api\.ghkdqhrbals\.org\{\{ \$labels\.path \}\}'/,
-  );
-  assert.match(alert, /code_location: '\{\{ \$labels\.origin \}\} · \{\{ \$labels\.logger \}\}'/);
-  assert.match(alert, /log_identity: 'requestId=\{\{ \$labels\.request_id \}\}'/);
+  assert.match(alert, /error: '\{\{ \$labels\.error_type \}\}: \{\{ \$labels\.error_message \}\}'/);
+  assert.match(alert, /error: '\{\{ \$labels\.error_message \}\}'/);
   assert.doesNotMatch(alert, /Logs: \{\{ \.Annotations\.logs_url \}\}/);
   const logsUrlValues = [...alert.matchAll(/^\s+logs_url: (.+)$/gm)].map((match) => match[1]);
   assert.equal(logsUrlValues.length, 2, "Both Slack alerts must include a Grafana logs URL");
