@@ -14,6 +14,7 @@ import com.buddystudy.backend.profile.application.port.outbound.AccountWithdrawa
 import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
 import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
 import com.buddystudy.backend.study.application.model.QuestionGenerationRequestedEvent
+import com.buddystudy.backend.study.application.model.QuestionGenerationRollbackRequestedEvent
 import com.fasterxml.jackson.databind.ObjectMapper
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.reactive.asFlow
@@ -77,6 +78,16 @@ class RedisEventOutboxRepository(
             payloadJson = objectMapper.writeValueAsString(event),
             createdAt = createdAt,
         )
+
+    override suspend fun appendQuestionGenerationRollbackRequested(
+        event: QuestionGenerationRollbackRequestedEvent,
+        createdAt: Instant,
+    ): Long = append(
+        eventId = event.eventId,
+        eventType = RedisOutboxEventType.QUESTION_GENERATION_ROLLBACK_REQUESTED,
+        payloadJson = objectMapper.writeValueAsString(event),
+        createdAt = createdAt,
+    )
 
     override suspend fun append(event: AccountWithdrawnEvent): Long =
         append(

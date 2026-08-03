@@ -12,7 +12,7 @@ import com.buddystudy.backend.study.application.model.QuestionGenerationStatus
 import com.buddystudy.backend.study.application.model.QuestionGenerationStep
 import com.buddystudy.backend.study.application.model.StreamInboxClaim
 import com.buddystudy.backend.study.application.model.TranslatedQuestionContent
-import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
+import com.buddystudy.backend.study.application.model.toRollbackRequestedEvent
 import com.buddystudy.backend.study.application.port.inbound.QuestionTranslationExecutionWriteUseCase
 import com.buddystudy.backend.study.application.port.inbound.QuestionWriteResult
 import com.buddystudy.backend.study.application.port.outbound.QuestionGenerationSagaPort
@@ -32,7 +32,6 @@ class QuestionTranslationExecutionWriteService(
     private val questions: QuestionPort,
     private val localizations: ContentLocalizationPort,
     private val notificationOutbox: RedisEventOutboxAppendPort,
-    private val questionKeys: OpenAIQuestionKeyProvider,
 ) : QuestionTranslationExecutionWriteUseCase {
     @Transactional
     override suspend fun claim(
@@ -133,27 +132,32 @@ class QuestionTranslationExecutionWriteService(
         claim: StreamInboxClaim,
         errorMessage: String,
         now: Instant,
-    ) {
+    ): OutboxReference? {
         val saga = sagas.findByCorrelationId(event.correlationId)
+        var rollbackOutbox: OutboxReference? = null
         if (saga != null && saga.status !in setOf(QuestionGenerationStatus.COMPLETED, QuestionGenerationStatus.FAILED)) {
-            questions.softDelete(event.questionId, saga.userId, now)
             check(
                 sagas.markFailed(
                     correlationId = saga.correlationId,
                     failedStep = QuestionGenerationStep.TRANSLATING,
                     errorCode = "QUESTION_TRANSLATION_FAILED",
                     errorMessage = "질문 번역을 완료하지 못했습니다.",
-                    refundedAt = now,
+                    refundedAt = null,
                     now = now,
                 ),
             ) { "Question generation Saga did not enter FAILED during translation." }
-            if (saga.quotaRefundedAt == null) {
-                questionKeys.releaseQuestionReservation(saga.userId, saga.quotaPeriodStartedAt, now)
-            }
+            rollbackOutbox = OutboxReference(
+                OutboxType.DOMAIN_EVENT,
+                notificationOutbox.appendQuestionGenerationRollbackRequested(
+                    saga.toRollbackRequestedEvent(event.eventId, QuestionGenerationStep.TRANSLATING, now),
+                    now,
+                ),
+            )
         }
         check(inbox.markFailed(claim, "QUESTION_TRANSLATION_FAILED", errorMessage, now)) {
             "Question translation Inbox claim was lost before terminal failure."
         }
+        return rollbackOutbox
     }
 
     companion object {

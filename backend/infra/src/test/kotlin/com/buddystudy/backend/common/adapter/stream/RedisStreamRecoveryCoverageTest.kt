@@ -7,6 +7,7 @@ import com.buddystudy.backend.notification.adapter.inbound.stream.NotificationSt
 import com.buddystudy.backend.profile.adapter.inbound.stream.AccountWithdrawalStreamListener
 import com.buddystudy.backend.study.adapter.inbound.stream.AnswerGradingStreamListener
 import com.buddystudy.backend.study.adapter.inbound.stream.QuestionGenerationStreamListener
+import com.buddystudy.backend.study.adapter.inbound.stream.QuestionGenerationRollbackStreamListener
 import com.buddystudy.backend.study.adapter.inbound.stream.QuestionTranslationStreamListener
 import com.buddystudy.backend.study.adapter.stream.PushStreamManager
 import org.assertj.core.api.Assertions.assertThat
@@ -22,6 +23,7 @@ class RedisStreamRecoveryCoverageTest {
             AccountWithdrawalStreamListener::class.java,
             AnswerGradingStreamListener::class.java,
             QuestionGenerationStreamListener::class.java,
+            QuestionGenerationRollbackStreamListener::class.java,
             QuestionTranslationStreamListener::class.java,
             PushStreamManager::class.java,
         )

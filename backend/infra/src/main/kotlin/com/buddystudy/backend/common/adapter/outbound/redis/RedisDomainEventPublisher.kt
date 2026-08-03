@@ -27,6 +27,8 @@ class RedisDomainEventPublisher(
             RedisOutboxEventType.ANSWER_GRADING_REQUESTED -> RedisStreamTopic.STUDY_ANSWER_GRADING_REQUESTED
             RedisOutboxEventType.QUESTION_GENERATION_REQUESTED ->
                 RedisStreamTopic.STUDY_QUESTION_GENERATION_REQUESTED
+            RedisOutboxEventType.QUESTION_GENERATION_ROLLBACK_REQUESTED ->
+                RedisStreamTopic.STUDY_QUESTION_GENERATION_ROLLBACK_REQUESTED
             RedisOutboxEventType.QUESTION_GENERATED -> RedisStreamTopic.STUDY_QUESTION_GENERATED
             RedisOutboxEventType.CONTENT_TRANSLATION_REQUESTED ->
                 RedisStreamTopic.LOCALIZATION_CONTENT_TRANSLATION_REQUESTED

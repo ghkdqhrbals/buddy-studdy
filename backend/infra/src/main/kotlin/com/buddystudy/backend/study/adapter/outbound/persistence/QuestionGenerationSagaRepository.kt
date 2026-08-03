@@ -25,11 +25,11 @@ class QuestionGenerationSagaRepository(
             insert into question_generation_sagas (
                 correlation_id, user_id, study_id, topic_id, question_id, source, status, current_step,
                 idempotency_key, quota_period_started_at, quota_refunded_at, failed_step, error_code,
-                error_message, created_at, updated_at, completed_at
+                error_message, created_at, updated_at, completed_at, rollback_completed_at
             ) values (
                 :correlationId, :userId, :studyId, :topicId, :questionId, :source, :status, :currentStep,
                 :idempotencyKey, :quotaPeriodStartedAt, :quotaRefundedAt, :failedStep, :errorCode,
-                :errorMessage, :createdAt, :updatedAt, :completedAt
+                :errorMessage, :createdAt, :updatedAt, :completedAt, :rollbackCompletedAt
             )
             """.trimIndent(),
         )
@@ -50,6 +50,7 @@ class QuestionGenerationSagaRepository(
             .bindNullable("errorCode", saga.errorCode, String::class.java)
             .bindNullable("errorMessage", saga.errorMessage, String::class.java)
             .bindNullable("completedAt", saga.completedAt?.utcDateTime(), LocalDateTime::class.java)
+            .bindNullable("rollbackCompletedAt", saga.rollbackCompletedAt?.utcDateTime(), LocalDateTime::class.java)
         statement.fetch().rowsUpdated().awaitSingle() == 1L
     } catch (_: DuplicateKeyException) {
         false
@@ -80,7 +81,10 @@ class QuestionGenerationSagaRepository(
             from question_generation_sagas
             where user_id = :userId
               and topic_id = :topicId
-              and status in ('QUEUED', 'GENERATING', 'TRANSLATING')
+              and (
+                  status in ('QUEUED', 'GENERATING', 'TRANSLATING')
+                  or (status = 'FAILED' and rollback_completed_at is null)
+              )
             limit 1
             """.trimIndent(),
         )
@@ -171,6 +175,22 @@ class QuestionGenerationSagaRepository(
         return statement.fetch().rowsUpdated().awaitSingle() > 0
     }
 
+    override suspend fun markRollbackCompleted(correlationId: String, now: Instant): Boolean =
+        databaseClient.sql(
+            """
+            update question_generation_sagas
+            set quota_refunded_at = coalesce(quota_refunded_at, :completedAt),
+                rollback_completed_at = :completedAt,
+                updated_at = :completedAt
+            where correlation_id = :correlationId
+              and status = 'FAILED'
+              and rollback_completed_at is null
+            """.trimIndent(),
+        )
+            .bind("completedAt", now.utcDateTime())
+            .bind("correlationId", correlationId)
+            .fetch().rowsUpdated().awaitSingle() == 1L
+
     private suspend fun select(whereClause: String, value: String): QuestionGenerationSaga? =
         databaseClient.sql(
             """
@@ -225,6 +245,7 @@ class QuestionGenerationSagaRepository(
             createdAt = get("created_at", LocalDateTime::class.java)!!.utcInstant(),
             updatedAt = get("updated_at", LocalDateTime::class.java)!!.utcInstant(),
             completedAt = get("completed_at", LocalDateTime::class.java)?.utcInstant(),
+            rollbackCompletedAt = get("rollback_completed_at", LocalDateTime::class.java)?.utcInstant(),
         )
 
     private fun Instant.utcDateTime(): LocalDateTime = LocalDateTime.ofInstant(this, ZoneOffset.UTC)

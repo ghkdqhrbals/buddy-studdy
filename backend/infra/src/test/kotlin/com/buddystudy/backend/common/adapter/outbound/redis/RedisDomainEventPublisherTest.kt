@@ -29,6 +29,16 @@ class RedisDomainEventPublisherTest {
     }
 
     @Test
+    fun `question generation rollback events use their dedicated topic`() = runBlocking {
+        val streams = RecordingPublisher()
+        val publisher = RedisDomainEventPublisher(streams)
+
+        publisher.publish(event(RedisOutboxEventType.QUESTION_GENERATION_ROLLBACK_REQUESTED))
+
+        assertThat(streams.topic).isEqualTo(RedisStreamTopic.STUDY_QUESTION_GENERATION_ROLLBACK_REQUESTED)
+    }
+
+    @Test
     fun `every community event uses its dedicated topic`() = runBlocking {
         val expected = mapOf(
             RedisOutboxEventType.CONTENT_VIEWED to RedisStreamTopic.COMMUNITY_QUESTION_VIEWED,

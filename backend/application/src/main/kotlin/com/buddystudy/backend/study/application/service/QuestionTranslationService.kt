@@ -77,7 +77,18 @@ class QuestionTranslationService(
                 writer.retry(claimed.inbox, message, Instant.now())
                 throw error
             }
-            writer.fail(event, claimed.inbox, message, Instant.now())
+            val rollbackOutbox = writer.fail(event, claimed.inbox, message, Instant.now())
+            rollbackOutbox?.let { reference ->
+                runCatching { publisher.publishNow(listOf(reference)) }
+                    .onFailure {
+                        log.warn(
+                            "question_translation_rollback_immediate_publish_failed correlationId={} questionId={} error={}",
+                            event.correlationId,
+                            event.questionId,
+                            it.message,
+                        )
+                    }
+            }
             log.warn(
                 "question_translation_failed correlationId={} questionId={} attempts={} errorType={} error={}",
                 event.correlationId,

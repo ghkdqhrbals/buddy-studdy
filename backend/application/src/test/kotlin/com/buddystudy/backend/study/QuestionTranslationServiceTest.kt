@@ -243,7 +243,7 @@ class QuestionTranslationServiceTest {
             claim: StreamInboxClaim,
             errorMessage: String,
             now: Instant,
-        ) = Unit
+        ): OutboxReference? = null
     }
 
     private class RecordingPublisher(

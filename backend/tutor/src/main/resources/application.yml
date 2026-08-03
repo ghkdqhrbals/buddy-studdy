@@ -105,6 +105,7 @@ buddystudy:
     account-withdrawn-key: ${BUDDYSTUDY_ACCOUNT_WITHDRAWN_STREAM_KEY:identity.account.withdrawn.v1}
     answer-grading-requested-key: ${BUDDYSTUDY_ANSWER_GRADING_REQUESTED_STREAM_KEY:study.answer-grading.requested.v1}
     question-generation-requested-key: ${BUDDYSTUDY_QUESTION_GENERATION_REQUESTED_STREAM_KEY:study.question-generation.requested.v1}
+    question-generation-rollback-requested-key: ${BUDDYSTUDY_QUESTION_GENERATION_ROLLBACK_REQUESTED_STREAM_KEY:study.question-generation.rollback-requested.v1}
     question-generated-key: ${BUDDYSTUDY_QUESTION_GENERATED_STREAM_KEY:study.question.generated.v1}
     content-translation-requested-key: ${BUDDYSTUDY_CONTENT_TRANSLATION_REQUESTED_STREAM_KEY:localization.content-translation.requested.v1}
     question-push-requested-key: ${BUDDYSTUDY_QUESTION_PUSH_REQUESTED_STREAM_KEY:notification.question-push.requested.v1}
@@ -117,6 +118,7 @@ buddystudy:
     account-withdrawn-max-len: ${BUDDYSTUDY_ACCOUNT_WITHDRAWN_STREAM_MAX_LEN:1000}
     answer-grading-requested-max-len: ${BUDDYSTUDY_ANSWER_GRADING_REQUESTED_STREAM_MAX_LEN:1000}
     question-generation-requested-max-len: ${BUDDYSTUDY_QUESTION_GENERATION_REQUESTED_STREAM_MAX_LEN:1000}
+    question-generation-rollback-requested-max-len: ${BUDDYSTUDY_QUESTION_GENERATION_ROLLBACK_REQUESTED_STREAM_MAX_LEN:1000}
     question-generated-max-len: ${BUDDYSTUDY_QUESTION_GENERATED_STREAM_MAX_LEN:1000}
     content-translation-requested-max-len: ${BUDDYSTUDY_CONTENT_TRANSLATION_REQUESTED_STREAM_MAX_LEN:1000}
     question-push-requested-max-len: ${BUDDYSTUDY_QUESTION_PUSH_REQUESTED_STREAM_MAX_LEN:1000}

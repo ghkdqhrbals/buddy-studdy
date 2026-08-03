@@ -8,6 +8,8 @@ import com.buddystudy.backend.study.application.model.QueuedQuestionGeneration
 import com.buddystudy.backend.study.application.model.ClaimedQuestionGeneration
 import com.buddystudy.backend.study.application.model.PreparedQuestionGeneration
 import com.buddystudy.backend.study.application.model.QuestionGenerationRequestedEvent
+import com.buddystudy.backend.study.application.model.QuestionGenerationRollbackRequestedEvent
+import com.buddystudy.backend.study.application.model.ClaimedQuestionGenerationRollback
 import com.buddystudy.backend.study.application.model.StreamInboxClaim
 import com.buddystudy.backend.study.application.model.ClaimedQuestionTranslation
 import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
@@ -73,7 +75,7 @@ interface QuestionGenerationExecutionWriteUseCase {
         errorCode: String,
         errorMessage: String,
         now: Instant,
-    )
+    ): OutboxReference?
 }
 
 interface QuestionDeliveryWriteUseCase {
@@ -108,7 +110,23 @@ interface QuestionTranslationExecutionWriteUseCase {
         claim: StreamInboxClaim,
         errorMessage: String,
         now: Instant,
+    ): OutboxReference?
+}
+
+interface QuestionGenerationRollbackWriteUseCase {
+    suspend fun claim(
+        event: QuestionGenerationRollbackRequestedEvent,
+        now: Instant,
+        streamKey: String = "test",
+    ): ClaimedQuestionGenerationRollback?
+
+    suspend fun complete(
+        event: QuestionGenerationRollbackRequestedEvent,
+        claim: StreamInboxClaim,
+        now: Instant,
     )
+
+    suspend fun retry(claim: StreamInboxClaim, error: String, now: Instant)
 }
 
 interface ScheduledQuestionWriteUseCase {

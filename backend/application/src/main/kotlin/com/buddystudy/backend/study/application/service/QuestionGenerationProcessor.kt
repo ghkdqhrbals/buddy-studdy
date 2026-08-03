@@ -95,13 +95,23 @@ class QuestionGenerationProcessor(
                 writer.retry(claimed.inbox, message, Instant.now())
                 throw error
             }
-            writer.fail(
+            val rollbackOutbox = writer.fail(
                 event = event,
                 claim = claimed.inbox,
                 errorCode = "QUESTION_GENERATION_FAILED",
                 errorMessage = "질문을 생성하지 못했습니다.",
                 now = Instant.now(),
             )
+            rollbackOutbox?.let { reference ->
+                runCatching { publisher.publishNow(listOf(reference)) }
+                    .onFailure {
+                        log.warn(
+                            "question_generation_rollback_immediate_publish_failed correlationId={} error={}",
+                            event.correlationId,
+                            it.message,
+                        )
+                    }
+            }
             log.warn(
                 "question_generation_failed correlationId={} attempts={} errorType={} error={}",
                 event.correlationId,

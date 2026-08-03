@@ -22,6 +22,7 @@ interface QuestionGenerationSagaPort {
         refundedAt: Instant?,
         now: Instant,
     ): Boolean
+    suspend fun markRollbackCompleted(correlationId: String, now: Instant): Boolean
 }
 
 interface StreamInboxPort {

@@ -9,6 +9,7 @@ import com.buddystudy.backend.study.application.model.StudyTopicSuggestionsRespo
 import com.buddystudy.backend.study.application.model.QuestionGenerationAcceptedResponse
 import com.buddystudy.backend.study.application.model.QuestionGenerationProcessResponse
 import com.buddystudy.backend.study.application.model.QuestionGenerationRequestedEvent
+import com.buddystudy.backend.study.application.model.QuestionGenerationRollbackRequestedEvent
 
 interface StudyUseCase {
     suspend fun answer(
@@ -38,6 +39,10 @@ interface GetQuestionGenerationProcessUseCase {
 
 interface ProcessQuestionGenerationUseCase {
     suspend fun process(event: QuestionGenerationRequestedEvent, streamKey: String = "test")
+}
+
+interface ProcessQuestionGenerationRollbackUseCase {
+    suspend fun process(event: QuestionGenerationRollbackRequestedEvent, streamKey: String = "test")
 }
 
 interface BrowseRecordsUseCase {

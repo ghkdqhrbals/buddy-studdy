@@ -63,7 +63,7 @@ The public states are:
 | `GENERATING` | `GENERATING` | The generation group owns the current lease. |
 | `TRANSLATING` | `TRANSLATING` | The question is stored and the translation event is committed. |
 | `COMPLETED` | `COMPLETED` | Localized question and delivery outboxes are committed. |
-| `FAILED` | failed step | Retry budget ended; quota compensation is committed. |
+| `FAILED` | failed step | Retry budget ended. It becomes terminal only after compensation is committed. |
 
 ## Persistent State
 
@@ -75,8 +75,9 @@ One row is the canonical process state.
 - Unique request: `(user_id, idempotency_key)`
 - Unique active topic: `(user_id, active_topic_id)`
 - Unique result: `question_id`
-- Generated `active_topic_id` is non-null only for `QUEUED`, `GENERATING`, and
-  `TRANSLATING`, so a terminal Saga releases the topic automatically.
+- Generated `active_topic_id` is non-null for `QUEUED`, `GENERATING`,
+  `TRANSLATING`, and `FAILED` rows whose rollback has not completed. The topic
+  becomes available again only after compensation commits.
 - State updates use expected-state conditions. A replay cannot repeat a
   successful transition.
 
@@ -167,6 +168,34 @@ Translation consumer group
     - mark translation Inbox SUCCEEDED
 ```
 
+Terminal generation or translation failure follows a separate compensation
+event instead of deleting data and refunding quota inside the failed worker:
+
+```text
+Generation or translation consumer exhausts its retry budget
+  transaction E:
+    - Saga -> FAILED with failedStep and error metadata
+    - insert QUESTION_GENERATION_ROLLBACK_REQUESTED outbox
+    - close the failed step Inbox entry
+  |
+  | commit, then publish through the normal outbox path
+  v
+Redis question-generation-rollback stream
+  |
+  v
+Rollback consumer group
+  transaction F:
+    - claim its own Inbox lease
+    - remove the ungraded generated question and dependent projections, if present
+    - reverse the coverage reservation, if present
+    - decrement the monthly question usage once
+    - set quota_refunded_at and rollback_completed_at
+    - close the rollback Inbox entry
+  |
+  v
+FAILED becomes terminal and the topic can accept a new generation request
+```
+
 Immediate publication occurs only after each transaction commits. Publication
 failure does not roll back committed business state; the durable outbox
 recovery scheduler publishes it later.
@@ -200,10 +229,16 @@ column.
 - A retryable failure records `RETRY_SCHEDULED`, releases the Inbox lease
   immediately, and leaves quota reserved.
 - After the retry limit, the worker marks the Saga `FAILED`, records the failed
-  step, compensates quota once, and closes the Inbox entry as `FAILED`.
-- Translation terminal failure also soft-deletes the unusable question.
-- A duplicate terminal-failure call sees the terminal Saga and cannot refund
-  quota again.
+  step, and appends a rollback event in the same transaction. It does not
+  modify quota or generated data directly.
+- The rollback consumer hard-deletes only the ungraded generated question and
+  its dependent projections, reverses its coverage reservation, and refunds
+  quota in one transaction.
+- `rollback_completed_at` is the compensation idempotency fence. A duplicate
+  rollback event is acknowledged without deleting or refunding a second time.
+- While rollback is pending, the failed Saga still owns the active-topic unique
+  key and the process endpoint returns `terminal=false`. This prevents the app
+  from starting another question before compensation has actually committed.
 - An old worker cannot complete after lease transfer because every Inbox update
   requires its fencing token.
 
@@ -232,7 +267,7 @@ Automated coverage includes:
 - real MySQL uniqueness and compare-and-set transitions;
 - same-group deduplication and lease-expiry recovery;
 - independent claims by different consumer groups;
-- one-time quota compensation;
+- one-time event-driven quota compensation and generated-question removal;
 - retry without compensation;
 - post-commit publication failure recovery;
 - iOS idempotency header and process endpoint routing;

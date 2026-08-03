@@ -1,10 +1,11 @@
 package com.buddystudy.backend.study.application.model
 
-import java.time.Instant
 import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKey
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSelection
 import com.buddystudy.study.domain.entity.QuestionEntity
+import java.time.Instant
+import java.util.UUID
 
 enum class QuestionGenerationSource {
     MANUAL,
@@ -44,6 +45,7 @@ data class QuestionGenerationSaga(
     val createdAt: Instant,
     val updatedAt: Instant,
     val completedAt: Instant?,
+    val rollbackCompletedAt: Instant? = null,
 )
 
 data class QuestionGenerationRequestedEvent(
@@ -62,6 +64,43 @@ data class QuestionGenerationRequestedEvent(
         const val EVENT_TYPE = "QUESTION_GENERATION_REQUESTED"
     }
 }
+
+data class QuestionGenerationRollbackRequestedEvent(
+    val eventId: String,
+    val correlationId: String,
+    val causationId: String,
+    val eventType: String = EVENT_TYPE,
+    val eventVersion: Int = 1,
+    val userId: Long,
+    val questionId: Long?,
+    val quotaPeriodStartedAt: Instant,
+    val failedStep: QuestionGenerationStep,
+    val occurredAt: Instant,
+) {
+    companion object {
+        const val EVENT_TYPE = "QUESTION_GENERATION_ROLLBACK_REQUESTED"
+    }
+}
+
+data class ClaimedQuestionGenerationRollback(
+    val saga: QuestionGenerationSaga,
+    val inbox: StreamInboxClaim,
+)
+
+fun QuestionGenerationSaga.toRollbackRequestedEvent(
+    causationId: String,
+    failedStep: QuestionGenerationStep,
+    now: Instant,
+) = QuestionGenerationRollbackRequestedEvent(
+    eventId = UUID.randomUUID().toString(),
+    correlationId = correlationId,
+    causationId = causationId,
+    userId = userId,
+    questionId = questionId,
+    quotaPeriodStartedAt = quotaPeriodStartedAt,
+    failedStep = failedStep,
+    occurredAt = now,
+)
 
 data class QuestionGenerationAcceptedResponse(
     val correlationId: String,

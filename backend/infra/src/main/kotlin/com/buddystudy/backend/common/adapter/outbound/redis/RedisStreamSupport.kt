@@ -46,6 +46,7 @@ enum class RedisStreamTopic(val apiName: String) {
     IDENTITY_ACCOUNT_WITHDRAWN("identity.account.withdrawn.v1"),
     STUDY_ANSWER_GRADING_REQUESTED("study.answer-grading.requested.v1"),
     STUDY_QUESTION_GENERATION_REQUESTED("study.question-generation.requested.v1"),
+    STUDY_QUESTION_GENERATION_ROLLBACK_REQUESTED("study.question-generation.rollback-requested.v1"),
     STUDY_QUESTION_GENERATED("study.question.generated.v1"),
     LOCALIZATION_CONTENT_TRANSLATION_REQUESTED("localization.content-translation.requested.v1"),
     NOTIFICATION_QUESTION_PUSH_REQUESTED("notification.question-push.requested.v1"),
@@ -144,6 +145,11 @@ class RedisStreamTopicManager(
             topic = RedisStreamTopic.STUDY_QUESTION_GENERATION_REQUESTED,
             streamKey = properties.streams.questionGenerationRequestedKey,
             maxLength = properties.streams.questionGenerationRequestedMaxLen.coerceAtLeast(1),
+        ),
+        RedisStreamTopicDefinition(
+            topic = RedisStreamTopic.STUDY_QUESTION_GENERATION_ROLLBACK_REQUESTED,
+            streamKey = properties.streams.questionGenerationRollbackRequestedKey,
+            maxLength = properties.streams.questionGenerationRollbackRequestedMaxLen.coerceAtLeast(1),
         ),
         RedisStreamTopicDefinition(
             topic = RedisStreamTopic.STUDY_QUESTION_GENERATED,

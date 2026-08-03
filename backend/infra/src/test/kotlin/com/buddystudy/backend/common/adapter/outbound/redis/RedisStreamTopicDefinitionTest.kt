@@ -20,10 +20,12 @@ class RedisStreamTopicDefinitionTest {
                 streams = BuddyStudyProperties.Streams(
                     notificationRequestedKey = "notification.message.requested.v1",
                     questionGeneratedKey = "study.question.generated.v1",
+                    questionGenerationRollbackRequestedKey = "study.question-generation.rollback-requested.v1",
                     questionPushRequestedKey = "notification.question-push.requested.v1",
                     questionCommentedKey = "community.question.commented.v1",
                     notificationRequestedMaxLen = 2_000,
                     questionGeneratedMaxLen = 4_000,
+                    questionGenerationRollbackRequestedMaxLen = 6_000,
                     questionPushRequestedMaxLen = 8_000,
                     questionCommentedMaxLen = 16_000,
                 ),
@@ -44,6 +46,14 @@ class RedisStreamTopicDefinitionTest {
                     topic = RedisStreamTopic.STUDY_QUESTION_GENERATED,
                     streamKey = "study.question.generated.v1",
                     maxLength = 4_000,
+                ),
+            )
+        assertThat(manager.definition(RedisStreamTopic.STUDY_QUESTION_GENERATION_ROLLBACK_REQUESTED))
+            .isEqualTo(
+                RedisStreamTopicDefinition(
+                    topic = RedisStreamTopic.STUDY_QUESTION_GENERATION_ROLLBACK_REQUESTED,
+                    streamKey = "study.question-generation.rollback-requested.v1",
+                    maxLength = 6_000,
                 ),
             )
         assertThat(manager.definition(RedisStreamTopic.NOTIFICATION_QUESTION_PUSH_REQUESTED))
@@ -74,6 +84,7 @@ class RedisStreamTopicDefinitionTest {
                 streams = BuddyStudyProperties.Streams(
                     notificationRequestedMaxLen = 0,
                     questionGeneratedMaxLen = -5,
+                    questionGenerationRollbackRequestedMaxLen = -7,
                     questionPushRequestedMaxLen = -10,
                 ),
             ),
@@ -81,6 +92,8 @@ class RedisStreamTopicDefinitionTest {
 
         assertThat(manager.definition(RedisStreamTopic.NOTIFICATION_MESSAGE_REQUESTED).maxLength).isEqualTo(1)
         assertThat(manager.definition(RedisStreamTopic.STUDY_QUESTION_GENERATED).maxLength).isEqualTo(1)
+        assertThat(manager.definition(RedisStreamTopic.STUDY_QUESTION_GENERATION_ROLLBACK_REQUESTED).maxLength)
+            .isEqualTo(1)
         assertThat(manager.definition(RedisStreamTopic.NOTIFICATION_QUESTION_PUSH_REQUESTED).maxLength).isEqualTo(1)
     }
 

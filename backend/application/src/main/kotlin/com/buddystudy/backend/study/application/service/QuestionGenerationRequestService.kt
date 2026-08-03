@@ -296,7 +296,7 @@ class QuestionGenerationProcessService(
                     .toRecordResponse()
             }
         val terminal = saga.status == QuestionGenerationStatus.COMPLETED ||
-            saga.status == QuestionGenerationStatus.FAILED
+            (saga.status == QuestionGenerationStatus.FAILED && saga.rollbackCompletedAt != null)
         return QuestionGenerationProcessResponse(
             correlationId = saga.correlationId,
             status = saga.status,

@@ -432,6 +432,19 @@ class QuestionRepository(
         Criteria.where("user_id").`is`(userId).and("topic").`is`(topic).and("deleted_at").isNull, now,
     )
 
+    override suspend fun deleteGeneratedForRollback(id: Long, userId: Long): Int {
+        val deleted = template.delete(
+            Query.query(
+                Criteria.where("id").`is`(id)
+                    .and("user_id").`is`(userId)
+                    .and("score").isNull,
+            ),
+            QuestionEntity::class.java,
+        ).awaitSingle().toInt()
+        if (deleted > 0) searchProjection.refresh(id)
+        return deleted
+    }
+
     private suspend fun findOne(criteria: Criteria): QuestionEntity? =
         template.selectOne(Query.query(criteria), QuestionEntity::class.java).awaitSingleOrNull()
 

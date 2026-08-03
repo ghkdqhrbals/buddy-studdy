@@ -3,6 +3,7 @@ package com.buddystudy.backend.study
 import com.buddystudy.backend.common.application.outbox.RedisEventOutboxAppendPort
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.model.QuestionGenerationRequestedEvent
+import com.buddystudy.backend.study.application.model.QuestionGenerationRollbackRequestedEvent
 import com.buddystudy.backend.study.application.model.QuestionGenerationSaga
 import com.buddystudy.backend.study.application.model.QuestionGenerationSource
 import com.buddystudy.backend.study.application.model.QuestionGenerationStatus
@@ -104,13 +105,14 @@ class QuestionGenerationExecutionWriteServiceTest {
     }
 
     @Test
-    fun `terminal failure refunds a quota reservation only once`(): Unit = runBlocking {
+    fun `terminal failure publishes one rollback event without refunding quota directly`(): Unit = runBlocking {
         val now = Instant.parse("2026-07-27T12:00:00Z")
         val saga = saga(now)
         val sagas = Mockito.mock(QuestionGenerationSagaPort::class.java)
         val inbox = Mockito.mock(StreamInboxPort::class.java)
         val memberships = Mockito.mock(QuestionMembershipPort::class.java)
-        val writer = writer(sagas, inbox, memberships)
+        val outbox = RecordingGeneratedQuestionOutbox()
+        val writer = writer(sagas, inbox, memberships, outbox)
         val event = event(saga, now)
         val firstClaim = StreamInboxClaim(event.eventId, "generation", "claim-1", 3)
         val duplicateClaim = StreamInboxClaim(event.eventId, "generation", "claim-2", 4)
@@ -123,7 +125,7 @@ class QuestionGenerationExecutionWriteServiceTest {
                 QuestionGenerationStep.GENERATING,
                 "QUESTION_GENERATION_FAILED",
                 "Generation failed.",
-                now,
+                null,
                 now,
             ),
         ).thenReturn(true)
@@ -134,14 +136,14 @@ class QuestionGenerationExecutionWriteServiceTest {
             inbox.markFailed(duplicateClaim, "QUESTION_GENERATION_FAILED", "Generation failed.", now),
         ).thenReturn(true)
 
-        writer.fail(
+        val first = writer.fail(
             event,
             firstClaim,
             "QUESTION_GENERATION_FAILED",
             "Generation failed.",
             now,
         )
-        writer.fail(
+        val duplicate = writer.fail(
             event,
             duplicateClaim,
             "QUESTION_GENERATION_FAILED",
@@ -149,14 +151,23 @@ class QuestionGenerationExecutionWriteServiceTest {
             now,
         )
 
-        Mockito.verify(memberships, Mockito.times(1))
-            .refundMonthlySystemQuestion(saga.userId, saga.quotaPeriodStartedAt, now)
+        assertThat(first?.id).isEqualTo(91L)
+        assertThat(duplicate).isNull()
+        assertThat(outbox.rollbackEvents).hasSize(1)
+        val rollback = outbox.rollbackEvents.single()
+        assertThat(rollback.correlationId).isEqualTo(saga.correlationId)
+        assertThat(rollback.causationId).isEqualTo(event.eventId)
+        assertThat(rollback.userId).isEqualTo(saga.userId)
+        assertThat(rollback.questionId).isNull()
+        assertThat(rollback.quotaPeriodStartedAt).isEqualTo(saga.quotaPeriodStartedAt)
+        assertThat(rollback.failedStep).isEqualTo(QuestionGenerationStep.GENERATING)
+        Mockito.verifyNoInteractions(memberships)
         Mockito.verify(sagas, Mockito.times(1)).markFailed(
             saga.correlationId,
             QuestionGenerationStep.GENERATING,
             "QUESTION_GENERATION_FAILED",
             "Generation failed.",
-            now,
+            null,
             now,
         )
     }
@@ -189,6 +200,7 @@ class QuestionGenerationExecutionWriteServiceTest {
         sagas: QuestionGenerationSagaPort,
         inbox: StreamInboxPort,
         memberships: QuestionMembershipPort,
+        outbox: RedisEventOutboxAppendPort = Mockito.mock(RedisEventOutboxAppendPort::class.java),
     ) = QuestionGenerationExecutionWriteService(
         sagas = sagas,
         inbox = inbox,
@@ -202,7 +214,7 @@ class QuestionGenerationExecutionWriteServiceTest {
             ),
             memberships,
         ),
-        outbox = Mockito.mock(RedisEventOutboxAppendPort::class.java),
+        outbox = outbox,
         translationRequests = ContentTranslationRequestManager(
             EmptyContentLocalizationPort(),
             RecordingContentTranslationEventPort(),
@@ -244,6 +256,7 @@ class QuestionGenerationExecutionWriteServiceTest {
 
     private class RecordingGeneratedQuestionOutbox : RedisEventOutboxAppendPort {
         val events = mutableListOf<QuestionGeneratedEvent>()
+        val rollbackEvents = mutableListOf<QuestionGenerationRollbackRequestedEvent>()
 
         override suspend fun appendNotification(command: NotificationRequestCommand, createdAt: Instant): Long =
             error("Not expected.")
@@ -251,6 +264,14 @@ class QuestionGenerationExecutionWriteServiceTest {
         override suspend fun appendQuestionGenerated(event: QuestionGeneratedEvent, createdAt: Instant): Long {
             events += event
             return 90L
+        }
+
+        override suspend fun appendQuestionGenerationRollbackRequested(
+            event: QuestionGenerationRollbackRequestedEvent,
+            createdAt: Instant,
+        ): Long {
+            rollbackEvents += event
+            return 91L
         }
     }
 }

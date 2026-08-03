@@ -150,6 +150,7 @@ interface QuestionPort {
     suspend fun softDeleteByStudySubtree(rootStudyId: Long, userId: Long, now: Instant): Int =
         softDeleteByStudyId(rootStudyId, userId, now)
     suspend fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int
+    suspend fun deleteGeneratedForRollback(id: Long, userId: Long): Int = 0
 }
 
 interface QuestionStatsPort {
@@ -160,6 +161,7 @@ interface QuestionStatsPort {
     suspend fun incrementLike(questionId: Long, delta: Int, now: Instant): Int
     suspend fun incrementComment(questionId: Long, delta: Int, now: Instant): Int
     suspend fun setLikeCount(questionId: Long, count: Int, now: Instant): Int
+    suspend fun deleteByQuestionId(questionId: Long): Int = 0
 }
 
 data class QuestionEmbeddingCandidate(
@@ -208,6 +210,7 @@ interface QuestionCoveragePort {
     suspend fun ensureCoverage(studyId: Long, topic: String, concepts: List<CoverageConceptBlueprint>)
     suspend fun selectNext(studyId: Long): QuestionCoverageSelection?
     suspend fun markAsked(selection: QuestionCoverageSelection, now: Instant)
+    suspend fun rollbackAsked(conceptId: Long, angleKey: String, now: Instant) = Unit
     suspend fun markAnswered(conceptId: Long, angleKey: String, score: Int, correct: Boolean, now: Instant)
 }
 

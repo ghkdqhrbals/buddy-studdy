@@ -11,6 +11,7 @@ import com.buddystudy.backend.study.application.model.QuestionGenerationRequeste
 import com.buddystudy.backend.study.application.model.QuestionGenerationStatus
 import com.buddystudy.backend.study.application.model.QuestionGenerationStep
 import com.buddystudy.backend.study.application.model.StreamInboxClaim
+import com.buddystudy.backend.study.application.model.toRollbackRequestedEvent
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
 import com.buddystudy.backend.study.application.port.inbound.QuestionGenerationExecutionWriteUseCase
 import com.buddystudy.backend.study.application.port.inbound.QuestionWriteResult
@@ -138,8 +139,9 @@ class QuestionGenerationExecutionWriteService(
         errorCode: String,
         errorMessage: String,
         now: Instant,
-    ) {
+    ): OutboxReference? {
         val saga = sagas.findByCorrelationId(event.correlationId)
+        var rollbackOutbox: OutboxReference? = null
         if (saga != null && saga.status !in setOf(QuestionGenerationStatus.COMPLETED, QuestionGenerationStatus.FAILED)) {
             check(
                 sagas.markFailed(
@@ -147,17 +149,22 @@ class QuestionGenerationExecutionWriteService(
                     failedStep = QuestionGenerationStep.GENERATING,
                     errorCode = errorCode,
                     errorMessage = errorMessage,
-                    refundedAt = now,
+                    refundedAt = null,
                     now = now,
                 ),
             ) { "Question generation Saga did not enter FAILED." }
-            if (saga.quotaRefundedAt == null) {
-                questionKeys.releaseQuestionReservation(saga.userId, saga.quotaPeriodStartedAt, now)
-            }
+            rollbackOutbox = OutboxReference(
+                OutboxType.DOMAIN_EVENT,
+                outbox.appendQuestionGenerationRollbackRequested(
+                    saga.toRollbackRequestedEvent(event.eventId, QuestionGenerationStep.GENERATING, now),
+                    now,
+                ),
+            )
         }
         check(inbox.markFailed(claim, errorCode, errorMessage, now)) {
             "Question generation Inbox claim was lost before terminal failure."
         }
+        return rollbackOutbox
     }
 
     companion object {

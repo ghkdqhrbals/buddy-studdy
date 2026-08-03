@@ -6,6 +6,7 @@ import com.buddystudy.backend.notification.application.port.inbound.Notification
 import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
 import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
 import com.buddystudy.backend.study.application.model.QuestionGenerationRequestedEvent
+import com.buddystudy.backend.study.application.model.QuestionGenerationRollbackRequestedEvent
 import java.time.Instant
 
 enum class OutboxType {
@@ -49,6 +50,7 @@ enum class RedisOutboxEventType {
     ACCOUNT_WITHDRAWN,
     ANSWER_GRADING_REQUESTED,
     QUESTION_GENERATION_REQUESTED,
+    QUESTION_GENERATION_ROLLBACK_REQUESTED,
     QUESTION_GENERATED,
     CONTENT_TRANSLATION_REQUESTED,
     CONTENT_VIEWED,
@@ -79,6 +81,10 @@ interface RedisEventOutboxAppendPort {
     ): Long = error("Question generation requested outbox is not configured.")
     suspend fun appendQuestionGenerated(event: QuestionGeneratedEvent, createdAt: Instant = Instant.now()): Long =
         error("Question generated outbox is not configured.")
+    suspend fun appendQuestionGenerationRollbackRequested(
+        event: QuestionGenerationRollbackRequestedEvent,
+        createdAt: Instant = Instant.now(),
+    ): Long = error("Question generation rollback requested outbox is not configured.")
     suspend fun appendContentTranslation(
         event: ContentTranslationRequestedEvent,
         createdAt: Instant = Instant.now(),
