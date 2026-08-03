@@ -1131,6 +1131,12 @@ private enum MobileHomeFeedItem: Identifiable {
     }
 }
 
+enum MobileHomeRefreshPresentationPolicy {
+    static func showsInitialLoading(hasContent: Bool, isRefreshing: Bool) -> Bool {
+        !hasContent && isRefreshing
+    }
+}
+
 private struct MobileHomeView: View {
     @EnvironmentObject private var appState: AppState
     @State private var selectedHomeScope: HomeFeedScope = .all
@@ -1155,6 +1161,7 @@ private struct MobileHomeView: View {
     @State private var searchFocusTask: Task<Void, Never>?
     @State private var homeRefreshTask: Task<Void, Never>?
     @State private var refreshingHomeScope: HomeFeedScope?
+    @State private var selectedHomeTreeRootID: String?
     @FocusState private var isSearchFocused: Bool
 
     private var strings: AppStrings {
@@ -1323,13 +1330,17 @@ private struct MobileHomeView: View {
             homeTitleHeader
             homeScopePickerHeader
 
-            List {
-                homeContentSection
-            }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .refreshable {
-                startHomeRefresh()
+            if selectedHomeScope == .tree, appState.isCommunitySessionActive {
+                homeStudyTreeGraph
+            } else {
+                List {
+                    homeContentSection
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .refreshable {
+                    startHomeRefresh()
+                }
             }
         }
         .background(Color(.systemBackground))
@@ -1666,7 +1677,7 @@ private struct MobileHomeView: View {
                     )
                 }
         } else if selectedHomeScope == .my {
-            myStudyListSection
+            myStudyOutlineSection
                 .onAppear {
                     appState.logMobileAuthView(
                         "mobile_render_protected_content",
@@ -1675,14 +1686,7 @@ private struct MobileHomeView: View {
                     )
                 }
         } else if selectedHomeScope == .tree {
-            myStudyTreeSection
-                .onAppear {
-                    appState.logMobileAuthView(
-                        "mobile_render_protected_content",
-                        page: .myStudies,
-                        reason: "home-my-study-tree"
-                    )
-                }
+            EmptyView()
         } else {
             communityQuestionSection
                 .onAppear {
@@ -1709,52 +1713,7 @@ private struct MobileHomeView: View {
         }
     }
 
-    private var myStudyListSection: some View {
-        Section {
-            personalStudyEmptyOrLoadingContent {
-                ForEach(filteredStudyCategories) { category in
-                    Button {
-                        appState.openStudyCategory(category.id)
-                    } label: {
-                        MobileHomeCategoryRow(
-                            category: category,
-                            hasPendingQuestion: appState.pendingQuestionCount(for: category) > 0,
-                            strings: strings
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .contextMenu {
-                        Button {
-                            editingStudyCategory = category
-                        } label: {
-                            Label(strings.editStudyCategory, systemImage: "pencil")
-                        }
-
-                        Button {
-                            appState.openStudyTree(category.id)
-                        } label: {
-                            Label(
-                                strings.viewFullStudyTree,
-                                systemImage: "point.3.connected.trianglepath.dotted"
-                            )
-                        }
-                    }
-                }
-                .onMove { offsets, destination in
-                    guard trimmedHomeStudySearchText.isEmpty else {
-                        return
-                    }
-
-                    appState.moveStudyCategories(from: offsets, to: destination)
-                }
-            }
-        }
-    }
-
-    private var myStudyTreeSection: some View {
+    private var myStudyOutlineSection: some View {
         Section {
             personalStudyEmptyOrLoadingContent {
                 ForEach(filteredStudyCategories) { category in
@@ -1769,6 +1728,95 @@ private struct MobileHomeView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var homeStudyTreeGraph: some View {
+        if let category = selectedHomeTreeCategory,
+           let rootStudyID = Int(category.id) {
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    Text(strings.currentStudyCategory)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Spacer(minLength: 0)
+
+                    Menu {
+                        ForEach(filteredStudyCategories) { option in
+                            Button {
+                                selectedHomeTreeRootID = option.id
+                            } label: {
+                                if option.id == category.id {
+                                    Label(option.title, systemImage: "checkmark")
+                                } else {
+                                    Text(option.title)
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(category.title)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 36)
+                        .background(Color(.secondarySystemBackground), in: Capsule())
+                    }
+                    .accessibilityLabel(strings.currentStudyCategory)
+                    .accessibilityValue(category.title)
+                }
+                .padding(.horizontal, 2)
+                .padding(.vertical, 8)
+
+                Divider()
+
+                MobileStudyTreeView(
+                    rootStudyID: rootStudyID,
+                    isEmbeddedInHome: true
+                )
+                .id(rootStudyID)
+            }
+            .onAppear {
+                selectedHomeTreeRootID = category.id
+                appState.logMobileAuthView(
+                    "mobile_render_protected_content",
+                    page: .myStudies,
+                    reason: "home-my-study-tree"
+                )
+            }
+        } else if MobileHomeRefreshPresentationPolicy.showsInitialLoading(
+            hasContent: selectedHomeTreeCategory != nil,
+            isRefreshing: isRefreshingMyStudyContent
+        ) {
+            MobileHomeRefreshIndicator()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(strings.noMatchingTopics)
+                    .font(.subheadline.weight(.semibold))
+
+                Text(strings.noMatchingTopicsDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(.top, 18)
+        }
+    }
+
+    private var selectedHomeTreeCategory: StudyCategory? {
+        if let selectedHomeTreeRootID,
+           let selected = filteredStudyCategories.first(where: { $0.id == selectedHomeTreeRootID }) {
+            return selected
+        }
+        return filteredStudyCategories.first
     }
 
     @ViewBuilder
@@ -2962,6 +3010,7 @@ struct MobileStudyTreeView: View {
     @State private var deletionCandidate: BackendStudyRoom?
 
     var rootStudyID: Int
+    var isEmbeddedInHome = false
 
     private var strings: AppStrings {
         appState.strings
@@ -3157,24 +3206,26 @@ struct MobileStudyTreeView: View {
             }
         }
         .background(Color(.systemBackground))
-        .navigationTitle(strings.studyTree)
+        .navigationTitle(isEmbeddedInHome ? "" : strings.studyTree)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                Text(strings.studyTree)
-                    .font(.headline)
-            }
-            if #available(iOS 26.0, *) {
-                ToolbarItem(placement: .topBarTrailing) {
-                    if !isSelectionMode {
-                        treeOptionsMenu
-                    }
+            if !isEmbeddedInHome {
+                ToolbarItem(placement: .principal) {
+                    Text(strings.studyTree)
+                        .font(.headline)
                 }
-                .sharedBackgroundVisibility(.hidden)
-            } else {
-                ToolbarItem(placement: .topBarTrailing) {
-                    if !isSelectionMode {
-                        treeOptionsMenu
+                if #available(iOS 26.0, *) {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        if !isSelectionMode {
+                            treeOptionsMenu
+                        }
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                } else {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        if !isSelectionMode {
+                            treeOptionsMenu
+                        }
                     }
                 }
             }
