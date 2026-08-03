@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.bind.support.WebExchangeBindException
 import org.springframework.web.reactive.resource.NoResourceFoundException
+import org.springframework.web.server.MethodNotAllowedException
 import org.springframework.web.server.ServerWebExchange
 import org.springframework.web.server.ServerWebInputException
 import org.springframework.web.util.DisconnectedClientHelper
@@ -131,6 +132,19 @@ class ErrorHandler(
             HttpStatus.NOT_FOUND,
             errorResponseFactory.envelope(ApiErrorCode.RESOURCE_NOT_FOUND, HttpStatus.NOT_FOUND, exchange),
         )
+
+    @ExceptionHandler(MethodNotAllowedException::class)
+    fun methodNotAllowed(
+        error: MethodNotAllowedException,
+        exchange: ServerWebExchange,
+    ): ResponseEntity<ApiErrorEnvelope> {
+        val status = HttpStatus.METHOD_NOT_ALLOWED
+        val body = errorResponseFactory.envelope(ApiErrorCode.METHOD_NOT_ALLOWED, status, exchange)
+        return ResponseEntity.status(status)
+            .allow(*error.supportedMethods.toTypedArray())
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(body)
+    }
 
     @ExceptionHandler(TaskRejectedException::class)
     fun serverBusy(error: TaskRejectedException, exchange: ServerWebExchange): ResponseEntity<ApiErrorEnvelope> {

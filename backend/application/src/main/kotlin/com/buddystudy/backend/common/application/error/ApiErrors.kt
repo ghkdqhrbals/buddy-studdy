@@ -55,6 +55,12 @@ enum class ApiErrorCode(
         "error.answer.already_submitted",
         "An answer has already been submitted for this question.",
     ),
+    METHOD_NOT_ALLOWED(
+        HttpStatus.METHOD_NOT_ALLOWED,
+        504,
+        "error.request.method_not_allowed",
+        "Request method is not supported.",
+    ),
 
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, 900, "error.internal.server_error", "Internal server error."),
     EMAIL_DELIVERY_FAILED(HttpStatus.SERVICE_UNAVAILABLE, 901, "error.email.delivery_failed", "Email delivery failed."),

@@ -14,11 +14,13 @@ import org.springframework.boot.test.system.CapturedOutput
 import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.context.support.StaticMessageSource
 import org.springframework.core.task.TaskRejectedException
+import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest
 import org.springframework.mock.web.server.MockServerWebExchange
 import org.springframework.web.reactive.resource.NoResourceFoundException
+import org.springframework.web.server.MethodNotAllowedException
 import reactor.netty.channel.AbortedException
 import java.net.URI
 import java.util.Locale
@@ -36,6 +38,7 @@ class ErrorHandlerTest {
         addMessage("error.internal.server_error", Locale.KOREA, "Internal backend error.")
         addMessage("error.internal.server_error", Locale.KOREAN, "Internal backend error.")
         addMessage("error.validation", Locale.ENGLISH, "Invalid request.")
+        addMessage("error.request.method_not_allowed", Locale.ENGLISH, "Request method is not supported.")
         addMessage("error.server.busy", Locale.ENGLISH, "Server is temporarily busy.")
     }
     private val responseFactory = ApiErrorResponseFactory(messageSource)
@@ -167,6 +170,22 @@ class ErrorHandlerTest {
         assertThat(response.headers.contentType).isEqualTo(MediaType.APPLICATION_JSON)
         val serialized = mapper.writeValueAsString(response.body)
         assertThat(serialized).contains("\"errorCode\":\"RESOURCE_NOT_FOUND\"")
+    }
+
+    @Test
+    fun `unsupported request method remains 405 without an error log`(output: CapturedOutput): Unit = runBlocking {
+        val exchange = exchange("GET", "/api/v1/admin/users/733/notifications", "req-method")
+        val error = MethodNotAllowedException(HttpMethod.GET, listOf(HttpMethod.POST))
+
+        val response = handler.methodNotAllowed(error, exchange)
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED)
+        assertThat(response.headers.allow).containsExactly(HttpMethod.POST)
+        val json = mapper.valueToTree<com.fasterxml.jackson.databind.JsonNode>(response.body)
+        assertThat(json["error"]["errorCode"].asText()).isEqualTo(ApiErrorCode.METHOD_NOT_ALLOWED.name)
+        assertThat(json["error"]["code"].asInt()).isEqualTo(ApiErrorCode.METHOD_NOT_ALLOWED.code)
+        assertThat(json["error"]["message"].asText()).isEqualTo("Request method is not supported.")
+        assertThat(output.all).doesNotContain("api_error")
     }
 
     @Test
