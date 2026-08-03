@@ -100,6 +100,37 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(comments.getValue("payments.status")).contains("SETTLED", "REFUND_PENDING", "REVOKED")
         assertThat(comments.getValue("billing_actions.action_type")).contains("REFUND", "CANCELLATION", "COMPENSATION")
         assertThat(comments.getValue("billing_actions.status")).contains("AWAITING_APPLE", "COMPLETED", "DECLINED")
+
+        data class TierProduct(
+            val tierCode: String,
+            val productId: String,
+            val billingPeriod: String,
+            val monthlyLimit: Int,
+        )
+
+        val tierProducts = databaseClient.sql(
+            """
+            select p.tier_code, p.product_id, p.billing_period, t.monthly_question_limit
+            from membership_tier_products p
+            join user_membership_tiers t on t.tier_code = p.tier_code
+            where p.provider = 'APPLE' and p.enabled = true
+            order by p.sort_order
+            """.trimIndent(),
+        ).map { row, _ ->
+            TierProduct(
+                tierCode = row.get("tier_code", String::class.java)!!,
+                productId = row.get("product_id", String::class.java)!!,
+                billingPeriod = row.get("billing_period", String::class.java)!!,
+                monthlyLimit = row.get("monthly_question_limit", java.lang.Integer::class.java)!!.toInt(),
+            )
+        }.all().collectList().awaitSingle()
+
+        assertThat(tierProducts).containsExactly(
+            TierProduct("TIER2", "io.github.ghkdqhrbals.StudyMate.tier2.monthly", "P1M", 300),
+            TierProduct("TIER2", "io.github.ghkdqhrbals.StudyMate.tier2.yearly", "P1Y", 300),
+            TierProduct("TIER3", "io.github.ghkdqhrbals.StudyMate.tier3.monthly", "P1M", 1000),
+            TierProduct("TIER3", "io.github.ghkdqhrbals.StudyMate.tier3.yearly", "P1Y", 1000),
+        )
     }
 
     @Test

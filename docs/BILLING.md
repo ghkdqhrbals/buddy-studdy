@@ -10,10 +10,16 @@ identity before writing the ledger.
 ## Product catalog
 
 `membership_tier_products` maps enabled App Store product IDs to
-`user_membership_tiers`. The initial monthly products are:
+`user_membership_tiers`. Monthly and annual products grant the same monthly
+allowance; only the Apple renewal period and price differ.
 
-- `io.github.ghkdqhrbals.StudyMate.tier2.monthly` → `TIER2`
-- `io.github.ghkdqhrbals.StudyMate.tier3.monthly` → `TIER3`
+| Tier | Monthly allowance | Product | Period | Korea price |
+| --- | ---: | --- | --- | ---: |
+| TIER1 | 30 | Free | — | Free |
+| TIER2 | 300 | `io.github.ghkdqhrbals.StudyMate.tier2.monthly` | P1M | ₩7,900 |
+| TIER2 | 300 | `io.github.ghkdqhrbals.StudyMate.tier2.yearly` | P1Y | ₩69,000 |
+| TIER3 | 1,000 | `io.github.ghkdqhrbals.StudyMate.tier3.monthly` | P1M | ₩17,900 |
+| TIER3 | 1,000 | `io.github.ghkdqhrbals.StudyMate.tier3.yearly` | P1Y | ₩149,000 |
 
 The mapping is server-owned. A client-supplied product that is absent, disabled,
 or has a different product type is rejected before an invoice is written.
@@ -80,10 +86,12 @@ flow at `/orders.html`.
 
 ## Production setup
 
-1. Create the two product IDs in App Store Connect and attach them to the same
-   auto-renewable subscription group.
-2. Configure the App Store Server Notifications V2 production and sandbox URL
-   as `https://api.ghkdqhrbals.org/api/v1/billing/apple/notifications`.
+1. Keep all four products in the single `BuddyStudy Membership` auto-renewable
+   subscription group. TIER3 is group level 1 and TIER2 is group level 2;
+   monthly and annual products for the same tier share a level.
+2. The Sandbox App Store Server Notifications V2 URL is
+   `https://api.ghkdqhrbals.org/api/v1/billing/apple/notifications`. Configure
+   the production URL separately before the App Store release.
 3. Keep bundle ID `io.github.ghkdqhrbals.StudyMate` and numeric App Store app ID
    `6774108938` aligned with the release app.
 4. Apple Root CA G2 and G3 public certificates are bundled from Apple PKI. They
@@ -92,6 +100,12 @@ flow at `/orders.html`.
 5. Production online certificate checks remain enabled. Xcode StoreKit
    transactions are accepted only in the development profile.
 
+The committed App Store Connect source of truth is
+`app-store/billing/subscriptions.json`. Product metadata can take up to one hour
+to propagate to Sandbox. A Sandbox Apple Account must be created in App Store
+Connect's Users and Access page because Apple exposes only lookup and mutation,
+not tester creation, through the public API.
+
 StoreKit products and server notifications still require App Store Connect
-agreements, tax/banking setup, localized product metadata, prices, and review
-approval before real purchases can complete.
+agreements, tax/banking setup, review screenshots, and review approval before
+real purchases can complete.

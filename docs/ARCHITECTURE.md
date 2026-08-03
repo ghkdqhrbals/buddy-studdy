@@ -348,6 +348,8 @@ Public community feed
 
 - `user_membership_tiers` is the operator-managed plan catalog and owns the default monthly limit.
 - `user_memberships.monthly_question_limit_override` is nullable. `NULL` inherits the tier value; a non-negative value overrides it for that user.
+- The default monthly allowance is 30 questions for TIER1, 300 for TIER2, and 1,000 for TIER3. TIER2 and TIER3 each map to one monthly and one annual Apple auto-renewable subscription; both billing periods grant the same tier allowance.
+- App Store Connect subscription metadata is tracked in `app-store/billing/subscriptions.json`. Korean prices are the base prices and Apple equalized prices are configured for every available storefront.
 - `user_monthly_question_usage.current_period_question_limit_override` is nullable and takes precedence only for that exact quota period. Clearing it immediately restores the recurring membership allowance, and the next period starts without carrying it forward.
 - Monthly quota periods are anchored to each user's `users.created_at` timestamp rather than calendar-month boundaries. A user created on the 7th resets on the 7th at the same UTC instant each month.
 - Month-end anchors use the target month's last valid day without drift. For example, a January 31 anchor resets on February 28 (or 29) and then March 31.
