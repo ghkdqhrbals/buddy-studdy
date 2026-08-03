@@ -1823,31 +1823,27 @@ private struct MobileHomeView: View {
     private func personalStudyEmptyOrLoadingContent<Content: View>(
         @ViewBuilder content: () -> Content
     ) -> some View {
-        if filteredStudyCategories.isEmpty {
-            if isRefreshingMyStudyContent {
-                MobileHomeRefreshIndicator()
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 34)
-                    .listRowSeparator(.hidden)
-            } else {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(strings.noMatchingTopics)
-                        .font(.subheadline.weight(.semibold))
+        let hasContent = !filteredStudyCategories.isEmpty
 
-                    Text(strings.noMatchingTopicsDescription)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 8)
+        if MobileHomeRefreshPresentationPolicy.showsInitialLoading(
+            hasContent: hasContent,
+            isRefreshing: isRefreshingMyStudyContent
+        ) {
+            MobileHomeRefreshIndicator()
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 34)
+                .listRowSeparator(.hidden)
+        } else if !hasContent {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(strings.noMatchingTopics)
+                    .font(.subheadline.weight(.semibold))
+
+                Text(strings.noMatchingTopicsDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
+            .padding(.vertical, 8)
         } else {
-            if isRefreshingMyStudyContent {
-                MobileHomeRefreshIndicator()
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 8)
-                    .listRowSeparator(.hidden)
-            }
-
             content()
         }
     }
@@ -1927,26 +1923,22 @@ private struct MobileHomeView: View {
 
     private var communityQuestionSection: some View {
         Section {
-            if appState.communityQuestions.isEmpty {
-                if isRefreshingCommunityContent {
-                    MobileHomeRefreshIndicator()
-                        .frame(maxWidth: .infinity, minHeight: 320)
-                        .listRowInsets(EdgeInsets(top: 18, leading: 0, bottom: 18, trailing: 0))
-                        .listRowSeparator(.hidden)
-                } else {
-                    MobileCommunityEmptyState(strings: strings)
-                        .frame(maxWidth: .infinity, minHeight: 320)
-                        .listRowInsets(EdgeInsets(top: 18, leading: 0, bottom: 18, trailing: 0))
-                        .listRowSeparator(.hidden)
-                }
-            } else {
-                if isRefreshingCommunityContent {
-                    MobileHomeRefreshIndicator()
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, 8)
-                        .listRowSeparator(.hidden)
-                }
+            let hasContent = !appState.communityQuestions.isEmpty
 
+            if MobileHomeRefreshPresentationPolicy.showsInitialLoading(
+                hasContent: hasContent,
+                isRefreshing: isRefreshingCommunityContent
+            ) {
+                MobileHomeRefreshIndicator()
+                    .frame(maxWidth: .infinity, minHeight: 320)
+                    .listRowInsets(EdgeInsets(top: 18, leading: 0, bottom: 18, trailing: 0))
+                    .listRowSeparator(.hidden)
+            } else if !hasContent {
+                MobileCommunityEmptyState(strings: strings)
+                    .frame(maxWidth: .infinity, minHeight: 320)
+                    .listRowInsets(EdgeInsets(top: 18, leading: 0, bottom: 18, trailing: 0))
+                    .listRowSeparator(.hidden)
+            } else {
                 ForEach(communityFeedItems) { item in
                     communityFeedRow(item)
                 }

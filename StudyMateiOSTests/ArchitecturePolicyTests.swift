@@ -1157,8 +1157,12 @@ final class ArchitecturePolicyTests: XCTestCase {
         let content = try String(contentsOf: file, encoding: .utf8)
 
         XCTAssertTrue(
-            content.contains("if appState.communityQuestions.isEmpty {\n                if isRefreshingCommunityContent {\n                    MobileHomeRefreshIndicator()"),
+            content.contains("let hasContent = !appState.communityQuestions.isEmpty\n\n            if MobileHomeRefreshPresentationPolicy.showsInitialLoading("),
             "When public questions are empty, the refresh indicator should render in the public-question content slot instead of shifting the fixed title or tab area."
+        )
+        XCTAssertFalse(
+            content.contains("if isRefreshingCommunityContent {\n                    MobileHomeRefreshIndicator()"),
+            "Refreshing cached public questions must not insert a standalone loading row above the existing feed."
         )
     }
 

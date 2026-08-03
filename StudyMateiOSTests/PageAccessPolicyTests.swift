@@ -59,6 +59,32 @@ final class CommunityQuestionActionPolicyTests: XCTestCase {
     }
 }
 
+final class MobileHomeRefreshPresentationPolicyTests: XCTestCase {
+    func testShowsLoadingOnlyWhenTheInitialContentIsEmpty() {
+        XCTAssertTrue(
+            MobileHomeRefreshPresentationPolicy.showsInitialLoading(
+                hasContent: false,
+                isRefreshing: true
+            )
+        )
+        XCTAssertFalse(
+            MobileHomeRefreshPresentationPolicy.showsInitialLoading(
+                hasContent: true,
+                isRefreshing: true
+            )
+        )
+    }
+
+    func testDoesNotShowLoadingWhenThereIsNoRefreshInFlight() {
+        XCTAssertFalse(
+            MobileHomeRefreshPresentationPolicy.showsInitialLoading(
+                hasContent: false,
+                isRefreshing: false
+            )
+        )
+    }
+}
+
 final class PageAccessPolicyTests: XCTestCase {
     @MainActor
     func testNotificationStudyListRouteUsesExistingHomeMyStudiesScreen() {
