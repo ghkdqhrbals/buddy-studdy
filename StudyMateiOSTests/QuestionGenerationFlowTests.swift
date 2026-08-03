@@ -1731,6 +1731,77 @@ final class QuestionGenerationFlowTests: XCTestCase {
         )
     }
 
+    func testBillingInvoicesDecodeCompletedNormalAndLinkedRefundStates() async throws {
+        let client = makeClient { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/v1/billing/invoices")
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: """
+                {
+                  "limit": 20,
+                  "offset": 0,
+                  "invoices": [
+                    {
+                      "id": 41,
+                      "invoiceNumber": "9f041446-e898-4ef7-974d-91ac70e1a89b",
+                      "type": "NORMAL",
+                      "originalInvoiceId": null,
+                      "tierCode": "TIER2",
+                      "productId": "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+                      "status": "COMPLETED",
+                      "version": 4,
+                      "paymentId": 71,
+                      "transactionId": "200000000000001",
+                      "originalTransactionId": "200000000000001",
+                      "paymentStatus": "SETTLED",
+                      "priceMilliunits": 7900000,
+                      "currency": "KRW",
+                      "purchaseAt": "2026-08-03T00:00:00Z",
+                      "expiresAt": "2026-09-03T00:00:00Z",
+                      "createdAt": "2026-08-03T00:00:00Z",
+                      "updatedAt": "2026-08-03T00:00:03Z"
+                    },
+                    {
+                      "id": 42,
+                      "invoiceNumber": "af041446-e898-4ef7-974d-91ac70e1a89b",
+                      "type": "REFUND",
+                      "originalInvoiceId": 41,
+                      "tierCode": "TIER2",
+                      "productId": "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+                      "status": "WAITING",
+                      "version": 2,
+                      "paymentId": 71,
+                      "transactionId": "200000000000001",
+                      "originalTransactionId": "200000000000001",
+                      "paymentStatus": "REFUND_PENDING",
+                      "priceMilliunits": 7900000,
+                      "currency": "KRW",
+                      "purchaseAt": "2026-08-03T00:00:00Z",
+                      "expiresAt": "2026-09-03T00:00:00Z",
+                      "createdAt": "2026-08-03T00:00:04Z",
+                      "updatedAt": "2026-08-03T00:00:05Z"
+                    }
+                  ]
+                }
+                """
+            )
+        }
+
+        let page = try await client.fetchBillingInvoices(
+            registration: Self.signedInRegistration,
+            limit: 20,
+            offset: 0
+        )
+
+        XCTAssertEqual(page.invoices.map(\.status), ["COMPLETED", "WAITING"])
+        XCTAssertTrue(page.invoices[0].isRefundable)
+        XCTAssertFalse(page.invoices[1].isRefundable)
+        XCTAssertEqual(page.invoices[1].type, "REFUND")
+        XCTAssertEqual(page.invoices[1].originalInvoiceId, 41)
+    }
+
     private func makeClient(
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> RemotePushBackendClient {
