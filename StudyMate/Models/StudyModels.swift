@@ -2806,6 +2806,20 @@ struct AppStrings {
     }
     var monthlyQuestionQuota: String { text("월간 질문", "Monthly questions") }
     var monthlyQuotaReached: String { text("이번 달 질문 한도에 도달했습니다.", "You have reached this month's question limit.") }
+    var membershipPlans: String { text("멤버십", "Membership", "メンバーシップ") }
+    var billingHistory: String { text("결제 내역", "Billing history", "支払い履歴") }
+    var restorePurchases: String { text("구매 복원", "Restore purchases", "購入を復元") }
+    var manageSubscription: String { text("구독 관리", "Manage subscription", "サブスクリプションを管理") }
+    var cancelSubscription: String { text("구독 취소", "Cancel subscription", "サブスクリプションを解約") }
+    var requestRefund: String { text("환불 요청", "Request refund", "返金をリクエスト") }
+    var purchaseMembership: String { text("구독하기", "Subscribe", "登録する") }
+    var noBillingHistory: String { text("아직 결제 내역이 없습니다.", "No billing history yet.", "支払い履歴はまだありません。") }
+    var billingPending: String { text("결제가 승인 대기 중입니다.", "The purchase is pending approval.", "購入は承認待ちです。") }
+    var billingPurchased: String { text("멤버십이 적용됐습니다.", "Your membership is active.", "メンバーシップが有効になりました。") }
+    var billingRestored: String { text("구매 내역을 복원했습니다.", "Purchases restored.", "購入履歴を復元しました。") }
+    var refundSubmitted: String { text("Apple에 환불 요청을 제출했습니다.", "Refund request submitted to Apple.", "Appleに返金リクエストを送信しました。") }
+    var billingStatus: String { text("상태", "Status", "ステータス") }
+    var monthlyQuestionAllowance: String { text("월 질문", "Monthly questions", "月間質問数") }
     func monthlyQuotaUsage(remaining: Int, limit: Int) -> String {
         text("\(limit)개 중 \(remaining)개 남음", "\(remaining) of \(limit) remaining", "残り\(remaining)件／\(limit)件")
     }

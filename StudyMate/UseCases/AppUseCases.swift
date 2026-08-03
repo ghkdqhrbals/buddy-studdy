@@ -204,6 +204,143 @@ struct TermsUseCase {
 }
 
 @MainActor
+protocol BillingRepository {
+    func catalog(registration: RemotePushRegistration) async throws -> BackendBillingCatalog
+    func syncAppleTransaction(
+        registration: RemotePushRegistration,
+        signedTransaction: String,
+        environment: String
+    ) async throws -> BackendBillingInvoice
+    func invoices(registration: RemotePushRegistration, limit: Int, offset: Int) async throws -> BackendBillingInvoicePage
+    func requestRefund(
+        registration: RemotePushRegistration,
+        paymentID: Int64,
+        idempotencyKey: String,
+        reason: String?
+    ) async throws -> BackendBillingAction
+    func requestCancellation(
+        registration: RemotePushRegistration,
+        originalTransactionID: String,
+        idempotencyKey: String,
+        reason: String?
+    ) async throws -> BackendBillingAction
+}
+
+@MainActor
+struct RemoteBillingRepository: BillingRepository {
+    private let backendClient: RemotePushBackendClientProtocol
+
+    init(backendClient: RemotePushBackendClientProtocol) {
+        self.backendClient = backendClient
+    }
+
+    func catalog(registration: RemotePushRegistration) async throws -> BackendBillingCatalog {
+        try await backendClient.fetchBillingCatalog(registration: registration)
+    }
+
+    func syncAppleTransaction(
+        registration: RemotePushRegistration,
+        signedTransaction: String,
+        environment: String
+    ) async throws -> BackendBillingInvoice {
+        try await backendClient.syncAppleTransaction(
+            registration: registration,
+            signedTransaction: signedTransaction,
+            environment: environment
+        )
+    }
+
+    func invoices(registration: RemotePushRegistration, limit: Int, offset: Int) async throws -> BackendBillingInvoicePage {
+        try await backendClient.fetchBillingInvoices(registration: registration, limit: limit, offset: offset)
+    }
+
+    func requestRefund(
+        registration: RemotePushRegistration,
+        paymentID: Int64,
+        idempotencyKey: String,
+        reason: String?
+    ) async throws -> BackendBillingAction {
+        try await backendClient.requestBillingRefund(
+            registration: registration,
+            paymentID: paymentID,
+            idempotencyKey: idempotencyKey,
+            reason: reason
+        )
+    }
+
+    func requestCancellation(
+        registration: RemotePushRegistration,
+        originalTransactionID: String,
+        idempotencyKey: String,
+        reason: String?
+    ) async throws -> BackendBillingAction {
+        try await backendClient.requestBillingCancellation(
+            registration: registration,
+            originalTransactionID: originalTransactionID,
+            idempotencyKey: idempotencyKey,
+            reason: reason
+        )
+    }
+}
+
+@MainActor
+struct BillingUseCase {
+    private let repository: BillingRepository
+
+    init(repository: BillingRepository) {
+        self.repository = repository
+    }
+
+    func catalog(registration: RemotePushRegistration) async throws -> BackendBillingCatalog {
+        try await repository.catalog(registration: registration)
+    }
+
+    func syncAppleTransaction(
+        registration: RemotePushRegistration,
+        signedTransaction: String,
+        environment: String
+    ) async throws -> BackendBillingInvoice {
+        try await repository.syncAppleTransaction(
+            registration: registration,
+            signedTransaction: signedTransaction,
+            environment: environment
+        )
+    }
+
+    func invoices(registration: RemotePushRegistration, limit: Int = 30, offset: Int = 0) async throws -> BackendBillingInvoicePage {
+        try await repository.invoices(registration: registration, limit: limit, offset: offset)
+    }
+
+    func requestRefund(
+        registration: RemotePushRegistration,
+        paymentID: Int64,
+        idempotencyKey: String,
+        reason: String? = nil
+    ) async throws -> BackendBillingAction {
+        try await repository.requestRefund(
+            registration: registration,
+            paymentID: paymentID,
+            idempotencyKey: idempotencyKey,
+            reason: reason
+        )
+    }
+
+    func requestCancellation(
+        registration: RemotePushRegistration,
+        originalTransactionID: String,
+        idempotencyKey: String,
+        reason: String? = nil
+    ) async throws -> BackendBillingAction {
+        try await repository.requestCancellation(
+            registration: registration,
+            originalTransactionID: originalTransactionID,
+            idempotencyKey: idempotencyKey,
+            reason: reason
+        )
+    }
+}
+
+@MainActor
 struct AppUseCases {
     let appUpdate: AppUpdateUseCase
     let backendIdentity: BackendIdentityUseCase
@@ -215,6 +352,7 @@ struct AppUseCases {
     let settings: SettingsUseCase
     let terms: TermsUseCase
     let community: CommunityUseCase
+    let billing: BillingUseCase
 
     init(backendClient: RemotePushBackendClientProtocol) {
         let appUpdateRepository = RemoteAppUpdateRepository(backendClient: backendClient)
@@ -227,6 +365,7 @@ struct AppUseCases {
         let notificationsRepository = RemoteNotificationsRepository(backendClient: backendClient)
         let settingsRepository = RemoteSettingsRepository(backendClient: backendClient)
         let termsRepository = RemoteTermsRepository(backendClient: backendClient)
+        let billingRepository = RemoteBillingRepository(backendClient: backendClient)
         appUpdate = AppUpdateUseCase(repository: appUpdateRepository)
         backendIdentity = BackendIdentityUseCase(repository: identityRepository)
         googleSignIn = GoogleSignInUseCase(repository: googleSignInRepository)
@@ -237,5 +376,6 @@ struct AppUseCases {
         settings = SettingsUseCase(repository: settingsRepository)
         terms = TermsUseCase(repository: termsRepository)
         community = CommunityUseCase(repository: communityRepository)
+        billing = BillingUseCase(repository: billingRepository)
     }
 }

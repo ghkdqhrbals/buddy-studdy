@@ -5931,6 +5931,8 @@ private struct MobileProfileSettingsSheet: View {
 
 private struct MobileQuestionUsageView: View {
     @EnvironmentObject private var appState: AppState
+    @StateObject private var billingStore = AppleBillingStore()
+    @State private var billingNotice: String?
 
     private var strings: AppStrings {
         appState.strings
@@ -5975,12 +5977,316 @@ private struct MobileQuestionUsageView: View {
                     }
                 }
             }
+
+            Section(strings.membershipPlans) {
+                if let catalog = appState.billingCatalog {
+                    if billingStore.isLoading {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text(strings.loading)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        ForEach(billingStore.products) { tierProduct in
+                            membershipRow(tierProduct, appAccountToken: catalog.appAccountToken)
+                        }
+                    }
+
+                    if let message = billingStore.errorMessage {
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack {
+                        Button(strings.restorePurchases) {
+                            restorePurchases(appAccountToken: catalog.appAccountToken)
+                        }
+                        .disabled(billingStore.processingProductID != nil)
+
+                        Spacer()
+
+                        Button(strings.manageSubscription) {
+                            openSubscriptionManagement()
+                        }
+                    }
+                } else if appState.isLoadingBilling {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text(strings.loading)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Section(strings.billingHistory) {
+                if appState.billingInvoices.isEmpty {
+                    Text(strings.noBillingHistory)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(appState.billingInvoices) { invoice in
+                        invoiceRow(invoice)
+                    }
+                }
+            }
+
+            if let message = appState.billingErrorMessage {
+                Section {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .navigationTitle(strings.usage)
         .navigationBarTitleDisplayMode(.inline)
         .task {
             await appState.refreshQuestionQuota()
+            await appState.refreshBilling()
+            if let catalog = appState.billingCatalog {
+                await billingStore.load(catalog: catalog)
+            }
         }
+        .alert(
+            strings.errorPopupTitle,
+            isPresented: Binding(
+                get: { billingNotice != nil },
+                set: { if !$0 { billingNotice = nil } }
+            )
+        ) {
+            Button(strings.close, role: .cancel) {}
+        } message: {
+            Text(billingNotice ?? "")
+        }
+    }
+
+    @ViewBuilder
+    private func membershipRow(
+        _ tierProduct: AppleBillingStore.TierProduct,
+        appAccountToken: UUID
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(tierProduct.product.displayName)
+                        .font(.headline)
+                    Text(tierProduct.product.description)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 12)
+
+                Text(tierProduct.product.displayPrice)
+                    .font(.subheadline.weight(.semibold))
+            }
+
+            HStack {
+                Label(
+                    "\(tierProduct.tier.monthlyQuestionLimit.formatted()) \(strings.monthlyQuestionAllowance)",
+                    systemImage: "questionmark.bubble"
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Button(strings.purchaseMembership) {
+                    purchase(tierProduct, appAccountToken: appAccountToken)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(billingStore.processingProductID != nil)
+            }
+        }
+        .padding(.vertical, 5)
+    }
+
+    @ViewBuilder
+    private func invoiceRow(_ invoice: BackendBillingInvoice) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(invoice.tierCode)
+                    .font(.headline)
+                Spacer(minLength: 10)
+                Text(invoiceAmount(invoice))
+                    .font(.subheadline.weight(.semibold))
+            }
+
+            HStack(spacing: 7) {
+                Text(statusText(invoice.status))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(statusColor(invoice.status))
+                Text("·")
+                    .foregroundStyle(.tertiary)
+                Text((invoice.purchaseAt ?? invoice.createdAt).formatted(date: .abbreviated, time: .omitted))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if invoice.isRefundable || invoice.isCancellable {
+                HStack(spacing: 14) {
+                    if invoice.isCancellable, let originalTransactionID = invoice.originalTransactionId {
+                        Button(strings.cancelSubscription) {
+                            requestCancellation(originalTransactionID: originalTransactionID)
+                        }
+                        .font(.footnote.weight(.semibold))
+                    }
+
+                    if invoice.isRefundable, let paymentID = invoice.paymentId, let transactionID = invoice.transactionId {
+                        Button(strings.requestRefund, role: .destructive) {
+                            requestRefund(paymentID: paymentID, transactionID: transactionID)
+                        }
+                        .font(.footnote.weight(.semibold))
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func purchase(
+        _ tierProduct: AppleBillingStore.TierProduct,
+        appAccountToken: UUID
+    ) {
+        Task {
+            do {
+                let outcome = try await billingStore.purchase(
+                    tierProduct,
+                    appAccountToken: appAccountToken,
+                    synchronize: appState.syncAppleBillingTransaction
+                )
+                switch outcome {
+                case .purchased:
+                    billingNotice = strings.billingPurchased
+                case .pending:
+                    billingNotice = strings.billingPending
+                case .cancelled:
+                    break
+                }
+            } catch {
+                await appState.refreshBilling()
+                billingNotice = error.localizedDescription
+            }
+        }
+    }
+
+    private func restorePurchases(appAccountToken: UUID) {
+        Task {
+            do {
+                _ = try await billingStore.restore(
+                    appAccountToken: appAccountToken,
+                    synchronize: appState.syncAppleBillingTransaction
+                )
+                await appState.refreshBilling()
+                billingNotice = strings.billingRestored
+            } catch {
+                billingNotice = error.localizedDescription
+            }
+        }
+    }
+
+    private func requestRefund(paymentID: Int64, transactionID: String) {
+        Task {
+            guard let scene = activeWindowScene else {
+                billingNotice = strings.serviceTemporarilyUnavailable
+                return
+            }
+            do {
+                let status = try await billingStore.beginRefundRequest(transactionID: transactionID, in: scene)
+                switch status {
+                case .success:
+                    _ = try await appState.requestBillingRefund(paymentID: paymentID)
+                    billingNotice = strings.refundSubmitted
+                case .userCancelled:
+                    break
+                @unknown default:
+                    billingNotice = strings.serviceTemporarilyUnavailable
+                }
+            } catch {
+                billingNotice = error.localizedDescription
+            }
+        }
+    }
+
+    private func openSubscriptionManagement() {
+        Task {
+            guard let scene = activeWindowScene else {
+                billingNotice = strings.serviceTemporarilyUnavailable
+                return
+            }
+            do {
+                try await billingStore.showManageSubscriptions(in: scene)
+                await appState.refreshBilling()
+            } catch {
+                billingNotice = error.localizedDescription
+            }
+        }
+    }
+
+    private func requestCancellation(originalTransactionID: String) {
+        Task {
+            guard let scene = activeWindowScene else {
+                billingNotice = strings.serviceTemporarilyUnavailable
+                return
+            }
+            do {
+                _ = try await appState.requestBillingCancellation(
+                    originalTransactionID: originalTransactionID
+                )
+                try await billingStore.showManageSubscriptions(in: scene)
+                await appState.refreshBilling()
+            } catch {
+                billingNotice = error.localizedDescription
+            }
+        }
+    }
+
+    private var activeWindowScene: UIWindowScene? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+    }
+
+    private func invoiceAmount(_ invoice: BackendBillingInvoice) -> String {
+        guard let raw = invoice.priceMilliunits, let currency = invoice.currency else { return "-" }
+        let amount = Decimal(raw) / 1_000_000
+        return amount.formatted(.currency(code: currency))
+    }
+
+    private func statusText(_ status: String) -> String {
+        let korean = [
+            "PENDING_PAYMENT": "결제 대기", "PAYMENT_VERIFIED": "결제 확인", "FULFILLMENT_PENDING": "적용 중",
+            "FULFILLED": "적용 완료", "CANCELLATION_REQUESTED": "취소 요청", "CANCELLED": "취소됨",
+            "REFUND_REQUESTED": "환불 요청", "REFUND_PENDING": "환불 심사 중", "REFUNDED": "환불 완료",
+            "REFUND_DECLINED": "환불 거절", "REFUND_REVERSED": "환불 취소", "COMPENSATION_REQUIRED": "환불 조치 필요",
+            "FAILED": "실패", "EXPIRED": "만료"
+        ]
+        let english = [
+            "PENDING_PAYMENT": "Payment pending", "PAYMENT_VERIFIED": "Payment verified", "FULFILLMENT_PENDING": "Activating",
+            "FULFILLED": "Active", "CANCELLATION_REQUESTED": "Cancellation requested", "CANCELLED": "Cancelled",
+            "REFUND_REQUESTED": "Refund requested", "REFUND_PENDING": "Refund pending", "REFUNDED": "Refunded",
+            "REFUND_DECLINED": "Refund declined", "REFUND_REVERSED": "Refund reversed", "COMPENSATION_REQUIRED": "Refund action required",
+            "FAILED": "Failed", "EXPIRED": "Expired"
+        ]
+        let japanese = [
+            "PENDING_PAYMENT": "支払い待ち", "PAYMENT_VERIFIED": "支払い確認済み", "FULFILLMENT_PENDING": "適用中",
+            "FULFILLED": "有効", "CANCELLATION_REQUESTED": "キャンセル申請中", "CANCELLED": "キャンセル済み",
+            "REFUND_REQUESTED": "返金申請中", "REFUND_PENDING": "返金審査中", "REFUNDED": "返金済み",
+            "REFUND_DECLINED": "返金却下", "REFUND_REVERSED": "返金取消", "COMPENSATION_REQUIRED": "返金対応が必要",
+            "FAILED": "失敗", "EXPIRED": "期限切れ"
+        ]
+        switch strings.language {
+        case .korean: return korean[status] ?? status
+        case .english: return english[status] ?? status
+        case .japanese: return japanese[status] ?? status
+        }
+    }
+
+    private func statusColor(_ status: String) -> Color {
+        if ["FULFILLED", "REFUNDED"].contains(status) { return .green }
+        if ["FAILED", "REFUND_DECLINED", "COMPENSATION_REQUIRED"].contains(status) { return .red }
+        return .secondary
     }
 }
 

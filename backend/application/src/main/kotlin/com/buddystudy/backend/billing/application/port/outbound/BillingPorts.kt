@@ -1,0 +1,70 @@
+package com.buddystudy.backend.billing.application.port.outbound
+
+import com.buddystudy.backend.billing.application.model.ApplyAppleNotificationCommand
+import com.buddystudy.backend.billing.application.model.AdminBillingInvoiceDetail
+import com.buddystudy.backend.billing.application.model.AdminBillingInvoicePage
+import com.buddystudy.backend.billing.application.model.BillingAction
+import com.buddystudy.backend.billing.application.model.BillingInvoiceDetail
+import com.buddystudy.backend.billing.application.model.BillingInvoicePage
+import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
+import com.buddystudy.backend.billing.application.model.BillingTierProduct
+import com.buddystudy.backend.billing.application.model.RecordVerifiedPaymentCommand
+import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
+import com.buddystudy.backend.billing.application.model.VerifiedAppleNotification
+import com.buddystudy.backend.billing.application.model.VerifiedAppleTransaction
+import com.buddystudy.billing.domain.BillingEnvironment
+import java.time.Instant
+import java.util.UUID
+
+interface AppleBillingVerificationPort {
+    suspend fun verifyTransaction(signedTransaction: String, environment: BillingEnvironment): VerifiedAppleTransaction
+    suspend fun verifyNotification(signedPayload: String): VerifiedAppleNotification
+}
+
+interface BillingLedgerPort {
+    suspend fun findOrCreateAppAccountToken(userId: Long, now: Instant): UUID
+    suspend fun userIdForAppAccountToken(appAccountToken: UUID): Long?
+    suspend fun enabledTierProducts(): List<BillingTierProduct>
+    suspend fun enabledTierProduct(productId: String): BillingTierProduct?
+
+    /** Atomically appends invoice/payment events, advances projections, and creates fulfillment work. */
+    suspend fun recordVerifiedPayment(command: RecordVerifiedPaymentCommand): BillingInvoiceSummary
+
+    /** Separate transaction boundary: grants the tier and settles the invoice/payment projections. */
+    suspend fun fulfill(invoiceId: Long, now: Instant): BillingInvoiceSummary
+
+    /** REQUIRES_NEW boundary used after fulfillment rollback; never marks an Apple refund as completed. */
+    suspend fun requireCompensation(invoiceId: Long, reason: String, now: Instant): BillingInvoiceSummary
+
+    suspend fun invoice(userId: Long, invoiceId: Long): BillingInvoiceDetail?
+    suspend fun invoices(userId: Long, limit: Int, offset: Int): BillingInvoicePage
+    suspend fun paymentOwner(paymentId: Long): Long?
+
+    suspend fun requestRefund(
+        userId: Long,
+        paymentId: Long,
+        command: RequestBillingActionCommand,
+        now: Instant,
+    ): BillingAction
+
+    suspend fun requestCancellation(
+        userId: Long,
+        originalTransactionId: String,
+        command: RequestBillingActionCommand,
+        now: Instant,
+    ): BillingAction
+
+    /** REQUIRES_NEW boundary: persists receipt before any lifecycle processing can fail. */
+    suspend fun recordAppleNotification(notification: VerifiedAppleNotification, now: Instant): Boolean
+
+    /** Applies an already recorded notification and marks it processed or ignored atomically. */
+    suspend fun applyAppleNotification(command: ApplyAppleNotificationCommand): Boolean
+
+    /** REQUIRES_NEW boundary: preserves processing failure details after the apply transaction rolls back. */
+    suspend fun markAppleNotificationFailed(notificationUUID: String, error: String, now: Instant)
+
+    suspend fun adminInvoices(query: String?, status: String?, limit: Int, offset: Int): AdminBillingInvoicePage
+    suspend fun adminInvoice(invoiceId: Long): AdminBillingInvoiceDetail?
+    suspend fun adminRequestRefund(invoiceId: Long, command: RequestBillingActionCommand, now: Instant): BillingAction
+    suspend fun adminRequestCancellation(invoiceId: Long, command: RequestBillingActionCommand, now: Instant): BillingAction
+}

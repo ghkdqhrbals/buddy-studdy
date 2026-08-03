@@ -939,6 +939,44 @@ final class StudyMateTests: XCTestCase {
         )
     }
 
+    func testBillingStringsIncludeJapaneseUserFacingCopy() {
+        let japanese = AppStrings(language: .japanese)
+
+        XCTAssertEqual(japanese.membershipPlans, "メンバーシップ")
+        XCTAssertEqual(japanese.restorePurchases, "購入を復元")
+        XCTAssertEqual(japanese.requestRefund, "返金をリクエスト")
+        XCTAssertEqual(japanese.billingPurchased, "メンバーシップが有効になりました。")
+    }
+
+    func testInvoiceActionsFollowServerStateProjection() {
+        let base = BackendBillingInvoice(
+            id: 41,
+            invoiceNumber: UUID(uuidString: "9f041446-e898-4ef7-974d-91ac70e1a89b")!,
+            tierCode: "TIER3",
+            productId: "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+            status: "FULFILLED",
+            version: 4,
+            paymentId: 87,
+            transactionId: "2000000812345678",
+            originalTransactionId: "2000000712345678",
+            paymentStatus: "SETTLED",
+            priceMilliunits: 9_900_000_000,
+            currency: "KRW",
+            purchaseAt: Date(timeIntervalSince1970: 1_785_744_720),
+            expiresAt: Date(timeIntervalSince1970: 1_788_422_720),
+            createdAt: Date(timeIntervalSince1970: 1_785_744_721),
+            updatedAt: Date(timeIntervalSince1970: 1_785_744_722)
+        )
+
+        XCTAssertTrue(base.isRefundable)
+        XCTAssertTrue(base.isCancellable)
+
+        var pendingRefund = base
+        pendingRefund.status = "REFUND_PENDING"
+        XCTAssertFalse(pendingRefund.isRefundable)
+        XCTAssertFalse(pendingRefund.isCancellable)
+    }
+
     func testGradedStudyRecordAdaptsToCommunityQuestionDetailModel() throws {
         let createdAt = Date(timeIntervalSince1970: 1_780_000_000)
         let answeredAt = createdAt.addingTimeInterval(30)

@@ -1,0 +1,281 @@
+package com.buddystudy.backend.billing.application.service
+
+import com.buddystudy.backend.auth.Principal
+import com.buddystudy.backend.billing.application.model.ApplyAppleNotificationCommand
+import com.buddystudy.backend.billing.application.model.BillingAction
+import com.buddystudy.backend.billing.application.model.BillingCatalog
+import com.buddystudy.backend.billing.application.model.BillingInvoiceDetail
+import com.buddystudy.backend.billing.application.model.BillingInvoicePage
+import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
+import com.buddystudy.backend.billing.application.model.RecordVerifiedPaymentCommand
+import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
+import com.buddystudy.backend.billing.application.model.SyncAppleTransactionCommand
+import com.buddystudy.backend.billing.application.model.VerifiedAppleTransaction
+import com.buddystudy.backend.billing.application.port.inbound.AppleBillingNotificationUseCase
+import com.buddystudy.backend.billing.application.port.inbound.BillingUseCase
+import com.buddystudy.backend.billing.application.port.outbound.AppleBillingVerificationPort
+import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPort
+import com.buddystudy.backend.common.application.error.ApiErrorCode
+import com.buddystudy.backend.common.application.error.ApiException
+import org.springframework.http.HttpStatus
+import org.springframework.stereotype.Service
+import java.time.Clock
+import java.time.Duration
+import java.time.Instant
+
+@Service
+class BillingService(
+    private val verifier: AppleBillingVerificationPort,
+    private val ledger: BillingLedgerPort,
+    private val clock: Clock = Clock.systemUTC(),
+) : BillingUseCase, AppleBillingNotificationUseCase {
+    override suspend fun catalog(principal: Principal): BillingCatalog {
+        requireRegistered(principal)
+        val now = clock.instant()
+        return BillingCatalog(
+            appAccountToken = ledger.findOrCreateAppAccountToken(principal.userId, now),
+            products = ledger.enabledTierProducts(),
+        )
+    }
+
+    override suspend fun syncAppleTransaction(
+        principal: Principal,
+        command: SyncAppleTransactionCommand,
+    ): BillingInvoiceSummary {
+        requireRegistered(principal)
+        validateSignedPayload(command.signedTransaction)
+
+        val transaction = verifier.verifyTransaction(command.signedTransaction, command.environment)
+        val now = clock.instant()
+        validateTransaction(transaction, now)
+
+        val expectedToken = ledger.findOrCreateAppAccountToken(principal.userId, now)
+        if (transaction.appAccountToken != expectedToken) {
+            throw billingError(
+                HttpStatus.CONFLICT,
+                ApiErrorCode.BILLING_TRANSACTION_CONFLICT,
+                "The App Store transaction appAccountToken does not match the signed-in user.",
+            )
+        }
+        val product = ledger.enabledTierProduct(transaction.productId)
+            ?: throw billingError(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.BILLING_TRANSACTION_INVALID,
+                "The App Store product is not enabled for a BuddyStudy tier.",
+            )
+        if (product.productType != transaction.productType) {
+            throw billingError(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.BILLING_TRANSACTION_INVALID,
+                "The App Store product type does not match the server tier catalog.",
+            )
+        }
+
+        val recorded = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                userId = principal.userId,
+                tierProduct = product,
+                transaction = transaction,
+                eventId = "apple-transaction:${transaction.transactionId}",
+                occurredAt = now,
+            ),
+        )
+
+        return try {
+            ledger.fulfill(recorded.id, now)
+        } catch (error: Exception) {
+            // This call is a separate transaction. A failed membership grant must never roll back
+            // the already committed proof that Apple charged the user.
+            ledger.requireCompensation(
+                invoiceId = recorded.id,
+                reason = error.message?.take(1000) ?: error.javaClass.simpleName,
+                now = clock.instant(),
+            )
+            throw error
+        }
+    }
+
+    override suspend fun invoices(principal: Principal, limit: Int, offset: Int): BillingInvoicePage {
+        requireRegistered(principal)
+        return ledger.invoices(principal.userId, limit.coerceIn(1, 100), offset.coerceAtLeast(0))
+    }
+
+    override suspend fun invoice(principal: Principal, invoiceId: Long): BillingInvoiceDetail {
+        requireRegistered(principal)
+        requirePositiveId(invoiceId, "invoiceId")
+        return ledger.invoice(principal.userId, invoiceId)
+            ?: throw billingError(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Invoice not found.")
+    }
+
+    override suspend fun requestRefund(
+        principal: Principal,
+        paymentId: Long,
+        command: RequestBillingActionCommand,
+    ): BillingAction {
+        requireRegistered(principal)
+        requirePositiveId(paymentId, "paymentId")
+        validateActionCommand(command)
+        return ledger.requestRefund(principal.userId, paymentId, command.normalized(), clock.instant())
+    }
+
+    override suspend fun requestCancellation(
+        principal: Principal,
+        originalTransactionId: String,
+        command: RequestBillingActionCommand,
+    ): BillingAction {
+        requireRegistered(principal)
+        validateProviderId(originalTransactionId, "originalTransactionId")
+        validateActionCommand(command)
+        return ledger.requestCancellation(
+            principal.userId,
+            originalTransactionId.trim(),
+            command.normalized(),
+            clock.instant(),
+        )
+    }
+
+    override suspend fun receive(signedPayload: String) {
+        validateSignedPayload(signedPayload)
+        val notification = verifier.verifyNotification(signedPayload)
+        val now = clock.instant()
+        if (!ledger.recordAppleNotification(notification, now)) return
+
+        try {
+            val transaction = notification.transaction
+            if (transaction != null) {
+                validateTransaction(transaction, now)
+                val userId = ledger.userIdForAppAccountToken(transaction.appAccountToken)
+                    ?: throw billingError(
+                        HttpStatus.UNPROCESSABLE_ENTITY,
+                        ApiErrorCode.BILLING_TRANSACTION_INVALID,
+                        "The App Store notification appAccountToken is unknown.",
+                    )
+                val product = ledger.enabledTierProduct(transaction.productId)
+                    ?: throw billingError(
+                        HttpStatus.UNPROCESSABLE_ENTITY,
+                        ApiErrorCode.BILLING_TRANSACTION_INVALID,
+                        "The App Store notification product is not mapped to a tier.",
+                    )
+                if (product.productType != transaction.productType) invalidTransaction()
+                val recorded = ledger.recordVerifiedPayment(
+                    RecordVerifiedPaymentCommand(
+                        userId = userId,
+                        tierProduct = product,
+                        transaction = transaction,
+                        eventId = "apple-transaction:${transaction.transactionId}",
+                        occurredAt = now,
+                    ),
+                )
+                if (notification.notificationType in FULFILLMENT_NOTIFICATION_TYPES) {
+                    try {
+                        ledger.fulfill(recorded.id, now)
+                    } catch (error: Exception) {
+                        ledger.requireCompensation(
+                            recorded.id,
+                            error.message?.take(1000) ?: error.javaClass.simpleName,
+                            clock.instant(),
+                        )
+                        throw error
+                    }
+                }
+            }
+            ledger.applyAppleNotification(ApplyAppleNotificationCommand(notification, clock.instant()))
+        } catch (error: Exception) {
+            ledger.markAppleNotificationFailed(
+                notification.notificationUUID,
+                (error.message ?: error.javaClass.name).take(4000),
+                clock.instant(),
+            )
+            throw error
+        }
+    }
+
+    private fun requireRegistered(principal: Principal) {
+        if (principal.anonymous || principal.status != "ACTIVE") {
+            throw billingError(
+                HttpStatus.FORBIDDEN,
+                ApiErrorCode.BILLING_ACCOUNT_REQUIRED,
+                "Sign in to purchase or manage a membership.",
+            )
+        }
+    }
+
+    private fun validateSignedPayload(payload: String) {
+        val trimmed = payload.trim()
+        if (trimmed.length !in 64..MAX_SIGNED_PAYLOAD_LENGTH || trimmed.count { it == '.' } != 2) {
+            throw billingError(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.BILLING_TRANSACTION_INVALID,
+                "The signed App Store payload is malformed.",
+            )
+        }
+    }
+
+    private fun validateTransaction(transaction: VerifiedAppleTransaction, now: Instant) {
+        validateProviderId(transaction.transactionId, "transactionId")
+        validateProviderId(transaction.originalTransactionId, "originalTransactionId")
+        if (!PRODUCT_ID.matches(transaction.productId) || transaction.quantity !in 1..100) invalidTransaction()
+        if (transaction.priceMilliunits?.let { it < 0 || it > MAX_PRICE_MILLIUNITS } == true) invalidTransaction()
+        if (transaction.currency?.let { !CURRENCY.matches(it) } == true) invalidTransaction()
+        if (transaction.purchaseAt.isAfter(now.plus(ALLOWED_CLOCK_SKEW))) invalidTransaction()
+        if (transaction.signedAt.isAfter(now.plus(ALLOWED_CLOCK_SKEW))) invalidTransaction()
+        if (transaction.signedAt.isBefore(transaction.purchaseAt.minus(ALLOWED_CLOCK_SKEW))) invalidTransaction()
+        if (transaction.expiresAt?.isBefore(transaction.purchaseAt) == true) invalidTransaction()
+        if (!SHA256.matches(transaction.signedPayloadSha256)) invalidTransaction()
+    }
+
+    private fun validateActionCommand(command: RequestBillingActionCommand) {
+        if (!IDEMPOTENCY_KEY.matches(command.idempotencyKey.trim())) {
+            throw billingError(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.VALIDATION_ERROR,
+                "A valid idempotency key is required.",
+            )
+        }
+        if ((command.reason?.length ?: 0) > 1000) {
+            throw billingError(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "Reason is too long.")
+        }
+    }
+
+    private fun validateProviderId(value: String, name: String) {
+        if (!PROVIDER_ID.matches(value.trim())) {
+            throw billingError(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.VALIDATION_ERROR,
+                "$name is invalid.",
+            )
+        }
+    }
+
+    private fun requirePositiveId(value: Long, name: String) {
+        if (value <= 0) {
+            throw billingError(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, "$name must be positive.")
+        }
+    }
+
+    private fun invalidTransaction(): Nothing = throw billingError(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        ApiErrorCode.BILLING_TRANSACTION_INVALID,
+        "The verified App Store transaction contains invalid values.",
+    )
+
+    private fun RequestBillingActionCommand.normalized() = copy(
+        idempotencyKey = idempotencyKey.trim(),
+        reason = reason?.trim()?.takeIf(String::isNotEmpty),
+    )
+
+    private fun billingError(status: HttpStatus, code: ApiErrorCode, message: String) =
+        ApiException(status, code, message)
+
+    private companion object {
+        const val MAX_SIGNED_PAYLOAD_LENGTH = 200_000
+        const val MAX_PRICE_MILLIUNITS = 100_000_000_000L
+        val ALLOWED_CLOCK_SKEW: Duration = Duration.ofMinutes(5)
+        val PROVIDER_ID = Regex("^[A-Za-z0-9._:-]{1,191}$")
+        val PRODUCT_ID = Regex("^[A-Za-z0-9._-]{1,191}$")
+        val CURRENCY = Regex("^[A-Z]{3}$")
+        val SHA256 = Regex("^[0-9a-f]{64}$")
+        val IDEMPOTENCY_KEY = Regex("^[A-Za-z0-9._:-]{8,191}$")
+        val FULFILLMENT_NOTIFICATION_TYPES = setOf("SUBSCRIBED", "DID_RENEW", "ONE_TIME_CHARGE", "OFFER_REDEEMED")
+    }
+}

@@ -764,10 +764,10 @@ button, a { -webkit-tap-highlight-color: transparent; }
   box-shadow: -16px 0 40px rgba(20, 31, 45, .16);
   animation: drawer-in 160ms ease-out;
 }
-.detail-drawer > header { display: flex; min-height: 82px; align-items: flex-start; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--border); background: white; padding: 18px 20px; }
+.detail-drawer > header { display: flex; min-height: 82px; flex: 0 0 auto; align-items: flex-start; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--border); background: white; padding: 18px 20px; }
 .detail-drawer h2 { max-width: 560px; overflow: hidden; margin: 0; text-overflow: ellipsis; white-space: nowrap; font-size: 18px; }
 .detail-drawer header p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
-.drawer-content { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; overflow-y: auto; padding: 16px 20px 32px; }
+.drawer-content { display: grid; min-height: 0; flex: 1 1 auto; grid-template-columns: minmax(0, 1fr); grid-auto-rows: max-content; align-content: start; gap: 14px; overflow-y: auto; padding: 16px 20px 32px; }
 .drawer-section, .object-inspector { border: 1px solid var(--border); border-radius: 5px; background: white; }
 .drawer-section { padding: 15px; }
 .drawer-section h3 { margin: 0 0 13px; font-size: 14px; }
@@ -822,6 +822,20 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .three-columns { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .drawer-form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .drawer-form-actions .inline-notice { flex: 1; }
+.order-filters { flex-wrap: wrap; justify-content: flex-end; }
+.order-filters .search-field { width: min(460px, 46vw); }
+.order-ledger-section { padding: 0; overflow: hidden; }
+.order-ledger-section h3 { margin: 0; border-bottom: 1px solid var(--border); padding: 13px 15px; }
+.order-ledger-section .data-table { min-width: 620px; }
+.order-ledger-section .data-table td { height: 42px; }
+.order-identifiers dl { display: grid; gap: 0; margin: 0; }
+.order-identifiers dl > div { display: grid; grid-template-columns: 148px minmax(0, 1fr); gap: 12px; border-bottom: 1px solid var(--border); padding: 9px 0; }
+.order-identifiers dl > div:last-child { border-bottom: 0; }
+.order-identifiers dt { color: var(--muted); font-size: 11px; font-weight: 700; }
+.order-identifiers dd { margin: 0; overflow-wrap: anywhere; color: #263548; font: 11px/1.5 "SFMono-Regular", Consolas, monospace; }
+.order-action-section { display: grid; gap: 12px; }
+.order-action-section .section-description { margin: -5px 0 0; }
+.order-action-section .inline-notice { max-width: none; margin: 0; }
 .object-inspector-head { display: flex; min-height: 48px; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); padding: 7px 10px 7px 14px; }
 .object-inspector-head > div { display: flex; align-items: center; gap: 7px; font-size: 12px; }
 .object-inspector-head .segmented-tabs { height: 30px; }

@@ -17,6 +17,7 @@ data class BuddyStudyProperties(
     var admin: Admin = Admin(),
     var analytics: Analytics = Analytics(),
     var monitoring: Monitoring = Monitoring(),
+    var billing: Billing = Billing(),
 ) {
     data class Auth(var jwtSecret: String = "", var accessTokenDays: Long = 90)
     data class Crypto(var masterKey: String = "")
@@ -122,6 +123,20 @@ data class BuddyStudyProperties(
         var password: String = "",
         var driverClassName: String = "",
         var databaseName: String = "",
+    )
+    data class Billing(
+        var apple: Apple = Apple(),
+    )
+    data class Apple(
+        var bundleId: String = "io.github.ghkdqhrbals.StudyMate",
+        var appAppleId: Long = 6774108938,
+        var rootCertificatesBase64: List<String> = emptyList(),
+        var rootCertificateResources: List<String> = listOf(
+            "classpath:apple/AppleRootCA-G2.cer.b64",
+            "classpath:apple/AppleRootCA-G3.cer.b64",
+        ),
+        var enableOnlineChecks: Boolean = true,
+        var allowXcodeEnvironment: Boolean = false,
     )
 }
 

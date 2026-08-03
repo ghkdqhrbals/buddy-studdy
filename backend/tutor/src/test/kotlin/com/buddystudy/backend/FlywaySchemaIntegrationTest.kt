@@ -50,6 +50,59 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var databaseClient: DatabaseClient
 
     @Test
+    fun `billing ledger tables and documented state constraints are installed`(): Unit = runBlocking {
+        val tables = databaseClient.sql(
+            """
+            select table_name
+            from information_schema.tables
+            where table_schema = database()
+              and table_name in (
+                'membership_tier_products', 'apple_billing_accounts', 'invoices', 'invoice_events',
+                'payments', 'payments_history', 'billing_actions', 'billing_jobs',
+                'apple_billing_notifications'
+              )
+            """.trimIndent(),
+        ).map { row, _ -> row.get("table_name", String::class.java)!! }
+            .all().collectList().awaitSingle()
+
+        assertThat(tables).containsExactlyInAnyOrder(
+            "membership_tier_products",
+            "apple_billing_accounts",
+            "invoices",
+            "invoice_events",
+            "payments",
+            "payments_history",
+            "billing_actions",
+            "billing_jobs",
+            "apple_billing_notifications",
+        )
+
+        val comments = databaseClient.sql(
+            """
+            select table_name, column_name, column_comment
+            from information_schema.columns
+            where table_schema = database()
+              and (
+                (table_name = 'invoices' and column_name = 'status')
+                or (table_name = 'payments' and column_name = 'status')
+                or (table_name = 'billing_actions' and column_name in ('action_type', 'status'))
+              )
+            """.trimIndent(),
+        ).map { row, _ ->
+            Triple(
+                row.get("table_name", String::class.java)!!,
+                row.get("column_name", String::class.java)!!,
+                row.get("column_comment", String::class.java)!!,
+            )
+        }.all().collectList().awaitSingle().associate { "${it.first}.${it.second}" to it.third }
+
+        assertThat(comments.getValue("invoices.status")).contains("FULFILLED", "COMPENSATION_REQUIRED", "REFUNDED")
+        assertThat(comments.getValue("payments.status")).contains("SETTLED", "REFUND_PENDING", "REVOKED")
+        assertThat(comments.getValue("billing_actions.action_type")).contains("REFUND", "CANCELLATION", "COMPENSATION")
+        assertThat(comments.getValue("billing_actions.status")).contains("AWAITING_APPLE", "COMPLETED", "DECLINED")
+    }
+
+    @Test
     fun `enum columns expose allowed values through database comments and checks`(): Unit = runBlocking {
         data class ColumnComment(val table: String, val column: String, val comment: String)
 

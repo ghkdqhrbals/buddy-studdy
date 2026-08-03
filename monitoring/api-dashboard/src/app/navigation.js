@@ -9,6 +9,7 @@ import {
   MessageSquareText,
   Wrench,
   Rocket,
+  ReceiptText,
   Server,
   Settings,
   ShieldCheck,
@@ -39,6 +40,7 @@ export const navigationGroups = [
     label: "Manage",
     items: [
       { href: "/users.html", label: "Users & Quotas", icon: Users },
+      { href: "/orders.html", label: "Orders & Billing", icon: ReceiptText },
       { href: "/administrators.html", label: "Administrators", icon: UserCog },
       { href: "/feedback.html", label: "User Feedback", icon: MessageSquareText },
       { href: "/jobs.html", label: "Batch Jobs", icon: CalendarClock },

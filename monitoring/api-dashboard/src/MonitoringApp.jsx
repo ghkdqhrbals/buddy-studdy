@@ -9,6 +9,7 @@ import { UsersPage } from "./pages/UsersPage.jsx";
 import { FeedbackPage } from "./pages/FeedbackPage.jsx";
 import { DeploymentsPage } from "./pages/DeploymentsPage.jsx";
 import { AdministratorsPage } from "./pages/AdministratorsPage.jsx";
+import { OrdersPage } from "./pages/OrdersPage.jsx";
 
 export function MonitoringApp() {
   const route = {
@@ -25,6 +26,7 @@ export function MonitoringApp() {
     "/service-status.html": ServiceStatusPage,
     "/deployments.html": DeploymentsPage,
     "/administrators.html": AdministratorsPage,
+    "/orders.html": OrdersPage,
   }[window.location.pathname];
   const normalizedRoute = typeof route === "function" ? { Page: route } : route;
   const { Page, contentClassName = "" } = normalizedRoute || { Page: ApiLogsPage };

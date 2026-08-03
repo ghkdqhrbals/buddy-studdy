@@ -44,6 +44,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
     implementation("com.github.pemistahl:lingua:1.2.2")
     implementation("com.google.firebase:firebase-admin:9.10.0")
+    implementation("com.apple.itunes.storekit:app-store-server-library:5.2.0")
     implementation("org.jooq:jooq:3.21.6")
     implementation("org.jooq:jooq-kotlin-coroutines:3.21.6")
 

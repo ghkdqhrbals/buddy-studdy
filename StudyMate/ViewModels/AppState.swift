@@ -139,6 +139,10 @@ final class AppState: ObservableObject {
     @Published var isRequiredTermsGatePresented = false
     @Published private(set) var questionQuota: BackendQuestionQuota?
     @Published private(set) var questionQuotaNotice: String?
+    @Published private(set) var billingCatalog: BackendBillingCatalog?
+    @Published private(set) var billingInvoices: [BackendBillingInvoice] = []
+    @Published private(set) var isLoadingBilling = false
+    @Published private(set) var billingErrorMessage: String?
     @Published private(set) var serviceAvailability = BackendServiceAvailability.operational
     @Published private(set) var isCheckingAppControl = false
     @Published private(set) var appUpdateDecision: BackendAppUpdateDecision?
@@ -606,6 +610,7 @@ final class AppState: ObservableObject {
     private var settingsUseCase: SettingsUseCase { appUseCases.settings }
     private var termsUseCase: TermsUseCase { appUseCases.terms }
     private var communityUseCase: CommunityUseCase { appUseCases.community }
+    private var billingUseCase: BillingUseCase { appUseCases.billing }
     private let actionRunner = AppActionRunner()
     private let notificationService: NotificationServicing
     private let cloudSyncProvider: CloudSyncProviding
@@ -4299,6 +4304,10 @@ final class AppState: ObservableObject {
         activeTerms = []
         notificationPreferences = []
         communityCommentsCache.removeAll()
+        billingCatalog = nil
+        billingInvoices = []
+        billingErrorMessage = nil
+        isLoadingBilling = false
         updateNotificationState { state in
             state.reset()
         }
@@ -5910,6 +5919,106 @@ final class AppState: ObservableObject {
         } catch {
             log(.warning, "월간 질문 한도 조회에 실패했습니다: \(error.localizedDescription)")
         }
+    }
+
+    func refreshBilling() async {
+        guard isCommunitySessionActive,
+              let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
+              let registration = await registrationWithAccessToken(storedRegistration, reason: "billing-refresh") else {
+            billingCatalog = nil
+            billingInvoices = []
+            billingErrorMessage = nil
+            return
+        }
+
+        isLoadingBilling = true
+        defer { isLoadingBilling = false }
+        do {
+            async let catalog = performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "billing-catalog",
+                operation: { recoveredRegistration in
+                    try await self.billingUseCase.catalog(registration: recoveredRegistration)
+                }
+            )
+            async let invoices = performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "billing-invoices",
+                operation: { recoveredRegistration in
+                    try await self.billingUseCase.invoices(registration: recoveredRegistration)
+                }
+            )
+            billingCatalog = try await catalog
+            billingInvoices = try await invoices.invoices
+            billingErrorMessage = nil
+        } catch {
+            billingErrorMessage = error.localizedDescription
+            log(.warning, "결제 정보를 동기화하지 못했습니다: \(error.localizedDescription)")
+        }
+    }
+
+    func syncAppleBillingTransaction(
+        signedTransaction: String,
+        environment: String
+    ) async throws -> BackendBillingInvoice {
+        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
+              let registration = await registrationWithAccessToken(storedRegistration, reason: "billing-transaction") else {
+            throw AppStateError.missingRemotePushRegistration
+        }
+        let invoice = try await performWithBackendIdentityRecovery(
+            registration: registration,
+            reason: "billing-transaction",
+            operation: { recoveredRegistration in
+                try await self.billingUseCase.syncAppleTransaction(
+                    registration: recoveredRegistration,
+                    signedTransaction: signedTransaction,
+                    environment: environment
+                )
+            }
+        )
+        await refreshBilling()
+        await refreshQuestionQuota()
+        return invoice
+    }
+
+    func requestBillingRefund(paymentID: Int64) async throws -> BackendBillingAction {
+        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
+              let registration = await registrationWithAccessToken(storedRegistration, reason: "billing-refund") else {
+            throw AppStateError.missingRemotePushRegistration
+        }
+        let action = try await performWithBackendIdentityRecovery(
+            registration: registration,
+            reason: "billing-refund",
+            operation: { recoveredRegistration in
+                try await self.billingUseCase.requestRefund(
+                    registration: recoveredRegistration,
+                    paymentID: paymentID,
+                    idempotencyKey: "ios-refund-\(UUID().uuidString.lowercased())"
+                )
+            }
+        )
+        await refreshBilling()
+        return action
+    }
+
+    func requestBillingCancellation(originalTransactionID: String) async throws -> BackendBillingAction {
+        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
+              let registration = await registrationWithAccessToken(storedRegistration, reason: "billing-cancellation") else {
+            throw AppStateError.missingRemotePushRegistration
+        }
+        let action = try await performWithBackendIdentityRecovery(
+            registration: registration,
+            reason: "billing-cancellation",
+            operation: { recoveredRegistration in
+                try await self.billingUseCase.requestCancellation(
+                    registration: recoveredRegistration,
+                    originalTransactionID: originalTransactionID,
+                    idempotencyKey: "ios-cancel-\(UUID().uuidString.lowercased())"
+                )
+            }
+        )
+        await refreshBilling()
+        return action
     }
 
     func clearQuestionQuotaNotice() {

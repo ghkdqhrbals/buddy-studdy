@@ -24,6 +24,7 @@ test("all monitoring pages load the shared React application", async () => {
     "administrators.html",
     "feedback.html",
     "jobs.html",
+    "orders.html",
     "streams.html",
     "deployments.html",
     "login.html",
@@ -45,11 +46,30 @@ test("all monitoring pages load the shared React application", async () => {
   assert.match(navigation, /Administrators/);
   assert.match(navigation, /User Feedback/);
   assert.match(navigation, /Batch Jobs/);
+  assert.match(navigation, /Orders & Billing/);
   assert.match(navigation, /Redis Streams/);
   assert.match(navigation, /Deployments/);
   assert.match(navigation, /GitPullRequest/);
   assert.doesNotMatch(navigation, /Layers3/);
   assert.match(navigation, /App Control/);
+});
+
+test("order administration exposes the invoice ledger and audited Apple actions", async () => {
+  const app = await source("MonitoringApp.jsx");
+  const page = await source("pages/OrdersPage.jsx");
+  const css = await source("styles/manage.css");
+  assert.match(app, /orders\.html/);
+  assert.match(page, /\/billing\/invoices\?/);
+  assert.match(page, /Invoice event ledger/);
+  assert.match(page, /Payment history/);
+  assert.match(page, /refund-requests/);
+  assert.match(page, /cancellation-requests/);
+  assert.match(page, /Apple confirms the final cancellation or refund/);
+  assert.match(page, /crypto\.randomUUID/);
+  assert.match(page, /Pagination/);
+  assert.match(page, /DetailDrawer/);
+  assert.match(css, /\.drawer-content\s*\{[\s\S]*min-height:\s*0;[\s\S]*flex:\s*1 1 auto;[\s\S]*grid-auto-rows:\s*max-content/);
+  assert.match(css, /\.detail-drawer > header\s*\{[\s\S]*flex:\s*0 0 auto/);
 });
 
 test("deployment administration shows auto-refreshed workflow history and rollout details", async () => {

@@ -40,6 +40,13 @@ buddystudy:
     key-id: ${APNS_KEY_ID:${local-secret.APNS_KEY_ID:}}
     auth-key-p8: ${APNS_AUTH_KEY_P8:${APNS_AUTH_KEY_BASE64:${local-secret.APNS_AUTH_KEY_BASE64:}}}
     bundle-id: ${APNS_BUNDLE_ID:${local-secret.APNS_BUNDLE_ID:io.github.ghkdqhrbals.StudyMate}}
+  billing:
+    apple:
+      bundle-id: ${APPLE_IAP_BUNDLE_ID:${local-secret.APPLE_IAP_BUNDLE_ID:${APNS_BUNDLE_ID:${local-secret.APNS_BUNDLE_ID:io.github.ghkdqhrbals.StudyMate}}}}
+      app-apple-id: ${APPLE_IAP_APP_APPLE_ID:${local-secret.APPLE_IAP_APP_APPLE_ID:6774108938}}
+      root-certificates-base64: ${APPLE_IAP_ROOT_CERTIFICATES_BASE64:${local-secret.APPLE_IAP_ROOT_CERTIFICATES_BASE64:}}
+      enable-online-checks: ${APPLE_IAP_ENABLE_ONLINE_CHECKS:true}
+      allow-xcode-environment: ${APPLE_IAP_ALLOW_XCODE_ENVIRONMENT:true}
   firebase:
     remote-config:
       project-id: ${FIREBASE_PROJECT_ID:${local-secret.FIREBASE_PROJECT_ID:}}

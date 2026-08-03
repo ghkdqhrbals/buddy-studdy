@@ -10,6 +10,7 @@
 		D40000000000000000000001 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = D40000000000000000000002 /* MarkdownUI */; };
 		E50000000000000000000001 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = E50000000000000000000002 /* Sentry */; };
 		E50000000000000000000003 /* SentryMonitoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = E50000000000000000000004 /* SentryMonitoring.swift */; };
+		B10000000000000000000002 /* AppleBillingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* AppleBillingStore.swift */; };
 		110000000000000000000101 /* StudyMateApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000001 /* StudyMateApp.swift */; };
 		110000000000000000000102 /* StudyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000002 /* StudyModels.swift */; };
 		1100000000000000000001E0 /* JapaneseAppStrings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100000000000000000000E0 /* JapaneseAppStrings.swift */; };
@@ -360,6 +361,7 @@
 		110000000000000000000017 /* StudyMate.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StudyMate.entitlements; sourceTree = "<group>"; };
 		110000000000000000000018 /* SwipeRevealRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeRevealRow.swift; sourceTree = "<group>"; };
 		110000000000000000000019 /* RemotePushBackendClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePushBackendClient.swift; sourceTree = "<group>"; };
+		B10000000000000000000001 /* AppleBillingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleBillingStore.swift; sourceTree = "<group>"; };
 		110000000000000000000180 /* NotificationLandingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationLandingCoordinator.swift; sourceTree = "<group>"; };
 		11000000000000000000001A /* KeyboardDoneToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardDoneToolbar.swift; sourceTree = "<group>"; };
 		11000000000000000000001B /* GoogleOAuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleOAuthService.swift; sourceTree = "<group>"; };
@@ -838,6 +840,7 @@
 				11000000000000000000007B /* ClipboardProvider.swift */,
 				11000000000000000000007E /* AppNotificationEventProvider.swift */,
 				110000000000000000000019 /* RemotePushBackendClient.swift */,
+				B10000000000000000000001 /* AppleBillingStore.swift */,
 				11000000000000000000001B /* GoogleOAuthService.swift */,
 				11000000000000000000000D /* UpdateService.swift */,
 			);
@@ -1307,6 +1310,7 @@
 				120000000000000000000106 /* NotificationService.swift in Sources */,
 				120000000000000000000122 /* NotificationLandingCoordinator.swift in Sources */,
 				120000000000000000000113 /* RemotePushBackendClient.swift in Sources */,
+				B10000000000000000000002 /* AppleBillingStore.swift in Sources */,
 				120000000000000000000123 /* BackendErrorPresentationPolicy.swift in Sources */,
 				120000000000000000000128 /* AppErrorHandlingPolicy.swift in Sources */,
 				12000000000000000000012D /* AppActionRunner.swift in Sources */,

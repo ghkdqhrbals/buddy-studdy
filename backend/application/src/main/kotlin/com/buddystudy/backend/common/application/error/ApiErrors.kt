@@ -61,6 +61,36 @@ enum class ApiErrorCode(
         "error.request.method_not_allowed",
         "Request method is not supported.",
     ),
+    BILLING_ACCOUNT_REQUIRED(
+        HttpStatus.FORBIDDEN,
+        505,
+        "error.billing.account_required",
+        "A registered account is required for purchases.",
+    ),
+    BILLING_TRANSACTION_INVALID(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        506,
+        "error.billing.transaction_invalid",
+        "The App Store transaction is invalid.",
+    ),
+    BILLING_TRANSACTION_CONFLICT(
+        HttpStatus.CONFLICT,
+        507,
+        "error.billing.transaction_conflict",
+        "The App Store transaction belongs to another account or invoice.",
+    ),
+    BILLING_ACTION_NOT_ALLOWED(
+        HttpStatus.CONFLICT,
+        508,
+        "error.billing.action_not_allowed",
+        "The requested billing action is not allowed in the current state.",
+    ),
+    BILLING_CONFIGURATION_ERROR(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        509,
+        "error.billing.configuration",
+        "Billing is temporarily unavailable.",
+    ),
 
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, 900, "error.internal.server_error", "Internal server error."),
     EMAIL_DELIVERY_FAILED(HttpStatus.SERVICE_UNAVAILABLE, 901, "error.email.delivery_failed", "Email delivery failed."),

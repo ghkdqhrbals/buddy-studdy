@@ -362,6 +362,36 @@ protocol RemotePushBackendClientProtocol {
         registration: RemotePushRegistration
     ) async throws -> BackendQuestionQuota
 
+    func fetchBillingCatalog(
+        registration: RemotePushRegistration
+    ) async throws -> BackendBillingCatalog
+
+    func syncAppleTransaction(
+        registration: RemotePushRegistration,
+        signedTransaction: String,
+        environment: String
+    ) async throws -> BackendBillingInvoice
+
+    func fetchBillingInvoices(
+        registration: RemotePushRegistration,
+        limit: Int,
+        offset: Int
+    ) async throws -> BackendBillingInvoicePage
+
+    func requestBillingRefund(
+        registration: RemotePushRegistration,
+        paymentID: Int64,
+        idempotencyKey: String,
+        reason: String?
+    ) async throws -> BackendBillingAction
+
+    func requestBillingCancellation(
+        registration: RemotePushRegistration,
+        originalTransactionID: String,
+        idempotencyKey: String,
+        reason: String?
+    ) async throws -> BackendBillingAction
+
     func fetchRecords(
         registration: RemotePushRegistration,
         limit: Int,
@@ -568,6 +598,46 @@ protocol RemotePushBackendClientProtocol {
 }
 
 extension RemotePushBackendClientProtocol {
+    func fetchBillingCatalog(
+        registration: RemotePushRegistration
+    ) async throws -> BackendBillingCatalog {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func syncAppleTransaction(
+        registration: RemotePushRegistration,
+        signedTransaction: String,
+        environment: String
+    ) async throws -> BackendBillingInvoice {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func fetchBillingInvoices(
+        registration: RemotePushRegistration,
+        limit: Int,
+        offset: Int
+    ) async throws -> BackendBillingInvoicePage {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func requestBillingRefund(
+        registration: RemotePushRegistration,
+        paymentID: Int64,
+        idempotencyKey: String,
+        reason: String?
+    ) async throws -> BackendBillingAction {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func requestBillingCancellation(
+        registration: RemotePushRegistration,
+        originalTransactionID: String,
+        idempotencyKey: String,
+        reason: String?
+    ) async throws -> BackendBillingAction {
+        throw RemotePushBackendError.invalidResponse
+    }
+
     func loginWithApple(
         registration: RemotePushRegistration,
         idToken: String
@@ -1062,6 +1132,100 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         let request = authenticatedRequest(registration: registration, url: url)
         let data = try await perform(request)
         return try decoder.decode(BackendQuestionQuota.self, from: data)
+    }
+
+    func fetchBillingCatalog(
+        registration: RemotePushRegistration
+    ) async throws -> BackendBillingCatalog {
+        let request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "billing", "catalog")
+        )
+        let data = try await perform(request)
+        return try decoder.decode(BackendBillingCatalog.self, from: data)
+    }
+
+    func syncAppleTransaction(
+        registration: RemotePushRegistration,
+        signedTransaction: String,
+        environment: String
+    ) async throws -> BackendBillingInvoice {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "billing", "apple", "transactions")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(
+            AppleTransactionSyncRequest(
+                signedTransaction: signedTransaction,
+                environment: environment
+            )
+        )
+        let data = try await perform(request)
+        return try decoder.decode(BackendBillingInvoice.self, from: data)
+    }
+
+    func fetchBillingInvoices(
+        registration: RemotePushRegistration,
+        limit: Int,
+        offset: Int
+    ) async throws -> BackendBillingInvoicePage {
+        var components = URLComponents(
+            url: endpoint("api", "v1", "billing", "invoices"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "limit", value: String(max(1, min(limit, 100)))),
+            URLQueryItem(name: "offset", value: String(max(offset, 0)))
+        ]
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+        let request = authenticatedRequest(registration: registration, url: url)
+        let data = try await perform(request)
+        return try decoder.decode(BackendBillingInvoicePage.self, from: data)
+    }
+
+    func requestBillingRefund(
+        registration: RemotePushRegistration,
+        paymentID: Int64,
+        idempotencyKey: String,
+        reason: String?
+    ) async throws -> BackendBillingAction {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "billing", "payments", String(paymentID), "refund-requests")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(
+            BillingActionRequest(idempotencyKey: idempotencyKey, reason: reason)
+        )
+        let data = try await perform(request)
+        return try decoder.decode(BackendBillingAction.self, from: data)
+    }
+
+    func requestBillingCancellation(
+        registration: RemotePushRegistration,
+        originalTransactionID: String,
+        idempotencyKey: String,
+        reason: String?
+    ) async throws -> BackendBillingAction {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint(
+                "api", "v1", "billing", "subscriptions", originalTransactionID,
+                "cancellation-requests"
+            )
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(
+            BillingActionRequest(idempotencyKey: idempotencyKey, reason: reason)
+        )
+        let data = try await perform(request)
+        return try decoder.decode(BackendBillingAction.self, from: data)
     }
 
     func deleteStudy(
@@ -2294,6 +2458,16 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var content: String
     }
 
+    private struct AppleTransactionSyncRequest: Encodable {
+        var signedTransaction: String
+        var environment: String
+    }
+
+    private struct BillingActionRequest: Encodable {
+        var idempotencyKey: String
+        var reason: String?
+    }
+
     private struct CommunityCommentRequest: Encodable {
         var body: String
         var sourceLanguage: String
@@ -2469,6 +2643,77 @@ struct BackendQuestionQuota: Decodable, Equatable {
     var monthlyLimit: Int
     var remainingCount: Int
     var resetAt: Date
+}
+
+struct BackendBillingCatalog: Decodable, Equatable {
+    var appAccountToken: UUID
+    var products: [BackendBillingTierProduct]
+}
+
+struct BackendBillingTierProduct: Decodable, Equatable, Identifiable {
+    var tierCode: String
+    var description: String
+    var monthlyQuestionLimit: Int
+    var productId: String
+    var productType: String
+    var billingPeriod: String?
+    var sortOrder: Int
+
+    var id: String { productId }
+}
+
+struct BackendBillingInvoice: Decodable, Equatable, Identifiable {
+    var id: Int64
+    var invoiceNumber: UUID
+    var tierCode: String
+    var productId: String
+    var status: String
+    var version: Int64
+    var paymentId: Int64?
+    var transactionId: String?
+    var originalTransactionId: String?
+    var paymentStatus: String?
+    var priceMilliunits: Int64?
+    var currency: String?
+    var purchaseAt: Date?
+    var expiresAt: Date?
+    var createdAt: Date
+    var updatedAt: Date
+
+    var isRefundable: Bool {
+        ["FULFILLED", "CANCELLATION_REQUESTED", "REFUND_DECLINED", "REFUND_REVERSED", "COMPENSATION_REQUIRED"]
+            .contains(status)
+    }
+
+    var isSubscription: Bool {
+        originalTransactionId != nil
+    }
+
+    var isCancellable: Bool {
+        isSubscription && ["FULFILLED", "REFUND_DECLINED", "REFUND_REVERSED"].contains(status)
+    }
+}
+
+struct BackendBillingInvoicePage: Decodable, Equatable {
+    var limit: Int
+    var offset: Int
+    var invoices: [BackendBillingInvoice]
+}
+
+struct BackendBillingAction: Decodable, Equatable, Identifiable {
+    var actionId: UUID
+    var actionType: String
+    var status: String
+    var invoiceId: Int64
+    var paymentId: Int64
+    var providerTransactionId: String
+    var providerOriginalTransactionId: String
+    var reason: String?
+    var requestedAt: Date
+    var completedAt: Date?
+    var clientAction: String
+
+    var id: UUID { actionId }
 }
 
 enum QuestionGenerationStatus: String, Codable, Equatable {
