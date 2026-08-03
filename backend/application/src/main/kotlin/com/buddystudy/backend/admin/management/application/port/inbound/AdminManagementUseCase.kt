@@ -14,6 +14,7 @@ interface AdminManagementUseCase {
     suspend fun tiers(): List<AdminMembershipTierResponse>
     suspend fun updateTier(tierCode: String, monthlyQuestionLimit: Int): AdminMembershipTierResponse
     suspend fun assignPlan(userId: Long, command: AssignUserPlanCommand): AdminUserSummary
+    suspend fun setCurrentPeriodQuestionLimit(userId: Long, questionLimitOverride: Int?): AdminUserSummary
 }
 
 interface AdminFeedbackUseCase {

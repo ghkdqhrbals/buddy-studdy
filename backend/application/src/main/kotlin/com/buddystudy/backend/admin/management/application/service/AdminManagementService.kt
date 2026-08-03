@@ -40,4 +40,20 @@ class AdminManagementService(
         return management.assignPlan(userId, command.copy(tierCode = command.tierCode.trim()))
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "User or membership tier not found.")
     }
+
+    @Transactional
+    override suspend fun setCurrentPeriodQuestionLimit(
+        userId: Long,
+        questionLimitOverride: Int?,
+    ): AdminUserSummary {
+        if (questionLimitOverride?.let { it !in 0..1_000_000 } == true) {
+            throw ApiException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.VALIDATION_ERROR,
+                "Current period question limit override is invalid.",
+            )
+        }
+        return management.setCurrentPeriodQuestionLimit(userId, questionLimitOverride)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "User not found.")
+    }
 }

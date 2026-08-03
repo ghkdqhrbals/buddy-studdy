@@ -159,6 +159,9 @@ test("user administration is searchable, paginated, and keeps plans internal", a
   assert.match(page, /DetailDrawer/);
   assert.match(page, /ObjectInspector/);
   assert.match(page, /monthlyQuestionLimitOverride/);
+  assert.match(page, /currentPeriodQuestionLimitOverride/);
+  assert.match(page, /\/quota\/current-period/);
+  assert.match(page, /Save current period/);
   assert.match(adminApi, /sessionStorage/);
   assert.match(adminApi, /Authorization: `Bearer \$\{session\.token\}`/);
   assert.doesNotMatch(page, /payment|billing/i);

@@ -188,6 +188,11 @@ class AdminMessagingServiceTest {
 
         override suspend fun assignPlan(userId: Long, command: AssignUserPlanCommand): AdminUserSummary? = null
 
+        override suspend fun setCurrentPeriodQuestionLimit(
+            userId: Long,
+            questionLimitOverride: Int?,
+        ): AdminUserSummary? = null
+
         private fun summary() = AdminUserSummary(
             id = 7,
             email = "user@example.com",
@@ -198,6 +203,7 @@ class AdminMessagingServiceTest {
             tierDescription = "Free",
             monthlyLimit = 30,
             monthlyLimitOverride = null,
+            currentPeriodQuestionLimitOverride = null,
             usedCount = 0,
             remainingCount = 30,
             resetAt = Instant.parse("2026-08-01T00:00:00Z"),

@@ -35,13 +35,13 @@ class OpenAIQuestionKeyProvider(
             throw monthlyQuotaExceeded(now, now)
         }
 
-        val plan = memberships.activePlanForUser(user.id)
-            ?: throw monthlyQuotaExceeded(user.createdAt, now)
         val quotaPeriod = MonthlyQuotaWindow.periodAt(user.createdAt, now)
+        val quota = memberships.quotaStatusForUser(user.id, quotaPeriod.startedAt)
+            ?: throw monthlyQuotaExceeded(user.createdAt, now)
         val consumed = memberships.tryConsumeMonthlySystemQuestion(
             userId = user.id,
             periodStartedAt = quotaPeriod.startedAt,
-            limit = plan.monthlyQuestionLimit,
+            limit = quota.monthlyQuestionLimit,
             now = now,
         )
         if (!consumed) {

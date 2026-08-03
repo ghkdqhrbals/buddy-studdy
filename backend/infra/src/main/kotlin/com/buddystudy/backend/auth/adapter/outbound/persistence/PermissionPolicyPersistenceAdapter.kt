@@ -152,14 +152,24 @@ class PermissionPolicyPersistenceAdapter(
         }
         val remaining = client.sql(
             """
-            select greatest(coalesce(t.monthly_question_limit, 0) - coalesce(u.system_question_count, 0), 0) as remaining
+            select greatest(
+                coalesce(
+                    u.current_period_question_limit_override,
+                    m.monthly_question_limit_override,
+                    t.monthly_question_limit,
+                    0
+                ) - coalesce(u.system_question_count, 0),
+                0
+            ) as remaining
             from users usr
-            left join user_membership_tiers t on t.tier_code = coalesce((
-                select m.tier from user_memberships m
-                where m.user_id = usr.id and m.status = 'ACTIVE'
-                  and (m.expires_at is null or m.expires_at > :now)
-                order by m.updated_at desc, m.id desc limit 1
-            ), 'TIER1')
+            left join user_memberships m on m.id = (
+                select active_membership.id from user_memberships active_membership
+                where active_membership.user_id = usr.id and active_membership.status = 'ACTIVE'
+                  and active_membership.started_at <= :now
+                  and (active_membership.expires_at is null or active_membership.expires_at > :now)
+                order by active_membership.updated_at desc, active_membership.id desc limit 1
+            )
+            left join user_membership_tiers t on t.tier_code = coalesce(m.tier, 'TIER1')
             left join user_monthly_question_usage u on u.user_id = usr.id and u.period_start = :periodStartedAt
             where usr.id = :userId
             """.trimIndent(),

@@ -13,6 +13,7 @@ data class AdminUserSummary(
     val tierDescription: String,
     val monthlyLimit: Int,
     val monthlyLimitOverride: Int?,
+    val currentPeriodQuestionLimitOverride: Int?,
     val usedCount: Int,
     val remainingCount: Int,
     val resetAt: Instant,

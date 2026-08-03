@@ -62,6 +62,14 @@ class AdminManagementController(
     ): AdminUserSummary =
         management.assignPlan(authorization.bearerToken(), userId, request)
 
+    @PatchMapping("/users/{userId}/quota/current-period")
+    suspend fun setCurrentPeriodQuestionLimit(
+        @RequestHeader("Authorization") authorization: String?,
+        @PathVariable userId: Long,
+        @Valid @RequestBody request: UpdateCurrentPeriodQuestionLimitRequest,
+    ): AdminUserSummary =
+        management.setCurrentPeriodQuestionLimit(authorization.bearerToken(), userId, request)
+
     @GetMapping("/feedback")
     suspend fun feedback(
         @RequestHeader("Authorization") authorization: String?,
@@ -108,6 +116,11 @@ data class AssignUserPlanRequest(
     var monthlyQuestionLimitOverride: Int? = null,
 )
 
+data class UpdateCurrentPeriodQuestionLimitRequest(
+    @field:Min(0) @field:Max(1_000_000)
+    var questionLimitOverride: Int? = null,
+)
+
 data class AdminNotificationRequest(
     @field:NotBlank
     var title: String = "",
@@ -128,6 +141,11 @@ interface AdminManagementWebPort {
         adminToken: String,
         userId: Long,
         request: AssignUserPlanRequest,
+    ): AdminUserSummary
+    suspend fun setCurrentPeriodQuestionLimit(
+        adminToken: String,
+        userId: Long,
+        request: UpdateCurrentPeriodQuestionLimitRequest,
     ): AdminUserSummary
     suspend fun feedback(
         adminToken: String,
@@ -190,6 +208,15 @@ class AdminManagementWebAdapter(
             userId,
             AssignUserPlanCommand(request.tierCode, request.monthlyQuestionLimitOverride),
         )
+    }
+
+    override suspend fun setCurrentPeriodQuestionLimit(
+        adminToken: String,
+        userId: Long,
+        request: UpdateCurrentPeriodQuestionLimitRequest,
+    ): AdminUserSummary {
+        authentication.validate(adminToken)
+        return management.setCurrentPeriodQuestionLimit(userId, request.questionLimitOverride)
     }
 
     override suspend fun feedback(

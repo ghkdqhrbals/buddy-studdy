@@ -39,6 +39,7 @@ function MembershipEditor({ user, tiers, onSaved }) {
   return (
     <section className="drawer-section">
       <h3>Membership controls</h3>
+      <p>Plan and personal limits continue to apply after the current quota period resets.</p>
       <div className="form-grid">
         <label className="field">
           <span>Internal plan</span>
@@ -47,7 +48,7 @@ function MembershipEditor({ user, tiers, onSaved }) {
           </select>
         </label>
         <label className="field">
-          <span>Personal monthly limit</span>
+          <span>Personal recurring limit</span>
           <input
             type="number"
             min="0"
@@ -61,6 +62,43 @@ function MembershipEditor({ user, tiers, onSaved }) {
       <div className="drawer-form-actions">
         {mutation.error ? <InlineNotice tone="danger" compact>{mutation.error.message}</InlineNotice> : null}
         <Button icon={Save} busy={mutation.isPending} onClick={() => mutation.mutate()}>Save membership</Button>
+      </div>
+    </section>
+  );
+}
+
+function CurrentPeriodQuotaEditor({ user, onSaved }) {
+  const [override, setOverride] = useState(user.currentPeriodQuestionLimitOverride ?? "");
+  const mutation = useMutation({
+    mutationFn: () => adminFetch(`/users/${user.id}/quota/current-period`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        questionLimitOverride: override === "" ? null : Number(override),
+      }),
+    }),
+    onSuccess: onSaved,
+  });
+  return (
+    <section className="drawer-section">
+      <h3>Current quota period</h3>
+      <p>
+        Override this user&apos;s total question allowance only until {formatDateTime(user.resetAt)}.
+        Clear the field to return to the membership limit immediately.
+      </p>
+      <label className="field">
+        <span>Question limit for this period</span>
+        <input
+          type="number"
+          min="0"
+          max="1000000"
+          value={override}
+          placeholder="Use membership limit"
+          onChange={(event) => setOverride(event.target.value)}
+        />
+      </label>
+      <div className="drawer-form-actions">
+        {mutation.error ? <InlineNotice tone="danger" compact>{mutation.error.message}</InlineNotice> : null}
+        <Button icon={Save} busy={mutation.isPending} onClick={() => mutation.mutate()}>Save current period</Button>
       </div>
     </section>
   );
@@ -208,6 +246,14 @@ function UsersWorkspace() {
               key={`${selected.id}-${selected.tierCode}-${selected.monthlyLimitOverride}`}
               user={selected}
               tiers={tiers}
+              onSaved={(updated) => {
+                setSelected(updated);
+                refresh();
+              }}
+            />
+            <CurrentPeriodQuotaEditor
+              key={`${selected.id}-${selected.currentPeriodQuestionLimitOverride}-${selected.resetAt}`}
+              user={selected}
               onSaved={(updated) => {
                 setSelected(updated);
                 refresh();

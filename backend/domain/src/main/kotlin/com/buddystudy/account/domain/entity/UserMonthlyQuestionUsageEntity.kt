@@ -14,6 +14,7 @@ class UserMonthlyQuestionUsageEntity(
     var usageMonth: String = "",
     var periodStart: Instant = Instant.now(),
     var systemQuestionCount: Int = 0,
+    var currentPeriodQuestionLimitOverride: Int? = null,
     var createdAt: Instant = Instant.now(),
     var updatedAt: Instant = Instant.now(),
 )

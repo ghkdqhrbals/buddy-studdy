@@ -14,6 +14,7 @@ import org.springframework.stereotype.Repository
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 import java.time.LocalDateTime
+import java.time.YearMonth
 import java.time.ZoneOffset
 
 @Repository
@@ -44,7 +45,7 @@ class AdminManagementPersistenceAdapter(
             .bind("offset", offset)
         val userRows = listSpec.map { row, _ -> row.toAdminUserRow() }.all().collectList().awaitSingle()
         val usageByUser = currentUsageByUser(userRows, now)
-        val users = userRows.map { it.toAdminUser(usageByUser[it.id] ?: 0, now) }
+        val users = userRows.map { it.toAdminUser(usageByUser[it.id] ?: CurrentPeriodUsage(), now) }
         return AdminUserPageResponse(users, totalCount, limit, offset)
     }
 
@@ -61,8 +62,8 @@ class AdminManagementPersistenceAdapter(
             .one()
             .awaitSingleOrNull()
             ?: return null
-        val usedCount = currentUsageByUser(listOf(row), now)[userId] ?: 0
-        return row.toAdminUser(usedCount, now)
+        val usage = currentUsageByUser(listOf(row), now)[userId] ?: CurrentPeriodUsage()
+        return row.toAdminUser(usage, now)
     }
 
     override suspend fun tiers(): List<AdminMembershipTierResponse> =
@@ -135,6 +136,54 @@ class AdminManagementPersistenceAdapter(
         return user(userId)
     }
 
+    @Transactional
+    override suspend fun setCurrentPeriodQuestionLimit(
+        userId: Long,
+        questionLimitOverride: Int?,
+    ): AdminUserSummary? {
+        val createdAt = database.sql(
+            "select created_at from users where id = :userId and status <> 'ANONYMOUS'",
+        ).bind("userId", userId)
+            .map { row, _ -> row.instant("created_at") }
+            .one()
+            .awaitSingleOrNull()
+            ?: return null
+        val now = Instant.now()
+        val period = MonthlyQuotaWindow.periodAt(createdAt, now)
+        val periodStartedAt = LocalDateTime.ofInstant(period.startedAt, ZoneOffset.UTC)
+
+        if (questionLimitOverride == null) {
+            database.sql(
+                """
+                update user_monthly_question_usage
+                set current_period_question_limit_override = null, updated_at = :now
+                where user_id = :userId and period_start = :periodStartedAt
+                """.trimIndent(),
+            ).bind("now", now)
+                .bind("userId", userId)
+                .bind("periodStartedAt", periodStartedAt)
+                .fetch().rowsUpdated().awaitSingle()
+        } else {
+            database.sql(
+                """
+                insert into user_monthly_question_usage
+                    (user_id, usage_month, period_start, system_question_count,
+                     current_period_question_limit_override, created_at, updated_at)
+                values (:userId, :usageMonth, :periodStartedAt, 0, :questionLimitOverride, :now, :now)
+                on duplicate key update
+                    current_period_question_limit_override = :questionLimitOverride,
+                    updated_at = :now
+                """.trimIndent(),
+            ).bind("userId", userId)
+                .bind("usageMonth", YearMonth.from(period.startedAt.atZone(ZoneOffset.UTC)).toString())
+                .bind("periodStartedAt", periodStartedAt)
+                .bind("questionLimitOverride", questionLimitOverride)
+                .bind("now", now)
+                .fetch().rowsUpdated().awaitSingle()
+        }
+        return user(userId)
+    }
+
     private fun userSelect(): String =
         """
         select
@@ -176,7 +225,7 @@ class AdminManagementPersistenceAdapter(
         return bind("query", search).bind("exactQuery", exact.orEmpty())
     }
 
-    private suspend fun currentUsageByUser(rows: List<AdminUserRow>, now: Instant): Map<Long, Int> {
+    private suspend fun currentUsageByUser(rows: List<AdminUserRow>, now: Instant): Map<Long, CurrentPeriodUsage> {
         if (rows.isEmpty()) return emptyMap()
         val periods = rows.associate { it.id to MonthlyQuotaWindow.periodAt(it.createdAt, now) }
         val conditions = rows.indices.joinToString(" or ") { index ->
@@ -184,7 +233,7 @@ class AdminManagementPersistenceAdapter(
         }
         var spec = database.sql(
             """
-            select user_id, system_question_count
+            select user_id, system_question_count, current_period_question_limit_override
             from user_monthly_question_usage
             where $conditions
             """.trimIndent(),
@@ -197,7 +246,13 @@ class AdminManagementPersistenceAdapter(
                 )
         }
         return spec.map { result, _ ->
-            result.long("user_id") to result.int("system_question_count")
+            result.long("user_id") to CurrentPeriodUsage(
+                usedCount = result.int("system_question_count"),
+                questionLimitOverride = result.get(
+                    "current_period_question_limit_override",
+                    java.lang.Integer::class.java,
+                )?.toInt(),
+            )
         }.all().collectList().awaitSingle().toMap()
     }
 
@@ -218,8 +273,9 @@ class AdminManagementPersistenceAdapter(
             appVersionSeenAt = nullableInstant("app_version_seen_at"),
         )
 
-    private fun AdminUserRow.toAdminUser(usedCount: Int, now: Instant): AdminUserSummary {
+    private fun AdminUserRow.toAdminUser(usage: CurrentPeriodUsage, now: Instant): AdminUserSummary {
         val period = MonthlyQuotaWindow.periodAt(createdAt, now)
+        val effectiveLimit = usage.questionLimitOverride ?: monthlyLimit
         return AdminUserSummary(
             id = id,
             email = email,
@@ -228,10 +284,11 @@ class AdminManagementPersistenceAdapter(
             status = status,
             tierCode = tierCode,
             tierDescription = tierDescription,
-            monthlyLimit = monthlyLimit,
+            monthlyLimit = effectiveLimit,
             monthlyLimitOverride = monthlyLimitOverride,
-            usedCount = usedCount,
-            remainingCount = (monthlyLimit - usedCount).coerceAtLeast(0),
+            currentPeriodQuestionLimitOverride = usage.questionLimitOverride,
+            usedCount = usage.usedCount,
+            remainingCount = (effectiveLimit - usage.usedCount).coerceAtLeast(0),
             resetAt = period.resetAt,
             createdAt = createdAt,
             appVersion = appVersion,
@@ -254,6 +311,11 @@ class AdminManagementPersistenceAdapter(
         val appVersion: String?,
         val appBuild: String?,
         val appVersionSeenAt: Instant?,
+    )
+
+    private data class CurrentPeriodUsage(
+        val usedCount: Int = 0,
+        val questionLimitOverride: Int? = null,
     )
 
     private fun Row.string(name: String): String = get(name, String::class.java).orEmpty()

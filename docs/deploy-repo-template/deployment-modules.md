@@ -303,7 +303,9 @@ deployment.
   secrets are not used. Deployments auto-refreshes every ten seconds and keeps
   a maximum of 500 workflow records in TestZone's persisted data directory.
   Users & Quotas provides bounded user search, 20-row pagination,
-  membership-tier allowance editing, and per-user tier/allowance overrides.
+  membership-tier allowance editing, recurring per-user tier/allowance
+  overrides, and a separate question-limit override that expires at the
+  selected user's next quota reset.
   These controls are internal-only and must not be linked from the consumer
   app.
 - Membership schema or quota API changes require a backend image/deploy first.

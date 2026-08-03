@@ -24,13 +24,14 @@ class QuestionMembershipPersistenceAdapter(
     override suspend fun activePlanForUser(userId: Long): QuestionMembershipPlan? {
         val membership = memberships.findFirstByUserIdAndStatusOrderByUpdatedAtDesc(userId, MembershipStatus.ACTIVE)
         val now = Instant.now()
-        val tierCode = if (
-            membership == null || membership.startedAt.isAfter(now) || membership.expiresAt?.isAfter(now) == false
-        ) DEFAULT_TIER else membership.tier
+        val activeMembership = membership?.takeIf {
+            !it.startedAt.isAfter(now) && it.expiresAt?.isAfter(now) != false
+        }
+        val tierCode = activeMembership?.tier ?: DEFAULT_TIER
         val tier = tiers.findByTierCode(tierCode) ?: tiers.findByTierCode(DEFAULT_TIER) ?: return null
         return QuestionMembershipPlan(
             tierCode = tier.tierCode,
-            monthlyQuestionLimit = membership?.monthlyQuestionLimitOverride ?: tier.monthlyQuestionLimit,
+            monthlyQuestionLimit = activeMembership?.monthlyQuestionLimitOverride ?: tier.monthlyQuestionLimit,
         )
     }
 
@@ -38,16 +39,28 @@ class QuestionMembershipPersistenceAdapter(
         val plan = activePlanForUser(userId) ?: return null
         val used = template.databaseClient.sql(
             """
-            select system_question_count
+            select system_question_count, current_period_question_limit_override
             from user_monthly_question_usage
             where user_id = :userId and period_start = :periodStartedAt
             """.trimIndent(),
         ).bind("userId", userId).bind("periodStartedAt", periodStartedAt.utcDateTime())
-            .map { row, _ -> row.get("system_question_count", java.lang.Integer::class.java)?.toInt() ?: 0 }
+            .map { row, _ ->
+                CurrentPeriodQuota(
+                    usedCount = row.get("system_question_count", java.lang.Integer::class.java)?.toInt() ?: 0,
+                    questionLimitOverride = row.get(
+                        "current_period_question_limit_override",
+                        java.lang.Integer::class.java,
+                    )?.toInt(),
+                )
+            }
             .one()
             .awaitSingleOrNull()
-            ?: 0
-        return QuestionQuotaStatus(plan.tierCode, used, plan.monthlyQuestionLimit)
+            ?: CurrentPeriodQuota()
+        return QuestionQuotaStatus(
+            plan.tierCode,
+            used.usedCount,
+            used.questionLimitOverride ?: plan.monthlyQuestionLimit,
+        )
     }
 
     @Transactional
@@ -92,6 +105,11 @@ class QuestionMembershipPersistenceAdapter(
     private companion object {
         const val DEFAULT_TIER = "TIER1"
     }
+
+    private data class CurrentPeriodQuota(
+        val usedCount: Int = 0,
+        val questionLimitOverride: Int? = null,
+    )
 
     private fun Instant.utcDateTime(): LocalDateTime = LocalDateTime.ofInstant(this, ZoneOffset.UTC)
 }
