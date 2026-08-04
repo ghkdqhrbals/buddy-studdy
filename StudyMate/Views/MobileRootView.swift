@@ -5973,32 +5973,7 @@ private struct MobileQuestionUsageView: View {
         List {
             Section {
                 if let quota = appState.questionQuota {
-                    VStack(alignment: .leading, spacing: 14) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(strings.monthlyQuestionQuota)
-                                .font(.headline)
-
-                            Spacer(minLength: 12)
-
-                            Text(strings.monthlyQuotaUsage(
-                                remaining: quota.remainingCount,
-                                limit: quota.monthlyLimit
-                            ))
-                            .font(.subheadline.weight(.semibold))
-                            .monospacedDigit()
-                            .foregroundStyle(quota.remainingCount == 0 ? Color.orange : Color.secondary)
-                        }
-
-                        ProgressView(
-                            value: Double(quota.usedCount),
-                            total: Double(max(quota.monthlyLimit, 1))
-                        )
-                        .tint(quota.remainingCount == 0 ? .orange : .accentColor)
-
-                        Text(strings.monthlyQuotaReset(quota.resetAt))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
+                    MonthlyQuestionQuotaSummary(quota: quota, strings: strings)
                     .padding(.vertical, 6)
                 } else {
                     HStack(spacing: 10) {
@@ -6017,6 +5992,51 @@ private struct MobileQuestionUsageView: View {
     }
 }
 
+private struct MonthlyQuestionQuotaSummary: View {
+    var quota: BackendQuestionQuota
+    var strings: AppStrings
+    var membershipName: String? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(strings.monthlyQuestionQuota)
+                    .font(.headline)
+
+                Spacer(minLength: 12)
+
+                Text(strings.monthlyQuotaUsage(
+                    remaining: quota.remainingCount,
+                    limit: quota.monthlyLimit
+                ))
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(quota.remainingCount == 0 ? Color.orange : Color.secondary)
+            }
+
+            ProgressView(
+                value: Double(quota.usedCount),
+                total: Double(max(quota.monthlyLimit, 1))
+            )
+            .tint(quota.remainingCount == 0 ? .orange : .accentColor)
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(strings.monthlyQuotaReset(quota.resetAt))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                Spacer(minLength: 8)
+
+                if let membershipName {
+                    Text(membershipName)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
 private struct MobileMembershipManagementView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var billingStore = AppleBillingStore()
@@ -6031,54 +6051,34 @@ private struct MobileMembershipManagementView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 24) {
+            LazyVStack(alignment: .leading, spacing: 28) {
                 membershipSummary
 
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(strings.billingCycle)
-                        .font(.headline)
-
-                    Picker(strings.billingCycle, selection: $selectedBillingPeriod) {
-                        ForEach(availableBillingPeriods, id: \.self) { period in
-                            Text(strings.billingPeriod(period))
-                                .tag(period)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                }
-
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 14) {
                     Text(strings.membershipPlans)
                         .font(.headline)
 
-                    Group {
-                        if appState.billingCatalog != nil {
-                            if billingStore.isLoading {
-                                loadingRow
-                                    .frame(maxWidth: .infinity, minHeight: 84, alignment: .center)
-                            } else {
-                                VStack(spacing: 0) {
-                                    ForEach(Array(membershipGroups.enumerated()), id: \.element.id) { index, group in
-                                        membershipOption(group)
+                    if appState.billingCatalog != nil {
+                        if billingStore.isLoading {
+                            loadingRow
+                                .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
+                        } else {
+                            membershipPicker
 
-                                        if index < membershipGroups.count - 1 {
-                                            Divider()
-                                                .padding(.leading, 16)
-                                        }
+                            if availableBillingPeriods.count > 1 {
+                                Picker(strings.billingCycle, selection: $selectedBillingPeriod) {
+                                    ForEach(availableBillingPeriods, id: \.self) { period in
+                                        Text(strings.billingPeriod(period))
+                                            .tag(period)
                                     }
                                 }
+                                .pickerStyle(.segmented)
+                                .labelsHidden()
                             }
-                        } else if appState.isLoadingBilling {
-                            loadingRow
-                                .frame(maxWidth: .infinity, minHeight: 84, alignment: .center)
                         }
-                    }
-                    .background(Color(.secondarySystemGroupedBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(Color(.separator).opacity(0.45), lineWidth: 0.5)
+                    } else if appState.isLoadingBilling {
+                        loadingRow
+                            .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
                     }
 
                     if let message = billingStore.errorMessage {
@@ -6086,9 +6086,6 @@ private struct MobileMembershipManagementView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
-                }
-
-                VStack(alignment: .leading, spacing: 10) {
                     Button {
                         guard let catalog = appState.billingCatalog,
                               let product = selectedProduct else { return }
@@ -6123,29 +6120,29 @@ private struct MobileMembershipManagementView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
-                }
 
-                HStack(spacing: 0) {
-                    if activeProductID != nil {
-                        Button(strings.manageSubscription) {
-                            cancelSubscription()
+                    HStack(spacing: 0) {
+                        if activeProductID != nil {
+                            Button(strings.manageSubscription) {
+                                cancelSubscription()
+                            }
+                            .frame(maxWidth: .infinity)
+
+                            Divider()
+                                .frame(height: 18)
                         }
-                        .frame(maxWidth: .infinity)
 
-                        Divider()
-                            .frame(height: 20)
-                    }
-
-                    if let catalog = appState.billingCatalog {
-                        Button(strings.restorePurchases) {
-                            restorePurchases(appAccountToken: catalog.appAccountToken)
+                        if let catalog = appState.billingCatalog {
+                            Button(strings.restorePurchases) {
+                                restorePurchases(appAccountToken: catalog.appAccountToken)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .disabled(billingStore.processingProductID != nil)
                         }
-                        .frame(maxWidth: .infinity)
-                        .disabled(billingStore.processingProductID != nil)
                     }
+                    .font(.footnote.weight(.semibold))
+                    .frame(minHeight: 38)
                 }
-                .font(.subheadline.weight(.semibold))
-                .frame(minHeight: 44)
 
                 if let message = appState.billingErrorMessage {
                     Text(message)
@@ -6194,65 +6191,94 @@ private struct MobileMembershipManagementView: View {
 
     @ViewBuilder
     private var membershipSummary: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(strings.currentMembership)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            if let activeProduct {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(strings.membershipTierName(activeProduct.tier.tierCode))
-                            .font(.title2.weight(.bold))
-
-                        Text(strings.monthlyQuestionAllowanceText(activeProduct.tier.monthlyQuestionLimit))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Spacer(minLength: 12)
-
-                    VStack(alignment: .trailing, spacing: 6) {
-                        Text(strings.activeMembership)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.green)
-
-                        Text(activeProduct.displayPrice)
-                            .font(.subheadline.weight(.semibold))
-                            .monospacedDigit()
-                    }
-                }
-
-                if let expirationDate = activeExpirationDate {
-                    HStack(spacing: 5) {
-                        Text(activeRenewalLabel)
-                        Text(expirationDate.formatted(date: .abbreviated, time: .omitted))
-                            .monospacedDigit()
-                    }
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                }
-            } else if let quota = appState.questionQuota {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(strings.monthlyQuotaUsage(
-                        remaining: quota.remainingCount,
-                        limit: quota.monthlyLimit
-                    ))
-                    .font(.title2.weight(.bold))
-                    .monospacedDigit()
-
-                    Text(strings.monthlyQuestionAllowanceText(quota.monthlyLimit))
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
+        Group {
+            if let quota = appState.questionQuota {
+                MonthlyQuestionQuotaSummary(
+                    quota: quota,
+                    strings: strings,
+                    membershipName: activeProduct.map { strings.membershipTierName($0.tier.tierCode) }
+                )
             } else {
                 loadingRow
+                    .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var membershipPicker: some View {
+        if let selectedGroup {
+            Menu {
+                ForEach(membershipGroups) { group in
+                    Button {
+                        selectedTierCode = group.tierCode
+                    } label: {
+                        if selectedTierCode == group.tierCode {
+                            Label(strings.membershipTierName(group.tierCode), systemImage: "checkmark")
+                        } else {
+                            Text(strings.membershipTierName(group.tierCode))
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 7) {
+                            Text(strings.membershipTierName(selectedGroup.tierCode))
+                                .font(.headline)
+
+                            if activeProduct?.tier.tierCode == selectedGroup.tierCode {
+                                Text(strings.activeMembership)
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.green)
+                            }
+                        }
+
+                        Text(strings.monthlyQuestionAllowanceText(selectedGroup.monthlyQuestionLimit))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 12)
+
+                    if let selectedProduct {
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text(selectedProduct.displayPrice)
+                                .font(.headline)
+                                .monospacedDigit()
+
+                            Text(strings.billingPeriod(selectedBillingPeriod))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 72)
+                .contentShape(Rectangle())
+                .background(Color(.secondarySystemGroupedBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(.plain)
+        } else {
+            loadingRow
+                .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
+                .background(Color(.secondarySystemGroupedBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+    }
+
+    private var selectedGroup: MembershipProductGroup? {
+        guard let selectedTierCode else { return nil }
+        return membershipGroups.first { $0.tierCode == selectedTierCode }
     }
 
     private var membershipGroups: [MembershipProductGroup] {
@@ -6305,14 +6331,6 @@ private struct MobileMembershipManagementView: View {
             }
     }
 
-    private var activeExpirationDate: Date? {
-        billingStore.activeSubscription?.expirationDate ?? fallbackActiveInvoice?.expiresAt
-    }
-
-    private var activeRenewalLabel: String {
-        billingStore.activeSubscription?.willRenew == false ? strings.endsOn : strings.renewsOn
-    }
-
     private var primaryActionTitle: String {
         switch primaryAction {
         case .subscribe:
@@ -6333,56 +6351,6 @@ private struct MobileMembershipManagementView: View {
         )
     }
 
-    @ViewBuilder
-    private func membershipOption(_ group: MembershipProductGroup) -> some View {
-        let product = group.products.first { $0.tier.billingPeriod == selectedBillingPeriod }
-        Button {
-            selectedTierCode = group.tierCode
-        } label: {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 7) {
-                        Text(strings.membershipTierName(group.tierCode))
-                            .font(.headline)
-
-                        if activeProduct?.tier.tierCode == group.tierCode {
-                            Text(strings.activeMembership)
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.green)
-                        }
-                    }
-
-                    Text(strings.monthlyQuestionAllowanceText(group.monthlyQuestionLimit))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer(minLength: 12)
-
-                if let product {
-                    VStack(alignment: .trailing, spacing: 3) {
-                        Text(product.displayPrice)
-                            .font(.subheadline.weight(.semibold))
-                            .monospacedDigit()
-
-                        Text(strings.billingPeriod(selectedBillingPeriod))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Image(systemName: selectedTierCode == group.tierCode ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(selectedTierCode == group.tierCode ? Color.accentColor : Color.secondary)
-            }
-            .padding(.horizontal, 16)
-            .frame(minHeight: 76)
-            .contentShape(Rectangle())
-            .background(selectedTierCode == group.tierCode ? Color.accentColor.opacity(0.08) : Color.clear)
-        }
-        .buttonStyle(.plain)
-        .disabled(product == nil)
-    }
 
     private func purchase(
         _ tierProduct: AppleBillingStore.TierProduct,
