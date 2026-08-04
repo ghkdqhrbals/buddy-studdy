@@ -42,6 +42,14 @@ or has a different product type is rejected before an invoice is written.
   authenticated RevenueCat webhook events. It never replaces the Apple
   transaction ledger.
 
+Each billing table has an explicit Spring Data relational persistence model in
+`billing/domain/entity/BillingPersistenceEntities.kt`. Closed database values
+use domain enums rather than unvalidated strings, while provider-defined open
+values such as RevenueCat event names remain strings. Transactional lock reads
+and history reads are mapped through these models; the handwritten SQL remains
+only where row locks, append-only sequencing, or atomic projection updates are
+required.
+
 Invoice changes must pass `InvoiceStateMachine`. Verified Apple notification
 events and authenticated RevenueCat lifecycle events are both authoritative
 inputs for refund, revocation, renewal-status, and expiration projections. They

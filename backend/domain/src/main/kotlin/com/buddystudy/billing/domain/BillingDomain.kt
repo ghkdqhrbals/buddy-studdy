@@ -17,6 +17,18 @@ enum class BillingProductType {
     NON_RENEWING_SUBSCRIPTION,
 }
 
+enum class BillingPeriod {
+    P1M,
+    P1Y,
+}
+
+enum class BillingReceiptStatus {
+    RECEIVED,
+    PROCESSED,
+    IGNORED,
+    FAILED,
+}
+
 enum class InvoiceType(val desc: String) {
     NORMAL("일반"),
     REFUND("환불"),

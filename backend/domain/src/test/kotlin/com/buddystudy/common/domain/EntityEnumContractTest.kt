@@ -14,6 +14,30 @@ import com.buddystudy.avatar.domain.entity.AvatarGrantSource
 import com.buddystudy.avatar.domain.entity.AvatarItemEntity
 import com.buddystudy.avatar.domain.entity.AvatarSlot
 import com.buddystudy.avatar.domain.entity.UserAvatarItemEntity
+import com.buddystudy.billing.domain.BillingActionStatus
+import com.buddystudy.billing.domain.BillingActionType
+import com.buddystudy.billing.domain.BillingEnvironment
+import com.buddystudy.billing.domain.BillingEventSource
+import com.buddystudy.billing.domain.BillingJobStatus
+import com.buddystudy.billing.domain.BillingJobType
+import com.buddystudy.billing.domain.BillingPeriod
+import com.buddystudy.billing.domain.BillingProductType
+import com.buddystudy.billing.domain.BillingProvider
+import com.buddystudy.billing.domain.BillingReceiptStatus
+import com.buddystudy.billing.domain.InvoiceEventType
+import com.buddystudy.billing.domain.InvoiceStatus
+import com.buddystudy.billing.domain.InvoiceType
+import com.buddystudy.billing.domain.PaymentHistoryEventType
+import com.buddystudy.billing.domain.PaymentStatus
+import com.buddystudy.billing.domain.entity.AppleBillingNotificationEntity
+import com.buddystudy.billing.domain.entity.BillingActionEntity
+import com.buddystudy.billing.domain.entity.BillingJobEntity
+import com.buddystudy.billing.domain.entity.InvoiceEntity
+import com.buddystudy.billing.domain.entity.InvoiceEventEntity
+import com.buddystudy.billing.domain.entity.MembershipTierProductEntity
+import com.buddystudy.billing.domain.entity.PaymentEntity
+import com.buddystudy.billing.domain.entity.PaymentHistoryEntity
+import com.buddystudy.billing.domain.entity.RevenueCatBillingEventEntity
 import com.buddystudy.community.domain.entity.FeedbackEntity
 import com.buddystudy.community.domain.entity.FeedbackStatus
 import com.buddystudy.community.domain.entity.QuestionCommentEntity
@@ -60,6 +84,29 @@ class EntityEnumContractTest {
         assertFieldType<QuestionEntity>("gradingVerdict", GradingVerdict::class.java)
         assertFieldType<QuestionEntity>("gradingStatus", AnswerGradingStatus::class.java)
         assertFieldType<StudyQuestionJobEntity>("status", StudyQuestionJobStatus::class.java)
+
+        assertFieldType<MembershipTierProductEntity>("provider", BillingProvider::class.java)
+        assertFieldType<MembershipTierProductEntity>("productType", BillingProductType::class.java)
+        assertFieldType<MembershipTierProductEntity>("billingPeriod", BillingPeriod::class.java)
+        assertFieldType<InvoiceEntity>("provider", BillingProvider::class.java)
+        assertFieldType<InvoiceEntity>("type", InvoiceType::class.java)
+        assertFieldType<InvoiceEntity>("status", InvoiceStatus::class.java)
+        assertFieldType<InvoiceEventEntity>("eventType", InvoiceEventType::class.java)
+        assertFieldType<InvoiceEventEntity>("source", BillingEventSource::class.java)
+        assertFieldType<PaymentEntity>("provider", BillingProvider::class.java)
+        assertFieldType<PaymentEntity>("productType", BillingProductType::class.java)
+        assertFieldType<PaymentEntity>("environment", BillingEnvironment::class.java)
+        assertFieldType<PaymentEntity>("status", PaymentStatus::class.java)
+        assertFieldType<PaymentHistoryEntity>("eventType", PaymentHistoryEventType::class.java)
+        assertFieldType<PaymentHistoryEntity>("source", BillingEventSource::class.java)
+        assertFieldType<BillingActionEntity>("actionType", BillingActionType::class.java)
+        assertFieldType<BillingActionEntity>("status", BillingActionStatus::class.java)
+        assertFieldType<BillingJobEntity>("jobType", BillingJobType::class.java)
+        assertFieldType<BillingJobEntity>("status", BillingJobStatus::class.java)
+        assertFieldType<AppleBillingNotificationEntity>("environment", BillingEnvironment::class.java)
+        assertFieldType<AppleBillingNotificationEntity>("processingStatus", BillingReceiptStatus::class.java)
+        assertFieldType<RevenueCatBillingEventEntity>("environment", BillingEnvironment::class.java)
+        assertFieldType<RevenueCatBillingEventEntity>("processingStatus", BillingReceiptStatus::class.java)
     }
 
     private inline fun <reified T : Any> assertFieldType(fieldName: String, expected: Class<*>) {
