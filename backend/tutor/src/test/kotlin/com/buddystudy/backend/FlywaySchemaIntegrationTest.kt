@@ -50,6 +50,27 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var databaseClient: DatabaseClient
 
     @Test
+    fun `billing fulfillment recovery job is registered for readiness monitoring`(): Unit = runBlocking {
+        val schedule = databaseClient.sql(
+            """
+            select schedule_type, schedule_value, max_retry_count, timeout_seconds, lock_seconds
+            from scheduled_jobs
+            where job_name = 'billing-fulfillment-recovery'
+            """.trimIndent(),
+        ).map { row, _ ->
+            listOf(
+                row.get("schedule_type", String::class.java),
+                row.get("schedule_value", String::class.java),
+                row.get("max_retry_count", java.lang.Integer::class.java)?.toInt(),
+                row.get("timeout_seconds", java.lang.Integer::class.java)?.toInt(),
+                row.get("lock_seconds", java.lang.Integer::class.java)?.toInt(),
+            )
+        }.one().awaitSingle()
+
+        assertThat(schedule).containsExactly("FIXED_DELAY", "5s", 3, 300, 300)
+    }
+
+    @Test
     fun `billing ledger tables and documented state constraints are installed`(): Unit = runBlocking {
         val tables = databaseClient.sql(
             """

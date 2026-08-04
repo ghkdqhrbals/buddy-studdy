@@ -4,8 +4,10 @@ import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.model.TranslatedQuestionContent
 import com.buddystudy.backend.study.application.port.outbound.TranslationValidationMode
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 
 class ResilientQuestionTranslationAdapterTest {
@@ -79,6 +81,30 @@ class ResilientQuestionTranslationAdapterTest {
                 "outcome", "failure",
             ).count(),
         ).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `does not turn coroutine cancellation into a provider fallback`() {
+        val cancelled = RecordingProvider(
+            providerId = "libretranslate",
+            failure = CancellationException("request cancelled"),
+        )
+        val fallback = RecordingProvider(
+            providerId = "openai",
+            result = TranslatedQuestionContent(
+                topic = "Proxy creation",
+                question = "Explain how proxy creation works for interface-based services.",
+                hint = null,
+            ),
+        )
+        val adapter = adapter(listOf(cancelled, fallback), listOf("libretranslate", "openai"))
+
+        assertThatThrownBy {
+            runBlocking {
+                adapter.translateToEnglish("프록시 생성", "인터페이스 프록시를 설명하세요.", null, "ko")
+            }
+        }.isInstanceOf(CancellationException::class.java)
+        assertThat(fallback.calls).isEmpty()
     }
 
     @Test

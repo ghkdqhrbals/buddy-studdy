@@ -38,6 +38,9 @@ class ApnsPushNotificationAdapter(
         .connectTimeout(timeout)
         .version(HttpClient.Version.HTTP_2)
         .build()
+    private val providerTokenLock = Any()
+    @Volatile private var cachedProviderToken: CachedProviderToken? = null
+    private val signingKey: ECPrivateKey by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { privateKey() }
 
     @PostConstruct
     fun logConfigurationStatus() {
@@ -79,7 +82,7 @@ class ApnsPushNotificationAdapter(
             message.createdAt,
         )
         try {
-            val jwt = apnsJwt()
+            val jwt = providerToken()
             val request = buildRequest(message, jwt)
             val response = client.sendAsync(request, HttpResponse.BodyHandlers.ofString()).await()
             val completedAt = Instant.now()
@@ -174,21 +177,27 @@ class ApnsPushNotificationAdapter(
         return compacted
     }
 
-    private fun apnsJwt(): String {
+    internal fun providerToken(now: Instant = Instant.now()): String {
         if (properties.apns.teamId.isBlank() || properties.apns.keyId.isBlank() || properties.apns.authKeyP8.isBlank()) {
             throw IllegalStateException("APNs credentials are not configured.")
         }
-        return JwtSupport.es256(
-            header = linkedMapOf(
-                "alg" to "ES256",
-                "kid" to properties.apns.keyId,
-            ),
-            payload = linkedMapOf(
-                "iss" to properties.apns.teamId,
-                "iat" to Instant.now().epochSecond,
-            ),
-            privateKey = privateKey(),
-        )
+        cachedProviderToken?.takeIf { it.isReusableAt(now) }?.let { return it.value }
+
+        return synchronized(providerTokenLock) {
+            cachedProviderToken?.takeIf { it.isReusableAt(now) }?.value ?: JwtSupport.es256(
+                header = linkedMapOf(
+                    "alg" to "ES256",
+                    "kid" to properties.apns.keyId,
+                ),
+                payload = linkedMapOf(
+                    "iss" to properties.apns.teamId,
+                    "iat" to now.epochSecond,
+                ),
+                privateKey = signingKey,
+            ).also { token ->
+                cachedProviderToken = CachedProviderToken(token, now)
+            }
+        }
     }
 
     private fun privateKey(): ECPrivateKey {
@@ -294,6 +303,15 @@ class ApnsPushNotificationAdapter(
         const val MAX_PAYLOAD_BYTES = 4_096
         const val MAX_LOG_BODY_CHARS = 512
         const val ELLIPSIS = "…"
+        val PROVIDER_TOKEN_REFRESH_INTERVAL: Duration = Duration.ofMinutes(50)
+    }
+
+    private data class CachedProviderToken(
+        val value: String,
+        val createdAt: Instant,
+    ) {
+        fun isReusableAt(now: Instant): Boolean =
+            !now.isBefore(createdAt) && Duration.between(createdAt, now) < PROVIDER_TOKEN_REFRESH_INTERVAL
     }
 }
 

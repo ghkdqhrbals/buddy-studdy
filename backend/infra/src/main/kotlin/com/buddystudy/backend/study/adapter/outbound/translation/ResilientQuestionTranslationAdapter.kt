@@ -6,6 +6,7 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionTranslatio
 import com.buddystudy.backend.study.application.port.outbound.TranslationValidationMode
 import com.buddystudy.study.domain.QuestionLanguage
 import io.micrometer.core.instrument.MeterRegistry
+import kotlinx.coroutines.CancellationException
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 
@@ -48,6 +49,8 @@ class ResilientQuestionTranslationAdapter(
                 validate(translated, targetLanguage, validationMode)
                 count(provider.providerId, "success")
                 return translated
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: Exception) {
                 lastFailure = error
                 count(provider.providerId, "failure")

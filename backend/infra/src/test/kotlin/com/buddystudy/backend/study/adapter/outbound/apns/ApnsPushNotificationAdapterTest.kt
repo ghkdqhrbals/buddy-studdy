@@ -11,9 +11,26 @@ import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import java.security.KeyPairGenerator
+import java.security.spec.ECGenParameterSpec
 import java.time.Duration
+import java.time.Instant
+import java.util.Base64
 
 class ApnsPushNotificationAdapterTest {
+    @Test
+    fun `provider token is reused until its refresh interval expires`() {
+        val adapter = ApnsPushNotificationAdapter(apnsProperties())
+        val issuedAt = Instant.parse("2030-01-01T00:00:00Z")
+
+        val first = adapter.providerToken(issuedAt)
+        val beforeRefresh = adapter.providerToken(issuedAt.plus(Duration.ofMinutes(49)))
+        val refreshed = adapter.providerToken(issuedAt.plus(Duration.ofMinutes(50)))
+
+        assertThat(beforeRefresh).isEqualTo(first)
+        assertThat(refreshed).isNotEqualTo(first)
+    }
+
     @Test
     fun `apns request timeout is five seconds`(): Unit = runBlocking {
         val adapter = ApnsPushNotificationAdapter(BuddyStudyProperties())
@@ -166,5 +183,17 @@ class ApnsPushNotificationAdapterTest {
             runBlocking { adapter.sendQuestion(message) }
         }.isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("APNs token is missing")
+    }
+
+    private fun apnsProperties(): BuddyStudyProperties {
+        val keyPairGenerator = KeyPairGenerator.getInstance("EC")
+        keyPairGenerator.initialize(ECGenParameterSpec("secp256r1"))
+        val encodedPrivateKey = Base64.getMimeEncoder(64, "\n".toByteArray())
+            .encodeToString(keyPairGenerator.generateKeyPair().private.encoded)
+        return BuddyStudyProperties().apply {
+            apns.teamId = "TEAM123456"
+            apns.keyId = "KEY1234567"
+            apns.authKeyP8 = "-----BEGIN PRIVATE KEY-----\n$encodedPrivateKey\n-----END PRIVATE KEY-----"
+        }
     }
 }
