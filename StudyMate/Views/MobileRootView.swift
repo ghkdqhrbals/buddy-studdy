@@ -5804,6 +5804,27 @@ private struct MobileProfileSettingsSheet: View {
     var body: some View {
         NavigationStack {
             List {
+                if appState.isCommunitySessionActive {
+                    Section {
+                        if let quota = appState.questionQuota {
+                            MonthlyQuestionQuotaSummary(
+                                quota: quota,
+                                strings: strings,
+                                isCompact: true
+                            )
+                            .padding(.vertical, 2)
+                        } else {
+                            HStack(spacing: 9) {
+                                ProgressView()
+                                Text(strings.loading)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(minHeight: 36)
+                        }
+                    }
+                }
+
                 Section {
                     if appState.isCommunitySessionActive {
                         NavigationLink {
@@ -5839,18 +5860,6 @@ private struct MobileProfileSettingsSheet: View {
                 }
 
                 if appState.isCommunitySessionActive {
-                    Section {
-                        NavigationLink {
-                            MobileQuestionUsageView()
-                        } label: {
-                            profileDestinationLabel(
-                                title: strings.usage,
-                                subtitle: nil,
-                                systemImage: "chart.bar"
-                            )
-                        }
-                    }
-
                     Section(strings.membershipAndBilling) {
                         NavigationLink {
                             MobileMembershipManagementView()
@@ -5930,6 +5939,7 @@ private struct MobileProfileSettingsSheet: View {
             }
             .task {
                 if appState.isCommunitySessionActive {
+                    await appState.refreshQuestionQuota()
                     await appState.loadCommunityProfile()
                 }
             }
@@ -5962,46 +5972,17 @@ private struct MobileProfileSettingsSheet: View {
     }
 }
 
-private struct MobileQuestionUsageView: View {
-    @EnvironmentObject private var appState: AppState
-
-    private var strings: AppStrings {
-        appState.strings
-    }
-
-    var body: some View {
-        List {
-            Section {
-                if let quota = appState.questionQuota {
-                    MonthlyQuestionQuotaSummary(quota: quota, strings: strings)
-                    .padding(.vertical, 6)
-                } else {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                        Text(strings.loading)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-        }
-        .navigationTitle(strings.usage)
-        .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await appState.refreshQuestionQuota()
-        }
-    }
-}
-
 private struct MonthlyQuestionQuotaSummary: View {
     var quota: BackendQuestionQuota
     var strings: AppStrings
     var membershipName: String? = nil
+    var isCompact = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: isCompact ? 8 : 14) {
             HStack(alignment: .firstTextBaseline) {
                 Text(strings.monthlyQuestionQuota)
-                    .font(.headline)
+                    .font(isCompact ? .subheadline.weight(.semibold) : .headline)
 
                 Spacer(minLength: 12)
 
@@ -6009,7 +5990,7 @@ private struct MonthlyQuestionQuotaSummary: View {
                     remaining: quota.remainingCount,
                     limit: quota.monthlyLimit
                 ))
-                .font(.subheadline.weight(.semibold))
+                .font(isCompact ? .caption.weight(.semibold) : .subheadline.weight(.semibold))
                 .monospacedDigit()
                 .foregroundStyle(quota.remainingCount == 0 ? Color.orange : Color.secondary)
             }
@@ -6020,17 +6001,23 @@ private struct MonthlyQuestionQuotaSummary: View {
             )
             .tint(quota.remainingCount == 0 ? .orange : .accentColor)
 
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            if isCompact {
                 Text(strings.monthlyQuotaReset(quota.resetAt))
-                    .font(.footnote)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
-
-                Spacer(minLength: 8)
-
-                if let membershipName {
-                    Text(membershipName)
-                        .font(.footnote.weight(.semibold))
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(strings.monthlyQuotaReset(quota.resetAt))
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
+
+                    Spacer(minLength: 8)
+
+                    if let membershipName {
+                        Text(membershipName)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -6091,20 +6078,16 @@ private struct MobileMembershipManagementView: View {
                               let product = selectedProduct else { return }
                         purchase(product, appAccountToken: catalog.appAccountToken)
                     } label: {
-                        HStack(spacing: 8) {
-                            if billingStore.processingProductID != nil {
-                                ProgressView()
-                                    .tint(.white)
+                        SignInButtonLabel(title: primaryActionTitle, isPrimary: true)
+                            .overlay(alignment: .leading) {
+                                if billingStore.processingProductID != nil {
+                                    ProgressView()
+                                        .tint(Color(.systemBackground))
+                                        .padding(.leading, 22)
+                                }
                             }
-
-                            Text(primaryActionTitle)
-                                .font(.headline)
-                        }
-                        .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.roundedRectangle(radius: 8))
-                    .controlSize(.large)
+                    .buttonStyle(SignInPressButtonStyle())
                     .disabled(
                         selectedProduct == nil
                             || primaryAction == .current
