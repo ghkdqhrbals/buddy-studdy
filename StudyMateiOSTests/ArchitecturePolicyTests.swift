@@ -1242,6 +1242,27 @@ final class ArchitecturePolicyTests: XCTestCase {
                 && content.contains("Button(strings.deleteStudy, role: .destructive)"),
             "Root studies and child topics should share one editor with deletion available inside it."
         )
+
+        let editorStart = try XCTUnwrap(content.range(of: "struct StudyEditorSheet: View"))
+        let editorEnd = try XCTUnwrap(
+            content.range(
+                of: "private struct MobileNotificationRow: View",
+                range: editorStart.upperBound..<content.endIndex
+            )
+        )
+        let editorSource = String(content[editorStart.lowerBound..<editorEnd.lowerBound])
+
+        XCTAssertTrue(
+            editorSource.contains(
+                "Button(strings.deleteStudy, role: .destructive) {\n                            onDelete?()\n                            dismiss()"
+            ),
+            "Study deletion should execute immediately and close the editor."
+        )
+        XCTAssertFalse(
+            editorSource.contains("confirmationDialog")
+                || editorSource.contains("showsDeleteConfirmation"),
+            "The study editor must not show a second destructive confirmation UI."
+        )
     }
 
     func testStudyEditorUsesBackendPromptWithoutExposingPromptControls() throws {

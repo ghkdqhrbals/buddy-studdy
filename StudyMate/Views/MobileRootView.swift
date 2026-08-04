@@ -4489,7 +4489,6 @@ struct StudyEditorSheet: View {
     @State private var title: String
     @State private var difficultyLevel: Double
     @State private var isQuestionRotationEnabled: Bool
-    @State private var showsDeleteConfirmation = false
 
     init(
         navigationTitle: String,
@@ -4557,7 +4556,8 @@ struct StudyEditorSheet: View {
                 if onDelete != nil {
                     Section {
                         Button(strings.deleteStudy, role: .destructive) {
-                            showsDeleteConfirmation = true
+                            onDelete?()
+                            dismiss()
                         }
                     }
                 }
@@ -4584,13 +4584,6 @@ struct StudyEditorSheet: View {
                     }
                     .disabled(!canSave)
                 }
-            }
-            .confirmationDialog(strings.deleteStudy, isPresented: $showsDeleteConfirmation) {
-                Button(strings.deleteStudy, role: .destructive) {
-                    onDelete?()
-                    dismiss()
-                }
-                Button(strings.cancel, role: .cancel) {}
             }
         }
     }
