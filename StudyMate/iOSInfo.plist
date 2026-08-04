@@ -53,6 +53,8 @@
 	<string>https://1f27f8ce965e634944d4b0b4dc2f4ec9@o4511814165790720.ingest.us.sentry.io/4511814175948805</string>
 	<key>RevenueCatPublicSDKKey</key>
 	<string>$(REVENUECAT_PUBLIC_SDK_KEY)</string>
+	<key>RevenueCatTestStoreSDKKey</key>
+	<string>$(REVENUECAT_TEST_STORE_SDK_KEY)</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>

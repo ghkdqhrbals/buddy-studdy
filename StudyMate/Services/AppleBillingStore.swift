@@ -16,6 +16,7 @@ final class RevenueCatBillingBridge {
 
     private(set) var mode: Mode = .disabled
     var isEnabled: Bool { mode != .disabled }
+    private var prefersTestStore = false
 
     private init() {}
 
@@ -30,20 +31,54 @@ final class RevenueCatBillingBridge {
             && (normalizedKey.hasPrefix("appl_") || (allowTestStore && normalizedKey.hasPrefix("test_")))
     }
 
+    nonisolated static func shouldUseTestStore(
+        isTestFlight: Bool,
+        isDebuggingEnabled: Bool
+    ) -> Bool {
+        isTestFlight && isDebuggingEnabled
+    }
+
+    nonisolated static func resolvedPublicSDKKey(
+        appStoreKey: String?,
+        testStoreKey: String?,
+        useTestStore: Bool
+    ) -> String? {
+        let candidate = useTestStore ? testStoreKey : appStoreKey
+        guard isValidPublicSDKKey(candidate, allowTestStore: useTestStore) else {
+            return nil
+        }
+        return candidate?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    @discardableResult
+    func configureForCurrentLaunch(
+        isTestFlight: Bool,
+        isDebuggingEnabled: Bool
+    ) -> Bool {
+        let shouldUseTestStore = Self.shouldUseTestStore(
+            isTestFlight: isTestFlight,
+            isDebuggingEnabled: isDebuggingEnabled
+        )
+        if Purchases.isConfigured {
+            return shouldUseTestStore ? mode == .testStore : mode == .appStore
+        }
+        prefersTestStore = shouldUseTestStore
+        return true
+    }
+
     func start() {
         guard !Purchases.isConfigured else {
             return
         }
-        let apiKey = ProcessInfo.processInfo.environment["REVENUECAT_PUBLIC_SDK_KEY"]
+        let appStoreKey = ProcessInfo.processInfo.environment["REVENUECAT_PUBLIC_SDK_KEY"]
             ?? Bundle.main.object(forInfoDictionaryKey: "RevenueCatPublicSDKKey") as? String
-        guard let apiKey else { return }
-        let normalizedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        #if DEBUG
-        let allowTestStore = true
-        #else
-        let allowTestStore = false
-        #endif
-        guard Self.isValidPublicSDKKey(normalizedKey, allowTestStore: allowTestStore) else {
+        let testStoreKey = ProcessInfo.processInfo.environment["REVENUECAT_TEST_STORE_SDK_KEY"]
+            ?? Bundle.main.object(forInfoDictionaryKey: "RevenueCatTestStoreSDKKey") as? String
+        guard let normalizedKey = Self.resolvedPublicSDKKey(
+            appStoreKey: appStoreKey,
+            testStoreKey: testStoreKey,
+            useTestStore: prefersTestStore
+        ) else {
             return
         }
         let resolvedMode: Mode = normalizedKey.hasPrefix("test_") ? .testStore : .appStore

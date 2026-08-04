@@ -1423,6 +1423,13 @@ final class AppState: ObservableObject {
             shouldRestoreDeveloperAccess && loadedDeveloperSettings.isDebuggingEnabled
         let loadedDebugBackendBaseURL = appUseCasesProvider.normalizedDebugBackendBaseURL(loadedDeveloperSettings.debugBackendBaseURL)
 
+        #if os(iOS)
+        RevenueCatBillingBridge.shared.configureForCurrentLaunch(
+            isTestFlight: appDistributionContext.isTestFlight,
+            isDebuggingEnabled: loadedIsDebuggingEnabled
+        )
+        #endif
+
         self.appLogUseCase = localUseCases.appLog
         self.storedBackendIdentityUseCase = localUseCases.storedBackendIdentity
         self.communityProfileCacheUseCase = localUseCases.communityProfileCache
@@ -4533,6 +4540,12 @@ final class AppState: ObservableObject {
         guard access.developerOptionsAllowed else {
             let wasDebuggingEnabled = isDebuggingEnabled
             isDebuggingEnabled = false
+            #if os(iOS)
+            RevenueCatBillingBridge.shared.configureForCurrentLaunch(
+                isTestFlight: appDistributionContext.isTestFlight,
+                isDebuggingEnabled: false
+            )
+            #endif
             if wasDebuggingEnabled {
                 refreshRemotePushBackendClient(reason: "developer-access-revoked-\(reason)")
             }
@@ -4550,6 +4563,12 @@ final class AppState: ObservableObject {
             return
         }
         isDebuggingEnabled = shouldEnableDebugging
+        #if os(iOS)
+        RevenueCatBillingBridge.shared.configureForCurrentLaunch(
+            isTestFlight: appDistributionContext.isTestFlight,
+            isDebuggingEnabled: shouldEnableDebugging
+        )
+        #endif
         refreshRemotePushBackendClient(reason: "developer-access-\(reason)")
     }
 
@@ -9058,6 +9077,15 @@ final class AppState: ObservableObject {
         }
         isDebuggingEnabled = isEnabled
         developerSettingsUseCase.saveIsDebuggingEnabled(isEnabled)
+        #if os(iOS)
+        let billingModeApplied = RevenueCatBillingBridge.shared.configureForCurrentLaunch(
+            isTestFlight: appDistributionContext.isTestFlight,
+            isDebuggingEnabled: isEnabled
+        )
+        if !billingModeApplied {
+            log(.info, "결제 테스트 환경 변경은 다음 앱 실행부터 적용됩니다.")
+        }
+        #endif
         refreshRemotePushBackendClient(reason: isEnabled ? "debug-enabled" : "debug-disabled")
         log(.info, isEnabled ? "디버깅 모드를 켰습니다." : "디버깅 모드를 껐습니다.")
         Task {

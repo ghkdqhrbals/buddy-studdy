@@ -19,6 +19,46 @@ final class AppControlPolicyTests: XCTestCase {
         )
     }
 
+    func testRevenueCatUsesTestStoreOnlyForTestFlightDebugging() {
+        XCTAssertTrue(
+            RevenueCatBillingBridge.shouldUseTestStore(
+                isTestFlight: true,
+                isDebuggingEnabled: true
+            )
+        )
+        XCTAssertFalse(
+            RevenueCatBillingBridge.shouldUseTestStore(
+                isTestFlight: true,
+                isDebuggingEnabled: false
+            )
+        )
+        XCTAssertFalse(
+            RevenueCatBillingBridge.shouldUseTestStore(
+                isTestFlight: false,
+                isDebuggingEnabled: true
+            )
+        )
+    }
+
+    func testRevenueCatResolvesOneKeyBeforeConfiguration() {
+        XCTAssertEqual(
+            RevenueCatBillingBridge.resolvedPublicSDKKey(
+                appStoreKey: " appl_apple ",
+                testStoreKey: "test_internal",
+                useTestStore: false
+            ),
+            "appl_apple"
+        )
+        XCTAssertEqual(
+            RevenueCatBillingBridge.resolvedPublicSDKKey(
+                appStoreKey: "appl_apple",
+                testStoreKey: " test_internal ",
+                useTestStore: true
+            ),
+            "test_internal"
+        )
+    }
+
     func testMaintenanceTakesPriorityOverForcedUpdate() {
         let result = AppControlPolicyResolver.resolve(
             policy: policy(

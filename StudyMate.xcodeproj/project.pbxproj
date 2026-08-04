@@ -1724,7 +1724,8 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.ghkdqhrbals.StudyMate;
 				PRODUCT_NAME = StudyMate;
-				REVENUECAT_PUBLIC_SDK_KEY = test_OCkfoPdAYOFAaRtBzomjtkAYnfo;
+				REVENUECAT_PUBLIC_SDK_KEY = appl_KOEGTdfWYEMrZgSdJchZkBeomZk;
+				REVENUECAT_TEST_STORE_SDK_KEY = test_OCkfoPdAYOFAaRtBzomjtkAYnfo;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -1761,6 +1762,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.ghkdqhrbals.StudyMate;
 				PRODUCT_NAME = StudyMate;
 				PROVISIONING_PROFILE_SPECIFIER = "$(IOS_PROVISIONING_PROFILE_NAME)";
+				REVENUECAT_TEST_STORE_SDK_KEY = test_OCkfoPdAYOFAaRtBzomjtkAYnfo;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_COMPILATION_MODE = wholemodule;

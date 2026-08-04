@@ -381,9 +381,15 @@ monitoring administrator session. The monitoring UI exposes the flow at
    Store webhook is filtered to the Test Store app and Sandbox environment and
    targets `https://lowfidev.cloud/api/v1/billing/revenuecat/webhooks`.
 7. RevenueCat must own transaction completion and use the same four App Store
-   product IDs. Debug builds may use a `test_` Test Store key; Release validates
-   that the configured public key starts with `appl_`. Test Store webhook events
-   are accepted only by the development backend profile.
+   product IDs. Debug, ordinary TestFlight, and App Store builds use the `appl_`
+   Apple public key so StoreKit determines Apple Sandbox versus Production from
+   the transaction environment. A TestFlight build with developer access and
+   debugging enabled may select the separate `test_` key before RevenueCat is
+   initialized; it also targets the development backend. RevenueCat remains
+   configured once per process, so changing that toggle after billing has been
+   opened applies on the next app launch. Release validates that the primary
+   public key starts with `appl_`. Test Store webhook events are accepted only
+   by the development backend profile.
 
 The committed App Store Connect source of truth is
 `app-store/billing/subscriptions.json`. Product metadata can take up to one hour
