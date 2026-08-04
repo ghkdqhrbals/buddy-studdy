@@ -7,6 +7,20 @@ backend verifies the signature, bundle ID, App Store app ID, environment,
 product mapping, account token, timestamps, amount fields, and transaction
 identity before writing the ledger.
 
+## At a glance
+
+BuddyStudy separates **purchase approval**, **payment evidence**, and
+**membership fulfillment**. RevenueCat presents and observes the App Store
+purchase, while the backend owns invoices, verified payment records, membership
+access, and monthly quota. A successful purchase sheet therefore does not by
+itself grant access: the invoice becomes `COMPLETED` only after verified payment
+evidence and membership fulfillment have both committed.
+
+The user-facing recovery surface is RevenueCat Customer Center. It provides
+missing-purchase restoration, subscription cancellation, iOS refund requests,
+and plan management according to the remote RevenueCat configuration. Apple,
+not BuddyStudy or RevenueCat, makes the final decision for an Apple refund.
+
 ## Product catalog
 
 `membership_tier_products` maps enabled App Store product IDs to
@@ -108,6 +122,163 @@ Therefore the failure cases converge as follows:
 The Apple transaction ID is the payment idempotency key. Duplicate client
 callbacks, Apple server notifications, RevenueCat webhooks, and foreground
 recovery cannot create a second payment or grant the membership twice.
+
+## Purchase sequence
+
+### Successful purchase and fulfillment
+
+The normal RevenueCat path is asynchronous after App Store approval. The iOS
+app briefly refreshes the invoice for immediate feedback, but the signed
+RevenueCat webhook and the durable fulfillment job are the recovery path when
+the app closes, loses its response, or the backend restarts.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant App as iOS app
+    participant API as BuddyStudy API
+    participant DB as Billing ledger
+    participant RC as RevenueCat
+    participant Apple as App Store
+    participant Worker as Fulfillment recovery
+
+    User->>App: Select membership product
+    App->>API: GET /api/v1/billing/catalog
+    API-->>App: products + appAccountToken
+    App->>API: POST /api/v1/billing/checkouts<br/>{productId, idempotencyKey}
+    API->>DB: INVOICE_CREATED, NORMAL/WAITING
+    API-->>App: invoiceId + invoiceNumber
+    App->>RC: identify(appAccountToken) + purchase(product)
+    RC->>Apple: Present and complete App Store purchase
+    Apple-->>RC: Verified transaction result
+    RC-->>App: Purchase success
+    par Durable server delivery
+        RC->>API: POST /api/v1/billing/revenuecat/webhooks<br/>signed raw event
+        API->>DB: Deduplicate event and transaction IDs<br/>PAYMENT_VERIFIED + PENDING fulfillment job
+        API->>Worker: Claim due fulfillment job
+        Worker->>DB: Grant tier and monthly quota atomically
+        Worker->>DB: FULFILLED, NORMAL/COMPLETED
+    and Bounded user feedback
+        App->>API: GET /api/v1/billing/invoices/{invoiceId}
+        API-->>App: WAITING or COMPLETED
+    end
+    App->>API: GET /api/v1/billing/invoices
+    API-->>App: Reconciled billing history
+```
+
+The direct `POST /api/v1/billing/apple/transactions` endpoint accepts
+`signedTransaction`, `environment`, and the optional `invoiceNumber`. It is a
+backward-compatible recovery path for StoreKit transactions that were not
+created through RevenueCat; it is not a second entitlement authority.
+
+| Contract | Required values | Purpose |
+| --- | --- | --- |
+| `GET /api/v1/billing/catalog` | authenticated user | Returns server-owned products and stable `appAccountToken` |
+| `POST /api/v1/billing/checkouts` | `productId`, user-scoped `idempotencyKey` | Creates the `NORMAL/WAITING` invoice before showing the purchase sheet |
+| RevenueCat purchase | product, `appAccountToken` as RevenueCat App User ID | Correlates Apple purchase, RevenueCat customer, and BuddyStudy user |
+| `POST /api/v1/billing/revenuecat/webhooks` | exact raw body, `X-RevenueCat-Webhook-Signature` | Primary at-least-once server delivery, deduplicated by event and transaction IDs |
+| `GET /api/v1/billing/invoices/{invoiceId}` | invoice ID owned by the user | Bounded client refresh; it does not replace webhook recovery |
+
+### App Store succeeds but backend fulfillment fails
+
+This case must not be displayed as an ordinary purchase cancellation. The user
+may already have been charged. Once verified payment evidence exists, the
+invoice is excluded from the ten-minute unpaid-checkout expiration job. The
+backend retries fulfillment with a durable lease and bounded backoff. The third
+failure records `COMPENSATION_REQUIRED`, marks the invoice `FAILED`, and creates
+an audited compensation action without deleting payment evidence.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant App as iOS app
+    participant API as BuddyStudy API
+    participant DB as Billing ledger
+    participant Worker as Fulfillment recovery
+    participant CC as RevenueCat Customer Center
+    participant Apple as Apple refund service
+    participant RC as RevenueCat
+
+    App->>API: Read invoice after RevenueCat purchase success
+    API-->>App: WAITING while fulfillment is recoverable
+    Worker->>DB: Fulfillment attempt 1 fails
+    Worker->>DB: Reschedule with backoff
+    Worker->>DB: Fulfillment attempt 2 fails
+    Worker->>DB: Reschedule with backoff
+    Worker->>DB: Final attempt fails
+    Worker->>DB: COMPENSATION_REQUIRED + FAILED<br/>create required compensation action
+    App->>API: GET /api/v1/billing/invoices
+    API-->>App: paymentId + latestEventType=COMPENSATION_REQUIRED
+    App-->>User: Payment was received but access was not applied<br/>Show "Review purchase or request refund"
+    User->>App: Open recovery action
+    App->>CC: Present CustomerCenterView
+    alt User checks a missing purchase
+        CC->>RC: Restore/sync purchases
+        RC-->>API: Redeliver purchase lifecycle event
+        API->>DB: Idempotently reconcile payment evidence
+    else User requests a refund
+        CC->>Apple: Begin iOS refund request
+        Apple-->>User: Accept request for review
+        Note over App,Apple: Customer Center completion means request submitted,<br/>not that the refund is settled
+        Apple-->>RC: Final refund lifecycle notification
+        RC->>API: Authenticated refund/cancellation webhook
+        API->>DB: Create linked REFUND invoice<br/>REFUNDED + entitlement reconciliation
+        App->>API: Refresh billing history after dismissal
+        API-->>App: Final refund projection
+    end
+```
+
+Required behavior by failure class:
+
+| Evidence and state | User meaning | Client action |
+| --- | --- | --- |
+| `FAILED` + `CANCELLED`, no payment evidence | Purchase sheet was cancelled or unpaid checkout expired | Allow retry; refund language is unnecessary |
+| `WAITING` + verified payment | Purchase succeeded and backend recovery is still running | Show non-blocking "Confirming purchase" and refresh with a bounded wait |
+| `FAILED` + `COMPENSATION_REQUIRED` and `paymentId` | Charge exists but access could not be applied | Present RevenueCat Customer Center with missing-purchase and refund paths |
+| Linked `REFUND/WAITING` | Apple refund decision is pending | Show "Refund under review"; do not remove the original ledger entry |
+| Linked `REFUND/COMPLETED` | Apple confirmed the refund | Reconcile entitlement and quota, then show the final refund record |
+
+The client must decide the recovery copy from `latestEventType` and payment
+evidence, not from HTTP success or the coarse `FAILED` status alone. A
+Customer Center callback such as `onCustomerCenterRefundRequestCompleted` is
+useful for UI refresh and analytics only; it must never project `REFUNDED` in
+the backend. Only a verified RevenueCat or Apple server lifecycle event can do
+that.
+
+## RevenueCat Customer Center
+
+RevenueCat's default iOS Customer Center configuration supports cancellation,
+missing purchases, refund requests, and plan changes. Configure it under
+RevenueCat Project Settings > Monetization Tools > Customer Center, and keep
+the following BuddyStudy paths enabled:
+
+1. **Missing Purchase** for restore and account-correlation recovery.
+2. **Refund Request** for a paid purchase that BuddyStudy could not fulfill.
+3. **Cancel Subscription** for stopping future renewals; cancellation is not a refund.
+4. **Change Plans** when membership upgrades or downgrades are enabled.
+
+The active-subscription and inactive-subscription screens must use localized
+Korean, English, and Japanese labels. Configure a support email for a missing
+purchase that cannot be restored. The app presents `CustomerCenterView` as a
+sheet and refreshes billing, membership, and quota after dismissal. If Customer
+Center cannot be loaded, the fallback is Apple's refund support page; BuddyStudy
+must not claim that it issued a refund.
+
+References:
+
+- [RevenueCat Customer Center configuration](https://www.revenuecat.com/docs/tools/customer-center/customer-center-configuration)
+- [RevenueCat Customer Center iOS integration](https://www.revenuecat.com/docs/tools/customer-center/customer-center-integration-ios)
+- [RevenueCat refund handling](https://www.revenuecat.com/docs/subscription-guidance/refunds)
+
+### Reliability and verification requirements
+
+- Persist checkout and payment evidence before granting access.
+- Deduplicate by checkout idempotency key, RevenueCat event ID, and Apple transaction ID.
+- Never expire or delete an invoice that has verified payment evidence.
+- Keep fulfillment retries bounded; terminal failure must create an audited compensation action.
+- Treat RevenueCat and Apple webhooks as at-least-once and safe to replay.
+- Alert on `COMPENSATION_REQUIRED`, failed webhook verification, fulfillment retry exhaustion, and refunds pending beyond the operational threshold.
+- Test purchase success, app termination after Apple approval, duplicate and out-of-order webhooks, backend restart between payment and fulfillment commits, terminal compensation, restore, refund approval, refund decline, and refund reversal.
 
 RevenueCat owns transaction completion (`purchasesAreCompletedBy: .revenueCat`)
 in both the App Store and RevenueCat Test Store. The stable BuddyStudy

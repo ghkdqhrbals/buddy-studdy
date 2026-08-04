@@ -6,8 +6,9 @@ BuddyStudy is a SwiftUI iOS app. It generates short study questions with OpenAI,
 
 Read these first:
 
-- `docs/PRD.md`
-- `docs/ARCHITECTURE.md`
+- [Product requirements](docs/PRD.md)
+- [System architecture](docs/ARCHITECTURE.md)
+- [Billing and RevenueCat flow](docs/BILLING.md)
 
 ## Working Rules
 
