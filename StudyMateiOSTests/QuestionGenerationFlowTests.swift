@@ -1180,6 +1180,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertEqual(AppStrings(language: .japanese).showOriginal, "原文を見る")
         XCTAssertEqual(AppStrings(language: .japanese).showTranslation, "翻訳を見る")
         XCTAssertEqual(AppStrings(language: .japanese).translatedIntoLanguage, "日本語に翻訳済み")
+        XCTAssertEqual(AppStrings(language: .japanese).reviewCancelledPurchase, "購入確認と返金")
     }
 
     func testContentLanguageRecognizerSupportsKoreanEnglishAndJapanese() {
@@ -1761,7 +1762,8 @@ final class QuestionGenerationFlowTests: XCTestCase {
                       "purchaseAt": "2026-08-03T00:00:00Z",
                       "expiresAt": "2026-09-03T00:00:00Z",
                       "createdAt": "2026-08-03T00:00:00Z",
-                      "updatedAt": "2026-08-03T00:00:03Z"
+                      "updatedAt": "2026-08-03T00:00:03Z",
+                      "latestEventType": "FULFILLED"
                     },
                     {
                       "id": 42,
@@ -1797,9 +1799,25 @@ final class QuestionGenerationFlowTests: XCTestCase {
 
         XCTAssertEqual(page.invoices.map(\.status), ["COMPLETED", "WAITING"])
         XCTAssertTrue(page.invoices[0].isRefundable)
+        XCTAssertEqual(page.invoices[0].latestEventType, "FULFILLED")
         XCTAssertFalse(page.invoices[1].isRefundable)
         XCTAssertEqual(page.invoices[1].type, "REFUND")
         XCTAssertEqual(page.invoices[1].originalInvoiceId, 41)
+
+        var cancelledCheckout = page.invoices[0]
+        cancelledCheckout.status = "FAILED"
+        cancelledCheckout.paymentId = nil
+        cancelledCheckout.paymentStatus = nil
+        cancelledCheckout.latestEventType = "CANCELLED"
+        XCTAssertTrue(cancelledCheckout.requiresCustomerCenterResolution)
+
+        var failedFulfillment = cancelledCheckout
+        failedFulfillment.latestEventType = "FULFILLMENT_FAILED"
+        XCTAssertFalse(failedFulfillment.requiresCustomerCenterResolution)
+
+        var cancelledRefund = cancelledCheckout
+        cancelledRefund.type = "REFUND"
+        XCTAssertFalse(cancelledRefund.requiresCustomerCenterResolution)
     }
 
     private func makeClient(

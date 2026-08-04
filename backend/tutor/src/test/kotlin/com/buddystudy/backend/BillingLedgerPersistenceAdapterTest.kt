@@ -12,6 +12,7 @@ import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.billing.domain.BillingActionStatus
 import com.buddystudy.billing.domain.BillingEnvironment
 import com.buddystudy.billing.domain.BillingEventSource
+import com.buddystudy.billing.domain.InvoiceEventType
 import com.buddystudy.billing.domain.InvoiceStatus
 import com.buddystudy.billing.domain.InvoiceType
 import com.buddystudy.billing.domain.PaymentStatus
@@ -217,8 +218,9 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         )
 
         assertThat(expired).isEqualTo(1)
-        assertThat(requireNotNull(ledger.invoice(fixture.userId, oldUnpaid.id)).invoice.status)
-            .isEqualTo(InvoiceStatus.FAILED)
+        val expiredInvoice = requireNotNull(ledger.invoice(fixture.userId, oldUnpaid.id)).invoice
+        assertThat(expiredInvoice.status).isEqualTo(InvoiceStatus.FAILED)
+        assertThat(expiredInvoice.latestEventType).isEqualTo(InvoiceEventType.CANCELLED)
         assertThat(requireNotNull(ledger.invoice(fixture.userId, paid.id)).invoice.status)
             .isEqualTo(InvoiceStatus.WAITING)
         assertThat(requireNotNull(ledger.invoice(fixture.userId, recentUnpaid.id)).invoice.status)

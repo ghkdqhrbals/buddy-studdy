@@ -1626,6 +1626,7 @@ class BillingLedgerPersistenceAdapter(
         expiresAt = nullableInstant("expires_at"),
         createdAt = instant("created_at"),
         updatedAt = instant("updated_at"),
+        latestEventType = nullableString("latest_event_type")?.let(InvoiceEventType::valueOf),
     )
 
     private fun Row.invoiceEntity() = InvoiceEntity(
@@ -1813,9 +1814,13 @@ class BillingLedgerPersistenceAdapter(
                    p.id as payment_id, p.provider_transaction_id, p.provider_original_transaction_id,
                    p.status as payment_status, p.price_milliunits, p.currency, p.purchase_at,
                    coalesce(p.expires_at, i.expires_at) as expires_at,
-                   i.created_at, i.updated_at
+                   i.created_at, i.updated_at,
+                   latest_event.event_type as latest_event_type
             from invoices i
             left join payments p on p.invoice_id = coalesce(i.original_invoice_id, i.id)
+            left join invoice_events latest_event
+              on latest_event.invoice_id = i.id
+             and latest_event.sequence_number = i.latest_event_sequence
         """
 
         const val ACTION_SQL = """
@@ -1834,9 +1839,13 @@ class BillingLedgerPersistenceAdapter(
                    p.status as payment_status, p.price_milliunits, p.currency, p.purchase_at,
                    coalesce(p.expires_at, i.expires_at) as expires_at,
                    i.created_at, i.updated_at,
+                   latest_event.event_type as latest_event_type,
                    u.id as user_id, u.email as user_email, u.display_name as user_display_name
             from invoices i
             left join payments p on p.invoice_id = coalesce(i.original_invoice_id, i.id)
+            left join invoice_events latest_event
+              on latest_event.invoice_id = i.id
+             and latest_event.sequence_number = i.latest_event_sequence
             join users u on u.id = i.user_id
         """
     }

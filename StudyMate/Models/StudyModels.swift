@@ -2810,8 +2810,24 @@ struct AppStrings {
     var billingHistory: String { text("결제 내역", "Billing history", "支払い履歴") }
     var restorePurchases: String { text("구매 복원", "Restore purchases", "購入を復元") }
     var manageSubscription: String { text("구독 관리", "Manage subscription", "サブスクリプションを管理") }
+    var managePurchases: String { text("결제 관리", "Manage purchases", "購入を管理") }
     var cancelSubscription: String { text("구독 취소", "Cancel subscription", "サブスクリプションを解約") }
     var requestRefund: String { text("환불 요청", "Request refund", "返金をリクエスト") }
+    var reviewCancelledPurchase: String { text("결제 확인 및 환불", "Review purchase and refund", "購入確認と返金") }
+    var cancelledPurchaseGuidance: String {
+        text(
+            "처리가 취소됐습니다. App Store에서 결제됐다면 결제 내역을 확인하고 환불을 요청하세요.",
+            "Processing was cancelled. If the App Store charged you, review the purchase and request a refund.",
+            "処理はキャンセルされました。App Storeで請求された場合は、購入を確認して返金を申請してください。"
+        )
+    }
+    var customerCenterUnavailable: String {
+        text(
+            "현재 결제 관리 화면을 열 수 없습니다.",
+            "Purchase management is currently unavailable.",
+            "現在、購入管理を開けません。"
+        )
+    }
     var purchaseMembership: String { text("구독하기", "Subscribe", "登録する") }
     var noBillingHistory: String { text("아직 결제 내역이 없습니다.", "No billing history yet.", "支払い履歴はまだありません。") }
     var billingPending: String { text("결제가 승인 대기 중입니다.", "The purchase is pending approval.", "購入は承認待ちです。") }

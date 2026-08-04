@@ -10,6 +10,7 @@
 		D40000000000000000000001 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = D40000000000000000000002 /* MarkdownUI */; };
 		E50000000000000000000001 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = E50000000000000000000002 /* Sentry */; };
 		C80000000000000000000001 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = C80000000000000000000002 /* RevenueCat */; };
+		C80000000000000000000004 /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = C80000000000000000000005 /* RevenueCatUI */; };
 		E50000000000000000000003 /* SentryMonitoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = E50000000000000000000004 /* SentryMonitoring.swift */; };
 		B10000000000000000000002 /* AppleBillingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* AppleBillingStore.swift */; };
 		B90000000000000000000002 /* StudyMateDev.storekit in Resources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000001 /* StudyMateDev.storekit */; };
@@ -451,6 +452,7 @@
 				F60000000000000000000006 /* FirebaseAnalyticsCore in Frameworks */,
 				F70000000000000000000006 /* FirebaseRemoteConfig in Frameworks */,
 				C80000000000000000000001 /* RevenueCat in Frameworks */,
+				C80000000000000000000004 /* RevenueCatUI in Frameworks */,
 				D40000000000000000000001 /* MarkdownUI in Frameworks */,
 				E50000000000000000000001 /* Sentry in Frameworks */,
 			);
@@ -1021,6 +1023,7 @@
 			name = StudyMateiOS;
 			packageProductDependencies = (
 				C80000000000000000000002 /* RevenueCat */,
+				C80000000000000000000005 /* RevenueCatUI */,
 				D40000000000000000000002 /* MarkdownUI */,
 				E50000000000000000000002 /* Sentry */,
 				F60000000000000000000007 /* FirebaseAnalyticsCore */,
@@ -1856,6 +1859,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = C80000000000000000000003 /* XCRemoteSwiftPackageReference "purchases-ios" */;
 			productName = RevenueCat;
+		};
+		C80000000000000000000005 /* RevenueCatUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C80000000000000000000003 /* XCRemoteSwiftPackageReference "purchases-ios" */;
+			productName = RevenueCatUI;
 		};
 		D40000000000000000000002 /* MarkdownUI */ = {
 			isa = XCSwiftPackageProductDependency;

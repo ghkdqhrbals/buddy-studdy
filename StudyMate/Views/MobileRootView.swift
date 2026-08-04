@@ -1,6 +1,7 @@
 import SwiftUI
 #if os(iOS)
 import AuthenticationServices
+import RevenueCatUI
 import SafariServices
 import UIKit
 #endif
@@ -5950,6 +5951,7 @@ private struct MobileQuestionUsageView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var billingStore = AppleBillingStore()
     @State private var billingNotice: String?
+    @State private var isCustomerCenterPresented = false
 
     private var strings: AppStrings {
         appState.strings
@@ -6023,8 +6025,8 @@ private struct MobileQuestionUsageView: View {
 
                         Spacer()
 
-                        Button(strings.manageSubscription) {
-                            openSubscriptionManagement()
+                        Button(strings.managePurchases) {
+                            openCustomerCenter()
                         }
                     }
                 } else if appState.isLoadingBilling {
@@ -6074,6 +6076,11 @@ private struct MobileQuestionUsageView: View {
             Button(strings.close, role: .cancel) {}
         } message: {
             Text(billingNotice ?? "")
+        }
+        .sheet(isPresented: $isCustomerCenterPresented, onDismiss: {
+            Task { await appState.refreshBilling() }
+        }) {
+            CustomerCenterView()
         }
     }
 
@@ -6131,9 +6138,9 @@ private struct MobileQuestionUsageView: View {
             }
 
             HStack(spacing: 7) {
-                Text(statusText(invoice.status))
+                Text(statusText(invoice))
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(statusColor(invoice.status))
+                    .foregroundStyle(statusColor(invoice))
                 Text("·")
                     .foregroundStyle(.tertiary)
                 Text((invoice.purchaseAt ?? invoice.createdAt).formatted(date: .abbreviated, time: .omitted))
@@ -6141,18 +6148,27 @@ private struct MobileQuestionUsageView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if invoice.isRefundable || invoice.isCancellable {
+            if invoice.requiresCustomerCenterResolution {
+                Text(strings.cancelledPurchaseGuidance)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                Button(strings.reviewCancelledPurchase) {
+                    openCustomerCenter()
+                }
+                .font(.footnote.weight(.semibold))
+            } else if invoice.isRefundable || invoice.isCancellable {
                 HStack(spacing: 14) {
-                    if invoice.isCancellable, let originalTransactionID = invoice.originalTransactionId {
+                    if invoice.isCancellable {
                         Button(strings.cancelSubscription) {
-                            requestCancellation(originalTransactionID: originalTransactionID)
+                            openCustomerCenter()
                         }
                         .font(.footnote.weight(.semibold))
                     }
 
-                    if invoice.isRefundable, let paymentID = invoice.paymentId, let transactionID = invoice.transactionId {
-                        Button(strings.requestRefund, role: .destructive) {
-                            requestRefund(paymentID: paymentID, transactionID: transactionID)
+                    if invoice.isRefundable {
+                        Button(strings.requestRefund) {
+                            openCustomerCenter()
                         }
                         .font(.footnote.weight(.semibold))
                     }
@@ -6206,66 +6222,19 @@ private struct MobileQuestionUsageView: View {
         }
     }
 
-    private func requestRefund(paymentID: Int64, transactionID: String) {
+    private func openCustomerCenter() {
         Task {
-            guard let scene = activeWindowScene else {
-                billingNotice = strings.serviceTemporarilyUnavailable
+            guard let appAccountToken = appState.billingCatalog?.appAccountToken else {
+                billingNotice = strings.customerCenterUnavailable
                 return
             }
             do {
-                let status = try await billingStore.beginRefundRequest(transactionID: transactionID, in: scene)
-                switch status {
-                case .success:
-                    _ = try await appState.requestBillingRefund(paymentID: paymentID)
-                    billingNotice = strings.refundSubmitted
-                case .userCancelled:
-                    break
-                @unknown default:
-                    billingNotice = strings.serviceTemporarilyUnavailable
-                }
+                try await billingStore.prepareCustomerCenter(appAccountToken: appAccountToken)
+                isCustomerCenterPresented = true
             } catch {
-                billingNotice = error.localizedDescription
+                billingNotice = strings.customerCenterUnavailable
             }
         }
-    }
-
-    private func openSubscriptionManagement() {
-        Task {
-            guard let scene = activeWindowScene else {
-                billingNotice = strings.serviceTemporarilyUnavailable
-                return
-            }
-            do {
-                try await billingStore.showManageSubscriptions(in: scene)
-                await appState.refreshBilling()
-            } catch {
-                billingNotice = error.localizedDescription
-            }
-        }
-    }
-
-    private func requestCancellation(originalTransactionID: String) {
-        Task {
-            guard let scene = activeWindowScene else {
-                billingNotice = strings.serviceTemporarilyUnavailable
-                return
-            }
-            do {
-                _ = try await appState.requestBillingCancellation(
-                    originalTransactionID: originalTransactionID
-                )
-                try await billingStore.showManageSubscriptions(in: scene)
-                await appState.refreshBilling()
-            } catch {
-                billingNotice = error.localizedDescription
-            }
-        }
-    }
-
-    private var activeWindowScene: UIWindowScene? {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first { $0.activationState == .foregroundActive }
     }
 
     private func invoiceAmount(_ invoice: BackendBillingInvoice) -> String {
@@ -6282,6 +6251,13 @@ private struct MobileQuestionUsageView: View {
         case (.japanese, "REFUND"): return "返金"
         default: return type
         }
+    }
+
+    private func statusText(_ invoice: BackendBillingInvoice) -> String {
+        if invoice.requiresCustomerCenterResolution {
+            return statusText("CANCELLED")
+        }
+        return statusText(invoice.status)
     }
 
     private func statusText(_ status: String) -> String {
@@ -6316,7 +6292,9 @@ private struct MobileQuestionUsageView: View {
         }
     }
 
-    private func statusColor(_ status: String) -> Color {
+    private func statusColor(_ invoice: BackendBillingInvoice) -> Color {
+        if invoice.requiresCustomerCenterResolution { return .secondary }
+        let status = invoice.status
         if ["COMPLETED", "FULFILLED", "REFUNDED"].contains(status) { return .green }
         if ["FAILED", "REFUND_DECLINED", "COMPENSATION_REQUIRED"].contains(status) { return .red }
         return .secondary

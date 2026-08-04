@@ -251,6 +251,13 @@ final class AppleBillingStore: ObservableObject {
         try await AppStore.showManageSubscriptions(in: scene)
     }
 
+    func prepareCustomerCenter(appAccountToken: UUID) async throws {
+        try await RevenueCatBillingBridge.shared.identify(appAccountToken: appAccountToken)
+        guard RevenueCatBillingBridge.shared.isEnabled else {
+            throw AppleBillingStoreError.customerCenterUnavailable
+        }
+    }
+
     static func backendEnvironment(_ transaction: Transaction) -> String {
         switch transaction.environment {
         case .production:
@@ -270,6 +277,7 @@ enum AppleBillingStoreError: LocalizedError {
     case unverifiedTransaction
     case accountTokenMismatch
     case invalidTransactionIdentifier
+    case customerCenterUnavailable
     case unknownPurchaseResult
 
     var errorDescription: String? {
@@ -282,6 +290,8 @@ enum AppleBillingStoreError: LocalizedError {
             return "결제 계정이 현재 로그인 계정과 일치하지 않습니다."
         case .invalidTransactionIdentifier:
             return "환불할 App Store 거래 번호가 올바르지 않습니다."
+        case .customerCenterUnavailable:
+            return "RevenueCat 결제 관리 기능을 사용할 수 없습니다."
         case .unknownPurchaseResult:
             return "알 수 없는 App Store 결제 결과입니다."
         }

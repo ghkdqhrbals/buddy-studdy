@@ -2788,6 +2788,7 @@ struct BackendBillingInvoice: Decodable, Equatable, Identifiable {
     var expiresAt: Date?
     var createdAt: Date
     var updatedAt: Date
+    var latestEventType: String? = nil
 
     var isRefundable: Bool {
         (type ?? "NORMAL") == "NORMAL"
@@ -2801,6 +2802,12 @@ struct BackendBillingInvoice: Decodable, Equatable, Identifiable {
 
     var isCancellable: Bool {
         (type ?? "NORMAL") == "NORMAL" && isSubscription && status == "COMPLETED"
+    }
+
+    var requiresCustomerCenterResolution: Bool {
+        (type ?? "NORMAL") == "NORMAL"
+            && status == "FAILED"
+            && latestEventType == "CANCELLED"
     }
 }
 

@@ -5,6 +5,7 @@ import com.buddystudy.billing.domain.BillingActionType
 import com.buddystudy.billing.domain.BillingEnvironment
 import com.buddystudy.billing.domain.BillingEventSource
 import com.buddystudy.billing.domain.BillingProductType
+import com.buddystudy.billing.domain.InvoiceEventType
 import com.buddystudy.billing.domain.InvoiceStatus
 import com.buddystudy.billing.domain.InvoiceType
 import com.buddystudy.billing.domain.PaymentStatus
@@ -113,6 +114,7 @@ data class BillingInvoiceSummary(
     val expiresAt: Instant?,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val latestEventType: InvoiceEventType? = null,
 )
 
 data class BillingInvoiceEvent(

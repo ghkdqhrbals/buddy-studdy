@@ -160,6 +160,13 @@ records a deterministic `SYSTEM/CANCELLED` invoice event and projects the
 invoice as `FAILED`. Paid invoices and `REFUND` invoices are never selected by
 checkout expiration.
 
+The invoice API includes the aggregate's latest event type so the client can
+distinguish a cancelled checkout from other `FAILED` outcomes. Billing history
+routes cancelled checkouts, refunds, purchase restoration, and subscription
+management through RevenueCat Customer Center. The app never grants an Apple
+refund itself; the user completes the supported Apple flow and RevenueCat
+webhooks eventually reconcile the payment and invoice projections.
+
 Admin endpoints:
 
 - `GET /api/v1/admin/billing/invoices`
