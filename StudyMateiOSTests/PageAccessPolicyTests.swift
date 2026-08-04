@@ -10,6 +10,9 @@ final class BillingLocalizationTests: XCTestCase {
         XCTAssertEqual(strings.membershipTierName("TIER2"), "ティア2")
         XCTAssertEqual(strings.billingPeriod("P1M"), "月間")
         XCTAssertEqual(strings.billingPeriod("P1Y"), "年間")
+        XCTAssertEqual(strings.monthlyQuestionAllowanceText(300), "毎月300問")
+        XCTAssertEqual(AppStrings(language: .korean).monthlyQuestionAllowanceText(300), "매월 질문 300개")
+        XCTAssertEqual(AppStrings(language: .english).monthlyQuestionAllowanceText(300), "300 questions each month")
     }
 
     func testMembershipActionDistinguishesCurrentChangeAndDowngrade() {

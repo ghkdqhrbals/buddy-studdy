@@ -6030,28 +6030,55 @@ private struct MobileMembershipManagementView: View {
     }
 
     var body: some View {
-        List {
-            membershipSummary
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 24) {
+                membershipSummary
 
-            Section(strings.billingCycle) {
-                Picker(strings.billingCycle, selection: $selectedBillingPeriod) {
-                    ForEach(availableBillingPeriods, id: \.self) { period in
-                        Text(strings.billingPeriod(period))
-                            .tag(period)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(strings.billingCycle)
+                        .font(.headline)
 
-            Section(strings.membershipPlans) {
-                if appState.billingCatalog != nil {
-                    if billingStore.isLoading {
-                        loadingRow
-                    } else {
-                        ForEach(membershipGroups) { group in
-                            membershipOption(group)
+                    Picker(strings.billingCycle, selection: $selectedBillingPeriod) {
+                        ForEach(availableBillingPeriods, id: \.self) { period in
+                            Text(strings.billingPeriod(period))
+                                .tag(period)
                         }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(strings.membershipPlans)
+                        .font(.headline)
+
+                    Group {
+                        if appState.billingCatalog != nil {
+                            if billingStore.isLoading {
+                                loadingRow
+                                    .frame(maxWidth: .infinity, minHeight: 84, alignment: .center)
+                            } else {
+                                VStack(spacing: 0) {
+                                    ForEach(Array(membershipGroups.enumerated()), id: \.element.id) { index, group in
+                                        membershipOption(group)
+
+                                        if index < membershipGroups.count - 1 {
+                                            Divider()
+                                                .padding(.leading, 16)
+                                        }
+                                    }
+                                }
+                            }
+                        } else if appState.isLoadingBilling {
+                            loadingRow
+                                .frame(maxWidth: .infinity, minHeight: 84, alignment: .center)
+                        }
+                    }
+                    .background(Color(.secondarySystemGroupedBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color(.separator).opacity(0.45), lineWidth: 0.5)
                     }
 
                     if let message = billingStore.errorMessage {
@@ -6059,68 +6086,78 @@ private struct MobileMembershipManagementView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
-                } else if appState.isLoadingBilling {
-                    loadingRow
-                }
-            }
-
-            Section {
-                Button {
-                    guard let catalog = appState.billingCatalog,
-                          let product = selectedProduct else { return }
-                    purchase(product, appAccountToken: catalog.appAccountToken)
-                } label: {
-                    Text(primaryActionTitle)
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 5)
-                }
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.roundedRectangle(radius: 8))
-                .disabled(
-                    selectedProduct == nil
-                        || primaryAction == .current
-                        || billingStore.processingProductID != nil
-                )
-
-                if primaryAction == .downgrade {
-                    Text(strings.downgradeMembershipNotice)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                } else if activeProductID != nil, selectedProduct?.id != activeProductID {
-                    Text(strings.membershipChangePending)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Section {
-                if activeProductID != nil {
-                    Button(role: .destructive) {
-                        cancelSubscription()
-                    } label: {
-                        Label(strings.cancelSubscription, systemImage: "xmark.circle")
-                    }
                 }
 
-                if let catalog = appState.billingCatalog {
+                VStack(alignment: .leading, spacing: 10) {
                     Button {
-                        restorePurchases(appAccountToken: catalog.appAccountToken)
+                        guard let catalog = appState.billingCatalog,
+                              let product = selectedProduct else { return }
+                        purchase(product, appAccountToken: catalog.appAccountToken)
                     } label: {
-                        Label(strings.restorePurchases, systemImage: "arrow.clockwise")
-                    }
-                    .disabled(billingStore.processingProductID != nil)
-                }
-            }
+                        HStack(spacing: 8) {
+                            if billingStore.processingProductID != nil {
+                                ProgressView()
+                                    .tint(.white)
+                            }
 
-            if let message = appState.billingErrorMessage {
-                Section {
+                            Text(primaryActionTitle)
+                                .font(.headline)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.roundedRectangle(radius: 8))
+                    .controlSize(.large)
+                    .disabled(
+                        selectedProduct == nil
+                            || primaryAction == .current
+                            || billingStore.processingProductID != nil
+                    )
+
+                    if primaryAction == .downgrade {
+                        Text(strings.downgradeMembershipNotice)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else if activeProductID != nil, selectedProduct?.id != activeProductID {
+                        Text(strings.membershipChangePending)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                HStack(spacing: 0) {
+                    if activeProductID != nil {
+                        Button(strings.manageSubscription) {
+                            cancelSubscription()
+                        }
+                        .frame(maxWidth: .infinity)
+
+                        Divider()
+                            .frame(height: 20)
+                    }
+
+                    if let catalog = appState.billingCatalog {
+                        Button(strings.restorePurchases) {
+                            restorePurchases(appAccountToken: catalog.appAccountToken)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .disabled(billingStore.processingProductID != nil)
+                    }
+                }
+                .font(.subheadline.weight(.semibold))
+                .frame(minHeight: 44)
+
+                if let message = appState.billingErrorMessage {
                     Text(message)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 18)
         }
+        .background(Color(.systemGroupedBackground))
         .navigationTitle(strings.membershipManagement)
         .navigationBarTitleDisplayMode(.inline)
         .task {
@@ -6157,57 +6194,65 @@ private struct MobileMembershipManagementView: View {
 
     @ViewBuilder
     private var membershipSummary: some View {
-        Section {
-            if let activeProduct {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(strings.membershipTierName(activeProduct.tier.tierCode))
-                            .font(.headline)
+        VStack(alignment: .leading, spacing: 12) {
+            Text(strings.currentMembership)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
 
+            if let activeProduct {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(strings.membershipTierName(activeProduct.tier.tierCode))
+                            .font(.title2.weight(.bold))
+
+                        Text(strings.monthlyQuestionAllowanceText(activeProduct.tier.monthlyQuestionLimit))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 12)
+
+                    VStack(alignment: .trailing, spacing: 6) {
                         Text(strings.activeMembership)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.green)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 5))
-
-                        Spacer(minLength: 12)
 
                         Text(activeProduct.displayPrice)
                             .font(.subheadline.weight(.semibold))
-                    }
-
-                    Text("\(activeProduct.tier.monthlyQuestionLimit.formatted()) \(strings.monthlyQuestionAllowance)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-
-                    if let expirationDate = activeExpirationDate {
-                        HStack(spacing: 6) {
-                            Text(activeRenewalLabel)
-                            Text(expirationDate.formatted(date: .abbreviated, time: .omitted))
-                                .monospacedDigit()
-                        }
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                            .monospacedDigit()
                     }
                 }
-                .padding(.vertical, 7)
+
+                if let expirationDate = activeExpirationDate {
+                    HStack(spacing: 5) {
+                        Text(activeRenewalLabel)
+                        Text(expirationDate.formatted(date: .abbreviated, time: .omitted))
+                            .monospacedDigit()
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                }
             } else if let quota = appState.questionQuota {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(strings.currentMembership)
-                    Spacer(minLength: 12)
+                VStack(alignment: .leading, spacing: 6) {
                     Text(strings.monthlyQuotaUsage(
                         remaining: quota.remainingCount,
                         limit: quota.monthlyLimit
                     ))
-                    .font(.subheadline.weight(.semibold))
+                    .font(.title2.weight(.bold))
                     .monospacedDigit()
-                    .foregroundStyle(.secondary)
+
+                    Text(strings.monthlyQuestionAllowanceText(quota.monthlyLimit))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
             } else {
                 loadingRow
             }
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private var membershipGroups: [MembershipProductGroup] {
@@ -6294,10 +6339,7 @@ private struct MobileMembershipManagementView: View {
         Button {
             selectedTierCode = group.tierCode
         } label: {
-            HStack(alignment: .firstTextBaseline) {
-                Image(systemName: selectedTierCode == group.tierCode ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(selectedTierCode == group.tierCode ? Color.accentColor : Color.secondary)
-
+            HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 7) {
                         Text(strings.membershipTierName(group.tierCode))
@@ -6310,7 +6352,7 @@ private struct MobileMembershipManagementView: View {
                         }
                     }
 
-                    Text("\(group.monthlyQuestionLimit.formatted()) \(strings.monthlyQuestionAllowance)")
+                    Text(strings.monthlyQuestionAllowanceText(group.monthlyQuestionLimit))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -6318,15 +6360,28 @@ private struct MobileMembershipManagementView: View {
                 Spacer(minLength: 12)
 
                 if let product {
-                    Text(product.displayPrice)
-                        .font(.subheadline.weight(.semibold))
-                        .monospacedDigit()
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text(product.displayPrice)
+                            .font(.subheadline.weight(.semibold))
+                            .monospacedDigit()
+
+                        Text(strings.billingPeriod(selectedBillingPeriod))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+
+                Image(systemName: selectedTierCode == group.tierCode ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(selectedTierCode == group.tierCode ? Color.accentColor : Color.secondary)
             }
+            .padding(.horizontal, 16)
+            .frame(minHeight: 76)
+            .contentShape(Rectangle())
+            .background(selectedTierCode == group.tierCode ? Color.accentColor.opacity(0.08) : Color.clear)
         }
         .buttonStyle(.plain)
         .disabled(product == nil)
-        .padding(.vertical, 7)
     }
 
     private func purchase(
@@ -6458,8 +6513,12 @@ private struct MobileBillingHistoryView: View {
                 Text(strings.noBillingHistory)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(appState.billingInvoices) { invoice in
-                    invoiceRow(invoice)
+                ForEach(invoiceSections) { section in
+                    Section(section.title) {
+                        ForEach(section.invoices) { invoice in
+                            invoiceRow(invoice)
+                        }
+                    }
                 }
             }
 
@@ -6497,54 +6556,96 @@ private struct MobileBillingHistoryView: View {
 
     @ViewBuilder
     private func invoiceRow(_ invoice: BackendBillingInvoice) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(invoice.type == "REFUND" ? invoiceTypeText("REFUND") : invoice.tierCode)
-                    .font(.headline)
-                Spacer(minLength: 10)
-                Text(invoiceAmount(invoice))
-                    .font(.subheadline.weight(.semibold))
+        if invoice.requiresCustomerCenterResolution || invoice.isRefundable || invoice.isCancellable {
+            Button {
+                openCustomerCenter()
+            } label: {
+                invoiceRowContent(invoice, showsDisclosure: true)
             }
+            .buttonStyle(.plain)
+        } else {
+            invoiceRowContent(invoice, showsDisclosure: false)
+        }
+    }
 
-            HStack(spacing: 7) {
-                Text(statusText(invoice))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(statusColor(invoice))
-                Text("·")
-                    .foregroundStyle(.tertiary)
-                Text((invoice.purchaseAt ?? invoice.createdAt).formatted(date: .abbreviated, time: .omitted))
+    private func invoiceRowContent(
+        _ invoice: BackendBillingInvoice,
+        showsDisclosure: Bool
+    ) -> some View {
+        HStack(spacing: 12) {
+            Circle()
+                .fill(statusColor(invoice))
+                .frame(width: 8, height: 8)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(invoiceTitle(invoice))
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Text(invoiceDateText(invoice.purchaseAt ?? invoice.createdAt))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                if invoice.requiresCustomerCenterResolution {
+                    Text(strings.cancelledPurchaseGuidance)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
             }
 
-            if invoice.requiresCustomerCenterResolution {
-                Text(strings.cancelledPurchaseGuidance)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+            Spacer(minLength: 12)
 
-                Button(strings.reviewCancelledPurchase) {
-                    openCustomerCenter()
-                }
-                .font(.footnote.weight(.semibold))
-            } else if invoice.isRefundable || invoice.isCancellable {
-                HStack(spacing: 14) {
-                    if invoice.isCancellable {
-                        Button(strings.cancelSubscription) {
-                            openCustomerCenter()
-                        }
-                        .font(.footnote.weight(.semibold))
-                    }
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(invoiceAmount(invoice))
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .monospacedDigit()
 
-                    if invoice.isRefundable {
-                        Button(strings.requestRefund) {
-                            openCustomerCenter()
-                        }
-                        .font(.footnote.weight(.semibold))
-                    }
-                }
+                Text(statusText(invoice))
+                    .font(.caption)
+                    .foregroundStyle(statusColor(invoice))
+            }
+
+            if showsDisclosure {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
+    }
+
+    private var invoiceSections: [BillingInvoiceSection] {
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: appState.billingInvoices) { invoice in
+            let date = invoice.purchaseAt ?? invoice.createdAt
+            return calendar.date(from: calendar.dateComponents([.year, .month], from: date)) ?? date
+        }
+        return grouped
+            .map { month, invoices in
+                BillingInvoiceSection(
+                    month: month,
+                    invoices: invoices.sorted {
+                        ($0.purchaseAt ?? $0.createdAt) > ($1.purchaseAt ?? $1.createdAt)
+                    }
+                )
+            }
+            .sorted { $0.month > $1.month }
+    }
+
+    private func invoiceTitle(_ invoice: BackendBillingInvoice) -> String {
+        invoice.type == "REFUND"
+            ? invoiceTypeText("REFUND")
+            : strings.membershipTierName(invoice.tierCode)
+    }
+
+    private func invoiceDateText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = strings.language.locale
+        formatter.setLocalizedDateFormatFromTemplate("MMM d, HH:mm")
+        return formatter.string(from: date)
     }
 
     private func openCustomerCenter() {
@@ -6622,7 +6723,21 @@ private struct MobileBillingHistoryView: View {
         let status = invoice.status
         if ["COMPLETED", "FULFILLED", "REFUNDED"].contains(status) { return .green }
         if ["FAILED", "REFUND_DECLINED", "COMPENSATION_REQUIRED"].contains(status) { return .red }
+        if ["WAITING", "PENDING_PAYMENT", "FULFILLMENT_PENDING", "REFUND_PENDING"].contains(status) {
+            return .orange
+        }
         return .secondary
+    }
+}
+
+private struct BillingInvoiceSection: Identifiable {
+    var month: Date
+    var invoices: [BackendBillingInvoice]
+
+    var id: Date { month }
+
+    var title: String {
+        month.formatted(.dateTime.year().month(.wide))
     }
 }
 

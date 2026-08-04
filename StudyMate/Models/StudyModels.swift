@@ -2846,6 +2846,13 @@ struct AppStrings {
     var refundSubmitted: String { text("Apple에 환불 요청을 제출했습니다.", "Refund request submitted to Apple.", "Appleに返金リクエストを送信しました。") }
     var billingStatus: String { text("상태", "Status", "ステータス") }
     var monthlyQuestionAllowance: String { text("월 질문", "Monthly questions", "月間質問数") }
+    func monthlyQuestionAllowanceText(_ limit: Int) -> String {
+        text(
+            "매월 질문 \(limit.formatted())개",
+            "\(limit.formatted()) questions each month",
+            "毎月\(limit.formatted())問"
+        )
+    }
     func membershipTierName(_ tierCode: String) -> String {
         switch tierCode.uppercased() {
         case "TIER2":
