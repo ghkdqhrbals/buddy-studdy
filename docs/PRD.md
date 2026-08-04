@@ -113,7 +113,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 
 ### Settings
 
-1. Profile is a category hub, not one long form. Profile, Settings, Usage, Notifications, and Terms each open a dedicated page.
+1. Profile is a category hub, not one long form. Profile, Settings, Usage, Notifications, and Terms each open a dedicated page. Membership & Billing is a separate section with dedicated Membership Management and Billing History destinations; Usage contains only quota consumption and reset timing.
 2. OpenAI API key and model are managed separately from study settings, but OpenAI requests are performed only by the backend.
 3. Notification permission opens system settings; no in-app test notification button is shown.
 4. Public-question visibility is stored as an account preference and is changed from Settings, not from the profile editor.

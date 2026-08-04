@@ -5857,6 +5857,28 @@ private struct MobileProfileSettingsSheet: View {
                             )
                         }
                     }
+
+                    Section(strings.membershipAndBilling) {
+                        NavigationLink {
+                            MobileMembershipManagementView()
+                        } label: {
+                            profileDestinationLabel(
+                                title: strings.membershipManagement,
+                                subtitle: nil,
+                                systemImage: "creditcard"
+                            )
+                        }
+
+                        NavigationLink {
+                            MobileBillingHistoryView()
+                        } label: {
+                            profileDestinationLabel(
+                                title: strings.billingHistory,
+                                subtitle: nil,
+                                systemImage: "list.bullet.rectangle"
+                            )
+                        }
+                    }
                 }
 
                 if appState.isCommunitySessionActive {
@@ -5949,9 +5971,6 @@ private struct MobileProfileSettingsSheet: View {
 
 private struct MobileQuestionUsageView: View {
     @EnvironmentObject private var appState: AppState
-    @StateObject private var billingStore = AppleBillingStore()
-    @State private var billingNotice: String?
-    @State private var isCustomerCenterPresented = false
 
     private var strings: AppStrings {
         appState.strings
@@ -5996,18 +6015,51 @@ private struct MobileQuestionUsageView: View {
                     }
                 }
             }
+        }
+        .navigationTitle(strings.usage)
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await appState.refreshQuestionQuota()
+        }
+    }
+}
+
+private struct MobileMembershipManagementView: View {
+    @EnvironmentObject private var appState: AppState
+    @StateObject private var billingStore = AppleBillingStore()
+    @State private var billingNotice: String?
+    @State private var isCustomerCenterPresented = false
+    @State private var selectedProductIDs: [String: String] = [:]
+
+    private var strings: AppStrings {
+        appState.strings
+    }
+
+    var body: some View {
+        List {
+            if let quota = appState.questionQuota {
+                Section {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(strings.monthlyQuestionQuota)
+                        Spacer(minLength: 12)
+                        Text(strings.monthlyQuotaUsage(
+                            remaining: quota.remainingCount,
+                            limit: quota.monthlyLimit
+                        ))
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                    }
+                }
+            }
 
             Section(strings.membershipPlans) {
                 if let catalog = appState.billingCatalog {
                     if billingStore.isLoading {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                            Text(strings.loading)
-                                .foregroundStyle(.secondary)
-                        }
+                        loadingRow
                     } else {
-                        ForEach(billingStore.products) { tierProduct in
-                            membershipRow(tierProduct, appAccountToken: catalog.appAccountToken)
+                        ForEach(membershipGroups) { group in
+                            membershipGroup(group, appAccountToken: catalog.appAccountToken)
                         }
                     }
 
@@ -6016,36 +6068,25 @@ private struct MobileQuestionUsageView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
-
-                    HStack {
-                        Button(strings.restorePurchases) {
-                            restorePurchases(appAccountToken: catalog.appAccountToken)
-                        }
-                        .disabled(billingStore.processingProductID != nil)
-
-                        Spacer()
-
-                        Button(strings.managePurchases) {
-                            openCustomerCenter()
-                        }
-                    }
                 } else if appState.isLoadingBilling {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                        Text(strings.loading)
-                            .foregroundStyle(.secondary)
-                    }
+                    loadingRow
                 }
             }
 
-            Section(strings.billingHistory) {
-                if appState.billingInvoices.isEmpty {
-                    Text(strings.noBillingHistory)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(appState.billingInvoices) { invoice in
-                        invoiceRow(invoice)
+            Section {
+                Button {
+                    openCustomerCenter()
+                } label: {
+                    Label(strings.manageSubscription, systemImage: "creditcard")
+                }
+
+                if let catalog = appState.billingCatalog {
+                    Button {
+                        restorePurchases(appAccountToken: catalog.appAccountToken)
+                    } label: {
+                        Label(strings.restorePurchases, systemImage: "arrow.clockwise")
                     }
+                    .disabled(billingStore.processingProductID != nil)
                 }
             }
 
@@ -6057,7 +6098,7 @@ private struct MobileQuestionUsageView: View {
                 }
             }
         }
-        .navigationTitle(strings.usage)
+        .navigationTitle(strings.membershipManagement)
         .navigationBarTitleDisplayMode(.inline)
         .task {
             await appState.refreshQuestionQuota()
@@ -6084,46 +6125,216 @@ private struct MobileQuestionUsageView: View {
         }
     }
 
+    private var loadingRow: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+            Text(strings.loading)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var membershipGroups: [MembershipProductGroup] {
+        Dictionary(grouping: billingStore.products, by: \.tier.tierCode)
+            .map { tierCode, products in
+                MembershipProductGroup(
+                    tierCode: tierCode,
+                    monthlyQuestionLimit: products.first?.tier.monthlyQuestionLimit ?? 0,
+                    products: products.sorted { $0.tier.sortOrder < $1.tier.sortOrder }
+                )
+            }
+            .sorted {
+                ($0.products.first?.tier.sortOrder ?? 0) < ($1.products.first?.tier.sortOrder ?? 0)
+            }
+    }
+
     @ViewBuilder
-    private func membershipRow(
-        _ tierProduct: AppleBillingStore.TierProduct,
+    private func membershipGroup(
+        _ group: MembershipProductGroup,
         appAccountToken: UUID
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(tierProduct.displayName)
-                        .font(.headline)
-                    Text(tierProduct.description)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
+                Text(strings.membershipTierName(group.tierCode))
+                    .font(.headline)
 
                 Spacer(minLength: 12)
 
-                Text(tierProduct.displayPrice)
-                    .font(.subheadline.weight(.semibold))
+                Text("\(group.monthlyQuestionLimit.formatted()) \(strings.monthlyQuestionAllowance)")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
 
-            HStack {
-                Label(
-                    "\(tierProduct.tier.monthlyQuestionLimit.formatted()) \(strings.monthlyQuestionAllowance)",
-                    systemImage: "questionmark.bubble"
-                )
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-
-                Spacer()
-
-                Button(strings.purchaseMembership) {
-                    purchase(tierProduct, appAccountToken: appAccountToken)
+            if group.products.count > 1 {
+                Picker(
+                    strings.membershipPlans,
+                    selection: productSelection(for: group)
+                ) {
+                    ForEach(group.products) { tierProduct in
+                        Text(strings.billingPeriod(tierProduct.tier.billingPeriod))
+                            .tag(tierProduct.id)
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .disabled(billingStore.processingProductID != nil)
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+
+            if let tierProduct = selectedProduct(in: group) {
+                HStack(spacing: 12) {
+                    Text(tierProduct.displayPrice)
+                        .font(.title3.weight(.semibold))
+                        .monospacedDigit()
+
+                    Spacer(minLength: 8)
+
+                    Button(strings.purchaseMembership) {
+                        purchase(tierProduct, appAccountToken: appAccountToken)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.roundedRectangle(radius: 8))
+                    .disabled(billingStore.processingProductID != nil)
+                }
             }
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, 8)
+    }
+
+    private func productSelection(for group: MembershipProductGroup) -> Binding<String> {
+        Binding(
+            get: { selectedProductIDs[group.tierCode] ?? group.products.first?.id ?? "" },
+            set: { selectedProductIDs[group.tierCode] = $0 }
+        )
+    }
+
+    private func selectedProduct(in group: MembershipProductGroup) -> AppleBillingStore.TierProduct? {
+        let selectedID = selectedProductIDs[group.tierCode]
+        return group.products.first(where: { $0.id == selectedID }) ?? group.products.first
+    }
+
+    private func purchase(
+        _ tierProduct: AppleBillingStore.TierProduct,
+        appAccountToken: UUID
+    ) {
+        Task {
+            do {
+                let outcome = try await billingStore.purchase(
+                    tierProduct,
+                    appAccountToken: appAccountToken,
+                    prepareCheckout: appState.createAppleBillingCheckout,
+                    synchronize: appState.syncAppleBillingTransaction,
+                    waitForFulfillment: appState.waitForRevenueCatBillingFulfillment,
+                    abandonCheckout: appState.abandonAppleBillingCheckout
+                )
+                switch outcome {
+                case .purchased:
+                    billingNotice = strings.billingPurchased
+                case .pending:
+                    billingNotice = strings.billingPending
+                case .cancelled:
+                    break
+                }
+            } catch {
+                await appState.refreshBilling()
+                billingNotice = error.localizedDescription
+            }
+        }
+    }
+
+    private func restorePurchases(appAccountToken: UUID) {
+        Task {
+            do {
+                _ = try await billingStore.restore(
+                    appAccountToken: appAccountToken,
+                    synchronize: appState.syncAppleBillingTransaction
+                )
+                await appState.refreshBilling()
+                billingNotice = strings.billingRestored
+            } catch {
+                billingNotice = error.localizedDescription
+            }
+        }
+    }
+
+    private func openCustomerCenter() {
+        Task {
+            guard let appAccountToken = appState.billingCatalog?.appAccountToken else {
+                billingNotice = strings.customerCenterUnavailable
+                return
+            }
+            do {
+                try await billingStore.prepareCustomerCenter(appAccountToken: appAccountToken)
+                isCustomerCenterPresented = true
+            } catch {
+                billingNotice = strings.customerCenterUnavailable
+            }
+        }
+    }
+}
+
+private struct MembershipProductGroup: Identifiable {
+    var tierCode: String
+    var monthlyQuestionLimit: Int
+    var products: [AppleBillingStore.TierProduct]
+
+    var id: String { tierCode }
+}
+
+private struct MobileBillingHistoryView: View {
+    @EnvironmentObject private var appState: AppState
+    @StateObject private var billingStore = AppleBillingStore()
+    @State private var billingNotice: String?
+    @State private var isCustomerCenterPresented = false
+
+    private var strings: AppStrings {
+        appState.strings
+    }
+
+    var body: some View {
+        List {
+            if appState.isLoadingBilling && appState.billingInvoices.isEmpty {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text(strings.loading)
+                        .foregroundStyle(.secondary)
+                }
+            } else if appState.billingInvoices.isEmpty {
+                Text(strings.noBillingHistory)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(appState.billingInvoices) { invoice in
+                    invoiceRow(invoice)
+                }
+            }
+
+            if let message = appState.billingErrorMessage {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle(strings.billingHistory)
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await appState.refreshBilling()
+        }
+        .refreshable {
+            await appState.refreshBilling()
+        }
+        .alert(
+            strings.errorPopupTitle,
+            isPresented: Binding(
+                get: { billingNotice != nil },
+                set: { if !$0 { billingNotice = nil } }
+            )
+        ) {
+            Button(strings.close, role: .cancel) {}
+        } message: {
+            Text(billingNotice ?? "")
+        }
+        .sheet(isPresented: $isCustomerCenterPresented, onDismiss: {
+            Task { await appState.refreshBilling() }
+        }) {
+            CustomerCenterView()
+        }
     }
 
     @ViewBuilder
@@ -6176,50 +6387,6 @@ private struct MobileQuestionUsageView: View {
             }
         }
         .padding(.vertical, 4)
-    }
-
-    private func purchase(
-        _ tierProduct: AppleBillingStore.TierProduct,
-        appAccountToken: UUID
-    ) {
-        Task {
-            do {
-                let outcome = try await billingStore.purchase(
-                    tierProduct,
-                    appAccountToken: appAccountToken,
-                    prepareCheckout: appState.createAppleBillingCheckout,
-                    synchronize: appState.syncAppleBillingTransaction,
-                    waitForFulfillment: appState.waitForRevenueCatBillingFulfillment,
-                    abandonCheckout: appState.abandonAppleBillingCheckout
-                )
-                switch outcome {
-                case .purchased:
-                    billingNotice = strings.billingPurchased
-                case .pending:
-                    billingNotice = strings.billingPending
-                case .cancelled:
-                    break
-                }
-            } catch {
-                await appState.refreshBilling()
-                billingNotice = error.localizedDescription
-            }
-        }
-    }
-
-    private func restorePurchases(appAccountToken: UUID) {
-        Task {
-            do {
-                _ = try await billingStore.restore(
-                    appAccountToken: appAccountToken,
-                    synchronize: appState.syncAppleBillingTransaction
-                )
-                await appState.refreshBilling()
-                billingNotice = strings.billingRestored
-            } catch {
-                billingNotice = error.localizedDescription
-            }
-        }
     }
 
     private func openCustomerCenter() {

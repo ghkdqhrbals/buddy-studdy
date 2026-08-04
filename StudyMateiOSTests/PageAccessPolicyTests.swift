@@ -1,6 +1,18 @@
 import XCTest
 @testable import StudyMate
 
+final class BillingLocalizationTests: XCTestCase {
+    func testMembershipAndBillingLabelsAreLocalizedInJapanese() {
+        let strings = AppStrings(language: .japanese)
+
+        XCTAssertEqual(strings.membershipAndBilling, "メンバーシップと支払い")
+        XCTAssertEqual(strings.membershipManagement, "メンバーシップ管理")
+        XCTAssertEqual(strings.membershipTierName("TIER2"), "ティア2")
+        XCTAssertEqual(strings.billingPeriod("P1M"), "月間")
+        XCTAssertEqual(strings.billingPeriod("P1Y"), "年間")
+    }
+}
+
 final class CommunityQuestionResultPresentationTests: XCTestCase {
     func testKeepsValidScoreAndDifficulty() {
         let presentation = CommunityQuestionResultPresentation(score: 94, difficulty: 4)

@@ -2806,6 +2806,8 @@ struct AppStrings {
     }
     var monthlyQuestionQuota: String { text("월간 질문", "Monthly questions") }
     var monthlyQuotaReached: String { text("이번 달 질문 한도에 도달했습니다.", "You have reached this month's question limit.") }
+    var membershipAndBilling: String { text("멤버십과 결제", "Membership & billing", "メンバーシップと支払い") }
+    var membershipManagement: String { text("멤버십 관리", "Manage membership", "メンバーシップ管理") }
     var membershipPlans: String { text("멤버십", "Membership", "メンバーシップ") }
     var billingHistory: String { text("결제 내역", "Billing history", "支払い履歴") }
     var restorePurchases: String { text("구매 복원", "Restore purchases", "購入を復元") }
@@ -2836,6 +2838,26 @@ struct AppStrings {
     var refundSubmitted: String { text("Apple에 환불 요청을 제출했습니다.", "Refund request submitted to Apple.", "Appleに返金リクエストを送信しました。") }
     var billingStatus: String { text("상태", "Status", "ステータス") }
     var monthlyQuestionAllowance: String { text("월 질문", "Monthly questions", "月間質問数") }
+    func membershipTierName(_ tierCode: String) -> String {
+        switch tierCode.uppercased() {
+        case "TIER2":
+            return text("티어 2", "Tier 2", "ティア2")
+        case "TIER3":
+            return text("티어 3", "Tier 3", "ティア3")
+        default:
+            return tierCode
+        }
+    }
+    func billingPeriod(_ value: String?) -> String {
+        switch value?.uppercased() {
+        case "P1M", "MONTHLY":
+            return text("월간", "Monthly", "月間")
+        case "P1Y", "YEARLY", "ANNUAL":
+            return text("연간", "Annual", "年間")
+        default:
+            return value ?? "-"
+        }
+    }
     func monthlyQuotaUsage(remaining: Int, limit: Int) -> String {
         text("\(limit)개 중 \(remaining)개 남음", "\(remaining) of \(limit) remaining", "残り\(remaining)件／\(limit)件")
     }
