@@ -170,7 +170,7 @@ struct EmailVerificationCodeResult: Equatable {
 
 @MainActor
 struct BackendBaseURLConfiguration: Equatable {
-    static let defaultDebugBaseURL = URL(string: "https://api.lowfidev.cloud")!
+    static let defaultDebugBaseURL = URL(string: "https://lowfidev.cloud")!
 
     var isDebuggingEnabled: Bool
     var debugBackendBaseURL: String
@@ -217,10 +217,10 @@ struct BackendBaseURLConfiguration: Equatable {
         let normalizedURL = String(trimmedURL.drop { $0 == "/" })
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         switch normalizedURL.lowercased() {
-        case "https://lowfidev.cloud":
-            return "https://api.lowfidev.cloud"
-        case "http://lowfidev.cloud":
-            return "http://api.lowfidev.cloud"
+        case "https://api.lowfidev.cloud":
+            return "https://lowfidev.cloud"
+        case "http://api.lowfidev.cloud":
+            return "http://lowfidev.cloud"
         default:
             return normalizedURL
         }

@@ -18,7 +18,7 @@ This keeps API/Grafana URLs simple while avoiding public DB/Redis exposure.
 
 `lowfidev-config.yaml` keeps these HTTP routes:
 
-- `api.lowfidev.cloud` -> `localhost:30080`
+- `lowfidev.cloud` -> `localhost:30080`
 - `coordinator.lowfidev.cloud` -> `localhost:8080`
 - `monitoring.lowfidev.cloud` -> `localhost:3000` (custom operational UI)
 - `grafana.lowfidev.cloud` -> `localhost:3001` (standalone Grafana)
@@ -88,7 +88,7 @@ Then connect local clients to `localhost:13306` or `localhost:16379`.
 Only one cloudflared process should serve tunnel
 `24c83c3f-3c20-402f-a9ca-247ca8d25fbb`.
 
-If `api.lowfidev.cloud/health` returns `404` while
+If `lowfidev.cloud/health` returns `404` while
 `http://localhost:30080/health` returns `200` on the MacBook Air, check for a
 second TunnelBar-managed connector:
 

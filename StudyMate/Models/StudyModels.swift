@@ -3326,7 +3326,7 @@ struct AppStrings {
     var paste: String { text("붙여넣기", "Paste") }
     var debuggingHelp: String { text("켜면 Developer 로그를 확인할 수 있습니다.", "When enabled, Developer logs are available.") }
     var debugBackendBaseURL: String { text("Debug API URL", "Debug API URL") }
-    var debugBackendBaseURLPlaceholder: String { "https://api.lowfidev.cloud" }
+    var debugBackendBaseURLPlaceholder: String { "https://lowfidev.cloud" }
     var debugBackendBaseURLInvalid: String { text("http 또는 https URL을 입력하세요.", "Enter an http or https URL.") }
     var debugBackendBaseURLHelp: String {
         text(

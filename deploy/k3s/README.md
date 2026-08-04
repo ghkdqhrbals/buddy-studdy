@@ -84,7 +84,7 @@ deploy/k3s/scripts/status.sh
 
 Cloudflared should run on the same Linux host and route:
 
-- `api.lowfidev.cloud` -> `http://localhost:30080`
+- `lowfidev.cloud` -> `http://localhost:30080`
 - DB administration via Tailscale/private network -> `<host-ip>:30432`
 - Redis administration via Tailscale/private network -> `<host-ip>:6379`
 

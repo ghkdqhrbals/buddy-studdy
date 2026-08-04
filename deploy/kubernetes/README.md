@@ -132,7 +132,7 @@ Cloudflare should be used in two different modes:
 `deploy/cloudflared/lowfidev-config.yaml` maps public HTTP services and keeps
 compatibility TCP hostnames:
 
-- `api.lowfidev.cloud` -> `http://localhost:30080`
+- `lowfidev.cloud` -> `http://localhost:30080`
 - `db.lowfidev.cloud` -> `tcp://localhost:30432`
 - Redis is exposed through a node `hostPort`, not a proxy service.
 

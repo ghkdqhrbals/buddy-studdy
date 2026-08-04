@@ -9,7 +9,7 @@ test("health monitor config accepts required production shape", () => {
 test("health monitor config rejects missing runtime essentials", () => {
   const config = validConfig();
   config.kv_namespaces[0].id = "replace-with-kv-namespace-id";
-  config.vars.HEALTHCHECK_URL = "http://api.lowfidev.cloud/api/v1/health/readiness";
+  config.vars.HEALTHCHECK_URL = "http://lowfidev.cloud/api/v1/health/readiness";
   config.vars.SERVICE_NAME = "";
   delete config.vars.ENVIRONMENT_NAME;
   config.vars.FAILURE_THRESHOLD = "0";
@@ -62,7 +62,7 @@ test("health monitor config requires exact readiness path", () => {
 
 test("health monitor config rejects dev health url for production", () => {
   const config = validConfig();
-  config.vars.HEALTHCHECK_URL = "https://api.lowfidev.cloud/api/v1/health/readiness";
+  config.vars.HEALTHCHECK_URL = "https://lowfidev.cloud/api/v1/health/readiness";
   config.vars.ENVIRONMENT_NAME = " Production ";
 
   assert.match(validateConfig(config).join("\n"), /Production HEALTHCHECK_URL/);

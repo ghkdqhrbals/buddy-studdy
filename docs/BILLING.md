@@ -189,7 +189,7 @@ monitoring administrator session. The monitoring UI exposes the flow at
    metadata. The App Store webhook targets
    `https://api.ghkdqhrbals.org/api/v1/billing/revenuecat/webhooks`; the Test
    Store webhook is filtered to the Test Store app and Sandbox environment and
-   targets `https://api.lowfidev.cloud/api/v1/billing/revenuecat/webhooks`.
+   targets `https://lowfidev.cloud/api/v1/billing/revenuecat/webhooks`.
 7. RevenueCat must own transaction completion and use the same four App Store
    product IDs. Debug builds may use a `test_` Test Store key; Release validates
    that the configured public key starts with `appl_`. Test Store webhook events
@@ -211,7 +211,7 @@ real purchases can complete.
   Simulator and Xcode-launched device purchases therefore return `XCODE`
   transactions while still creating the same backend `NORMAL/WAITING` invoice
   before the StoreKit sheet and synchronizing the transaction JWS afterward.
-- The same launch action injects `BUDDYSTUDY_BACKEND_BASE_URL=https://api.lowfidev.cloud`,
+- The same launch action injects `BUDDYSTUDY_BACKEND_BASE_URL=https://lowfidev.cloud`,
   keeping the local StoreKit transaction and its pending invoice on the dev
   backend even when the installation previously selected the production API.
 - The backend `dev` profile accepts `XCODE` transactions and verifies their

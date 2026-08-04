@@ -2663,7 +2663,7 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
         XCTAssertTrue(scheme.contains("../../StudyMateDev.storekit"))
         XCTAssertTrue(scheme.contains("BUDDYSTUDY_BACKEND_BASE_URL"))
-        XCTAssertTrue(scheme.contains("https://api.lowfidev.cloud"))
+        XCTAssertTrue(scheme.contains("https://lowfidev.cloud"))
     }
 
     @MainActor
@@ -2671,22 +2671,22 @@ final class ArchitecturePolicyTests: XCTestCase {
         let configuration = BackendBaseURLConfiguration(
             isDebuggingEnabled: false,
             debugBackendBaseURL: "",
-            launchBackendBaseURL: "https://api.lowfidev.cloud"
+            launchBackendBaseURL: "https://lowfidev.cloud"
         )
 
-        XCTAssertEqual(configuration.effectiveBaseURL.absoluteString, "https://api.lowfidev.cloud")
+        XCTAssertEqual(configuration.effectiveBaseURL.absoluteString, "https://lowfidev.cloud")
     }
 
     @MainActor
-    func testLegacyDevelopmentBackendURLMigratesToAPIHost() {
+    func testLegacyDevelopmentAPIHostMigratesToRootHost() {
         let configuration = BackendBaseURLConfiguration(
             isDebuggingEnabled: true,
-            debugBackendBaseURL: "https://lowfidev.cloud",
+            debugBackendBaseURL: "https://api.lowfidev.cloud",
             launchBackendBaseURL: nil
         )
 
-        XCTAssertEqual(configuration.normalizedDebugBackendBaseURL, "https://api.lowfidev.cloud")
-        XCTAssertEqual(configuration.effectiveBaseURL.absoluteString, "https://api.lowfidev.cloud")
+        XCTAssertEqual(configuration.normalizedDebugBackendBaseURL, "https://lowfidev.cloud")
+        XCTAssertEqual(configuration.effectiveBaseURL.absoluteString, "https://lowfidev.cloud")
     }
 
     func testDevelopmentStoreKitConfigurationLoadsAllPaidProducts() async throws {

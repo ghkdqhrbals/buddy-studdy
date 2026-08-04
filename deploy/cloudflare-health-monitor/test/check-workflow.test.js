@@ -120,7 +120,7 @@ jobs:
           printf '%s' "$HEALTH_MONITOR_SLACK_WEBHOOK_URL" | npx wrangler secret put SLACK_WEBHOOK_URL
           printf '%s' "$MANUAL_CHECK_TOKEN" | npx wrangler secret put MANUAL_CHECK_TOKEN
       - name: Check backend health
-        run: curl -fsS https://api.lowfidev.cloud/api/v1/health/readiness
+        run: curl -fsS https://lowfidev.cloud/api/v1/health/readiness
 `;
 
   assert.match(validateWorkflowText(workflow).join("\n"), /must not directly call backend health endpoints/);
@@ -135,7 +135,7 @@ jobs:
   build:
     steps:
       - name: Health check
-        run: wget -qO- https://api.lowfidev.cloud/health
+        run: wget -qO- https://lowfidev.cloud/health
 `;
 
   assert.match(validateNoActionsRuntimeHealthChecks(workflow, "backend-image.yml").join("\n"), /backend-image\.yml/);
@@ -623,7 +623,7 @@ jobs:
       - name: Check backend readiness
         run: |
           curl -fsS \\
-            "https://api.lowfidev.cloud/api/v1/health/readiness"
+            "https://lowfidev.cloud/api/v1/health/readiness"
 `;
 
   const errors = validateNoActionsRuntimeHealthChecks(workflow, "deploy-backend.yml").join("\n");
@@ -641,7 +641,7 @@ jobs:
   deploy:
     steps:
       - name: Check backend readiness
-        run: node -e "fetch('https://api.lowfidev.cloud/api/v1/health/readiness')"
+        run: node -e "fetch('https://lowfidev.cloud/api/v1/health/readiness')"
 `;
 
   const errors = validateNoActionsRuntimeHealthChecks(workflow, "deploy-backend.yml").join("\n");
@@ -659,7 +659,7 @@ jobs:
   deploy:
     steps:
       - name: Wait for backend readiness
-        run: npx wait-on https://api.lowfidev.cloud/api/v1/health/readiness
+        run: npx wait-on https://lowfidev.cloud/api/v1/health/readiness
 `;
 
   const errors = validateNoActionsRuntimeHealthChecks(workflow, "deploy-backend.yml").join("\n");

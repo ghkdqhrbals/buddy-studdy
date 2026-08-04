@@ -83,7 +83,7 @@
       <EnvironmentVariables>
          <EnvironmentVariable
             key = "BUDDYSTUDY_BACKEND_BASE_URL"
-            value = "https://api.lowfidev.cloud"
+            value = "https://lowfidev.cloud"
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>
