@@ -2809,6 +2809,14 @@ struct AppStrings {
     var membershipAndBilling: String { text("멤버십과 결제", "Membership & billing", "メンバーシップと支払い") }
     var membershipManagement: String { text("멤버십 관리", "Manage membership", "メンバーシップ管理") }
     var membershipPlans: String { text("멤버십", "Membership", "メンバーシップ") }
+    var billingCycle: String { text("결제 주기", "Billing cycle", "請求期間") }
+    var currentMembership: String { text("현재 멤버십", "Current membership", "現在のメンバーシップ") }
+    var activeMembership: String { text("이용 중", "Active", "利用中") }
+    var changeMembership: String { text("멤버십 변경", "Change membership", "メンバーシップを変更") }
+    var membershipChangePending: String { text("App Store에서 변경 일정을 확인할 수 있습니다.", "Review the change schedule in the App Store.", "App Storeで変更予定を確認できます。") }
+    var downgradeMembershipNotice: String { text("낮은 멤버십은 현재 결제 기간이 끝난 뒤 적용됩니다.", "A downgrade takes effect after the current billing period.", "ダウングレードは現在の請求期間終了後に適用されます。") }
+    var renewsOn: String { text("다음 갱신", "Renews", "次回更新") }
+    var endsOn: String { text("이용 종료", "Ends", "利用終了") }
     var billingHistory: String { text("결제 내역", "Billing history", "支払い履歴") }
     var restorePurchases: String { text("구매 복원", "Restore purchases", "購入を復元") }
     var manageSubscription: String { text("구독 관리", "Manage subscription", "サブスクリプションを管理") }
@@ -3990,4 +3998,32 @@ struct AppStrings {
     var notEnoughStats: String { text("통계를 만들려면 채점 기록이 더 필요합니다.", "Grade more answers to build insights.") }
     func itemCount(_ count: Int) -> String { text("\(count)개", "\(count)", "\(count)件") }
     var correctRate: String { text("정답", "Correct") }
+}
+
+enum MembershipPrimaryAction: Equatable {
+    case subscribe
+    case current
+    case change
+    case downgrade
+}
+
+struct MembershipPlanActionPolicy {
+    static func resolve(
+        activeProductID: String?,
+        activeMonthlyLimit: Int?,
+        selectedProductID: String?,
+        selectedMonthlyLimit: Int?
+    ) -> MembershipPrimaryAction {
+        guard let selectedProductID else { return .subscribe }
+        guard let activeProductID else { return .subscribe }
+        if selectedProductID == activeProductID {
+            return .current
+        }
+        if let activeMonthlyLimit,
+           let selectedMonthlyLimit,
+           selectedMonthlyLimit < activeMonthlyLimit {
+            return .downgrade
+        }
+        return .change
+    }
 }

@@ -11,6 +11,45 @@ final class BillingLocalizationTests: XCTestCase {
         XCTAssertEqual(strings.billingPeriod("P1M"), "月間")
         XCTAssertEqual(strings.billingPeriod("P1Y"), "年間")
     }
+
+    func testMembershipActionDistinguishesCurrentChangeAndDowngrade() {
+        XCTAssertEqual(
+            MembershipPlanActionPolicy.resolve(
+                activeProductID: nil,
+                activeMonthlyLimit: nil,
+                selectedProductID: "tier2.monthly",
+                selectedMonthlyLimit: 300
+            ),
+            .subscribe
+        )
+        XCTAssertEqual(
+            MembershipPlanActionPolicy.resolve(
+                activeProductID: "tier2.monthly",
+                activeMonthlyLimit: 300,
+                selectedProductID: "tier2.monthly",
+                selectedMonthlyLimit: 300
+            ),
+            .current
+        )
+        XCTAssertEqual(
+            MembershipPlanActionPolicy.resolve(
+                activeProductID: "tier2.monthly",
+                activeMonthlyLimit: 300,
+                selectedProductID: "tier3.monthly",
+                selectedMonthlyLimit: 1_000
+            ),
+            .change
+        )
+        XCTAssertEqual(
+            MembershipPlanActionPolicy.resolve(
+                activeProductID: "tier3.monthly",
+                activeMonthlyLimit: 1_000,
+                selectedProductID: "tier2.monthly",
+                selectedMonthlyLimit: 300
+            ),
+            .downgrade
+        )
+    }
 }
 
 final class CommunityQuestionResultPresentationTests: XCTestCase {

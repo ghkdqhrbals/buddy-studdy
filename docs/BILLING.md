@@ -16,10 +16,16 @@ access, and monthly quota. A successful purchase sheet therefore does not by
 itself grant access: the invoice becomes `COMPLETED` only after verified payment
 evidence and membership fulfillment have both committed.
 
-The user-facing recovery surface is RevenueCat Customer Center. It provides
-missing-purchase restoration, subscription cancellation, iOS refund requests,
-and plan management according to the remote RevenueCat configuration. Apple,
-not BuddyStudy or RevenueCat, makes the final decision for an Apple refund.
+The membership screen reads RevenueCat `CustomerInfo` to identify the active
+product and presents one selected tier, one billing period, and one primary
+subscribe/change action. Selecting another product in the same App Store
+subscription group supports upgrades, crossgrades, and downgrades; a downgrade
+takes effect at the next renewal according to Apple's rules. When RevenueCat is
+enabled, the visible cancellation action opens Customer Center so App Store and
+RevenueCat Test Store subscriptions use the same cancellation, plan-change, and
+refund surface. Apple's native subscription management is the fallback when
+RevenueCat is unavailable. Apple, not BuddyStudy or RevenueCat, makes the final
+decision for an Apple refund.
 
 ## Product catalog
 

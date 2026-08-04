@@ -6029,7 +6029,8 @@ private struct MobileMembershipManagementView: View {
     @StateObject private var billingStore = AppleBillingStore()
     @State private var billingNotice: String?
     @State private var isCustomerCenterPresented = false
-    @State private var selectedProductIDs: [String: String] = [:]
+    @State private var selectedTierCode: String?
+    @State private var selectedBillingPeriod = "P1M"
 
     private var strings: AppStrings {
         appState.strings
@@ -6037,29 +6038,26 @@ private struct MobileMembershipManagementView: View {
 
     var body: some View {
         List {
-            if let quota = appState.questionQuota {
-                Section {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(strings.monthlyQuestionQuota)
-                        Spacer(minLength: 12)
-                        Text(strings.monthlyQuotaUsage(
-                            remaining: quota.remainingCount,
-                            limit: quota.monthlyLimit
-                        ))
-                        .font(.subheadline.weight(.semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
+            membershipSummary
+
+            Section(strings.billingCycle) {
+                Picker(strings.billingCycle, selection: $selectedBillingPeriod) {
+                    ForEach(availableBillingPeriods, id: \.self) { period in
+                        Text(strings.billingPeriod(period))
+                            .tag(period)
                     }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
             }
 
             Section(strings.membershipPlans) {
-                if let catalog = appState.billingCatalog {
+                if appState.billingCatalog != nil {
                     if billingStore.isLoading {
                         loadingRow
                     } else {
                         ForEach(membershipGroups) { group in
-                            membershipGroup(group, appAccountToken: catalog.appAccountToken)
+                            membershipOption(group)
                         }
                     }
 
@@ -6075,9 +6073,41 @@ private struct MobileMembershipManagementView: View {
 
             Section {
                 Button {
-                    openCustomerCenter()
+                    guard let catalog = appState.billingCatalog,
+                          let product = selectedProduct else { return }
+                    purchase(product, appAccountToken: catalog.appAccountToken)
                 } label: {
-                    Label(strings.manageSubscription, systemImage: "creditcard")
+                    Text(primaryActionTitle)
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 5)
+                }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.roundedRectangle(radius: 8))
+                .disabled(
+                    selectedProduct == nil
+                        || primaryAction == .current
+                        || billingStore.processingProductID != nil
+                )
+
+                if primaryAction == .downgrade {
+                    Text(strings.downgradeMembershipNotice)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else if activeProductID != nil, selectedProduct?.id != activeProductID {
+                    Text(strings.membershipChangePending)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                if activeProductID != nil {
+                    Button(role: .destructive) {
+                        cancelSubscription()
+                    } label: {
+                        Label(strings.cancelSubscription, systemImage: "xmark.circle")
+                    }
                 }
 
                 if let catalog = appState.billingCatalog {
@@ -6101,11 +6131,10 @@ private struct MobileMembershipManagementView: View {
         .navigationTitle(strings.membershipManagement)
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            await appState.refreshQuestionQuota()
-            await appState.refreshBilling()
-            if let catalog = appState.billingCatalog {
-                await billingStore.load(catalog: catalog)
-            }
+            await refreshMembershipData()
+        }
+        .refreshable {
+            await refreshMembershipData()
         }
         .alert(
             strings.errorPopupTitle,
@@ -6119,7 +6148,7 @@ private struct MobileMembershipManagementView: View {
             Text(billingNotice ?? "")
         }
         .sheet(isPresented: $isCustomerCenterPresented, onDismiss: {
-            Task { await appState.refreshBilling() }
+            Task { await refreshMembershipData() }
         }) {
             CustomerCenterView()
         }
@@ -6130,6 +6159,61 @@ private struct MobileMembershipManagementView: View {
             ProgressView()
             Text(strings.loading)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var membershipSummary: some View {
+        Section {
+            if let activeProduct {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(strings.membershipTierName(activeProduct.tier.tierCode))
+                            .font(.headline)
+
+                        Text(strings.activeMembership)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.green)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(.green.opacity(0.12), in: RoundedRectangle(cornerRadius: 5))
+
+                        Spacer(minLength: 12)
+
+                        Text(activeProduct.displayPrice)
+                            .font(.subheadline.weight(.semibold))
+                    }
+
+                    Text("\(activeProduct.tier.monthlyQuestionLimit.formatted()) \(strings.monthlyQuestionAllowance)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    if let expirationDate = activeExpirationDate {
+                        HStack(spacing: 6) {
+                            Text(activeRenewalLabel)
+                            Text(expirationDate.formatted(date: .abbreviated, time: .omitted))
+                                .monospacedDigit()
+                        }
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 7)
+            } else if let quota = appState.questionQuota {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(strings.currentMembership)
+                    Spacer(minLength: 12)
+                    Text(strings.monthlyQuotaUsage(
+                        remaining: quota.remainingCount,
+                        limit: quota.monthlyLimit
+                    ))
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                }
+            } else {
+                loadingRow
+            }
         }
     }
 
@@ -6147,67 +6231,109 @@ private struct MobileMembershipManagementView: View {
             }
     }
 
-    @ViewBuilder
-    private func membershipGroup(
-        _ group: MembershipProductGroup,
-        appAccountToken: UUID
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(strings.membershipTierName(group.tierCode))
-                    .font(.headline)
-
-                Spacer(minLength: 12)
-
-                Text("\(group.monthlyQuestionLimit.formatted()) \(strings.monthlyQuestionAllowance)")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
-            if group.products.count > 1 {
-                Picker(
-                    strings.membershipPlans,
-                    selection: productSelection(for: group)
-                ) {
-                    ForEach(group.products) { tierProduct in
-                        Text(strings.billingPeriod(tierProduct.tier.billingPeriod))
-                            .tag(tierProduct.id)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
-
-            if let tierProduct = selectedProduct(in: group) {
-                HStack(spacing: 12) {
-                    Text(tierProduct.displayPrice)
-                        .font(.title3.weight(.semibold))
-                        .monospacedDigit()
-
-                    Spacer(minLength: 8)
-
-                    Button(strings.purchaseMembership) {
-                        purchase(tierProduct, appAccountToken: appAccountToken)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .buttonBorderShape(.roundedRectangle(radius: 8))
-                    .disabled(billingStore.processingProductID != nil)
-                }
-            }
-        }
-        .padding(.vertical, 8)
+    private var availableBillingPeriods: [String] {
+        let periods = Set(billingStore.products.compactMap(\.tier.billingPeriod))
+        let preferredOrder = ["P1M", "P1Y"]
+        return preferredOrder.filter(periods.contains) + periods.subtracting(preferredOrder).sorted()
     }
 
-    private func productSelection(for group: MembershipProductGroup) -> Binding<String> {
-        Binding(
-            get: { selectedProductIDs[group.tierCode] ?? group.products.first?.id ?? "" },
-            set: { selectedProductIDs[group.tierCode] = $0 }
+    private var selectedProduct: AppleBillingStore.TierProduct? {
+        guard let selectedTierCode else { return nil }
+        return billingStore.products.first {
+            $0.tier.tierCode == selectedTierCode
+                && $0.tier.billingPeriod == selectedBillingPeriod
+        }
+    }
+
+    private var activeProductID: String? {
+        billingStore.activeSubscription?.productID ?? fallbackActiveInvoice?.productId
+    }
+
+    private var activeProduct: AppleBillingStore.TierProduct? {
+        guard let activeProductID else { return nil }
+        return billingStore.products.first { $0.id == activeProductID }
+    }
+
+    private var fallbackActiveInvoice: BackendBillingInvoice? {
+        appState.billingInvoices
+            .filter {
+                ($0.type ?? "NORMAL") == "NORMAL"
+                    && $0.status == "COMPLETED"
+                    && $0.isSubscription
+                    && $0.expiresAt.map { $0 > Date() } == true
+            }
+            .max {
+                ($0.expiresAt ?? .distantPast) < ($1.expiresAt ?? .distantPast)
+            }
+    }
+
+    private var activeExpirationDate: Date? {
+        billingStore.activeSubscription?.expirationDate ?? fallbackActiveInvoice?.expiresAt
+    }
+
+    private var activeRenewalLabel: String {
+        billingStore.activeSubscription?.willRenew == false ? strings.endsOn : strings.renewsOn
+    }
+
+    private var primaryActionTitle: String {
+        switch primaryAction {
+        case .subscribe:
+            return strings.purchaseMembership
+        case .current:
+            return strings.currentMembership
+        case .change, .downgrade:
+            return strings.changeMembership
+        }
+    }
+
+    private var primaryAction: MembershipPrimaryAction {
+        MembershipPlanActionPolicy.resolve(
+            activeProductID: activeProductID,
+            activeMonthlyLimit: activeProduct?.tier.monthlyQuestionLimit,
+            selectedProductID: selectedProduct?.id,
+            selectedMonthlyLimit: selectedProduct?.tier.monthlyQuestionLimit
         )
     }
 
-    private func selectedProduct(in group: MembershipProductGroup) -> AppleBillingStore.TierProduct? {
-        let selectedID = selectedProductIDs[group.tierCode]
-        return group.products.first(where: { $0.id == selectedID }) ?? group.products.first
+    @ViewBuilder
+    private func membershipOption(_ group: MembershipProductGroup) -> some View {
+        let product = group.products.first { $0.tier.billingPeriod == selectedBillingPeriod }
+        Button {
+            selectedTierCode = group.tierCode
+        } label: {
+            HStack(alignment: .firstTextBaseline) {
+                Image(systemName: selectedTierCode == group.tierCode ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(selectedTierCode == group.tierCode ? Color.accentColor : Color.secondary)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 7) {
+                        Text(strings.membershipTierName(group.tierCode))
+                            .font(.headline)
+
+                        if activeProduct?.tier.tierCode == group.tierCode {
+                            Text(strings.activeMembership)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.green)
+                        }
+                    }
+
+                    Text("\(group.monthlyQuestionLimit.formatted()) \(strings.monthlyQuestionAllowance)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 12)
+
+                if let product {
+                    Text(product.displayPrice)
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(product == nil)
+        .padding(.vertical, 7)
     }
 
     private func purchase(
@@ -6232,6 +6358,7 @@ private struct MobileMembershipManagementView: View {
                 case .cancelled:
                     break
                 }
+                await refreshMembershipData()
             } catch {
                 await appState.refreshBilling()
                 billingNotice = error.localizedDescription
@@ -6246,7 +6373,7 @@ private struct MobileMembershipManagementView: View {
                     appAccountToken: appAccountToken,
                     synchronize: appState.syncAppleBillingTransaction
                 )
-                await appState.refreshBilling()
+                await refreshMembershipData()
                 billingNotice = strings.billingRestored
             } catch {
                 billingNotice = error.localizedDescription
@@ -6254,19 +6381,57 @@ private struct MobileMembershipManagementView: View {
         }
     }
 
-    private func openCustomerCenter() {
+    private func refreshMembershipData() async {
+        await appState.refreshQuestionQuota()
+        await appState.refreshBilling()
+        guard let catalog = appState.billingCatalog else { return }
+        await billingStore.load(catalog: catalog)
+        initializeSelection()
+    }
+
+    private func initializeSelection() {
+        if let activeProduct {
+            selectedTierCode = activeProduct.tier.tierCode
+            selectedBillingPeriod = activeProduct.tier.billingPeriod ?? selectedBillingPeriod
+            return
+        }
+        if selectedTierCode == nil {
+            selectedTierCode = membershipGroups.first?.tierCode
+        }
+        if !availableBillingPeriods.contains(selectedBillingPeriod) {
+            selectedBillingPeriod = availableBillingPeriods.first ?? "P1M"
+        }
+    }
+
+    private func cancelSubscription() {
         Task {
-            guard let appAccountToken = appState.billingCatalog?.appAccountToken else {
-                billingNotice = strings.customerCenterUnavailable
-                return
-            }
             do {
-                try await billingStore.prepareCustomerCenter(appAccountToken: appAccountToken)
-                isCustomerCenterPresented = true
+                if RevenueCatBillingBridge.shared.isEnabled {
+                    guard let appAccountToken = appState.billingCatalog?.appAccountToken else {
+                        billingNotice = strings.customerCenterUnavailable
+                        return
+                    }
+                    try await billingStore.prepareCustomerCenter(appAccountToken: appAccountToken)
+                    isCustomerCenterPresented = true
+                } else {
+                    guard let scene = activeWindowScene else {
+                        billingNotice = strings.customerCenterUnavailable
+                        return
+                    }
+                    try await billingStore.showManageSubscriptions(in: scene)
+                    await refreshMembershipData()
+                }
             } catch {
                 billingNotice = strings.customerCenterUnavailable
             }
         }
+    }
+
+    private var activeWindowScene: UIWindowScene? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })
+            ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
     }
 }
 

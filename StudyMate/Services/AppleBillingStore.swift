@@ -83,6 +83,12 @@ final class RevenueCatBillingBridge {
 
 @MainActor
 final class AppleBillingStore: ObservableObject {
+    struct ActiveSubscription: Equatable {
+        var productID: String
+        var expirationDate: Date?
+        var willRenew: Bool?
+    }
+
     struct TierProduct: Identifiable {
         enum StoreProductSource {
             case appStore(Product)
@@ -120,6 +126,7 @@ final class AppleBillingStore: ObservableObject {
     }
 
     @Published private(set) var products: [TierProduct] = []
+    @Published private(set) var activeSubscription: ActiveSubscription?
     @Published private(set) var isLoading = false
     @Published private(set) var processingProductID: String?
     @Published private(set) var errorMessage: String?
@@ -145,12 +152,14 @@ final class AppleBillingStore: ObservableObject {
                     byIdentifier[tier.productId].map { TierProduct(tier: tier, source: $0) }
                 }
                 .sorted { $0.tier.sortOrder < $1.tier.sortOrder }
+            activeSubscription = try await resolveActiveSubscription(catalog: catalog)
             let missingProducts = Set(catalog.products.map(\.productId)).subtracting(byIdentifier.keys)
             errorMessage = missingProducts.isEmpty
                 ? nil
                 : "App Store에서 일부 요금제를 불러올 수 없습니다."
         } catch {
             products = []
+            activeSubscription = nil
             errorMessage = error.localizedDescription
         }
     }
@@ -256,6 +265,46 @@ final class AppleBillingStore: ObservableObject {
         guard RevenueCatBillingBridge.shared.isEnabled else {
             throw AppleBillingStoreError.customerCenterUnavailable
         }
+    }
+
+    private func resolveActiveSubscription(
+        catalog: BackendBillingCatalog
+    ) async throws -> ActiveSubscription? {
+        let catalogProductIDs = Set(catalog.products.map(\.productId))
+        if RevenueCatBillingBridge.shared.isEnabled {
+            let customerInfo = try await Purchases.shared.customerInfo(fetchPolicy: .fetchCurrent)
+            return customerInfo.activeSubscriptions
+                .filter(catalogProductIDs.contains)
+                .compactMap { productID -> ActiveSubscription? in
+                    let subscription = customerInfo.subscriptionsByProductIdentifier[productID]
+                    return ActiveSubscription(
+                        productID: productID,
+                        expirationDate: subscription?.expiresDate,
+                        willRenew: subscription?.willRenew
+                    )
+                }
+                .max {
+                    ($0.expirationDate ?? .distantPast) < ($1.expirationDate ?? .distantPast)
+                }
+        }
+
+        var active: ActiveSubscription?
+        for await result in Transaction.currentEntitlements {
+            guard case .verified(let transaction) = result,
+                  catalogProductIDs.contains(transaction.productID),
+                  transaction.revocationDate == nil else {
+                continue
+            }
+            let candidate = ActiveSubscription(
+                productID: transaction.productID,
+                expirationDate: transaction.expirationDate,
+                willRenew: nil
+            )
+            if (candidate.expirationDate ?? .distantFuture) > (active?.expirationDate ?? .distantPast) {
+                active = candidate
+            }
+        }
+        return active
     }
 
     static func backendEnvironment(_ transaction: Transaction) -> String {
