@@ -382,6 +382,9 @@ private extension ISO8601DateFormatter {
 @MainActor
 protocol NotificationServicing: AnyObject {
     func requestAuthorizationIfNeeded(language: AppLanguage) async -> Bool
+    #if os(iOS)
+    func deactivateRemoteNotificationsForLogout()
+    #endif
     func openSystemNotificationSettings()
     func playPreview(sound: NotificationSoundOption)
     func showQuestionNotification(
@@ -434,6 +437,17 @@ final class NotificationService: NotificationServicing {
             return false
         }
     }
+
+    #if os(iOS)
+    func deactivateRemoteNotificationsForLogout() {
+        UIApplication.shared.unregisterForRemoteNotifications()
+        let center = UNUserNotificationCenter.current()
+        center.removeAllPendingNotificationRequests()
+        center.removeAllDeliveredNotifications()
+        StudyNotificationDelegate.shared.resetForLogout()
+        StudyRemoteNotificationBridge.shared.resetForLogout()
+    }
+    #endif
 
     private func registerForRemoteNotificationsIfAvailable() {
         #if os(iOS)
@@ -701,15 +715,33 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
         self.appState = appState
         register(language: appState.settings.appLanguage)
         flushPendingEventLogs()
+        #if os(iOS)
+        guard appState.isCommunitySessionActive else {
+            resetForLogout()
+            return
+        }
+        #endif
         processPendingAppRoutes()
         processPendingLocalResponsesIfActive()
     }
+
+    #if os(iOS)
+    @MainActor
+    func resetForLogout() {
+        pendingLocalResponses.removeAll()
+        pendingAppRoutes.removeAll()
+    }
+    #endif
 
     @MainActor
     private func enqueueAppRoute(_ route: AppRoute, announcement: HomeAnnouncement? = nil) {
         logEvent("push_route_enqueued route=\(route)")
         guard let appState else {
             pendingAppRoutes.append(PendingAppRoute(route: route, announcement: announcement))
+            return
+        }
+        guard appState.isCommunitySessionActive else {
+            logEvent("로그아웃 상태에서 push route를 무시했습니다. route=\(route)")
             return
         }
 
@@ -774,6 +806,10 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
         replyText: String?,
         openStudy: Bool
     ) {
+        if let appState, !appState.isCommunitySessionActive {
+            logEvent("로그아웃 상태에서 notification response를 무시했습니다.")
+            return
+        }
         pendingLocalResponses.append(
             PendingLocalNotificationResponse(
                 actionIdentifier: actionIdentifier,
@@ -799,6 +835,10 @@ final class StudyNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
 
     @MainActor
     private func processPendingLocalResponses() {
+        if let appState, !appState.isCommunitySessionActive {
+            pendingLocalResponses.removeAll()
+            return
+        }
         let pendingResponses = pendingLocalResponses
         pendingLocalResponses.removeAll()
         for response in pendingResponses {
@@ -1163,6 +1203,14 @@ final class StudyRemoteNotificationBridge {
     }
 
     func didRegisterForRemoteNotifications(deviceToken: Data) {
+        guard appState?.isCommunitySessionActive == true else {
+            pendingDeviceToken = nil
+            UIApplication.shared.unregisterForRemoteNotifications()
+            appState?.logRemoteNotificationEvent(
+                "로그아웃 상태의 APNs 토큰 등록을 폐기했습니다."
+            )
+            return
+        }
         pendingDeviceToken = deviceToken
         appState?.logRemoteNotificationEvent(
             "iPhone push 등록 성공: tokenBytes=\(deviceToken.count)"
@@ -1179,6 +1227,12 @@ final class StudyRemoteNotificationBridge {
 
     private func processPendingDeviceTokenIfNeeded() {
         guard let pendingDeviceToken, let appState else {
+            return
+        }
+
+        guard appState.isCommunitySessionActive else {
+            self.pendingDeviceToken = nil
+            UIApplication.shared.unregisterForRemoteNotifications()
             return
         }
 
@@ -1255,6 +1309,11 @@ final class StudyRemoteNotificationBridge {
             return false
         }
 
+        guard appState.isCommunitySessionActive else {
+            appState.logRemoteNotificationEvent("로그아웃 상태에서 push 열기를 무시했습니다.")
+            return false
+        }
+
         return await appState.notificationLandingCoordinator.land(userInfo: userInfo, replyText: replyText)
     }
 
@@ -1273,6 +1332,11 @@ final class StudyRemoteNotificationBridge {
                     replyText: replyText
                 )
             )
+            return false
+        }
+
+        guard appState.isCommunitySessionActive else {
+            appState.logRemoteNotificationEvent("로그아웃 상태에서 수신된 push를 무시했습니다.")
             return false
         }
 
@@ -1303,6 +1367,11 @@ final class StudyRemoteNotificationBridge {
             openStudy: openStudy,
             replyText: replyText
         )
+    }
+
+    func resetForLogout() {
+        pendingNotifications.removeAll()
+        pendingDeviceToken = nil
     }
 
     nonisolated static func cloudQuestionPushRecordName(from userInfo: [AnyHashable: Any]) -> String? {

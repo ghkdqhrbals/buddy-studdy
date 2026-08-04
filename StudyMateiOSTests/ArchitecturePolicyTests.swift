@@ -2455,6 +2455,27 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testLogoutUnregistersDevicePushAndLoginRegistersAgain() throws {
+        let root = try repositoryRoot()
+        let appState = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/ViewModels/AppState.swift"),
+            encoding: .utf8
+        )
+        let notificationService = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Services/NotificationService.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(appState.contains("notificationService.deactivateRemoteNotificationsForLogout()"))
+        XCTAssertTrue(
+            appState.contains("requestAuthorizationIfNeeded(\n                language: self.settings.appLanguage")
+        )
+        XCTAssertTrue(notificationService.contains("UIApplication.shared.unregisterForRemoteNotifications()"))
+        XCTAssertTrue(notificationService.contains("center.removeAllPendingNotificationRequests()"))
+        XCTAssertTrue(notificationService.contains("center.removeAllDeliveredNotifications()"))
+        XCTAssertTrue(notificationService.contains("guard appState.isCommunitySessionActive else"))
+    }
+
     func testNotificationPayloadDoesNotConsumeUnknownTypeAsHomeRoute() {
         let payload: [AnyHashable: Any] = [
             "type": "cloudkit-query",

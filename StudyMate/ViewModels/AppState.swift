@@ -2036,7 +2036,15 @@ final class AppState: ObservableObject {
         #if os(iOS)
         await recoverUnfinishedAppleTransactions(reason: "startup")
         #endif
+        #if os(iOS)
+        if isCommunitySessionActive {
+            _ = await notificationService.requestAuthorizationIfNeeded(language: settings.appLanguage)
+        } else {
+            notificationService.deactivateRemoteNotificationsForLogout()
+        }
+        #else
         _ = await notificationService.requestAuthorizationIfNeeded(language: settings.appLanguage)
+        #endif
         await validateAPIKeyOnStartup()
         #if os(macOS)
         await generateDueQuestionIfNeeded(reason: "startup")
@@ -4290,6 +4298,9 @@ final class AppState: ObservableObject {
 
     func signOutFromCommunity() {
         logAuthTrace("community_sign_out_start", reason: "manual", deduplicate: false)
+        #if os(iOS)
+        notificationService.deactivateRemoteNotificationsForLogout()
+        #endif
         questionGenerationPollingTask?.cancel()
         questionGenerationPollingTask = nil
         finishQuestionGenerationProcess()
@@ -4831,7 +4842,13 @@ final class AppState: ObservableObject {
         setCommunitySessionSignedIn(true)
         #if os(iOS)
         Task { @MainActor [weak self] in
-            await self?.recoverUnfinishedAppleTransactions(reason: "sign-in")
+            guard let self else {
+                return
+            }
+            _ = await self.notificationService.requestAuthorizationIfNeeded(
+                language: self.settings.appLanguage
+            )
+            await self.recoverUnfinishedAppleTransactions(reason: "sign-in")
         }
         #endif
     }
@@ -6705,7 +6722,15 @@ final class AppState: ObservableObject {
         #endif
         markCloudDataChanged()
 
+        #if os(iOS)
+        if isCommunitySessionActive {
+            _ = await notificationService.requestAuthorizationIfNeeded(language: settings.appLanguage)
+        } else {
+            notificationService.deactivateRemoteNotificationsForLogout()
+        }
+        #else
         _ = await notificationService.requestAuthorizationIfNeeded(language: settings.appLanguage)
+        #endif
         isValidatingAPIKey = false
         hasAPIKeyError = false
         errorMessage = nil
