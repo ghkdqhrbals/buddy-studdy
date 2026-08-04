@@ -1050,6 +1050,9 @@
 					120000000000000000000040 = {
 						CreatedOnToolsVersion = 26.0.1;
 						SystemCapabilities = {
+							com.apple.InAppPurchase = {
+								enabled = 1;
+							};
 							com.apple.Push = {
 								enabled = 1;
 							};
