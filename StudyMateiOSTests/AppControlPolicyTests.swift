@@ -4,59 +4,15 @@ import XCTest
 final class AppControlPolicyTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
-    func testRevenueCatPublicKeyPolicySeparatesTestStoreFromAppStoreRelease() {
-        XCTAssertTrue(
-            RevenueCatBillingBridge.isValidPublicSDKKey("test_public-key", allowTestStore: true)
-        )
-        XCTAssertFalse(
-            RevenueCatBillingBridge.isValidPublicSDKKey("test_public-key", allowTestStore: false)
-        )
-        XCTAssertTrue(
-            RevenueCatBillingBridge.isValidPublicSDKKey("appl_public-key", allowTestStore: false)
-        )
-        XCTAssertFalse(
-            RevenueCatBillingBridge.isValidPublicSDKKey("$(UNRESOLVED)", allowTestStore: true)
-        )
-    }
-
-    func testRevenueCatUsesTestStoreOnlyForTestFlightDebugging() {
-        XCTAssertTrue(
-            RevenueCatBillingBridge.shouldUseTestStore(
-                isTestFlight: true,
-                isDebuggingEnabled: true
-            )
-        )
-        XCTAssertFalse(
-            RevenueCatBillingBridge.shouldUseTestStore(
-                isTestFlight: true,
-                isDebuggingEnabled: false
-            )
-        )
-        XCTAssertFalse(
-            RevenueCatBillingBridge.shouldUseTestStore(
-                isTestFlight: false,
-                isDebuggingEnabled: true
-            )
-        )
-    }
-
-    func testRevenueCatResolvesOneKeyBeforeConfiguration() {
+    func testRevenueCatAcceptsOnlyAppStorePublicSDKKey() {
+        XCTAssertTrue(RevenueCatBillingBridge.isValidPublicSDKKey("appl_public-key"))
+        XCTAssertFalse(RevenueCatBillingBridge.isValidPublicSDKKey("test_public-key"))
+        XCTAssertFalse(RevenueCatBillingBridge.isValidPublicSDKKey("$(UNRESOLVED)"))
         XCTAssertEqual(
-            RevenueCatBillingBridge.resolvedPublicSDKKey(
-                appStoreKey: " appl_apple ",
-                testStoreKey: "test_internal",
-                useTestStore: false
-            ),
+            RevenueCatBillingBridge.resolvedPublicSDKKey(" appl_apple "),
             "appl_apple"
         )
-        XCTAssertEqual(
-            RevenueCatBillingBridge.resolvedPublicSDKKey(
-                appStoreKey: "appl_apple",
-                testStoreKey: " test_internal ",
-                useTestStore: true
-            ),
-            "test_internal"
-        )
+        XCTAssertNil(RevenueCatBillingBridge.resolvedPublicSDKKey("test_internal"))
     }
 
     func testMaintenanceTakesPriorityOverForcedUpdate() {

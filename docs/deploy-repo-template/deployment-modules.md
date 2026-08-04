@@ -135,12 +135,11 @@ deployment.
   HMAC-authenticated apps in the BuddyStudy RevenueCat project and still rejects
   unknown products or account tokens. The webhook is the primary new-purchase and lifecycle input and uses
   the same provider transaction idempotency key as the backward-compatible
-  direct JWS synchronization path. Production keeps
-  `REVENUECAT_ALLOW_TEST_STORE=false`; only the development profile accepts
-  RevenueCat Test Store events. Production and development use separate HMAC
-  webhook configurations and signing secrets. The development webhook is
-  filtered to the Test Store app plus Sandbox events so its purchases cannot
-  be applied to the production ledger.
+  direct JWS synchronization path. The iOS app always uses the App Store
+  `appl_` public SDK key. Production and development use separate HMAC webhook
+  configurations and signing secrets. The development webhook accepts App
+  Store Sandbox events so TestFlight purchases reach the development ledger.
+  The production webhook accepts App Store Production events only.
 - Runtime health checks are not GitHub Actions deploy gates. GitHub Actions
   validates image/config submission and Nginx syntax only. Docker Swarm owns
   task health, replacement ordering, and rollback; Grafana owns continuous

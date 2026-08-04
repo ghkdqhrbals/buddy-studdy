@@ -21,9 +21,8 @@ product and presents one selected tier, one billing period, and one primary
 subscribe/change action. Selecting another product in the same App Store
 subscription group supports upgrades, crossgrades, and downgrades; a downgrade
 takes effect at the next renewal according to Apple's rules. When RevenueCat is
-enabled, the visible cancellation action opens Customer Center so App Store and
-RevenueCat Test Store subscriptions use the same cancellation, plan-change, and
-refund surface. Apple's native subscription management is the fallback when
+enabled, the visible cancellation action opens Customer Center for App Store
+subscriptions. Apple's native subscription management is the fallback when
 RevenueCat is unavailable. Apple, not BuddyStudy or RevenueCat, makes the final
 decision for an Apple refund.
 
@@ -286,8 +285,8 @@ References:
 - Alert on `COMPENSATION_REQUIRED`, failed webhook verification, fulfillment retry exhaustion, and refunds pending beyond the operational threshold.
 - Test purchase success, app termination after Apple approval, duplicate and out-of-order webhooks, backend restart between payment and fulfillment commits, terminal compensation, restore, refund approval, refund decline, and refund reversal.
 
-RevenueCat owns transaction completion (`purchasesAreCompletedBy: .revenueCat`)
-in both the App Store and RevenueCat Test Store. The stable BuddyStudy
+RevenueCat owns App Store transaction completion
+(`purchasesAreCompletedBy: .revenueCat`). The stable BuddyStudy
 `appAccountToken` is the RevenueCat App User ID, so a purchase can be recovered
 without matching on email or device. The
 backend also resolves RevenueCat's `original_app_user_id` and aliases to survive
@@ -376,20 +375,18 @@ monitoring administrator session. The monitoring UI exposes the flow at
    `REVENUECAT_PUBLIC_SDK_KEY`. Add each environment's own
    `REVENUECAT_WEBHOOK_SIGNING_SECRET` to its backend application secret.
    `REVENUECAT_PROJECT_ID` and `REVENUECAT_APP_ID` are optional scoping
-   metadata. The App Store webhook targets
-   `https://api.ghkdqhrbals.org/api/v1/billing/revenuecat/webhooks`; the Test
-   Store webhook is filtered to the Test Store app and Sandbox environment and
+   metadata. The production-only App Store webhook targets
+   `https://api.ghkdqhrbals.org/api/v1/billing/revenuecat/webhooks`; the Sandbox
+   webhook accepts Sandbox events for the App Store app and
    targets `https://lowfidev.cloud/api/v1/billing/revenuecat/webhooks`.
 7. RevenueCat must own transaction completion and use the same four App Store
    product IDs. Debug, ordinary TestFlight, and App Store builds use the `appl_`
    Apple public key so StoreKit determines Apple Sandbox versus Production from
-   the transaction environment. A TestFlight build with developer access and
-   debugging enabled may select the separate `test_` key before RevenueCat is
-   initialized; it also targets the development backend. RevenueCat remains
-   configured once per process, so changing that toggle after billing has been
-   opened applies on the next app launch. Release validates that the primary
-   public key starts with `appl_`. Test Store webhook events are accepted only
-   by the development backend profile.
+   the transaction environment. TestFlight always uses the `appl_` key,
+   including when developer access points API traffic at the development
+   backend. The app does not embed or select a RevenueCat Test Store key.
+   RevenueCat remains configured once per process with the `appl_` key. Release
+   validates that the public key starts with `appl_`.
 
 The committed App Store Connect source of truth is
 `app-store/billing/subscriptions.json`. Product metadata can take up to one hour

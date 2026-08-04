@@ -9,61 +9,28 @@ final class RevenueCatBillingBridge {
     enum Mode: Equatable {
         case disabled
         case appStore
-        case testStore
     }
 
     static let shared = RevenueCatBillingBridge()
 
     private(set) var mode: Mode = .disabled
     var isEnabled: Bool { mode != .disabled }
-    private var prefersTestStore = false
 
     private init() {}
 
-    nonisolated static func isValidPublicSDKKey(
-        _ value: String?,
-        allowTestStore: Bool = false
-    ) -> Bool {
+    nonisolated static func isValidPublicSDKKey(_ value: String?) -> Bool {
         guard let value else { return false }
         let normalizedKey = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return !normalizedKey.isEmpty
             && !normalizedKey.contains("$(")
-            && (normalizedKey.hasPrefix("appl_") || (allowTestStore && normalizedKey.hasPrefix("test_")))
+            && normalizedKey.hasPrefix("appl_")
     }
 
-    nonisolated static func shouldUseTestStore(
-        isTestFlight: Bool,
-        isDebuggingEnabled: Bool
-    ) -> Bool {
-        isTestFlight && isDebuggingEnabled
-    }
-
-    nonisolated static func resolvedPublicSDKKey(
-        appStoreKey: String?,
-        testStoreKey: String?,
-        useTestStore: Bool
-    ) -> String? {
-        let candidate = useTestStore ? testStoreKey : appStoreKey
-        guard isValidPublicSDKKey(candidate, allowTestStore: useTestStore) else {
+    nonisolated static func resolvedPublicSDKKey(_ appStoreKey: String?) -> String? {
+        guard isValidPublicSDKKey(appStoreKey) else {
             return nil
         }
-        return candidate?.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    @discardableResult
-    func configureForCurrentLaunch(
-        isTestFlight: Bool,
-        isDebuggingEnabled: Bool
-    ) -> Bool {
-        let shouldUseTestStore = Self.shouldUseTestStore(
-            isTestFlight: isTestFlight,
-            isDebuggingEnabled: isDebuggingEnabled
-        )
-        if Purchases.isConfigured {
-            return shouldUseTestStore ? mode == .testStore : mode == .appStore
-        }
-        prefersTestStore = shouldUseTestStore
-        return true
+        return appStoreKey?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func start() {
@@ -72,16 +39,9 @@ final class RevenueCatBillingBridge {
         }
         let appStoreKey = ProcessInfo.processInfo.environment["REVENUECAT_PUBLIC_SDK_KEY"]
             ?? Bundle.main.object(forInfoDictionaryKey: "RevenueCatPublicSDKKey") as? String
-        let testStoreKey = ProcessInfo.processInfo.environment["REVENUECAT_TEST_STORE_SDK_KEY"]
-            ?? Bundle.main.object(forInfoDictionaryKey: "RevenueCatTestStoreSDKKey") as? String
-        guard let normalizedKey = Self.resolvedPublicSDKKey(
-            appStoreKey: appStoreKey,
-            testStoreKey: testStoreKey,
-            useTestStore: prefersTestStore
-        ) else {
+        guard let normalizedKey = Self.resolvedPublicSDKKey(appStoreKey) else {
             return
         }
-        let resolvedMode: Mode = normalizedKey.hasPrefix("test_") ? .testStore : .appStore
 
         #if DEBUG
         Purchases.logLevel = .debug
@@ -94,7 +54,7 @@ final class RevenueCatBillingBridge {
             purchasesAreCompletedBy: .revenueCat,
             storeKitVersion: .storeKit2
         )
-        mode = resolvedMode
+        mode = .appStore
     }
 
     func identify(appAccountToken: UUID) async throws {
