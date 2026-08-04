@@ -169,6 +169,45 @@ class BillingLedgerPersistenceAdapter(
     }
 
     @Transactional
+    override suspend fun expirePendingCheckouts(expiredBefore: Instant, now: Instant, limit: Int): Int {
+        val invoiceIds = database.sql(
+            """
+            select i.id
+            from invoices i
+            where i.type = 'NORMAL'
+              and i.status = 'WAITING'
+              and i.created_at <= :expiredBefore
+              and not exists (
+                  select 1
+                  from payments p
+                  where p.invoice_id = i.id
+              )
+            order by i.created_at, i.id
+            limit :limit
+            for update skip locked
+            """.trimIndent(),
+        ).bind("expiredBefore", expiredBefore.utc())
+            .bind("limit", limit.coerceIn(1, 100))
+            .map { row, _ -> row.long("id") }
+            .all().collectList().awaitSingle()
+
+        invoiceIds.forEach { invoiceId ->
+            val invoice = lockInvoice(invoiceId)
+                ?: throw billingFailure(ApiErrorCode.RESOURCE_NOT_FOUND, "Invoice not found.", HttpStatus.NOT_FOUND)
+            appendInvoiceEvent(
+                invoiceId = invoice.id,
+                eventId = "checkout-expired:${invoice.invoiceNumber}",
+                eventType = InvoiceEventType.CANCELLED,
+                source = BillingEventSource.SYSTEM,
+                actorUserId = null,
+                reason = "Checkout automatically cancelled after waiting 10 minutes without verified payment.",
+                occurredAt = now,
+            )
+        }
+        return invoiceIds.size
+    }
+
+    @Transactional
     override suspend fun recordVerifiedPayment(command: RecordVerifiedPaymentCommand): BillingInvoiceSummary {
         lockAndValidateAccount(command.userId, command.transaction.appAccountToken)
 

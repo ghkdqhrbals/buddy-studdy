@@ -213,6 +213,11 @@ class BillingService(
 
     override suspend fun recoverDueFulfillments(): BillingRecoveryResult {
         val now = clock.instant()
+        val expiredCheckouts = ledger.expirePendingCheckouts(
+            expiredBefore = now.minus(CHECKOUT_TIMEOUT),
+            now = now,
+            limit = CHECKOUT_EXPIRATION_BATCH_SIZE,
+        )
         val claims = ledger.claimDueFulfillmentJobs(
             now = now,
             staleBefore = now.minus(FULFILLMENT_CLAIM_LEASE),
@@ -238,6 +243,7 @@ class BillingService(
             }
         }
         return BillingRecoveryResult(
+            expiredCheckouts = expiredCheckouts,
             claimed = claims.size,
             completed = completed,
             retried = retried,
@@ -330,6 +336,8 @@ class BillingService(
         ApiException(status, code, message)
 
     private companion object {
+        val CHECKOUT_TIMEOUT: Duration = Duration.ofMinutes(10)
+        const val CHECKOUT_EXPIRATION_BATCH_SIZE = 100
         const val MAX_SIGNED_PAYLOAD_LENGTH = 200_000
         const val MAX_PRICE_MILLIUNITS = 100_000_000_000L
         val ALLOWED_CLOCK_SKEW: Duration = Duration.ofMinutes(5)

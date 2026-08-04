@@ -219,6 +219,7 @@ data class BillingFulfillmentJobClaim(
 )
 
 data class BillingRecoveryResult(
+    val expiredCheckouts: Int,
     val claimed: Int,
     val completed: Int,
     val retried: Int,

@@ -46,6 +46,9 @@ interface BillingLedgerPort {
     /** Idempotently closes a checkout when StoreKit reports userCancelled before a transaction exists. */
     suspend fun abandonPendingInvoice(userId: Long, invoiceNumber: UUID, now: Instant): BillingInvoiceSummary
 
+    /** Atomically expires unpaid NORMAL/WAITING checkouts created at or before the cutoff. */
+    suspend fun expirePendingCheckouts(expiredBefore: Instant, now: Instant, limit: Int): Int
+
     /** Atomically attaches a verified payment to a PENDING invoice and creates fulfillment work. */
     suspend fun recordVerifiedPayment(command: RecordVerifiedPaymentCommand): BillingInvoiceSummary
 

@@ -174,6 +174,67 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
+    fun `checkout expiration cancels only old unpaid normal invoices`(): Unit = runBlocking {
+        val fixture = fixture("checkout-expiration")
+        val oldUnpaid = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            fixture.product,
+            "${fixture.idempotencyKey}-old",
+            fixture.now,
+        )
+        val paid = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            fixture.product,
+            "${fixture.idempotencyKey}-paid",
+            fixture.now.plusSeconds(1),
+        )
+        val transaction = fixture.transaction()
+        ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                userId = fixture.userId,
+                tierProduct = fixture.product,
+                transaction = transaction,
+                invoiceNumber = paid.invoiceNumber,
+                source = BillingEventSource.CLIENT,
+                eventId = "apple-transaction:${transaction.transactionId}",
+                occurredAt = fixture.now.plusSeconds(2),
+            ),
+        )
+        val recentUnpaid = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            fixture.product,
+            "${fixture.idempotencyKey}-recent",
+            fixture.now.plusSeconds(60),
+        )
+
+        val expired = ledger.expirePendingCheckouts(
+            expiredBefore = fixture.now.plusSeconds(30),
+            now = fixture.now.plusSeconds(630),
+            limit = 100,
+        )
+
+        assertThat(expired).isEqualTo(1)
+        assertThat(requireNotNull(ledger.invoice(fixture.userId, oldUnpaid.id)).invoice.status)
+            .isEqualTo(InvoiceStatus.FAILED)
+        assertThat(requireNotNull(ledger.invoice(fixture.userId, paid.id)).invoice.status)
+            .isEqualTo(InvoiceStatus.WAITING)
+        assertThat(requireNotNull(ledger.invoice(fixture.userId, recentUnpaid.id)).invoice.status)
+            .isEqualTo(InvoiceStatus.WAITING)
+        assertThat(eventTypes(oldUnpaid.id)).containsExactly("INVOICE_CREATED", "CANCELLED")
+        assertThat(
+            database.sql(
+                "select source from invoice_events where invoice_id = :invoiceId and event_type = 'CANCELLED'",
+            )
+                .bind("invoiceId", oldUnpaid.id)
+                .map { row -> row.get("source", String::class.java)!! }
+                .one().awaitSingle(),
+        ).isEqualTo("SYSTEM")
+    }
+
+    @Test
     fun `verified charge fulfillment can be reclaimed after backend process death`(): Unit = runBlocking {
         val fixture = fixture("crash-recovery")
         val checkout = ledger.createPendingInvoice(

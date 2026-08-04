@@ -154,6 +154,12 @@ RevenueCat signs the exact raw request body with
 invalid HMAC-SHA256 signatures before recording an event. Delivery is
 at-least-once and is deduplicated by RevenueCat event ID.
 
+`NORMAL/WAITING` checkout invoices without verified payment evidence expire
+ten minutes after creation. The managed `billing-fulfillment-recovery` job
+records a deterministic `SYSTEM/CANCELLED` invoice event and projects the
+invoice as `FAILED`. Paid invoices and `REFUND` invoices are never selected by
+checkout expiration.
+
 Admin endpoints:
 
 - `GET /api/v1/admin/billing/invoices`

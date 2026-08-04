@@ -28,13 +28,14 @@ class BillingRecoveryJob(
     private val billingRecovery: BillingRecoveryUseCase,
 ) : ManagedJob {
     override val name: String = "billing-fulfillment-recovery"
-    override val displayName: String = "Apple billing fulfillment recovery"
+    override val displayName: String = "Apple billing recovery"
     override val description: String =
-        "Recovers verified Apple charges whose membership fulfillment was interrupted by a crash or transient failure."
+        "Expires unpaid checkouts and recovers verified Apple charges interrupted during membership fulfillment."
 
     override suspend fun run(): String {
         val result = billingRecovery.recoverDueFulfillments()
-        return "claimed=${result.claimed}, completed=${result.completed}, retried=${result.retried}, " +
+        return "expiredCheckouts=${result.expiredCheckouts}, claimed=${result.claimed}, " +
+            "completed=${result.completed}, retried=${result.retried}, " +
             "compensationRequired=${result.compensationRequired}"
     }
 }

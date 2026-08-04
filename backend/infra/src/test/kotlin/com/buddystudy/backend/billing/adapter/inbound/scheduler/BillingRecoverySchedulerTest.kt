@@ -18,7 +18,7 @@ class BillingRecoverySchedulerTest {
         val executor = RecordingManagedJobs()
         val job = BillingRecoveryJob(
             object : BillingRecoveryUseCase {
-                override suspend fun recoverDueFulfillments() = BillingRecoveryResult(4, 2, 1, 1)
+                override suspend fun recoverDueFulfillments() = BillingRecoveryResult(3, 4, 2, 1, 1)
             },
         )
         val scheduler = BillingRecoveryScheduler(executor, job)
@@ -27,7 +27,9 @@ class BillingRecoverySchedulerTest {
 
         assertThat(executor.jobName).isEqualTo("billing-fulfillment-recovery")
         assertThat(executor.triggerType).isEqualTo(JobTriggerType.SCHEDULED)
-        assertThat(executor.summary).isEqualTo("claimed=4, completed=2, retried=1, compensationRequired=1")
+        assertThat(executor.summary).isEqualTo(
+            "expiredCheckouts=3, claimed=4, completed=2, retried=1, compensationRequired=1",
+        )
     }
 
     private class RecordingManagedJobs : ManagedJobExecutionUseCase by unsupportedPort() {

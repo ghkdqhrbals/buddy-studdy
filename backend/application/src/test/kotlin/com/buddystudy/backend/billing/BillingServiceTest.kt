@@ -157,6 +157,19 @@ class BillingServiceTest {
     }
 
     @Test
+    fun `recovery expires unpaid checkouts after ten minutes`() = runBlocking {
+        val ledger = FakeLedger(token, product).apply { expiredCheckoutCount = 3 }
+        val service = service(ledger)
+
+        val result = service.recoverDueFulfillments()
+
+        assertEquals(3, result.expiredCheckouts)
+        assertEquals(now.minusSeconds(600), ledger.checkoutExpirationCutoff)
+        assertEquals(now, ledger.checkoutExpirationRunAt)
+        assertEquals(100, ledger.checkoutExpirationLimit)
+    }
+
+    @Test
     fun `recovery retries transient errors and requires compensation only after max attempts`() = runBlocking {
         val retryClaim = BillingFulfillmentJobClaim(10, 99, 0, 3, UUID.randomUUID())
         val finalClaim = BillingFulfillmentJobClaim(11, 100, 2, 3, UUID.randomUUID())
@@ -267,6 +280,10 @@ class BillingServiceTest {
         val failedNotifications = mutableListOf<String>()
         var appliedNotifications = 0
         var lastFulfillmentStatus: InvoiceStatus? = null
+        var expiredCheckoutCount = 0
+        var checkoutExpirationCutoff: Instant? = null
+        var checkoutExpirationRunAt: Instant? = null
+        var checkoutExpirationLimit: Int? = null
 
         override suspend fun findOrCreateAppAccountToken(userId: Long, now: Instant): UUID {
             tokenReads += 1
@@ -290,6 +307,12 @@ class BillingServiceTest {
             invoiceNumber: UUID,
             now: Instant,
         ): BillingInvoiceSummary = invoice(InvoiceStatus.FAILED)
+        override suspend fun expirePendingCheckouts(expiredBefore: Instant, now: Instant, limit: Int): Int {
+            checkoutExpirationCutoff = expiredBefore
+            checkoutExpirationRunAt = now
+            checkoutExpirationLimit = limit
+            return expiredCheckoutCount
+        }
         override suspend fun recordVerifiedPayment(command: RecordVerifiedPaymentCommand): BillingInvoiceSummary {
             recordedPayments += command
             return invoice(InvoiceStatus.WAITING)
