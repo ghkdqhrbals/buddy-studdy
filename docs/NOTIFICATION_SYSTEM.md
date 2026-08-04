@@ -49,6 +49,10 @@ sequenceDiagram
 
 ## Data Model
 
+The complete iOS URL route table and the differences between external URL,
+system-push, and notification-inbox navigation are documented in
+[DEEPLINKS.md](DEEPLINKS.md).
+
 `app_notifications` is the source of truth.
 
 Important columns:
