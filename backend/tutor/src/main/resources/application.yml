@@ -110,6 +110,7 @@ buddystudy:
       webhook-signing-secret: ${REVENUECAT_WEBHOOK_SIGNING_SECRET:}
       project-id: ${REVENUECAT_PROJECT_ID:}
       app-id: ${REVENUECAT_APP_ID:}
+      allow-test-store: ${REVENUECAT_ALLOW_TEST_STORE:false}
     recovery:
       enabled: ${BILLING_RECOVERY_ENABLED:true}
       poll-ms: ${BILLING_RECOVERY_POLL_MS:5000}

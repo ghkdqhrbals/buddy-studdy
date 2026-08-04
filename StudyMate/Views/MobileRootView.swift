@@ -6068,16 +6068,16 @@ private struct MobileQuestionUsageView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(tierProduct.product.displayName)
+                    Text(tierProduct.displayName)
                         .font(.headline)
-                    Text(tierProduct.product.description)
+                    Text(tierProduct.description)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
 
                 Spacer(minLength: 12)
 
-                Text(tierProduct.product.displayPrice)
+                Text(tierProduct.displayPrice)
                     .font(.subheadline.weight(.semibold))
             }
 
@@ -6156,6 +6156,7 @@ private struct MobileQuestionUsageView: View {
                     appAccountToken: appAccountToken,
                     prepareCheckout: appState.createAppleBillingCheckout,
                     synchronize: appState.syncAppleBillingTransaction,
+                    waitForFulfillment: appState.waitForRevenueCatBillingFulfillment,
                     abandonCheckout: appState.abandonAppleBillingCheckout
                 )
                 switch outcome {

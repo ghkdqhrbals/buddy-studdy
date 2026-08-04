@@ -206,7 +206,7 @@ jobs:
           REVENUECAT_WEBHOOK_SIGNING_SECRET="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("REVENUECAT_WEBHOOK_SIGNING_SECRET") or "")')"
           REVENUECAT_PROJECT_ID="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("REVENUECAT_PROJECT_ID") or "")')"
           REVENUECAT_APP_ID="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("REVENUECAT_APP_ID") or "")')"
-          for required_revenuecat_key in REVENUECAT_WEBHOOK_SIGNING_SECRET REVENUECAT_PROJECT_ID REVENUECAT_APP_ID; do
+          for required_revenuecat_key in REVENUECAT_WEBHOOK_SIGNING_SECRET; do
             if [ -z "${!required_revenuecat_key}" ]; then
               echo "Missing ${required_revenuecat_key} in AWS Secrets Manager secret: ${APP_SECRET_ID}" >&2
               exit 1

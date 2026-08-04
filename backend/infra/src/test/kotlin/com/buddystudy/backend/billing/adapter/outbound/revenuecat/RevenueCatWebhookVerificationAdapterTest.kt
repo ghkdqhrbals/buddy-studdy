@@ -20,7 +20,7 @@ class RevenueCatWebhookVerificationAdapterTest {
     private val now = Instant.parse("2026-08-04T00:00:00Z")
     private val secret = "revenuecat-webhook-test-secret"
     private val body =
-        """{"api_version":"1.0","event":{"id":"rc-event-1","type":"INITIAL_PURCHASE","app_id":"app123","event_timestamp_ms":1785801600000,"app_user_id":"3f0c5f50-6521-4ba0-a990-73500e915f57","aliases":[],"store":"APP_STORE","product_id":"io.github.ghkdqhrbals.StudyMate.tier2.monthly","transaction_id":"200000000000001","original_transaction_id":"200000000000000","environment":"SANDBOX","price_in_purchased_currency":7900,"currency":"KRW","purchased_at_ms":1785801590000,"expiration_at_ms":1788393600000}}"""
+        """{"api_version":"1.0","event":{"id":"rc-event-1","type":"INITIAL_PURCHASE","app_id":"app123","event_timestamp_ms":1785801600000,"app_user_id":"3f0c5f50-6521-4ba0-a990-73500e915f57","original_app_user_id":"3f0c5f50-6521-4ba0-a990-73500e915f57","aliases":[],"store":"APP_STORE","product_id":"io.github.ghkdqhrbals.StudyMate.tier2.monthly","transaction_id":"200000000000001","original_transaction_id":"200000000000000","environment":"SANDBOX","price_in_purchased_currency":7900,"currency":"KRW","purchased_at_ms":1785801590000,"expiration_at_ms":1788393600000}}"""
             .toByteArray()
 
     @Test
@@ -34,6 +34,21 @@ class RevenueCatWebhookVerificationAdapterTest {
         assertThat(event.environment).isEqualTo(BillingEnvironment.SANDBOX)
         assertThat(event.priceMilliunits).isEqualTo(7_900_000)
         assertThat(event.transactionId).isEqualTo("200000000000001")
+        assertThat(event.originalAppUserId).isEqualTo("3f0c5f50-6521-4ba0-a990-73500e915f57")
+    }
+
+    @Test
+    fun `maps RevenueCat expiration reason independently from cancellation reason`() = runBlocking<Unit> {
+        val expirationBody =
+            """{"api_version":"1.0","event":{"id":"rc-expiration-1","type":"EXPIRATION","app_id":"app123","event_timestamp_ms":1785801600000,"app_user_id":"3f0c5f50-6521-4ba0-a990-73500e915f57","aliases":[],"store":"APP_STORE","transaction_id":"200000000000001","original_transaction_id":"200000000000000","environment":"SANDBOX","expiration_reason":"BILLING_ERROR"}}"""
+                .toByteArray()
+
+        val event = adapter().verify(
+            RevenueCatWebhookRequest(expirationBody, signature(now.epochSecond, expirationBody)),
+        )
+
+        assertThat(event.cancelReason).isNull()
+        assertThat(event.expirationReason).isEqualTo("BILLING_ERROR")
     }
 
     @Test

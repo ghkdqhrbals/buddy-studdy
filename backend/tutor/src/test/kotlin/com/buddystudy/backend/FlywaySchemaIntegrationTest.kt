@@ -87,7 +87,9 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
                 (table_name = 'invoices' and column_name in ('type', 'status'))
                 or (table_name = 'payments' and column_name = 'status')
                 or (table_name = 'billing_actions' and column_name in ('action_type', 'status'))
-                or (table_name = 'revenuecat_billing_events' and column_name = 'processing_status')
+                or (table_name = 'revenuecat_billing_events' and column_name in (
+                    'processing_status', 'original_app_user_id', 'cancel_reason', 'expiration_reason'
+                ))
               )
             """.trimIndent(),
         ).map { row, _ ->
@@ -105,6 +107,12 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(comments.getValue("billing_actions.status")).contains("AWAITING_APPLE", "COMPLETED", "DECLINED")
         assertThat(comments.getValue("revenuecat_billing_events.processing_status"))
             .contains("RECEIVED", "PROCESSED", "IGNORED", "FAILED")
+        assertThat(comments.getValue("revenuecat_billing_events.original_app_user_id"))
+            .contains("RevenueCat App User ID", "appAccountToken")
+        assertThat(comments.getValue("revenuecat_billing_events.cancel_reason"))
+            .contains("CUSTOMER_SUPPORT")
+        assertThat(comments.getValue("revenuecat_billing_events.expiration_reason"))
+            .contains("BILLING_ERROR")
 
         data class TierProduct(
             val tierCode: String,

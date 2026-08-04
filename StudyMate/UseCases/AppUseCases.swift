@@ -222,6 +222,7 @@ protocol BillingRepository {
         invoiceNumber: UUID?
     ) async throws -> BackendBillingInvoice
     func invoices(registration: RemotePushRegistration, limit: Int, offset: Int) async throws -> BackendBillingInvoicePage
+    func invoice(registration: RemotePushRegistration, invoiceID: Int64) async throws -> BackendBillingInvoice
     func requestRefund(
         registration: RemotePushRegistration,
         paymentID: Int64,
@@ -286,6 +287,10 @@ struct RemoteBillingRepository: BillingRepository {
 
     func invoices(registration: RemotePushRegistration, limit: Int, offset: Int) async throws -> BackendBillingInvoicePage {
         try await backendClient.fetchBillingInvoices(registration: registration, limit: limit, offset: offset)
+    }
+
+    func invoice(registration: RemotePushRegistration, invoiceID: Int64) async throws -> BackendBillingInvoice {
+        try await backendClient.fetchBillingInvoice(registration: registration, invoiceID: invoiceID)
     }
 
     func requestRefund(
@@ -364,6 +369,10 @@ struct BillingUseCase {
 
     func invoices(registration: RemotePushRegistration, limit: Int = 30, offset: Int = 0) async throws -> BackendBillingInvoicePage {
         try await repository.invoices(registration: registration, limit: limit, offset: offset)
+    }
+
+    func invoice(registration: RemotePushRegistration, invoiceID: Int64) async throws -> BackendBillingInvoice {
+        try await repository.invoice(registration: registration, invoiceID: invoiceID)
     }
 
     func requestRefund(

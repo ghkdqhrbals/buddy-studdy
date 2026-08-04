@@ -4,6 +4,21 @@ import XCTest
 final class AppControlPolicyTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
+    func testRevenueCatPublicKeyPolicySeparatesTestStoreFromAppStoreRelease() {
+        XCTAssertTrue(
+            RevenueCatBillingBridge.isValidPublicSDKKey("test_public-key", allowTestStore: true)
+        )
+        XCTAssertFalse(
+            RevenueCatBillingBridge.isValidPublicSDKKey("test_public-key", allowTestStore: false)
+        )
+        XCTAssertTrue(
+            RevenueCatBillingBridge.isValidPublicSDKKey("appl_public-key", allowTestStore: false)
+        )
+        XCTAssertFalse(
+            RevenueCatBillingBridge.isValidPublicSDKKey("$(UNRESOLVED)", allowTestStore: true)
+        )
+    }
+
     func testMaintenanceTakesPriorityOverForcedUpdate() {
         let result = AppControlPolicyResolver.resolve(
             policy: policy(

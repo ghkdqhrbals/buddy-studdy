@@ -601,20 +601,25 @@ class BillingLedgerPersistenceAdapter(
         val inserted = database.sql(
             """
             insert ignore into revenuecat_billing_events (
-                event_id, event_type, app_user_id, store, product_id, transaction_id,
-                environment, signed_payload_sha256, processing_status, event_at, received_at, updated_at
+                event_id, event_type, app_user_id, original_app_user_id, store, product_id, transaction_id,
+                environment, cancel_reason, expiration_reason, signed_payload_sha256,
+                processing_status, event_at, received_at, updated_at
             ) values (
-                :eventId, :eventType, :appUserId, :store, :productId, :transactionId,
-                :environment, :hash, 'RECEIVED', :eventAt, :now, :now
+                :eventId, :eventType, :appUserId, :originalAppUserId, :store, :productId, :transactionId,
+                :environment, :cancelReason, :expirationReason, :hash,
+                'RECEIVED', :eventAt, :now, :now
             )
             """.trimIndent(),
         ).bind("eventId", event.eventId)
             .bind("eventType", event.eventType)
             .bindNullable("appUserId", event.appUserId, String::class.java)
+            .bindNullable("originalAppUserId", event.originalAppUserId, String::class.java)
             .bindNullable("store", event.store, String::class.java)
             .bindNullable("productId", event.productId, String::class.java)
             .bindNullable("transactionId", event.transactionId, String::class.java)
             .bindNullable("environment", event.environment?.name, String::class.java)
+            .bindNullable("cancelReason", event.cancelReason, String::class.java)
+            .bindNullable("expirationReason", event.expirationReason, String::class.java)
             .bind("hash", event.signedPayloadSha256)
             .bind("eventAt", event.eventAt.utc())
             .bind("now", now.utc())
@@ -1336,7 +1341,7 @@ class BillingLedgerPersistenceAdapter(
                 "DID_CHANGE_RENEWAL_STATUS" to "AUTO_RENEW_DISABLED"
             }
             "UNCANCELLATION" -> "DID_CHANGE_RENEWAL_STATUS" to "AUTO_RENEW_ENABLED"
-            "EXPIRATION" -> "EXPIRED" to cancelReason
+            "EXPIRATION" -> "EXPIRED" to expirationReason
             "REFUND_REVERSED" -> "REFUND_REVERSED" to null
             else -> return null
         }

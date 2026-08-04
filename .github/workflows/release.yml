@@ -159,6 +159,11 @@ jobs:
             exit 1
           fi
 
+          if [[ "${REVENUECAT_PUBLIC_SDK_KEY}" != appl_* ]]; then
+            echo "REVENUECAT_PUBLIC_SDK_KEY must be the iOS App Store public key (appl_), not a Test Store key." >&2
+            exit 1
+          fi
+
       - name: Install Firebase iOS configuration
         run: |
           set -euo pipefail

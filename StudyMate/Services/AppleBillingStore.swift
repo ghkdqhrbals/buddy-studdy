@@ -6,30 +6,47 @@ import UIKit
 
 @MainActor
 final class RevenueCatBillingBridge {
+    enum Mode: Equatable {
+        case disabled
+        case appStore
+        case testStore
+    }
+
     static let shared = RevenueCatBillingBridge()
 
-    private(set) var isEnabled = false
+    private(set) var mode: Mode = .disabled
+    var isEnabled: Bool { mode != .disabled }
 
     private init() {}
 
-    nonisolated static func isValidPublicSDKKey(_ value: String?) -> Bool {
+    nonisolated static func isValidPublicSDKKey(
+        _ value: String?,
+        allowTestStore: Bool = false
+    ) -> Bool {
         guard let value else { return false }
         let normalizedKey = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return !normalizedKey.isEmpty
             && !normalizedKey.contains("$(")
-            && normalizedKey.hasPrefix("appl_")
+            && (normalizedKey.hasPrefix("appl_") || (allowTestStore && normalizedKey.hasPrefix("test_")))
     }
 
     func start() {
-        guard !Purchases.isConfigured,
-              let apiKey = Bundle.main.object(forInfoDictionaryKey: "RevenueCatPublicSDKKey") as? String else {
-            isEnabled = Purchases.isConfigured
+        guard !Purchases.isConfigured else {
             return
         }
+        let apiKey = ProcessInfo.processInfo.environment["REVENUECAT_PUBLIC_SDK_KEY"]
+            ?? Bundle.main.object(forInfoDictionaryKey: "RevenueCatPublicSDKKey") as? String
+        guard let apiKey else { return }
         let normalizedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard Self.isValidPublicSDKKey(normalizedKey) else {
+        #if DEBUG
+        let allowTestStore = true
+        #else
+        let allowTestStore = false
+        #endif
+        guard Self.isValidPublicSDKKey(normalizedKey, allowTestStore: allowTestStore) else {
             return
         }
+        let resolvedMode: Mode = normalizedKey.hasPrefix("test_") ? .testStore : .appStore
 
         #if DEBUG
         Purchases.logLevel = .debug
@@ -39,10 +56,10 @@ final class RevenueCatBillingBridge {
         Purchases.configure(
             withAPIKey: normalizedKey,
             appUserID: nil,
-            purchasesAreCompletedBy: .myApp,
+            purchasesAreCompletedBy: .revenueCat,
             storeKitVersion: .storeKit2
         )
-        isEnabled = true
+        mode = resolvedMode
     }
 
     func identify(appAccountToken: UUID) async throws {
@@ -51,16 +68,6 @@ final class RevenueCatBillingBridge {
         let appUserID = appAccountToken.uuidString.lowercased()
         guard Purchases.shared.appUserID != appUserID else { return }
         _ = try await Purchases.shared.logIn(appUserID)
-    }
-
-    func record(_ purchaseResult: StoreKit.Product.PurchaseResult) async {
-        guard isEnabled else { return }
-        do {
-            _ = try await Purchases.shared.recordPurchase(purchaseResult)
-        } catch {
-            // BuddyStudy owns transaction completion. RevenueCat outages must not prevent the
-            // verified Apple transaction from reaching our durable invoice ledger.
-        }
     }
 
     func syncPurchases() async throws {
@@ -77,10 +84,33 @@ final class RevenueCatBillingBridge {
 @MainActor
 final class AppleBillingStore: ObservableObject {
     struct TierProduct: Identifiable {
+        enum StoreProductSource {
+            case appStore(Product)
+            case revenueCat(StoreProduct)
+        }
+
         var tier: BackendBillingTierProduct
-        var product: Product
+        var source: StoreProductSource
 
         var id: String { tier.productId }
+        var displayName: String {
+            switch source {
+            case .appStore(let product): product.displayName
+            case .revenueCat(let product): product.localizedTitle
+            }
+        }
+        var description: String {
+            switch source {
+            case .appStore(let product): product.description
+            case .revenueCat(let product): product.localizedDescription
+            }
+        }
+        var displayPrice: String {
+            switch source {
+            case .appStore(let product): product.displayPrice
+            case .revenueCat(let product): product.localizedPriceString
+            }
+        }
     }
 
     enum PurchaseOutcome: Equatable {
@@ -99,11 +129,20 @@ final class AppleBillingStore: ObservableObject {
         defer { isLoading = false }
         do {
             try await RevenueCatBillingBridge.shared.identify(appAccountToken: catalog.appAccountToken)
-            let storeProducts = try await Product.products(for: catalog.products.map(\.productId))
-            let byIdentifier = Dictionary(uniqueKeysWithValues: storeProducts.map { ($0.id, $0) })
+            let identifiers = catalog.products.map(\.productId)
+            let byIdentifier: [String: TierProduct.StoreProductSource]
+            if RevenueCatBillingBridge.shared.isEnabled {
+                let storeProducts = await Purchases.shared.products(identifiers)
+                byIdentifier = Dictionary(
+                    uniqueKeysWithValues: storeProducts.map { ($0.productIdentifier, .revenueCat($0)) }
+                )
+            } else {
+                let storeProducts = try await Product.products(for: identifiers)
+                byIdentifier = Dictionary(uniqueKeysWithValues: storeProducts.map { ($0.id, .appStore($0)) })
+            }
             products = catalog.products
                 .compactMap { tier in
-                    byIdentifier[tier.productId].map { TierProduct(tier: tier, product: $0) }
+                    byIdentifier[tier.productId].map { TierProduct(tier: tier, source: $0) }
                 }
                 .sorted { $0.tier.sortOrder < $1.tier.sortOrder }
             let missingProducts = Set(catalog.products.map(\.productId)).subtracting(byIdentifier.keys)
@@ -121,6 +160,7 @@ final class AppleBillingStore: ObservableObject {
         appAccountToken: UUID,
         prepareCheckout: @escaping (String) async throws -> BackendBillingInvoice,
         synchronize: @escaping (String, String, UUID?) async throws -> BackendBillingInvoice,
+        waitForFulfillment: @escaping (Int64) async throws -> BackendBillingInvoice,
         abandonCheckout: @escaping (UUID) async throws -> Void
     ) async throws -> PurchaseOutcome {
         guard processingProductID == nil else {
@@ -133,32 +173,42 @@ final class AppleBillingStore: ObservableObject {
         // presents a sheet so every user-initiated attempt has an invoice aggregate.
         let checkout = try await prepareCheckout(tierProduct.id)
         try await RevenueCatBillingBridge.shared.identify(appAccountToken: appAccountToken)
-        let result = try await tierProduct.product.purchase(options: [.appAccountToken(appAccountToken)])
-        await RevenueCatBillingBridge.shared.record(result)
-        switch result {
-        case .success(let verification):
-            guard case .verified(let transaction) = verification else {
-                throw AppleBillingStoreError.unverifiedTransaction
+        switch tierProduct.source {
+        case .revenueCat(let product):
+            let (_, _, userCancelled) = try await Purchases.shared.purchase(product: product)
+            if userCancelled {
+                try? await abandonCheckout(checkout.invoiceNumber)
+                return .cancelled
             }
-            guard transaction.appAccountToken == appAccountToken else {
-                throw AppleBillingStoreError.accountTokenMismatch
+            let invoice = try await waitForFulfillment(checkout.id)
+            return invoice.status == "COMPLETED" ? .purchased(invoice) : .pending
+        case .appStore(let product):
+            let result = try await product.purchase(options: [.appAccountToken(appAccountToken)])
+            switch result {
+            case .success(let verification):
+                guard case .verified(let transaction) = verification else {
+                    throw AppleBillingStoreError.unverifiedTransaction
+                }
+                guard transaction.appAccountToken == appAccountToken else {
+                    throw AppleBillingStoreError.accountTokenMismatch
+                }
+                // Finish only after the backend verifies Apple JWS, commits the invoice/payment ledger,
+                // and grants the tier. A backend failure leaves the transaction available for recovery.
+                let invoice = try await synchronize(
+                    verification.jwsRepresentation,
+                    Self.backendEnvironment(transaction),
+                    checkout.invoiceNumber
+                )
+                await transaction.finish()
+                return .purchased(invoice)
+            case .pending:
+                return .pending
+            case .userCancelled:
+                try? await abandonCheckout(checkout.invoiceNumber)
+                return .cancelled
+            @unknown default:
+                throw AppleBillingStoreError.unknownPurchaseResult
             }
-            // Finish only after the backend verifies Apple JWS, commits the invoice/payment ledger,
-            // and grants the tier. A backend failure leaves the transaction available for recovery.
-            let invoice = try await synchronize(
-                verification.jwsRepresentation,
-                Self.backendEnvironment(transaction),
-                checkout.invoiceNumber
-            )
-            await transaction.finish()
-            return .purchased(invoice)
-        case .pending:
-            return .pending
-        case .userCancelled:
-            try? await abandonCheckout(checkout.invoiceNumber)
-            return .cancelled
-        @unknown default:
-            throw AppleBillingStoreError.unknownPurchaseResult
         }
     }
 
@@ -167,6 +217,10 @@ final class AppleBillingStore: ObservableObject {
         synchronize: @escaping (String, String, UUID?) async throws -> BackendBillingInvoice
     ) async throws -> [BackendBillingInvoice] {
         try await RevenueCatBillingBridge.shared.identify(appAccountToken: appAccountToken)
+        if RevenueCatBillingBridge.shared.isEnabled {
+            _ = try await Purchases.shared.restorePurchases()
+            return []
+        }
         try await AppStore.sync()
         try await RevenueCatBillingBridge.shared.syncPurchases()
         var restored: [BackendBillingInvoice] = []

@@ -403,6 +403,11 @@ protocol RemotePushBackendClientProtocol {
         offset: Int
     ) async throws -> BackendBillingInvoicePage
 
+    func fetchBillingInvoice(
+        registration: RemotePushRegistration,
+        invoiceID: Int64
+    ) async throws -> BackendBillingInvoice
+
     func requestBillingRefund(
         registration: RemotePushRegistration,
         paymentID: Int64,
@@ -658,6 +663,13 @@ extension RemotePushBackendClientProtocol {
         limit: Int,
         offset: Int
     ) async throws -> BackendBillingInvoicePage {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func fetchBillingInvoice(
+        registration: RemotePushRegistration,
+        invoiceID: Int64
+    ) async throws -> BackendBillingInvoice {
         throw RemotePushBackendError.invalidResponse
     }
 
@@ -1262,6 +1274,18 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         let request = authenticatedRequest(registration: registration, url: url)
         let data = try await perform(request)
         return try decoder.decode(BackendBillingInvoicePage.self, from: data)
+    }
+
+    func fetchBillingInvoice(
+        registration: RemotePushRegistration,
+        invoiceID: Int64
+    ) async throws -> BackendBillingInvoice {
+        let request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "billing", "invoices", String(invoiceID))
+        )
+        let data = try await perform(request)
+        return try decoder.decode(BackendBillingInvoiceDetail.self, from: data).invoice
     }
 
     func requestBillingRefund(
@@ -2784,6 +2808,10 @@ struct BackendBillingInvoicePage: Decodable, Equatable {
     var limit: Int
     var offset: Int
     var invoices: [BackendBillingInvoice]
+}
+
+private struct BackendBillingInvoiceDetail: Decodable {
+    var invoice: BackendBillingInvoice
 }
 
 struct BackendBillingAction: Decodable, Equatable, Identifiable {

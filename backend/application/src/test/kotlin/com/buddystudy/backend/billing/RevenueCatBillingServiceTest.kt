@@ -31,6 +31,7 @@ class RevenueCatBillingServiceTest {
         eventId = "rc-event-1",
         eventType = "INITIAL_PURCHASE",
         appUserId = token.toString(),
+        originalAppUserId = token.toString(),
         aliases = emptyList(),
         store = "APP_STORE",
         productId = "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
@@ -43,6 +44,7 @@ class RevenueCatBillingServiceTest {
         expiresAt = now.plusSeconds(2_592_000),
         eventAt = now,
         cancelReason = null,
+        expirationReason = null,
         signedPayloadSha256 = "b".repeat(64),
     )
     private val product = BillingTierProduct(
@@ -64,34 +66,7 @@ class RevenueCatBillingServiceTest {
         Mockito.`when`(ledger.userIdForAppAccountToken(token)).thenReturn(733)
         Mockito.`when`(ledger.enabledTierProduct(product.productId)).thenReturn(product)
 
-        val expectedCommand = RecordVerifiedPaymentCommand(
-            userId = 733,
-            tierProduct = product,
-            transaction = VerifiedAppleTransaction(
-                transactionId = event.transactionId!!,
-                originalTransactionId = event.originalTransactionId!!,
-                appTransactionId = null,
-                webOrderLineItemId = null,
-                appAccountToken = token,
-                productId = product.productId,
-                productType = BillingProductType.AUTO_RENEWABLE_SUBSCRIPTION,
-                environment = BillingEnvironment.SANDBOX,
-                quantity = 1,
-                priceMilliunits = event.priceMilliunits,
-                currency = event.currency,
-                purchaseAt = event.purchasedAt!!,
-                originalPurchaseAt = null,
-                expiresAt = event.expiresAt,
-                revocationAt = null,
-                revocationReason = null,
-                signedAt = event.eventAt,
-                signedPayloadSha256 = event.signedPayloadSha256,
-            ),
-            invoiceNumber = null,
-            source = BillingEventSource.REVENUECAT_WEBHOOK,
-            eventId = "apple-transaction:${event.transactionId}",
-            occurredAt = now,
-        )
+        val expectedCommand = paymentCommand(event)
         Mockito.`when`(ledger.recordVerifiedPayment(expectedCommand)).thenReturn(invoice())
         Mockito.`when`(ledger.fulfill(99, now)).thenReturn(invoice(InvoiceStatus.COMPLETED))
         Mockito.`when`(ledger.applyRevenueCatEvent(event, now)).thenReturn(true)
@@ -113,6 +88,80 @@ class RevenueCatBillingServiceTest {
 
         Mockito.verify(ledger, Mockito.never()).userIdForAppAccountToken(token)
     }
+
+    @Test
+    fun `purchase resolves stable account token from RevenueCat original app user id`() = runBlocking<Unit> {
+        val aliasedEvent = event.copy(
+            eventId = "rc-event-aliased",
+            appUserId = "\$RCAnonymousID:temporary-device-user",
+            originalAppUserId = token.toString(),
+        )
+        val verifier = Mockito.mock(RevenueCatWebhookVerificationPort::class.java)
+        val ledger = Mockito.mock(BillingLedgerPort::class.java)
+        Mockito.`when`(verifier.verify(request)).thenReturn(aliasedEvent)
+        Mockito.`when`(ledger.recordRevenueCatEvent(aliasedEvent, now)).thenReturn(true)
+        Mockito.`when`(ledger.userIdForAppAccountToken(token)).thenReturn(733)
+        Mockito.`when`(ledger.enabledTierProduct(product.productId)).thenReturn(product)
+        Mockito.`when`(ledger.recordVerifiedPayment(paymentCommand(aliasedEvent))).thenReturn(invoice())
+        Mockito.`when`(ledger.fulfill(99, now)).thenReturn(invoice(InvoiceStatus.COMPLETED))
+        Mockito.`when`(ledger.applyRevenueCatEvent(aliasedEvent, now)).thenReturn(true)
+
+        RevenueCatBillingService(verifier, ledger, Clock.fixed(now, ZoneOffset.UTC)).receive(request)
+
+        Mockito.verify(ledger).userIdForAppAccountToken(token)
+    }
+
+    @Test
+    fun `test store purchase is accepted only when explicitly enabled`() = runBlocking<Unit> {
+        val testStoreEvent = event.copy(store = "TEST_STORE")
+        val verifier = Mockito.mock(RevenueCatWebhookVerificationPort::class.java)
+        val ledger = Mockito.mock(BillingLedgerPort::class.java)
+        Mockito.`when`(verifier.verify(request)).thenReturn(testStoreEvent)
+        Mockito.`when`(ledger.recordRevenueCatEvent(testStoreEvent, now)).thenReturn(true)
+        Mockito.`when`(ledger.userIdForAppAccountToken(token)).thenReturn(733)
+        Mockito.`when`(ledger.enabledTierProduct(product.productId)).thenReturn(product)
+        Mockito.`when`(ledger.recordVerifiedPayment(paymentCommand(testStoreEvent))).thenReturn(invoice())
+        Mockito.`when`(ledger.fulfill(99, now)).thenReturn(invoice(InvoiceStatus.COMPLETED))
+        Mockito.`when`(ledger.applyRevenueCatEvent(testStoreEvent, now)).thenReturn(true)
+
+        RevenueCatBillingService(
+            verifier,
+            ledger,
+            Clock.fixed(now, ZoneOffset.UTC),
+            allowTestStore = true,
+        ).receive(request)
+
+        Mockito.verify(ledger).fulfill(99, now)
+    }
+
+    private fun paymentCommand(source: VerifiedRevenueCatEvent) = RecordVerifiedPaymentCommand(
+        userId = 733,
+        tierProduct = product,
+        transaction = VerifiedAppleTransaction(
+            transactionId = source.transactionId!!,
+            originalTransactionId = source.originalTransactionId!!,
+            appTransactionId = null,
+            webOrderLineItemId = null,
+            appAccountToken = token,
+            productId = product.productId,
+            productType = BillingProductType.AUTO_RENEWABLE_SUBSCRIPTION,
+            environment = BillingEnvironment.SANDBOX,
+            quantity = 1,
+            priceMilliunits = source.priceMilliunits,
+            currency = source.currency,
+            purchaseAt = source.purchasedAt!!,
+            originalPurchaseAt = null,
+            expiresAt = source.expiresAt,
+            revocationAt = null,
+            revocationReason = null,
+            signedAt = source.eventAt,
+            signedPayloadSha256 = source.signedPayloadSha256,
+        ),
+        invoiceNumber = null,
+        source = BillingEventSource.REVENUECAT_WEBHOOK,
+        eventId = "apple-transaction:${source.transactionId}",
+        occurredAt = now,
+    )
 
     private fun invoice(status: InvoiceStatus = InvoiceStatus.WAITING) = BillingInvoiceSummary(
         id = 99,

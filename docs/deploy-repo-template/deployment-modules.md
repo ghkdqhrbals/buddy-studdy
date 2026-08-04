@@ -129,10 +129,18 @@ deployment.
   default monitored list. Apple payment evidence is recovered by the
   `billing-fulfillment-recovery` managed job, which also belongs in the default
   monitored list so a verified charge cannot remain unfulfilled silently.
-  RevenueCat webhook recovery requires `REVENUECAT_WEBHOOK_SIGNING_SECRET`,
-  `REVENUECAT_PROJECT_ID`, and `REVENUECAT_APP_ID` in the backend application
-  secret. The webhook is a secondary input and uses the same Apple transaction
-  idempotency key as direct JWS synchronization.
+  RevenueCat webhook recovery requires `REVENUECAT_WEBHOOK_SIGNING_SECRET` in
+  the backend application secret. `REVENUECAT_PROJECT_ID` and
+  `REVENUECAT_APP_ID` are optional scoping metadata; an empty app ID accepts all
+  HMAC-authenticated apps in the BuddyStudy RevenueCat project and still rejects
+  unknown products or account tokens. The webhook is the primary new-purchase and lifecycle input and uses
+  the same provider transaction idempotency key as the backward-compatible
+  direct JWS synchronization path. Production keeps
+  `REVENUECAT_ALLOW_TEST_STORE=false`; only the development profile accepts
+  RevenueCat Test Store events. Production and development use separate HMAC
+  webhook configurations and signing secrets. The development webhook is
+  filtered to the Test Store app plus Sandbox events so its purchases cannot
+  be applied to the production ledger.
 - Runtime health checks are not GitHub Actions deploy gates. GitHub Actions
   validates image/config submission and Nginx syntax only. Docker Swarm owns
   task health, replacement ordering, and rollback; Grafana owns continuous

@@ -1718,6 +1718,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.ghkdqhrbals.StudyMate;
 				PRODUCT_NAME = StudyMate;
+				REVENUECAT_PUBLIC_SDK_KEY = test_OCkfoPdAYOFAaRtBzomjtkAYnfo;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_EMIT_LOC_STRINGS = YES;

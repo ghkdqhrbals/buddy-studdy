@@ -77,6 +77,7 @@ data class VerifiedRevenueCatEvent(
     val eventId: String,
     val eventType: String,
     val appUserId: String?,
+    val originalAppUserId: String?,
     val aliases: List<String>,
     val store: String?,
     val productId: String?,
@@ -89,6 +90,7 @@ data class VerifiedRevenueCatEvent(
     val expiresAt: Instant?,
     val eventAt: Instant,
     val cancelReason: String?,
+    val expirationReason: String?,
     val signedPayloadSha256: String,
 )
 

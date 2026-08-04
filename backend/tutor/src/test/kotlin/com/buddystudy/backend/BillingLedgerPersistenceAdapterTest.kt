@@ -73,6 +73,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
             eventId = eventId,
             eventType = "TEST",
             appUserId = null,
+            originalAppUserId = null,
             aliases = emptyList(),
             store = "APP_STORE",
             productId = null,
@@ -85,6 +86,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
             expiresAt = null,
             eventAt = Instant.parse("2032-08-04T00:00:00Z"),
             cancelReason = null,
+            expirationReason = null,
             signedPayloadSha256 = "c".repeat(64),
         )
 
@@ -333,6 +335,75 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
             "REFUND_REQUESTED",
             "REFUNDED",
         )
+        assertThat(
+            longValue(
+                "select count(*) from user_memberships where user_id = ${fixture.userId} and status = 'ACTIVE'",
+            ),
+        ).isZero()
+    }
+
+    @Test
+    fun `RevenueCat customer support cancellation completes refund and revokes current entitlement`(): Unit = runBlocking {
+        val fixture = fixture("revenuecat-refund")
+        val checkout = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            fixture.product,
+            fixture.idempotencyKey,
+            fixture.now,
+        )
+        val transaction = fixture.transaction()
+        val recorded = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                userId = fixture.userId,
+                tierProduct = fixture.product,
+                transaction = transaction,
+                invoiceNumber = checkout.invoiceNumber,
+                source = BillingEventSource.CLIENT,
+                eventId = "apple-transaction:${transaction.transactionId}",
+                occurredAt = fixture.now.plusSeconds(1),
+            ),
+        )
+        ledger.fulfill(recorded.id, fixture.now.plusSeconds(2))
+
+        val eventId = "rc-refund-${fixture.suffix}"
+        createdRevenueCatEventIds += eventId
+        val refund = VerifiedRevenueCatEvent(
+            eventId = eventId,
+            eventType = "CANCELLATION",
+            appUserId = fixture.appAccountToken.toString(),
+            originalAppUserId = fixture.appAccountToken.toString(),
+            aliases = emptyList(),
+            store = "APP_STORE",
+            productId = fixture.product.productId,
+            transactionId = transaction.transactionId,
+            originalTransactionId = transaction.originalTransactionId,
+            environment = BillingEnvironment.SANDBOX,
+            priceMilliunits = -7_900_000,
+            currency = "KRW",
+            purchasedAt = transaction.purchaseAt,
+            expiresAt = transaction.expiresAt,
+            eventAt = fixture.now.plusSeconds(3),
+            cancelReason = "CUSTOMER_SUPPORT",
+            expirationReason = null,
+            signedPayloadSha256 = "d".repeat(64),
+        )
+
+        assertThat(ledger.recordRevenueCatEvent(refund, refund.eventAt)).isTrue()
+        assertThat(ledger.applyRevenueCatEvent(refund, refund.eventAt)).isTrue()
+
+        val refundInvoiceId = longValue(
+            "select id from invoices where original_invoice_id = ${recorded.id} and type = 'REFUND'",
+        )
+        val refundInvoice = requireNotNull(ledger.invoice(fixture.userId, refundInvoiceId))
+        assertThat(refundInvoice.invoice.status).isEqualTo(InvoiceStatus.COMPLETED)
+        assertThat(refundInvoice.invoice.paymentStatus).isEqualTo(PaymentStatus.REFUNDED)
+        assertThat(refundInvoice.events.map { it.eventType }).containsExactly("INVOICE_CREATED", "REFUNDED")
+        assertThat(
+            longValue(
+                "select count(*) from invoice_events where invoice_id = $refundInvoiceId and source = 'REVENUECAT_WEBHOOK'",
+            ),
+        ).isEqualTo(2)
         assertThat(
             longValue(
                 "select count(*) from user_memberships where user_id = ${fixture.userId} and status = 'ACTIVE'",

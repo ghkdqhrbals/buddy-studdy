@@ -71,6 +71,7 @@ class RevenueCatWebhookVerificationAdapter(
             eventId = eventId,
             eventType = eventType,
             appUserId = event.appUserId?.trim()?.takeIf(String::isNotEmpty),
+            originalAppUserId = event.originalAppUserId?.trim()?.takeIf(String::isNotEmpty),
             aliases = event.aliases.orEmpty().map(String::trim).filter(String::isNotEmpty).take(20),
             store = event.store?.trim()?.uppercase(),
             productId = event.productId?.trim()?.takeIf(String::isNotEmpty),
@@ -83,6 +84,7 @@ class RevenueCatWebhookVerificationAdapter(
             expiresAt = event.expirationAtMs?.toInstant(),
             eventAt = eventAt,
             cancelReason = event.cancelReason?.trim()?.uppercase()?.takeIf(String::isNotEmpty),
+            expirationReason = event.expirationReason?.trim()?.uppercase()?.takeIf(String::isNotEmpty),
             signedPayloadSha256 = MessageDigest.getInstance("SHA-256").digest(request.rawBody).toHex(),
         )
     }
@@ -132,6 +134,7 @@ class RevenueCatWebhookVerificationAdapter(
         @param:JsonProperty("app_id") val appId: String? = null,
         @param:JsonProperty("event_timestamp_ms") val eventTimestampMs: Long? = null,
         @param:JsonProperty("app_user_id") val appUserId: String? = null,
+        @param:JsonProperty("original_app_user_id") val originalAppUserId: String? = null,
         val aliases: List<String>? = null,
         val store: String? = null,
         @param:JsonProperty("product_id") val productId: String? = null,
@@ -143,6 +146,7 @@ class RevenueCatWebhookVerificationAdapter(
         @param:JsonProperty("purchased_at_ms") val purchasedAtMs: Long? = null,
         @param:JsonProperty("expiration_at_ms") val expirationAtMs: Long? = null,
         @param:JsonProperty("cancel_reason") val cancelReason: String? = null,
+        @param:JsonProperty("expiration_reason") val expirationReason: String? = null,
     )
 
     private companion object {

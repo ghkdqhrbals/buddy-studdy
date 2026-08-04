@@ -6137,6 +6137,40 @@ final class AppState: ObservableObject {
         return invoice
     }
 
+    func waitForRevenueCatBillingFulfillment(invoiceID: Int64) async throws -> BackendBillingInvoice {
+        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
+              let registration = await registrationWithAccessToken(storedRegistration, reason: "billing-webhook") else {
+            throw AppStateError.missingRemotePushRegistration
+        }
+        let delays: [UInt64] = [1_000_000_000, 2_000_000_000, 4_000_000_000]
+        var latest = try await performWithBackendIdentityRecovery(
+            registration: registration,
+            reason: "billing-webhook",
+            operation: { recoveredRegistration in
+                try await self.billingUseCase.invoice(
+                    registration: recoveredRegistration,
+                    invoiceID: invoiceID
+                )
+            }
+        )
+        for delay in delays where latest.status == "WAITING" {
+            try await Task.sleep(nanoseconds: delay)
+            latest = try await performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "billing-webhook",
+                operation: { recoveredRegistration in
+                    try await self.billingUseCase.invoice(
+                        registration: recoveredRegistration,
+                        invoiceID: invoiceID
+                    )
+                }
+            )
+        }
+        await refreshBilling()
+        await refreshQuestionQuota()
+        return latest
+    }
+
     func abandonAppleBillingCheckout(invoiceNumber: UUID) async throws {
         guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "billing-checkout-abandon") else {

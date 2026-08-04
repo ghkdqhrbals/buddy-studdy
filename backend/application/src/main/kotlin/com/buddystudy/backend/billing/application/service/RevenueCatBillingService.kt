@@ -10,6 +10,7 @@ import com.buddystudy.backend.billing.application.port.outbound.RevenueCatWebhoo
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.billing.domain.BillingEventSource
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import java.time.Clock
@@ -21,6 +22,8 @@ class RevenueCatBillingService(
     private val verifier: RevenueCatWebhookVerificationPort,
     private val ledger: BillingLedgerPort,
     private val clock: Clock = Clock.systemUTC(),
+    @param:Value("\${buddystudy.billing.revenue-cat.allow-test-store:false}")
+    private val allowTestStore: Boolean = false,
 ) : RevenueCatBillingNotificationUseCase {
     override suspend fun receive(request: RevenueCatWebhookRequest) {
         val event = verifier.verify(request)
@@ -62,8 +65,9 @@ class RevenueCatBillingService(
     }
 
     private fun VerifiedRevenueCatEvent.toVerifiedAppleTransaction(): VerifiedAppleTransaction {
-        if (store != "APP_STORE") invalidEvent("Only App Store RevenueCat events are accepted.")
-        val token = sequenceOf(appUserId).plus(aliases.asSequence())
+        val acceptedStore = store == "APP_STORE" || (store == "TEST_STORE" && allowTestStore)
+        if (!acceptedStore) invalidEvent("RevenueCat store is not accepted in this environment.")
+        val token = sequenceOf(appUserId, originalAppUserId).plus(aliases.asSequence())
             .filterNotNull()
             .mapNotNull { runCatching { UUID.fromString(it) }.getOrNull() }
             .firstOrNull()
