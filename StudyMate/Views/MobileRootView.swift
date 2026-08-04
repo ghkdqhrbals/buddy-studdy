@@ -1517,8 +1517,8 @@ private struct MobileHomeView: View {
                 closeHomeSearch(clearText: false)
             }
         }
-        .sheet(isPresented: $isShowingProfileSettings) {
-            MobileProfileSettingsSheet()
+        .navigationDestination(isPresented: $isShowingProfileSettings) {
+            MobileProfilePage()
         }
         .sheet(isPresented: $isShowingEmailSignIn) {
             EmailSignInSheet {
@@ -2608,7 +2608,7 @@ private struct NotificationRouteDestination: View {
                 .navigationTitle(strings.tabSettings)
                 .navigationBarTitleDisplayMode(.inline)
         case .profile:
-            MobileProfileSettingsSheet()
+            MobileProfilePage()
         case .home:
             EmptyView()
         }
@@ -5784,9 +5784,10 @@ extension Color {
     }
 }
 
-private struct MobileProfileSettingsSheet: View {
+private struct MobileProfilePage: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
+    @State private var isMembershipManagementPresented = false
 
     private var strings: AppStrings {
         appState.strings
@@ -5801,148 +5802,194 @@ private struct MobileProfileSettingsSheet: View {
         return parts.isEmpty ? "-" : parts.joined(separator: " ")
     }
 
+    private var membershipTierName: String {
+        strings.membershipTierName(activeMembershipTierCode)
+    }
+
+    private var activeMembershipTierCode: String {
+        if let invoice = appState.billingInvoices
+            .filter({ invoice in
+                (invoice.type ?? "NORMAL") == "NORMAL"
+                    && invoice.status == "COMPLETED"
+                    && invoice.isSubscription
+                    && invoice.expiresAt.map { $0 > Date() } == true
+            })
+            .max(by: { ($0.expiresAt ?? .distantPast) < ($1.expiresAt ?? .distantPast) }) {
+            return invoice.tierCode
+        }
+
+        if let monthlyLimit = appState.questionQuota?.monthlyLimit,
+           let product = appState.billingCatalog?.products.first(where: {
+               $0.monthlyQuestionLimit == monthlyLimit
+           }) {
+            return product.tierCode
+        }
+
+        switch appState.questionQuota?.monthlyLimit {
+        case 300:
+            return "TIER2"
+        case 1_000:
+            return "TIER3"
+        default:
+            return "TIER1"
+        }
+    }
+
     var body: some View {
-        NavigationStack {
-            List {
-                if appState.isCommunitySessionActive {
-                    Section {
-                        if let quota = appState.questionQuota {
+        List {
+            if appState.isCommunitySessionActive {
+                Section {
+                    if let quota = appState.questionQuota {
+                        Button {
+                            isMembershipManagementPresented = true
+                        } label: {
                             MonthlyQuestionQuotaSummary(
                                 quota: quota,
                                 strings: strings,
+                                title: membershipTierName,
+                                showsDisclosureIndicator: true,
                                 isCompact: true
                             )
                             .padding(.vertical, 2)
-                        } else {
-                            HStack(spacing: 9) {
-                                ProgressView()
-                                Text(strings.loading)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .frame(minHeight: 36)
                         }
+                        .buttonStyle(.plain)
+                    } else {
+                        HStack(spacing: 9) {
+                            ProgressView()
+                            Text(strings.loading)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(minHeight: 36)
                     }
                 }
+            }
 
-                Section {
-                    if appState.isCommunitySessionActive {
-                        NavigationLink {
-                            MobileProfileEditorView()
-                        } label: {
-                            profileDestinationLabel(
-                                title: strings.avatar,
-                                subtitle: appState.communityProfile?.displayName,
-                                systemImage: "person.crop.circle"
-                            )
-                        }
-                    } else {
-                        NavigationLink {
-                            MobileProfileEditorView()
-                        } label: {
-                            profileDestinationLabel(
-                                title: strings.communityLogin,
-                                subtitle: nil,
-                                systemImage: "person.crop.circle.badge.plus"
-                            )
-                        }
-                    }
-
+            Section {
+                if appState.isCommunitySessionActive {
                     NavigationLink {
-                        MobileSettingsView()
+                        MobileProfileEditorView()
                     } label: {
                         profileDestinationLabel(
-                            title: strings.tabSettings,
+                            title: strings.avatar,
+                            subtitle: appState.communityProfile?.displayName,
+                            systemImage: "person.crop.circle"
+                        )
+                    }
+                } else {
+                    NavigationLink {
+                        MobileProfileEditorView()
+                    } label: {
+                        profileDestinationLabel(
+                            title: strings.communityLogin,
                             subtitle: nil,
-                            systemImage: "gearshape"
+                            systemImage: "person.crop.circle.badge.plus"
                         )
                     }
                 }
 
-                if appState.isCommunitySessionActive {
-                    Section(strings.membershipAndBilling) {
-                        NavigationLink {
-                            MobileMembershipManagementView()
-                        } label: {
-                            profileDestinationLabel(
-                                title: strings.membershipManagement,
-                                subtitle: nil,
-                                systemImage: "creditcard"
-                            )
-                        }
+                NavigationLink {
+                    MobileSettingsView()
+                } label: {
+                    profileDestinationLabel(
+                        title: strings.tabSettings,
+                        subtitle: nil,
+                        systemImage: "gearshape"
+                    )
+                }
+            }
 
-                        NavigationLink {
-                            MobileBillingHistoryView()
-                        } label: {
-                            profileDestinationLabel(
-                                title: strings.billingHistory,
-                                subtitle: nil,
-                                systemImage: "list.bullet.rectangle"
-                            )
-                        }
+            if appState.isCommunitySessionActive {
+                Section(strings.membershipAndBilling) {
+                    NavigationLink {
+                        MobileMembershipManagementView()
+                    } label: {
+                        profileDestinationLabel(
+                            title: strings.membershipManagement,
+                            subtitle: nil,
+                            systemImage: "creditcard"
+                        )
+                    }
+
+                    NavigationLink {
+                        MobileBillingHistoryView()
+                    } label: {
+                        profileDestinationLabel(
+                            title: strings.billingHistory,
+                            subtitle: nil,
+                            systemImage: "list.bullet.rectangle"
+                        )
                     }
                 }
+            }
 
-                if appState.isCommunitySessionActive {
-                    Section {
-                        NavigationLink {
-                            MobileNotificationSettingsView()
-                        } label: {
-                            profileDestinationLabel(
-                                title: strings.notificationSettings,
-                                subtitle: nil,
-                                systemImage: "bell"
-                            )
-                        }
-
-                        NavigationLink {
-                            MobileTermsSettingsView()
-                        } label: {
-                            profileDestinationLabel(
-                                title: strings.operatingTerms,
-                                subtitle: nil,
-                                systemImage: "doc.text"
-                            )
-                        }
-                    }
-                }
-
+            if appState.isCommunitySessionActive {
                 Section {
-                    HStack {
-                        Text(strings.appVersion)
-                        Spacer()
-                        Text(appVersionText)
-                            .foregroundStyle(.secondary)
+                    NavigationLink {
+                        MobileNotificationSettingsView()
+                    } label: {
+                        profileDestinationLabel(
+                            title: strings.notificationSettings,
+                            subtitle: nil,
+                            systemImage: "bell"
+                        )
+                    }
+
+                    NavigationLink {
+                        MobileTermsSettingsView()
+                    } label: {
+                        profileDestinationLabel(
+                            title: strings.operatingTerms,
+                            subtitle: nil,
+                            systemImage: "doc.text"
+                        )
                     }
                 }
+            }
 
-                if appState.isCommunitySessionActive {
-                    Section {
-                        Button(role: .destructive) {
-                            appState.signOutFromCommunity()
-                            dismiss()
-                        } label: {
-                            Text(strings.communityLogout)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+            Section {
+                HStack {
+                    Text(strings.appVersion)
+                    Spacer()
+                    Text(appVersionText)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if appState.isCommunitySessionActive {
+                Section {
+                    Button(role: .destructive) {
+                        appState.signOutFromCommunity()
+                        dismiss()
+                    } label: {
+                        Text(strings.communityLogout)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        }
+        .navigationTitle(strings.profile)
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            if appState.isCommunitySessionActive {
+                async let quotaRefresh: Void = appState.refreshQuestionQuota()
+                async let billingRefresh: Void = appState.refreshBilling()
+                async let profileRefresh: Void = appState.loadCommunityProfile()
+                _ = await (quotaRefresh, billingRefresh, profileRefresh)
+            }
+        }
+        .sheet(isPresented: $isMembershipManagementPresented) {
+            NavigationStack {
+                MobileMembershipManagementView()
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(strings.close) {
+                                isMembershipManagementPresented = false
+                            }
                         }
                     }
-                }
             }
-            .navigationTitle(strings.profile)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(strings.close) {
-                        dismiss()
-                    }
-                }
-            }
-            .task {
-                if appState.isCommunitySessionActive {
-                    await appState.refreshQuestionQuota()
-                    await appState.loadCommunityProfile()
-                }
-            }
+            .presentationDragIndicator(.visible)
         }
     }
 
@@ -5976,12 +6023,14 @@ private struct MonthlyQuestionQuotaSummary: View {
     var quota: BackendQuestionQuota
     var strings: AppStrings
     var membershipName: String? = nil
+    var title: String? = nil
+    var showsDisclosureIndicator = false
     var isCompact = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: isCompact ? 8 : 14) {
             HStack(alignment: .firstTextBaseline) {
-                Text(strings.monthlyQuestionQuota)
+                Text(title ?? strings.monthlyQuestionQuota)
                     .font(isCompact ? .subheadline.weight(.semibold) : .headline)
 
                 Spacer(minLength: 12)
@@ -5993,6 +6042,12 @@ private struct MonthlyQuestionQuotaSummary: View {
                 .font(isCompact ? .caption.weight(.semibold) : .subheadline.weight(.semibold))
                 .monospacedDigit()
                 .foregroundStyle(quota.remainingCount == 0 ? Color.orange : Color.secondary)
+
+                if showsDisclosureIndicator {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
             }
 
             ProgressView(
@@ -6874,7 +6929,7 @@ private struct MobileProfileEditorView: View {
                 appState.logMobileAuthView(
                     "mobile_profile_sheet_appear",
                     page: .profile,
-                    reason: "MobileProfileSettingsSheet",
+                    reason: "MobileProfilePage",
                     extra: ["hasProfile=\(appState.communityProfile != nil)"]
                 )
                 resetDraftProfile()
@@ -6910,7 +6965,7 @@ private struct MobileProfileEditorView: View {
                 appState.logMobileAuthView(
                     "mobile_profile_session_change",
                     page: .profile,
-                    reason: "MobileProfileSettingsSheet",
+                    reason: "MobileProfilePage",
                     extra: ["isSignedIn=\(isSignedIn)"]
                 )
                 if isSignedIn, !wasSignedInWhenOpened {

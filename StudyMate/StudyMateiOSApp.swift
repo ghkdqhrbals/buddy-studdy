@@ -80,11 +80,11 @@ private struct StudyMateiOSBootstrapView: View {
             } else {
                 Color(.systemBackground)
             }
-
+        }
+        .background {
             if let appState {
-                FloatingDebugLogOverlay()
-                    .environmentObject(appState)
-                    .zIndex(2)
+                DebugOverlayWindowInstaller(appState: appState)
+                    .frame(width: 0, height: 0)
             }
         }
         .background(Color(.systemBackground))
@@ -101,6 +101,90 @@ private struct StudyMateiOSBootstrapView: View {
             appState = state
             await state.start()
         }
+    }
+}
+
+private struct DebugOverlayWindowInstaller: UIViewRepresentable {
+    @ObservedObject var appState: AppState
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> DebugOverlayAttachmentView {
+        let view = DebugOverlayAttachmentView()
+        view.isUserInteractionEnabled = false
+        view.onWindowSceneChange = { scene in
+            context.coordinator.attach(to: scene, appState: appState)
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: DebugOverlayAttachmentView, context: Context) {
+        context.coordinator.attach(to: uiView.window?.windowScene, appState: appState)
+    }
+
+    static func dismantleUIView(_ uiView: DebugOverlayAttachmentView, coordinator: Coordinator) {
+        uiView.onWindowSceneChange = nil
+        coordinator.detach()
+    }
+
+    @MainActor
+    final class Coordinator {
+        private weak var attachedScene: UIWindowScene?
+        private var overlayWindow: DebugOverlayPassthroughWindow?
+        private var hostingController: UIHostingController<AnyView>?
+
+        func attach(to scene: UIWindowScene?, appState: AppState) {
+            guard let scene else { return }
+
+            if attachedScene !== scene || overlayWindow == nil {
+                detach()
+
+                let rootView = AnyView(
+                    FloatingDebugLogOverlay()
+                        .environmentObject(appState)
+                )
+                let hostingController = UIHostingController(rootView: rootView)
+                hostingController.view.backgroundColor = .clear
+
+                let window = DebugOverlayPassthroughWindow(windowScene: scene)
+                window.backgroundColor = .clear
+                window.windowLevel = UIWindow.Level(rawValue: UIWindow.Level.alert.rawValue + 1)
+                window.rootViewController = hostingController
+                window.isHidden = false
+
+                attachedScene = scene
+                overlayWindow = window
+                self.hostingController = hostingController
+            }
+        }
+
+        func detach() {
+            overlayWindow?.isHidden = true
+            overlayWindow?.rootViewController = nil
+            overlayWindow = nil
+            hostingController = nil
+            attachedScene = nil
+        }
+    }
+}
+
+private final class DebugOverlayAttachmentView: UIView {
+    var onWindowSceneChange: ((UIWindowScene?) -> Void)?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        onWindowSceneChange?(window?.windowScene)
+    }
+}
+
+private final class DebugOverlayPassthroughWindow: UIWindow {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard let hitView = super.hitTest(point, with: event) else {
+            return nil
+        }
+        return hitView === rootViewController?.view ? nil : hitView
     }
 }
 

@@ -7,7 +7,10 @@ final class BillingLocalizationTests: XCTestCase {
 
         XCTAssertEqual(strings.membershipAndBilling, "メンバーシップと支払い")
         XCTAssertEqual(strings.membershipManagement, "メンバーシップ管理")
+        XCTAssertEqual(strings.membershipTierName("TIER1"), "ティア1")
         XCTAssertEqual(strings.membershipTierName("TIER2"), "ティア2")
+        XCTAssertEqual(AppStrings(language: .korean).membershipTierName("TIER1"), "티어 1")
+        XCTAssertEqual(AppStrings(language: .english).membershipTierName("TIER1"), "Tier 1")
         XCTAssertEqual(strings.billingPeriod("P1M"), "月間")
         XCTAssertEqual(strings.billingPeriod("P1Y"), "年間")
         XCTAssertEqual(strings.monthlyQuestionAllowanceText(300), "毎月300問")
