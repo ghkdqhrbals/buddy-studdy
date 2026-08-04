@@ -116,6 +116,7 @@ class PushStreamManagerTest {
             `when`(devices.findByDeviceId("device-1")).thenReturn(
                 DeviceEntity(
                     deviceId = "device-1",
+                    userId = 11,
                     apnsToken = "apns-token",
                     apnsEnvironment = ApnsEnvironment.SANDBOX,
                 ),

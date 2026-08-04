@@ -131,6 +131,9 @@ class PushStreamManager(
         }
         val device = devices.findByDeviceId(request.deviceId)
             ?: return reject("device_not_found", "Push target device was not found.")
+        if (userId != null && device.userId != userId) {
+            return reject("device_user_mismatch", "Push target device is not attached to the user.")
+        }
         val apnsToken = device.apnsToken.trim()
         if (apnsToken.isBlank()) {
             return reject("apns_token_missing", "APNs token is missing.")
@@ -217,11 +220,12 @@ class PushStreamManager(
     }
 
     internal suspend fun deliver(payload: QuestionPushRequestedPayload, context: StreamMessageContext) {
+        val targetDevice = resolveActiveDeliveryTarget(payload, context) ?: return
         val pushMessage = PushEventPayloadMapper.toPushQuestionMessage(
             payload = payload,
             fields = context.fields,
-            apnsToken = context.fields["apnsToken"].orEmpty(),
-            apnsEnvironment = context.fields["apnsEnvironment"] ?: "production",
+            apnsToken = targetDevice.apnsToken.trim(),
+            apnsEnvironment = targetDevice.apnsEnvironment.databaseValue,
         )
         try {
             logger.info(
@@ -273,6 +277,46 @@ class PushStreamManager(
             }
             throw error
         }
+    }
+
+    private suspend fun resolveActiveDeliveryTarget(
+        payload: QuestionPushRequestedPayload,
+        context: StreamMessageContext,
+    ) = run {
+        suspend fun reject(reason: String, detail: String): Nothing? {
+            payload.notificationId?.let {
+                notifications.markPushFailed(it, detail, Instant.now())
+            }
+            logger.info(
+                "redis_stream_consume_discarded reason={} stream={} redisRecordId={} eventId={} recordId={} notificationId={} deviceId={} userId={} claimed={}",
+                reason,
+                context.streamKey,
+                context.recordId,
+                context.eventId,
+                payload.recordId,
+                payload.notificationId,
+                payload.deviceId,
+                payload.userId,
+                context.claimed,
+            )
+            return null
+        }
+
+        val device = devices.findByDeviceId(payload.deviceId)
+            ?: return@run reject("device_not_found", "Push target device was not found.")
+        val userId = payload.userId
+        if (userId != null) {
+            if (device.userId != userId) {
+                return@run reject("device_user_mismatch", "Push target device is not attached to the user.")
+            }
+            if (!userDevices.hasActiveSession(userId, payload.deviceId)) {
+                return@run reject("inactive_session", "Push target session is inactive.")
+            }
+        }
+        if (device.apnsToken.isBlank()) {
+            return@run reject("apns_token_missing", "APNs token is missing.")
+        }
+        device
     }
 
     private fun QuestionPushRequest.toEvent(): QuestionPushRequestedEvent =

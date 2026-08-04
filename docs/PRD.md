@@ -150,6 +150,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 7. Push arrival syncs data without opening a new answer page unless the user taps the notification.
 8. If APNs registration is not available yet, the app can still register a backend device and use backend questions/grading manually. Scheduled push delivery starts after the APNs token is attached to that backend device.
 9. Persisted message content keeps Markdown source, while notification previews use a parser-derived plain-text projection so formatting markers are not exposed in APNs alerts. Rehydrating a queued push must rebuild this projection instead of falling back to the Markdown source.
+10. Logging out immediately removes the current device from the user's active push targets. A push already queued before logout must revalidate the active session, current user-device attachment, and current APNs token immediately before APNs delivery and must be discarded when any check fails.
 
 ### Internal Operations
 

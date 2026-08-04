@@ -93,6 +93,12 @@ Primary fields:
 - `userId`
 - `payload`
 
+Before publishing a user-scoped push request and again before calling APNs, the
+backend requires an active user-device session. The final delivery gate reloads
+the device attachment and APNs token from MySQL, so a notification queued
+before logout is discarded after logout instead of using the token copied into
+the Redis Stream entry.
+
 `payload` contains the same values as `NotificationRequestCommand`.
 
 ## Consistency and Ordering

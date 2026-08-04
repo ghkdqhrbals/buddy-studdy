@@ -1,5 +1,7 @@
 package com.buddystudy.backend.study.adapter.stream
 
+import com.buddystudy.auth.domain.entity.ApnsEnvironment
+import com.buddystudy.auth.domain.entity.DeviceEntity
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
@@ -22,6 +24,7 @@ import org.junit.jupiter.api.Test
 import org.mockito.Answers
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.mockingDetails
+import org.mockito.Mockito.`when`
 import org.mockito.Mockito.verifyNoInteractions
 
 class PushStreamManagerAnnotationTest {
@@ -58,13 +61,22 @@ class PushStreamManagerAnnotationTest {
     }
 
     @Test
-    fun `push consumer sends prepared apns message without target or policy validation`() = runBlocking {
+    fun `push consumer revalidates session and uses the current apns target`() = runBlocking {
         val pushNotifications = mock(PushNotificationPort::class.java)
         val devices = mock(DevicePort::class.java)
         val userDevices = mock(UserDevicePort::class.java)
         val notifications = mock(NotificationPersistencePort::class.java) { invocation ->
             if (invocation.method.name == "markPushSent") 1 else Answers.RETURNS_DEFAULTS.answer(invocation)
         }
+        `when`(devices.findByDeviceId("device-1")).thenReturn(
+            DeviceEntity(
+                deviceId = "device-1",
+                userId = 11,
+                apnsToken = "current-apns-token",
+                apnsEnvironment = ApnsEnvironment.SANDBOX,
+            ),
+        )
+        `when`(userDevices.hasActiveSession(11, "device-1")).thenReturn(true)
         val payload = QuestionPushRequestedPayload(
             recordId = 10,
             notificationId = 42,
@@ -90,8 +102,8 @@ class PushStreamManagerAnnotationTest {
             eventType = "QUESTION_PUSH_REQUESTED",
             fields = mapOf(
                 "pushProvider" to "APNS",
-                "apnsToken" to "apns-token",
-                "apnsEnvironment" to "sandbox",
+                "apnsToken" to "stale-queued-token",
+                "apnsEnvironment" to "production",
             ),
             claimed = false,
         )
@@ -111,29 +123,33 @@ class PushStreamManagerAnnotationTest {
             .arguments[0]
         assertThat(sentMessage).isInstanceOf(ApnsQuestionMessage::class.java)
         assertThat((sentMessage as ApnsQuestionMessage).notificationId).isEqualTo("42")
+        assertThat(sentMessage.token).isEqualTo("current-apns-token")
+        assertThat(sentMessage.environment).isEqualTo("sandbox")
         val pushStatus = mockingDetails(notifications).invocations
             .single { it.method.name == "markPushSent" }
         assertThat(pushStatus.arguments[0]).isEqualTo(42L)
         assertThat(pushStatus.arguments[1]).isInstanceOf(Instant::class.java)
-        verifyNoInteractions(devices, userDevices)
     }
 
     @Test
-    fun `legacy push without apns token is marked failed and discarded`() = runBlocking {
-        var deliveryAttempts = 0
-        val pushNotifications = object : PushNotificationPort {
-            override suspend fun sendQuestion(message: com.buddystudy.backend.study.application.port.outbound.PushQuestionMessage) {
-                deliveryAttempts += 1
-                throw IllegalArgumentException("APNs token is missing for record ${message.recordId}.")
-            }
-        }
+    fun `queued push is discarded when the user logged out before delivery`() = runBlocking {
+        val pushNotifications = mock(PushNotificationPort::class.java)
         val notifications = mock(NotificationPersistencePort::class.java)
+        val devices = mock(DevicePort::class.java)
+        val userDevices = mock(UserDevicePort::class.java)
+        `when`(devices.findByDeviceId("device-1")).thenReturn(
+            DeviceEntity(
+                deviceId = "device-1",
+                userId = null,
+                apnsToken = "still-present-device-token",
+            ),
+        )
         val manager = PushStreamManager(
             properties = BuddyStudyProperties(),
             publisher = mock(RedisStreamObjectPublisher::class.java),
             pushNotifications = pushNotifications,
-            devices = mock(DevicePort::class.java),
-            userDevices = mock(UserDevicePort::class.java),
+            devices = devices,
+            userDevices = userDevices,
             notifications = notifications,
         )
         val payload = QuestionPushRequestedPayload(
@@ -161,6 +177,7 @@ class PushStreamManagerAnnotationTest {
             eventType = "QUESTION_PUSH_REQUESTED",
             fields = mapOf(
                 "pushProvider" to "APNS",
+                "apnsToken" to "queued-before-logout",
                 "apnsEnvironment" to "sandbox",
             ),
             claimed = true,
@@ -168,10 +185,10 @@ class PushStreamManagerAnnotationTest {
 
         manager.deliver(payload, context)
 
-        assertThat(deliveryAttempts).isEqualTo(1)
+        verifyNoInteractions(pushNotifications)
         val failure = mockingDetails(notifications).invocations
             .single { it.method.name == "markPushFailed" }
         assertThat(failure.arguments[0]).isEqualTo(42L)
-        assertThat(failure.arguments[1]).isEqualTo("APNs token is missing for record 12.")
+        assertThat(failure.arguments[1]).isEqualTo("Push target device is not attached to the user.")
     }
 }
