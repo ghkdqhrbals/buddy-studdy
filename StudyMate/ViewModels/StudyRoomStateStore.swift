@@ -1,5 +1,19 @@
 import Foundation
 
+enum StudyRoomDisplayPolicy {
+    static func rootCategories(
+        from categories: [StudyCategory],
+        rooms: [BackendStudyRoom]
+    ) -> [StudyCategory] {
+        let rootIDs = Set(
+            rooms
+                .filter { $0.parentStudyId == nil }
+                .map { String($0.id) }
+        )
+        return categories.filter { rootIDs.contains($0.id) }
+    }
+}
+
 struct StudyRoomStateStore {
     private(set) var rooms: [BackendStudyRoom] = []
 

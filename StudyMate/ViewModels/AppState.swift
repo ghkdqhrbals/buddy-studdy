@@ -89,6 +89,13 @@ enum EmailCommunitySignInResult: Equatable {
     case failed
 }
 
+enum BackendStudyLoadState: Equatable {
+    case idle
+    case loading
+    case loaded
+    case failed
+}
+
 @MainActor
 final class AppState: ObservableObject {
     static let developerLogPageSize = 50
@@ -138,6 +145,7 @@ final class AppState: ObservableObject {
     @Published var openAIModelOptions: [OpenAIModelOption] = OpenAIModelOption.all
     @Published var hasCompletedOnboarding: Bool
     @Published var isRefreshingVisibleData = false
+    @Published private(set) var backendStudyLoadState: BackendStudyLoadState = .idle
     @Published var isCloudSyncEnabled: Bool
     @Published var isCloudSyncing = false
     @Published var activeTerms: [BackendTerms] = []
@@ -564,15 +572,10 @@ final class AppState: ObservableObject {
     }
 
     var rootStudyCategoriesForDisplay: [StudyCategory] {
-        let rootIDs = Set(
-            backendStudyRooms
-                .filter { $0.parentStudyId == nil }
-                .map { String($0.id) }
+        StudyRoomDisplayPolicy.rootCategories(
+            from: studyCategoriesForDisplay,
+            rooms: backendStudyRooms
         )
-        guard !rootIDs.isEmpty else {
-            return studyCategoriesForDisplay
-        }
-        return studyCategoriesForDisplay.filter { rootIDs.contains($0.id) }
     }
 
     var selectedStudyCategoryIDForDisplay: String? {
@@ -2882,8 +2885,10 @@ final class AppState: ObservableObject {
         preserveLocalSettings: Bool = true
     ) async -> Bool {
         _ = preserveLocalSettings
+        backendStudyLoadState = .loading
         guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "state") else {
+            backendStudyLoadState = .failed
             return false
         }
 
@@ -2905,11 +2910,13 @@ final class AppState: ObservableObject {
             },
             onSuccess: { studyPage in
                 applyBackendStudyPage(studyPage)
+                backendStudyLoadState = .loaded
                 let pendingCount = studyPage.studies.compactMap(\.pendingQuestion).count
                 statusMessage = updateVisibleQuestion ? strings.refreshed : statusMessage
                 log(.info, "백엔드 학습 데이터를 동기화했습니다. studies=\(studyPage.studies.count), pending=\(pendingCount)")
             },
             onFailure: { error in
+                backendStudyLoadState = .failed
                 handleAppError(error, fallback: strings.pageAccessRequiresLogin, target: .none)
                 log(.warning, "백엔드 학습 데이터 동기화 실패: \(error.localizedDescription)")
             }
@@ -4320,6 +4327,8 @@ final class AppState: ObservableObject {
         logAuthTrace("community_session_reset_start", reason: "resetCommunitySignInState", deduplicate: false)
         cancelAllAnswerGradingPolling(reason: "community-session-reset")
         setCommunitySessionSignedIn(false)
+        studyRoomState.replace(with: [])
+        backendStudyLoadState = .idle
         isRequiredTermsGatePresented = false
         pendingTermsRequirementRetry = nil
         var nextState = communityProfileState

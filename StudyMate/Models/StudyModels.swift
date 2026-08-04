@@ -3875,6 +3875,20 @@ struct AppStrings {
     var noMatchingTopicsDescription: String {
         text("검색어를 줄이거나 기간을 넓혀보세요.", "Try a broader search or a wider period.")
     }
+    var unableToLoadStudies: String {
+        text(
+            "학습을 불러오지 못했습니다",
+            "Couldn’t load your studies",
+            "学習を読み込めませんでした"
+        )
+    }
+    var studyLoadRetryDescription: String {
+        text(
+            "잠시 후 다시 시도하거나 화면을 아래로 당겨 새로고침해 주세요.",
+            "Try again shortly or pull down to refresh.",
+            "しばらくしてから再試行するか、画面を下に引いて更新してください。"
+        )
+    }
     var previousPage: String { text("이전 페이지", "Previous Page") }
     var nextPage: String { text("다음 페이지", "Next Page") }
     func topicPageStatus(start: Int, end: Int, total: Int) -> String {

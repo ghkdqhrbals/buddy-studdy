@@ -85,6 +85,95 @@ final class MobileHomeRefreshPresentationPolicyTests: XCTestCase {
     }
 }
 
+final class MobileHomeStudyPresentationPolicyTests: XCTestCase {
+    func testCachedCategoriesDoNotRenderAsRootStudiesWithoutBackendRooms() {
+        let root = StudyCategory(id: "11", title: "Message Queue")
+        let child = StudyCategory(id: "12", title: "Retry and Dead Letter Queue")
+
+        XCTAssertEqual(
+            StudyRoomDisplayPolicy.rootCategories(
+                from: [root, child],
+                rooms: []
+            ),
+            []
+        )
+    }
+
+    func testOnlyBackendRootRoomsRenderAsRootStudies() {
+        let root = StudyCategory(id: "11", title: "Message Queue")
+        let child = StudyCategory(id: "12", title: "Retry and Dead Letter Queue")
+        let rooms = [
+            backendRoom(id: 11, topic: root.title, parentStudyId: nil),
+            backendRoom(id: 12, topic: child.title, parentStudyId: 11),
+        ]
+
+        XCTAssertEqual(
+            StudyRoomDisplayPolicy.rootCategories(
+                from: [root, child],
+                rooms: rooms
+            ),
+            [root]
+        )
+    }
+
+    func testStudyPresentationShowsLoadingFailureAndContentWithoutFlatFallback() {
+        XCTAssertEqual(
+            MobileHomeStudyPresentationPolicy.resolve(
+                hasContent: false,
+                loadState: .idle
+            ),
+            .loading
+        )
+        XCTAssertEqual(
+            MobileHomeStudyPresentationPolicy.resolve(
+                hasContent: false,
+                loadState: .failed
+            ),
+            .loadFailure
+        )
+        XCTAssertEqual(
+            MobileHomeStudyPresentationPolicy.resolve(
+                hasContent: true,
+                loadState: .failed
+            ),
+            .content
+        )
+    }
+
+    func testStudyLoadFailureCopyIsLocalizedForEverySupportedLanguage() {
+        XCTAssertEqual(AppStrings(language: .korean).unableToLoadStudies, "학습을 불러오지 못했습니다")
+        XCTAssertEqual(AppStrings(language: .english).unableToLoadStudies, "Couldn’t load your studies")
+        XCTAssertEqual(AppStrings(language: .japanese).unableToLoadStudies, "学習を読み込めませんでした")
+    }
+
+    private func backendRoom(
+        id: Int,
+        topic: String,
+        parentStudyId: Int?
+    ) -> BackendStudyRoom {
+        BackendStudyRoom(
+            id: id,
+            topic: topic,
+            parentStudyId: parentStudyId,
+            sortOrder: 0,
+            difficultyLevel: 5,
+            intervalMinutes: 60,
+            enabled: true,
+            activeForQuestions: true,
+            notificationSound: "default",
+            customPrompt: "",
+            openAIModel: StudySettings.defaultOpenAIModel,
+            maxHistoryCount: 100,
+            nextDueAt: nil,
+            lastSentAt: nil,
+            lastError: nil,
+            pendingQuestion: nil,
+            createdAt: Date(timeIntervalSince1970: 1),
+            updatedAt: Date(timeIntervalSince1970: 1)
+        )
+    }
+}
+
 final class PageAccessPolicyTests: XCTestCase {
     @MainActor
     func testNotificationStudyListRouteUsesExistingHomeMyStudiesScreen() {

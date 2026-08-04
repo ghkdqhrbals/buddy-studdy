@@ -1137,6 +1137,33 @@ enum MobileHomeRefreshPresentationPolicy {
     }
 }
 
+enum MobileHomeStudyPresentation: Equatable {
+    case loading
+    case content
+    case loadFailure
+    case empty
+}
+
+enum MobileHomeStudyPresentationPolicy {
+    static func resolve(
+        hasContent: Bool,
+        loadState: BackendStudyLoadState
+    ) -> MobileHomeStudyPresentation {
+        if hasContent {
+            return .content
+        }
+
+        switch loadState {
+        case .idle, .loading:
+            return .loading
+        case .failed:
+            return .loadFailure
+        case .loaded:
+            return .empty
+        }
+    }
+}
+
 private struct MobileHomeView: View {
     @EnvironmentObject private var appState: AppState
     @State private var selectedHomeScope: HomeFeedScope = .all
@@ -1825,15 +1852,35 @@ private struct MobileHomeView: View {
     ) -> some View {
         let hasContent = !filteredStudyCategories.isEmpty
 
-        if MobileHomeRefreshPresentationPolicy.showsInitialLoading(
+        switch MobileHomeStudyPresentationPolicy.resolve(
             hasContent: hasContent,
-            isRefreshing: isRefreshingMyStudyContent
+            loadState: appState.backendStudyLoadState
         ) {
+        case .loading:
             MobileHomeRefreshIndicator()
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.vertical, 34)
                 .listRowSeparator(.hidden)
-        } else if !hasContent {
+        case .loadFailure:
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(strings.unableToLoadStudies)
+                        .font(.subheadline.weight(.semibold))
+
+                    Text(strings.studyLoadRetryDescription)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button(strings.retry) {
+                    startHomeRefresh()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+            .padding(.vertical, 8)
+            .listRowSeparator(.hidden)
+        case .empty:
             VStack(alignment: .leading, spacing: 4) {
                 Text(strings.noMatchingTopics)
                     .font(.subheadline.weight(.semibold))
@@ -1843,7 +1890,7 @@ private struct MobileHomeView: View {
                     .foregroundStyle(.secondary)
             }
             .padding(.vertical, 8)
-        } else {
+        case .content:
             content()
         }
     }
@@ -1871,36 +1918,6 @@ private struct MobileHomeView: View {
                         handleStudyOutlineAction(action, category: category)
                     }
                 )
-            } else {
-                Button {
-                    appState.openStudyTree(category.id)
-                } label: {
-                    MobileHomeCategoryRow(
-                        category: category,
-                        hasPendingQuestion: appState.pendingQuestionCount(for: category) > 0,
-                        strings: strings
-                    )
-                }
-                .buttonStyle(.plain)
-                .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-                .contextMenu {
-                    Button {
-                        editingStudyCategory = category
-                    } label: {
-                        Label(strings.editStudyCategory, systemImage: "pencil")
-                    }
-
-                    Button {
-                        appState.openStudyTree(category.id)
-                    } label: {
-                        Label(
-                            strings.viewFullStudyTree,
-                            systemImage: "point.3.connected.trianglepath.dotted"
-                        )
-                    }
-                }
             }
         }
     }
