@@ -4014,10 +4014,15 @@ final class AppState: ObservableObject {
 
         await actionRunner.run(
             operation: {
-                try await communityUseCase.loginWithGoogle(
+                try await runCommunityAuthenticationOperation(
                     registration: registration,
-                    idToken: idToken
-                )
+                    reason: "google-login"
+                ) { recoveredRegistration in
+                    try await communityUseCase.loginWithGoogle(
+                        registration: recoveredRegistration,
+                        idToken: idToken
+                    )
+                }
             },
             onSuccess: { result in
                 applyCommunityProfile(result.profile)
@@ -4028,7 +4033,7 @@ final class AppState: ObservableObject {
                 refreshCommunitySignInDataInBackground(registration: result.registration, reason: "google-login")
             },
             onFailure: { error in
-                handleCommunityError(error)
+                handleCommunityAuthenticationError(error)
                 AppAnalytics.login(method: .google, outcome: .failed)
                 logAuthTrace(
                     "community_sign_in_token_exchange_failure",
@@ -4054,10 +4059,15 @@ final class AppState: ObservableObject {
         communityErrorMessage = nil
         await actionRunner.run(
             operation: {
-                try await communityUseCase.loginWithApple(
+                try await runCommunityAuthenticationOperation(
                     registration: registration,
-                    idToken: identityToken
-                )
+                    reason: "apple-login"
+                ) { recoveredRegistration in
+                    try await communityUseCase.loginWithApple(
+                        registration: recoveredRegistration,
+                        idToken: identityToken
+                    )
+                }
             },
             onSuccess: { result in
                 applyCommunityProfile(result.profile)
@@ -4067,7 +4077,7 @@ final class AppState: ObservableObject {
                 refreshCommunitySignInDataInBackground(registration: result.registration, reason: "apple-login")
             },
             onFailure: { error in
-                handleCommunityError(error)
+                handleCommunityAuthenticationError(error)
                 AppAnalytics.login(method: .apple, outcome: .failed)
                 logAuthTrace(
                     "community_sign_in_token_exchange_failure",
@@ -4177,16 +4187,24 @@ final class AppState: ObservableObject {
 
         return await actionRunner.runVoid(
             operation: {
-                _ = try await communityUseCase.requestEmailVerificationCode(
+                _ = try await runCommunityAuthenticationOperation(
                     registration: registration,
-                    email: normalizedEmail
-                )
+                    reason: "email-code"
+                ) { recoveredRegistration in
+                    try await communityUseCase.requestEmailVerificationCode(
+                        registration: recoveredRegistration,
+                        email: normalizedEmail
+                    )
+                }
             },
             onSuccess: {
                 communityErrorMessage = nil
             },
             onFailure: { error in
-                handleCommunityError(error, fallback: strings.emailVerificationSendFailed)
+                handleCommunityAuthenticationError(
+                    error,
+                    fallback: strings.emailVerificationSendFailed
+                )
                 log(.warning, "Email 인증코드 요청 실패: \(error.localizedDescription)")
             }
         )
@@ -4206,7 +4224,7 @@ final class AppState: ObservableObject {
         communityErrorMessage = nil
         let result = await actionRunner.run(
             operation: {
-                try await performWithBackendIdentityRecovery(
+                try await runCommunityAuthenticationOperation(
                     registration: registration,
                     reason: "email-login"
                 ) { recoveredRegistration in
@@ -4232,7 +4250,7 @@ final class AppState: ObservableObject {
                     log(.info, "Email 로그인에 인증코드가 필요합니다.")
                     return
                 }
-                handleCommunityError(error)
+                handleCommunityAuthenticationError(error)
                 AppAnalytics.login(method: .email, outcome: .failed)
                 logAuthTrace(
                     "community_sign_in_failure",
@@ -4254,6 +4272,30 @@ final class AppState: ObservableObject {
         )
         await loadCommunityQuestions(reset: true, userInitiated: true)
         return .signedIn
+    }
+
+    private func runCommunityAuthenticationOperation<T>(
+        registration: RemotePushRegistration,
+        reason: String,
+        operation: (RemotePushRegistration) async throws -> T
+    ) async throws -> T {
+        try await performWithBackendIdentityRecovery(
+            registration: registration,
+            reason: reason,
+            operation: operation
+        )
+    }
+
+    private func handleCommunityAuthenticationError(
+        _ error: Error,
+        fallback: String? = nil
+    ) {
+        let fallbackMessage = fallback ?? strings.communityRequestFailed
+        let identityRecoveryFailed = appErrorHandlingUseCase.shouldResetBackendIdentity(after: error)
+        handleCommunityError(error, fallback: fallbackMessage)
+        if identityRecoveryFailed {
+            communityErrorMessage = fallbackMessage
+        }
     }
 
     func signOutFromCommunity() {

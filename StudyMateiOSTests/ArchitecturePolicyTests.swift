@@ -372,6 +372,28 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testAllCommunityAuthenticationEntryPointsUseBackendIdentityRecovery() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let functionBoundaries = [
+            ("func signInToCommunity(idToken: String) async {", "func signInToCommunityWithApple"),
+            ("func signInToCommunityWithApple(identityToken: String) async {", "func appleSignInCancelled"),
+            ("func requestEmailVerificationCode(email: String) async -> Bool {", "func signInToCommunity(email:"),
+            ("func signInToCommunity(email: String, password: String", "func signOutFromCommunity"),
+        ]
+
+        for (startMarker, endMarker) in functionBoundaries {
+            let start = try XCTUnwrap(content.range(of: startMarker)?.lowerBound)
+            let end = try XCTUnwrap(content.range(of: endMarker, range: start..<content.endIndex)?.lowerBound)
+            let functionSource = content[start..<end]
+            XCTAssertTrue(
+                functionSource.contains("runCommunityAuthenticationOperation"),
+                "Authentication entry point \(startMarker) must recover a missing backend device and retry once."
+            )
+        }
+    }
+
     func testAppStateDoesNotOwnBackendTransportComposition() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
