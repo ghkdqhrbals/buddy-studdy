@@ -2569,11 +2569,11 @@ enum AppLegalLinks {
     static func privacyPolicyURL(language: AppLanguage) -> URL {
         switch language {
         case .korean:
-            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/privacy-2026-07-30.html")!
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/privacy-2026-08-05.html")!
         case .english:
-            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/privacy-2026-07-30.html")!
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/privacy-2026-08-05.html")!
         case .japanese:
-            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/ja/privacy-2026-07-30.html")!
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/ja/privacy-2026-08-05.html")!
         }
     }
 
