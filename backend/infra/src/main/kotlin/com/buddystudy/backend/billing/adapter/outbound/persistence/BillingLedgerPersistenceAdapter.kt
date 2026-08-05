@@ -1876,12 +1876,22 @@ class BillingLedgerPersistenceAdapter(
     }
 
     private suspend fun activateFirstPaidAnchor(userId: Long, purchasedAt: Instant, now: Instant) {
+        database.sql(
+            """
+            insert ignore into quota_accounts (
+                user_id, anchor_type, anchor_at, anchor_day, first_paid_at,
+                policy_version, created_at, updated_at
+            )
+            select id, 'ACCOUNT_CREATED', created_at, day(created_at), null, 2, :now, :now
+            from users where id = :userId
+            """.trimIndent(),
+        ).bind("now", now.utc()).bind("userId", userId).fetch().rowsUpdated().awaitSingle()
         val account = database.sql(
             "select anchor_at, first_paid_at from quota_accounts where user_id = :userId for update",
         ).bind("userId", userId).map { row, _ ->
             row.instant("anchor_at") to row.nullableInstant("first_paid_at")
         }.one().awaitSingleOrNull() ?: return
-        if (account.second != null) return
+        if (account.second?.let { !purchasedAt.isBefore(it) } == true) return
         val oldWindow = MonthlyQuotaWindow.periodAt(account.first, now)
         val newWindow = MonthlyQuotaWindow.periodAt(purchasedAt, now)
         if (oldWindow.startedAt != newWindow.startedAt) {
@@ -1941,7 +1951,7 @@ class BillingLedgerPersistenceAdapter(
             update quota_accounts
             set anchor_type = 'FIRST_PAID', anchor_at = :purchasedAt, anchor_day = :anchorDay,
                 first_paid_at = :purchasedAt, updated_at = :now
-            where user_id = :userId and first_paid_at is null
+            where user_id = :userId and (first_paid_at is null or first_paid_at > :purchasedAt)
             """.trimIndent(),
         ).bind("purchasedAt", purchasedAt.utc()).bind("anchorDay", purchasedAt.atZone(ZoneOffset.UTC).dayOfMonth)
             .bind("now", now.utc()).bind("userId", userId).fetch().rowsUpdated().awaitSingle()

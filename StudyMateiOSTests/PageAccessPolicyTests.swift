@@ -56,6 +56,75 @@ final class BillingLocalizationTests: XCTestCase {
             .downgrade
         )
     }
+
+    func testBackendBillingStatusDecodesAuthoritativeEntitlementAndQuota() throws {
+        let payload = """
+        {
+          "tierCode": "TIER2",
+          "source": "APP_STORE",
+          "accessStatus": "ACTIVE",
+          "renewalStatus": "CANCELED",
+          "productId": "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+          "startedAt": "2026-08-01T00:00:00Z",
+          "expiresAt": "2026-09-01T00:00:00Z",
+          "willRenew": false,
+          "pendingChange": null,
+          "synchronizedAt": "2026-08-05T00:00:00Z",
+          "quota": {
+            "periodStartedAt": "2026-08-01T00:00:00Z",
+            "resetAt": "2026-09-01T00:00:00Z",
+            "anchorType": "FIRST_PAID",
+            "baseLimit": 300,
+            "bonusLimit": 20,
+            "usedCount": 41,
+            "reservedCount": 1,
+            "remainingCount": 278,
+            "policyVersion": 2
+          }
+        }
+        """.data(using: .utf8)!
+
+        let status = try RemotePushBackendClient.makeDecoder().decode(BackendBillingStatus.self, from: payload)
+
+        XCTAssertEqual(status.tierCode, "TIER2")
+        XCTAssertTrue(status.isEntitlementActive)
+        XCTAssertFalse(status.willRenew)
+        XCTAssertEqual(status.renewalStatus, "CANCELED")
+        XCTAssertEqual(status.quota.usedCount, 41)
+        XCTAssertEqual(status.quota.reservedCount, 1)
+        XCTAssertEqual(status.quota.remainingCount, 278)
+        XCTAssertEqual(status.quota.anchorType, "FIRST_PAID")
+    }
+
+    func testBackendBillingStatusTreatsGracePeriodAsActiveButExpiredAsInactive() throws {
+        func decode(accessStatus: String) throws -> BackendBillingStatus {
+            let payload = """
+            {
+              "tierCode": "TIER2",
+              "source": "APP_STORE",
+              "accessStatus": "\(accessStatus)",
+              "renewalStatus": "BILLING_RETRY",
+              "willRenew": true,
+              "synchronizedAt": "2026-08-05T00:00:00Z",
+              "quota": {
+                "periodStartedAt": "2026-08-01T00:00:00Z",
+                "resetAt": "2026-09-01T00:00:00Z",
+                "anchorType": "FIRST_PAID",
+                "baseLimit": 300,
+                "bonusLimit": 0,
+                "usedCount": 0,
+                "reservedCount": 0,
+                "remainingCount": 300,
+                "policyVersion": 2
+              }
+            }
+            """.data(using: .utf8)!
+            return try RemotePushBackendClient.makeDecoder().decode(BackendBillingStatus.self, from: payload)
+        }
+
+        XCTAssertTrue(try decode(accessStatus: "GRACE_PERIOD").isEntitlementActive)
+        XCTAssertFalse(try decode(accessStatus: "EXPIRED").isEntitlementActive)
+    }
 }
 
 final class CommunityQuestionResultPresentationTests: XCTestCase {

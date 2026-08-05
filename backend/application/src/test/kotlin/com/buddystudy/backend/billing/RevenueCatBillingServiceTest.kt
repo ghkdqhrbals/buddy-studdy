@@ -16,6 +16,7 @@ import com.buddystudy.billing.domain.InvoiceStatus
 import com.buddystudy.billing.domain.InvoiceType
 import com.buddystudy.billing.domain.PaymentStatus
 import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito
 import java.time.Clock
@@ -144,6 +145,58 @@ class RevenueCatBillingServiceTest {
         service.projectDueEvents()
 
         Mockito.verify(ledger).fulfill(99, now)
+    }
+
+    @Test
+    fun `test store purchase is rejected before persistence when disabled`() = runBlocking<Unit> {
+        val testStoreEvent = event.copy(store = "TEST_STORE")
+        val verifier = Mockito.mock(RevenueCatWebhookVerificationPort::class.java)
+        val ledger = Mockito.mock(BillingLedgerPort::class.java)
+        Mockito.`when`(verifier.verify(request)).thenReturn(testStoreEvent)
+
+        val service = RevenueCatBillingService(
+            verifier,
+            ledger,
+            Clock.fixed(now, ZoneOffset.UTC),
+            allowTestStore = false,
+        )
+        val failure = runCatching { service.receive(request) }.exceptionOrNull()
+
+        assertInstanceOf(com.buddystudy.backend.common.application.error.ApiException::class.java, failure)
+        Mockito.verify(ledger, Mockito.never()).recordRevenueCatEvent(testStoreEvent, now)
+    }
+
+    @Test
+    fun `invalid projected event is failed durably without blocking the next event`() = runBlocking<Unit> {
+        val invalidEvent = event.copy(
+            eventId = "rc-event-invalid-user",
+            appUserId = "not-a-buddystudy-account-token",
+            originalAppUserId = null,
+        )
+        val nextEvent = event.copy(
+            eventId = "rc-event-after-invalid",
+            transactionId = "200000000000002",
+        )
+        val verifier = Mockito.mock(RevenueCatWebhookVerificationPort::class.java)
+        val ledger = Mockito.mock(BillingLedgerPort::class.java)
+        Mockito.`when`(ledger.claimDueRevenueCatEvents(now, 100)).thenReturn(listOf(invalidEvent, nextEvent))
+        Mockito.`when`(ledger.userIdForAppAccountToken(token)).thenReturn(733)
+        Mockito.`when`(ledger.enabledTierProduct(product.productId)).thenReturn(product)
+        Mockito.`when`(ledger.recordVerifiedPayment(paymentCommand(nextEvent))).thenReturn(invoice())
+        Mockito.`when`(ledger.fulfill(99, now)).thenReturn(invoice(InvoiceStatus.COMPLETED))
+        Mockito.`when`(ledger.applyRevenueCatEvent(nextEvent, now)).thenReturn(true)
+
+        val service = RevenueCatBillingService(verifier, ledger, Clock.fixed(now, ZoneOffset.UTC))
+        service.projectDueEvents()
+
+        Mockito.verify(ledger).markRevenueCatEventFailed(
+            invalidEvent.eventId,
+            "RevenueCat App User ID must be the BuddyStudy appAccountToken UUID.",
+            now,
+        )
+        Mockito.verify(ledger).recordVerifiedPayment(paymentCommand(nextEvent))
+        Mockito.verify(ledger).fulfill(99, now)
+        Mockito.verify(ledger).applyRevenueCatEvent(nextEvent, now)
     }
 
     private fun paymentCommand(source: VerifiedRevenueCatEvent) = RecordVerifiedPaymentCommand(

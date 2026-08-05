@@ -3,7 +3,9 @@ package com.buddystudy.backend
 import com.buddystudy.backend.billing.application.model.ApplyAppleNotificationCommand
 import com.buddystudy.backend.billing.application.model.BillingTierProduct
 import com.buddystudy.backend.billing.application.model.RecordVerifiedPaymentCommand
+import com.buddystudy.backend.billing.application.model.RevenueCatCustomerSnapshot
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
+import com.buddystudy.backend.billing.application.model.SubscriptionReconciliationClaim
 import com.buddystudy.backend.billing.application.model.VerifiedAppleNotification
 import com.buddystudy.backend.billing.application.model.VerifiedAppleTransaction
 import com.buddystudy.backend.billing.application.model.VerifiedRevenueCatEvent
@@ -18,6 +20,8 @@ import com.buddystudy.billing.domain.InvoiceEventType
 import com.buddystudy.billing.domain.InvoiceStatus
 import com.buddystudy.billing.domain.InvoiceType
 import com.buddystudy.billing.domain.PaymentStatus
+import com.buddystudy.billing.domain.SubscriptionAccessStatus
+import com.buddystudy.billing.domain.SubscriptionRenewalStatus
 import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -576,6 +580,176 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         ).isEqualTo(java.time.LocalDateTime.ofInstant(fixture.now, java.time.ZoneOffset.UTC))
     }
 
+    @Test
+    fun `highest active subscription wins while expiration and resubscription preserve quota usage`(): Unit = runBlocking {
+        val fixture = fixture("subscription-priority")
+        val tier2Checkout = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            fixture.product,
+            "tier2-${fixture.suffix}",
+            fixture.now,
+        )
+        val tier2Transaction = fixture.transaction()
+        val tier2Invoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                fixture.product,
+                tier2Transaction,
+                tier2Checkout.invoiceNumber,
+                BillingEventSource.CLIENT,
+                "tier2-payment-${fixture.suffix}",
+                fixture.now,
+            ),
+        )
+        ledger.fulfill(tier2Invoice.id, fixture.now.plusSeconds(1))
+
+        val quotaKey = "priority-quota-${fixture.suffix}"
+        assertThat(quota.reserveMonthlySystemQuestion(fixture.userId, fixture.now, quotaKey, quotaKey, fixture.now))
+            .isTrue()
+        quota.commitMonthlySystemQuestion(quotaKey, fixture.now.plusSeconds(2))
+
+        val tier3 = requireNotNull(
+            ledger.enabledTierProduct("io.github.ghkdqhrbals.StudyMate.tier3.monthly"),
+        )
+        val tier3PurchasedAt = fixture.now.plusSeconds(100)
+        val tier3Transaction = tier2Transaction.copy(
+            transactionId = "tier3-tx-${fixture.suffix}",
+            originalTransactionId = "tier3-original-${fixture.suffix}",
+            productId = tier3.productId,
+            priceMilliunits = 17_900_000,
+            purchaseAt = tier3PurchasedAt,
+            originalPurchaseAt = tier3PurchasedAt,
+            expiresAt = tier3PurchasedAt.plusSeconds(2_592_000),
+            signedAt = tier3PurchasedAt,
+        )
+        val tier3Checkout = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            tier3,
+            "tier3-${fixture.suffix}",
+            tier3PurchasedAt,
+        )
+        val tier3Invoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                tier3,
+                tier3Transaction,
+                tier3Checkout.invoiceNumber,
+                BillingEventSource.CLIENT,
+                "tier3-payment-${fixture.suffix}",
+                tier3PurchasedAt,
+            ),
+        )
+        ledger.fulfill(tier3Invoice.id, tier3PurchasedAt.plusSeconds(1))
+
+        assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER3")
+        val tier3Quota = requireNotNull(quota.quotaStatusForUser(fixture.userId, tier3PurchasedAt.plusSeconds(2)))
+        assertThat(tier3Quota.usedCount).isEqualTo(1)
+        assertThat(tier3Quota.baseLimit).isEqualTo(1_000)
+
+        expireSubscription(
+            fixture.userId,
+            tier3Transaction.originalTransactionId,
+            fixture.appAccountToken,
+            tier3PurchasedAt.plusSeconds(3),
+        )
+        assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER2")
+        assertThat(requireNotNull(quota.quotaStatusForUser(fixture.userId, tier3PurchasedAt.plusSeconds(4))).usedCount)
+            .isEqualTo(1)
+
+        expireSubscription(
+            fixture.userId,
+            tier2Transaction.originalTransactionId,
+            fixture.appAccountToken,
+            tier3PurchasedAt.plusSeconds(5),
+        )
+        val expiredQuota = requireNotNull(quota.quotaStatusForUser(fixture.userId, tier3PurchasedAt.plusSeconds(6)))
+        assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER1")
+        assertThat(expiredQuota.usedCount).isEqualTo(1)
+        assertThat(expiredQuota.baseLimit).isEqualTo(30)
+
+        val resubscribeAt = tier3PurchasedAt.plusSeconds(10)
+        val resubscribeTransaction = tier3Transaction.copy(
+            transactionId = "resubscribe-${fixture.suffix}",
+            originalTransactionId = "resubscribe-original-${fixture.suffix}",
+            purchaseAt = resubscribeAt,
+            originalPurchaseAt = resubscribeAt,
+            expiresAt = resubscribeAt.plusSeconds(2_592_000),
+            signedAt = resubscribeAt,
+        )
+        val resubscribeInvoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                tier3,
+                resubscribeTransaction,
+                null,
+                BillingEventSource.REVENUECAT_WEBHOOK,
+                "resubscribe-payment-${fixture.suffix}",
+                resubscribeAt,
+            ),
+        )
+        ledger.fulfill(resubscribeInvoice.id, resubscribeAt.plusSeconds(1))
+        val resubscribedQuota = requireNotNull(quota.quotaStatusForUser(fixture.userId, resubscribeAt.plusSeconds(2)))
+        assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER3")
+        assertThat(resubscribedQuota.usedCount).isEqualTo(1)
+        assertThat(resubscribedQuota.periodStartedAt).isEqualTo(fixture.now)
+    }
+
+    @Test
+    fun `late older purchase moves the lifetime anchor backward without losing usage`(): Unit = runBlocking {
+        val fixture = fixture("late-first-paid")
+        val initialInvoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                fixture.product,
+                fixture.transaction(),
+                null,
+                BillingEventSource.REVENUECAT_WEBHOOK,
+                "initial-${fixture.suffix}",
+                fixture.now,
+            ),
+        )
+        ledger.fulfill(initialInvoice.id, fixture.now.plusSeconds(1))
+        val quotaKey = "late-anchor-quota-${fixture.suffix}"
+        assertThat(quota.reserveMonthlySystemQuestion(fixture.userId, fixture.now, quotaKey, quotaKey, fixture.now))
+            .isTrue()
+        quota.commitMonthlySystemQuestion(quotaKey, fixture.now.plusSeconds(2))
+
+        val earlierPurchaseAt = fixture.now.minusSeconds(86_400)
+        val lateTransaction = fixture.transaction().copy(
+            transactionId = "late-older-${fixture.suffix}",
+            originalTransactionId = "late-older-original-${fixture.suffix}",
+            purchaseAt = earlierPurchaseAt,
+            originalPurchaseAt = earlierPurchaseAt,
+            expiresAt = earlierPurchaseAt.plusSeconds(2_592_000),
+            signedAt = fixture.now.plusSeconds(10),
+        )
+        val lateInvoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                fixture.product,
+                lateTransaction,
+                null,
+                BillingEventSource.REVENUECAT_WEBHOOK,
+                "late-older-payment-${fixture.suffix}",
+                fixture.now.plusSeconds(10),
+            ),
+        )
+        ledger.fulfill(lateInvoice.id, fixture.now.plusSeconds(11))
+
+        val status = requireNotNull(quota.quotaStatusForUser(fixture.userId, fixture.now.plusSeconds(12)))
+        assertThat(status.anchorType).isEqualTo("FIRST_PAID")
+        assertThat(status.periodStartedAt).isEqualTo(earlierPurchaseAt)
+        assertThat(status.usedCount).isEqualTo(1)
+        assertThat(
+            database.sql("select first_paid_at from quota_accounts where user_id = :userId")
+                .bind("userId", fixture.userId)
+                .map { row -> row.get("first_paid_at", java.time.LocalDateTime::class.java)!! }
+                .one().awaitSingle(),
+        ).isEqualTo(java.time.LocalDateTime.ofInstant(earlierPurchaseAt, java.time.ZoneOffset.UTC))
+    }
+
     private suspend fun fixture(
         label: String,
         now: Instant = Instant.parse("2032-08-04T00:00:00Z"),
@@ -629,6 +803,28 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
 
     private suspend fun execute(sql: String) {
         database.sql(sql).fetch().rowsUpdated().awaitSingle()
+    }
+
+    private suspend fun expireSubscription(
+        userId: Long,
+        originalTransactionId: String,
+        token: UUID,
+        now: Instant,
+    ) {
+        val subscriptionId = longValue(
+            "select id from subscriptions where original_transaction_id = '$originalTransactionId'",
+        )
+        val claim = SubscriptionReconciliationClaim(subscriptionId, userId, originalTransactionId, token, 1)
+        ledger.applySubscriptionSnapshot(
+            claim,
+            RevenueCatCustomerSnapshot(
+                SubscriptionAccessStatus.EXPIRED,
+                SubscriptionRenewalStatus.NOT_APPLICABLE,
+                now,
+                now,
+            ),
+            now,
+        )
     }
 
     private data class Fixture(

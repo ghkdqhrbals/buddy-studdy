@@ -62,4 +62,31 @@ class BillingReconciliationServiceTest {
         assertThat(count).isEqualTo(1)
         Mockito.verify(ledger).recordSubscriptionReconcileFailure(claim, "provider unavailable", now)
     }
+
+    @Test
+    fun `one failed subscription does not prevent later subscriptions from reconciling`() = runBlocking {
+        val ledger = Mockito.mock(BillingLedgerPort::class.java)
+        val revenueCat = Mockito.mock(RevenueCatCustomerInfoPort::class.java)
+        val second = claim.copy(subscriptionId = 4, userId = 8, originalTransactionId = "2000000123456790")
+        val snapshot = RevenueCatCustomerSnapshot(
+            SubscriptionAccessStatus.ACTIVE,
+            SubscriptionRenewalStatus.WILL_RENEW,
+            now.plusSeconds(86_400),
+            now,
+        )
+        Mockito.`when`(ledger.claimDueSubscriptionReconciliations(now, 25)).thenReturn(listOf(claim, second))
+        Mockito.`when`(revenueCat.fetch(token, claim.originalTransactionId))
+            .thenThrow(IllegalStateException("first provider lookup failed"))
+        Mockito.`when`(revenueCat.fetch(token, second.originalTransactionId)).thenReturn(snapshot)
+
+        val count = BillingReconciliationService(
+            ledger,
+            revenueCat,
+            Clock.fixed(now, ZoneOffset.UTC),
+        ).reconcileDueSubscriptions()
+
+        assertThat(count).isEqualTo(2)
+        Mockito.verify(ledger).recordSubscriptionReconcileFailure(claim, "first provider lookup failed", now)
+        Mockito.verify(ledger).applySubscriptionSnapshot(second, snapshot, now)
+    }
 }

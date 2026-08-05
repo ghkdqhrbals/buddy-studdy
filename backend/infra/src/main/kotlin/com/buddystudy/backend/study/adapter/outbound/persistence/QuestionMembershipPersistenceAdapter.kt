@@ -105,7 +105,7 @@ class QuestionMembershipPersistenceAdapter(
         correlationId: String,
         now: Instant,
     ): Boolean {
-        val existing = reservationStatus(reservationKey)
+        val existing = reservationStatus(reservationKey, correlationId)
         if (existing != null) return existing != "RELEASED"
 
         val account = ensureQuotaAccount(userId, now) ?: return false
@@ -142,7 +142,7 @@ class QuestionMembershipPersistenceAdapter(
             template.databaseClient.sql(
                 "update quota_periods set reserved_count = greatest(reserved_count - 1, 0), updated_at = :now where id = :id",
             ).bind("now", now.utc()).bind("id", period.id).fetch().rowsUpdated().awaitSingle()
-            return reservationStatus(reservationKey) != "RELEASED"
+            return reservationStatus(reservationKey, correlationId)?.let { it != "RELEASED" } ?: false
         }
 
         val reservationId = reservationId(reservationKey) ?: error("Quota reservation disappeared after insert.")
@@ -283,9 +283,10 @@ class QuestionMembershipPersistenceAdapter(
     ).bind("userId", userId).bind("startedAt", start.utc()).map { row, _ -> row.quotaPeriod() }
         .one().awaitSingleOrNull()
 
-    private suspend fun reservationStatus(key: String): String? = template.databaseClient.sql(
-        "select status from quota_reservations where reservation_key = :key",
-    ).bind("key", key.take(191)).map { row, _ -> row.get("status", String::class.java)!! }
+    private suspend fun reservationStatus(key: String, correlationId: String): String? = template.databaseClient.sql(
+        "select status from quota_reservations where reservation_key = :key or correlation_id = :correlationId limit 1",
+    ).bind("key", key.take(191)).bind("correlationId", correlationId.take(191))
+        .map { row, _ -> row.get("status", String::class.java)!! }
         .one().awaitSingleOrNull()
 
     private suspend fun reservationId(key: String): Long? = template.databaseClient.sql(
