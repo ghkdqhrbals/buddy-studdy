@@ -613,6 +613,11 @@ final class AppState: ObservableObject {
     private var recoveringAppleTransactionIDs = Set<UInt64>()
     private var synchronizedAppleTransactionIDs = Set<UInt64>()
     #endif
+    private var membershipRefreshOrder = MembershipRefreshOrder()
+    private var backendClientGeneration = 0
+    private var configuredBackendBaseURLDescription = ""
+    private var billingRefreshRequestID = 0
+    private var billingRefreshInFlightCount = 0
     private var appControlResolution = AppControlResolution.normal
     private var didStartAppControlListener = false
     private var appControlRefreshTask: Task<Bool, Never>?
@@ -1161,10 +1166,23 @@ final class AppState: ObservableObject {
             return
         }
 
+        let nextBaseURLDescription = activeBackendBaseURLDescription
+        let didChangeBackend = configuredBackendBaseURLDescription != nextBaseURLDescription
         appUseCases = appUseCasesProvider.makeUseCases(
             isDebuggingEnabled: isDebuggingEnabled,
             debugBackendBaseURL: debugBackendBaseURL
         )
+        configuredBackendBaseURLDescription = nextBaseURLDescription
+        backendClientGeneration += 1
+        membershipRefreshOrder.invalidatePendingRequests()
+        billingRefreshRequestID += 1
+        if didChangeBackend {
+            billingCatalog = nil
+            billingStatus = nil
+            billingInvoices = []
+            questionQuota = nil
+            billingErrorMessage = nil
+        }
         log(.info, "백엔드 API 경로를 갱신했습니다. reason=\(reason), baseURL=\(activeBackendBaseURLDescription)")
     }
 
@@ -1461,6 +1479,10 @@ final class AppState: ObservableObject {
         self.cloudSyncService = cloudSyncService
         self.appUseCasesProvider = appUseCasesProvider
         self.appUseCases = appUseCasesProvider.makeUseCases(
+            isDebuggingEnabled: loadedIsDebuggingEnabled,
+            debugBackendBaseURL: loadedDebugBackendBaseURL
+        )
+        self.configuredBackendBaseURLDescription = appUseCasesProvider.displayBaseURL(
             isDebuggingEnabled: loadedIsDebuggingEnabled,
             debugBackendBaseURL: loadedDebugBackendBaseURL
         )
@@ -5940,10 +5962,16 @@ final class AppState: ObservableObject {
     }
 
     func refreshQuestionQuota() async {
+        let refreshOrder = membershipRefreshOrder.issue()
+        let clientGeneration = backendClientGeneration
+        let currentStudyRoomUseCase = studyRoomUseCase
         guard isCommunitySessionActive,
               let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "question-quota") else {
-            questionQuota = nil
+            if clientGeneration == backendClientGeneration,
+               membershipRefreshOrder.isLatest(refreshOrder) {
+                questionQuota = nil
+            }
             return
         }
 
@@ -5952,9 +5980,22 @@ final class AppState: ObservableObject {
                 registration: registration,
                 reason: "question-quota",
                 operation: { recoveredRegistration in
-                    try await self.studyRoomUseCase.fetchQuestionQuota(registration: recoveredRegistration)
+                    try await currentStudyRoomUseCase.fetchQuestionQuota(registration: recoveredRegistration)
                 }
             )
+            guard clientGeneration == backendClientGeneration,
+                  membershipRefreshOrder.isLatest(refreshOrder) else {
+                return
+            }
+            if let billingStatus,
+               billingStatus.tierCode != quota.tierCode {
+                log(
+                    .warning,
+                    "최신 quota와 이전 결제 상태의 티어가 달라 이전 결제 상태를 폐기합니다. " +
+                        "billingTier=\(billingStatus.tierCode), quotaTier=\(quota.tierCode)"
+                )
+                self.billingStatus = nil
+            }
             questionQuota = quota
             if quota.remainingCount > 0 {
                 questionQuotaNotice = nil
@@ -5963,72 +6004,144 @@ final class AppState: ObservableObject {
                 .info,
                 "월간 질문 한도를 동기화했습니다. used=\(quota.usedCount), limit=\(quota.monthlyLimit), remaining=\(quota.remainingCount)"
             )
-        } catch {
+        } catch where !Self.isCancellationLikeError(error) {
+            guard clientGeneration == backendClientGeneration,
+                  membershipRefreshOrder.isLatest(refreshOrder) else {
+                return
+            }
             log(.warning, "월간 질문 한도 조회에 실패했습니다: \(error.localizedDescription)")
+        } catch {
+            return
         }
     }
 
     func refreshBilling() async {
+        let refreshOrder = membershipRefreshOrder.issue()
+        let clientGeneration = backendClientGeneration
+        billingRefreshRequestID += 1
+        let requestID = billingRefreshRequestID
+        let currentBillingUseCase = billingUseCase
         guard isCommunitySessionActive,
               let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "billing-refresh") else {
-            billingCatalog = nil
-            billingStatus = nil
-            billingInvoices = []
-            billingErrorMessage = nil
+            if clientGeneration == backendClientGeneration,
+               requestID == billingRefreshRequestID,
+               membershipRefreshOrder.isLatest(refreshOrder) {
+                billingCatalog = nil
+                billingStatus = nil
+                billingInvoices = []
+                billingErrorMessage = nil
+            }
             return
         }
 
+        billingRefreshInFlightCount += 1
         isLoadingBilling = true
-        defer { isLoadingBilling = false }
+        defer {
+            billingRefreshInFlightCount = max(0, billingRefreshInFlightCount - 1)
+            isLoadingBilling = billingRefreshInFlightCount > 0
+        }
+
         do {
-            async let catalog = performWithBackendIdentityRecovery(
-                registration: registration,
-                reason: "billing-catalog",
-                operation: { recoveredRegistration in
-                    try await self.billingUseCase.catalog(registration: recoveredRegistration)
-                }
-            )
-            async let status = performWithBackendIdentityRecovery(
+            let resolvedStatus = try await performWithBackendIdentityRecovery(
                 registration: registration,
                 reason: "billing-status",
                 operation: { recoveredRegistration in
-                    try await self.billingUseCase.status(registration: recoveredRegistration)
+                    try await currentBillingUseCase.status(registration: recoveredRegistration)
                 }
             )
-            async let invoices = performWithBackendIdentityRecovery(
+            guard clientGeneration == backendClientGeneration,
+                  requestID == billingRefreshRequestID,
+                  membershipRefreshOrder.isLatest(refreshOrder) else {
+                return
+            }
+            applyBillingStatus(resolvedStatus)
+            billingErrorMessage = nil
+            log(
+                .info,
+                "결제 상태를 동기화했습니다. tier=\(resolvedStatus.tierCode), " +
+                    "limit=\(resolvedStatus.quota.baseLimit + resolvedStatus.quota.bonusLimit), " +
+                    "product=\(resolvedStatus.productId ?? "-")"
+            )
+        } catch where !Self.isCancellationLikeError(error) {
+            guard clientGeneration == backendClientGeneration,
+                  requestID == billingRefreshRequestID,
+                  membershipRefreshOrder.isLatest(refreshOrder) else {
+                return
+            }
+            billingErrorMessage = error.localizedDescription
+            log(.warning, "결제 상태를 동기화하지 못했습니다: \(error.localizedDescription)")
+            return
+        } catch {
+            return
+        }
+
+        do {
+            let resolvedCatalog = try await performWithBackendIdentityRecovery(
                 registration: registration,
-                reason: "billing-invoices",
+                reason: "billing-catalog",
                 operation: { recoveredRegistration in
-                    try await self.billingUseCase.invoices(registration: recoveredRegistration)
+                    try await currentBillingUseCase.catalog(registration: recoveredRegistration)
                 }
             )
-            let resolvedCatalog = try await catalog
-            let resolvedStatus = try await status
+            guard clientGeneration == backendClientGeneration,
+                  requestID == billingRefreshRequestID else {
+                return
+            }
             billingCatalog = resolvedCatalog
-            billingStatus = resolvedStatus
-            questionQuota = BackendQuestionQuota(
-                usedCount: resolvedStatus.quota.usedCount,
-                monthlyLimit: resolvedStatus.quota.baseLimit + resolvedStatus.quota.bonusLimit,
-                remainingCount: resolvedStatus.quota.remainingCount,
-                resetAt: resolvedStatus.quota.resetAt,
-                tierCode: resolvedStatus.tierCode,
-                periodStartedAt: resolvedStatus.quota.periodStartedAt,
-                reservedCount: resolvedStatus.quota.reservedCount,
-                baseLimit: resolvedStatus.quota.baseLimit,
-                bonusLimit: resolvedStatus.quota.bonusLimit,
-                anchorType: resolvedStatus.quota.anchorType,
-                policyVersion: resolvedStatus.quota.policyVersion
-            )
-            billingInvoices = try await invoices.invoices
             #if os(iOS)
             try await RevenueCatBillingBridge.shared.identify(appAccountToken: resolvedCatalog.appAccountToken)
             #endif
-            billingErrorMessage = nil
-        } catch {
+        } catch where !Self.isCancellationLikeError(error) {
+            guard clientGeneration == backendClientGeneration,
+                  requestID == billingRefreshRequestID else {
+                return
+            }
             billingErrorMessage = error.localizedDescription
-            log(.warning, "결제 정보를 동기화하지 못했습니다: \(error.localizedDescription)")
+            log(.warning, "결제 상품 정보를 동기화하지 못했습니다: \(error.localizedDescription)")
+        } catch {
+            return
         }
+
+        do {
+            let resolvedInvoices = try await performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "billing-invoices",
+                operation: { recoveredRegistration in
+                    try await currentBillingUseCase.invoices(registration: recoveredRegistration)
+                }
+            )
+            guard clientGeneration == backendClientGeneration,
+                  requestID == billingRefreshRequestID else {
+                return
+            }
+            billingInvoices = resolvedInvoices.invoices
+        } catch where !Self.isCancellationLikeError(error) {
+            guard clientGeneration == backendClientGeneration,
+                  requestID == billingRefreshRequestID else {
+                return
+            }
+            log(.warning, "결제 원장 목록을 동기화하지 못했습니다: \(error.localizedDescription)")
+        } catch {
+            return
+        }
+    }
+
+    private func applyBillingStatus(_ resolvedStatus: BackendBillingStatus) {
+        billingStatus = resolvedStatus
+        questionQuota = BackendQuestionQuota(
+            usedCount: resolvedStatus.quota.usedCount,
+            monthlyLimit: resolvedStatus.quota.baseLimit + resolvedStatus.quota.bonusLimit,
+            remainingCount: resolvedStatus.quota.remainingCount,
+            resetAt: resolvedStatus.quota.resetAt,
+            tierCode: resolvedStatus.tierCode,
+            periodStartedAt: resolvedStatus.quota.periodStartedAt,
+            reservedCount: resolvedStatus.quota.reservedCount,
+            baseLimit: resolvedStatus.quota.baseLimit,
+            bonusLimit: resolvedStatus.quota.bonusLimit,
+            anchorType: resolvedStatus.quota.anchorType,
+            policyVersion: resolvedStatus.quota.policyVersion
+        )
     }
 
     func syncAppleBillingTransaction(

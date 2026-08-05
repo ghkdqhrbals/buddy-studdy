@@ -4056,3 +4056,20 @@ struct MembershipProductPolicy {
         products.filter { $0.billingPeriod?.uppercased() == "P1M" }
     }
 }
+
+struct MembershipRefreshOrder {
+    private(set) var latestIssued = 0
+
+    mutating func issue() -> Int {
+        latestIssued += 1
+        return latestIssued
+    }
+
+    func isLatest(_ request: Int) -> Bool {
+        request == latestIssued
+    }
+
+    mutating func invalidatePendingRequests() {
+        latestIssued += 1
+    }
+}

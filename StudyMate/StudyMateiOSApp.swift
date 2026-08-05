@@ -562,13 +562,30 @@ private struct FloatingDebugLogOverlay: View {
     private func panel(in size: CGSize) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Image(systemName: "line.3.horizontal")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 32, height: 32)
-                    .contentShape(Rectangle())
-                    .gesture(dragGesture(in: size))
-                    .accessibilityLabel(strings.moveDebugPanel)
+                Button {
+                    runTapAction {
+                        withAnimation(.smooth(duration: 0.18)) {
+                            committedOffset = DebugOverlayPositionPolicy.nextCornerOffset(
+                                current: boundedOffset(for: size),
+                                containerSize: size,
+                                panelSize: CGSize(
+                                    width: panelWidth(for: size),
+                                    height: panelEstimatedHeight(for: size)
+                                ),
+                                margin: 12
+                            )
+                        }
+                    }
+                } label: {
+                    Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .simultaneousGesture(dragGesture(in: size))
+                .accessibilityLabel(strings.moveDebugPanel)
 
                 Button {
                     runTapAction {

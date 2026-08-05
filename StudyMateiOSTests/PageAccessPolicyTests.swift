@@ -92,6 +92,18 @@ final class BillingLocalizationTests: XCTestCase {
         )
     }
 
+    func testOnlyLatestMembershipRefreshMayReplaceDisplayedTier() {
+        var order = MembershipRefreshOrder()
+        let olderBillingRequest = order.issue()
+        let newerQuotaRequest = order.issue()
+
+        XCTAssertFalse(order.isLatest(olderBillingRequest))
+        XCTAssertTrue(order.isLatest(newerQuotaRequest))
+
+        order.invalidatePendingRequests()
+        XCTAssertFalse(order.isLatest(newerQuotaRequest))
+    }
+
     func testBackendBillingStatusDecodesAuthoritativeEntitlementAndQuota() throws {
         let payload = """
         {
@@ -624,6 +636,28 @@ final class DeveloperAccessPolicyTests: XCTestCase {
             ),
             CGSize(width: 78, height: 12)
         )
+    }
+
+    func testDebugOverlayMoveButtonCyclesBetweenVisibleCorners() {
+        let container = CGSize(width: 390, height: 844)
+        let panel = CGSize(width: 300, height: 64)
+        let topLeft = CGSize(width: 12, height: 12)
+
+        let topRight = DebugOverlayPositionPolicy.nextCornerOffset(
+            current: topLeft,
+            containerSize: container,
+            panelSize: panel,
+            margin: 12
+        )
+        let bottomRight = DebugOverlayPositionPolicy.nextCornerOffset(
+            current: topRight,
+            containerSize: container,
+            panelSize: panel,
+            margin: 12
+        )
+
+        XCTAssertEqual(topRight, CGSize(width: 78, height: 12))
+        XCTAssertEqual(bottomRight, CGSize(width: 78, height: 768))
     }
 
     @MainActor

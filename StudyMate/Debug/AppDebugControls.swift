@@ -60,6 +60,50 @@ enum DebugOverlayPositionPolicy {
             margin: margin
         )
     }
+
+    static func nextCornerOffset(
+        current: CGSize,
+        containerSize: CGSize,
+        panelSize: CGSize,
+        margin: CGFloat
+    ) -> CGSize {
+        let topLeft = boundedOffset(
+            proposed: CGSize(width: margin, height: margin),
+            containerSize: containerSize,
+            panelSize: panelSize,
+            margin: margin
+        )
+        let topRight = boundedOffset(
+            proposed: CGSize(width: CGFloat.greatestFiniteMagnitude, height: margin),
+            containerSize: containerSize,
+            panelSize: panelSize,
+            margin: margin
+        )
+        let bottomRight = boundedOffset(
+            proposed: CGSize(
+                width: CGFloat.greatestFiniteMagnitude,
+                height: CGFloat.greatestFiniteMagnitude
+            ),
+            containerSize: containerSize,
+            panelSize: panelSize,
+            margin: margin
+        )
+        let bottomLeft = boundedOffset(
+            proposed: CGSize(width: margin, height: CGFloat.greatestFiniteMagnitude),
+            containerSize: containerSize,
+            panelSize: panelSize,
+            margin: margin
+        )
+        let corners = [topLeft, topRight, bottomRight, bottomLeft]
+        let currentIndex = corners.indices.min { lhs, rhs in
+            distance(from: current, to: corners[lhs]) < distance(from: current, to: corners[rhs])
+        } ?? 0
+        return corners[(currentIndex + 1) % corners.count]
+    }
+
+    private static func distance(from lhs: CGSize, to rhs: CGSize) -> CGFloat {
+        hypot(lhs.width - rhs.width, lhs.height - rhs.height)
+    }
 }
 
 struct AppDebugSettingsTabLongPressBridge: UIViewRepresentable {
