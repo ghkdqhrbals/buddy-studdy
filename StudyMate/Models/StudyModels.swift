@@ -2846,7 +2846,14 @@ struct AppStrings {
     var membershipPlans: String { text("멤버십", "Membership", "メンバーシップ") }
     var currentMembership: String { text("현재 멤버십", "Current membership", "現在のメンバーシップ") }
     var activeMembership: String { text("이용 중", "Active", "利用中") }
-    var changeMembership: String { text("멤버십 변경", "Change membership", "メンバーシップを変更") }
+    func startMembership(_ tierCode: String) -> String {
+        let tierName = membershipTierName(tierCode)
+        return text("\(tierName) 시작하기", "Get \(tierName)", "\(tierName)を始める")
+    }
+    func changeMembership(to tierCode: String) -> String {
+        let tierName = membershipTierName(tierCode)
+        return text("\(tierName) 변경하기", "Switch to \(tierName)", "\(tierName)に変更")
+    }
     var membershipChangePending: String { text("App Store에서 변경 일정을 확인할 수 있습니다.", "Review the change schedule in the App Store.", "App Storeで変更予定を確認できます。") }
     var downgradeMembershipNotice: String { text("낮은 멤버십은 현재 결제 기간이 끝난 뒤 적용됩니다.", "A downgrade takes effect after the current billing period.", "ダウングレードは現在の請求期間終了後に適用されます。") }
     var renewsOn: String { text("다음 갱신", "Renews", "次回更新") }
@@ -2872,7 +2879,6 @@ struct AppStrings {
             "現在、購入管理を開けません。"
         )
     }
-    var purchaseMembership: String { text("구독하기", "Subscribe", "登録する") }
     var perMonth: String { text("/월", "/month", "/月") }
     var remainingQuestions: String { text("개 남음", "left", "問残り") }
     var noBillingHistory: String { text("아직 결제 내역이 없습니다.", "No billing history yet.", "支払い履歴はまだありません。") }

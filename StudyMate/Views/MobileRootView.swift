@@ -6257,16 +6257,22 @@ private struct MobileMembershipManagementView: View {
                             HStack(spacing: 10) {
                                 if billingStore.processingProductID != nil {
                                     ProgressView()
-                                        .tint(.white)
+                                        .tint(Color(.systemBackground))
                                 }
                                 Text(primaryActionTitle)
-                                    .font(.headline)
+                                    .font(.subheadline.weight(.semibold))
                             }
-                            .frame(maxWidth: .infinity, minHeight: 48)
+                            .foregroundStyle(Color(.systemBackground))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(
+                                Color.primary,
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            )
+                            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
-                        .buttonStyle(.borderedProminent)
-                        .buttonBorderShape(.roundedRectangle(radius: 14))
+                        .buttonStyle(.plain)
                         .disabled(selectedProduct == nil || billingStore.processingProductID != nil)
+                        .opacity(selectedProduct == nil ? 0.45 : 1)
                     }
 
                     if primaryAction == .downgrade {
@@ -6512,11 +6518,11 @@ private struct MobileMembershipManagementView: View {
     private var primaryActionTitle: String {
         switch primaryAction {
         case .subscribe:
-            return strings.purchaseMembership
+            return strings.startMembership(selectedTierCode ?? "TIER2")
         case .current:
             return strings.currentMembership
         case .change, .downgrade:
-            return strings.changeMembership
+            return strings.changeMembership(to: selectedTierCode ?? activeTierCode)
         }
     }
 
