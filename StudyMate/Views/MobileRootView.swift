@@ -5788,6 +5788,7 @@ private struct MobileProfilePage: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var isMembershipManagementPresented = false
+    @State private var developerUnlockTapTracker = RapidDeveloperUnlockTapTracker()
 
     private var strings: AppStrings {
         appState.strings
@@ -5948,12 +5949,18 @@ private struct MobileProfilePage: View {
             }
 
             Section {
-                HStack {
-                    Text(strings.appVersion)
-                    Spacer()
-                    Text(appVersionText)
-                        .foregroundStyle(.secondary)
+                Button {
+                    registerDeveloperVersionTap()
+                } label: {
+                    HStack {
+                        Text(strings.appVersion)
+                        Spacer()
+                        Text(appVersionText)
+                            .foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
             }
 
             if appState.isCommunitySessionActive {
@@ -5991,6 +5998,13 @@ private struct MobileProfilePage: View {
             }
             .presentationDragIndicator(.visible)
         }
+    }
+
+    private func registerDeveloperVersionTap() {
+        guard developerUnlockTapTracker.registerTap(at: Date()) else {
+            return
+        }
+        appState.unlockDeveloperAccessFromVersionGesture()
     }
 
     private func profileDestinationLabel(
@@ -9786,7 +9800,6 @@ private struct MobileOnboardingView: View {
 
 private struct MobileSettingsView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var promotionCode = ""
 
     private static let kofiTipURL = URL(string: "https://ko-fi.com/gyumin")!
 
@@ -9938,65 +9951,6 @@ private struct MobileSettingsView: View {
                     }
                 }
 
-                if !appState.canAccessDeveloperOptions {
-                    MobileSettingsCard(
-                        title: strings.promotionCode,
-                        systemImage: "ticket"
-                    ) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            TextField(
-                                strings.promotionCodePlaceholder,
-                                text: $promotionCode
-                            )
-                            #if os(iOS)
-                            .keyboardType(.asciiCapable)
-                            .textInputAutocapitalization(.characters)
-                            .autocorrectionDisabled()
-                            .textContentType(.oneTimeCode)
-                            #endif
-                            .monospaced()
-                            .submitLabel(.done)
-                            .onChange(of: promotionCode) { _, newValue in
-                                let formatted = DeveloperPromotionCodeVerifier.formattedInput(newValue)
-                                if promotionCode != formatted {
-                                    promotionCode = formatted
-                                }
-                            }
-                            .onSubmit {
-                                redeemPromotionCode()
-                            }
-
-                            if let message = appState.promotionCodeMessage {
-                                Text(message)
-                                    .font(.caption)
-                                    .foregroundStyle(appState.hasPromotionCodeError ? .red : .green)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-
-                            Button {
-                                redeemPromotionCode()
-                            } label: {
-                                HStack(spacing: 8) {
-                                    if appState.isRedeemingPromotionCode {
-                                        ProgressView()
-                                            .controlSize(.small)
-                                    }
-                                    Text(strings.applyPromotionCode)
-                                        .fontWeight(.semibold)
-                                }
-                                .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.green)
-                            .disabled(
-                                promotionCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                    || promotionCode.count != 19
-                                    || appState.isRedeemingPromotionCode
-                            )
-                        }
-                    }
-                }
-
                 if appState.canAccessDeveloperOptions {
                     MobileSettingsCard(
                         title: strings.developerOptions,
@@ -10121,18 +10075,6 @@ private struct MobileSettingsView: View {
         }
         .buttonStyle(.plain)
         .disabled(appState.isValidatingAPIKey)
-    }
-
-    private func redeemPromotionCode() {
-        let code = promotionCode.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !code.isEmpty, !appState.isRedeemingPromotionCode else {
-            return
-        }
-        Task {
-            if await appState.redeemDeveloperPromotionCode(code) {
-                promotionCode = ""
-            }
-        }
     }
 
 }

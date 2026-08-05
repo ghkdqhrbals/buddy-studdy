@@ -104,19 +104,6 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
-    func testEmbeddedDeveloperCodeAcceptsOnlyConfiguredFourPartCode() {
-        XCTAssertTrue(
-            DeveloperPromotionCodeVerifier.isDeveloperCode("QAQA-QAQA-QAQA-QAQA")
-        )
-        XCTAssertFalse(
-            DeveloperPromotionCodeVerifier.isDeveloperCode("NOPE-NOPE-NOPE-NOPE")
-        )
-        XCTAssertEqual(
-            DeveloperPromotionCodeVerifier.formattedInput("qaqaqaqaqaqaqaqa"),
-            "QAQA-QAQA-QAQA-QAQA"
-        )
-    }
-
     func testMaintenanceScreenProvidesHiddenDeveloperBypass() throws {
         let root = try repositoryRoot()
         let appFile = root.appendingPathComponent("StudyMate/StudyMateiOSApp.swift")
@@ -126,8 +113,9 @@ final class ArchitecturePolicyTests: XCTestCase {
 
         XCTAssertTrue(appContent.contains("now.timeIntervalSince(startedAt) <= 2"))
         XCTAssertTrue(appContent.contains("guard hiddenTapCount >= 5"))
-        XCTAssertTrue(appContent.contains("MaintenanceDeveloperAccessSheet()"))
+        XCTAssertTrue(appContent.contains("guard appState.canAccessDeveloperOptions else"))
         XCTAssertTrue(appContent.contains("await appState.bypassMaintenanceForDeveloper()"))
+        XCTAssertFalse(appContent.contains("MaintenanceDeveloperAccessSheet"))
         XCTAssertTrue(
             stateContent.contains(
                 "isServiceUnderMaintenance && !isMaintenanceBypassedForDeveloper"
@@ -135,7 +123,42 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
-    func testTestFlightKeepsDeveloperDebugPopupBehindPromotionCodeGate() throws {
+    func testProfileVersionTapRevealsDeveloperOptionsWithoutPromotionCodeEntry() throws {
+        let root = try repositoryRoot()
+        let mobileRootContent = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Views/MobileRootView.swift"),
+            encoding: .utf8
+        )
+        let appStateContent = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/ViewModels/AppState.swift"),
+            encoding: .utf8
+        )
+        let stringsContent = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Models/StudyModels.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(mobileRootContent.contains("registerDeveloperVersionTap()"))
+        XCTAssertTrue(mobileRootContent.contains(".buttonStyle(.plain)"))
+        XCTAssertFalse(mobileRootContent.contains("promotionCodePlaceholder"))
+        XCTAssertFalse(appStateContent.contains("DeveloperPromotionCodeVerifier"))
+        XCTAssertFalse(appStateContent.contains("redeemDeveloperPromotionCode"))
+        XCTAssertFalse(stringsContent.contains("var promotionCodePlaceholder"))
+    }
+
+    func testFloatingDebugOverlayUsesDedicatedDragHandle() throws {
+        let root = try repositoryRoot()
+        let appContent = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/StudyMateiOSApp.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(appContent.contains("Image(systemName: \"line.3.horizontal\")"))
+        XCTAssertTrue(appContent.contains(".gesture(dragGesture(in: size))"))
+        XCTAssertFalse(appContent.contains(".simultaneousGesture(dragGesture(in: size))"))
+    }
+
+    func testTestFlightKeepsDeveloperDebugPopupBehindDeveloperAccessGate() throws {
         let root = try repositoryRoot()
         let appContent = try String(
             contentsOf: root.appendingPathComponent("StudyMate/StudyMateiOSApp.swift"),

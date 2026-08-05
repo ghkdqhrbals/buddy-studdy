@@ -2,6 +2,66 @@
 import SwiftUI
 import UIKit
 
+struct RapidDeveloperUnlockTapTracker {
+    static let requiredTapCount = 5
+    static let tapWindow: TimeInterval = 2
+
+    private(set) var tapCount = 0
+    private var windowStartedAt: Date?
+
+    mutating func registerTap(at now: Date) -> Bool {
+        if let windowStartedAt,
+           now.timeIntervalSince(windowStartedAt) <= Self.tapWindow {
+            tapCount += 1
+        } else {
+            windowStartedAt = now
+            tapCount = 1
+        }
+
+        guard tapCount >= Self.requiredTapCount else {
+            return false
+        }
+
+        tapCount = 0
+        windowStartedAt = nil
+        return true
+    }
+}
+
+enum DebugOverlayPositionPolicy {
+    static func boundedOffset(
+        proposed: CGSize,
+        containerSize: CGSize,
+        panelSize: CGSize,
+        margin: CGFloat
+    ) -> CGSize {
+        let maxX = max(margin, containerSize.width - panelSize.width - margin)
+        let maxY = max(margin, containerSize.height - panelSize.height - margin)
+        return CGSize(
+            width: min(max(proposed.width, margin), maxX),
+            height: min(max(proposed.height, margin), maxY)
+        )
+    }
+
+    static func offsetAfterDrag(
+        committed: CGSize,
+        translation: CGSize,
+        containerSize: CGSize,
+        panelSize: CGSize,
+        margin: CGFloat
+    ) -> CGSize {
+        boundedOffset(
+            proposed: CGSize(
+                width: committed.width + translation.width,
+                height: committed.height + translation.height
+            ),
+            containerSize: containerSize,
+            panelSize: panelSize,
+            margin: margin
+        )
+    }
+}
+
 struct AppDebugSettingsTabLongPressBridge: UIViewRepresentable {
     let onLongPressSettingsTab: () -> Void
 

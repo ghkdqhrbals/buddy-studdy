@@ -1,6 +1,5 @@
 import Foundation
 import Combine
-import CryptoKit
 import OSLog
 #if os(iOS)
 import StoreKit
@@ -8,44 +7,6 @@ import StoreKit
 
 private let appStateLogger = Logger(subsystem: "io.github.ghkdqhrbals.StudyMate", category: "app")
 private let appAuthLogger = Logger(subsystem: "io.github.ghkdqhrbals.StudyMate", category: "auth")
-
-enum DeveloperPromotionCodeVerifier {
-    private static let developerCodeHash = Data([
-        0x44, 0xe6, 0x4b, 0xfd, 0xca, 0x1f, 0x6c, 0xa7,
-        0xa2, 0x65, 0x27, 0xe6, 0x22, 0x8e, 0x64, 0xfc,
-        0x6e, 0x15, 0x3a, 0x29, 0x93, 0x1b, 0x42, 0x00,
-        0xdc, 0xc2, 0xba, 0x28, 0xfa, 0x2e, 0x75, 0x63
-    ])
-
-    static func isDeveloperCode(_ code: String) -> Bool {
-        let normalized = code.trimmingCharacters(in: .whitespacesAndNewlines)
-        let candidate = Data(SHA256.hash(data: Data(normalized.utf8)))
-        guard candidate.count == developerCodeHash.count else {
-            return false
-        }
-        return zip(candidate, developerCodeHash)
-            .reduce(UInt8(0)) { difference, bytes in
-                difference | (bytes.0 ^ bytes.1)
-            } == 0
-    }
-
-    static func formattedInput(_ value: String) -> String {
-        let characters = value
-            .uppercased()
-            .filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
-            .prefix(16)
-        return stride(from: 0, to: characters.count, by: 4)
-            .map { offset in
-                let start = characters.index(characters.startIndex, offsetBy: offset)
-                let end = characters.index(
-                    start,
-                    offsetBy: min(4, characters.distance(from: start, to: characters.endIndex))
-                )
-                return String(characters[start..<end])
-            }
-            .joined(separator: "-")
-    }
-}
 
 private enum QuestionGenerationSkip: Error {
     case pendingLimit
@@ -593,9 +554,6 @@ final class AppState: ObservableObject {
     @Published var pageAccessPrompt: PageAccessPrompt?
     @Published private(set) var backendPermissionEvaluations = BackendPermissionEvaluations(permissions: [])
     @Published private(set) var developerFeatureAccess: DeveloperFeatureAccess = .restricted
-    @Published private(set) var isRedeemingPromotionCode = false
-    @Published private(set) var promotionCodeMessage: String?
-    @Published private(set) var hasPromotionCodeError = false
 
     private let appLogUseCase: AppLogUseCase
     private let storedBackendIdentityUseCase: StoredBackendIdentityUseCase
@@ -2349,7 +2307,7 @@ final class AppState: ObservableObject {
             return
         }
         isMaintenanceBypassedForDeveloper = true
-        log(.info, "개발자 코드로 현재 점검 화면을 우회했습니다.")
+        log(.info, "활성화된 개발자 옵션으로 현재 점검 화면을 우회했습니다.")
         if appControlPolicy != nil {
             await recordAppControlEvent(.maintenanceBypassed, resolution: appControlResolution)
         }
@@ -4362,8 +4320,6 @@ final class AppState: ObservableObject {
             state.reset()
         }
         isLoadingTermsAndPreferences = false
-        promotionCodeMessage = nil
-        hasPromotionCodeError = false
         backendAccessState = .signedOut
         communityProfileCacheUseCase.saveSignedOutProfile(avatarSymbolName: profileAvatarSymbolName)
         logAuthTrace("community_session_reset_end", reason: "resetCommunitySignInState", deduplicate: false)
@@ -4482,36 +4438,18 @@ final class AppState: ObservableObject {
     }
 
     @discardableResult
-    func redeemDeveloperPromotionCode(_ code: String) async -> Bool {
-        let normalizedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedCode.isEmpty else {
-            promotionCodeMessage = strings.promotionCodeRequired
-            hasPromotionCodeError = true
+    func unlockDeveloperAccessFromVersionGesture() -> Bool {
+        guard appDistributionContext.allowsHiddenDeveloperUnlock else {
             return false
         }
-        isRedeemingPromotionCode = true
-        promotionCodeMessage = nil
-        hasPromotionCodeError = false
-        defer {
-            isRedeemingPromotionCode = false
-        }
-
-        guard DeveloperPromotionCodeVerifier.isDeveloperCode(normalizedCode) else {
-            promotionCodeMessage = strings.promotionCodeInvalid
-            hasPromotionCodeError = true
-            log(.warning, "유효하지 않은 개발자 프로모션 코드가 입력되었습니다.")
-            return false
-        }
-
         developerSettingsUseCase.saveDeveloperAccessUnlocked(true)
         developerSettingsUseCase.saveDeveloperAccessBuildIdentifier(
             appDistributionContext.isTestFlight
                 ? appDistributionContext.buildIdentifier
                 : nil
         )
-        applyDeveloperFeatureAccess(.fullyAllowed, reason: "promotion-code")
-        promotionCodeMessage = strings.promotionCodeApplied
-        log(.info, "이 기기에 로컬 개발자 기능 권한을 적용했습니다.")
+        applyDeveloperFeatureAccess(.fullyAllowed, reason: "version-five-taps")
+        log(.info, "버전 5회 탭으로 이 빌드의 개발자 옵션을 활성화했습니다.")
         return true
     }
 
@@ -4520,6 +4458,9 @@ final class AppState: ObservableObject {
         distribution: AppDistributionContext
     ) -> Bool {
         guard settings.isDeveloperAccessUnlocked else {
+            return false
+        }
+        guard distribution.allowsHiddenDeveloperUnlock else {
             return false
         }
         guard distribution.isTestFlight else {

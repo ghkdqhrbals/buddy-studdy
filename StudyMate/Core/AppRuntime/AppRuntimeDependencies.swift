@@ -3,6 +3,21 @@ import Foundation
 struct AppDistributionContext: Equatable {
     let isTestFlight: Bool
     let buildIdentifier: String
+    let isDebugBuild: Bool
+
+    init(
+        isTestFlight: Bool,
+        buildIdentifier: String,
+        isDebugBuild: Bool = false
+    ) {
+        self.isTestFlight = isTestFlight
+        self.buildIdentifier = buildIdentifier
+        self.isDebugBuild = isDebugBuild
+    }
+
+    var allowsHiddenDeveloperUnlock: Bool {
+        isDebugBuild || isTestFlight
+    }
 
     var appVersion: String {
         buildIdentifier.split(separator: "(", maxSplits: 1).first.map(String.init) ?? "0"
@@ -27,9 +42,15 @@ struct AppDistributionContext: Equatable {
             ?? "unknown"
         let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
             ?? "unknown"
+        #if DEBUG
+        let isDebugBuild = true
+        #else
+        let isDebugBuild = false
+        #endif
         return AppDistributionContext(
             isTestFlight: bundle.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt",
-            buildIdentifier: "\(version)(\(build))"
+            buildIdentifier: "\(version)(\(build))",
+            isDebugBuild: isDebugBuild
         )
     }
 }

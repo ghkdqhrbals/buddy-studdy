@@ -2912,16 +2912,6 @@ struct AppStrings {
     }
     var maintenanceRetry: String { text("다시 확인", "Check again", "もう一度確認") }
     var maintenanceChecking: String { text("확인 중", "Checking", "確認中") }
-    var maintenanceDeveloperAccessTitle: String {
-        text("개발자 접근", "Developer Access", "開発者アクセス")
-    }
-    var maintenanceDeveloperAccessHelp: String {
-        text(
-            "개발자 코드를 입력하면 현재 점검 화면을 닫고 앱에 접근할 수 있습니다.",
-            "Enter the developer code to dismiss the current maintenance screen and access the app.",
-            "開発者コードを入力すると、現在のメンテナンス画面を閉じてアプリにアクセスできます。"
-        )
-    }
     var studyTree: String { text("학습 트리", "Study Tree") }
     var activateTopics: String { text("주제 활성화", "Activate topics") }
     var deleteTopics: String { text("주제 삭제", "Delete topics") }
@@ -3391,26 +3381,8 @@ struct AppStrings {
     }
     var cloudflareTunnel: String { text("Cloudflare 터널", "Cloudflare Tunnel") }
     var developerOptions: String { text("개발자 옵션", "Developer Options") }
-    var promotionCode: String { text("프로모션 코드", "Promotion Code", "プロモーションコード") }
-    var promotionCodeHelp: String {
-        text(
-            "발급받은 코드를 적용하면 이 기기에서 개발자 옵션과 디버깅 팝업을 사용할 수 있습니다.",
-            "Apply an issued code to use developer options and debug popups on this device.",
-            "発行されたコードを適用すると、このデバイスで開発者オプションとデバッグポップアップを使用できます。"
-        )
-    }
-    var promotionCodePlaceholder: String {
-        "XXXX-XXXX-XXXX-XXXX"
-    }
-    var applyPromotionCode: String { text("코드 적용", "Apply Code", "コードを適用") }
-    var promotionCodeRequired: String {
-        text("프로모션 코드를 입력해 주세요.", "Enter a promotion code.", "プロモーションコードを入力してください。")
-    }
-    var promotionCodeApplied: String {
-        text("개발자 기능이 허용되었습니다.", "Developer features are now available.", "開発者機能が利用可能になりました。")
-    }
-    var promotionCodeInvalid: String {
-        text("유효하지 않은 프로모션 코드입니다.", "This promotion code is invalid.", "このプロモーションコードは無効です。")
+    var moveDebugPanel: String {
+        text("디버그 패널 이동", "Move debug panel", "デバッグパネルを移動")
     }
     var apiDebugWindowTitle: String { text("API 통신 로그", "API Traffic Logs") }
     var resetDebugLogs: String { text("디버그 로그 초기화", "Reset Debug Logs") }

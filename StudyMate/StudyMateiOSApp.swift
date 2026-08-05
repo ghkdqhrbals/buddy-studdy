@@ -354,7 +354,6 @@ private struct ServiceMaintenanceView: View {
     @EnvironmentObject private var appState: AppState
     @State private var hiddenTapCount = 0
     @State private var hiddenTapWindowStartedAt: Date?
-    @State private var showsDeveloperCodeEntry = false
 
     var body: some View {
         let strings = appState.strings
@@ -441,10 +440,6 @@ private struct ServiceMaintenanceView: View {
                 .padding(.bottom, 30)
             }
         }
-        .sheet(isPresented: $showsDeveloperCodeEntry) {
-            MaintenanceDeveloperAccessSheet()
-                .environmentObject(appState)
-        }
     }
 
     private func registerHiddenDeveloperTap() {
@@ -462,114 +457,11 @@ private struct ServiceMaintenanceView: View {
         }
         hiddenTapCount = 0
         hiddenTapWindowStartedAt = nil
-        showsDeveloperCodeEntry = true
-    }
-}
-
-private struct MaintenanceDeveloperAccessSheet: View {
-    @EnvironmentObject private var appState: AppState
-    @Environment(\.dismiss) private var dismiss
-    @State private var code = ""
-    @State private var hasSubmitted = false
-    @FocusState private var isCodeFieldFocused: Bool
-
-    var body: some View {
-        let strings = appState.strings
-
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 20) {
-                Image(systemName: "wrench.and.screwdriver.fill")
-                    .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
-                    .accessibilityHidden(true)
-
-                Text(strings.maintenanceDeveloperAccessHelp)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                TextField(
-                    strings.promotionCodePlaceholder,
-                    text: $code
-                )
-                .font(.system(.body, design: .monospaced))
-                .textInputAutocapitalization(.characters)
-                .keyboardType(.asciiCapable)
-                .autocorrectionDisabled()
-                .textContentType(.oneTimeCode)
-                .submitLabel(.done)
-                .focused($isCodeFieldFocused)
-                .onChange(of: code) { _, newValue in
-                    let formatted = DeveloperPromotionCodeVerifier.formattedInput(newValue)
-                    if formatted != code {
-                        code = formatted
-                    }
-                    hasSubmitted = false
-                }
-                .onSubmit {
-                    submitCode()
-                }
-                .padding(.horizontal, 14)
-                .frame(height: 50)
-                .background(Color(.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-                if hasSubmitted,
-                   let message = appState.promotionCodeMessage {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(appState.hasPromotionCodeError ? .red : .green)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Button {
-                    submitCode()
-                } label: {
-                    HStack(spacing: 8) {
-                        if appState.isRedeemingPromotionCode {
-                            ProgressView()
-                                .tint(.white)
-                        }
-                        Text(strings.applyPromotionCode)
-                            .fontWeight(.semibold)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 50)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(code.count != 19 || appState.isRedeemingPromotionCode)
-
-                Spacer(minLength: 0)
-            }
-            .padding(24)
-            .navigationTitle(strings.maintenanceDeveloperAccessTitle)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(strings.cancel) {
-                        dismiss()
-                    }
-                }
-            }
-        }
-        .presentationDetents([.height(340)])
-        .presentationDragIndicator(.visible)
-        .onAppear {
-            isCodeFieldFocused = true
-        }
-    }
-
-    private func submitCode() {
-        guard code.count == 19, !appState.isRedeemingPromotionCode else {
+        guard appState.canAccessDeveloperOptions else {
             return
         }
-        hasSubmitted = true
         Task {
-            guard await appState.redeemDeveloperPromotionCode(code) else {
-                return
-            }
             await appState.bypassMaintenanceForDeveloper()
-            dismiss()
         }
     }
 }
@@ -670,6 +562,14 @@ private struct FloatingDebugLogOverlay: View {
     private func panel(in size: CGSize) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
+                Image(systemName: "line.3.horizontal")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+                    .gesture(dragGesture(in: size))
+                    .accessibilityLabel(strings.moveDebugPanel)
+
                 Button {
                     runTapAction {
                         isExpanded.toggle()
@@ -744,8 +644,6 @@ private struct FloatingDebugLogOverlay: View {
                 }
                 .buttonStyle(.plain)
             }
-            .contentShape(Rectangle())
-            .simultaneousGesture(dragGesture(in: size))
 
             if isExpanded {
                 Divider()
@@ -1017,26 +915,29 @@ private struct FloatingDebugLogOverlay: View {
     }
 
     private func boundedOffset(for size: CGSize, proposed proposedOffset: CGSize? = nil) -> CGSize {
-        let offset = proposedOffset ?? committedOffset
-        let margin: CGFloat = 12
-        let panelWidth = panelWidth(for: size)
-        let panelHeight = panelEstimatedHeight(for: size)
-        let maxX = max(margin, size.width - panelWidth - margin)
-        let maxY = max(margin, size.height - panelHeight - margin)
-
-        return CGSize(
-            width: min(max(offset.width, margin), maxX),
-            height: min(max(offset.height, margin), maxY)
+        DebugOverlayPositionPolicy.boundedOffset(
+            proposed: proposedOffset ?? committedOffset,
+            containerSize: size,
+            panelSize: CGSize(
+                width: panelWidth(for: size),
+                height: panelEstimatedHeight(for: size)
+            ),
+            margin: 12
         )
     }
 
     private func displayOffset(for size: CGSize) -> CGSize {
         let baseOffset = boundedOffset(for: size)
-        let proposedOffset = CGSize(
-            width: baseOffset.width + dragTranslation.width,
-            height: baseOffset.height + dragTranslation.height
+        return DebugOverlayPositionPolicy.offsetAfterDrag(
+            committed: baseOffset,
+            translation: dragTranslation,
+            containerSize: size,
+            panelSize: CGSize(
+                width: panelWidth(for: size),
+                height: panelEstimatedHeight(for: size)
+            ),
+            margin: 12
         )
-        return boundedOffset(for: size, proposed: proposedOffset)
     }
 
     private func dragGesture(in size: CGSize) -> some Gesture {
@@ -1052,15 +953,20 @@ private struct FloatingDebugLogOverlay: View {
             }
             .onEnded { value in
                 let startOffset = boundedOffset(for: size)
-                let proposedOffset = CGSize(
-                    width: startOffset.width + value.translation.width,
-                    height: startOffset.height + value.translation.height
-                )
 
                 var transaction = Transaction()
                 transaction.disablesAnimations = true
                 withTransaction(transaction) {
-                    committedOffset = boundedOffset(for: size, proposed: proposedOffset)
+                    committedOffset = DebugOverlayPositionPolicy.offsetAfterDrag(
+                        committed: startOffset,
+                        translation: value.translation,
+                        containerSize: size,
+                        panelSize: CGSize(
+                            width: panelWidth(for: size),
+                            height: panelEstimatedHeight(for: size)
+                        ),
+                        margin: 12
+                    )
                 }
                 if suppressTapAction {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {

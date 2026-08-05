@@ -469,8 +469,61 @@ final class PageAccessPolicyTests: XCTestCase {
 }
 
 final class DeveloperAccessPolicyTests: XCTestCase {
+    func testHiddenDeveloperUnlockIsLimitedToDebugAndTestFlight() {
+        XCTAssertTrue(
+            AppDistributionContext(
+                isTestFlight: false,
+                buildIdentifier: "1.1.0(80)",
+                isDebugBuild: true
+            ).allowsHiddenDeveloperUnlock
+        )
+        XCTAssertTrue(
+            AppDistributionContext(
+                isTestFlight: true,
+                buildIdentifier: "1.1.0(80)",
+                isDebugBuild: false
+            ).allowsHiddenDeveloperUnlock
+        )
+        XCTAssertFalse(
+            AppDistributionContext(
+                isTestFlight: false,
+                buildIdentifier: "1.1.0(80)",
+                isDebugBuild: false
+            ).allowsHiddenDeveloperUnlock
+        )
+    }
+
+    func testFiveRapidVersionTapsUnlockAndExpiredWindowRestarts() {
+        var tracker = RapidDeveloperUnlockTapTracker()
+        let startedAt = Date(timeIntervalSince1970: 1_000)
+
+        for offset in 0..<4 {
+            XCTAssertFalse(
+                tracker.registerTap(
+                    at: startedAt.addingTimeInterval(Double(offset) * 0.25)
+                )
+            )
+        }
+        XCTAssertTrue(tracker.registerTap(at: startedAt.addingTimeInterval(1)))
+        XCTAssertFalse(tracker.registerTap(at: startedAt.addingTimeInterval(4)))
+        XCTAssertEqual(tracker.tapCount, 1)
+    }
+
+    func testDebugOverlayOffsetAccumulatesAndClampsToVisibleBounds() {
+        XCTAssertEqual(
+            DebugOverlayPositionPolicy.offsetAfterDrag(
+                committed: CGSize(width: 12, height: 74),
+                translation: CGSize(width: 500, height: -500),
+                containerSize: CGSize(width: 390, height: 844),
+                panelSize: CGSize(width: 300, height: 64),
+                margin: 12
+            ),
+            CGSize(width: 78, height: 12)
+        )
+    }
+
     @MainActor
-    func testTestFlightRequiresDeveloperCodeAgainForEachBuild() async {
+    func testTestFlightRequiresVersionGestureAgainForEachBuild() async {
         let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer {
@@ -484,7 +537,8 @@ final class DeveloperAccessPolicyTests: XCTestCase {
 
         let currentBuild = AppDistributionContext(
             isTestFlight: true,
-            buildIdentifier: "1.1.0(57)"
+            buildIdentifier: "1.1.0(57)",
+            isDebugBuild: false
         )
         let appState = AppState(
             settingsStore: store,
@@ -498,13 +552,12 @@ final class DeveloperAccessPolicyTests: XCTestCase {
         XCTAssertFalse(store.loadIsDebuggingEnabled())
         XCTAssertNil(store.loadDeveloperAccessBuildIdentifier())
 
-        let developerCodeAccepted = await appState.redeemDeveloperPromotionCode(
-            "QAQA-QAQA-QAQA-QAQA"
-        )
+        let developerAccessUnlocked = appState.unlockDeveloperAccessFromVersionGesture()
 
-        XCTAssertTrue(developerCodeAccepted)
+        XCTAssertTrue(developerAccessUnlocked)
         XCTAssertTrue(appState.canAccessDeveloperOptions)
         XCTAssertTrue(appState.canShowDebugPopup)
+        XCTAssertFalse(appState.isAPIDebugPanelPresented)
         XCTAssertFalse(appState.isDebuggingEnabled)
         XCTAssertEqual(store.loadDeveloperAccessBuildIdentifier(), "1.1.0(57)")
 
@@ -519,12 +572,37 @@ final class DeveloperAccessPolicyTests: XCTestCase {
             settingsStore: store,
             appDistributionContext: AppDistributionContext(
                 isTestFlight: true,
-                buildIdentifier: "1.1.1(58)"
+                buildIdentifier: "1.1.1(58)",
+                isDebugBuild: false
             )
         )
         XCTAssertFalse(nextBuild.canAccessDeveloperOptions)
         XCTAssertFalse(nextBuild.canShowDebugPopup)
         XCTAssertFalse(nextBuild.isDebuggingEnabled)
+    }
+
+    @MainActor
+    func testAppStoreBuildRejectsVersionGestureUnlock() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let appState = AppState(
+            settingsStore: store,
+            appDistributionContext: AppDistributionContext(
+                isTestFlight: false,
+                buildIdentifier: "1.1.0(80)",
+                isDebugBuild: false
+            )
+        )
+
+        XCTAssertFalse(appState.unlockDeveloperAccessFromVersionGesture())
+        XCTAssertFalse(appState.canAccessDeveloperOptions)
+        XCTAssertFalse(store.loadIsDeveloperAccessUnlocked())
+        XCTAssertNil(store.loadDeveloperAccessBuildIdentifier())
     }
 }
 
