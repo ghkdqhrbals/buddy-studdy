@@ -30,6 +30,82 @@ final class AppControlPolicyTests: XCTestCase {
         )
     }
 
+    func testRevenueCatStoreKitTransactionMatchRequiresTransactionProductAndAccount() {
+        let accountToken = UUID(uuidString: "3f0c5f50-6521-4ba0-a990-73500e915f57")!
+        let otherAccountToken = UUID(uuidString: "4f0c5f50-6521-4ba0-a990-73500e915f57")!
+
+        XCTAssertTrue(
+            StoreKitTransactionSyncResolver.matches(
+                revenueCatTransactionIdentifier: "200000000000001",
+                storeKitTransactionID: 200000000000001,
+                storeKitProductID: "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                expectedProductID: "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                storeKitAppAccountToken: accountToken,
+                expectedAppAccountToken: accountToken
+            )
+        )
+        XCTAssertFalse(
+            StoreKitTransactionSyncResolver.matches(
+                revenueCatTransactionIdentifier: "200000000000001",
+                storeKitTransactionID: 200000000000002,
+                storeKitProductID: "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                expectedProductID: "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                storeKitAppAccountToken: accountToken,
+                expectedAppAccountToken: accountToken
+            )
+        )
+        XCTAssertFalse(
+            StoreKitTransactionSyncResolver.matches(
+                revenueCatTransactionIdentifier: "200000000000001",
+                storeKitTransactionID: 200000000000001,
+                storeKitProductID: "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+                expectedProductID: "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                storeKitAppAccountToken: accountToken,
+                expectedAppAccountToken: accountToken
+            )
+        )
+        XCTAssertFalse(
+            StoreKitTransactionSyncResolver.matches(
+                revenueCatTransactionIdentifier: "200000000000001",
+                storeKitTransactionID: 200000000000001,
+                storeKitProductID: "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                expectedProductID: "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                storeKitAppAccountToken: otherAccountToken,
+                expectedAppAccountToken: accountToken
+            )
+        )
+        XCTAssertFalse(
+            StoreKitTransactionSyncResolver.matches(
+                revenueCatTransactionIdentifier: "test-store-transaction",
+                storeKitTransactionID: 200000000000001,
+                storeKitProductID: "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                expectedProductID: "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                storeKitAppAccountToken: accountToken,
+                expectedAppAccountToken: accountToken
+            )
+        )
+    }
+
+    func testRevenueCatPurchaseSynchronizesAppleJWSBeforeWebhookFallback() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let billingStore = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Services/AppleBillingStore.swift"),
+            encoding: .utf8
+        )
+        let appState = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/ViewModels/AppState.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(billingStore.contains("StoreKitTransactionSyncResolver.resolve("))
+        XCTAssertTrue(billingStore.contains("checkout.invoiceNumber"))
+        XCTAssertTrue(billingStore.contains("let invoice = try await waitForFulfillment(checkout.id)"))
+        XCTAssertTrue(appState.contains("for await verification in Transaction.currentEntitlements"))
+        XCTAssertTrue(appState.contains("finishAfterSync: false"))
+    }
+
     func testMaintenanceTakesPriorityOverForcedUpdate() {
         let result = AppControlPolicyResolver.resolve(
             policy: policy(

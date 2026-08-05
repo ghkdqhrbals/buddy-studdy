@@ -66,6 +66,12 @@ class RevenueCatWebhookVerificationAdapter(
         val eventId = event.id?.trim()?.takeIf { PROVIDER_ID.matches(it) } ?: invalidWebhook()
         val eventType = event.type?.trim()?.uppercase()?.takeIf { EVENT_TYPE.matches(it) } ?: invalidWebhook()
         val eventAt = event.eventTimestampMs?.toInstant() ?: invalidWebhook()
+        val productId = if (eventType == "PRODUCT_CHANGE") {
+            event.newProductId?.trim()?.takeIf(String::isNotEmpty)
+                ?: event.productId?.trim()?.takeIf(String::isNotEmpty)
+        } else {
+            event.productId?.trim()?.takeIf(String::isNotEmpty)
+        }
 
         return VerifiedRevenueCatEvent(
             eventId = eventId,
@@ -74,7 +80,7 @@ class RevenueCatWebhookVerificationAdapter(
             originalAppUserId = event.originalAppUserId?.trim()?.takeIf(String::isNotEmpty),
             aliases = event.aliases.orEmpty().map(String::trim).filter(String::isNotEmpty).take(20),
             store = event.store?.trim()?.uppercase(),
-            productId = event.productId?.trim()?.takeIf(String::isNotEmpty),
+            productId = productId,
             transactionId = event.transactionId?.trim()?.takeIf(String::isNotEmpty),
             originalTransactionId = event.originalTransactionId?.trim()?.takeIf(String::isNotEmpty),
             environment = event.environment?.toBillingEnvironment(),
@@ -138,6 +144,7 @@ class RevenueCatWebhookVerificationAdapter(
         val aliases: List<String>? = null,
         val store: String? = null,
         @param:JsonProperty("product_id") val productId: String? = null,
+        @param:JsonProperty("new_product_id") val newProductId: String? = null,
         @param:JsonProperty("transaction_id") val transactionId: String? = null,
         @param:JsonProperty("original_transaction_id") val originalTransactionId: String? = null,
         val environment: String? = null,

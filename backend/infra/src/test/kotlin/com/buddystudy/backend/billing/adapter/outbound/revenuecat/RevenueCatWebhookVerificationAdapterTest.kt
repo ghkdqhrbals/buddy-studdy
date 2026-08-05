@@ -52,6 +52,19 @@ class RevenueCatWebhookVerificationAdapterTest {
     }
 
     @Test
+    fun `maps PRODUCT_CHANGE to the new product instead of the previous product`() = runBlocking<Unit> {
+        val productChangeBody =
+            """{"api_version":"1.0","event":{"id":"rc-product-change-1","type":"PRODUCT_CHANGE","app_id":"app123","event_timestamp_ms":1785801600000,"app_user_id":"3f0c5f50-6521-4ba0-a990-73500e915f57","aliases":[],"store":"APP_STORE","product_id":"io.github.ghkdqhrbals.StudyMate.tier2.monthly","new_product_id":"io.github.ghkdqhrbals.StudyMate.tier3.monthly","original_transaction_id":"200000000000000","environment":"SANDBOX"}}"""
+                .toByteArray()
+
+        val event = adapter().verify(
+            RevenueCatWebhookRequest(productChangeBody, signature(now.epochSecond, productChangeBody)),
+        )
+
+        assertThat(event.productId).isEqualTo("io.github.ghkdqhrbals.StudyMate.tier3.monthly")
+    }
+
+    @Test
     fun `rejects a signature produced for different body bytes`() {
         val adapter = adapter()
         val signature = signature(now.epochSecond, "{}".toByteArray())

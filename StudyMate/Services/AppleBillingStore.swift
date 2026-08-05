@@ -4,6 +4,97 @@ import StoreKit
 import RevenueCat
 import UIKit
 
+struct StoreKitTransactionSyncEvidence: Equatable {
+    var signedTransaction: String
+    var environment: String
+}
+
+enum StoreKitTransactionSyncResolver {
+    nonisolated static func matches(
+        revenueCatTransactionIdentifier: String,
+        storeKitTransactionID: UInt64,
+        storeKitProductID: String,
+        expectedProductID: String,
+        storeKitAppAccountToken: UUID?,
+        expectedAppAccountToken: UUID
+    ) -> Bool {
+        guard let revenueCatTransactionID = UInt64(revenueCatTransactionIdentifier) else {
+            return false
+        }
+        return revenueCatTransactionID == storeKitTransactionID
+            && storeKitProductID == expectedProductID
+            && storeKitAppAccountToken == expectedAppAccountToken
+    }
+
+    static func resolve(
+        revenueCatTransactionIdentifier: String,
+        productID: String,
+        appAccountToken: UUID
+    ) async -> StoreKitTransactionSyncEvidence? {
+        for await verification in Transaction.currentEntitlements {
+            if let evidence = evidence(
+                from: verification,
+                revenueCatTransactionIdentifier: revenueCatTransactionIdentifier,
+                productID: productID,
+                appAccountToken: appAccountToken
+            ) {
+                return evidence
+            }
+        }
+
+        // RevenueCat normally finishes StoreKit transactions after posting them. Transaction.all
+        // remains the durable fallback when the just-purchased subscription is not yet visible in
+        // currentEntitlements or has already moved out of the current entitlement set.
+        for await verification in Transaction.all {
+            if let evidence = evidence(
+                from: verification,
+                revenueCatTransactionIdentifier: revenueCatTransactionIdentifier,
+                productID: productID,
+                appAccountToken: appAccountToken
+            ) {
+                return evidence
+            }
+        }
+        return nil
+    }
+
+    private static func evidence(
+        from verification: StoreKit.VerificationResult<StoreKit.Transaction>,
+        revenueCatTransactionIdentifier: String,
+        productID: String,
+        appAccountToken: UUID
+    ) -> StoreKitTransactionSyncEvidence? {
+        guard case .verified(let transaction) = verification,
+              matches(
+                revenueCatTransactionIdentifier: revenueCatTransactionIdentifier,
+                storeKitTransactionID: transaction.id,
+                storeKitProductID: transaction.productID,
+                expectedProductID: productID,
+                storeKitAppAccountToken: transaction.appAccountToken,
+                expectedAppAccountToken: appAccountToken
+              ) else {
+            return nil
+        }
+        return StoreKitTransactionSyncEvidence(
+            signedTransaction: verification.jwsRepresentation,
+            environment: backendEnvironment(transaction)
+        )
+    }
+
+    private static func backendEnvironment(_ transaction: Transaction) -> String {
+        switch transaction.environment {
+        case .production:
+            return "PRODUCTION"
+        case .sandbox:
+            return "SANDBOX"
+        case .xcode:
+            return "XCODE"
+        default:
+            return transaction.environment.rawValue.uppercased()
+        }
+    }
+}
+
 @MainActor
 final class RevenueCatBillingBridge {
     enum Mode: Equatable {
@@ -191,11 +282,28 @@ final class AppleBillingStore: ObservableObject {
         try await RevenueCatBillingBridge.shared.identify(appAccountToken: appAccountToken)
         switch tierProduct.source {
         case .revenueCat(let product):
-            let (_, _, userCancelled) = try await Purchases.shared.purchase(product: product)
+            let (revenueCatTransaction, _, userCancelled) = try await Purchases.shared.purchase(product: product)
             if userCancelled {
                 try? await abandonCheckout(checkout.invoiceNumber)
                 return .cancelled
             }
+            if let transactionIdentifier = revenueCatTransaction?.transactionIdentifier,
+               let evidence = await StoreKitTransactionSyncResolver.resolve(
+                revenueCatTransactionIdentifier: transactionIdentifier,
+                productID: tierProduct.id,
+                appAccountToken: appAccountToken
+               ),
+               let invoice = try? await synchronize(
+                evidence.signedTransaction,
+                evidence.environment,
+                checkout.invoiceNumber
+               ),
+               invoice.status == "COMPLETED" {
+                return .purchased(invoice)
+            }
+
+            // Webhooks remain the fallback for Test Store purchases and for a temporary client-to-
+            // backend failure. A future launch also replays the active StoreKit entitlement JWS.
             let invoice = try await waitForFulfillment(checkout.id)
             return invoice.status == "COMPLETED" ? .purchased(invoice) : .pending
         case .appStore(let product):

@@ -611,6 +611,7 @@ final class AppState: ObservableObject {
     private var appleBillingUpdatesTask: Task<Void, Never>?
     private var appleBillingRecoveryTask: Task<Void, Never>?
     private var recoveringAppleTransactionIDs = Set<UInt64>()
+    private var synchronizedAppleTransactionIDs = Set<UInt64>()
     #endif
     private var appControlResolution = AppControlResolution.normal
     private var didStartAppControlListener = false
@@ -1993,7 +1994,7 @@ final class AppState: ObservableObject {
         await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
         await resumePendingQuestionGenerationIfNeeded(reason: "startup")
         #if os(iOS)
-        await recoverUnfinishedAppleTransactions(reason: "startup")
+        await recoverAppleBillingTransactions(reason: "startup")
         #endif
         #if os(iOS)
         if isCommunitySessionActive {
@@ -2040,7 +2041,7 @@ final class AppState: ObservableObject {
         await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
         await resumePendingQuestionGenerationIfNeeded(reason: "foreground")
         #if os(iOS)
-        await recoverUnfinishedAppleTransactions(reason: "foreground")
+        await recoverAppleBillingTransactions(reason: "foreground")
         #endif
         if isCloudSyncEnabled {
             await syncCloudNow(updateVisibleQuestion: false)
@@ -4791,7 +4792,7 @@ final class AppState: ObservableObject {
             _ = await self.notificationService.requestAuthorizationIfNeeded(
                 language: self.settings.appLanguage
             )
-            await self.recoverUnfinishedAppleTransactions(reason: "sign-in")
+            await self.recoverAppleBillingTransactions(reason: "sign-in")
         }
         #endif
     }
@@ -6024,12 +6025,16 @@ final class AppState: ObservableObject {
                 guard !Task.isCancelled else {
                     return
                 }
-                await self?.reconcileAppleTransaction(verification, reason: "storekit-update")
+                await self?.reconcileAppleTransaction(
+                    verification,
+                    reason: "storekit-update",
+                    finishAfterSync: true
+                )
             }
         }
     }
 
-    private func recoverUnfinishedAppleTransactions(reason: String) async {
+    private func recoverAppleBillingTransactions(reason: String) async {
         guard isCommunitySessionActive, appleBillingRecoveryTask == nil else {
             return
         }
@@ -6041,7 +6046,21 @@ final class AppState: ObservableObject {
                 guard !Task.isCancelled else {
                     return
                 }
-                await reconcileAppleTransaction(verification, reason: reason)
+                await reconcileAppleTransaction(
+                    verification,
+                    reason: reason,
+                    finishAfterSync: true
+                )
+            }
+            for await verification in Transaction.currentEntitlements {
+                guard !Task.isCancelled else {
+                    return
+                }
+                await reconcileAppleTransaction(
+                    verification,
+                    reason: "\(reason)-current-entitlement",
+                    finishAfterSync: false
+                )
             }
         }
         appleBillingRecoveryTask = task
@@ -6051,14 +6070,16 @@ final class AppState: ObservableObject {
 
     private func reconcileAppleTransaction(
         _ verification: VerificationResult<Transaction>,
-        reason: String
+        reason: String,
+        finishAfterSync: Bool
     ) async {
         guard case .verified(let transaction) = verification else {
             log(.error, "검증되지 않은 StoreKit 거래는 완료 처리하지 않았습니다. reason=\(reason)")
             return
         }
         guard isCommunitySessionActive,
-              !recoveringAppleTransactionIDs.contains(transaction.id) else {
+              !recoveringAppleTransactionIDs.contains(transaction.id),
+              !synchronizedAppleTransactionIDs.contains(transaction.id) else {
             return
         }
 
@@ -6084,10 +6105,14 @@ final class AppState: ObservableObject {
                     environment: AppleBillingStore.backendEnvironment(transaction),
                     invoiceNumber: nil
                 )
-                await transaction.finish()
+                synchronizedAppleTransactionIDs.insert(transaction.id)
+                if finishAfterSync {
+                    await transaction.finish()
+                }
                 log(
                     .info,
-                    "미완료 StoreKit 거래를 복구했습니다. transactionID=\(transaction.id), attempt=\(attempt), reason=\(reason)"
+                    "StoreKit 거래를 백엔드에 동기화했습니다. transactionID=\(transaction.id), " +
+                        "attempt=\(attempt), reason=\(reason)"
                 )
                 return
             } catch {
