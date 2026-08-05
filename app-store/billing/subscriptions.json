@@ -24,17 +24,6 @@
       "customerPrice": "7900"
     },
     {
-      "tierCode": "TIER2",
-      "productId": "io.github.ghkdqhrbals.StudyMate.tier2.yearly",
-      "appStoreConnectId": "6797527085",
-      "subscriptionPeriod": "ONE_YEAR",
-      "billingPeriod": "P1Y",
-      "groupLevel": 2,
-      "monthlyQuestionLimit": 300,
-      "baseTerritory": "KOR",
-      "customerPrice": "69000"
-    },
-    {
       "tierCode": "TIER3",
       "productId": "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
       "appStoreConnectId": "6797527130",
@@ -44,17 +33,6 @@
       "monthlyQuestionLimit": 1000,
       "baseTerritory": "KOR",
       "customerPrice": "17900"
-    },
-    {
-      "tierCode": "TIER3",
-      "productId": "io.github.ghkdqhrbals.StudyMate.tier3.yearly",
-      "appStoreConnectId": "6797527227",
-      "subscriptionPeriod": "ONE_YEAR",
-      "billingPeriod": "P1Y",
-      "groupLevel": 1,
-      "monthlyQuestionLimit": 1000,
-      "baseTerritory": "KOR",
-      "customerPrice": "149000"
     }
   ]
 }

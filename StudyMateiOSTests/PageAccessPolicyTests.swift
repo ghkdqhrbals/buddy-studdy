@@ -11,11 +11,46 @@ final class BillingLocalizationTests: XCTestCase {
         XCTAssertEqual(strings.membershipTierName("TIER2"), "ティア2")
         XCTAssertEqual(AppStrings(language: .korean).membershipTierName("TIER1"), "티어 1")
         XCTAssertEqual(AppStrings(language: .english).membershipTierName("TIER1"), "Tier 1")
-        XCTAssertEqual(strings.billingPeriod("P1M"), "月間")
-        XCTAssertEqual(strings.billingPeriod("P1Y"), "年間")
         XCTAssertEqual(strings.monthlyQuestionAllowanceText(300), "毎月300問")
         XCTAssertEqual(AppStrings(language: .korean).monthlyQuestionAllowanceText(300), "매월 질문 300개")
         XCTAssertEqual(AppStrings(language: .english).monthlyQuestionAllowanceText(300), "300 questions each month")
+    }
+
+    func testMembershipCatalogOnlyOffersMonthlyProducts() {
+        let products = [
+            BackendBillingTierProduct(
+                tierCode: "TIER2",
+                description: "Monthly",
+                monthlyQuestionLimit: 300,
+                productId: "tier2.monthly",
+                productType: "AUTO_RENEWABLE_SUBSCRIPTION",
+                billingPeriod: "P1M",
+                sortOrder: 20
+            ),
+            BackendBillingTierProduct(
+                tierCode: "TIER2",
+                description: "Legacy annual",
+                monthlyQuestionLimit: 300,
+                productId: "tier2.yearly",
+                productType: "AUTO_RENEWABLE_SUBSCRIPTION",
+                billingPeriod: "P1Y",
+                sortOrder: 21
+            ),
+            BackendBillingTierProduct(
+                tierCode: "TIER3",
+                description: "Monthly",
+                monthlyQuestionLimit: 1_000,
+                productId: "tier3.monthly",
+                productType: "AUTO_RENEWABLE_SUBSCRIPTION",
+                billingPeriod: "p1m",
+                sortOrder: 30
+            ),
+        ]
+
+        XCTAssertEqual(
+            MembershipProductPolicy.monthlyProducts(products).map(\.productId),
+            ["tier2.monthly", "tier3.monthly"]
+        )
     }
 
     func testMembershipActionDistinguishesCurrentChangeAndDowngrade() {
@@ -1104,6 +1139,31 @@ final class StudyTreeLayoutPolicyTests: XCTestCase {
         XCTAssertEqual(geometry.end, CGPoint(x: 100, y: 226))
         XCTAssertEqual(geometry.arrowLeft, CGPoint(x: 95, y: 216))
         XCTAssertEqual(geometry.arrowRight, CGPoint(x: 105, y: 216))
+    }
+
+    func testPixelTreeEdgesUseAStableOrthogonalBranch() throws {
+        let geometry = try XCTUnwrap(
+            StudyTreeEdgePolicy.steppedGeometry(
+                start: CGPoint(x: 100, y: 160),
+                end: CGPoint(x: 254, y: 226)
+            )
+        )
+
+        XCTAssertEqual(
+            geometry,
+            StudyTreeSteppedEdgeGeometry(
+                start: CGPoint(x: 100, y: 160),
+                parentCorner: CGPoint(x: 100, y: 193),
+                childCorner: CGPoint(x: 254, y: 193),
+                end: CGPoint(x: 254, y: 226)
+            )
+        )
+        XCTAssertNil(
+            StudyTreeEdgePolicy.steppedGeometry(
+                start: CGPoint(x: 12, y: 12),
+                end: CGPoint(x: 12, y: 12)
+            )
+        )
     }
 
     func testStudySubtreeDeletesChildrenBeforeTheirParent() {

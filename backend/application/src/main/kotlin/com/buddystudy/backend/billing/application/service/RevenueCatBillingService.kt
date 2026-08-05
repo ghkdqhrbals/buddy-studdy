@@ -44,7 +44,7 @@ class RevenueCatBillingService(
                     val transaction = event.toVerifiedAppleTransaction()
                     val userId = ledger.userIdForAppAccountToken(transaction.appAccountToken)
                         ?: invalidEvent("RevenueCat App User ID is not mapped to a BuddyStudy account.")
-                    val product = ledger.enabledTierProduct(transaction.productId)
+                    val product = ledger.tierProduct(transaction.productId)
                         ?: invalidEvent("RevenueCat product is not mapped to a membership tier.")
                     if (product.productType != transaction.productType) {
                         invalidEvent("RevenueCat product type does not match the membership catalog.")

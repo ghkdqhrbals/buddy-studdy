@@ -82,6 +82,13 @@ struct StudyTreeDirectionalEdgeGeometry: Equatable {
     var arrowRight: CGPoint
 }
 
+struct StudyTreeSteppedEdgeGeometry: Equatable {
+    var start: CGPoint
+    var parentCorner: CGPoint
+    var childCorner: CGPoint
+    var end: CGPoint
+}
+
 enum StudyTreeNodeStylePolicy {
     static func levelFillFraction(_ difficultyLevel: Int) -> CGFloat {
         CGFloat(min(max(difficultyLevel, 1), 10)) / 10
@@ -178,6 +185,27 @@ enum StudyTreeEdgePolicy {
                 x: arrowBase.x - perpendicularX,
                 y: arrowBase.y - perpendicularY
             )
+        )
+    }
+
+    static func steppedGeometry(
+        start: CGPoint,
+        end: CGPoint
+    ) -> StudyTreeSteppedEdgeGeometry? {
+        guard start.x.isFinite,
+              start.y.isFinite,
+              end.x.isFinite,
+              end.y.isFinite,
+              hypot(end.x - start.x, end.y - start.y) > 0.5 else {
+            return nil
+        }
+
+        let branchY = start.y + (end.y - start.y) / 2
+        return StudyTreeSteppedEdgeGeometry(
+            start: start,
+            parentCorner: CGPoint(x: start.x, y: branchY),
+            childCorner: CGPoint(x: end.x, y: branchY),
+            end: end
         )
     }
 }
@@ -2773,6 +2801,13 @@ struct AppStrings {
         )
     }
     var loading: String { text("불러오는 중", "Loading") }
+    var membershipPlansUnavailable: String {
+        text(
+            "현재 이용 가능한 멤버십이 없습니다.",
+            "No memberships are available right now.",
+            "現在利用できるメンバーシップはありません。"
+        )
+    }
     var retry: String { text("다시 시도", "Retry") }
     var serviceTemporarilyUnavailable: String {
         text(
@@ -2809,7 +2844,6 @@ struct AppStrings {
     var membershipAndBilling: String { text("멤버십과 결제", "Membership & billing", "メンバーシップと支払い") }
     var membershipManagement: String { text("멤버십 관리", "Manage membership", "メンバーシップ管理") }
     var membershipPlans: String { text("멤버십", "Membership", "メンバーシップ") }
-    var billingCycle: String { text("결제 주기", "Billing cycle", "請求期間") }
     var currentMembership: String { text("현재 멤버십", "Current membership", "現在のメンバーシップ") }
     var activeMembership: String { text("이용 중", "Active", "利用中") }
     var changeMembership: String { text("멤버십 변경", "Change membership", "メンバーシップを変更") }
@@ -2839,6 +2873,8 @@ struct AppStrings {
         )
     }
     var purchaseMembership: String { text("구독하기", "Subscribe", "登録する") }
+    var perMonth: String { text("/월", "/month", "/月") }
+    var remainingQuestions: String { text("개 남음", "left", "問残り") }
     var noBillingHistory: String { text("아직 결제 내역이 없습니다.", "No billing history yet.", "支払い履歴はまだありません。") }
     var billingPending: String { text("결제가 승인 대기 중입니다.", "The purchase is pending approval.", "購入は承認待ちです。") }
     var billingPurchased: String { text("멤버십이 적용됐습니다.", "Your membership is active.", "メンバーシップが有効になりました。") }
@@ -2863,16 +2899,6 @@ struct AppStrings {
             return text("티어 3", "Tier 3", "ティア3")
         default:
             return tierCode
-        }
-    }
-    func billingPeriod(_ value: String?) -> String {
-        switch value?.uppercased() {
-        case "P1M", "MONTHLY":
-            return text("월간", "Monthly", "月間")
-        case "P1Y", "YEARLY", "ANNUAL":
-            return text("연간", "Annual", "年間")
-        default:
-            return value ?? "-"
         }
     }
     func monthlyQuotaUsage(remaining: Int, limit: Int) -> String {
@@ -2913,6 +2939,7 @@ struct AppStrings {
     var maintenanceRetry: String { text("다시 확인", "Check again", "もう一度確認") }
     var maintenanceChecking: String { text("확인 중", "Checking", "確認中") }
     var studyTree: String { text("학습 트리", "Study Tree") }
+    var rootTopic: String { text("루트", "Root", "ルート") }
     var activateTopics: String { text("주제 활성화", "Activate topics") }
     var deleteTopics: String { text("주제 삭제", "Delete topics") }
     var resetTreeLayout: String { text("트리 배치 초기화", "Reset tree layout") }
@@ -4013,5 +4040,13 @@ struct MembershipPlanActionPolicy {
             return .downgrade
         }
         return .change
+    }
+}
+
+struct MembershipProductPolicy {
+    static func monthlyProducts(
+        _ products: [BackendBillingTierProduct]
+    ) -> [BackendBillingTierProduct] {
+        products.filter { $0.billingPeriod?.uppercased() == "P1M" }
     }
 }

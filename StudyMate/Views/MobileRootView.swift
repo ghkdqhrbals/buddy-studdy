@@ -2969,6 +2969,145 @@ struct StudyTreeLayoutSnapshot {
     }
 }
 
+struct StudyTreePixelBackdrop: View {
+    var accentColor: Color = .accentColor
+
+    var body: some View {
+        Canvas { context, size in
+            let spacing: CGFloat = 24
+            let columns = max(1, Int(size.width / spacing) + 1)
+            let rows = max(1, Int(size.height / spacing) + 1)
+
+            for row in 0..<rows {
+                for column in 0..<columns {
+                    let isAnchor = row.isMultiple(of: 4) && column.isMultiple(of: 4)
+                    let side: CGFloat = isAnchor ? 2.5 : 1.5
+                    let color = isAnchor
+                        ? accentColor.opacity(0.15)
+                        : Color.secondary.opacity(0.09)
+                    let rect = CGRect(
+                        x: CGFloat(column) * spacing - side / 2,
+                        y: CGFloat(row) * spacing - side / 2,
+                        width: side,
+                        height: side
+                    )
+                    context.fill(Path(rect), with: .color(color))
+                }
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+enum StudyTreePixelConnector {
+    static func draw(
+        _ geometry: StudyTreeDirectionalEdgeGeometry,
+        color: Color,
+        in context: inout GraphicsContext
+    ) {
+        guard let stepped = StudyTreeEdgePolicy.steppedGeometry(
+            start: geometry.start,
+            end: geometry.end
+        ) else {
+            return
+        }
+
+        var path = Path()
+        path.move(to: stepped.start)
+        path.addLine(to: stepped.parentCorner)
+        path.addLine(to: stepped.childCorner)
+        path.addLine(to: stepped.end)
+
+        context.stroke(
+            path,
+            with: .color(Color(.systemBackground).opacity(0.92)),
+            style: StrokeStyle(lineWidth: 5, lineCap: .square, lineJoin: .miter)
+        )
+        context.stroke(
+            path,
+            with: .color(color.opacity(0.72)),
+            style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter)
+        )
+
+        let jointSize: CGFloat = 5
+        let jointRect = CGRect(
+            x: stepped.childCorner.x - jointSize / 2,
+            y: stepped.childCorner.y - jointSize / 2,
+            width: jointSize,
+            height: jointSize
+        )
+        context.fill(Path(jointRect), with: .color(color.opacity(0.92)))
+
+        var arrow = Path()
+        arrow.move(to: geometry.end)
+        arrow.addLine(to: geometry.arrowLeft)
+        arrow.addLine(to: geometry.arrowRight)
+        arrow.closeSubpath()
+        context.fill(arrow, with: .color(color.opacity(0.9)))
+    }
+}
+
+struct StudyTreePixelTexture: View {
+    var seed: Int
+    var color: Color
+
+    var body: some View {
+        Canvas { context, size in
+            let pixel: CGFloat = 7
+            let columns = Int(size.width / pixel)
+            let rows = Int(size.height / pixel)
+
+            for row in 0..<rows {
+                for column in 0..<columns {
+                    let value = abs(seed &* 31 &+ row &* 17 &+ column &* 13)
+                    guard value.isMultiple(of: 11) else { continue }
+                    let rect = CGRect(
+                        x: CGFloat(column) * pixel,
+                        y: CGFloat(row) * pixel,
+                        width: pixel - 1,
+                        height: pixel - 1
+                    )
+                    context.fill(Path(rect), with: .color(color.opacity(0.08)))
+                }
+            }
+        }
+        .clipShape(Circle())
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+struct StudyTreePixelProgressRing: View {
+    var progress: CGFloat
+    var color: Color
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(
+                    Color.secondary.opacity(0.16),
+                    style: StrokeStyle(lineWidth: 3, dash: [3, 4])
+                )
+
+            Circle()
+                .trim(from: 0, to: min(max(progress, 0), 1))
+                .stroke(
+                    color,
+                    style: StrokeStyle(
+                        lineWidth: 4,
+                        lineCap: .butt,
+                        lineJoin: .miter,
+                        dash: [7, 3]
+                    )
+                )
+                .rotationEffect(.degrees(-90))
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
 private enum StudyTopicAddMode: String {
     case recommendation
     case manual
@@ -3070,6 +3209,8 @@ struct MobileStudyTreeView: View {
                         height: canvasLayout.size.height * zoomScale
                     )
                     ZStack(alignment: .bottom) {
+                        StudyTreePixelBackdrop()
+
                         ScrollView([.horizontal, .vertical]) {
                             ZStack(alignment: .topLeading) {
                                 ZStack(alignment: .topLeading) {
@@ -3094,23 +3235,16 @@ struct MobileStudyTreeView: View {
                                             ) else {
                                                 continue
                                             }
-                                            var path = Path()
-                                            path.move(to: geometry.start)
-                                            let midpoint = (geometry.start.y + geometry.end.y) / 2
-                                            path.addCurve(
-                                                to: geometry.end,
-                                                control1: CGPoint(x: geometry.start.x, y: midpoint),
-                                                control2: CGPoint(x: geometry.end.x, y: midpoint)
+                                            let childColor = appState
+                                                .backendStudyRoom(id: edge.childID)?
+                                                .activeForQuestions == true
+                                                ? Color.green
+                                                : Color.accentColor
+                                            StudyTreePixelConnector.draw(
+                                                geometry,
+                                                color: childColor,
+                                                in: &context
                                             )
-                                            let edgeColor = Color.secondary.opacity(0.48)
-                                            context.stroke(path, with: .color(edgeColor), lineWidth: 1.7)
-
-                                            var arrow = Path()
-                                            arrow.move(to: geometry.end)
-                                            arrow.addLine(to: geometry.arrowLeft)
-                                            arrow.addLine(to: geometry.arrowRight)
-                                            arrow.closeSubpath()
-                                            context.fill(arrow, with: .color(edgeColor))
                                         }
                                     }
 
@@ -3118,6 +3252,7 @@ struct MobileStudyTreeView: View {
                                         StudyTreeNode(
                                             room: placement.room,
                                             strings: strings,
+                                            isRoot: placement.room.id == rootStudyID,
                                             hasPendingQuestion:
                                                 appState.pendingQuestionCount(
                                                     categoryID: String(placement.room.id)
@@ -3979,6 +4114,7 @@ private extension UIView {
 private struct StudyTreeNode: View {
     var room: BackendStudyRoom
     var strings: AppStrings
+    var isRoot: Bool
     var hasPendingQuestion: Bool
     var isSelectionMode: Bool
     var isSelected: Bool
@@ -3990,7 +4126,10 @@ private struct StudyTreeNode: View {
     var onDelete: () -> Void
 
     private var levelProgressColor: Color {
-        room.activeForQuestions ? Color.green : Color.secondary.opacity(0.6)
+        if isRoot {
+            return .accentColor
+        }
+        return room.activeForQuestions ? Color.green : Color.secondary.opacity(0.62)
     }
 
     private var levelFillFraction: CGFloat {
@@ -4001,17 +4140,22 @@ private struct StudyTreeNode: View {
         Button {
             isSelectionMode ? onSelect() : onOpen()
         } label: {
-            VStack(spacing: 5) {
+            VStack(spacing: 7) {
+                HStack(spacing: 5) {
+                    Rectangle()
+                        .fill(levelProgressColor)
+                        .frame(width: 6, height: 6)
+                    Text(isRoot ? strings.rootTopic : StudyTreeNodeStylePolicy.levelText(room.difficultyLevel))
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .textCase(.uppercase)
+                        .foregroundStyle(levelProgressColor)
+                }
+
                 Text(room.topic)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
-
-                Text(StudyTreeNodeStylePolicy.levelText(room.difficultyLevel))
-                    .font(.caption2.weight(.bold))
-                    .monospacedDigit()
-                    .foregroundStyle(room.activeForQuestions ? Color.green : Color.secondary)
             }
             .padding(12)
             .frame(
@@ -4020,22 +4164,22 @@ private struct StudyTreeNode: View {
                 alignment: .center
             )
             .background {
-                Circle()
-                    .fill(Color(.secondarySystemBackground))
+                ZStack {
+                    Circle()
+                        .fill(Color(.secondarySystemBackground))
+                    StudyTreePixelTexture(seed: room.id, color: levelProgressColor)
+                }
             }
             .overlay {
                 Circle()
-                    .strokeBorder(Color.secondary.opacity(0.22), lineWidth: 2.5)
+                    .strokeBorder(Color(.separator).opacity(0.34), lineWidth: 1)
             }
             .overlay {
-                Circle()
-                    .trim(from: 0, to: levelFillFraction)
-                    .stroke(
-                        levelProgressColor,
-                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
-                    )
-                    .rotationEffect(.degrees(-90))
-                    .padding(1.5)
+                StudyTreePixelProgressRing(
+                    progress: levelFillFraction,
+                    color: levelProgressColor
+                )
+                .padding(2)
             }
             .overlay {
                 if isSelected {
@@ -4045,6 +4189,7 @@ private struct StudyTreeNode: View {
                 }
             }
             .contentShape(Circle())
+            .shadow(color: levelProgressColor.opacity(0.12), radius: 10, y: 5)
         }
         .buttonStyle(.plain)
         .contentShape(.contextMenuPreview, Circle())
@@ -6074,7 +6219,6 @@ private struct MobileMembershipManagementView: View {
     @State private var billingNotice: String?
     @State private var isCustomerCenterPresented = false
     @State private var selectedTierCode: String?
-    @State private var selectedBillingPeriod = "P1M"
     @State private var purchaseTask: Task<Void, Never>?
 
     private var strings: AppStrings {
@@ -6083,30 +6227,16 @@ private struct MobileMembershipManagementView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 28) {
+            LazyVStack(alignment: .leading, spacing: 20) {
                 membershipSummary
 
-                VStack(alignment: .leading, spacing: 14) {
-                    Text(strings.membershipPlans)
-                        .font(.headline)
-
+                VStack(alignment: .leading, spacing: 12) {
                     if appState.billingCatalog != nil {
                         if billingStore.isLoading {
                             loadingRow
                                 .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
                         } else {
                             membershipPicker
-
-                            if availableBillingPeriods.count > 1 {
-                                Picker(strings.billingCycle, selection: $selectedBillingPeriod) {
-                                    ForEach(availableBillingPeriods, id: \.self) { period in
-                                        Text(strings.billingPeriod(period))
-                                            .tag(period)
-                                    }
-                                }
-                                .pickerStyle(.segmented)
-                                .labelsHidden()
-                            }
                         }
                     } else if appState.isLoadingBilling {
                         loadingRow
@@ -6118,26 +6248,26 @@ private struct MobileMembershipManagementView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
-                    Button {
-                        guard let catalog = appState.billingCatalog,
-                              let product = selectedProduct else { return }
-                        purchase(product, appAccountToken: catalog.appAccountToken)
-                    } label: {
-                        SignInButtonLabel(title: primaryActionTitle, isPrimary: true)
-                            .overlay(alignment: .leading) {
+                    if primaryAction != .current {
+                        Button {
+                            guard let catalog = appState.billingCatalog,
+                                  let product = selectedProduct else { return }
+                            purchase(product, appAccountToken: catalog.appAccountToken)
+                        } label: {
+                            HStack(spacing: 10) {
                                 if billingStore.processingProductID != nil {
                                     ProgressView()
-                                        .tint(Color(.systemBackground))
-                                        .padding(.leading, 22)
+                                        .tint(.white)
                                 }
+                                Text(primaryActionTitle)
+                                    .font(.headline)
                             }
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.roundedRectangle(radius: 14))
+                        .disabled(selectedProduct == nil || billingStore.processingProductID != nil)
                     }
-                    .buttonStyle(SignInPressButtonStyle())
-                    .disabled(
-                        selectedProduct == nil
-                            || primaryAction == .current
-                            || billingStore.processingProductID != nil
-                    )
 
                     if primaryAction == .downgrade {
                         Text(strings.downgradeMembershipNotice)
@@ -6149,27 +6279,24 @@ private struct MobileMembershipManagementView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    HStack(spacing: 0) {
+                    HStack(spacing: 20) {
                         if activeProductID != nil {
                             Button(strings.manageSubscription) {
                                 cancelSubscription()
                             }
-                            .frame(maxWidth: .infinity)
-
-                            Divider()
-                                .frame(height: 18)
                         }
 
                         if let catalog = appState.billingCatalog {
                             Button(strings.restorePurchases) {
                                 restorePurchases(appAccountToken: catalog.appAccountToken)
                             }
-                            .frame(maxWidth: .infinity)
                             .disabled(billingStore.processingProductID != nil)
                         }
                     }
-                    .font(.footnote.weight(.semibold))
-                    .frame(minHeight: 38)
+                    .buttonStyle(.plain)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 32, alignment: .center)
                 }
 
                 if let message = appState.billingErrorMessage {
@@ -6180,7 +6307,7 @@ private struct MobileMembershipManagementView: View {
                 }
             }
             .padding(.horizontal, 20)
-            .padding(.vertical, 18)
+            .padding(.vertical, 16)
         }
         .background(Color(.systemGroupedBackground))
         .navigationTitle(strings.membershipManagement)
@@ -6226,11 +6353,38 @@ private struct MobileMembershipManagementView: View {
     private var membershipSummary: some View {
         Group {
             if let quota = appState.questionQuota {
-                MonthlyQuestionQuotaSummary(
-                    quota: quota,
-                    strings: strings,
-                    membershipName: activeProduct.map { strings.membershipTierName($0.tier.tierCode) }
-                )
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(strings.membershipTierName(activeTierCode))
+                                .font(.headline)
+                            Text(strings.monthlyQuestionAllowanceText(quota.monthlyLimit))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer(minLength: 12)
+
+                        HStack(alignment: .firstTextBaseline, spacing: 3) {
+                            Text(quota.remainingCount.formatted())
+                                .font(.title3.weight(.semibold))
+                                .monospacedDigit()
+                            Text(strings.remainingQuestions)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    ProgressView(
+                        value: Double(quota.usedCount),
+                        total: Double(max(quota.monthlyLimit, 1))
+                    )
+                    .tint(quota.remainingCount == 0 ? .orange : .accentColor)
+
+                    Text(strings.monthlyQuotaReset(quota.resetAt))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             } else {
                 loadingRow
                     .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
@@ -6239,79 +6393,87 @@ private struct MobileMembershipManagementView: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     @ViewBuilder
     private var membershipPicker: some View {
-        if let selectedGroup {
-            Menu {
-                ForEach(membershipGroups) { group in
+        if membershipGroups.isEmpty {
+            Text(strings.membershipPlansUnavailable)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
+                .background(Color(.secondarySystemGroupedBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        } else {
+            VStack(spacing: 0) {
+                ForEach(Array(membershipGroups.enumerated()), id: \.element.id) { index, group in
                     Button {
                         selectedTierCode = group.tierCode
                     } label: {
-                        if selectedTierCode == group.tierCode {
-                            Label(strings.membershipTierName(group.tierCode), systemImage: "checkmark")
-                        } else {
-                            Text(strings.membershipTierName(group.tierCode))
-                        }
+                        membershipRow(group)
+                    }
+                    .buttonStyle(.plain)
+
+                    if index < membershipGroups.count - 1 {
+                        Divider()
+                            .padding(.leading, 52)
                     }
                 }
-            } label: {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 7) {
-                            Text(strings.membershipTierName(selectedGroup.tierCode))
-                                .font(.headline)
-
-                            if activeProduct?.tier.tierCode == selectedGroup.tierCode {
-                                Text(strings.activeMembership)
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(.green)
-                            }
-                        }
-
-                        Text(strings.monthlyQuestionAllowanceText(selectedGroup.monthlyQuestionLimit))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Spacer(minLength: 12)
-
-                    if let selectedProduct {
-                        VStack(alignment: .trailing, spacing: 3) {
-                            Text(selectedProduct.displayPrice)
-                                .font(.headline)
-                                .monospacedDigit()
-
-                            Text(strings.billingPeriod(selectedBillingPeriod))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 16)
-                .frame(minHeight: 72)
-                .contentShape(Rectangle())
-                .background(Color(.secondarySystemGroupedBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
-            .buttonStyle(.plain)
-        } else {
-            loadingRow
-                .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
-                .background(Color(.secondarySystemGroupedBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
     }
 
-    private var selectedGroup: MembershipProductGroup? {
-        guard let selectedTierCode else { return nil }
-        return membershipGroups.first { $0.tierCode == selectedTierCode }
+    private func membershipRow(_ group: MembershipProductGroup) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .stroke(
+                        selectedTierCode == group.tierCode ? Color.accentColor : Color.secondary.opacity(0.45),
+                        lineWidth: 1.5
+                    )
+                    .frame(width: 22, height: 22)
+                if selectedTierCode == group.tierCode {
+                    Circle()
+                        .fill(Color.accentColor)
+                        .frame(width: 12, height: 12)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 7) {
+                    Text(strings.membershipTierName(group.tierCode))
+                        .font(.body.weight(.semibold))
+                    if activeTierCode == group.tierCode,
+                       appState.billingStatus?.isEntitlementActive == true {
+                        Text(strings.activeMembership)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text(strings.monthlyQuestionAllowanceText(group.monthlyQuestionLimit))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 10)
+
+            if let product = group.products.first {
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text(product.displayPrice)
+                        .font(.body.weight(.semibold))
+                        .monospacedDigit()
+                    Text(strings.perMonth)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 70)
+        .contentShape(Rectangle())
     }
 
     private var membershipGroups: [MembershipProductGroup] {
@@ -6328,18 +6490,13 @@ private struct MobileMembershipManagementView: View {
             }
     }
 
-    private var availableBillingPeriods: [String] {
-        let periods = Set(billingStore.products.compactMap(\.tier.billingPeriod))
-        let preferredOrder = ["P1M", "P1Y"]
-        return preferredOrder.filter(periods.contains) + periods.subtracting(preferredOrder).sorted()
-    }
-
     private var selectedProduct: AppleBillingStore.TierProduct? {
         guard let selectedTierCode else { return nil }
-        return billingStore.products.first {
-            $0.tier.tierCode == selectedTierCode
-                && $0.tier.billingPeriod == selectedBillingPeriod
-        }
+        return billingStore.products.first { $0.tier.tierCode == selectedTierCode }
+    }
+
+    private var activeTierCode: String {
+        appState.billingStatus?.tierCode ?? appState.questionQuota?.tierCode ?? "TIER1"
     }
 
     private var activeProductID: String? {
@@ -6364,9 +6521,13 @@ private struct MobileMembershipManagementView: View {
     }
 
     private var primaryAction: MembershipPrimaryAction {
-        MembershipPlanActionPolicy.resolve(
+        if appState.billingStatus?.isEntitlementActive == true,
+           selectedTierCode == activeTierCode {
+            return .current
+        }
+        return MembershipPlanActionPolicy.resolve(
             activeProductID: activeProductID,
-            activeMonthlyLimit: activeProduct?.tier.monthlyQuestionLimit,
+            activeMonthlyLimit: appState.billingStatus?.quota.baseLimit,
             selectedProductID: selectedProduct?.id,
             selectedMonthlyLimit: selectedProduct?.tier.monthlyQuestionLimit
         )
@@ -6435,14 +6596,10 @@ private struct MobileMembershipManagementView: View {
     private func initializeSelection() {
         if let activeProduct {
             selectedTierCode = activeProduct.tier.tierCode
-            selectedBillingPeriod = activeProduct.tier.billingPeriod ?? selectedBillingPeriod
             return
         }
         if selectedTierCode == nil {
             selectedTierCode = membershipGroups.first?.tierCode
-        }
-        if !availableBillingPeriods.contains(selectedBillingPeriod) {
-            selectedBillingPeriod = availableBillingPeriods.first ?? "P1M"
         }
     }
 

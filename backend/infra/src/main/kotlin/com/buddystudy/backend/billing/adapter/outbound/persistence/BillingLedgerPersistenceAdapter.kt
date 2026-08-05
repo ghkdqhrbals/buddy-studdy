@@ -113,15 +113,22 @@ class BillingLedgerPersistenceAdapter(
             .all().collectList().awaitSingle()
 
     override suspend fun enabledTierProduct(productId: String): BillingTierProduct? =
+        tierProduct(productId, enabledOnly = true)
+
+    override suspend fun tierProduct(productId: String): BillingTierProduct? =
+        tierProduct(productId, enabledOnly = false)
+
+    private suspend fun tierProduct(productId: String, enabledOnly: Boolean): BillingTierProduct? =
         database.sql(
             """
             select p.tier_code, t.description, t.monthly_question_limit, p.product_id,
                    p.product_type, p.billing_period, p.sort_order
             from membership_tier_products p
             join user_membership_tiers t on t.tier_code = p.tier_code
-            where p.provider = 'APPLE' and p.product_id = :productId and p.enabled = true
+            where p.provider = 'APPLE' and p.product_id = :productId
+              and (:enabledOnly = false or p.enabled = true)
             """.trimIndent(),
-        ).bind("productId", productId)
+        ).bind("productId", productId).bind("enabledOnly", enabledOnly)
             .map { row, _ -> row.tierProduct() }
             .one().awaitSingleOrNull()
 
@@ -2161,7 +2168,7 @@ class BillingLedgerPersistenceAdapter(
     }
 
     private suspend fun validateProductMapping(command: RecordVerifiedPaymentCommand) {
-        val mapped = enabledTierProduct(command.transaction.productId)
+        val mapped = tierProduct(command.transaction.productId)
         if (mapped != command.tierProduct) {
             throw billingFailure(ApiErrorCode.BILLING_TRANSACTION_INVALID, "Tier product mapping changed during verification.")
         }

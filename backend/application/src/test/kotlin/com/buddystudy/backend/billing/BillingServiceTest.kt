@@ -120,6 +120,27 @@ class BillingServiceTest {
     }
 
     @Test
+    fun `retired product cannot open checkout but remains valid for transaction recovery`() = runBlocking {
+        val ledger = FakeLedger(token, product, productEnabled = false)
+        val service = service(ledger)
+
+        val checkoutError = assertThrows(ApiRuntimeException::class.java) {
+            runBlocking {
+                service.createCheckout(
+                    principal(),
+                    CreateBillingCheckoutCommand(product.productId, "retired-product-checkout"),
+                )
+            }
+        }
+        assertEquals(ApiErrorCode.BILLING_TRANSACTION_INVALID, checkoutError.errorCode)
+        assertTrue(ledger.pendingCheckoutKeys.isEmpty())
+
+        val recovered = service.syncAppleTransaction(principal(), syncCommand())
+        assertEquals(InvoiceStatus.COMPLETED, recovered.status)
+        assertEquals(1, ledger.recordedPayments.size)
+    }
+
+    @Test
     fun `disabled or unknown tier products are rejected before ledger write`() {
         val ledger = FakeLedger(token, null)
         val service = service(ledger)
@@ -269,6 +290,7 @@ class BillingServiceTest {
     private class FakeLedger(
         private val token: UUID,
         private val product: BillingTierProduct?,
+        private val productEnabled: Boolean = true,
     ) : BillingLedgerPort {
         override suspend fun entitlementForUser(userId: Long): BillingEntitlementProjection? = null
         var tokenReads = 0
@@ -294,8 +316,11 @@ class BillingServiceTest {
             return token
         }
         override suspend fun userIdForAppAccountToken(appAccountToken: UUID): Long? = 733
-        override suspend fun enabledTierProducts(): List<BillingTierProduct> = listOfNotNull(product)
-        override suspend fun enabledTierProduct(productId: String): BillingTierProduct? = product?.takeIf { it.productId == productId }
+        override suspend fun enabledTierProducts(): List<BillingTierProduct> =
+            if (productEnabled) listOfNotNull(product) else emptyList()
+        override suspend fun enabledTierProduct(productId: String): BillingTierProduct? =
+            product?.takeIf { productEnabled && it.productId == productId }
+        override suspend fun tierProduct(productId: String): BillingTierProduct? = product?.takeIf { it.productId == productId }
         override suspend fun createPendingInvoice(
             userId: Long,
             appAccountToken: UUID,

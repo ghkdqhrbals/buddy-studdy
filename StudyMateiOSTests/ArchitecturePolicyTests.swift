@@ -21,14 +21,17 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertEqual(korean.homeScopeAll, "모든 학습들")
         XCTAssertEqual(korean.homeScopeMy, "내 학습")
         XCTAssertEqual(korean.homeScopeStudyTree, "내 학습트리")
+        XCTAssertEqual(korean.rootTopic, "루트")
 
         XCTAssertEqual(english.homeScopeAll, "All Studies")
         XCTAssertEqual(english.homeScopeMy, "My Studies")
         XCTAssertEqual(english.homeScopeStudyTree, "My Study Tree")
+        XCTAssertEqual(english.rootTopic, "Root")
 
         XCTAssertEqual(japanese.homeScopeAll, "すべての学習")
         XCTAssertEqual(japanese.homeScopeMy, "マイ学習")
         XCTAssertEqual(japanese.homeScopeStudyTree, "学習ツリー")
+        XCTAssertEqual(japanese.rootTopic, "ルート")
     }
 
     func testFeedbackPromptLeadsWithCreditRewardInEveryLanguage() {
@@ -2760,9 +2763,7 @@ final class ArchitecturePolicyTests: XCTestCase {
         session.clearTransactions()
         let expectedProductIDs: Set<String> = [
             "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
-            "io.github.ghkdqhrbals.StudyMate.tier2.yearly",
             "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
-            "io.github.ghkdqhrbals.StudyMate.tier3.yearly",
         ]
 
         let products = try await Product.products(for: expectedProductIDs)

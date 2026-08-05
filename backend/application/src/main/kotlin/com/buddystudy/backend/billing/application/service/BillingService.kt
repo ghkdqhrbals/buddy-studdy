@@ -131,7 +131,7 @@ class BillingService(
                 "The App Store transaction appAccountToken does not match the signed-in user.",
             )
         }
-        val product = ledger.enabledTierProduct(transaction.productId)
+        val product = ledger.tierProduct(transaction.productId)
             ?: throw billingError(
                 HttpStatus.UNPROCESSABLE_ENTITY,
                 ApiErrorCode.BILLING_TRANSACTION_INVALID,
@@ -217,7 +217,7 @@ class BillingService(
                         ApiErrorCode.BILLING_TRANSACTION_INVALID,
                         "The App Store notification appAccountToken is unknown.",
                     )
-                val product = ledger.enabledTierProduct(transaction.productId)
+                val product = ledger.tierProduct(transaction.productId)
                     ?: throw billingError(
                         HttpStatus.UNPROCESSABLE_ENTITY,
                         ApiErrorCode.BILLING_TRANSACTION_INVALID,

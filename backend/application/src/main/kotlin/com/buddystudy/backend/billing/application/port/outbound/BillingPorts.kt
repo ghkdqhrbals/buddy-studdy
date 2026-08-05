@@ -43,6 +43,8 @@ interface BillingLedgerPort {
     suspend fun userIdForAppAccountToken(appAccountToken: UUID): Long?
     suspend fun enabledTierProducts(): List<BillingTierProduct>
     suspend fun enabledTierProduct(productId: String): BillingTierProduct?
+    /** Resolves disabled legacy products so renewals and refunds remain processable. */
+    suspend fun tierProduct(productId: String): BillingTierProduct?
     suspend fun entitlementForUser(userId: Long): BillingEntitlementProjection?
 
     /** Creates the event-sourced NORMAL/WAITING invoice before StoreKit is opened. */

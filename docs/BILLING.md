@@ -29,16 +29,15 @@ decision for an Apple refund.
 ## Product catalog
 
 `membership_tier_products` maps enabled App Store product IDs to
-`user_membership_tiers`. Monthly and annual products grant the same monthly
-allowance; only the Apple renewal period and price differ.
+`user_membership_tiers`. BuddyStudy offers monthly subscriptions only. Retired
+product mappings remain disabled so historical renewals, refunds, and invoices
+can still be reconciled without exposing those products for a new checkout.
 
 | Tier | Monthly allowance | Product | Period | Korea price |
 | --- | ---: | --- | --- | ---: |
 | TIER1 | 30 | Free | — | Free |
 | TIER2 | 300 | `io.github.ghkdqhrbals.StudyMate.tier2.monthly` | P1M | ₩7,900 |
-| TIER2 | 300 | `io.github.ghkdqhrbals.StudyMate.tier2.yearly` | P1Y | ₩69,000 |
 | TIER3 | 1,000 | `io.github.ghkdqhrbals.StudyMate.tier3.monthly` | P1M | ₩17,900 |
-| TIER3 | 1,000 | `io.github.ghkdqhrbals.StudyMate.tier3.yearly` | P1Y | ₩149,000 |
 
 The mapping is server-owned. A client-supplied product that is absent, disabled,
 or has a different product type is rejected before an invoice is written.
@@ -381,9 +380,9 @@ monitoring administrator session. The monitoring UI exposes the flow at
 
 ## Production setup
 
-1. Keep all four products in the single `BuddyStudy Membership` auto-renewable
-   subscription group. TIER3 is group level 1 and TIER2 is group level 2;
-   monthly and annual products for the same tier share a level.
+1. Keep the two monthly products in the single `BuddyStudy Membership`
+   auto-renewable subscription group. TIER3 is group level 1 and TIER2 is group
+   level 2. Retired products must not be included in the RevenueCat offering.
 2. The Sandbox App Store Server Notifications V2 URL is
    `https://api.ghkdqhrbals.org/api/v1/billing/apple/notifications`. Configure
    the production URL separately before the App Store release.

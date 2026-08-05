@@ -142,7 +142,10 @@ final class AppleBillingStore: ObservableObject {
         defer { isLoading = false }
         do {
             try await RevenueCatBillingBridge.shared.identify(appAccountToken: catalog.appAccountToken)
-            let identifiers = catalog.products.map(\.productId)
+            // Annual subscriptions are retained only as historical billing records on the backend.
+            // The storefront is monthly-only, so an older or stale catalog must never surface them.
+            let availableProducts = MembershipProductPolicy.monthlyProducts(catalog.products)
+            let identifiers = availableProducts.map(\.productId)
             let byIdentifier: [String: TierProduct.StoreProductSource]
             if RevenueCatBillingBridge.shared.isEnabled {
                 let storeProducts = await Purchases.shared.products(identifiers)
@@ -153,12 +156,12 @@ final class AppleBillingStore: ObservableObject {
                 let storeProducts = try await Product.products(for: identifiers)
                 byIdentifier = Dictionary(uniqueKeysWithValues: storeProducts.map { ($0.id, .appStore($0)) })
             }
-            products = catalog.products
+            products = availableProducts
                 .compactMap { tier in
                     byIdentifier[tier.productId].map { TierProduct(tier: tier, source: $0) }
                 }
                 .sorted { $0.tier.sortOrder < $1.tier.sortOrder }
-            let missingProducts = Set(catalog.products.map(\.productId)).subtracting(byIdentifier.keys)
+            let missingProducts = Set(availableProducts.map(\.productId)).subtracting(byIdentifier.keys)
             errorMessage = missingProducts.isEmpty
                 ? nil
                 : "App Store에서 일부 요금제를 불러올 수 없습니다."

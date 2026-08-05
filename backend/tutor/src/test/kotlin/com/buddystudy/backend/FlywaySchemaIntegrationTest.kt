@@ -177,10 +177,18 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
 
         assertThat(tierProducts).containsExactly(
             TierProduct("TIER2", "io.github.ghkdqhrbals.StudyMate.tier2.monthly", "P1M", 300),
-            TierProduct("TIER2", "io.github.ghkdqhrbals.StudyMate.tier2.yearly", "P1Y", 300),
             TierProduct("TIER3", "io.github.ghkdqhrbals.StudyMate.tier3.monthly", "P1M", 1000),
-            TierProduct("TIER3", "io.github.ghkdqhrbals.StudyMate.tier3.yearly", "P1Y", 1000),
         )
+
+        val retiredAnnualProducts = databaseClient.sql(
+            """
+            select count(*) as product_count
+            from membership_tier_products
+            where provider = 'APPLE' and billing_period = 'P1Y' and enabled = false
+            """.trimIndent(),
+        ).map { row, _ -> row.get("product_count", java.lang.Long::class.java)!!.toLong() }
+            .one().awaitSingle()
+        assertThat(retiredAnnualProducts).isEqualTo(2)
     }
 
     @Test
