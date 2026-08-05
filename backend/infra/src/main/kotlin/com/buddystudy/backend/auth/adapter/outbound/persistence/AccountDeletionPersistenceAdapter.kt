@@ -117,7 +117,6 @@ class AccountDeletionPersistenceAdapter(
         ).forEach { update(it, userId, ids, withdrawnAt) }
 
         update("delete from reports where reporter_user_id = :userId or question_id in (:questionIds)", userId, ids, withdrawnAt)
-        update("delete from user_blocks where blocker_user_id = :userId or blocked_user_id = :userId", userId, ids, withdrawnAt)
         update("delete from question_comments where user_id = :userId or question_id in (:questionIds)", userId, ids, withdrawnAt)
         update("delete from question_likes where user_id = :userId or question_id in (:questionIds)", userId, ids, withdrawnAt)
         update("delete from question_stats where question_id in (:questionIds)", userId, ids, withdrawnAt)
