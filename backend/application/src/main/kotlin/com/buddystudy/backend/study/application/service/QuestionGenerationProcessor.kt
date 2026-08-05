@@ -65,7 +65,11 @@ class QuestionGenerationProcessor(
             check(StudyTreeSelector.rootFor(topicStudy, userStudies).id == rootStudy.id) {
                 "Question topic does not belong to the requested root study."
             }
-            val questionKey = questionKeys.resolveReservedQuestionGeneration(user, saga.quotaPeriodStartedAt)
+            val questionKey = questionKeys.resolveReservedQuestionGeneration(
+                user,
+                saga.quotaPeriodStartedAt,
+                saga.correlationId,
+            )
             val prepared = prepare(
                 event = event,
                 rootStudy = rootStudy,

@@ -54,22 +54,6 @@ class AdminManagementController(
     ): AdminMembershipTierResponse =
         management.updateTier(authorization.bearerToken(), tierCode, request)
 
-    @PatchMapping("/users/{userId}/membership")
-    suspend fun assignPlan(
-        @RequestHeader("Authorization") authorization: String?,
-        @PathVariable userId: Long,
-        @Valid @RequestBody request: AssignUserPlanRequest,
-    ): AdminUserSummary =
-        management.assignPlan(authorization.bearerToken(), userId, request)
-
-    @PatchMapping("/users/{userId}/quota/current-period")
-    suspend fun setCurrentPeriodQuestionLimit(
-        @RequestHeader("Authorization") authorization: String?,
-        @PathVariable userId: Long,
-        @Valid @RequestBody request: UpdateCurrentPeriodQuestionLimitRequest,
-    ): AdminUserSummary =
-        management.setCurrentPeriodQuestionLimit(authorization.bearerToken(), userId, request)
-
     @GetMapping("/feedback")
     suspend fun feedback(
         @RequestHeader("Authorization") authorization: String?,

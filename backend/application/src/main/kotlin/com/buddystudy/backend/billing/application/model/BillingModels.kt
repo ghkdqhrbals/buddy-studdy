@@ -9,6 +9,9 @@ import com.buddystudy.billing.domain.InvoiceEventType
 import com.buddystudy.billing.domain.InvoiceStatus
 import com.buddystudy.billing.domain.InvoiceType
 import com.buddystudy.billing.domain.PaymentStatus
+import com.buddystudy.billing.domain.EntitlementSource
+import com.buddystudy.billing.domain.SubscriptionAccessStatus
+import com.buddystudy.billing.domain.SubscriptionRenewalStatus
 import java.time.Instant
 import java.util.UUID
 
@@ -25,6 +28,45 @@ data class BillingTierProduct(
 data class BillingCatalog(
     val appAccountToken: UUID,
     val products: List<BillingTierProduct>,
+)
+
+data class BillingEntitlementProjection(
+    val tierCode: String,
+    val source: EntitlementSource,
+    val accessStatus: SubscriptionAccessStatus,
+    val renewalStatus: SubscriptionRenewalStatus,
+    val productId: String?,
+    val startedAt: Instant?,
+    val expiresAt: Instant?,
+    val willRenew: Boolean,
+    val pendingProductId: String?,
+    val synchronizedAt: Instant,
+)
+
+data class BillingQuotaStatus(
+    val periodStartedAt: Instant,
+    val resetAt: Instant,
+    val anchorType: String,
+    val baseLimit: Int,
+    val bonusLimit: Int,
+    val usedCount: Int,
+    val reservedCount: Int,
+    val remainingCount: Int,
+    val policyVersion: Int,
+)
+
+data class BillingStatusResponse(
+    val tierCode: String,
+    val source: EntitlementSource,
+    val accessStatus: SubscriptionAccessStatus,
+    val renewalStatus: SubscriptionRenewalStatus,
+    val productId: String?,
+    val startedAt: Instant?,
+    val expiresAt: Instant?,
+    val willRenew: Boolean,
+    val pendingChange: String?,
+    val synchronizedAt: Instant,
+    val quota: BillingQuotaStatus,
 )
 
 data class SyncAppleTransactionCommand(
@@ -186,6 +228,38 @@ data class AdminBillingInvoiceDetail(
     val detail: BillingInvoiceDetail,
 )
 
+data class AdminQuotaAdjustment(
+    val userId: Long,
+    val ledgerEventId: String,
+    val periodStartedAt: Instant,
+    val resetAt: Instant,
+    val bonusDelta: Int,
+    val bonusLimit: Int,
+    val reason: String,
+    val occurredAt: Instant,
+)
+
+data class AdminBillingReconcileRequest(
+    val userId: Long,
+    val eventId: String,
+    val queuedAt: Instant,
+)
+
+data class AdminBillingTimelineEntry(
+    val category: String,
+    val eventId: String,
+    val eventType: String,
+    val status: String?,
+    val reason: String?,
+    val occurredAt: Instant,
+)
+
+data class AdminUserBillingTimeline(
+    val userId: Long,
+    val entitlement: BillingEntitlementProjection?,
+    val entries: List<AdminBillingTimelineEntry>,
+)
+
 enum class BillingClientAction {
     NONE,
     BEGIN_APPLE_REFUND_REQUEST,
@@ -226,4 +300,19 @@ data class BillingRecoveryResult(
     val completed: Int,
     val retried: Int,
     val compensationRequired: Int,
+)
+
+data class SubscriptionReconciliationClaim(
+    val subscriptionId: Long,
+    val userId: Long,
+    val originalTransactionId: String,
+    val appAccountToken: UUID,
+    val attempt: Int,
+)
+
+data class RevenueCatCustomerSnapshot(
+    val accessStatus: SubscriptionAccessStatus,
+    val renewalStatus: SubscriptionRenewalStatus,
+    val expiresAt: Instant?,
+    val fetchedAt: Instant,
 )

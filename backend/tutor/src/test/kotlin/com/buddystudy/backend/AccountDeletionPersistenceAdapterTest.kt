@@ -32,6 +32,8 @@ class AccountDeletionPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         val deviceId = "withdrawal-device-$suffix"
         val withdrawnAt = Instant.parse("2032-07-27T00:00:00Z")
         val userId = insertUser(suffix, withdrawnAt.minusSeconds(60))
+        val appAccountToken = UUID.randomUUID().toString().lowercase()
+        insertBillingAccount(userId, appAccountToken, withdrawnAt.minusSeconds(60))
         insertDevice(deviceId, userId, withdrawnAt.minusSeconds(60))
         insertSession(deviceId, userId, withdrawnAt.minusSeconds(60))
         insertNotification("old-$suffix", deviceId, withdrawnAt.minusSeconds(1))
@@ -48,9 +50,20 @@ class AccountDeletionPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         accountDeletion.deleteAccountData(userId, snapshot.deviceIds, withdrawnAt)
 
         assertThat(longValue("select count(*) from users where id = $userId")).isZero()
+        assertThat(longValue("select count(*) from billing_accounts where app_account_token = '$appAccountToken' and user_id is null and status = 'ANONYMIZED'")).isEqualTo(1)
         assertThat(longValue("select count(*) from user_devices where user_id = $userId")).isZero()
         assertThat(longValue("select count(*) from app_notifications where event_id = 'old-$suffix'")).isZero()
         assertThat(longValue("select count(*) from app_notifications where event_id = 'new-$suffix'")).isEqualTo(1)
+    }
+
+    private suspend fun insertBillingAccount(userId: Long, token: String, createdAt: Instant) {
+        client.sql(
+            """
+            insert into billing_accounts (user_id, app_account_token, status, created_at, updated_at)
+            values (:userId, :token, 'ACTIVE', :createdAt, :createdAt)
+            """.trimIndent(),
+        ).bind("userId", userId).bind("token", token).bind("createdAt", createdAt)
+            .fetch().rowsUpdated().awaitSingle()
     }
 
     private suspend fun insertUser(suffix: String, createdAt: Instant): Long =

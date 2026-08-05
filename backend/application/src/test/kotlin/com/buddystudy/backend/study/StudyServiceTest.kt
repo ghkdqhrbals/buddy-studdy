@@ -505,7 +505,7 @@ class StudyServiceTest {
         var consumeCalls = 0
         var refundCalls = 0
         override suspend fun activePlanForUser(userId: Long): QuestionMembershipPlan? = activePlan
-        override suspend fun quotaStatusForUser(userId: Long, periodStartedAt: Instant): QuestionQuotaStatus =
+        override suspend fun quotaStatusForUser(userId: Long, at: Instant): QuestionQuotaStatus =
             QuestionQuotaStatus(
                 tierCode = activePlan.tierCode,
                 usedCount = usedCount,

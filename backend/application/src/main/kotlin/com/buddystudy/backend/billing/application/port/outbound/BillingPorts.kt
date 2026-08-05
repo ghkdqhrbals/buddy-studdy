@@ -3,10 +3,16 @@ package com.buddystudy.backend.billing.application.port.outbound
 import com.buddystudy.backend.billing.application.model.ApplyAppleNotificationCommand
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoicePage
+import com.buddystudy.backend.billing.application.model.AdminQuotaAdjustment
+import com.buddystudy.backend.billing.application.model.AdminBillingReconcileRequest
+import com.buddystudy.backend.billing.application.model.AdminUserBillingTimeline
+import com.buddystudy.backend.billing.application.model.SubscriptionReconciliationClaim
+import com.buddystudy.backend.billing.application.model.RevenueCatCustomerSnapshot
 import com.buddystudy.backend.billing.application.model.BillingAction
 import com.buddystudy.backend.billing.application.model.BillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.BillingInvoicePage
 import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
+import com.buddystudy.backend.billing.application.model.BillingEntitlementProjection
 import com.buddystudy.backend.billing.application.model.BillingTierProduct
 import com.buddystudy.backend.billing.application.model.BillingFulfillmentJobClaim
 import com.buddystudy.backend.billing.application.model.RecordVerifiedPaymentCommand
@@ -28,11 +34,16 @@ interface RevenueCatWebhookVerificationPort {
     suspend fun verify(request: RevenueCatWebhookRequest): VerifiedRevenueCatEvent
 }
 
+interface RevenueCatCustomerInfoPort {
+    suspend fun fetch(appAccountToken: UUID, originalTransactionId: String): RevenueCatCustomerSnapshot
+}
+
 interface BillingLedgerPort {
     suspend fun findOrCreateAppAccountToken(userId: Long, now: Instant): UUID
     suspend fun userIdForAppAccountToken(appAccountToken: UUID): Long?
     suspend fun enabledTierProducts(): List<BillingTierProduct>
     suspend fun enabledTierProduct(productId: String): BillingTierProduct?
+    suspend fun entitlementForUser(userId: Long): BillingEntitlementProjection?
 
     /** Creates the event-sourced NORMAL/WAITING invoice before StoreKit is opened. */
     suspend fun createPendingInvoice(
@@ -103,6 +114,9 @@ interface BillingLedgerPort {
     /** REQUIRES_NEW receipt used to deduplicate RevenueCat's at-least-once webhook delivery. */
     suspend fun recordRevenueCatEvent(event: VerifiedRevenueCatEvent, now: Instant): Boolean
 
+    /** Claims verified RevenueCat receipts after the webhook transaction has committed. */
+    suspend fun claimDueRevenueCatEvents(now: Instant, limit: Int): List<VerifiedRevenueCatEvent> = emptyList()
+
     /** Applies a verified RevenueCat lifecycle event and completes its receipt atomically. */
     suspend fun applyRevenueCatEvent(event: VerifiedRevenueCatEvent, now: Instant): Boolean
 
@@ -113,4 +127,29 @@ interface BillingLedgerPort {
     suspend fun adminInvoice(invoiceId: Long): AdminBillingInvoiceDetail?
     suspend fun adminRequestRefund(invoiceId: Long, command: RequestBillingActionCommand, now: Instant): BillingAction
     suspend fun adminRequestCancellation(invoiceId: Long, command: RequestBillingActionCommand, now: Instant): BillingAction
+    suspend fun adminAdjustQuota(
+        userId: Long,
+        bonusDelta: Int,
+        reason: String,
+        idempotencyKey: String,
+        now: Instant,
+    ): AdminQuotaAdjustment = error("Quota adjustment is not supported by this billing ledger.")
+    suspend fun adminRequestReconcile(
+        userId: Long,
+        reason: String?,
+        now: Instant,
+    ): AdminBillingReconcileRequest = error("Billing reconciliation is not supported by this billing ledger.")
+    suspend fun adminUserTimeline(userId: Long, limit: Int): AdminUserBillingTimeline =
+        error("Billing timeline is not supported by this billing ledger.")
+    suspend fun claimDueSubscriptionReconciliations(now: Instant, limit: Int): List<SubscriptionReconciliationClaim> = emptyList()
+    suspend fun applySubscriptionSnapshot(
+        claim: SubscriptionReconciliationClaim,
+        snapshot: RevenueCatCustomerSnapshot,
+        now: Instant,
+    ) = Unit
+    suspend fun recordSubscriptionReconcileFailure(
+        claim: SubscriptionReconciliationClaim,
+        error: String,
+        now: Instant,
+    ) = Unit
 }

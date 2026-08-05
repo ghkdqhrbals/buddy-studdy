@@ -264,9 +264,10 @@ class QuestionRepository(
                        row_number() over (partition by q.study_id order by q.created_at desc, q.id desc) as study_rank
                 from questions q
                 where q.study_id in ($studyMarkers) and q.deleted_at is null
+                  and q.skipped_at is null
+                  and q.status not in ('graded', 'failed', 'skipped')
             ) ranked
             where study_rank = 1
-              and status not in ('graded', 'failed', 'skipped')
             """.trimIndent(),
         ).bindIndexed("studyId", studyIds.toList())
             .map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }

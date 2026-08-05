@@ -104,13 +104,16 @@ class QuestionGenerationRequestWriteServiceTest {
         Mockito.`when`(studies.findAllByUserId(7)).thenReturn(listOf(study))
         Mockito.`when`(users.findById(7)).thenReturn(user)
         Mockito.`when`(questions.findLatestStatusByStudyId(11)).thenReturn(latestStatus)
-        Mockito.`when`(questionKeys.resolveForQuestionGeneration(user)).thenReturn(
+        Mockito.`when`(
+            questionKeys.resolveForQuestionGeneration(Mockito.eq(user), Mockito.anyString()),
+        ).thenAnswer { invocation ->
+            val reservationKey = invocation.getArgument<String>(1)
             OpenAIQuestionKey(
                 apiKey = "test-key",
-                quotaReservation = SystemQuestionQuotaReservation(7, now.minusSeconds(86400)),
+                quotaReservation = SystemQuestionQuotaReservation(7, now.minusSeconds(86400), reservationKey),
                 user = user,
-            ),
-        )
+            )
+        }
         val writer = QuestionGenerationRequestWriteService(
             studies = studies,
             questions = questions,

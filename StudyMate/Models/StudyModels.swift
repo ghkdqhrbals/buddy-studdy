@@ -3825,6 +3825,13 @@ struct AppStrings {
             "Your account and related records cannot be recovered after deletion."
         )
     }
+    var deleteAccountActiveSubscriptionWarning: String {
+        text(
+            "자동 갱신 구독이 아직 활성화되어 있습니다. 지금 탈퇴해도 Apple 결제는 계속될 수 있고 남은 유료 권한은 포기되며, 이 구독을 다른 BuddyStudy 계정으로 복원할 수 없습니다. 먼저 Apple 구독 관리에서 갱신을 취소하는 것을 권장합니다.",
+            "Your auto-renewing subscription is still active. Deleting now may not stop Apple billing, forfeits remaining access, and this subscription cannot be restored to another BuddyStudy account. Cancel renewal in Apple subscription management first.",
+            "自動更新サブスクリプションが有効です。今すぐ退会してもAppleの請求が続く場合があり、残りの利用権を放棄し、別のBuddyStudyアカウントへ復元できません。先にAppleのサブスクリプション管理で更新をキャンセルしてください。"
+        )
+    }
     var accountDeleted: String { text("탈퇴 처리되었습니다.", "Account deleted.") }
     var pageAccess: String { text("페이지 접근 허용", "Page Access") }
     var publicQuestionsPage: String { text("공개 질문", "Public Questions") }

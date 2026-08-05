@@ -340,7 +340,9 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
             .json()
         assertThat(studyPage["studies"]).hasSize(2)
         assertThat(studyPage["studies"].map { it["topic"].asText() }).contains(study.topic, swiftTopic)
-        val pendingStudyNode = studyPage["studies"].first { it["pendingQuestion"]["id"].asText() == pending.id.toString() }
+        val pendingStudyNode = studyPage["studies"].first {
+            it.path("pendingQuestion").path("id").asText() == pending.id.toString()
+        }
         assertThat(pendingStudyNode["pendingQuestion"]["topic"].asText()).isEqualTo("Redis")
         assertThat(pendingStudyNode["pendingQuestion"]["question"]["question"].asText()).isEqualTo("Redis의 Stream이 무엇인지 설명하세요.")
 

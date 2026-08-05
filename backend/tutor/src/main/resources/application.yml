@@ -110,11 +110,24 @@ buddystudy:
       webhook-signing-secret: ${REVENUECAT_WEBHOOK_SIGNING_SECRET:}
       project-id: ${REVENUECAT_PROJECT_ID:}
       app-id: ${REVENUECAT_APP_ID:}
+      server-api-key: ${REVENUECAT_SERVER_API_KEY:}
+      api-base-url: ${REVENUECAT_API_BASE_URL:https://api.revenuecat.com/v2}
+      connect-timeout-ms: ${REVENUECAT_CONNECT_TIMEOUT_MS:3000}
+      read-timeout-ms: ${REVENUECAT_READ_TIMEOUT_MS:5000}
+      max-retries: ${REVENUECAT_MAX_RETRIES:3}
       allow-test-store: ${REVENUECAT_ALLOW_TEST_STORE:false}
     recovery:
       enabled: ${BILLING_RECOVERY_ENABLED:true}
       poll-ms: ${BILLING_RECOVERY_POLL_MS:5000}
       initial-delay-ms: ${BILLING_RECOVERY_INITIAL_DELAY_MS:5000}
+    reconciliation:
+      enabled: ${BILLING_RECONCILIATION_ENABLED:true}
+      poll-ms: ${BILLING_RECONCILIATION_POLL_MS:900000}
+      initial-delay-ms: ${BILLING_RECONCILIATION_INITIAL_DELAY_MS:60000}
+    event-projector:
+      enabled: ${BILLING_EVENT_PROJECTOR_ENABLED:true}
+      poll-ms: ${BILLING_EVENT_PROJECTOR_POLL_MS:1000}
+      initial-delay-ms: ${BILLING_EVENT_PROJECTOR_INITIAL_DELAY_MS:1000}
   streams:
     enabled: ${BUDDYSTUDY_STREAMS_ENABLED:true}
     notification-requested-key: ${BUDDYSTUDY_NOTIFICATION_REQUESTED_STREAM_KEY:notification.message.requested.v1}
@@ -176,12 +189,16 @@ buddystudy:
       service-account-json-base64: ${FIREBASE_SERVICE_ACCOUNT_JSON_BASE64:}
       parameter-key: ${FIREBASE_REMOTE_CONFIG_PARAMETER_KEY:ios_app_control_v1}
   monitoring:
+    billing-lifecycle:
+      enabled: ${MONITORING_BILLING_LIFECYCLE_ENABLED:true}
+      interval-ms: ${MONITORING_BILLING_LIFECYCLE_INTERVAL_MS:300000}
+      initial-delay-ms: ${MONITORING_BILLING_LIFECYCLE_INITIAL_DELAY_MS:60000}
     environment-name: ${MONITORING_ENVIRONMENT_NAME:${SPRING_PROFILES_ACTIVE:production}}
     service-name: ${MONITORING_SERVICE_NAME:BuddyStudy backend}
     scheduler-readiness-enabled: ${MONITORING_SCHEDULER_READINESS_ENABLED:true}
     scheduler-stale-threshold-minutes: ${MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES:15}
     scheduler-startup-grace-minutes: ${MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES:15}
-    scheduler-monitored-jobs: ${MONITORING_SCHEDULER_MONITORED_JOBS:question-schedule,event-outbox-dispatch,user-stats-refresh,answer-grading-watchdog,billing-fulfillment-recovery}
+    scheduler-monitored-jobs: ${MONITORING_SCHEDULER_MONITORED_JOBS:question-schedule,event-outbox-dispatch,user-stats-refresh,answer-grading-watchdog,billing-fulfillment-recovery,billing-subscription-event-projector}
     runtime-metrics:
       enabled: ${RUNTIME_METRICS_ENABLED:true}
       interval-ms: ${RUNTIME_METRICS_INTERVAL_MS:30000}

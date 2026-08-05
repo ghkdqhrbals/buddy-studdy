@@ -118,6 +118,62 @@ enum class BillingEventSource {
     ADMIN,
 }
 
+enum class BillingAccountStatus {
+    ACTIVE,
+    ANONYMIZED,
+}
+
+enum class SubscriptionAccessStatus {
+    PENDING,
+    ACTIVE,
+    GRACE_PERIOD,
+    EXPIRED,
+    REVOKED,
+    TRANSFERRED,
+    UNKNOWN,
+}
+
+enum class SubscriptionRenewalStatus {
+    WILL_RENEW,
+    CANCELED,
+    BILLING_RETRY,
+    NOT_APPLICABLE,
+    UNKNOWN,
+}
+
+enum class EntitlementSource {
+    FREE,
+    APP_STORE,
+}
+
+enum class SubscriptionEventProcessingStatus {
+    PENDING,
+    PROCESSING,
+    COMPLETED,
+    FAILED,
+    IGNORED,
+}
+
+enum class QuotaAnchorType {
+    ACCOUNT_CREATED,
+    FIRST_PAID,
+}
+
+enum class QuotaReservationStatus {
+    RESERVED,
+    COMMITTED,
+    RELEASED,
+}
+
+enum class QuotaLedgerType {
+    RESERVE,
+    COMMIT,
+    RELEASE,
+    BONUS_GRANT,
+    BONUS_REVOKE,
+    MIGRATION_ADJUSTMENT,
+}
+
 /**
  * Invoice events are the source of truth. The invoice row is only the current-state projection.
  * Every transition is intentionally enumerated so a duplicated or out-of-order Apple event fails closed.
@@ -126,12 +182,12 @@ object InvoiceStateMachine {
     private data class Key(val type: InvoiceType, val status: InvoiceStatus, val event: InvoiceEventType)
 
     private val transitions: Map<Key, InvoiceStatus> = buildMap {
-        allowWaiting(InvoiceType.NORMAL, InvoiceEventType.PAYMENT_VERIFIED)
-        allowWaiting(InvoiceType.NORMAL, InvoiceEventType.FULFILLMENT_STARTED)
-        allow(InvoiceType.NORMAL, InvoiceStatus.WAITING, InvoiceEventType.FULFILLED, InvoiceStatus.COMPLETED)
+        allow(InvoiceType.NORMAL, InvoiceStatus.WAITING, InvoiceEventType.PAYMENT_VERIFIED, InvoiceStatus.COMPLETED)
+        allowCompleted(InvoiceType.NORMAL, InvoiceEventType.FULFILLMENT_STARTED)
+        allowCompleted(InvoiceType.NORMAL, InvoiceEventType.FULFILLED)
         allow(InvoiceType.NORMAL, InvoiceStatus.WAITING, InvoiceEventType.CANCELLED, InvoiceStatus.FAILED)
-        allow(InvoiceType.NORMAL, InvoiceStatus.WAITING, InvoiceEventType.COMPENSATION_REQUIRED, InvoiceStatus.FAILED)
-        allow(InvoiceType.NORMAL, InvoiceStatus.WAITING, InvoiceEventType.FULFILLMENT_FAILED, InvoiceStatus.FAILED)
+        allowCompleted(InvoiceType.NORMAL, InvoiceEventType.COMPENSATION_REQUIRED)
+        allowCompleted(InvoiceType.NORMAL, InvoiceEventType.FULFILLMENT_FAILED)
 
         listOf(
             InvoiceEventType.CANCELLATION_REQUESTED,

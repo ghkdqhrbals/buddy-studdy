@@ -8,6 +8,8 @@ import com.buddystudy.backend.billing.application.model.VerifiedAppleNotificatio
 import com.buddystudy.backend.billing.application.model.VerifiedAppleTransaction
 import com.buddystudy.backend.billing.application.model.VerifiedRevenueCatEvent
 import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPort
+import com.buddystudy.backend.admin.management.application.port.outbound.AdminManagementPort
+import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.billing.domain.BillingActionStatus
 import com.buddystudy.billing.domain.BillingEnvironment
@@ -41,6 +43,8 @@ import java.util.UUID
 )
 class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var ledger: BillingLedgerPort
+    @Autowired lateinit var quota: QuestionMembershipPort
+    @Autowired lateinit var adminManagement: AdminManagementPort
     @Autowired lateinit var database: DatabaseClient
     private val createdUserIds = mutableListOf<Long>()
     private val createdRevenueCatEventIds = mutableListOf<String>()
@@ -53,6 +57,13 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         }
         createdRevenueCatEventIds.clear()
         createdUserIds.asReversed().forEach { userId ->
+            execute("delete from quota_ledger where user_id = $userId")
+            execute("delete from quota_reservations where user_id = $userId")
+            execute("delete from quota_periods where user_id = $userId")
+            execute("delete from quota_accounts where user_id = $userId")
+            execute("delete from user_entitlement_projection where user_id = $userId")
+            execute("delete from subscription_events where user_id = $userId")
+            execute("delete from subscriptions where user_id = $userId")
             execute("delete from billing_actions where user_id = $userId")
             execute("delete from billing_jobs where invoice_id in (select id from invoices where user_id = $userId)")
             execute("delete from payments_history where invoice_id in (select id from invoices where user_id = $userId)")
@@ -60,6 +71,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
             execute("delete from payments where user_id = $userId")
             execute("delete from user_memberships where user_id = $userId")
             execute("delete from invoices where user_id = $userId")
+            execute("delete from billing_accounts where user_id = $userId")
             execute("delete from apple_billing_accounts where user_id = $userId")
             execute("delete from users where id = $userId")
         }
@@ -222,7 +234,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         assertThat(expiredInvoice.status).isEqualTo(InvoiceStatus.FAILED)
         assertThat(expiredInvoice.latestEventType).isEqualTo(InvoiceEventType.CANCELLED)
         assertThat(requireNotNull(ledger.invoice(fixture.userId, paid.id)).invoice.status)
-            .isEqualTo(InvoiceStatus.WAITING)
+            .isEqualTo(InvoiceStatus.COMPLETED)
         assertThat(requireNotNull(ledger.invoice(fixture.userId, recentUnpaid.id)).invoice.status)
             .isEqualTo(InvoiceStatus.WAITING)
         assertThat(eventTypes(oldUnpaid.id)).containsExactly("INVOICE_CREATED", "CANCELLED")
@@ -326,7 +338,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
 
         assertThat(recorded.id).isEqualTo(checkout.id)
         assertThat(recorded.type).isEqualTo(InvoiceType.NORMAL)
-        assertThat(recorded.status).isEqualTo(InvoiceStatus.WAITING)
+        assertThat(recorded.status).isEqualTo(InvoiceStatus.COMPLETED)
         assertThat(recorded.paymentStatus).isEqualTo(PaymentStatus.VERIFIED)
 
         val completed = ledger.fulfill(recorded.id, fixture.now.plusSeconds(2))
@@ -406,7 +418,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
-    fun `RevenueCat customer support cancellation completes refund and revokes current entitlement`(): Unit = runBlocking {
+    fun `RevenueCat customer support cancellation preserves access until provider reconciliation`(): Unit = runBlocking {
         val fixture = fixture("revenuecat-refund")
         val checkout = ledger.createPendingInvoice(
             fixture.userId,
@@ -455,28 +467,120 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         assertThat(ledger.recordRevenueCatEvent(refund, refund.eventAt)).isTrue()
         assertThat(ledger.applyRevenueCatEvent(refund, refund.eventAt)).isTrue()
 
-        val refundInvoiceId = longValue(
-            "select id from invoices where original_invoice_id = ${recorded.id} and type = 'REFUND'",
-        )
-        val refundInvoice = requireNotNull(ledger.invoice(fixture.userId, refundInvoiceId))
-        assertThat(refundInvoice.invoice.status).isEqualTo(InvoiceStatus.COMPLETED)
-        assertThat(refundInvoice.invoice.paymentStatus).isEqualTo(PaymentStatus.REFUNDED)
-        assertThat(refundInvoice.events.map { it.eventType }).containsExactly("INVOICE_CREATED", "REFUNDED")
-        assertThat(
-            longValue(
-                "select count(*) from invoice_events where invoice_id = $refundInvoiceId and source = 'REVENUECAT_WEBHOOK'",
-            ),
-        ).isEqualTo(2)
+        assertThat(longValue("select count(*) from invoices where original_invoice_id = ${recorded.id} and type = 'REFUND'"))
+            .isZero()
+        assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER2")
         assertThat(
             longValue(
                 "select count(*) from user_memberships where user_id = ${fixture.userId} and status = 'ACTIVE'",
             ),
-        ).isZero()
+        ).isEqualTo(1)
     }
 
-    private suspend fun fixture(label: String): Fixture {
+    @Test
+    fun `first paid purchase and fast renewal preserve usage and the lifetime quota anchor`(): Unit = runBlocking {
+        val fixture = fixture("quota-anchor", Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).minusSeconds(60))
+        val beforePurchase = fixture.now.minusSeconds(10)
+        assertThat(
+            quota.reserveMonthlySystemQuestion(
+                fixture.userId,
+                beforePurchase,
+                "reserve-${fixture.suffix}",
+                "question-${fixture.suffix}",
+                beforePurchase,
+            ),
+        ).isTrue()
+        quota.commitMonthlySystemQuestion("reserve-${fixture.suffix}", beforePurchase.plusSeconds(1))
+        assertThat(requireNotNull(quota.quotaStatusForUser(fixture.userId, beforePurchase)).usedCount).isEqualTo(1)
+
+        val checkout = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            fixture.product,
+            fixture.idempotencyKey,
+            fixture.now,
+        )
+        val initialTransaction = fixture.transaction()
+        val initialInvoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                fixture.product,
+                initialTransaction,
+                checkout.invoiceNumber,
+                BillingEventSource.CLIENT,
+                "apple-transaction:${initialTransaction.transactionId}",
+                fixture.now.plusSeconds(1),
+            ),
+        )
+        ledger.fulfill(initialInvoice.id, fixture.now.plusSeconds(2))
+
+        val paidStatus = requireNotNull(quota.quotaStatusForUser(fixture.userId, fixture.now.plusSeconds(3)))
+        assertThat(paidStatus.tierCode).isEqualTo("TIER2")
+        assertThat(paidStatus.usedCount).isEqualTo(1)
+        assertThat(paidStatus.baseLimit).isEqualTo(300)
+        assertThat(paidStatus.anchorType).isEqualTo("FIRST_PAID")
+        assertThat(paidStatus.periodStartedAt).isEqualTo(fixture.now)
+
+        assertThat(
+            quota.reserveMonthlySystemQuestion(
+                fixture.userId,
+                fixture.now.plusSeconds(4),
+                "pending-${fixture.suffix}",
+                "pending-question-${fixture.suffix}",
+                fixture.now.plusSeconds(4),
+            ),
+        ).isTrue()
+        ledger.adminAdjustQuota(
+            fixture.userId,
+            20,
+            "support bonus",
+            "bonus-${fixture.suffix}",
+            fixture.now.plusSeconds(5),
+        )
+        val adminSummary = requireNotNull(adminManagement.user(fixture.userId))
+        assertThat(adminSummary.tierCode).isEqualTo("TIER2")
+        assertThat(adminSummary.baseLimit).isEqualTo(300)
+        assertThat(adminSummary.bonusLimit).isEqualTo(20)
+        assertThat(adminSummary.usedCount).isEqualTo(1)
+        assertThat(adminSummary.reservedCount).isEqualTo(1)
+        assertThat(adminSummary.remainingCount).isEqualTo(318)
+
+        val renewalAt = fixture.now.plusSeconds(86_400)
+        val renewalTransaction = initialTransaction.copy(
+            transactionId = "renewal-${fixture.suffix}",
+            purchaseAt = renewalAt,
+            expiresAt = renewalAt.plusSeconds(2_592_000),
+            signedAt = renewalAt,
+        )
+        val renewalInvoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                fixture.product,
+                renewalTransaction,
+                null,
+                BillingEventSource.REVENUECAT_WEBHOOK,
+                "apple-transaction:${renewalTransaction.transactionId}",
+                renewalAt,
+            ),
+        )
+        ledger.fulfill(renewalInvoice.id, renewalAt.plusSeconds(1))
+
+        val renewedStatus = requireNotNull(quota.quotaStatusForUser(fixture.userId, renewalAt.plusSeconds(2)))
+        assertThat(renewedStatus.usedCount).isEqualTo(1)
+        assertThat(renewedStatus.periodStartedAt).isEqualTo(fixture.now)
+        assertThat(
+            database.sql("select first_paid_at from quota_accounts where user_id = :userId")
+                .bind("userId", fixture.userId)
+                .map { row -> row.get("first_paid_at", java.time.LocalDateTime::class.java)!! }
+                .one().awaitSingle(),
+        ).isEqualTo(java.time.LocalDateTime.ofInstant(fixture.now, java.time.ZoneOffset.UTC))
+    }
+
+    private suspend fun fixture(
+        label: String,
+        now: Instant = Instant.parse("2032-08-04T00:00:00Z"),
+    ): Fixture {
         val suffix = UUID.randomUUID().toString()
-        val now = Instant.parse("2032-08-04T00:00:00Z")
         val userId = insertUser("$label-$suffix", now.minusSeconds(60))
         createdUserIds += userId
         val token = ledger.findOrCreateAppAccountToken(userId, now.minusSeconds(30))

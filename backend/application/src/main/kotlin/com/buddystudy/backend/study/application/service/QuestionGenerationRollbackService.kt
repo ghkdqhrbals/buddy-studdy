@@ -113,7 +113,13 @@ class QuestionGenerationRollbackWriteService(
                         }
                     }
             }
-            memberships.refundMonthlySystemQuestion(saga.userId, saga.quotaPeriodStartedAt, now)
+            memberships.releaseMonthlySystemQuestion(
+                userId = saga.userId,
+                periodStartedAt = saga.quotaPeriodStartedAt,
+                reservationKey = saga.correlationId,
+                reason = saga.errorMessage ?: "Question generation rolled back",
+                now = now,
+            )
             check(sagas.markRollbackCompleted(event.correlationId, now)) {
                 "Question generation Saga rollback completion was not recorded."
             }

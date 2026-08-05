@@ -56,7 +56,7 @@ class QuestionQuotaServiceTest {
         override suspend fun activePlanForUser(userId: Long): QuestionMembershipPlan =
             QuestionMembershipPlan("TIER1", monthlyLimit)
 
-        override suspend fun quotaStatusForUser(userId: Long, periodStartedAt: Instant): QuestionQuotaStatus =
+        override suspend fun quotaStatusForUser(userId: Long, at: Instant): QuestionQuotaStatus =
             QuestionQuotaStatus("TIER1", usedCount, monthlyLimit)
 
         override suspend fun tryConsumeMonthlySystemQuestion(

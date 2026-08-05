@@ -120,7 +120,7 @@ jobs:
           MONITORING_SCHEDULER_READINESS_ENABLED: ${{ vars.MONITORING_SCHEDULER_READINESS_ENABLED || 'true' }}
           MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES: ${{ vars.MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES || '15' }}
           MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES: ${{ vars.MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES || '15' }}
-          MONITORING_SCHEDULER_MONITORED_JOBS: ${{ vars.MONITORING_SCHEDULER_MONITORED_JOBS || 'question-schedule,event-outbox-dispatch,user-stats-refresh,answer-grading-watchdog,billing-fulfillment-recovery' }}
+          MONITORING_SCHEDULER_MONITORED_JOBS: ${{ vars.MONITORING_SCHEDULER_MONITORED_JOBS || 'question-schedule,event-outbox-dispatch,user-stats-refresh,answer-grading-watchdog,billing-fulfillment-recovery,billing-subscription-event-projector' }}
           REMOTE_LOKI_PUSH_URL: ${{ vars.REMOTE_LOKI_PUSH_URL || '' }}
           REMOTE_LOKI_BASIC_AUTH_USER: ${{ secrets.REMOTE_LOKI_BASIC_AUTH_USER || '' }}
           REMOTE_LOKI_BASIC_AUTH_PASSWORD: ${{ secrets.REMOTE_LOKI_BASIC_AUTH_PASSWORD || '' }}
@@ -206,7 +206,8 @@ jobs:
           REVENUECAT_WEBHOOK_SIGNING_SECRET="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("REVENUECAT_WEBHOOK_SIGNING_SECRET") or "")')"
           REVENUECAT_PROJECT_ID="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("REVENUECAT_PROJECT_ID") or "")')"
           REVENUECAT_APP_ID="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("REVENUECAT_APP_ID") or "")')"
-          for required_revenuecat_key in REVENUECAT_WEBHOOK_SIGNING_SECRET; do
+          REVENUECAT_SERVER_API_KEY="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("REVENUECAT_SERVER_API_KEY") or "")')"
+          for required_revenuecat_key in REVENUECAT_WEBHOOK_SIGNING_SECRET REVENUECAT_PROJECT_ID REVENUECAT_SERVER_API_KEY; do
             if [ -z "${!required_revenuecat_key}" ]; then
               echo "Missing ${required_revenuecat_key} in AWS Secrets Manager secret: ${APP_SECRET_ID}" >&2
               exit 1
@@ -302,6 +303,7 @@ jobs:
           REVENUECAT_WEBHOOK_SIGNING_SECRET=${REVENUECAT_WEBHOOK_SIGNING_SECRET}
           REVENUECAT_PROJECT_ID=${REVENUECAT_PROJECT_ID}
           REVENUECAT_APP_ID=${REVENUECAT_APP_ID}
+          REVENUECAT_SERVER_API_KEY=${REVENUECAT_SERVER_API_KEY}
           AWS_SECRET_ID=${APP_SECRET_ID}
           AWS_REGION=ap-northeast-2
           SENTRY_DSN=${SENTRY_DSN}

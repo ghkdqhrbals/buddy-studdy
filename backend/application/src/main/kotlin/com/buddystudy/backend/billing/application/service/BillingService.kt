@@ -8,6 +8,8 @@ import com.buddystudy.backend.billing.application.model.BillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.BillingInvoicePage
 import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
 import com.buddystudy.backend.billing.application.model.BillingRecoveryResult
+import com.buddystudy.backend.billing.application.model.BillingStatusResponse
+import com.buddystudy.backend.billing.application.model.BillingQuotaStatus
 import com.buddystudy.backend.billing.application.model.CreateBillingCheckoutCommand
 import com.buddystudy.backend.billing.application.model.RecordVerifiedPaymentCommand
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
@@ -20,7 +22,11 @@ import com.buddystudy.backend.billing.application.port.outbound.AppleBillingVeri
 import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystudy.billing.domain.BillingEventSource
+import com.buddystudy.billing.domain.EntitlementSource
+import com.buddystudy.billing.domain.SubscriptionAccessStatus
+import com.buddystudy.billing.domain.SubscriptionRenewalStatus
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import java.time.Clock
@@ -32,8 +38,41 @@ import java.util.UUID
 class BillingService(
     private val verifier: AppleBillingVerificationPort,
     private val ledger: BillingLedgerPort,
+    private val memberships: QuestionMembershipPort,
     private val clock: Clock = Clock.systemUTC(),
 ) : BillingUseCase, AppleBillingNotificationUseCase, BillingRecoveryUseCase {
+    override suspend fun status(principal: Principal): BillingStatusResponse {
+        requireRegistered(principal)
+        val now = clock.instant()
+        val entitlement = ledger.entitlementForUser(principal.userId)
+        val quota = memberships.quotaStatusForUser(principal.userId, now)
+            ?: throw billingError(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Question quota was not found.")
+        val periodStartedAt = quota.periodStartedAt ?: now
+        val resetAt = quota.resetAt ?: now
+        return BillingStatusResponse(
+            tierCode = entitlement?.tierCode ?: quota.tierCode,
+            source = entitlement?.source ?: EntitlementSource.FREE,
+            accessStatus = entitlement?.accessStatus ?: SubscriptionAccessStatus.ACTIVE,
+            renewalStatus = entitlement?.renewalStatus ?: SubscriptionRenewalStatus.NOT_APPLICABLE,
+            productId = entitlement?.productId,
+            startedAt = entitlement?.startedAt,
+            expiresAt = entitlement?.expiresAt,
+            willRenew = entitlement?.willRenew ?: false,
+            pendingChange = entitlement?.pendingProductId,
+            synchronizedAt = entitlement?.synchronizedAt ?: now,
+            quota = BillingQuotaStatus(
+                periodStartedAt = periodStartedAt,
+                resetAt = resetAt,
+                anchorType = quota.anchorType,
+                baseLimit = quota.baseLimit,
+                bonusLimit = quota.bonusLimit,
+                usedCount = quota.usedCount,
+                reservedCount = quota.reservedCount,
+                remainingCount = (quota.monthlyQuestionLimit - quota.usedCount - quota.reservedCount).coerceAtLeast(0),
+                policyVersion = quota.policyVersion,
+            ),
+        )
+    }
     override suspend fun catalog(principal: Principal): BillingCatalog {
         requireRegistered(principal)
         val now = clock.instant()

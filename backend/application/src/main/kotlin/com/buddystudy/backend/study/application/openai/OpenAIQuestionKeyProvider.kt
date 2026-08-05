@@ -20,6 +20,7 @@ data class OpenAIQuestionKey(
 data class SystemQuestionQuotaReservation(
     val userId: Long,
     val periodStartedAt: Instant,
+    val reservationKey: String,
 )
 
 @Component
@@ -27,7 +28,10 @@ class OpenAIQuestionKeyProvider(
     private val userContentKeys: UserContentOpenAIKeyProvider,
     private val memberships: QuestionMembershipPort,
 ) {
-    suspend fun resolveForQuestionGeneration(user: UserEntity?): OpenAIQuestionKey {
+    suspend fun resolveForQuestionGeneration(
+        user: UserEntity?,
+        reservationKey: String = java.util.UUID.randomUUID().toString(),
+    ): OpenAIQuestionKey {
         val userContentApiKey = userContentKeys.requireApiKey()
         val now = Instant.now()
 
@@ -36,44 +40,75 @@ class OpenAIQuestionKeyProvider(
         }
 
         val quotaPeriod = MonthlyQuotaWindow.periodAt(user.createdAt, now)
-        val quota = memberships.quotaStatusForUser(user.id, quotaPeriod.startedAt)
+        val quota = memberships.quotaStatusForUser(user.id, now)
             ?: throw monthlyQuotaExceeded(user.createdAt, now)
-        val consumed = memberships.tryConsumeMonthlySystemQuestion(
+        val activePeriodStartedAt = quota.periodStartedAt ?: quotaPeriod.startedAt
+        val consumed = memberships.reserveMonthlySystemQuestion(
             userId = user.id,
-            periodStartedAt = quotaPeriod.startedAt,
-            limit = quota.monthlyQuestionLimit,
+            periodStartedAt = activePeriodStartedAt,
+            reservationKey = reservationKey,
+            correlationId = reservationKey,
             now = now,
         )
         if (!consumed) {
-            throw monthlyQuotaExceeded(user.createdAt, now)
+            throw ApiException(
+                status = HttpStatus.FORBIDDEN,
+                code = ApiErrorCode.QUOTA_EXCEEDED,
+                message = "Monthly question limit reached.",
+                metadata = mapOf(
+                    "quotaPeriod" to "MONTHLY",
+                    "quotaPeriodStartedAt" to activePeriodStartedAt.toString(),
+                    "quotaResetAt" to quota.resetAt?.toString(),
+                    "quotaTimeZone" to "Z",
+                    "tierCode" to quota.tierCode,
+                    "remainingCount" to 0,
+                ),
+            )
         }
 
         return OpenAIQuestionKey(
             apiKey = userContentApiKey,
-            quotaReservation = SystemQuestionQuotaReservation(user.id, quotaPeriod.startedAt),
+            quotaReservation = SystemQuestionQuotaReservation(user.id, activePeriodStartedAt, reservationKey),
             user = user,
         )
     }
 
-    fun resolveReservedQuestionGeneration(user: UserEntity, periodStartedAt: Instant): OpenAIQuestionKey {
+    fun resolveReservedQuestionGeneration(
+        user: UserEntity,
+        periodStartedAt: Instant,
+        reservationKey: String,
+    ): OpenAIQuestionKey {
         return OpenAIQuestionKey(
             apiKey = userContentKeys.requireApiKey(),
-            quotaReservation = SystemQuestionQuotaReservation(user.id, periodStartedAt),
+            quotaReservation = SystemQuestionQuotaReservation(user.id, periodStartedAt, reservationKey),
             user = user,
         )
     }
 
     suspend fun markQuestionCreated(key: OpenAIQuestionKey, now: Instant = Instant.now()) {
-        if (!key.usesSystemMembershipQuota) return
+        val reservation = key.quotaReservation ?: return
+        memberships.commitMonthlySystemQuestion(reservation.reservationKey, now)
     }
 
     suspend fun releaseQuestionReservation(key: OpenAIQuestionKey, now: Instant = Instant.now()) {
         val reservation = key.quotaReservation ?: return
-        memberships.refundMonthlySystemQuestion(reservation.userId, reservation.periodStartedAt, now)
+        memberships.releaseMonthlySystemQuestion(
+            reservation.userId,
+            reservation.periodStartedAt,
+            reservation.reservationKey,
+            "Question generation did not complete",
+            now,
+        )
     }
 
-    suspend fun releaseQuestionReservation(userId: Long, periodStartedAt: Instant, now: Instant = Instant.now()) {
-        memberships.refundMonthlySystemQuestion(userId, periodStartedAt, now)
+    suspend fun releaseQuestionReservation(
+        userId: Long,
+        periodStartedAt: Instant,
+        reservationKey: String,
+        reason: String?,
+        now: Instant = Instant.now(),
+    ) {
+        memberships.releaseMonthlySystemQuestion(userId, periodStartedAt, reservationKey, reason, now)
     }
 
     private fun monthlyQuotaExceeded(accountCreatedAt: Instant, now: Instant) =

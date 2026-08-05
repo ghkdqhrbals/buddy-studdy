@@ -346,7 +346,7 @@ class StudyController(
 
     @Operation(
         summary = "Fetch my monthly question quota",
-        description = "Returns only the current usage, monthly allowance, remaining count, and next reset time. Membership tier details are intentionally not exposed to the app.",
+        description = "Returns the current tier, quota period, base and bonus limits, committed and reserved usage, remaining count, and next reset time.",
     )
     @GetMapping("/questions/quota")
     suspend fun questionQuota(authentication: Authentication) =

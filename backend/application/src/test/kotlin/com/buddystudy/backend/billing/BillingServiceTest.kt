@@ -12,6 +12,7 @@ import com.buddystudy.backend.billing.application.model.BillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.BillingInvoicePage
 import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
 import com.buddystudy.backend.billing.application.model.BillingTierProduct
+import com.buddystudy.backend.billing.application.model.BillingEntitlementProjection
 import com.buddystudy.backend.billing.application.model.CreateBillingCheckoutCommand
 import com.buddystudy.backend.billing.application.model.RecordVerifiedPaymentCommand
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
@@ -22,6 +23,7 @@ import com.buddystudy.backend.billing.application.model.VerifiedRevenueCatEvent
 import com.buddystudy.backend.billing.application.port.outbound.AppleBillingVerificationPort
 import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPort
 import com.buddystudy.backend.billing.application.service.BillingService
+import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiRuntimeException
 import com.buddystudy.billing.domain.BillingActionStatus
@@ -244,6 +246,7 @@ class BillingServiceTest {
                 notification ?: error("not used")
         },
         ledger = ledger,
+        memberships = org.mockito.Mockito.mock(QuestionMembershipPort::class.java),
         clock = Clock.fixed(now, ZoneOffset.UTC),
     )
 
@@ -267,6 +270,7 @@ class BillingServiceTest {
         private val token: UUID,
         private val product: BillingTierProduct?,
     ) : BillingLedgerPort {
+        override suspend fun entitlementForUser(userId: Long): BillingEntitlementProjection? = null
         var tokenReads = 0
         var fulfillmentError: Exception? = null
         var notificationApplyError: Exception? = null

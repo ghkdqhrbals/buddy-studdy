@@ -25,6 +25,9 @@ import java.time.LocalDate
 @TestPropertySource(
     properties = [
         "buddystudy.scheduler.enabled=false",
+        "buddystudy.billing.recovery.enabled=false",
+        "buddystudy.billing.reconciliation.enabled=false",
+        "buddystudy.billing.event-projector.enabled=false",
         "buddystudy.streams.enabled=false",
         "buddystudy.crypto.master-key=test-master-key",
         "buddystudy.auth.jwt-secret=test-jwt-secret",
@@ -45,7 +48,9 @@ class AdminSchedulerStatusIntegrationTest : MySqlIntegrationTestSupport() {
     @BeforeEach
     fun setUpSchema(): Unit = runBlocking {
         databaseClient.sql("delete from scheduled_job_runs").fetch().rowsUpdated().awaitSingle()
-        databaseClient.sql("delete from scheduled_jobs").fetch().rowsUpdated().awaitSingle()
+        databaseClient.sql(
+            "delete from scheduled_jobs where job_name in ('question-schedule', 'user-stats-refresh')",
+        ).fetch().rowsUpdated().awaitSingle()
         databaseClient.sql("delete from admin_daily_metrics").fetch().rowsUpdated().awaitSingle()
         databaseClient.sql(
             """
@@ -112,7 +117,7 @@ class AdminSchedulerStatusIntegrationTest : MySqlIntegrationTestSupport() {
 
         assertThat(response.statusCode()).isEqualTo(200)
         val body = response.json()
-        assertThat(body["jobs"]).hasSize(2)
+        assertThat(body["jobs"].size()).isGreaterThanOrEqualTo(2)
         val questionSchedule = body["jobs"].first { it["jobName"].asText() == "question-schedule" }
         val statsRefresh = body["jobs"].first { it["jobName"].asText() == "user-stats-refresh" }
         assertThat(questionSchedule["displayName"].asText()).isEqualTo("Scheduled question dispatch")

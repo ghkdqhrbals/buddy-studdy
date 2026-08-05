@@ -116,6 +116,7 @@ final class AppState: ObservableObject {
     @Published private(set) var questionQuota: BackendQuestionQuota?
     @Published private(set) var questionQuotaNotice: String?
     @Published private(set) var billingCatalog: BackendBillingCatalog?
+    @Published private(set) var billingStatus: BackendBillingStatus?
     @Published private(set) var billingInvoices: [BackendBillingInvoice] = []
     @Published private(set) var isLoadingBilling = false
     @Published private(set) var billingErrorMessage: String?
@@ -4308,6 +4309,7 @@ final class AppState: ObservableObject {
         notificationPreferences = []
         communityCommentsCache.removeAll()
         billingCatalog = nil
+        billingStatus = nil
         billingInvoices = []
         billingErrorMessage = nil
         isLoadingBilling = false
@@ -5928,6 +5930,7 @@ final class AppState: ObservableObject {
               let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
               let registration = await registrationWithAccessToken(storedRegistration, reason: "billing-refresh") else {
             billingCatalog = nil
+            billingStatus = nil
             billingInvoices = []
             billingErrorMessage = nil
             return
@@ -5943,6 +5946,13 @@ final class AppState: ObservableObject {
                     try await self.billingUseCase.catalog(registration: recoveredRegistration)
                 }
             )
+            async let status = performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "billing-status",
+                operation: { recoveredRegistration in
+                    try await self.billingUseCase.status(registration: recoveredRegistration)
+                }
+            )
             async let invoices = performWithBackendIdentityRecovery(
                 registration: registration,
                 reason: "billing-invoices",
@@ -5951,7 +5961,22 @@ final class AppState: ObservableObject {
                 }
             )
             let resolvedCatalog = try await catalog
+            let resolvedStatus = try await status
             billingCatalog = resolvedCatalog
+            billingStatus = resolvedStatus
+            questionQuota = BackendQuestionQuota(
+                usedCount: resolvedStatus.quota.usedCount,
+                monthlyLimit: resolvedStatus.quota.baseLimit + resolvedStatus.quota.bonusLimit,
+                remainingCount: resolvedStatus.quota.remainingCount,
+                resetAt: resolvedStatus.quota.resetAt,
+                tierCode: resolvedStatus.tierCode,
+                periodStartedAt: resolvedStatus.quota.periodStartedAt,
+                reservedCount: resolvedStatus.quota.reservedCount,
+                baseLimit: resolvedStatus.quota.baseLimit,
+                bonusLimit: resolvedStatus.quota.bonusLimit,
+                anchorType: resolvedStatus.quota.anchorType,
+                policyVersion: resolvedStatus.quota.policyVersion
+            )
             billingInvoices = try await invoices.invoices
             #if os(iOS)
             try await RevenueCatBillingBridge.shared.identify(appAccountToken: resolvedCatalog.appAccountToken)

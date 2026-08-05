@@ -9,16 +9,16 @@ identity before writing the ledger.
 
 ## At a glance
 
-BuddyStudy separates **purchase approval**, **payment evidence**, and
-**membership fulfillment**. RevenueCat presents and observes the App Store
-purchase, while the backend owns invoices, verified payment records, membership
-access, and monthly quota. A successful purchase sheet therefore does not by
-itself grant access: the invoice becomes `COMPLETED` only after verified payment
-evidence and membership fulfillment have both committed.
+BuddyStudy separates **payment**, **subscription**, **entitlement**, and
+**quota**. RevenueCat presents and observes the App Store purchase, while the
+backend owns the financial ledger and every user-visible projection. A verified
+charge completes its `NORMAL` invoice even if entitlement projection is delayed;
+projection failure is durable retry work and never rewrites a completed charge
+as a failed payment.
 
-The membership screen reads RevenueCat `CustomerInfo` to identify the active
-product and presents one selected tier, one billing period, and one primary
-subscribe/change action. Selecting another product in the same App Store
+The membership screen uses `GET /api/v1/billing/status` as its only entitlement
+and quota authority. RevenueCat `CustomerInfo` is used by the SDK only for
+products, purchase, restore, and Customer Center. Selecting another product in the same App Store
 subscription group supports upgrades, crossgrades, and downgrades; a downgrade
 takes effect at the next renewal according to Apple's rules. When RevenueCat is
 enabled, the visible cancellation action opens Customer Center for App Store
@@ -52,14 +52,24 @@ or has a different product type is rejected before an invoice is written.
   settlement projection.
 - `payments_history` is the append-only verification, settlement, revocation,
   and refund history.
-- `billing_actions` stores idempotent user, admin, and compensation requests.
-- `billing_jobs` durably records fulfillment or compensation work with a
+- `billing_actions` stores idempotent user and admin requests.
+- `billing_jobs` keeps the legacy entitlement-fulfillment recovery path with a
   maximum of three attempts.
 - `apple_billing_notifications` deduplicates signed App Store Server
   Notifications V2 by notification UUID.
 - `revenuecat_billing_events` stores raw-body hashes and processing state for
   authenticated RevenueCat webhook events. It never replaces the Apple
   transaction ledger.
+- `billing_accounts` owns the immutable one-to-one relationship between a
+  BuddyStudy user and `appAccountToken`. Deletion anonymizes rather than
+  reassigns this relationship.
+- `subscription_events` is the append-only, idempotent provider event source;
+  `subscriptions` projects one Apple `originalTransactionId` each.
+- `user_entitlement_projection` selects the single highest currently valid tier
+  without summing duplicate subscriptions.
+- `quota_accounts` stores the immutable account-created or first-paid anchor.
+  `quota_periods` is the current projection, while `quota_reservations` and
+  `quota_ledger` provide idempotent reserve/commit/release accounting.
 
 Each billing table has an explicit Spring Data relational persistence model in
 `billing/domain/entity/BillingPersistenceEntities.kt`. Closed database values
@@ -79,9 +89,9 @@ For a user-initiated purchase, BuddyStudy creates a `NORMAL` invoice before
 asking RevenueCat to present the App Store purchase sheet. `INVOICE_CREATED` projects it as `WAITING`
 without a payment row. Payment verification and membership fulfillment remain
 detailed events while the public invoice status stays `WAITING`. It becomes
-`COMPLETED` only after the verified Apple payment has successfully applied the
-membership entitlement and monthly question allowance. StoreKit user
-cancellation or fulfillment failure makes it `FAILED`; StoreKit's `.pending`
+`COMPLETED` when verified Apple or RevenueCat payment evidence commits.
+Entitlement projection and reconciliation proceed independently. StoreKit user
+cancellation before a transaction exists makes it `FAILED`; StoreKit's `.pending`
 result deliberately keeps it `WAITING` for later approval or webhook recovery.
 
 Invoice projection status is intentionally limited to `WAITING`, `COMPLETED`,
@@ -100,14 +110,12 @@ new invoice because each renewal is a separate charge.
 
 ## Transaction boundaries and compensation
 
-Payment evidence and a `PENDING` fulfillment job commit atomically before
-membership fulfillment. Fulfillment runs in a separate transaction. A managed
-recovery job claims due work every five seconds and also reclaims `PROCESSING`
-work whose two-minute lease expired after process death. Transient failures use
-bounded backoff. Only the third failed attempt records
-`COMPENSATION_REQUIRED`, fails the fulfillment job, creates a compensation job,
-and creates a required compensation action. This preserves proof of the charge
-and avoids treating one transient database failure as a refund case.
+Payment evidence and a `COMPLETED` normal invoice commit independently from
+subscription and entitlement projection. Provider receipts are inserted in a
+separate transaction before lifecycle processing, so processing failure remains
+observable and retryable. Projection and RevenueCat reconciliation retry at
+most three times; exhausted work and its complete error remain stored for an
+operator alert. A backend failure never initiates or claims an Apple refund.
 
 RevenueCat completes new StoreKit transactions and reports them through an
 HMAC-signed webhook. The iOS client performs a short bounded invoice refresh;
@@ -121,7 +129,7 @@ Therefore the failure cases converge as follows:
 | Backend unavailable before checkout | No Apple charge exists | Retry checkout |
 | App exits after Apple approval but before invoice refresh | RevenueCat purchase and webhook retry | Backend completes the existing invoice |
 | Backend exits before payment commit | RevenueCat webhook retry | The same webhook event and transaction IDs are replayed |
-| Backend exits after payment commit but before entitlement commit | `payments`, `payments_history`, and `billing_jobs` | Backend recovery job fulfills membership |
+| Backend exits after payment commit but before entitlement projection | `payments`, `subscription_events`, and reconciliation schedule | Projector/reconciliation rebuilds entitlement without changing the completed charge |
 | Backend commits but its response is lost | Apple transaction ID and existing invoice | Client retry returns the same idempotent result |
 
 The Apple transaction ID is the payment idempotency key. Duplicate client
@@ -145,7 +153,7 @@ sequenceDiagram
     participant DB as Billing ledger
     participant RC as RevenueCat
     participant Apple as App Store
-    participant Worker as Fulfillment recovery
+    participant Worker as Subscription projector
 
     User->>App: Select membership product
     App->>API: GET /api/v1/billing/catalog
@@ -159,10 +167,10 @@ sequenceDiagram
     RC-->>App: Purchase success
     par Durable server delivery
         RC->>API: POST /api/v1/billing/revenuecat/webhooks<br/>signed raw event
-        API->>DB: Deduplicate event and transaction IDs<br/>PAYMENT_VERIFIED + PENDING fulfillment job
-        API->>Worker: Claim due fulfillment job
-        Worker->>DB: Grant tier and monthly quota atomically
-        Worker->>DB: FULFILLED, NORMAL/COMPLETED
+        API->>DB: Deduplicate event and transaction IDs<br/>NORMAL/COMPLETED + subscription event
+        API->>Worker: Project due subscription event
+        Worker->>DB: Update subscription + effective entitlement
+        Worker->>DB: Reconcile provider snapshot when ordering is ambiguous
     and Bounded user feedback
         App->>API: GET /api/v1/billing/invoices/{invoiceId}
         API-->>App: WAITING or COMPLETED
@@ -189,62 +197,23 @@ created through RevenueCat; it is not a second entitlement authority.
 This case must not be displayed as an ordinary purchase cancellation. The user
 may already have been charged. Once verified payment evidence exists, the
 invoice is excluded from the ten-minute unpaid-checkout expiration job. The
-backend retries fulfillment with a durable lease and bounded backoff. The third
-failure records `COMPENSATION_REQUIRED`, marks the invoice `FAILED`, and creates
-an audited compensation action without deleting payment evidence.
-
-```mermaid
-sequenceDiagram
-    actor User
-    participant App as iOS app
-    participant API as BuddyStudy API
-    participant DB as Billing ledger
-    participant Worker as Fulfillment recovery
-    participant CC as RevenueCat Customer Center
-    participant Apple as Apple refund service
-    participant RC as RevenueCat
-
-    App->>API: Read invoice after RevenueCat purchase success
-    API-->>App: WAITING while fulfillment is recoverable
-    Worker->>DB: Fulfillment attempt 1 fails
-    Worker->>DB: Reschedule with backoff
-    Worker->>DB: Fulfillment attempt 2 fails
-    Worker->>DB: Reschedule with backoff
-    Worker->>DB: Final attempt fails
-    Worker->>DB: COMPENSATION_REQUIRED + FAILED<br/>create required compensation action
-    App->>API: GET /api/v1/billing/invoices
-    API-->>App: paymentId + latestEventType=COMPENSATION_REQUIRED
-    App-->>User: Payment was received but access was not applied<br/>Show "Review purchase or request refund"
-    User->>App: Open recovery action
-    App->>CC: Present CustomerCenterView
-    alt User checks a missing purchase
-        CC->>RC: Restore/sync purchases
-        RC-->>API: Redeliver purchase lifecycle event
-        API->>DB: Idempotently reconcile payment evidence
-    else User requests a refund
-        CC->>Apple: Begin iOS refund request
-        Apple-->>User: Accept request for review
-        Note over App,Apple: Customer Center completion means request submitted,<br/>not that the refund is settled
-        Apple-->>RC: Final refund lifecycle notification
-        RC->>API: Authenticated refund/cancellation webhook
-        API->>DB: Create linked REFUND invoice<br/>REFUNDED + entitlement reconciliation
-        App->>API: Refresh billing history after dismissal
-        API-->>App: Final refund projection
-    end
-```
+backend retries entitlement projection with a durable lease and bounded
+backoff. The third failure preserves the completed invoice and payment evidence,
+retains the failed event, and raises an operator alert. It does not initiate an
+automatic refund.
 
 Required behavior by failure class:
 
 | Evidence and state | User meaning | Client action |
 | --- | --- | --- |
 | `FAILED` + `CANCELLED`, no payment evidence | Purchase sheet was cancelled or unpaid checkout expired | Allow retry; refund language is unnecessary |
-| `WAITING` + verified payment | Purchase succeeded and backend recovery is still running | Show non-blocking "Confirming purchase" and refresh with a bounded wait |
-| `FAILED` + `COMPENSATION_REQUIRED` and `paymentId` | Charge exists but access could not be applied | Present RevenueCat Customer Center with missing-purchase and refund paths |
+| `COMPLETED` charge + stale/unknown entitlement | Purchase succeeded and backend projection is still running | Show non-blocking "Confirming purchase" from `GET /api/v1/billing/status` and refresh with a bounded wait |
+| Failed subscription projection after three attempts | Charge is preserved; operator reconciliation is required | Keep access status explicit, alert operations, and offer restore/Customer Center without claiming a refund occurred |
 | Linked `REFUND/WAITING` | Apple refund decision is pending | Show "Refund under review"; do not remove the original ledger entry |
 | Linked `REFUND/COMPLETED` | Apple confirmed the refund | Reconcile entitlement and quota, then show the final refund record |
 
-The client must decide the recovery copy from `latestEventType` and payment
-evidence, not from HTTP success or the coarse `FAILED` status alone. A
+The client decides entitlement copy from `GET /api/v1/billing/status`, not from
+RevenueCat active subscriptions, invoice status, or HTTP success alone. A
 Customer Center callback such as `onCustomerCenterRefundRequestCompleted` is
 useful for UI refresh and analytics only; it must never project `REFUNDED` in
 the backend. Only a verified RevenueCat or Apple server lifecycle event can do
@@ -280,10 +249,10 @@ References:
 - Persist checkout and payment evidence before granting access.
 - Deduplicate by checkout idempotency key, RevenueCat event ID, and Apple transaction ID.
 - Never expire or delete an invoice that has verified payment evidence.
-- Keep fulfillment retries bounded; terminal failure must create an audited compensation action.
+- Keep projection and reconciliation retries bounded; terminal failure must preserve the completed charge, failed event, and full error for operator reconciliation.
 - Treat RevenueCat and Apple webhooks as at-least-once and safe to replay.
-- Alert on `COMPENSATION_REQUIRED`, failed webhook verification, fulfillment retry exhaustion, and refunds pending beyond the operational threshold.
-- Test purchase success, app termination after Apple approval, duplicate and out-of-order webhooks, backend restart between payment and fulfillment commits, terminal compensation, restore, refund approval, refund decline, and refund reversal.
+- Alert on delayed webhooks, entitlement mismatch, reconciliation exhaustion, stale quota reservations, negative counters, ownership conflict, duplicate active subscriptions, and refunds pending beyond the operational threshold.
+- Test purchase success, app termination after Apple approval, duplicate and out-of-order webhooks, backend restart between payment and entitlement commits, exhausted projection recovery, restore, refund approval, refund decline, and refund reversal.
 
 RevenueCat owns App Store transaction completion
 (`purchasesAreCompletedBy: .revenueCat`). The stable BuddyStudy
@@ -292,10 +261,12 @@ without matching on email or device. The
 backend also resolves RevenueCat's `original_app_user_id` and aliases to survive
 customer identity changes. RevenueCat purchase and lifecycle webhooks are the
 primary server-delivered path; the direct signed-JWS endpoint remains a
-backward-compatible recovery path. `CANCELLATION` with `CUSTOMER_SUPPORT` completes a linked refund
-invoice, while ordinary cancellation only disables renewal until a later
-`EXPIRATION` event removes access. Both paths converge on the same Apple
-transaction ID and invoice event ledger.
+backward-compatible recovery path. `CANCELLATION` with `CUSTOMER_SUPPORT`
+requests an immediate CustomerInfo reconciliation; it does not revoke the
+current entitlement or complete a refund invoice from that event alone.
+Ordinary cancellation only disables renewal until a later `EXPIRATION` event
+removes access. Verified provider refund evidence creates the linked refund
+invoice and converges on the Apple transaction ID and invoice event ledger.
 
 Apple does not provide a server API that lets BuddyStudy unilaterally issue an
 App Store refund or cancel a user's subscription. iOS starts the system refund
@@ -304,11 +275,60 @@ Apple's subscription management. Admin actions create a durable audited request
 and operational state. The final result always comes back through a verified
 Apple server notification, and no admin endpoint can forge a completed refund.
 
+## Subscription, entitlement, and quota lifecycle
+
+`subscriptions` deliberately separates access and renewal:
+
+- `access_status`: `PENDING`, `ACTIVE`, `GRACE_PERIOD`, `EXPIRED`, `REVOKED`,
+  `TRANSFERRED`, or `UNKNOWN`.
+- `renewal_status`: `WILL_RENEW`, `CANCELED`, `BILLING_RETRY`,
+  `NOT_APPLICABLE`, or `UNKNOWN`.
+
+Cancellation only changes renewal and retains paid access through expiration.
+Product-change notices record `pending_product_id`; the effective tier changes
+only when a verified entitlement snapshot changes. Billing retry reconciles at
+15-minute intervals, ordinary active subscriptions every six hours, and ended
+subscriptions daily. Customer-support refund notices force reconciliation so a
+historical refund cannot revoke a newer valid subscription. If multiple valid
+subscriptions exist, the highest tier wins and limits are never added together.
+
+The monthly window starts at account creation until the first verified paid
+purchase. That purchase's provider `purchasedAt` becomes `first_paid_at` once
+and remains the lifetime anchor through renewal, cancellation, expiration,
+refund, plan change, and resubscription. Existing usage and in-flight
+reservations move to the reprojected current window; purchase never resets them.
+UTC month arithmetic preserves the original anchor day, including
+January 31 → February end → March 31.
+
+Question generation uses its Saga correlation ID as an exactly-once quota key:
+
+1. Acceptance appends `RESERVE` and increments `reserved_count` atomically.
+2. A usable persisted system question appends `COMMIT`, moving one reserved
+   unit to committed usage.
+3. Permanent generation failure or rollback appends one `RELEASE` and reverses
+   the appropriate counter.
+4. Replayed requests return the existing reservation result.
+
+No reset batch exists. The current window is calculated from the immutable
+anchor, and a period row is created lazily on the first reservation or bonus.
+Remaining quota is `max(0, base tier limit + current-period bonus - committed -
+reserved)`. Upgrades therefore increase capacity without clearing usage;
+downgrades, expiration, or refund lower only the limit. Bonuses are append-only
+`BONUS_GRANT`/`BONUS_REVOKE` ledger events and expire with their period.
+
+Every five minutes the backend records `billing_lifecycle_metrics` for webhook
+lag, entitlement mismatch, exhausted reconciliation, stale reservations,
+negative counters, duplicate active subscriptions, and ownership conflicts.
+An anomalous snapshot is emitted as `billing_lifecycle_anomaly` at ERROR; the
+existing Grafana/Loki operational-error rule owns Slack notification. The
+backend never calls Slack directly.
+
 ## API
 
 User endpoints:
 
 - `GET /api/v1/billing/catalog`
+- `GET /api/v1/billing/status`
 - `POST /api/v1/billing/checkouts`
 - `POST /api/v1/billing/checkouts/{invoiceNumber}/abandon`
 - `POST /api/v1/billing/apple/transactions`
@@ -349,6 +369,9 @@ Admin endpoints:
 - `GET /api/v1/admin/billing/invoices/{invoiceId}`
 - `POST /api/v1/admin/billing/invoices/{invoiceId}/refund-requests`
 - `POST /api/v1/admin/billing/invoices/{invoiceId}/cancellation-requests`
+- `GET /api/v1/admin/users/{userId}/billing/timeline`
+- `POST /api/v1/admin/users/{userId}/billing/reconcile`
+- `POST /api/v1/admin/users/{userId}/quota-adjustments`
 
 Checkout creation and billing actions require a validated idempotency key. The
 transaction-sync endpoint is idempotent by Apple's transaction ID, and checkout
@@ -374,8 +397,11 @@ monitoring administrator session. The monitoring UI exposes the flow at
 6. Add the RevenueCat Apple public SDK key as the iOS release secret
    `REVENUECAT_PUBLIC_SDK_KEY`. Add each environment's own
    `REVENUECAT_WEBHOOK_SIGNING_SECRET` to its backend application secret.
-   `REVENUECAT_PROJECT_ID` and `REVENUECAT_APP_ID` are optional scoping
-   metadata. The production-only App Store webhook targets
+   Add a RevenueCat V2 secret key with customer-read permission as
+   `REVENUECAT_SERVER_API_KEY`; `REVENUECAT_PROJECT_ID` is required for the
+   six-hour/15-minute/daily server reconciliation schedule. Configure bounded
+   connect/read timeouts and at most three attempts. `REVENUECAT_APP_ID` remains
+   optional scoping metadata. The production-only App Store webhook targets
    `https://api.ghkdqhrbals.org/api/v1/billing/revenuecat/webhooks`; the Sandbox
    webhook accepts Sandbox events for the App Store app and
    targets `https://lowfidev.cloud/api/v1/billing/revenuecat/webhooks`.

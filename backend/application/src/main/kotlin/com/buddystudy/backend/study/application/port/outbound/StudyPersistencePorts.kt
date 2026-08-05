@@ -226,11 +226,41 @@ data class QuestionQuotaStatus(
     val tierCode: String,
     val usedCount: Int,
     val monthlyQuestionLimit: Int,
+    val reservedCount: Int = 0,
+    val baseLimit: Int = monthlyQuestionLimit,
+    val bonusLimit: Int = 0,
+    val periodStartedAt: Instant? = null,
+    val resetAt: Instant? = null,
+    val anchorType: String = "ACCOUNT_CREATED",
+    val policyVersion: Int = 2,
 )
 
 interface QuestionMembershipPort {
     suspend fun activePlanForUser(userId: Long): QuestionMembershipPlan?
-    suspend fun quotaStatusForUser(userId: Long, periodStartedAt: Instant): QuestionQuotaStatus?
+    suspend fun quotaStatusForUser(userId: Long, at: Instant): QuestionQuotaStatus?
     suspend fun tryConsumeMonthlySystemQuestion(userId: Long, periodStartedAt: Instant, limit: Int, now: Instant): Boolean
     suspend fun refundMonthlySystemQuestion(userId: Long, periodStartedAt: Instant, now: Instant)
+
+    suspend fun reserveMonthlySystemQuestion(
+        userId: Long,
+        periodStartedAt: Instant,
+        reservationKey: String,
+        correlationId: String,
+        now: Instant,
+    ): Boolean = tryConsumeMonthlySystemQuestion(
+        userId,
+        periodStartedAt,
+        quotaStatusForUser(userId, now)?.monthlyQuestionLimit ?: 0,
+        now,
+    )
+
+    suspend fun commitMonthlySystemQuestion(reservationKey: String, now: Instant) = Unit
+
+    suspend fun releaseMonthlySystemQuestion(
+        userId: Long,
+        periodStartedAt: Instant,
+        reservationKey: String,
+        reason: String?,
+        now: Instant,
+    ) = refundMonthlySystemQuestion(userId, periodStartedAt, now)
 }

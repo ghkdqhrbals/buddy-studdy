@@ -205,6 +205,7 @@ struct TermsUseCase {
 
 @MainActor
 protocol BillingRepository {
+    func status(registration: RemotePushRegistration) async throws -> BackendBillingStatus
     func catalog(registration: RemotePushRegistration) async throws -> BackendBillingCatalog
     func createCheckout(
         registration: RemotePushRegistration,
@@ -243,6 +244,10 @@ struct RemoteBillingRepository: BillingRepository {
 
     init(backendClient: RemotePushBackendClientProtocol) {
         self.backendClient = backendClient
+    }
+
+    func status(registration: RemotePushRegistration) async throws -> BackendBillingStatus {
+        try await backendClient.fetchBillingStatus(registration: registration)
     }
 
     func catalog(registration: RemotePushRegistration) async throws -> BackendBillingCatalog {
@@ -328,6 +333,10 @@ struct BillingUseCase {
 
     init(repository: BillingRepository) {
         self.repository = repository
+    }
+
+    func status(registration: RemotePushRegistration) async throws -> BackendBillingStatus {
+        try await repository.status(registration: registration)
     }
 
     func catalog(registration: RemotePushRegistration) async throws -> BackendBillingCatalog {

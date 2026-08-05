@@ -127,11 +127,13 @@ deployment.
   registered as a scheduled or manually retryable batch job.
   The answer-grading watchdog is a frequent critical job and belongs in the
   default monitored list. Apple payment evidence is recovered by the
-  `billing-fulfillment-recovery` managed job, which also belongs in the default
+  `billing-fulfillment-recovery` and `billing-subscription-event-projector`
+  managed jobs, which also belong in the default
   monitored list so a verified charge cannot remain unfulfilled silently.
   RevenueCat webhook recovery requires `REVENUECAT_WEBHOOK_SIGNING_SECRET` in
-  the backend application secret. `REVENUECAT_PROJECT_ID` and
-  `REVENUECAT_APP_ID` are optional scoping metadata; an empty app ID accepts all
+  the backend application secret. Subscription reconciliation additionally
+  requires `REVENUECAT_PROJECT_ID` and `REVENUECAT_SERVER_API_KEY`.
+  `REVENUECAT_APP_ID` is optional scoping metadata; an empty app ID accepts all
   HMAC-authenticated apps in the BuddyStudy RevenueCat project and still rejects
   unknown products or account tokens. The webhook is the primary new-purchase and lifecycle input and uses
   the same provider transaction idempotency key as the backward-compatible

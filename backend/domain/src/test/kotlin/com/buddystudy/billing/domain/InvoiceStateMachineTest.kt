@@ -17,7 +17,7 @@ class InvoiceStateMachineTest {
     }
 
     @Test
-    fun `normal invoice waits until fulfillment completes`() {
+    fun `verified payment completes financial invoice before entitlement projection`() {
         val verified = InvoiceStateMachine.next(
             InvoiceType.NORMAL,
             InvoiceStatus.WAITING,
@@ -34,9 +34,21 @@ class InvoiceStateMachineTest {
             InvoiceEventType.FULFILLED,
         )
 
-        assertEquals(InvoiceStatus.WAITING, verified)
-        assertEquals(InvoiceStatus.WAITING, fulfilling)
+        assertEquals(InvoiceStatus.COMPLETED, verified)
+        assertEquals(InvoiceStatus.COMPLETED, fulfilling)
         assertEquals(InvoiceStatus.COMPLETED, completed)
+    }
+
+    @Test
+    fun `entitlement projection failure never regresses a completed charge`() {
+        assertEquals(
+            InvoiceStatus.COMPLETED,
+            InvoiceStateMachine.next(
+                InvoiceType.NORMAL,
+                InvoiceStatus.COMPLETED,
+                InvoiceEventType.FULFILLMENT_FAILED,
+            ),
+        )
     }
 
     @Test

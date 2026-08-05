@@ -4,7 +4,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { CalendarRange, Plus, RotateCcw, Save } from "lucide-react";
+import { Plus, RefreshCw, Save } from "lucide-react";
 import { useMemo, useState } from "react";
 import { adminFetch } from "../admin/adminApi.js";
 import {
@@ -30,77 +30,28 @@ function formatQuestionCount(value) {
 
 function quotaUsagePercent(user) {
   const limit = Number(user.monthlyLimit) || 0;
-  const used = Number(user.usedCount) || 0;
+  const used = (Number(user.usedCount) || 0) + (Number(user.reservedCount) || 0);
   if (limit <= 0) return used > 0 ? 100 : 0;
   return Math.min(100, Math.round((used / limit) * 100));
 }
 
-function MembershipEditor({ user, tiers, onSaved }) {
-  const [tierCode, setTierCode] = useState(user.tierCode);
-  const [override, setOverride] = useState(user.monthlyLimitOverride ?? "");
-  const mutation = useMutation({
-    mutationFn: () => adminFetch(`/users/${user.id}/membership`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        tierCode,
-        monthlyQuestionLimitOverride: override === "" ? null : Number(override),
-      }),
-    }),
-    onSuccess: onSaved,
-  });
-  return (
-    <section className="drawer-section">
-      <h3>Default limit after reset</h3>
-      <p className="section-description">
-        This membership limit applies now when no current-period override exists, and continues after every reset.
-      </p>
-      <div className="form-grid">
-        <label className="field">
-          <span>Internal plan</span>
-          <select value={tierCode} onChange={(event) => setTierCode(event.target.value)}>
-            {tiers.map((tier) => <option key={tier.tierCode}>{tier.tierCode}</option>)}
-          </select>
-        </label>
-        <label className="field">
-          <span>Personal recurring limit</span>
-          <input
-            type="number"
-            min="0"
-            max="1000000"
-            value={override}
-            placeholder="Use plan default"
-            onChange={(event) => setOverride(event.target.value)}
-          />
-        </label>
-      </div>
-      <div className="drawer-form-actions">
-        {mutation.error ? <InlineNotice tone="danger" compact>{mutation.error.message}</InlineNotice> : null}
-        <Button icon={Save} busy={mutation.isPending} onClick={() => mutation.mutate()}>Save membership</Button>
-      </div>
-    </section>
-  );
-}
-
-function CurrentPeriodQuotaEditor({ user, membershipLimit, onSaved }) {
+function CurrentPeriodQuotaEditor({ user, onSaved }) {
   const currentLimit = Number(user.monthlyLimit) || 0;
   const usedCount = Number(user.usedCount) || 0;
-  const [targetLimit, setTargetLimit] = useState(String(currentLimit));
-  const parsedTargetLimit = targetLimit === "" ? Number.NaN : Number(targetLimit);
-  const isValidTarget = Number.isInteger(parsedTargetLimit)
-    && parsedTargetLimit >= 0
-    && parsedTargetLimit <= 1_000_000;
-  const projectedRemaining = isValidTarget ? Math.max(parsedTargetLimit - usedCount, 0) : null;
-  const limitDelta = isValidTarget ? parsedTargetLimit - currentLimit : 0;
+  const reservedCount = Number(user.reservedCount) || 0;
+  const [bonusDelta, setBonusDelta] = useState("50");
+  const [reason, setReason] = useState("");
+  const parsedDelta = Number(bonusDelta);
+  const isValidDelta = Number.isInteger(parsedDelta) && parsedDelta !== 0 && Math.abs(parsedDelta) <= 10_000;
   const usagePercent = quotaUsagePercent(user);
-  const limitSource = user.currentPeriodQuestionLimitOverride != null
-    ? "Current-period override"
-    : user.monthlyLimitOverride != null
-      ? "Personal recurring limit"
-      : `${user.tierCode} plan default`;
   const mutation = useMutation({
-    mutationFn: (questionLimitOverride) => adminFetch(`/users/${user.id}/quota/current-period`, {
-      method: "PATCH",
-      body: JSON.stringify({ questionLimitOverride }),
+    mutationFn: () => adminFetch(`/users/${user.id}/quota-adjustments`, {
+      method: "POST",
+      body: JSON.stringify({
+        bonusDelta: parsedDelta,
+        reason: reason.trim(),
+        idempotencyKey: `admin-${user.id}-${Date.now()}`,
+      }),
     }),
     onSuccess: onSaved,
   });
@@ -111,12 +62,12 @@ function CurrentPeriodQuotaEditor({ user, membershipLimit, onSaved }) {
           <span className="quota-eyebrow">Current allowance</span>
           <h3>Questions in this quota period</h3>
         </div>
-        <StatusBadge tone={user.remainingCount > 0 ? "success" : "warning"}>{limitSource}</StatusBadge>
+        <StatusBadge tone={user.remainingCount > 0 ? "success" : "warning"}>{user.tierCode}</StatusBadge>
       </div>
 
       <div className="quota-stat-grid">
-        <div><span>Current limit</span><strong>{formatQuestionCount(currentLimit)}</strong><small>questions total</small></div>
-        <div><span>Used</span><strong>{formatQuestionCount(usedCount)}</strong><small>{usagePercent}% consumed</small></div>
+        <div><span>Current limit</span><strong>{formatQuestionCount(currentLimit)}</strong><small>{formatQuestionCount(user.baseLimit)} base + {formatQuestionCount(user.bonusLimit)} bonus</small></div>
+        <div><span>Used</span><strong>{formatQuestionCount(usedCount)}</strong><small>{formatQuestionCount(reservedCount)} reserved</small></div>
         <div><span>Remaining</span><strong>{formatQuestionCount(user.remainingCount)}</strong><small>available now</small></div>
       </div>
       <div
@@ -125,34 +76,27 @@ function CurrentPeriodQuotaEditor({ user, membershipLimit, onSaved }) {
         aria-label="Question quota used"
         aria-valuemin="0"
         aria-valuemax={currentLimit}
-        aria-valuenow={Math.min(usedCount, currentLimit)}
+        aria-valuenow={Math.min(usedCount + reservedCount, currentLimit)}
       >
         <span style={{ width: `${usagePercent}%` }} />
       </div>
 
-      <div className="quota-period">
-        <CalendarRange size={19} aria-hidden="true" />
-        <div>
-          <span>Applies to this quota period only</span>
-          <strong>{formatDateTime(user.periodStartedAt)} → {formatDateTime(user.resetAt)}</strong>
-          <small>The override expires automatically at the reset time.</small>
-        </div>
-      </div>
+      <p className="section-description">{formatDateTime(user.periodStartedAt)} → {formatDateTime(user.resetAt)}</p>
 
       <div className="quota-target-editor">
         <div>
-          <h4>Set the total limit until reset</h4>
-          <p>Enter the total allowance, or add a common extension to the current limit.</p>
+          <h4>Current-period bonus</h4>
+          <p>Add or revoke questions without changing the user's subscription tier.</p>
         </div>
         <label className="field quota-limit-field">
-          <span>New total limit</span>
+          <span>Bonus change</span>
           <div className="quota-number-input">
             <input
               type="number"
-              min="0"
-              max="1000000"
-              value={targetLimit}
-              onChange={(event) => setTargetLimit(event.target.value)}
+              min="-10000"
+              max="10000"
+              value={bonusDelta}
+              onChange={(event) => setBonusDelta(event.target.value)}
             />
             <span>questions</span>
           </div>
@@ -162,7 +106,7 @@ function CurrentPeriodQuotaEditor({ user, membershipLimit, onSaved }) {
             <button
               type="button"
               key={increment}
-              onClick={() => setTargetLimit(String(currentLimit + increment))}
+              onClick={() => setBonusDelta(String(increment))}
             >
               <Plus size={13} aria-hidden="true" />{increment}
             </button>
@@ -170,44 +114,65 @@ function CurrentPeriodQuotaEditor({ user, membershipLimit, onSaved }) {
         </div>
       </div>
 
-      {isValidTarget ? (
-        <div className="quota-change-preview" data-change={limitDelta === 0 ? "none" : limitDelta > 0 ? "increase" : "decrease"}>
-          <div><span>Current</span><strong>{formatQuestionCount(currentLimit)}</strong></div>
-          <span className="quota-change-arrow" aria-hidden="true">→</span>
-          <div><span>New limit</span><strong>{formatQuestionCount(parsedTargetLimit)}</strong></div>
-          <div><span>Available after update</span><strong>{formatQuestionCount(projectedRemaining)}</strong></div>
-          <small>{limitDelta === 0 ? "No change" : `${limitDelta > 0 ? "+" : ""}${formatQuestionCount(limitDelta)} questions`}</small>
-        </div>
-      ) : (
-        <InlineNotice tone="warning" compact>Enter a whole number between 0 and 1,000,000.</InlineNotice>
-      )}
-      {isValidTarget && parsedTargetLimit < usedCount ? (
-        <InlineNotice tone="warning" compact>
-          This user already used {formatQuestionCount(usedCount)} questions, so the remaining allowance will be 0.
-        </InlineNotice>
-      ) : null}
+      <label className="field">
+        <span>Reason</span>
+        <input value={reason} maxLength={1000} onChange={(event) => setReason(event.target.value)} placeholder="Why is this adjustment needed?" />
+      </label>
+      {!isValidDelta ? <InlineNotice tone="warning" compact>Enter a non-zero whole number up to 10,000.</InlineNotice> : null}
 
       <div className="drawer-form-actions">
         {mutation.error ? <InlineNotice tone="danger" compact>{mutation.error.message}</InlineNotice> : null}
-        {user.currentPeriodQuestionLimitOverride != null ? (
-          <Button
-            variant="ghost"
-            icon={RotateCcw}
-            busy={mutation.isPending}
-            onClick={() => mutation.mutate(null)}
-          >
-            Restore default ({formatQuestionCount(membershipLimit)})
-          </Button>
-        ) : null}
         <Button
           icon={Save}
           busy={mutation.isPending}
-          disabled={!isValidTarget || parsedTargetLimit === currentLimit}
-          onClick={() => mutation.mutate(parsedTargetLimit)}
+          disabled={!isValidDelta || reason.trim().length < 3}
+          onClick={() => mutation.mutate()}
         >
-          Update until reset
+          Apply bonus until reset
         </Button>
       </div>
+    </section>
+  );
+}
+
+function BillingLifecycle({ userId }) {
+  const queryClient = useQueryClient();
+  const timeline = useQuery({
+    queryKey: ["admin", "users", userId, "billing-timeline"],
+    queryFn: () => adminFetch(`/users/${userId}/billing/timeline?limit=100`),
+    enabled: Boolean(userId),
+  });
+  const reconcile = useMutation({
+    mutationFn: () => adminFetch(`/users/${userId}/billing/reconcile`, {
+      method: "POST",
+      body: JSON.stringify({ reason: "Manual admin reconciliation" }),
+    }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin", "users", userId, "billing-timeline"] }),
+  });
+  const entries = Array.isArray(timeline.data?.entries) ? timeline.data.entries : [];
+  const columns = [
+    { key: "occurredAt", label: "Time", render: (entry) => formatDateTime(entry.occurredAt) },
+    { key: "category", label: "Area", render: (entry) => <StatusBadge>{entry.category}</StatusBadge> },
+    { key: "eventType", label: "Event" },
+    { key: "status", label: "Status", render: (entry) => entry.status || "-" },
+    { key: "reason", label: "Result", render: (entry) => entry.reason || "-" },
+  ];
+  return (
+    <section className="drawer-section order-ledger-section">
+      <div className="billing-timeline-heading">
+        <div><h3>Billing & quota timeline</h3><p>Subscription, payment, invoice, and quota events in one audit trail.</p></div>
+        <Button variant="secondary" icon={RefreshCw} busy={reconcile.isPending} onClick={() => reconcile.mutate()}>Reconcile</Button>
+      </div>
+      {timeline.error || reconcile.error ? <InlineNotice tone="danger" compact>{timeline.error?.message || reconcile.error?.message}</InlineNotice> : null}
+      {timeline.data?.entitlement ? (
+        <div className="billing-entitlement-line">
+          <StatusBadge tone={statusTone(timeline.data.entitlement.accessStatus)}>{timeline.data.entitlement.tierCode}</StatusBadge>
+          <span>{timeline.data.entitlement.accessStatus}</span>
+          <span>{timeline.data.entitlement.renewalStatus}</span>
+          <span>Synced {formatDateTime(timeline.data.entitlement.synchronizedAt)}</span>
+        </div>
+      ) : null}
+      <DataTable columns={columns} rows={entries} rowKey={(entry) => `${entry.category}-${entry.eventId}`} emptyText="No billing or quota events." loading={timeline.isLoading} />
     </section>
   );
 }
@@ -303,7 +268,7 @@ function UsersWorkspace() {
 
       <section className="workspace-section">
         <div className="section-heading">
-          <div><h2>Plan limits</h2><p>Defaults apply only when a user has no personal override.</p></div>
+          <div><h2>Plan limits</h2><p>Base monthly capacity for each subscription tier.</p></div>
         </div>
         <div className="table-frame compact-table">
           <table className="data-table">
@@ -351,13 +316,9 @@ function UsersWorkspace() {
         {selected ? (
           <>
             <CurrentPeriodQuotaEditor
-              key={`${selected.id}-${selected.currentPeriodQuestionLimitOverride}-${selected.resetAt}`}
+              key={`${selected.id}-${selected.bonusLimit}-${selected.reservedCount}-${selected.resetAt}`}
               user={selected}
-              membershipLimit={selected.monthlyLimitOverride
-                ?? tiers.find((tier) => tier.tierCode === selected.tierCode)?.monthlyQuestionLimit
-                ?? selected.monthlyLimit}
-              onSaved={(updated) => {
-                setSelected(updated);
+              onSaved={() => {
                 refresh();
               }}
             />
@@ -367,15 +328,7 @@ function UsersWorkspace() {
               <div><span>Plan</span><strong>{selected.tierCode}</strong></div>
               <div><span>User ID</span><strong>{selected.id}</strong></div>
             </div>
-            <MembershipEditor
-              key={`${selected.id}-${selected.tierCode}-${selected.monthlyLimitOverride}`}
-              user={selected}
-              tiers={tiers}
-              onSaved={(updated) => {
-                setSelected(updated);
-                refresh();
-              }}
-            />
+            <BillingLifecycle userId={selected.id} />
             <AdminNotificationComposer
               endpoint={`/users/${selected.id}/notifications`}
               title="Send push to this user"

@@ -5808,32 +5808,7 @@ private struct MobileProfilePage: View {
     }
 
     private var activeMembershipTierCode: String {
-        if let invoice = appState.billingInvoices
-            .filter({ invoice in
-                (invoice.type ?? "NORMAL") == "NORMAL"
-                    && invoice.status == "COMPLETED"
-                    && invoice.isSubscription
-                    && invoice.expiresAt.map { $0 > Date() } == true
-            })
-            .max(by: { ($0.expiresAt ?? .distantPast) < ($1.expiresAt ?? .distantPast) }) {
-            return invoice.tierCode
-        }
-
-        if let monthlyLimit = appState.questionQuota?.monthlyLimit,
-           let product = appState.billingCatalog?.products.first(where: {
-               $0.monthlyQuestionLimit == monthlyLimit
-           }) {
-            return product.tierCode
-        }
-
-        switch appState.questionQuota?.monthlyLimit {
-        case 300:
-            return "TIER2"
-        case 1_000:
-            return "TIER3"
-        default:
-            return "TIER1"
-        }
+        appState.billingStatus?.tierCode ?? appState.questionQuota?.tierCode ?? "TIER1"
     }
 
     var body: some View {
@@ -6100,6 +6075,7 @@ private struct MobileMembershipManagementView: View {
     @State private var isCustomerCenterPresented = false
     @State private var selectedTierCode: String?
     @State private var selectedBillingPeriod = "P1M"
+    @State private var purchaseTask: Task<Void, Never>?
 
     private var strings: AppStrings {
         appState.strings
@@ -6214,6 +6190,10 @@ private struct MobileMembershipManagementView: View {
         }
         .refreshable {
             await refreshMembershipData()
+        }
+        .onDisappear {
+            purchaseTask?.cancel()
+            purchaseTask = nil
         }
         .alert(
             strings.errorPopupTitle,
@@ -6363,25 +6343,13 @@ private struct MobileMembershipManagementView: View {
     }
 
     private var activeProductID: String? {
-        billingStore.activeSubscription?.productID ?? fallbackActiveInvoice?.productId
+        guard appState.billingStatus?.isEntitlementActive == true else { return nil }
+        return appState.billingStatus?.productId
     }
 
     private var activeProduct: AppleBillingStore.TierProduct? {
         guard let activeProductID else { return nil }
         return billingStore.products.first { $0.id == activeProductID }
-    }
-
-    private var fallbackActiveInvoice: BackendBillingInvoice? {
-        appState.billingInvoices
-            .filter {
-                ($0.type ?? "NORMAL") == "NORMAL"
-                    && $0.status == "COMPLETED"
-                    && $0.isSubscription
-                    && $0.expiresAt.map { $0 > Date() } == true
-            }
-            .max {
-                ($0.expiresAt ?? .distantPast) < ($1.expiresAt ?? .distantPast)
-            }
     }
 
     private var primaryActionTitle: String {
@@ -6409,7 +6377,8 @@ private struct MobileMembershipManagementView: View {
         _ tierProduct: AppleBillingStore.TierProduct,
         appAccountToken: UUID
     ) {
-        Task {
+        purchaseTask?.cancel()
+        purchaseTask = Task {
             do {
                 let outcome = try await billingStore.purchase(
                     tierProduct,
@@ -6421,14 +6390,19 @@ private struct MobileMembershipManagementView: View {
                 )
                 switch outcome {
                 case .purchased:
-                    billingNotice = strings.billingPurchased
+                    await refreshMembershipData()
+                    billingNotice = appState.billingStatus?.productId == tierProduct.id
+                        && appState.billingStatus?.isEntitlementActive == true
+                        ? strings.billingPurchased
+                        : strings.billingPending
                 case .pending:
                     billingNotice = strings.billingPending
+                    await refreshMembershipData()
                 case .cancelled:
                     break
                 }
-                await refreshMembershipData()
             } catch {
+                guard !Task.isCancelled else { return }
                 await appState.refreshBilling()
                 billingNotice = error.localizedDescription
             }
@@ -10090,6 +10064,7 @@ private struct MobileSettingsView: View {
 private struct MobileAccountSettingsView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var billingStore = AppleBillingStore()
     @State private var isShowingWithdrawalConfirmation = false
 
     private var strings: AppStrings { appState.strings }
@@ -10130,6 +10105,15 @@ private struct MobileAccountSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .alert(strings.deleteAccount, isPresented: $isShowingWithdrawalConfirmation) {
             Button(strings.cancel, role: .cancel) {}
+            if appState.billingStatus?.willRenew == true {
+                Button(strings.manageSubscription) {
+                    Task {
+                        guard let scene = activeWindowScene else { return }
+                        try? await billingStore.showManageSubscriptions(in: scene)
+                        await appState.refreshBilling()
+                    }
+                }
+            }
             Button(strings.deleteAccount, role: .destructive) {
                 Task {
                     if await appState.withdrawCommunityAccount() {
@@ -10138,8 +10122,18 @@ private struct MobileAccountSettingsView: View {
                 }
             }
         } message: {
-            Text(strings.deleteAccountConfirmMessage)
+            Text(
+                appState.billingStatus?.willRenew == true
+                    ? strings.deleteAccountActiveSubscriptionWarning
+                    : strings.deleteAccountConfirmMessage
+            )
         }
+    }
+
+    private var activeWindowScene: UIWindowScene? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
     }
 }
 

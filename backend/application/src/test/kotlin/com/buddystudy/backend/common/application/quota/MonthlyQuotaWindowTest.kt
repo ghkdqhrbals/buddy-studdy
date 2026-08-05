@@ -53,4 +53,16 @@ class MonthlyQuotaWindowTest {
         assertThat(period.startedAt).isEqualTo(Instant.parse("2026-02-28T10:15:00Z"))
         assertThat(period.resetAt).isEqualTo(Instant.parse("2026-03-31T10:15:00Z"))
     }
+
+    @Test
+    fun `leap day anchor returns to the original day after February`() {
+        val anchor = Instant.parse("2024-01-31T23:45:00Z")
+
+        val february = MonthlyQuotaWindow.periodAt(anchor, Instant.parse("2024-02-29T12:00:00Z"))
+        val march = MonthlyQuotaWindow.periodAt(anchor, Instant.parse("2024-03-30T12:00:00Z"))
+
+        assertThat(february.resetAt).isEqualTo(Instant.parse("2024-02-29T23:45:00Z"))
+        assertThat(march.startedAt).isEqualTo(Instant.parse("2024-02-29T23:45:00Z"))
+        assertThat(march.resetAt).isEqualTo(Instant.parse("2024-03-31T23:45:00Z"))
+    }
 }

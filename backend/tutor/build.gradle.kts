@@ -127,6 +127,9 @@ kotlin {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    // The tutor suite boots several distinct Spring contexts. Keep the worker from
+    // exhausting the default 512 MiB heap during the full integration-test run.
+    maxHeapSize = "1g"
 }
 
 jacoco {

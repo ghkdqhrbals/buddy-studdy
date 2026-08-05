@@ -828,6 +828,10 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .order-ledger-section h3 { margin: 0; border-bottom: 1px solid var(--border); padding: 13px 15px; }
 .order-ledger-section .data-table { min-width: 620px; }
 .order-ledger-section .data-table td { height: 42px; }
+.billing-timeline-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); padding: 12px 15px; }
+.billing-timeline-heading h3 { margin: 0 0 2px; border: 0; padding: 0; }
+.billing-timeline-heading p { margin: 0; color: var(--muted); font-size: 11px; }
+.billing-entitlement-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); padding: 10px 15px; color: var(--muted); font-size: 11px; }
 .order-identifiers dl { display: grid; gap: 0; margin: 0; }
 .order-identifiers dl > div { display: grid; grid-template-columns: 148px minmax(0, 1fr); gap: 12px; border-bottom: 1px solid var(--border); padding: 9px 0; }
 .order-identifiers dl > div:last-child { border-bottom: 0; }

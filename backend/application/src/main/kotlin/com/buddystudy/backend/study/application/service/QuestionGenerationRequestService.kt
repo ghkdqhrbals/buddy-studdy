@@ -158,11 +158,11 @@ class QuestionGenerationRequestWriteService(
         idempotencyKey: String,
         now: Instant,
     ): QueuedQuestionGeneration {
-        val questionKey = questionKeys.resolveForQuestionGeneration(user)
+        val correlationId = UUID.randomUUID().toString()
+        val questionKey = questionKeys.resolveForQuestionGeneration(user, correlationId)
         val reservation = checkNotNull(questionKey.quotaReservation) {
             "Question quota reservation is required."
         }
-        val correlationId = UUID.randomUUID().toString()
         val saga = QuestionGenerationSaga(
             correlationId = correlationId,
             userId = user.id,

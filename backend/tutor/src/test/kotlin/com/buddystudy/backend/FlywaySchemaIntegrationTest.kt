@@ -80,7 +80,10 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
               and table_name in (
                 'membership_tier_products', 'apple_billing_accounts', 'invoices', 'invoice_events',
                 'payments', 'payments_history', 'billing_actions', 'billing_jobs',
-                'apple_billing_notifications', 'revenuecat_billing_events'
+                'apple_billing_notifications', 'revenuecat_billing_events',
+                'billing_accounts', 'subscription_events', 'subscriptions',
+                'user_entitlement_projection', 'quota_accounts', 'quota_periods',
+                'quota_reservations', 'quota_ledger'
               )
             """.trimIndent(),
         ).map { row, _ -> row.get("table_name", String::class.java)!! }
@@ -97,6 +100,14 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
             "billing_jobs",
             "apple_billing_notifications",
             "revenuecat_billing_events",
+            "billing_accounts",
+            "subscription_events",
+            "subscriptions",
+            "user_entitlement_projection",
+            "quota_accounts",
+            "quota_periods",
+            "quota_reservations",
+            "quota_ledger",
         )
 
         val comments = databaseClient.sql(
@@ -111,6 +122,8 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
                 or (table_name = 'revenuecat_billing_events' and column_name in (
                     'processing_status', 'original_app_user_id', 'cancel_reason', 'expiration_reason'
                 ))
+                or (table_name = 'billing_accounts' and column_name in ('app_account_token', 'status', 'anonymized_subject_hash'))
+                or (table_name = 'subscription_events' and column_name in ('event_type', 'processing_status', 'payload_sha256'))
               )
             """.trimIndent(),
         ).map { row, _ ->
@@ -134,6 +147,9 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
             .contains("CUSTOMER_SUPPORT")
         assertThat(comments.getValue("revenuecat_billing_events.expiration_reason"))
             .contains("BILLING_ERROR")
+        assertThat(comments.getValue("billing_accounts.status")).contains("ACTIVE", "ANONYMIZED")
+        assertThat(comments.getValue("subscription_events.processing_status"))
+            .contains("PENDING", "COMPLETED", "FAILED")
 
         data class TierProduct(
             val tierCode: String,

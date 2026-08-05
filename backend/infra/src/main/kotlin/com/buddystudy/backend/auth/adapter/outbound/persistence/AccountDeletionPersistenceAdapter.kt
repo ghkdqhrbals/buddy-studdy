@@ -108,6 +108,15 @@ class AccountDeletionPersistenceAdapter(
             withdrawnAt,
         )
         listOf(
+            "update quota_ledger set actor_user_id = null where actor_user_id = :userId",
+            "delete from user_entitlement_projection where user_id = :userId",
+            "update subscription_events set user_id = null where user_id = :userId",
+            "update subscriptions set user_id = null where user_id = :userId",
+            "update invoice_events set actor_user_id = null where actor_user_id = :userId",
+            "update billing_actions set user_id = null where user_id = :userId",
+            "update payments set user_id = null where user_id = :userId",
+            "update invoices set user_id = null where user_id = :userId",
+            "update billing_accounts set user_id = null, status = 'ANONYMIZED', anonymized_subject_hash = sha2(concat(app_account_token, ':', :userId), 256), anonymized_at = coalesce(anonymized_at, :withdrawnAt), updated_at = :withdrawnAt where user_id = :userId",
             "delete from user_monthly_question_usage where user_id = :userId",
             "delete from user_memberships where user_id = :userId",
             "delete from user_avatar_items where user_id = :userId",

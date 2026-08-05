@@ -71,7 +71,12 @@ class RevenueCatBillingServiceTest {
         Mockito.`when`(ledger.fulfill(99, now)).thenReturn(invoice(InvoiceStatus.COMPLETED))
         Mockito.`when`(ledger.applyRevenueCatEvent(event, now)).thenReturn(true)
 
-        RevenueCatBillingService(verifier, ledger, Clock.fixed(now, ZoneOffset.UTC)).receive(request)
+        val service = RevenueCatBillingService(verifier, ledger, Clock.fixed(now, ZoneOffset.UTC))
+        service.receive(request)
+        Mockito.verify(ledger, Mockito.never()).recordVerifiedPayment(expectedCommand)
+
+        Mockito.`when`(ledger.claimDueRevenueCatEvents(now, 100)).thenReturn(listOf(event))
+        service.projectDueEvents()
 
         Mockito.verify(ledger).recordVerifiedPayment(expectedCommand)
         Mockito.verify(ledger).fulfill(99, now)
@@ -84,7 +89,8 @@ class RevenueCatBillingServiceTest {
         Mockito.`when`(verifier.verify(request)).thenReturn(event)
         Mockito.`when`(ledger.recordRevenueCatEvent(event, now)).thenReturn(false)
 
-        RevenueCatBillingService(verifier, ledger, Clock.fixed(now, ZoneOffset.UTC)).receive(request)
+        val service = RevenueCatBillingService(verifier, ledger, Clock.fixed(now, ZoneOffset.UTC))
+        service.receive(request)
 
         Mockito.verify(ledger, Mockito.never()).userIdForAppAccountToken(token)
     }
@@ -106,7 +112,10 @@ class RevenueCatBillingServiceTest {
         Mockito.`when`(ledger.fulfill(99, now)).thenReturn(invoice(InvoiceStatus.COMPLETED))
         Mockito.`when`(ledger.applyRevenueCatEvent(aliasedEvent, now)).thenReturn(true)
 
-        RevenueCatBillingService(verifier, ledger, Clock.fixed(now, ZoneOffset.UTC)).receive(request)
+        val service = RevenueCatBillingService(verifier, ledger, Clock.fixed(now, ZoneOffset.UTC))
+        service.receive(request)
+        Mockito.`when`(ledger.claimDueRevenueCatEvents(now, 100)).thenReturn(listOf(aliasedEvent))
+        service.projectDueEvents()
 
         Mockito.verify(ledger).userIdForAppAccountToken(token)
     }
@@ -124,12 +133,15 @@ class RevenueCatBillingServiceTest {
         Mockito.`when`(ledger.fulfill(99, now)).thenReturn(invoice(InvoiceStatus.COMPLETED))
         Mockito.`when`(ledger.applyRevenueCatEvent(testStoreEvent, now)).thenReturn(true)
 
-        RevenueCatBillingService(
+        val service = RevenueCatBillingService(
             verifier,
             ledger,
             Clock.fixed(now, ZoneOffset.UTC),
             allowTestStore = true,
-        ).receive(request)
+        )
+        service.receive(request)
+        Mockito.`when`(ledger.claimDueRevenueCatEvents(now, 100)).thenReturn(listOf(testStoreEvent))
+        service.projectDueEvents()
 
         Mockito.verify(ledger).fulfill(99, now)
     }

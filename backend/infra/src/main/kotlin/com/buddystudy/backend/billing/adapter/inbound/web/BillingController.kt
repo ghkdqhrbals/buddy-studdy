@@ -6,6 +6,7 @@ import com.buddystudy.backend.billing.application.model.BillingCatalog
 import com.buddystudy.backend.billing.application.model.BillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.BillingInvoicePage
 import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
+import com.buddystudy.backend.billing.application.model.BillingStatusResponse
 import com.buddystudy.backend.billing.application.model.CreateBillingCheckoutCommand
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
 import com.buddystudy.backend.billing.application.model.RevenueCatWebhookRequest
@@ -21,6 +22,7 @@ import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Pattern
 import jakarta.validation.constraints.Size
+import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
@@ -40,6 +42,10 @@ import java.util.UUID
 class BillingController(
     private val billing: BillingWebPort,
 ) {
+    @GetMapping("/status")
+    suspend fun status(authentication: Authentication): BillingStatusResponse =
+        billing.status(authentication.principalOrThrow())
+
     @GetMapping("/catalog")
     suspend fun catalog(authentication: Authentication): BillingCatalog =
         billing.catalog(authentication.principalOrThrow())
@@ -160,6 +166,7 @@ data class AppleServerNotificationRequest(
 )
 
 interface BillingWebPort {
+    suspend fun status(principal: Principal): BillingStatusResponse
     suspend fun catalog(principal: Principal): BillingCatalog
     suspend fun createCheckout(principal: Principal, request: CreateBillingCheckoutRequest): BillingInvoiceSummary
     suspend fun abandonCheckout(principal: Principal, invoiceNumber: UUID): BillingInvoiceSummary
@@ -185,7 +192,10 @@ interface RevenueCatBillingNotificationWebPort {
 @Component
 class BillingWebAdapter(
     private val billing: BillingUseCase,
+    private val meterRegistry: MeterRegistry,
 ) : BillingWebPort {
+    override suspend fun status(principal: Principal): BillingStatusResponse = billing.status(principal)
+
     override suspend fun catalog(principal: Principal): BillingCatalog = billing.catalog(principal)
 
     override suspend fun createCheckout(
@@ -202,14 +212,21 @@ class BillingWebAdapter(
     override suspend fun syncAppleTransaction(
         principal: Principal,
         request: SyncAppleTransactionRequest,
-    ): BillingInvoiceSummary = billing.syncAppleTransaction(
-        principal,
-        SyncAppleTransactionCommand(
-            signedTransaction = request.signedTransaction.trim(),
-            environment = request.environment.toBillingEnvironment(),
-            invoiceNumber = request.invoiceNumber,
-        ),
-    )
+    ): BillingInvoiceSummary = try {
+        billing.syncAppleTransaction(
+            principal,
+            SyncAppleTransactionCommand(
+                signedTransaction = request.signedTransaction.trim(),
+                environment = request.environment.toBillingEnvironment(),
+                invoiceNumber = request.invoiceNumber,
+            ),
+        )
+    } catch (error: ApiException) {
+        if (error.code == ApiErrorCode.BILLING_TRANSACTION_CONFLICT) {
+            meterRegistry.counter("billing.lifecycle.ownership.conflicts").increment()
+        }
+        throw error
+    }
 
     override suspend fun invoices(principal: Principal, limit: Int, offset: Int): BillingInvoicePage =
         billing.invoices(principal, limit, offset)

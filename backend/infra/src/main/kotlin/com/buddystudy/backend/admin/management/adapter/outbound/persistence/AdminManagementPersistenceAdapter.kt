@@ -193,24 +193,19 @@ class AdminManagementPersistenceAdapter(
             u.provider,
             u.status,
             u.created_at,
-            coalesce(m.tier, 'TIER1') as tier_code,
+            coalesce(e.tier_code, 'TIER1') as tier_code,
             coalesce(t.description, fallback_tier.description, '') as tier_description,
-            m.monthly_question_limit_override,
-            coalesce(m.monthly_question_limit_override, t.monthly_question_limit, fallback_tier.monthly_question_limit, 0) as monthly_limit,
+            coalesce(t.monthly_question_limit, fallback_tier.monthly_question_limit, 30) as monthly_limit,
+            coalesce(qa.anchor_at, u.created_at) as quota_anchor_at,
+            coalesce(qa.policy_version, 2) as quota_policy_version,
             d.app_version,
             d.app_build,
             d.app_version_seen_at
         from users u
-        left join user_memberships m on m.id = (
-            select max(active_membership.id)
-            from user_memberships active_membership
-            where active_membership.user_id = u.id
-              and active_membership.status = 'ACTIVE'
-              and active_membership.started_at <= utc_timestamp(6)
-              and (active_membership.expires_at is null or active_membership.expires_at > utc_timestamp(6))
-        )
-        left join user_membership_tiers t on t.tier_code = m.tier
+        left join user_entitlement_projection e on e.user_id = u.id
+        left join user_membership_tiers t on t.tier_code = coalesce(e.tier_code, 'TIER1')
         left join user_membership_tiers fallback_tier on fallback_tier.tier_code = 'TIER1'
+        left join quota_accounts qa on qa.user_id = u.id
         left join devices d on d.id = (
             select latest_device.id
             from devices latest_device
@@ -227,14 +222,14 @@ class AdminManagementPersistenceAdapter(
 
     private suspend fun currentUsageByUser(rows: List<AdminUserRow>, now: Instant): Map<Long, CurrentPeriodUsage> {
         if (rows.isEmpty()) return emptyMap()
-        val periods = rows.associate { it.id to MonthlyQuotaWindow.periodAt(it.createdAt, now) }
+        val periods = rows.associate { it.id to MonthlyQuotaWindow.periodAt(it.quotaAnchorAt, now) }
         val conditions = rows.indices.joinToString(" or ") { index ->
-            "(user_id = :userId$index and period_start = :periodStartedAt$index)"
+            "(user_id = :userId$index and period_started_at = :periodStartedAt$index)"
         }
         var spec = database.sql(
             """
-            select user_id, system_question_count, current_period_question_limit_override
-            from user_monthly_question_usage
+            select user_id, committed_count, reserved_count, bonus_count, policy_version
+            from quota_periods
             where $conditions
             """.trimIndent(),
         )
@@ -247,11 +242,10 @@ class AdminManagementPersistenceAdapter(
         }
         return spec.map { result, _ ->
             result.long("user_id") to CurrentPeriodUsage(
-                usedCount = result.int("system_question_count"),
-                questionLimitOverride = result.get(
-                    "current_period_question_limit_override",
-                    java.lang.Integer::class.java,
-                )?.toInt(),
+                committedCount = result.int("committed_count"),
+                reservedCount = result.int("reserved_count"),
+                bonusCount = result.int("bonus_count"),
+                policyVersion = result.int("policy_version"),
             )
         }.all().collectList().awaitSingle().toMap()
     }
@@ -266,7 +260,8 @@ class AdminManagementPersistenceAdapter(
             tierCode = string("tier_code"),
             tierDescription = string("tier_description"),
             monthlyLimit = int("monthly_limit"),
-            monthlyLimitOverride = get("monthly_question_limit_override", java.lang.Integer::class.java)?.toInt(),
+            quotaAnchorAt = instant("quota_anchor_at"),
+            quotaPolicyVersion = int("quota_policy_version"),
             createdAt = instant("created_at"),
             appVersion = get("app_version", String::class.java),
             appBuild = get("app_build", String::class.java),
@@ -274,8 +269,8 @@ class AdminManagementPersistenceAdapter(
         )
 
     private fun AdminUserRow.toAdminUser(usage: CurrentPeriodUsage, now: Instant): AdminUserSummary {
-        val period = MonthlyQuotaWindow.periodAt(createdAt, now)
-        val effectiveLimit = usage.questionLimitOverride ?: monthlyLimit
+        val period = MonthlyQuotaWindow.periodAt(quotaAnchorAt, now)
+        val effectiveLimit = (monthlyLimit + usage.bonusCount).coerceAtLeast(0)
         return AdminUserSummary(
             id = id,
             email = email,
@@ -285,10 +280,14 @@ class AdminManagementPersistenceAdapter(
             tierCode = tierCode,
             tierDescription = tierDescription,
             monthlyLimit = effectiveLimit,
-            monthlyLimitOverride = monthlyLimitOverride,
-            currentPeriodQuestionLimitOverride = usage.questionLimitOverride,
-            usedCount = usage.usedCount,
-            remainingCount = (effectiveLimit - usage.usedCount).coerceAtLeast(0),
+            monthlyLimitOverride = null,
+            currentPeriodQuestionLimitOverride = null,
+            baseLimit = monthlyLimit,
+            bonusLimit = usage.bonusCount,
+            usedCount = usage.committedCount,
+            reservedCount = usage.reservedCount,
+            remainingCount = (effectiveLimit - usage.committedCount - usage.reservedCount).coerceAtLeast(0),
+            quotaPolicyVersion = usage.policyVersion.takeIf { it > 0 } ?: quotaPolicyVersion,
             periodStartedAt = period.startedAt,
             resetAt = period.resetAt,
             createdAt = createdAt,
@@ -307,7 +306,8 @@ class AdminManagementPersistenceAdapter(
         val tierCode: String,
         val tierDescription: String,
         val monthlyLimit: Int,
-        val monthlyLimitOverride: Int?,
+        val quotaAnchorAt: Instant,
+        val quotaPolicyVersion: Int,
         val createdAt: Instant,
         val appVersion: String?,
         val appBuild: String?,
@@ -315,8 +315,10 @@ class AdminManagementPersistenceAdapter(
     )
 
     private data class CurrentPeriodUsage(
-        val usedCount: Int = 0,
-        val questionLimitOverride: Int? = null,
+        val committedCount: Int = 0,
+        val reservedCount: Int = 0,
+        val bonusCount: Int = 0,
+        val policyVersion: Int = 2,
     )
 
     private fun Row.string(name: String): String = get(name, String::class.java).orEmpty()

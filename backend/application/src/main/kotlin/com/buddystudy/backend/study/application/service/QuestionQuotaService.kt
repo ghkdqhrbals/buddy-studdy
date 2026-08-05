@@ -24,13 +24,20 @@ class QuestionQuotaService(
         val user = users.findById(principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "User was not found.")
         val quotaPeriod = MonthlyQuotaWindow.periodAt(user.createdAt, now)
-        val status = memberships.quotaStatusForUser(principal.userId, quotaPeriod.startedAt)
+        val status = memberships.quotaStatusForUser(principal.userId, now)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Question quota was not found.")
         return QuestionQuotaResponse(
             usedCount = status.usedCount,
             monthlyLimit = status.monthlyQuestionLimit,
-            remainingCount = (status.monthlyQuestionLimit - status.usedCount).coerceAtLeast(0),
-            resetAt = quotaPeriod.resetAt,
+            remainingCount = (status.monthlyQuestionLimit - status.usedCount - status.reservedCount).coerceAtLeast(0),
+            resetAt = status.resetAt ?: quotaPeriod.resetAt,
+            tierCode = status.tierCode,
+            periodStartedAt = status.periodStartedAt ?: quotaPeriod.startedAt,
+            reservedCount = status.reservedCount,
+            baseLimit = status.baseLimit,
+            bonusLimit = status.bonusLimit,
+            anchorType = status.anchorType,
+            policyVersion = status.policyVersion,
         )
     }
 }

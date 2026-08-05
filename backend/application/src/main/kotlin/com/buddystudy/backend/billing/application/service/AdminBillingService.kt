@@ -4,6 +4,9 @@ import com.buddystudy.backend.billing.application.model.AdminBillingInvoiceDetai
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoicePage
 import com.buddystudy.backend.billing.application.model.BillingAction
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
+import com.buddystudy.backend.billing.application.model.AdminQuotaAdjustment
+import com.buddystudy.backend.billing.application.model.AdminBillingReconcileRequest
+import com.buddystudy.backend.billing.application.model.AdminUserBillingTimeline
 import com.buddystudy.backend.billing.application.port.inbound.AdminBillingUseCase
 import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
@@ -60,8 +63,38 @@ class AdminBillingService(
         return ledger.adminRequestCancellation(invoiceId, command.normalized(), clock.instant())
     }
 
+    override suspend fun adjustQuota(
+        userId: Long,
+        bonusDelta: Int,
+        reason: String,
+        idempotencyKey: String,
+    ): AdminQuotaAdjustment {
+        requireUserId(userId)
+        if (bonusDelta == 0 || bonusDelta !in -10_000..10_000) throw invalid("bonusDelta must be between -10000 and 10000 and cannot be zero.")
+        val normalizedReason = reason.trim()
+        if (normalizedReason.length !in 3..1000) throw invalid("A reason is required.")
+        val normalizedKey = idempotencyKey.trim()
+        if (!Regex("^[A-Za-z0-9._:-]{8,191}$").matches(normalizedKey)) throw invalid("A valid idempotency key is required.")
+        return ledger.adminAdjustQuota(userId, bonusDelta, normalizedReason, normalizedKey, clock.instant())
+    }
+
+    override suspend fun reconcile(userId: Long, reason: String?): AdminBillingReconcileRequest {
+        requireUserId(userId)
+        if ((reason?.length ?: 0) > 1000) throw invalid("Reason is too long.")
+        return ledger.adminRequestReconcile(userId, reason?.trim()?.takeIf(String::isNotEmpty), clock.instant())
+    }
+
+    override suspend fun timeline(userId: Long, limit: Int): AdminUserBillingTimeline {
+        requireUserId(userId)
+        return ledger.adminUserTimeline(userId, limit.coerceIn(1, 200))
+    }
+
     private fun requireInvoiceId(invoiceId: Long) {
         if (invoiceId <= 0) throw invalid("invoiceId must be positive.")
+    }
+
+    private fun requireUserId(userId: Long) {
+        if (userId <= 0) throw invalid("userId must be positive.")
     }
 
     private fun validate(command: RequestBillingActionCommand) {

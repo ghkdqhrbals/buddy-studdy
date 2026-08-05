@@ -143,6 +143,11 @@ data class BuddyStudyProperties(
         var webhookSigningSecret: String = "",
         var projectId: String = "",
         var appId: String = "",
+        var serverApiKey: String = "",
+        var apiBaseUrl: String = "https://api.revenuecat.com/v2",
+        var connectTimeoutMs: Long = 3_000,
+        var readTimeoutMs: Long = 5_000,
+        var maxRetries: Int = 3,
     )
 }
 

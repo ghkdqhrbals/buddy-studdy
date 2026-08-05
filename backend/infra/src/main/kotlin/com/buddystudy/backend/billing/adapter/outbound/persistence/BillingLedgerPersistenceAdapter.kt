@@ -4,6 +4,12 @@ import com.buddystudy.backend.billing.application.model.ApplyAppleNotificationCo
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoice
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoicePage
+import com.buddystudy.backend.billing.application.model.AdminQuotaAdjustment
+import com.buddystudy.backend.billing.application.model.AdminBillingReconcileRequest
+import com.buddystudy.backend.billing.application.model.AdminBillingTimelineEntry
+import com.buddystudy.backend.billing.application.model.AdminUserBillingTimeline
+import com.buddystudy.backend.billing.application.model.SubscriptionReconciliationClaim
+import com.buddystudy.backend.billing.application.model.RevenueCatCustomerSnapshot
 import com.buddystudy.backend.billing.application.model.BillingAction
 import com.buddystudy.backend.billing.application.model.BillingClientAction
 import com.buddystudy.backend.billing.application.model.BillingInvoiceDetail
@@ -12,6 +18,7 @@ import com.buddystudy.backend.billing.application.model.BillingInvoicePage
 import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
 import com.buddystudy.backend.billing.application.model.BillingFulfillmentJobClaim
 import com.buddystudy.backend.billing.application.model.BillingTierProduct
+import com.buddystudy.backend.billing.application.model.BillingEntitlementProjection
 import com.buddystudy.backend.billing.application.model.PaymentHistoryEntry
 import com.buddystudy.backend.billing.application.model.RecordVerifiedPaymentCommand
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
@@ -21,6 +28,7 @@ import com.buddystudy.backend.billing.application.model.VerifiedRevenueCatEvent
 import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.common.application.quota.MonthlyQuotaWindow
 import com.buddystudy.billing.domain.BillingActionStatus
 import com.buddystudy.billing.domain.BillingActionType
 import com.buddystudy.billing.domain.BillingEventSource
@@ -33,6 +41,9 @@ import com.buddystudy.billing.domain.InvoiceStatus
 import com.buddystudy.billing.domain.InvoiceType
 import com.buddystudy.billing.domain.PaymentHistoryEventType
 import com.buddystudy.billing.domain.PaymentStatus
+import com.buddystudy.billing.domain.EntitlementSource
+import com.buddystudy.billing.domain.SubscriptionAccessStatus
+import com.buddystudy.billing.domain.SubscriptionRenewalStatus
 import com.buddystudy.billing.domain.entity.BillingJobEntity
 import com.buddystudy.billing.domain.entity.InvoiceEntity
 import com.buddystudy.billing.domain.entity.InvoiceEventEntity
@@ -58,7 +69,7 @@ class BillingLedgerPersistenceAdapter(
     @Transactional
     override suspend fun findOrCreateAppAccountToken(userId: Long, now: Instant): UUID {
         existingToken(userId)?.let { return it }
-        val token = UUID.randomUUID()
+        val token = legacyToken(userId) ?: UUID.randomUUID()
         database.sql(
             """
             insert into apple_billing_accounts (user_id, app_account_token, created_at, updated_at)
@@ -69,13 +80,21 @@ class BillingLedgerPersistenceAdapter(
             .bind("token", token.toString().lowercase())
             .bind("now", now.utc())
             .fetch().rowsUpdated().awaitSingle()
+        database.sql(
+            """
+            insert into billing_accounts (user_id, app_account_token, status, created_at, updated_at)
+            values (:userId, :token, 'ACTIVE', :now, :now)
+            on duplicate key update status = 'ACTIVE', updated_at = :now
+            """.trimIndent(),
+        ).bind("userId", userId).bind("token", token.toString().lowercase()).bind("now", now.utc())
+            .fetch().rowsUpdated().awaitSingle()
         return existingToken(userId)
             ?: throw billingFailure(ApiErrorCode.INTERNAL_SERVER_ERROR, "Unable to create an Apple billing account token.")
     }
 
     override suspend fun userIdForAppAccountToken(appAccountToken: UUID): Long? =
         database.sql(
-            "select user_id from apple_billing_accounts where app_account_token = :token",
+            "select user_id from billing_accounts where app_account_token = :token and status = 'ACTIVE'",
         ).bind("token", appAccountToken.toString().lowercase())
             .map { row, _ -> row.long("user_id") }
             .one().awaitSingleOrNull()
@@ -105,6 +124,28 @@ class BillingLedgerPersistenceAdapter(
         ).bind("productId", productId)
             .map { row, _ -> row.tierProduct() }
             .one().awaitSingleOrNull()
+
+    override suspend fun entitlementForUser(userId: Long): BillingEntitlementProjection? =
+        database.sql(
+            """
+            select tier_code, source, access_status, renewal_status, product_id, started_at,
+                   expires_at, will_renew, pending_product_id, projected_at
+            from user_entitlement_projection where user_id = :userId
+            """.trimIndent(),
+        ).bind("userId", userId).map { row, _ ->
+            BillingEntitlementProjection(
+                tierCode = row.string("tier_code"),
+                source = EntitlementSource.valueOf(row.string("source")),
+                accessStatus = SubscriptionAccessStatus.valueOf(row.string("access_status")),
+                renewalStatus = SubscriptionRenewalStatus.valueOf(row.string("renewal_status")),
+                productId = row.nullableString("product_id"),
+                startedAt = row.nullableInstant("started_at"),
+                expiresAt = row.nullableInstant("expires_at"),
+                willRenew = row.boolean("will_renew"),
+                pendingProductId = row.nullableString("pending_product_id"),
+                synchronizedAt = row.instant("projected_at"),
+            )
+        }.one().awaitSingleOrNull()
 
     @Transactional
     override suspend fun createPendingInvoice(
@@ -276,8 +317,10 @@ class BillingLedgerPersistenceAdapter(
     override suspend fun fulfill(invoiceId: Long, now: Instant): BillingInvoiceSummary {
         val locked = lockInvoice(invoiceId)
             ?: throw billingFailure(ApiErrorCode.RESOURCE_NOT_FOUND, "Invoice not found.", HttpStatus.NOT_FOUND)
-        if (locked.status == InvoiceStatus.COMPLETED) return requireInvoiceSummary(invoiceId)
-        if (locked.type != InvoiceType.NORMAL || locked.status != InvoiceStatus.WAITING) {
+        if (locked.status == InvoiceStatus.COMPLETED && hasInvoiceEvent(invoiceId, InvoiceEventType.FULFILLED)) {
+            return requireInvoiceSummary(invoiceId)
+        }
+        if (locked.type != InvoiceType.NORMAL || locked.status != InvoiceStatus.COMPLETED) {
             throw billingFailure(
                 ApiErrorCode.BILLING_ACTION_NOT_ALLOWED,
                 "Invoice cannot be fulfilled from ${locked.status}.",
@@ -333,16 +376,13 @@ class BillingLedgerPersistenceAdapter(
     override suspend fun requireCompensation(invoiceId: Long, reason: String, now: Instant): BillingInvoiceSummary {
         val locked = lockInvoice(invoiceId)
             ?: throw billingFailure(ApiErrorCode.RESOURCE_NOT_FOUND, "Invoice not found.", HttpStatus.NOT_FOUND)
-        if (locked.status == InvoiceStatus.FAILED) return requireInvoiceSummary(invoiceId)
-        if (locked.type != InvoiceType.NORMAL || locked.status != InvoiceStatus.WAITING) {
+        if (locked.type != InvoiceType.NORMAL || locked.status != InvoiceStatus.COMPLETED) {
             return requireInvoiceSummary(invoiceId)
         }
-        val payment = lockPaymentByInvoice(invoiceId)
-            ?: throw billingFailure(ApiErrorCode.INTERNAL_SERVER_ERROR, "Invoice payment is missing.")
         appendInvoiceEvent(
             invoiceId,
-            "invoice-compensation-required:${locked.invoiceNumber}",
-            InvoiceEventType.COMPENSATION_REQUIRED,
+            "invoice-fulfillment-failed:${locked.invoiceNumber}",
+            InvoiceEventType.FULFILLMENT_FAILED,
             BillingEventSource.SYSTEM,
             null,
             reason.take(1000),
@@ -357,16 +397,8 @@ class BillingLedgerPersistenceAdapter(
             """.trimIndent(),
         ).bind("invoiceId", invoiceId).bind("reason", reason.take(4000)).bind("now", now.utc())
             .fetch().rowsUpdated().awaitSingle()
-        insertBillingJob(invoiceId, payment.id, BillingJobType.COMPENSATION, now)
-        insertActionIfAbsent(
-            invoice = locked,
-            payment = payment,
-            actionType = BillingActionType.COMPENSATION,
-            status = BillingActionStatus.REQUIRED,
-            idempotencyKey = "compensation:$invoiceId",
-            reason = reason.take(1000),
-            now = now,
-        )
+        // A verified Apple charge is never rolled back because entitlement projection failed.
+        // The immutable invoice stays COMPLETED and the failed projection job remains visible for operations.
         return requireInvoiceSummary(invoiceId)
     }
 
@@ -670,7 +702,10 @@ class BillingLedgerPersistenceAdapter(
             .bind("eventAt", event.eventAt.utc())
             .bind("now", now.utc())
             .fetch().rowsUpdated().awaitSingle()
-        if (inserted == 1L) return true
+        if (inserted == 1L) {
+            insertSubscriptionEventReceipt(event, now)
+            return true
+        }
 
         return database.sql(
             """
@@ -683,11 +718,96 @@ class BillingLedgerPersistenceAdapter(
     }
 
     @Transactional
+    override suspend fun claimDueRevenueCatEvents(now: Instant, limit: Int): List<VerifiedRevenueCatEvent> {
+        val events = database.sql(
+            """
+            select e.provider_event_id, e.event_type, e.store, e.product_id, e.transaction_id,
+                   e.original_transaction_id, e.environment, e.price_milliunits, e.currency,
+                   e.purchased_at, e.expires_at, e.occurred_at, e.provider_reason, e.payload_sha256,
+                   a.app_account_token
+            from subscription_events e
+            left join billing_accounts a on a.id = e.billing_account_id and a.status = 'ACTIVE'
+            where e.provider = 'REVENUECAT'
+              and e.processing_status in ('PENDING', 'FAILED')
+              and e.attempt_count < e.max_attempts and e.next_attempt_at <= :now
+            order by e.next_attempt_at, e.id
+            limit :limit for update skip locked
+            """.trimIndent(),
+        ).bind("now", now.utc()).bind("limit", limit.coerceIn(1, 100)).map { row, _ ->
+            val eventType = row.string("event_type")
+            VerifiedRevenueCatEvent(
+                eventId = row.string("provider_event_id"),
+                eventType = eventType,
+                appUserId = row.nullableString("app_account_token"),
+                originalAppUserId = null,
+                aliases = emptyList(),
+                store = row.nullableString("store"),
+                productId = row.nullableString("product_id"),
+                transactionId = row.nullableString("transaction_id"),
+                originalTransactionId = row.nullableString("original_transaction_id"),
+                environment = row.nullableString("environment")?.let(com.buddystudy.billing.domain.BillingEnvironment::valueOf),
+                priceMilliunits = row.get("price_milliunits", java.lang.Long::class.java)?.toLong(),
+                currency = row.nullableString("currency"),
+                purchasedAt = row.nullableInstant("purchased_at"),
+                expiresAt = row.nullableInstant("expires_at"),
+                eventAt = row.instant("occurred_at"),
+                cancelReason = row.nullableString("provider_reason").takeIf { eventType == "CANCELLATION" },
+                expirationReason = row.nullableString("provider_reason").takeIf { eventType == "EXPIRATION" },
+                signedPayloadSha256 = row.string("payload_sha256"),
+            )
+        }.all().collectList().awaitSingle()
+        events.forEach { event ->
+            database.sql(
+                """
+                update subscription_events
+                set processing_status = 'PROCESSING', updated_at = :now
+                where provider = 'REVENUECAT' and provider_event_id = :eventId
+                  and processing_status in ('PENDING', 'FAILED')
+                """.trimIndent(),
+            ).bind("now", now.utc()).bind("eventId", event.eventId).fetch().rowsUpdated().awaitSingle()
+        }
+        return events
+    }
+
+    @Transactional
     override suspend fun applyRevenueCatEvent(
         event: VerifiedRevenueCatEvent,
         now: Instant,
     ): Boolean {
         if (event.eventType in REVENUECAT_PURCHASE_EVENTS) {
+            markRevenueCatEvent(event.eventId, BillingReceiptStatus.PROCESSED, null, now)
+            return true
+        }
+        if (event.eventType == "PRODUCT_CHANGE") {
+            event.originalTransactionId?.let { originalTransactionId ->
+                updatePendingProduct(originalTransactionId, event.productId, event.eventAt, now)
+            }
+            markRevenueCatEvent(event.eventId, BillingReceiptStatus.PROCESSED, null, now)
+            return true
+        }
+        if (event.eventType == "BILLING_ISSUE") {
+            event.originalTransactionId?.let { originalTransactionId ->
+                updateSubscriptionLifecycle(
+                    originalTransactionId,
+                    accessStatus = null,
+                    renewalStatus = "BILLING_RETRY",
+                    now = now,
+                    nextReconcileAt = now.plusSeconds(15 * 60),
+                )
+            }
+            markRevenueCatEvent(event.eventId, BillingReceiptStatus.PROCESSED, null, now)
+            return true
+        }
+        if (event.eventType == "CANCELLATION" && event.cancelReason == "CUSTOMER_SUPPORT") {
+            event.originalTransactionId?.let { originalTransactionId ->
+                updateSubscriptionLifecycle(
+                    originalTransactionId,
+                    accessStatus = null,
+                    renewalStatus = null,
+                    now = now,
+                    nextReconcileAt = now,
+                )
+            }
             markRevenueCatEvent(event.eventId, BillingReceiptStatus.PROCESSED, null, now)
             return true
         }
@@ -715,6 +835,15 @@ class BillingLedgerPersistenceAdapter(
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     override suspend fun markRevenueCatEventFailed(eventId: String, error: String, now: Instant) {
         markRevenueCatEvent(eventId, BillingReceiptStatus.FAILED, error.take(4000), now)
+        database.sql(
+            """
+            update subscription_events
+            set processing_status = 'FAILED', attempt_count = least(attempt_count + 1, max_attempts),
+                last_error = :error, next_attempt_at = timestampadd(minute, 15, :now), updated_at = :now
+            where provider = 'REVENUECAT' and provider_event_id = :eventId
+            """.trimIndent(),
+        ).bind("error", error.take(4000)).bind("now", now.utc()).bind("eventId", eventId)
+            .fetch().rowsUpdated().awaitSingle()
     }
 
     override suspend fun adminInvoices(
@@ -787,6 +916,267 @@ class BillingLedgerPersistenceAdapter(
         )
     }
 
+    @Transactional
+    override suspend fun adminAdjustQuota(
+        userId: Long,
+        bonusDelta: Int,
+        reason: String,
+        idempotencyKey: String,
+        now: Instant,
+    ): AdminQuotaAdjustment {
+        val eventId = "admin-quota:$idempotencyKey".take(191)
+        existingAdminQuotaAdjustment(eventId)?.let { return it }
+        val anchor = database.sql("select anchor_at from quota_accounts where user_id = :userId for update")
+            .bind("userId", userId).map { row, _ -> row.instant("anchor_at") }.one().awaitSingleOrNull()
+            ?: throw billingFailure(ApiErrorCode.RESOURCE_NOT_FOUND, "Quota account not found.", HttpStatus.NOT_FOUND)
+        val window = MonthlyQuotaWindow.periodAt(anchor, now)
+        database.sql(
+            """
+            insert ignore into quota_periods (
+                user_id, period_started_at, period_ends_at, committed_count, reserved_count, bonus_count,
+                policy_version, created_at, updated_at
+            ) values (:userId, :start, :end, 0, 0, 0, 2, :now, :now)
+            """.trimIndent(),
+        ).bind("userId", userId).bind("start", window.startedAt.utc()).bind("end", window.resetAt.utc())
+            .bind("now", now.utc()).fetch().rowsUpdated().awaitSingle()
+        val period = database.sql(
+            "select id, bonus_count from quota_periods where user_id = :userId and period_started_at = :start for update",
+        ).bind("userId", userId).bind("start", window.startedAt.utc()).map { row, _ ->
+            row.long("id") to row.int("bonus_count")
+        }.one().awaitSingle()
+        val appliedDelta = bonusDelta.coerceAtLeast(-period.second)
+        database.sql("update quota_periods set bonus_count = bonus_count + :delta, updated_at = :now where id = :id")
+            .bind("delta", appliedDelta).bind("now", now.utc()).bind("id", period.first)
+            .fetch().rowsUpdated().awaitSingle()
+        database.sql(
+            """
+            insert into quota_ledger (
+                ledger_event_id, user_id, quota_period_id, reservation_id, ledger_type,
+                committed_delta, reserved_delta, bonus_delta, reason, occurred_at, created_at
+            ) values (:eventId, :userId, :periodId, null, :type, 0, 0, :delta, :reason, :now, :now)
+            """.trimIndent(),
+        ).bind("eventId", eventId).bind("userId", userId).bind("periodId", period.first)
+            .bind("type", if (appliedDelta >= 0) "BONUS_GRANT" else "BONUS_REVOKE")
+            .bind("delta", appliedDelta).bind("reason", reason.take(1000)).bind("now", now.utc())
+            .fetch().rowsUpdated().awaitSingle()
+        return AdminQuotaAdjustment(
+            userId, eventId, window.startedAt, window.resetAt, appliedDelta,
+            period.second + appliedDelta, reason.take(1000), now,
+        )
+    }
+
+    @Transactional
+    override suspend fun adminRequestReconcile(
+        userId: Long,
+        reason: String?,
+        now: Instant,
+    ): AdminBillingReconcileRequest {
+        val subscription = database.sql(
+            """
+            select s.original_transaction_id, s.billing_account_id
+            from subscriptions s where s.user_id = :userId
+            order by s.updated_at desc, s.id desc limit 1 for update
+            """.trimIndent(),
+        ).bind("userId", userId).map { row, _ -> row.string("original_transaction_id") to row.long("billing_account_id") }
+            .one().awaitSingleOrNull()
+            ?: throw billingFailure(ApiErrorCode.RESOURCE_NOT_FOUND, "Subscription not found.", HttpStatus.NOT_FOUND)
+        val eventId = "admin-reconcile:${UUID.randomUUID()}"
+        database.sql(
+            """
+            insert into subscription_events (
+                provider_event_id, provider, event_type, user_id, billing_account_id,
+                original_transaction_id, processing_status, attempt_count, max_attempts, next_attempt_at,
+                payload_sha256, last_error, occurred_at, created_at, updated_at
+            ) values (
+                :eventId, 'REVENUECAT', 'ADMIN_RECONCILE_REQUESTED', :userId, :accountId,
+                :originalTransactionId, 'PENDING', 0, 3, :now,
+                :hash, :reason, :now, :now, :now
+            )
+            """.trimIndent(),
+        ).bind("eventId", eventId).bind("userId", userId).bind("accountId", subscription.second)
+            .bind("originalTransactionId", subscription.first).bind("now", now.utc())
+            .bind("hash", "0".repeat(64)).bindNullable("reason", reason?.take(1000), String::class.java)
+            .fetch().rowsUpdated().awaitSingle()
+        database.sql(
+            "update subscriptions set next_reconcile_at = :now, updated_at = :now where user_id = :userId",
+        ).bind("now", now.utc()).bind("userId", userId).fetch().rowsUpdated().awaitSingle()
+        return AdminBillingReconcileRequest(userId, eventId, now)
+    }
+
+    override suspend fun adminUserTimeline(userId: Long, limit: Int): AdminUserBillingTimeline {
+        val entries = database.sql(
+            """
+            select category, event_id, event_type, status, reason, occurred_at
+            from (
+                select 'SUBSCRIPTION' category, provider_event_id event_id, event_type,
+                       processing_status status, last_error reason, occurred_at
+                from subscription_events where user_id = :userId
+                union all
+                select 'INVOICE', e.event_id, e.event_type, e.to_status, e.reason, e.occurred_at
+                from invoice_events e join invoices i on i.id = e.invoice_id where i.user_id = :userId
+                union all
+                select 'PAYMENT', h.event_id, h.event_type, h.to_status, h.reason, h.occurred_at
+                from payments_history h join payments p on p.id = h.payment_id where p.user_id = :userId
+                union all
+                select 'QUOTA', q.ledger_event_id, q.ledger_type, null, q.reason, q.occurred_at
+                from quota_ledger q where q.user_id = :userId
+            ) timeline
+            order by occurred_at desc, event_id desc
+            limit :limit
+            """.trimIndent(),
+        ).bind("userId", userId).bind("limit", limit).map { row, _ ->
+            AdminBillingTimelineEntry(
+                category = row.string("category"),
+                eventId = row.string("event_id"),
+                eventType = row.string("event_type"),
+                status = row.get("status", String::class.java),
+                reason = row.get("reason", String::class.java),
+                occurredAt = row.instant("occurred_at"),
+            )
+        }.all().collectList().awaitSingle()
+        return AdminUserBillingTimeline(userId, entitlementForUser(userId), entries)
+    }
+
+    private suspend fun existingAdminQuotaAdjustment(eventId: String): AdminQuotaAdjustment? =
+        database.sql(
+            """
+            select l.user_id, l.ledger_event_id, p.period_started_at, p.period_ends_at,
+                   l.bonus_delta, p.bonus_count, l.reason, l.occurred_at
+            from quota_ledger l join quota_periods p on p.id = l.quota_period_id
+            where l.ledger_event_id = :eventId
+            """.trimIndent(),
+        ).bind("eventId", eventId).map { row, _ ->
+            AdminQuotaAdjustment(
+                userId = row.long("user_id"), ledgerEventId = row.string("ledger_event_id"),
+                periodStartedAt = row.instant("period_started_at"), resetAt = row.instant("period_ends_at"),
+                bonusDelta = row.int("bonus_delta"), bonusLimit = row.int("bonus_count"),
+                reason = row.nullableString("reason").orEmpty(), occurredAt = row.instant("occurred_at"),
+            )
+        }.one().awaitSingleOrNull()
+
+    @Transactional
+    override suspend fun claimDueSubscriptionReconciliations(
+        now: Instant,
+        limit: Int,
+    ): List<SubscriptionReconciliationClaim> {
+        val claims = database.sql(
+            """
+            select s.id, s.user_id, s.original_transaction_id, a.app_account_token,
+                   (
+                       select count(*) from subscription_events e
+                       where e.original_transaction_id = s.original_transaction_id
+                         and e.event_type = 'SUBSCRIPTION_RECONCILE_FAILED'
+                         and (s.last_reconciled_at is null or e.occurred_at > s.last_reconciled_at)
+                   ) as failure_count
+            from subscriptions s join billing_accounts a on a.id = s.billing_account_id
+            where s.user_id is not null and a.status = 'ACTIVE'
+              and coalesce(s.next_reconcile_at, s.updated_at) <= :now
+              and (
+                  select count(*) from subscription_events e
+                  where e.original_transaction_id = s.original_transaction_id
+                    and e.event_type = 'SUBSCRIPTION_RECONCILE_FAILED'
+                    and (s.last_reconciled_at is null or e.occurred_at > s.last_reconciled_at)
+              ) < 3
+            order by coalesce(s.next_reconcile_at, s.updated_at), s.id
+            limit :limit for update skip locked
+            """.trimIndent(),
+        ).bind("now", now.utc()).bind("limit", limit.coerceIn(1, 100)).map { row, _ ->
+            SubscriptionReconciliationClaim(
+                subscriptionId = row.long("id"), userId = row.long("user_id"),
+                originalTransactionId = row.string("original_transaction_id"),
+                appAccountToken = UUID.fromString(row.string("app_account_token")),
+                attempt = row.int("failure_count") + 1,
+            )
+        }.all().collectList().awaitSingle()
+        claims.forEach { claim ->
+            database.sql(
+                "update subscriptions set next_reconcile_at = timestampadd(minute, 5, :now), updated_at = :now where id = :id",
+            ).bind("now", now.utc()).bind("id", claim.subscriptionId).fetch().rowsUpdated().awaitSingle()
+        }
+        return claims
+    }
+
+    @Transactional
+    override suspend fun applySubscriptionSnapshot(
+        claim: SubscriptionReconciliationClaim,
+        snapshot: RevenueCatCustomerSnapshot,
+        now: Instant,
+    ) {
+        val eventId = "reconcile:${claim.subscriptionId}:${snapshot.fetchedAt.toEpochMilli()}".take(191)
+        val access = snapshot.accessStatus.name
+        val renewal = snapshot.renewalStatus.name
+        val nextReconcileAt = when {
+            snapshot.renewalStatus == com.buddystudy.billing.domain.SubscriptionRenewalStatus.BILLING_RETRY ->
+                now.plusSeconds(15 * 60)
+            snapshot.accessStatus == com.buddystudy.billing.domain.SubscriptionAccessStatus.UNKNOWN ->
+                now.plusSeconds(15 * 60)
+            snapshot.accessStatus in setOf(
+                com.buddystudy.billing.domain.SubscriptionAccessStatus.ACTIVE,
+                com.buddystudy.billing.domain.SubscriptionAccessStatus.GRACE_PERIOD,
+            ) -> now.plusSeconds(6 * 60 * 60)
+            else -> now.plusSeconds(24 * 60 * 60)
+        }
+        database.sql(
+            """
+            insert ignore into subscription_events (
+                provider_event_id, provider, event_type, user_id, billing_account_id,
+                original_transaction_id, expires_at, access_status, renewal_status, processing_status,
+                attempt_count, max_attempts, next_attempt_at, payload_sha256,
+                occurred_at, processed_at, created_at, updated_at
+            ) select :eventId, 'REVENUECAT', 'SUBSCRIPTION_SNAPSHOT_RECONCILED', s.user_id, s.billing_account_id,
+                     s.original_transaction_id, :expiresAt, :access, :renewal, 'COMPLETED',
+                     :attempt, 3, :now, :hash, :fetchedAt, :now, :now, :now
+              from subscriptions s where s.id = :subscriptionId
+            """.trimIndent(),
+        ).bind("eventId", eventId).bindNullable("expiresAt", snapshot.expiresAt?.utc(), LocalDateTime::class.java)
+            .bind("access", access).bind("renewal", renewal).bind("attempt", claim.attempt).bind("now", now.utc())
+            .bind("hash", "0".repeat(64)).bind("fetchedAt", snapshot.fetchedAt.utc())
+            .bind("subscriptionId", claim.subscriptionId).fetch().rowsUpdated().awaitSingle()
+        database.sql(
+            """
+            update subscriptions
+            set access_status = :access, renewal_status = :renewal,
+                expires_at = coalesce(:expiresAt, expires_at),
+                last_reconciled_at = :fetchedAt,
+                next_reconcile_at = :nextReconcileAt,
+                version = version + 1, updated_at = :now
+            where id = :id and user_id = :userId
+            """.trimIndent(),
+        ).bind("access", access).bind("renewal", renewal)
+            .bindNullable("expiresAt", snapshot.expiresAt?.utc(), LocalDateTime::class.java)
+            .bind("fetchedAt", snapshot.fetchedAt.utc()).bind("nextReconcileAt", nextReconcileAt.utc())
+            .bind("now", now.utc()).bind("id", claim.subscriptionId).bind("userId", claim.userId)
+            .fetch().rowsUpdated().awaitSingle()
+        rebuildEntitlementProjection(claim.userId, now)
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    override suspend fun recordSubscriptionReconcileFailure(
+        claim: SubscriptionReconciliationClaim,
+        error: String,
+        now: Instant,
+    ) {
+        database.sql(
+            """
+            insert into subscription_events (
+                provider_event_id, provider, event_type, user_id, billing_account_id,
+                original_transaction_id, processing_status, attempt_count, max_attempts,
+                next_attempt_at, payload_sha256, last_error, occurred_at, created_at, updated_at
+            ) select :eventId, 'REVENUECAT', 'SUBSCRIPTION_RECONCILE_FAILED', s.user_id, s.billing_account_id,
+                     s.original_transaction_id, 'FAILED', :attempt, 3,
+                     timestampadd(minute, 15, :now), :hash, :error, :now, :now, :now
+              from subscriptions s where s.id = :subscriptionId
+            """.trimIndent(),
+        ).bind("eventId", "reconcile-failed:${claim.subscriptionId}:${now.toEpochMilli()}".take(191))
+            .bind("attempt", claim.attempt).bind("now", now.utc()).bind("hash", "0".repeat(64))
+            .bind("error", error.take(4000)).bind("subscriptionId", claim.subscriptionId)
+            .fetch().rowsUpdated().awaitSingle()
+        database.sql(
+            "update subscriptions set next_reconcile_at = timestampadd(minute, :delay, :now), updated_at = :now where id = :id",
+        ).bind("delay", if (claim.attempt >= 3) 1440 else 15).bind("now", now.utc())
+            .bind("id", claim.subscriptionId).fetch().rowsUpdated().awaitSingle()
+    }
+
     private suspend fun applyProviderLifecycle(
         invoice: InvoiceEntity,
         payment: PaymentEntity,
@@ -816,6 +1206,12 @@ class BillingLedgerPersistenceAdapter(
                         BillingActionStatus.COMPLETED,
                         now,
                     )
+                    updateSubscriptionLifecycle(
+                        payment.providerOriginalTransactionId,
+                        accessStatus = null,
+                        renewalStatus = "CANCELED",
+                        now = now,
+                    )
                 }
                 "AUTO_RENEW_ENABLED" -> {
                     if (InvoiceStateMachine.canApply(invoice.type, invoice.status, InvoiceEventType.CANCELLATION_REVERSED)) {
@@ -835,6 +1231,12 @@ class BillingLedgerPersistenceAdapter(
                         BillingActionStatus.CANCELLED,
                         now,
                     )
+                    updateSubscriptionLifecycle(
+                        payment.providerOriginalTransactionId,
+                        accessStatus = null,
+                        renewalStatus = "WILL_RENEW",
+                        now = now,
+                    )
                 }
             }
             "REFUND" -> {
@@ -846,6 +1248,12 @@ class BillingLedgerPersistenceAdapter(
                 completeActions(refundInvoice.id, setOf(BillingActionType.REFUND, BillingActionType.COMPENSATION), BillingActionStatus.COMPLETED, now)
                 completeActions(invoice.id, setOf(BillingActionType.COMPENSATION), BillingActionStatus.COMPLETED, now)
                 deactivateMembership(payment.providerOriginalTransactionId, invoice.id, now)
+                updateSubscriptionLifecycle(
+                    payment.providerOriginalTransactionId,
+                    accessStatus = "REVOKED",
+                    renewalStatus = "NOT_APPLICABLE",
+                    now = now,
+                )
             }
             "REFUND_DECLINED" -> {
                 val refundInvoice = requireRefundInvoice(invoice, notification, now, source)
@@ -871,10 +1279,23 @@ class BillingLedgerPersistenceAdapter(
                     notification.notificationUUID, null, now, historyInvoiceId = refundInvoice.id)
                 appendIfAllowed(refundInvoice.id, InvoiceEventType.PAYMENT_REVOKED, notification, now, source, eventPrefix)
                 deactivateMembership(payment.providerOriginalTransactionId, invoice.id, now)
+                updateSubscriptionLifecycle(
+                    payment.providerOriginalTransactionId,
+                    accessStatus = "REVOKED",
+                    renewalStatus = "NOT_APPLICABLE",
+                    now = now,
+                )
             }
             "EXPIRED", "GRACE_PERIOD_EXPIRED" -> {
                 appendIfAllowed(invoice.id, InvoiceEventType.EXPIRED, notification, now, source, eventPrefix)
                 deactivateMembership(payment.providerOriginalTransactionId, invoice.id, now)
+                updateSubscriptionLifecycle(
+                    payment.providerOriginalTransactionId,
+                    accessStatus = "EXPIRED",
+                    renewalStatus = "NOT_APPLICABLE",
+                    now = now,
+                    nextReconcileAt = now.plusSeconds(24 * 60 * 60),
+                )
             }
             "CONSUMPTION_REQUEST" -> {
                 val refundInvoice = requireRefundInvoice(invoice, notification, now, source)
@@ -1259,6 +1680,8 @@ class BillingLedgerPersistenceAdapter(
             .bind("startedAt", payment.purchaseAt.utc())
             .bindNullable("expiresAt", payment.expiresAt?.utc(), LocalDateTime::class.java)
             .bind("now", now.utc()).fetch().rowsUpdated().awaitSingle()
+        projectActiveSubscription(invoice, payment, now)
+        activateFirstPaidAnchor(invoice.userId, payment.purchaseAt, now)
     }
 
     private suspend fun reactivateMembership(invoice: InvoiceEntity, payment: PaymentEntity, now: Instant) =
@@ -1274,6 +1697,254 @@ class BillingLedgerPersistenceAdapter(
             """.trimIndent(),
         ).bind("originalTransactionId", originalTransactionId).bind("invoiceId", invoiceId)
             .bind("now", now.utc()).fetch().rowsUpdated().awaitSingle()
+    }
+
+    private suspend fun projectActiveSubscription(invoice: InvoiceEntity, payment: PaymentEntity, now: Instant) {
+        database.sql(
+            """
+            insert into billing_accounts (user_id, app_account_token, status, created_at, updated_at)
+            values (:userId, :token, 'ACTIVE', :now, :now)
+            on duplicate key update status = 'ACTIVE', updated_at = :now
+            """.trimIndent(),
+        ).bind("userId", invoice.userId).bind("token", payment.appAccountToken.toString().lowercase())
+            .bind("now", now.utc()).fetch().rowsUpdated().awaitSingle()
+        val accountId = database.sql("select id from billing_accounts where user_id = :userId")
+            .bind("userId", invoice.userId).map { row, _ -> row.long("id") }.one().awaitSingle()
+        val eventType = if (payment.purchaseAt == payment.originalPurchaseAt || payment.originalPurchaseAt == null) {
+            "INITIAL_PURCHASE"
+        } else {
+            "RENEWAL"
+        }
+        database.sql(
+            """
+            insert ignore into subscription_events (
+                provider_event_id, provider, event_type, user_id, billing_account_id,
+                original_transaction_id, transaction_id, product_id, environment, purchased_at, expires_at,
+                access_status, renewal_status, processing_status, attempt_count, max_attempts, next_attempt_at,
+                payload_sha256, occurred_at, processed_at, created_at, updated_at
+            ) values (
+                :eventId, 'APPLE', :eventType, :userId, :accountId,
+                :originalTransactionId, :transactionId, :productId, :environment, :purchasedAt, :expiresAt,
+                'ACTIVE', 'WILL_RENEW', 'COMPLETED', 1, 3, :now,
+                :hash, :occurredAt, :now, :now, :now
+            )
+            """.trimIndent(),
+        ).bind("eventId", "apple:${payment.providerTransactionId}:$eventType".take(191))
+            .bind("eventType", eventType).bind("userId", invoice.userId).bind("accountId", accountId)
+            .bind("originalTransactionId", payment.providerOriginalTransactionId)
+            .bind("transactionId", payment.providerTransactionId).bind("productId", payment.productId)
+            .bind("environment", payment.environment.name).bind("purchasedAt", payment.purchaseAt.utc())
+            .bindNullable("expiresAt", payment.expiresAt?.utc(), LocalDateTime::class.java)
+            .bind("hash", payment.signedPayloadSha256).bind("occurredAt", payment.purchaseAt.utc())
+            .bind("now", now.utc()).fetch().rowsUpdated().awaitSingle()
+        database.sql(
+            """
+            insert into subscriptions (
+                billing_account_id, user_id, provider, original_transaction_id, latest_transaction_id,
+                product_id, tier_code, access_status, renewal_status, started_at, expires_at,
+                last_provider_event_at, last_reconciled_at, next_reconcile_at, version, created_at, updated_at
+            ) values (
+                :accountId, :userId, 'APPLE', :originalTransactionId, :transactionId,
+                :productId, :tierCode, 'ACTIVE', 'WILL_RENEW', :startedAt, :expiresAt,
+                :now, :now, timestampadd(hour, 6, :now), 0, :now, :now
+            ) on duplicate key update
+                latest_transaction_id = values(latest_transaction_id), product_id = values(product_id),
+                tier_code = values(tier_code), access_status = 'ACTIVE',
+                started_at = least(coalesce(started_at, values(started_at)), values(started_at)),
+                expires_at = values(expires_at), last_provider_event_at = values(last_provider_event_at),
+                next_reconcile_at = values(next_reconcile_at), version = version + 1, updated_at = values(updated_at)
+            """.trimIndent(),
+        ).bind("accountId", accountId).bind("userId", invoice.userId)
+            .bind("originalTransactionId", payment.providerOriginalTransactionId)
+            .bind("transactionId", payment.providerTransactionId).bind("productId", payment.productId)
+            .bind("tierCode", invoice.tierCode).bind("startedAt", payment.purchaseAt.utc())
+            .bindNullable("expiresAt", payment.expiresAt?.utc(), LocalDateTime::class.java)
+            .bind("now", now.utc()).fetch().rowsUpdated().awaitSingle()
+        rebuildEntitlementProjection(invoice.userId, now)
+    }
+
+    private suspend fun rebuildEntitlementProjection(userId: Long, now: Instant) {
+        val best = database.sql(
+            """
+            select id, tier_code, product_id, access_status, renewal_status, started_at, expires_at,
+                   pending_product_id
+            from subscriptions
+            where user_id = :userId and access_status in ('ACTIVE', 'GRACE_PERIOD')
+              and (expires_at is null or expires_at > :now)
+            order by case tier_code when 'TIER3' then 3 when 'TIER2' then 2 else 1 end desc,
+                     expires_at desc, id desc
+            limit 1
+            """.trimIndent(),
+        ).bind("userId", userId).bind("now", now.utc()).map { row, _ ->
+            ActiveSubscriptionProjection(
+                id = row.long("id"), tierCode = row.string("tier_code"), productId = row.nullableString("product_id"),
+                accessStatus = row.string("access_status"), renewalStatus = row.string("renewal_status"),
+                startedAt = row.nullableInstant("started_at"), expiresAt = row.nullableInstant("expires_at"),
+                pendingProductId = row.nullableString("pending_product_id"),
+            )
+        }.one().awaitSingleOrNull()
+        if (best == null) {
+            database.sql(
+                """
+                insert into user_entitlement_projection (
+                    user_id, subscription_id, tier_code, source, access_status, renewal_status,
+                    will_renew, projected_at, version
+                ) values (:userId, null, 'TIER1', 'FREE', 'ACTIVE', 'NOT_APPLICABLE', false, :now, 0)
+                on duplicate key update subscription_id = null, tier_code = 'TIER1', source = 'FREE',
+                    access_status = 'ACTIVE', renewal_status = 'NOT_APPLICABLE', product_id = null,
+                    started_at = null, expires_at = null, will_renew = false, pending_product_id = null,
+                    projected_at = :now, version = version + 1
+                """.trimIndent(),
+            ).bind("userId", userId).bind("now", now.utc()).fetch().rowsUpdated().awaitSingle()
+            return
+        }
+        val willRenew = best.renewalStatus == "WILL_RENEW"
+        var spec = database.sql(
+            """
+            insert into user_entitlement_projection (
+                user_id, subscription_id, tier_code, source, access_status, renewal_status, product_id,
+                started_at, expires_at, will_renew, pending_product_id, projected_at, version
+            ) values (
+                :userId, :subscriptionId, :tierCode, 'APP_STORE', :accessStatus, :renewalStatus, :productId,
+                :startedAt, :expiresAt, :willRenew, :pendingProductId, :now, 0
+            ) on duplicate key update subscription_id = values(subscription_id), tier_code = values(tier_code),
+                source = 'APP_STORE', access_status = values(access_status), renewal_status = values(renewal_status),
+                product_id = values(product_id), started_at = values(started_at), expires_at = values(expires_at),
+                will_renew = values(will_renew), pending_product_id = values(pending_product_id),
+                projected_at = values(projected_at), version = version + 1
+            """.trimIndent(),
+        ).bind("userId", userId).bind("subscriptionId", best.id).bind("tierCode", best.tierCode)
+            .bind("accessStatus", best.accessStatus).bind("renewalStatus", best.renewalStatus)
+            .bind("willRenew", willRenew).bind("now", now.utc())
+        spec = spec.bindNullable("productId", best.productId, String::class.java)
+            .bindNullable("startedAt", best.startedAt?.utc(), LocalDateTime::class.java)
+            .bindNullable("expiresAt", best.expiresAt?.utc(), LocalDateTime::class.java)
+            .bindNullable("pendingProductId", best.pendingProductId, String::class.java)
+        spec.fetch().rowsUpdated().awaitSingle()
+    }
+
+    private suspend fun updateSubscriptionLifecycle(
+        originalTransactionId: String,
+        accessStatus: String?,
+        renewalStatus: String?,
+        now: Instant,
+        nextReconcileAt: Instant = now.plusSeconds(6 * 60 * 60),
+    ) {
+        var spec = database.sql(
+            """
+            update subscriptions
+            set access_status = coalesce(:accessStatus, access_status),
+                renewal_status = coalesce(:renewalStatus, renewal_status),
+                last_provider_event_at = :now, next_reconcile_at = :nextReconcileAt,
+                version = version + 1, updated_at = :now
+            where original_transaction_id = :originalTransactionId
+            """.trimIndent(),
+        ).bindNullable("accessStatus", accessStatus, String::class.java)
+            .bindNullable("renewalStatus", renewalStatus, String::class.java)
+            .bind("now", now.utc()).bind("nextReconcileAt", nextReconcileAt.utc())
+            .bind("originalTransactionId", originalTransactionId)
+        spec.fetch().rowsUpdated().awaitSingle()
+        val userId = database.sql(
+            "select user_id from subscriptions where original_transaction_id = :originalTransactionId limit 1",
+        ).bind("originalTransactionId", originalTransactionId)
+            .map { row, _ -> row.long("user_id") }.one().awaitSingleOrNull()
+        if (userId != null) rebuildEntitlementProjection(userId, now)
+    }
+
+    private suspend fun updatePendingProduct(
+        originalTransactionId: String,
+        productId: String?,
+        providerEventAt: Instant,
+        now: Instant,
+    ) {
+        var spec = database.sql(
+            """
+            update subscriptions
+            set pending_product_id = :productId, last_provider_event_at = :eventAt,
+                next_reconcile_at = :now, version = version + 1, updated_at = :now
+            where original_transaction_id = :originalTransactionId
+            """.trimIndent(),
+        ).bindNullable("productId", productId, String::class.java)
+            .bind("eventAt", providerEventAt.utc()).bind("now", now.utc())
+            .bind("originalTransactionId", originalTransactionId)
+        spec.fetch().rowsUpdated().awaitSingle()
+        val userId = database.sql(
+            "select user_id from subscriptions where original_transaction_id = :originalTransactionId limit 1",
+        ).bind("originalTransactionId", originalTransactionId)
+            .map { row, _ -> row.long("user_id") }.one().awaitSingleOrNull()
+        if (userId != null) rebuildEntitlementProjection(userId, now)
+    }
+
+    private suspend fun activateFirstPaidAnchor(userId: Long, purchasedAt: Instant, now: Instant) {
+        val account = database.sql(
+            "select anchor_at, first_paid_at from quota_accounts where user_id = :userId for update",
+        ).bind("userId", userId).map { row, _ ->
+            row.instant("anchor_at") to row.nullableInstant("first_paid_at")
+        }.one().awaitSingleOrNull() ?: return
+        if (account.second != null) return
+        val oldWindow = MonthlyQuotaWindow.periodAt(account.first, now)
+        val newWindow = MonthlyQuotaWindow.periodAt(purchasedAt, now)
+        if (oldWindow.startedAt != newWindow.startedAt) {
+            val carried = database.sql(
+                """
+                select committed_count, reserved_count, bonus_count, policy_version
+                from quota_periods where user_id = :userId and period_started_at = :oldStart
+                """.trimIndent(),
+            ).bind("userId", userId).bind("oldStart", oldWindow.startedAt.utc()).map { row, _ ->
+                listOf(
+                    row.int("committed_count"),
+                    row.int("reserved_count"),
+                    row.int("bonus_count"),
+                    row.int("policy_version"),
+                )
+            }.one().awaitSingleOrNull()
+            if (carried != null) {
+                database.sql(
+                    """
+                    insert ignore into quota_periods (
+                        user_id, period_started_at, period_ends_at, committed_count, reserved_count, bonus_count,
+                        policy_version, created_at, updated_at
+                    ) values (:userId, :newStart, :newEnd, 0, 0, 0, :policyVersion, :now, :now)
+                    """.trimIndent(),
+                ).bind("userId", userId).bind("newStart", newWindow.startedAt.utc())
+                    .bind("newEnd", newWindow.resetAt.utc()).bind("policyVersion", carried[3])
+                    .bind("now", now.utc()).fetch().rowsUpdated().awaitSingle()
+                database.sql(
+                    """
+                    update quota_periods
+                    set committed_count = greatest(committed_count, :committed),
+                        reserved_count = greatest(reserved_count, :reserved),
+                        bonus_count = greatest(bonus_count, :bonus), updated_at = :now
+                    where user_id = :userId and period_started_at = :newStart
+                    """.trimIndent(),
+                ).bind("committed", carried[0]).bind("reserved", carried[1]).bind("bonus", carried[2])
+                    .bind("now", now.utc()).bind("userId", userId).bind("newStart", newWindow.startedAt.utc())
+                    .fetch().rowsUpdated().awaitSingle()
+            }
+            val newPeriodId = database.sql(
+                "select id from quota_periods where user_id = :userId and period_started_at = :newStart",
+            ).bind("userId", userId).bind("newStart", newWindow.startedAt.utc())
+                .map { row, _ -> row.long("id") }.one().awaitSingleOrNull()
+            if (newPeriodId != null) {
+                database.sql(
+                    """
+                    update quota_reservations r join quota_periods p on p.id = r.quota_period_id
+                    set r.quota_period_id = :newPeriodId, r.updated_at = :now
+                    where r.user_id = :userId and p.period_started_at = :oldStart and r.status = 'RESERVED'
+                    """.trimIndent(),
+                ).bind("newPeriodId", newPeriodId).bind("now", now.utc()).bind("userId", userId)
+                    .bind("oldStart", oldWindow.startedAt.utc()).fetch().rowsUpdated().awaitSingle()
+            }
+        }
+        database.sql(
+            """
+            update quota_accounts
+            set anchor_type = 'FIRST_PAID', anchor_at = :purchasedAt, anchor_day = :anchorDay,
+                first_paid_at = :purchasedAt, updated_at = :now
+            where user_id = :userId and first_paid_at is null
+            """.trimIndent(),
+        ).bind("purchasedAt", purchasedAt.utc()).bind("anchorDay", purchasedAt.atZone(ZoneOffset.UTC).dayOfMonth)
+            .bind("now", now.utc()).bind("userId", userId).fetch().rowsUpdated().awaitSingle()
     }
 
     private suspend fun insertBillingJob(invoiceId: Long, paymentId: Long, type: BillingJobType, now: Instant) {
@@ -1377,6 +2048,68 @@ class BillingLedgerPersistenceAdapter(
             .bind("now", now.utc())
             .bind("eventId", eventId)
             .fetch().rowsUpdated().awaitSingle()
+        if (status in TERMINAL_RECEIPT_STATES) {
+            database.sql(
+                """
+                update subscription_events
+                set processing_status = :status, processed_at = :now, last_error = :error, updated_at = :now
+                where provider = 'REVENUECAT' and provider_event_id = :eventId
+                """.trimIndent(),
+            ).bind("status", if (status == BillingReceiptStatus.IGNORED) "IGNORED" else "COMPLETED")
+                .bindNullable("error", error, String::class.java).bind("now", now.utc()).bind("eventId", eventId)
+                .fetch().rowsUpdated().awaitSingle()
+        }
+    }
+
+    private suspend fun insertSubscriptionEventReceipt(event: VerifiedRevenueCatEvent, now: Instant) {
+        val token = sequenceOf(event.appUserId, event.originalAppUserId).plus(event.aliases.asSequence())
+            .filterNotNull().mapNotNull { runCatching { UUID.fromString(it) }.getOrNull() }.firstOrNull()
+        val account = token?.let { value ->
+            database.sql("select id, user_id from billing_accounts where app_account_token = :token and status = 'ACTIVE'")
+                .bind("token", value.toString().lowercase()).map { row, _ -> row.long("id") to row.long("user_id") }
+                .one().awaitSingleOrNull()
+        }
+        val statuses = when (event.eventType) {
+            "INITIAL_PURCHASE", "RENEWAL", "NON_RENEWING_PURCHASE" -> "ACTIVE" to "WILL_RENEW"
+            "CANCELLATION" -> null to "CANCELED"
+            "UNCANCELLATION" -> null to "WILL_RENEW"
+            "BILLING_ISSUE" -> null to "BILLING_RETRY"
+            "EXPIRATION" -> "EXPIRED" to "NOT_APPLICABLE"
+            else -> null to null
+        }
+        var spec = database.sql(
+            """
+            insert ignore into subscription_events (
+                provider_event_id, provider, event_type, store, provider_reason, price_milliunits, currency,
+                user_id, billing_account_id,
+                original_transaction_id, transaction_id, product_id, environment, purchased_at, expires_at,
+                access_status, renewal_status, processing_status, attempt_count, max_attempts,
+                next_attempt_at, payload_sha256, occurred_at, created_at, updated_at
+            ) values (
+                :eventId, 'REVENUECAT', :eventType, :store, :providerReason, :priceMilliunits, :currency,
+                :userId, :accountId,
+                :originalTransactionId, :transactionId, :productId, :environment, :purchasedAt, :expiresAt,
+                :accessStatus, :renewalStatus, 'PENDING', 0, 3,
+                :now, :hash, :occurredAt, :now, :now
+            )
+            """.trimIndent(),
+        ).bind("eventId", event.eventId).bind("eventType", event.eventType)
+            .bindNullable("store", event.store, String::class.java)
+            .bindNullable("providerReason", event.cancelReason ?: event.expirationReason, String::class.java)
+            .bindNullable("priceMilliunits", event.priceMilliunits, java.lang.Long::class.java)
+            .bindNullable("currency", event.currency, String::class.java)
+            .bindNullable("userId", account?.second, java.lang.Long::class.java)
+            .bindNullable("accountId", account?.first, java.lang.Long::class.java)
+            .bindNullable("originalTransactionId", event.originalTransactionId, String::class.java)
+            .bindNullable("transactionId", event.transactionId, String::class.java)
+            .bindNullable("productId", event.productId, String::class.java)
+            .bindNullable("environment", event.environment?.name, String::class.java)
+            .bindNullable("purchasedAt", event.purchasedAt?.utc(), LocalDateTime::class.java)
+            .bindNullable("expiresAt", event.expiresAt?.utc(), LocalDateTime::class.java)
+            .bindNullable("accessStatus", statuses.first, String::class.java)
+            .bindNullable("renewalStatus", statuses.second, String::class.java)
+            .bind("now", now.utc()).bind("hash", event.signedPayloadSha256).bind("occurredAt", event.eventAt.utc())
+        spec.fetch().rowsUpdated().awaitSingle()
     }
 
     private fun VerifiedRevenueCatEvent.toProviderNotification(): VerifiedAppleNotification? {
@@ -1403,11 +2136,12 @@ class BillingLedgerPersistenceAdapter(
     }
 
     private suspend fun lockAndValidateAccount(userId: Long, token: UUID) {
-        val owner = database.sql(
-            "select user_id from apple_billing_accounts where app_account_token = :token for update",
-        ).bind("token", token.toString().lowercase()).map { row, _ -> row.long("user_id") }
-            .one().awaitSingleOrNull()
-        if (owner != userId) {
+        val account = database.sql(
+            "select user_id, status from billing_accounts where app_account_token = :token for update",
+        ).bind("token", token.toString().lowercase()).map { row, _ ->
+            row.get("user_id", java.lang.Long::class.java)?.toLong() to row.string("status")
+        }.one().awaitSingleOrNull()
+        if (account == null || account.first != userId || account.second != "ACTIVE") {
             throw billingFailure(
                 ApiErrorCode.BILLING_TRANSACTION_CONFLICT,
                 "The App Store transaction does not belong to this user.",
@@ -1424,6 +2158,11 @@ class BillingLedgerPersistenceAdapter(
     }
 
     private suspend fun existingToken(userId: Long): UUID? =
+        database.sql("select app_account_token from billing_accounts where user_id = :userId and status = 'ACTIVE'")
+            .bind("userId", userId).map { row, _ -> UUID.fromString(row.string("app_account_token")) }
+            .one().awaitSingleOrNull()
+
+    private suspend fun legacyToken(userId: Long): UUID? =
         database.sql("select app_account_token from apple_billing_accounts where user_id = :userId")
             .bind("userId", userId).map { row, _ -> UUID.fromString(row.string("app_account_token")) }
             .one().awaitSingleOrNull()
@@ -1767,6 +2506,11 @@ class BillingLedgerPersistenceAdapter(
     private fun Row.nullableLong(name: String): Long? = (get(name) as? Number)?.toLong()
     private fun Row.int(name: String): Int = (get(name) as Number).toInt()
     private fun Row.nullableInt(name: String): Int? = (get(name) as? Number)?.toInt()
+    private fun Row.boolean(name: String): Boolean = when (val value = get(name)) {
+        is Boolean -> value
+        is Number -> value.toInt() != 0
+        else -> throw IllegalStateException("Column $name is not boolean")
+    }
     private fun Row.uuid(name: String): UUID = UUID.fromString(string(name))
     private fun Row.nullableUuid(name: String): UUID? = nullableString(name)?.let(UUID::fromString)
     private inline fun <reified T : Enum<T>> Row.enum(name: String): T = enumValueOf(string(name))
@@ -1792,6 +2536,16 @@ class BillingLedgerPersistenceAdapter(
 
     private data class ExistingPayment(val invoiceId: Long, val userId: Long, val productId: String)
     private data class ExistingCheckout(val invoiceId: Long, val productId: String)
+    private data class ActiveSubscriptionProjection(
+        val id: Long,
+        val tierCode: String,
+        val productId: String?,
+        val accessStatus: String,
+        val renewalStatus: String,
+        val startedAt: Instant?,
+        val expiresAt: Instant?,
+        val pendingProductId: String?,
+    )
 
     private companion object {
         val REVENUECAT_PURCHASE_EVENTS = setOf("INITIAL_PURCHASE", "RENEWAL", "NON_RENEWING_PURCHASE")

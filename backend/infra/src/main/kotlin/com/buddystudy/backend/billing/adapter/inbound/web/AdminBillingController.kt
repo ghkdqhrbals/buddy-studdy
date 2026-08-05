@@ -5,6 +5,9 @@ import com.buddystudy.backend.billing.application.model.AdminBillingInvoiceDetai
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoicePage
 import com.buddystudy.backend.billing.application.model.BillingAction
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
+import com.buddystudy.backend.billing.application.model.AdminQuotaAdjustment
+import com.buddystudy.backend.billing.application.model.AdminBillingReconcileRequest
+import com.buddystudy.backend.billing.application.model.AdminUserBillingTimeline
 import com.buddystudy.backend.billing.application.port.inbound.AdminBillingUseCase
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
@@ -58,6 +61,47 @@ class AdminBillingController(
     ): BillingAction = billing.requestCancellation(authorization.bearerToken(), invoiceId, request)
 }
 
+@RestController
+@RequestMapping("/api/v1/admin/users")
+class AdminUserBillingController(
+    private val billing: AdminBillingWebPort,
+) {
+    @GetMapping("/{userId}/billing/timeline")
+    suspend fun timeline(
+        @RequestHeader("Authorization") authorization: String?,
+        @PathVariable userId: Long,
+        @RequestParam(defaultValue = "100") limit: Int,
+    ): AdminUserBillingTimeline = billing.timeline(authorization.bearerToken(), userId, limit)
+
+    @PostMapping("/{userId}/quota-adjustments")
+    suspend fun adjustQuota(
+        @RequestHeader("Authorization") authorization: String?,
+        @PathVariable userId: Long,
+        @Valid @RequestBody request: AdminQuotaAdjustmentRequest,
+    ): AdminQuotaAdjustment = billing.adjustQuota(authorization.bearerToken(), userId, request)
+
+    @PostMapping("/{userId}/billing/reconcile")
+    suspend fun reconcile(
+        @RequestHeader("Authorization") authorization: String?,
+        @PathVariable userId: Long,
+        @Valid @RequestBody request: AdminBillingReconcileRequestBody,
+    ): AdminBillingReconcileRequest = billing.reconcile(authorization.bearerToken(), userId, request.reason)
+}
+
+data class AdminQuotaAdjustmentRequest(
+    var bonusDelta: Int = 0,
+    @field:NotBlank @field:Size(min = 3, max = 1000)
+    var reason: String = "",
+    @field:NotBlank @field:Size(min = 8, max = 191)
+    @field:Pattern(regexp = "[A-Za-z0-9._:-]+")
+    var idempotencyKey: String = "",
+)
+
+data class AdminBillingReconcileRequestBody(
+    @field:Size(max = 1000)
+    var reason: String? = null,
+)
+
 data class AdminBillingActionRequest(
     @field:NotBlank
     @field:Size(min = 8, max = 191)
@@ -78,6 +122,13 @@ interface AdminBillingWebPort {
     suspend fun invoice(adminToken: String, invoiceId: Long): AdminBillingInvoiceDetail
     suspend fun requestRefund(adminToken: String, invoiceId: Long, request: AdminBillingActionRequest): BillingAction
     suspend fun requestCancellation(adminToken: String, invoiceId: Long, request: AdminBillingActionRequest): BillingAction
+    suspend fun adjustQuota(
+        adminToken: String,
+        userId: Long,
+        request: AdminQuotaAdjustmentRequest,
+    ): AdminQuotaAdjustment
+    suspend fun reconcile(adminToken: String, userId: Long, reason: String?): AdminBillingReconcileRequest
+    suspend fun timeline(adminToken: String, userId: Long, limit: Int): AdminUserBillingTimeline
 }
 
 @Component
@@ -117,6 +168,29 @@ class AdminBillingWebAdapter(
     ): BillingAction {
         authentication.validate(adminToken)
         return billing.requestCancellation(invoiceId, RequestBillingActionCommand(request.idempotencyKey, request.reason))
+    }
+
+    override suspend fun adjustQuota(
+        adminToken: String,
+        userId: Long,
+        request: AdminQuotaAdjustmentRequest,
+    ): AdminQuotaAdjustment {
+        authentication.validate(adminToken)
+        return billing.adjustQuota(userId, request.bonusDelta, request.reason, request.idempotencyKey)
+    }
+
+    override suspend fun reconcile(
+        adminToken: String,
+        userId: Long,
+        reason: String?,
+    ): AdminBillingReconcileRequest {
+        authentication.validate(adminToken)
+        return billing.reconcile(userId, reason)
+    }
+
+    override suspend fun timeline(adminToken: String, userId: Long, limit: Int): AdminUserBillingTimeline {
+        authentication.validate(adminToken)
+        return billing.timeline(userId, limit)
     }
 }
 

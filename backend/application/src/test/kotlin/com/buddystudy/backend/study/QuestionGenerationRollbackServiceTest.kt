@@ -104,7 +104,13 @@ class QuestionGenerationRollbackServiceTest {
         Mockito.verify(coverage).rollbackAsked(91, "tradeoffs", now)
         Mockito.verify(stats).deleteByQuestionId(question.id)
         Mockito.verify(questions).deleteGeneratedForRollback(question.id, saga.userId)
-        Mockito.verify(memberships).refundMonthlySystemQuestion(saga.userId, saga.quotaPeriodStartedAt, now)
+        Mockito.verify(memberships).releaseMonthlySystemQuestion(
+            saga.userId,
+            saga.quotaPeriodStartedAt,
+            saga.correlationId,
+            saga.errorMessage,
+            now,
+        )
         Mockito.verify(sagas).markRollbackCompleted(saga.correlationId, now)
         Mockito.verifyNoInteractions(inbox)
 
@@ -133,7 +139,13 @@ class QuestionGenerationRollbackServiceTest {
         writer.complete(event, now)
 
         Mockito.verifyNoInteractions(questions, stats, coverage)
-        Mockito.verify(memberships).refundMonthlySystemQuestion(saga.userId, saga.quotaPeriodStartedAt, now)
+        Mockito.verify(memberships).releaseMonthlySystemQuestion(
+            saga.userId,
+            saga.quotaPeriodStartedAt,
+            saga.correlationId,
+            saga.errorMessage,
+            now,
+        )
         Mockito.verify(sagas).markRollbackCompleted(saga.correlationId, now)
         Mockito.verifyNoInteractions(inbox)
 

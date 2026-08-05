@@ -379,6 +379,10 @@ protocol RemotePushBackendClientProtocol {
         registration: RemotePushRegistration
     ) async throws -> BackendBillingCatalog
 
+    func fetchBillingStatus(
+        registration: RemotePushRegistration
+    ) async throws -> BackendBillingStatus
+
     func createBillingCheckout(
         registration: RemotePushRegistration,
         productID: String,
@@ -628,6 +632,12 @@ protocol RemotePushBackendClientProtocol {
 }
 
 extension RemotePushBackendClientProtocol {
+    func fetchBillingStatus(
+        registration: RemotePushRegistration
+    ) async throws -> BackendBillingStatus {
+        throw RemotePushBackendError.invalidResponse
+    }
+
     func fetchBillingCatalog(
         registration: RemotePushRegistration
     ) async throws -> BackendBillingCatalog {
@@ -1185,6 +1195,17 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         let request = authenticatedRequest(registration: registration, url: url)
         let data = try await perform(request)
         return try decoder.decode(BackendQuestionQuota.self, from: data)
+    }
+
+    func fetchBillingStatus(
+        registration: RemotePushRegistration
+    ) async throws -> BackendBillingStatus {
+        let request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "billing", "status")
+        )
+        let data = try await perform(request)
+        return try decoder.decode(BackendBillingStatus.self, from: data)
     }
 
     func fetchBillingCatalog(
@@ -2750,6 +2771,90 @@ struct BackendQuestionQuota: Decodable, Equatable {
     var monthlyLimit: Int
     var remainingCount: Int
     var resetAt: Date
+    var tierCode: String
+    var periodStartedAt: Date?
+    var reservedCount: Int
+    var baseLimit: Int
+    var bonusLimit: Int
+    var anchorType: String
+    var policyVersion: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case usedCount, monthlyLimit, remainingCount, resetAt, tierCode, periodStartedAt
+        case reservedCount, baseLimit, bonusLimit, anchorType, policyVersion
+    }
+
+    init(
+        usedCount: Int,
+        monthlyLimit: Int,
+        remainingCount: Int,
+        resetAt: Date,
+        tierCode: String,
+        periodStartedAt: Date?,
+        reservedCount: Int,
+        baseLimit: Int,
+        bonusLimit: Int,
+        anchorType: String,
+        policyVersion: Int
+    ) {
+        self.usedCount = usedCount
+        self.monthlyLimit = monthlyLimit
+        self.remainingCount = remainingCount
+        self.resetAt = resetAt
+        self.tierCode = tierCode
+        self.periodStartedAt = periodStartedAt
+        self.reservedCount = reservedCount
+        self.baseLimit = baseLimit
+        self.bonusLimit = bonusLimit
+        self.anchorType = anchorType
+        self.policyVersion = policyVersion
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        usedCount = try values.decode(Int.self, forKey: .usedCount)
+        monthlyLimit = try values.decode(Int.self, forKey: .monthlyLimit)
+        remainingCount = try values.decode(Int.self, forKey: .remainingCount)
+        resetAt = try values.decode(Date.self, forKey: .resetAt)
+        tierCode = try values.decodeIfPresent(String.self, forKey: .tierCode) ?? "TIER1"
+        periodStartedAt = try values.decodeIfPresent(Date.self, forKey: .periodStartedAt)
+        reservedCount = try values.decodeIfPresent(Int.self, forKey: .reservedCount) ?? 0
+        baseLimit = try values.decodeIfPresent(Int.self, forKey: .baseLimit) ?? monthlyLimit
+        bonusLimit = try values.decodeIfPresent(Int.self, forKey: .bonusLimit) ?? 0
+        anchorType = try values.decodeIfPresent(String.self, forKey: .anchorType) ?? "ACCOUNT_CREATED"
+        policyVersion = try values.decodeIfPresent(Int.self, forKey: .policyVersion) ?? 1
+    }
+}
+
+struct BackendBillingStatus: Decodable, Equatable {
+    var tierCode: String
+    var source: String
+    var accessStatus: String
+    var renewalStatus: String
+    var productId: String?
+    var startedAt: Date?
+    var expiresAt: Date?
+    var willRenew: Bool
+    var pendingChange: String?
+    var synchronizedAt: Date
+    var quota: BackendBillingQuotaStatus
+
+    var isEntitlementActive: Bool {
+        accessStatus == "ACTIVE" || accessStatus == "GRACE_PERIOD"
+    }
+}
+
+struct BackendBillingQuotaStatus: Decodable, Equatable {
+    var periodStartedAt: Date
+    var resetAt: Date
+    var anchorType: String
+    var baseLimit: Int
+    var bonusLimit: Int
+    var usedCount: Int
+    var reservedCount: Int
+    var remainingCount: Int
+    var policyVersion: Int
+
 }
 
 struct BackendBillingCatalog: Decodable, Equatable {
