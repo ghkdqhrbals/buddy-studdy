@@ -3,14 +3,14 @@
 This document is the engineering source of truth used when updating BuddyStudy's
 Terms of Service, Privacy Policy, and Marketing Information Consent.
 
-Last reviewed: 2026-07-30
+Last reviewed: 2026-08-05
 
 ## Published Documents
 
 | Document | Required | User can withdraw | Current fixed copy |
 | --- | --- | --- | --- |
 | Terms of Service | Yes | No, while using the service | `terms-2026-07-30.html` |
-| Privacy Policy | Yes | No, while using the service | `privacy-2026-07-30.html` |
+| Privacy Policy | Yes | No, while using the service | `privacy-2026-08-05.html` |
 | Marketing Information Consent | No | Yes | `marketing-consent-2026-07-30.html` |
 
 The Korean fixed copies are the documents registered in the `terms` table. The
@@ -31,6 +31,8 @@ so localized copies must remain equivalent translations of that version.
 | Translation | Self-hosted LibreTranslate first; OpenAI fallback | Translation results are stored with content localizations |
 | Notifications | APNs device token, notification preferences, notification and read state | Until device unregister, invalidation, or account deletion |
 | Terms agreements | Immutable MySQL action history with version, source, time, app version, IP and user agent | Until account deletion unless required for a legal dispute |
+| Subscriptions and purchases | MySQL and RevenueCat: membership, product ID, App Account Token, App Store transaction/original transaction IDs, environment, amount/currency, renewal, expiration, cancellation, refund, and fulfillment state | Until account deletion or membership termination; longer where payment, refund, dispute, or legal retention requires it |
+| App control | Firebase Remote Config: app, device, and configuration request metadata | Google project retention settings |
 | Product analytics | Google Analytics for Firebase in release builds; coarse screen and feature events | Firebase project retention settings |
 | Error diagnostics | Sentry error and fatal events; error-session replay with all text and images masked | Sentry project retention settings |
 | API and operation logs | Loki; credentials and tokens are redacted | 7 days |
@@ -48,8 +50,9 @@ registration numbers, health data, biometrics, or other sensitive information.
 | Amazon Web Services | API, MySQL, Redis, secrets and backups | Seoul region |
 | Cloudflare | DNS, TLS proxy and network security | Global edge network |
 | OpenAI | AI question, grading, feedback, recommendation and fallback translation | Provider operating countries |
-| Apple APNs | iOS push delivery | Provider operating countries |
-| Google | Login, SMTP email verification and Firebase Analytics | Provider operating countries |
+| Apple | Sign in with Apple, App Store subscriptions, StoreKit transactions, purchase management, and APNs push delivery | Provider operating countries |
+| RevenueCat, Inc. | Product lookup, purchase/restore, Customer Center, subscription state, and webhook delivery | Provider operating countries |
+| Google | Login, SMTP email verification, Firebase Analytics, and Remote Config | Provider operating countries |
 | Functional Software, Inc. (Sentry) | Error and crash diagnostics | Provider operating countries |
 
 Data transmitted to external providers uses encrypted transport. BuddyStudy does
