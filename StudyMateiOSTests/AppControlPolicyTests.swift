@@ -15,6 +15,21 @@ final class AppControlPolicyTests: XCTestCase {
         XCTAssertNil(RevenueCatBillingBridge.resolvedPublicSDKKey("test_internal"))
     }
 
+    func testRevenueCatUILocaleFollowsTheInAppLanguage() {
+        XCTAssertEqual(
+            RevenueCatBillingBridge.preferredUILocaleIdentifier(for: .korean),
+            "ko_KR"
+        )
+        XCTAssertEqual(
+            RevenueCatBillingBridge.preferredUILocaleIdentifier(for: .english),
+            "en_US"
+        )
+        XCTAssertEqual(
+            RevenueCatBillingBridge.preferredUILocaleIdentifier(for: .japanese),
+            "ja_JP"
+        )
+    }
+
     func testMaintenanceTakesPriorityOverForcedUpdate() {
         let result = AppControlPolicyResolver.resolve(
             policy: policy(

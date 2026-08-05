@@ -33,6 +33,10 @@ final class RevenueCatBillingBridge {
         return appStoreKey?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    nonisolated static func preferredUILocaleIdentifier(for language: AppLanguage) -> String {
+        language.locale.identifier
+    }
+
     func start() {
         guard !Purchases.isConfigured else {
             return
@@ -63,6 +67,14 @@ final class RevenueCatBillingBridge {
         let appUserID = appAccountToken.uuidString.lowercased()
         guard Purchases.shared.appUserID != appUserID else { return }
         _ = try await Purchases.shared.logIn(appUserID)
+    }
+
+    func setPreferredUILocale(for language: AppLanguage) {
+        start()
+        guard isEnabled else { return }
+        Purchases.shared.overridePreferredUILocale(
+            Self.preferredUILocaleIdentifier(for: language)
+        )
     }
 
     func syncPurchases() async throws {
@@ -255,11 +267,12 @@ final class AppleBillingStore: ObservableObject {
         try await AppStore.showManageSubscriptions(in: scene)
     }
 
-    func prepareCustomerCenter(appAccountToken: UUID) async throws {
+    func prepareCustomerCenter(appAccountToken: UUID, language: AppLanguage) async throws {
         try await RevenueCatBillingBridge.shared.identify(appAccountToken: appAccountToken)
         guard RevenueCatBillingBridge.shared.isEnabled else {
             throw AppleBillingStoreError.customerCenterUnavailable
         }
+        RevenueCatBillingBridge.shared.setPreferredUILocale(for: language)
     }
 
     private func resolveActiveSubscription(

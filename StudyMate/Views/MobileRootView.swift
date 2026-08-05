@@ -6230,6 +6230,7 @@ private struct MobileMembershipManagementView: View {
             Task { await refreshMembershipData() }
         }) {
             CustomerCenterView()
+                .environment(\.locale, appState.settings.appLanguage.locale)
         }
     }
 
@@ -6479,7 +6480,10 @@ private struct MobileMembershipManagementView: View {
                         billingNotice = strings.customerCenterUnavailable
                         return
                     }
-                    try await billingStore.prepareCustomerCenter(appAccountToken: appAccountToken)
+                    try await billingStore.prepareCustomerCenter(
+                        appAccountToken: appAccountToken,
+                        language: appState.settings.appLanguage
+                    )
                     isCustomerCenterPresented = true
                 } else {
                     guard let scene = activeWindowScene else {
@@ -6571,6 +6575,7 @@ private struct MobileBillingHistoryView: View {
             Task { await appState.refreshBilling() }
         }) {
             CustomerCenterView()
+                .environment(\.locale, appState.settings.appLanguage.locale)
         }
     }
 
@@ -6675,7 +6680,10 @@ private struct MobileBillingHistoryView: View {
                 return
             }
             do {
-                try await billingStore.prepareCustomerCenter(appAccountToken: appAccountToken)
+                try await billingStore.prepareCustomerCenter(
+                    appAccountToken: appAccountToken,
+                    language: appState.settings.appLanguage
+                )
                 isCustomerCenterPresented = true
             } catch {
                 billingNotice = strings.customerCenterUnavailable
