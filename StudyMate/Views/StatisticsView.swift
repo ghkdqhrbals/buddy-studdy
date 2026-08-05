@@ -2196,6 +2196,8 @@ private struct StudyGrowthTreeCard: View {
             )
 
             ZStack {
+                StudyTreePixelBackdrop(accentColor: .green)
+
                 ScrollView([.horizontal, .vertical]) {
                     ZStack(alignment: .topLeading) {
                         Canvas { context, _ in
@@ -2218,23 +2220,14 @@ private struct StudyGrowthTreeCard: View {
                                     continue
                                 }
 
-                                var path = Path()
-                                path.move(to: edgeGeometry.start)
-                                let midpoint = (edgeGeometry.start.y + edgeGeometry.end.y) / 2
-                                path.addCurve(
-                                    to: edgeGeometry.end,
-                                    control1: CGPoint(x: edgeGeometry.start.x, y: midpoint),
-                                    control2: CGPoint(x: edgeGeometry.end.x, y: midpoint)
+                                let edgeColor = nodesByID[edge.childID]
+                                    .map { StudyGrowthFormat.color($0.growth) }
+                                    ?? Color.accentColor
+                                StudyTreePixelConnector.draw(
+                                    edgeGeometry,
+                                    color: edgeColor,
+                                    in: &context
                                 )
-                                let edgeColor = Color.secondary.opacity(0.48)
-                                context.stroke(path, with: .color(edgeColor), lineWidth: 1.7)
-
-                                var arrow = Path()
-                                arrow.move(to: edgeGeometry.end)
-                                arrow.addLine(to: edgeGeometry.arrowLeft)
-                                arrow.addLine(to: edgeGeometry.arrowRight)
-                                arrow.closeSubpath()
-                                context.fill(arrow, with: .color(edgeColor))
                             }
                         }
 
@@ -2244,6 +2237,7 @@ private struct StudyGrowthTreeCard: View {
                                     StudyGrowthNodeDetailView(node: node, strings: strings)
                                 } label: {
                                     StudyGrowthScoreTreeNode(
+                                        nodeID: node.studyId,
                                         topic: node.topic,
                                         currentLevel: node.currentLevel,
                                         growth: node.growth,
@@ -2312,6 +2306,7 @@ private struct StudyGrowthTreeCard: View {
 }
 
 private struct StudyGrowthScoreTreeNode: View {
+    var nodeID: Int
     var topic: String
     var currentLevel: Double?
     var growth: Double?
@@ -2362,22 +2357,27 @@ private struct StudyGrowthScoreTreeNode: View {
             height: StudyTreeLayoutSnapshot.nodeSize.height
         )
         .background {
-            Circle()
-                .fill(Color(.secondarySystemBackground))
-        }
-        .overlay {
-            Circle()
-                .strokeBorder(Color.secondary.opacity(0.22), lineWidth: 2.5)
-        }
-        .overlay {
-            Circle()
-                .trim(from: 0, to: fillFraction)
-                .stroke(
-                    nodeColor,
-                    style: StrokeStyle(lineWidth: 3, lineCap: .round)
+            ZStack {
+                Circle()
+                    .fill(Color(.secondarySystemBackground))
+                StudyTreePixelTexture(
+                    seed: nodeID,
+                    color: nodeColor
                 )
-                .rotationEffect(.degrees(-90))
+            }
         }
+        .overlay {
+            Circle()
+                .strokeBorder(Color(.separator).opacity(0.34), lineWidth: 1)
+        }
+        .overlay {
+            StudyTreePixelProgressRing(
+                progress: fillFraction,
+                color: nodeColor
+            )
+            .padding(2)
+        }
+        .shadow(color: nodeColor.opacity(0.12), radius: 10, y: 5)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             "\(topic), \(strings.currentAbility) \(StudyGrowthFormat.level(currentLevel)), "
