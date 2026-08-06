@@ -6697,7 +6697,8 @@ final class AppState: ObservableObject {
         }
 
         let nextSettings = StudySettings(
-            topic: selectedCategory?.normalizedTitle ?? settings.topic,
+            topic: selectedCategory?.normalizedTitle
+                ?? StudySettings.fallbackTopic(for: settings.appLanguage),
             difficulty: selectedCategory?.difficulty ?? settings.difficulty,
             appLanguage: settings.appLanguage,
             language: settings.appLanguage.studyLanguage,
@@ -6712,16 +6713,6 @@ final class AppState: ObservableObject {
         )
 
         persistSettings(nextSettings, apiKey: apiKey, syncBackendSchedule: false)
-        if !studyIDsToDelete.isEmpty || !topicKeysToDelete.isEmpty {
-            let remainingRecords = studyRecords.filter { record in
-                if let studyID = record.studyID {
-                    return !studyIDsToDelete.contains(studyID)
-                }
-                return !topicKeysToDelete.contains(Self.normalizedCategoryText(for: record.topic))
-            }
-            localStudyRecordUseCase.replaceRecords(remainingRecords)
-            reloadStudyRecordsFromStore(refreshRooms: true)
-        }
         studyIDsToDelete.forEach { studyRoomState.removeStudy(id: $0) }
         Task { [weak self] in
             await self?.deleteBackendStudiesIfPossible(

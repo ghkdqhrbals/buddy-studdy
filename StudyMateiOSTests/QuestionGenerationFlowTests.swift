@@ -54,6 +54,54 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertEqual(requests.value, 0)
     }
 
+    func testDeletingStudyCategoryPreservesItsStudyRecords() throws {
+        let suiteName = "StudyDeletionRecordLifecycleTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+
+        let store = SettingsStore(
+            defaults: defaults,
+            recordDatabaseURL: databaseURL,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveSettings(
+            StudySettings(
+                topic: "Redis",
+                difficulty: .level6,
+                customPrompt: "짧게",
+                intervalMinutes: 15,
+                studyCategories: [StudyCategory(id: "42", title: "Redis", difficulty: .level6)],
+                selectedStudyCategoryID: "42"
+            )
+        )
+        let record = StudyRecord(
+            id: "record-42",
+            studyID: 42,
+            question: QuestionItem(
+                question: "Redis Stream의 consumer group을 설명하세요.",
+                expectedAnswerHint: nil,
+                createdAt: Date()
+            ),
+            answer: "여러 consumer가 메시지를 분담해 처리합니다.",
+            topic: "Redis",
+            difficulty: .level6,
+            answeredAt: Date()
+        )
+        store.saveStudyRecord(record)
+        let appState = AppState(settingsStore: store)
+
+        appState.deleteStudyCategory(id: "42")
+
+        XCTAssertTrue(appState.settings.studyCategories.isEmpty)
+        XCTAssertEqual(appState.studyRecords.map(\.id), [record.id])
+        XCTAssertEqual(store.loadStudyRecords().map(\.id), [record.id])
+    }
+
     func testAutosavingStudyRoomDraftDoesNotPromoteItToSubmittedAnswer() {
         let suiteName = "AnswerDraftFlowTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

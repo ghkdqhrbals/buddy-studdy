@@ -229,13 +229,15 @@ class StudySyncServiceTest {
     }
 
     @Test
-    fun `deleting study removes records in that study subtree without using topic matching`(): Unit = runBlocking {
+    fun `deleting study preserves records and deletes only the owned study`(): Unit = runBlocking {
         studies.rows += study(id = 8, topic = "Redis")
+        questions.completedRows += pendingQuestion(id = 81, studyId = 8, topic = "Redis")
 
         service.deleteStudy(principal, studyId = 8)
 
-        assertThat(questions.softDeletedSubtreeIds).containsExactly(8)
-        assertThat(questions.softDeletedTopics).isEmpty()
+        assertThat(studies.rows).noneMatch { it.id == 8L }
+        assertThat(questions.completedRows).hasSize(1)
+        assertThat(questions.softDeletedQuestionIds).isEmpty()
     }
 
     private fun study(id: Long, topic: String) = StudyEntity(
@@ -295,9 +297,7 @@ class StudySyncServiceTest {
     private class FakeQuestionPort : QuestionPort {
         val pendingRows = mutableListOf<QuestionEntity>()
         val completedRows = mutableListOf<QuestionEntity>()
-        val softDeletedStudyIds = mutableListOf<Long>()
-        val softDeletedSubtreeIds = mutableListOf<Long>()
-        val softDeletedTopics = mutableListOf<String>()
+        val softDeletedQuestionIds = mutableListOf<Long>()
         var findPendingByStudyIdCalls = 0
         var findLatestPendingByStudyIdsCalls = 0
         var findLatestCompletedCalls = 0
@@ -344,20 +344,12 @@ class StudySyncServiceTest {
         override suspend fun findPublicAnsweredByQuery(query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override suspend fun findPublicAnsweredById(id: Long): QuestionEntity? = null
         override suspend fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = emptyList()
-        override suspend fun softDelete(id: Long, userId: Long, now: Instant): Int = 0
+        override suspend fun softDelete(id: Long, userId: Long, now: Instant): Int {
+            softDeletedQuestionIds += id
+            return 0
+        }
         override suspend fun softDeleteByUserId(userId: Long, now: Instant): Int = 0
-        override suspend fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int {
-            softDeletedStudyIds += studyId
-            return 0
-        }
-        override suspend fun softDeleteByStudySubtree(rootStudyId: Long, userId: Long, now: Instant): Int {
-            softDeletedSubtreeIds += rootStudyId
-            return 0
-        }
-        override suspend fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int {
-            softDeletedTopics += topic
-            return 0
-        }
+        override suspend fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int = 0
     }
 
     private class FakeQuestionStatsPort : QuestionStatsPort {

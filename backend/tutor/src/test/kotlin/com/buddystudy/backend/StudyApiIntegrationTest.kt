@@ -575,6 +575,71 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(questions.countPendingForStudy(created["id"].asLong())).isZero()
     }
 
+    @Test
+    fun `deleting a study subtree preserves records until the record is explicitly deleted`(): Unit = runBlocking {
+        val owner = registerActiveUser("study-record-lifecycle")
+        val root = createStudy(owner, "Lifecycle Archive")
+        val child = postJson(
+            "/api/v1/studies/${root.id}/topics",
+            """
+            {
+              "topic": "Lifecycle Child",
+              "difficultyLevel": 4,
+              "sortOrder": 1,
+              "activeForQuestions": true
+            }
+            """.trimIndent(),
+            owner.accessToken,
+            owner.deviceId,
+            owner.clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        val childId = child["id"].asLong()
+        val record = questions.save(
+            gradedQuestion(
+                deviceId = owner.deviceId,
+                userId = root.userId,
+                studyId = childId,
+                topic = "Lifecycle Child",
+                question = "Explain the lifecycle archive boundary.",
+                createdAt = Instant.parse("2026-08-06T00:00:00Z"),
+            ),
+        )
+
+        delete("/api/v1/studies/${root.id}", owner)
+            .also { assertThat(it.statusCode()).isEqualTo(204) }
+
+        assertThat(studies.findById(root.id)).isNull()
+        assertThat(studies.findById(childId)).isNull()
+        assertThat(questions.findById(record.id)?.studyId).isNull()
+
+        val records = getJson(
+            "/api/v1/records?limit=100&offset=0&query=lifecycle",
+            owner.accessToken,
+            owner.deviceId,
+            owner.clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        assertThat(records["records"].map { it["id"].asText() }).contains(record.id.toString())
+
+        val publicQuestions = get("/api/v1/public/questions?limit=20&offset=0&query=lifecycle")
+            .also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        assertThat(publicQuestions["questions"].map { it["id"].asText() }).contains(record.id.toString())
+
+        delete("/api/v1/records/${record.id}", owner)
+            .also { assertThat(it.statusCode()).isEqualTo(204) }
+
+        val recordsAfterDeletion = getJson(
+            "/api/v1/records?limit=100&offset=0&query=lifecycle",
+            owner.accessToken,
+            owner.deviceId,
+            owner.clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        assertThat(recordsAfterDeletion["records"].map { it["id"].asText() }).doesNotContain(record.id.toString())
+
+        val publicAfterDeletion = get("/api/v1/public/questions?limit=20&offset=0&query=lifecycle")
+            .also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        assertThat(publicAfterDeletion["questions"].map { it["id"].asText() }).doesNotContain(record.id.toString())
+    }
+
     @TestConfiguration
     class OpenAITestConfig {
         @Bean
@@ -990,6 +1055,9 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
 
     private fun putJson(path: String, body: String, bearerToken: String? = null, deviceId: String? = null, clientSecret: String? = null): HttpResponse<String> =
         request("PUT", path, body, bearerToken, deviceId, clientSecret)
+
+    private fun delete(path: String, auth: AuthHeaders): HttpResponse<String> =
+        request("DELETE", path, "", auth.accessToken, auth.deviceId, auth.clientSecret)
 
     private fun get(path: String): HttpResponse<String> =
         client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port$path")).GET().build(), HttpResponse.BodyHandlers.ofString())

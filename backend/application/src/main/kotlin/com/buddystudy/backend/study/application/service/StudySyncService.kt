@@ -209,10 +209,8 @@ class StudySyncService(
 
     @Transactional
     override suspend fun deleteStudy(principal: Principal, studyId: Long) {
-        val study = studies.findByIdAndUserId(studyId, principal.userId)
+        studies.findByIdAndUserId(studyId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
-        val now = Instant.now()
-        questions.softDeleteByStudySubtree(study.id, principal.userId, now)
         val deleted = studies.deleteByIdAndUserId(studyId, principal.userId)
         if (deleted == 0L) {
             throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")

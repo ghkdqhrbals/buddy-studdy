@@ -431,41 +431,6 @@ class QuestionRepository(
         now,
     )
 
-    override suspend fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int = updateDeleted(
-        Criteria.where("study_id").`is`(studyId).and("user_id").`is`(userId).and("deleted_at").isNull, now,
-    )
-
-    override suspend fun softDeleteByStudySubtree(rootStudyId: Long, userId: Long, now: Instant): Int {
-        val studyIds = template.databaseClient.sql(
-            """
-            with recursive study_subtree as (
-                select id
-                from studies
-                where id = :rootStudyId and user_id = :userId
-                union all
-                select child.id
-                from studies child
-                join study_subtree parent on child.parent_study_id = parent.id
-                where child.user_id = :userId
-            )
-            select id from study_subtree
-            """.trimIndent(),
-        )
-            .bind("rootStudyId", rootStudyId)
-            .bind("userId", userId)
-            .map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }
-            .all()
-            .collectList()
-            .awaitSingle()
-        if (studyIds.isEmpty()) return 0
-        return updateDeleted(
-            Criteria.where("study_id").`in`(studyIds)
-                .and("user_id").`is`(userId)
-                .and("deleted_at").isNull,
-            now,
-        )
-    }
-
     override suspend fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int = updateDeleted(
         Criteria.where("user_id").`is`(userId).and("topic").`is`(topic).and("deleted_at").isNull, now,
     )

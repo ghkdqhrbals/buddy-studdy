@@ -427,11 +427,6 @@ class StudyServiceTest {
             rows.forEach { it.deletedAt = now }
             return rows.size
         }
-        override suspend fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int {
-            val rows = (visibleRows + pendingRows).filter { it.studyId == studyId && it.userId == userId && it.deletedAt == null }
-            rows.forEach { it.deletedAt = now }
-            return rows.size
-        }
         override suspend fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int {
             val rows = (visibleRows + pendingRows).filter {
                 it.userId == userId && it.topic.equals(topic, ignoreCase = true) && it.deletedAt == null

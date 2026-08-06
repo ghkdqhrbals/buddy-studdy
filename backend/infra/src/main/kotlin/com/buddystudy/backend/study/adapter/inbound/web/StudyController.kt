@@ -129,7 +129,10 @@ class StudyController(
         authentication: Authentication,
     ): StudyRoomResponse = study.createStudyTopic(parentStudyId, body, authentication)
 
-    @Operation(summary = "Delete a study", description = "Deletes one study room owned by the authenticated user and removes its related questions from active records/search.")
+    @Operation(
+        summary = "Delete a study subtree",
+        description = "Deletes the owned study and all descendant topics. Existing records remain available and keep their public visibility until explicitly deleted through the records API.",
+    )
     @ApiResponses(
         ApiResponse(responseCode = "204", description = "Study deleted."),
         ApiResponse(responseCode = "401", description = "Authentication required."),

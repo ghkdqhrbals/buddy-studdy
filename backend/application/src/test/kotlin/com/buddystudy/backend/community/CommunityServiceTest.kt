@@ -269,7 +269,6 @@ class CommunityServiceTest {
         override suspend fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = rows.filter { it.id in ids }
         override suspend fun softDelete(id: Long, userId: Long, now: Instant): Int = 0
         override suspend fun softDeleteByUserId(userId: Long, now: Instant): Int = 0
-        override suspend fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int = 0
         override suspend fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int = 0
     }
 
