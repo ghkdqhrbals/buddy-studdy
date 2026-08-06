@@ -104,8 +104,12 @@ final class AppControlPolicyTests: XCTestCase {
         XCTAssertTrue(billingStore.contains("let invoice = try await waitForFulfillment(checkout.id)"))
         XCTAssertTrue(billingStore.contains("Self.requireApplied(invoice)"))
         XCTAssertFalse(billingStore.contains("try? await synchronize("))
+        XCTAssertTrue(billingStore.contains("for await verification in Transaction.currentEntitlements"))
+        XCTAssertTrue(billingStore.contains("let appliedInvoice = try Self.requireApplied(invoice)"))
         XCTAssertTrue(appState.contains("for await verification in Transaction.currentEntitlements"))
         XCTAssertTrue(appState.contains("finishAfterSync: false"))
+        XCTAssertTrue(appState.contains("_ = try AppleBillingStore.requireApplied(invoice)"))
+        XCTAssertTrue(appState.contains("case .membershipApplicationIncomplete = billingError"))
     }
 
     func testPurchaseSuccessRequiresSettledAndFulfilledBackendInvoice() throws {
@@ -138,6 +142,12 @@ final class AppControlPolicyTests: XCTestCase {
         paymentOnly.fulfilledAt = nil
         XCTAssertFalse(paymentOnly.isApplied)
         XCTAssertThrowsError(try AppleBillingStore.requireApplied(paymentOnly))
+
+        var unfulfilled = applied
+        unfulfilled.fulfilledAt = nil
+        XCTAssertEqual(unfulfilled.paymentStatus, "SETTLED")
+        XCTAssertFalse(unfulfilled.isApplied)
+        XCTAssertThrowsError(try AppleBillingStore.requireApplied(unfulfilled))
     }
 
     func testMaintenanceTakesPriorityOverForcedUpdate() {

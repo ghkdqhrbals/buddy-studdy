@@ -354,10 +354,14 @@ final class AppleBillingStore: ObservableObject {
         try await RevenueCatBillingBridge.shared.identify(appAccountToken: appAccountToken)
         if RevenueCatBillingBridge.shared.isEnabled {
             _ = try await Purchases.shared.restorePurchases()
-            return []
+        } else {
+            try await AppStore.sync()
+            try await RevenueCatBillingBridge.shared.syncPurchases()
         }
-        try await AppStore.sync()
-        try await RevenueCatBillingBridge.shared.syncPurchases()
+
+        // RevenueCat restores the Store account, but BuddyStudy still needs Apple's verified JWS
+        // for its own invoice/payment ledger. Replay every current entitlement through the same
+        // synchronous backend contract used by a new purchase.
         var restored: [BackendBillingInvoice] = []
         for await verification in Transaction.currentEntitlements {
             guard case .verified(let transaction) = verification,
@@ -369,8 +373,9 @@ final class AppleBillingStore: ObservableObject {
                 Self.backendEnvironment(transaction),
                 nil
             )
+            let appliedInvoice = try Self.requireApplied(invoice)
             await transaction.finish()
-            restored.append(invoice)
+            restored.append(appliedInvoice)
         }
         return restored
     }

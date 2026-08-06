@@ -394,6 +394,61 @@ final class ArchitecturePolicyTests: XCTestCase {
         }
     }
 
+    func testStartupAndInitialForegroundRefreshCannotRunConcurrently() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+
+        XCTAssertTrue(content.contains("private var isCompletingStartupTasks = false"))
+        XCTAssertTrue(content.contains("guard !isCompletingStartupTasks else"))
+        XCTAssertTrue(content.contains("isCompletingStartupTasks = true"))
+        XCTAssertTrue(content.contains("isCompletingStartupTasks = false"))
+    }
+
+    func testPostLoginRefreshDoesNotRefetchProfileReturnedByLogin() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let start = try XCTUnwrap(content.range(of: "private func refreshCommunitySignInData(")?.lowerBound)
+        let end = try XCTUnwrap(
+            content.range(of: "func requestEmailVerificationCode", range: start..<content.endIndex)?.lowerBound
+        )
+        let refreshSource = content[start..<end]
+
+        XCTAssertFalse(refreshSource.contains("fetchMyProfile"))
+        XCTAssertTrue(refreshSource.contains("refreshPermissionEvaluations"))
+        XCTAssertTrue(refreshSource.contains("refreshBackendStudyIfPossible"))
+    }
+
+    func testBillingRefreshCoalescesConcurrentCallers() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let start = try XCTUnwrap(content.range(of: "func refreshBilling() async")?.lowerBound)
+        let end = try XCTUnwrap(
+            content.range(of: "private func performBillingRefresh() async", range: start..<content.endIndex)?.lowerBound
+        )
+        let refreshSource = content[start..<end]
+
+        XCTAssertTrue(refreshSource.contains("if let billingRefreshTask"))
+        XCTAssertTrue(refreshSource.contains("await billingRefreshTask.value"))
+    }
+
+    func testUnchangedAPNSTokenDoesNotTriggerStartupDataRefreshAgain() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let start = try XCTUnwrap(content.range(of: "func registerRemotePushDeviceToken")?.lowerBound)
+        let end = try XCTUnwrap(
+            content.range(of: "private func syncRemotePushScheduleIfPossible", range: start..<content.endIndex)?.lowerBound
+        )
+        let registrationSource = content[start..<end]
+
+        XCTAssertTrue(registrationSource.contains("existingRegistration.apnsToken == token"))
+        XCTAssertTrue(registrationSource.contains("// APNs invokes this callback on every launch"))
+        XCTAssertFalse(registrationSource.contains("reason: \"device-token-existing\""))
+    }
+
     func testAppStateDoesNotOwnBackendTransportComposition() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")

@@ -616,6 +616,7 @@ final class AppState: ObservableObject {
     private var membershipRefreshOrder = MembershipRefreshOrder()
     private var backendClientGeneration = 0
     private var configuredBackendBaseURLDescription = ""
+    private var billingRefreshTask: Task<Void, Never>?
     private var billingRefreshRequestID = 0
     private var billingRefreshInFlightCount = 0
     private var appControlResolution = AppControlResolution.normal
@@ -627,6 +628,8 @@ final class AppState: ObservableObject {
     private var lastBackgroundQuestionPreparationAt: Date?
     private var didStart = false
     private var didCompleteStartupTasks = false
+    private var isCompletingStartupTasks = false
+    private var communitySignInRefreshTask: Task<Void, Never>?
     private var savedSettings: StudySettings
     private var savedAPIKey: String
     private var savedDebugBackendBaseURL: String
@@ -1175,6 +1178,8 @@ final class AppState: ObservableObject {
         configuredBackendBaseURLDescription = nextBaseURLDescription
         backendClientGeneration += 1
         membershipRefreshOrder.invalidatePendingRequests()
+        billingRefreshTask?.cancel()
+        billingRefreshTask = nil
         billingRefreshRequestID += 1
         if didChangeBackend {
             billingCatalog = nil
@@ -1999,10 +2004,17 @@ final class AppState: ObservableObject {
     }
 
     private func completeStartupTasksIfNeeded() async {
-        guard !didCompleteStartupTasks, hasCompletedOnboarding, !isMaintenanceAccessBlocked else {
+        guard !didCompleteStartupTasks,
+              !isCompletingStartupTasks,
+              hasCompletedOnboarding,
+              !isMaintenanceAccessBlocked else {
             return
         }
-        didCompleteStartupTasks = true
+        isCompletingStartupTasks = true
+        defer {
+            isCompletingStartupTasks = false
+            didCompleteStartupTasks = true
+        }
 
         if isCloudSyncEnabled {
             await syncCloudNow(updateVisibleQuestion: false)
@@ -2048,6 +2060,13 @@ final class AppState: ObservableObject {
             await refreshAppUpdate()
         }
         guard hasCompletedOnboarding else {
+            return
+        }
+
+        // SwiftUI can report the initial active scene while start() is still awaiting its
+        // startup refresh. That lifecycle notification must join the startup pass instead of
+        // launching the same settings, permissions, and study requests a second time.
+        guard !isCompletingStartupTasks else {
             return
         }
 
@@ -2982,7 +3001,7 @@ final class AppState: ObservableObject {
             .category(for: settings.selectedStudyCategoryID)
             .map { Self.normalizedCategoryText(for: $0.title) }
 
-        let categories = visibleStudies.map { room in
+        let categories = visibleStudies.filter { $0.parentStudyId == nil }.map { room in
             let topicKey = Self.normalizedCategoryText(for: room.topic)
             let existing = existingCategoriesByTopic[topicKey]
             return StudyCategory(
@@ -2995,9 +3014,15 @@ final class AppState: ObservableObject {
             )
         }
 
-        let selectedCategoryID = selectedTopicKey.flatMap { key in
+        let selectedRootRoomID = StudyRoomDisplayPolicy.rootRoomID(
+            containing: settings.selectedStudyCategoryID.flatMap(Int.init),
+            rooms: visibleStudies
+        )
+        let selectedCategoryID = selectedRootRoomID.map(String.init).flatMap { rootID in
+            categories.first { $0.id == rootID }?.id
+        } ?? selectedTopicKey.flatMap { key in
             categories.first { Self.normalizedCategoryText(for: $0.title) == key }?.id
-        } ?? categories.first(where: { $0.id == settings.selectedStudyCategoryID })?.id ?? categories.first?.id
+        } ?? categories.first?.id
         let selectedCategory = categories.first { $0.id == selectedCategoryID } ?? categories.first
 
         let nextSettings = normalizedSettings(
@@ -4052,7 +4077,7 @@ final class AppState: ObservableObject {
                 communityErrorMessage = nil
                 AppAnalytics.login(method: .google, outcome: .completed)
                 logAuthTrace("community_sign_in_success", reason: "google-login", deduplicate: false)
-                refreshCommunitySignInDataInBackground(registration: result.registration, reason: "google-login")
+                refreshCommunitySignInDataInBackground(reason: "google-login")
             },
             onFailure: { error in
                 handleCommunityAuthenticationError(error)
@@ -4096,7 +4121,7 @@ final class AppState: ObservableObject {
                 storedBackendIdentityUseCase.saveRegistration(result.registration)
                 AppAnalytics.login(method: .apple, outcome: .completed)
                 logAuthTrace("community_sign_in_success", reason: "apple-login", deduplicate: false)
-                refreshCommunitySignInDataInBackground(registration: result.registration, reason: "apple-login")
+                refreshCommunitySignInDataInBackground(reason: "apple-login")
             },
             onFailure: { error in
                 handleCommunityAuthenticationError(error)
@@ -4128,15 +4153,12 @@ final class AppState: ObservableObject {
         )
     }
 
-    private func refreshCommunitySignInDataInBackground(
-        registration: RemotePushRegistration,
-        reason: String
-    ) {
+    private func refreshCommunitySignInDataInBackground(reason: String) {
         let sessionGeneration = communitySessionState.generation
         logAuthTrace("community_sign_in_data_refresh_schedule", reason: reason, deduplicate: false)
-        Task { [weak self] in
+        communitySignInRefreshTask?.cancel()
+        communitySignInRefreshTask = Task { [weak self] in
             await self?.refreshCommunitySignInData(
-                registration: registration,
                 reason: reason,
                 sessionGeneration: sessionGeneration
             )
@@ -4144,7 +4166,6 @@ final class AppState: ObservableObject {
     }
 
     private func refreshCommunitySignInData(
-        registration: RemotePushRegistration,
         reason: String,
         sessionGeneration: UInt64
     ) async {
@@ -4153,50 +4174,28 @@ final class AppState: ObservableObject {
             return
         }
         logAuthTrace("community_sign_in_data_refresh_start", reason: reason, deduplicate: false)
-        await actionRunner.run(
-            operation: {
-                try await performWithBackendIdentityRecovery(
-                    registration: registration,
-                    reason: "community-profile-\(reason)",
-                    operation: { recoveredRegistration in
-                        try await communityUseCase.fetchMyProfile(registration: recoveredRegistration)
-                    }
-                )
-            },
-            onSuccess: { profile in
-                guard isCurrentCommunitySession(sessionGeneration) else {
-                    logAuthTrace("community_sign_in_data_refresh_stale", reason: reason, deduplicate: false)
-                    return
-                }
-                applyCommunityProfile(profile)
-                logAuthTrace("community_sign_in_data_refresh_success", reason: reason, deduplicate: false)
-            },
-            onFailure: { error in
-                guard isCurrentCommunitySession(sessionGeneration) else {
-                    logAuthTrace("community_sign_in_data_refresh_error_ignored", reason: reason, deduplicate: false)
-                    return
-                }
-                handleAppError(error, fallback: "", target: .community)
-                logAuthTrace(
-                    "community_sign_in_data_refresh_failure",
-                    reason: reason,
-                    extra: ["error=\(error.localizedDescription)"],
-                    deduplicate: false
-                )
-                log(.warning, "로그인 후 프로필 조회 실패: \(error.localizedDescription), reason=\(reason)")
-            }
-        )
-
-        guard isCurrentCommunitySession(sessionGeneration) else {
+        // Every login endpoint already returns the authoritative profile. Fetching /me again
+        // here duplicated the first authenticated request without adding newer information.
+        guard !Task.isCancelled, isCurrentCommunitySession(sessionGeneration) else {
             return
         }
         await refreshPermissionEvaluations(reason: reason)
+        guard !Task.isCancelled, isCurrentCommunitySession(sessionGeneration) else {
+            return
+        }
         await refreshTermsAndNotificationPreferences(reason: reason)
+        guard !Task.isCancelled, isCurrentCommunitySession(sessionGeneration) else {
+            return
+        }
         await refreshBackendStudyIfPossible(
             updateVisibleQuestion: true,
             preserveLocalSettings: false
         )
+        guard !Task.isCancelled, isCurrentCommunitySession(sessionGeneration) else {
+            return
+        }
         await loadCommunityQuestions(reset: true, userInitiated: false)
+        logAuthTrace("community_sign_in_data_refresh_success", reason: reason, deduplicate: false)
     }
 
     func requestEmailVerificationCode(email: String) async -> Bool {
@@ -4288,11 +4287,7 @@ final class AppState: ObservableObject {
             return communityErrorMessage == strings.emailVerificationRequired ? .verificationRequired : .failed
         }
 
-        await refreshBackendStudyIfPossible(
-            updateVisibleQuestion: true,
-            preserveLocalSettings: false
-        )
-        await loadCommunityQuestions(reset: true, userInitiated: true)
+        refreshCommunitySignInDataInBackground(reason: "email-login")
         return .signedIn
     }
 
@@ -4327,6 +4322,8 @@ final class AppState: ObservableObject {
         #endif
         questionGenerationPollingTask?.cancel()
         questionGenerationPollingTask = nil
+        communitySignInRefreshTask?.cancel()
+        communitySignInRefreshTask = nil
         finishQuestionGenerationProcess()
         let registrationForLogout = storedBackendIdentityUseCase.loadRegistration()
         resetCommunitySignInState()
@@ -6016,6 +6013,23 @@ final class AppState: ObservableObject {
     }
 
     func refreshBilling() async {
+        if let billingRefreshTask {
+            await billingRefreshTask.value
+            return
+        }
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+            await self.performBillingRefresh()
+        }
+        billingRefreshTask = task
+        await task.value
+        billingRefreshTask = nil
+    }
+
+    private func performBillingRefresh() async {
         let refreshOrder = membershipRefreshOrder.issue()
         let clientGeneration = backendClientGeneration
         billingRefreshRequestID += 1
@@ -6165,8 +6179,14 @@ final class AppState: ObservableObject {
                 )
             }
         )
-        await refreshBilling()
-        await refreshQuestionQuota()
+        log(
+            invoice.isApplied ? .info : .error,
+            "Apple 결제 검증 응답을 확인했습니다. endpoint=/api/v1/billing/apple/transactions " +
+                "invoiceId=\(invoice.id), status=\(invoice.status), " +
+                "paymentStatus=\(invoice.paymentStatus ?? "nil"), " +
+                "fulfilledAtPresent=\(invoice.fulfilledAt != nil), " +
+                "transactionIdPresent=\(invoice.transactionId != nil)"
+        )
         return invoice
     }
 
@@ -6180,11 +6200,17 @@ final class AppState: ObservableObject {
                 guard !Task.isCancelled else {
                     return
                 }
-                await self?.reconcileAppleTransaction(
+                guard let self else {
+                    return
+                }
+                let didSynchronize = await self.reconcileAppleTransaction(
                     verification,
                     reason: "storekit-update",
                     finishAfterSync: true
                 )
+                if didSynchronize {
+                    await self.refreshBilling()
+                }
             }
         }
     }
@@ -6197,25 +6223,29 @@ final class AppState: ObservableObject {
             guard let self else {
                 return
             }
+            var didSynchronize = false
             for await verification in Transaction.unfinished {
                 guard !Task.isCancelled else {
                     return
                 }
-                await reconcileAppleTransaction(
+                didSynchronize = await reconcileAppleTransaction(
                     verification,
                     reason: reason,
                     finishAfterSync: true
-                )
+                ) || didSynchronize
             }
             for await verification in Transaction.currentEntitlements {
                 guard !Task.isCancelled else {
                     return
                 }
-                await reconcileAppleTransaction(
+                didSynchronize = await reconcileAppleTransaction(
                     verification,
                     reason: "\(reason)-current-entitlement",
                     finishAfterSync: false
-                )
+                ) || didSynchronize
+            }
+            if didSynchronize {
+                await refreshBilling()
             }
         }
         appleBillingRecoveryTask = task
@@ -6227,15 +6257,15 @@ final class AppState: ObservableObject {
         _ verification: VerificationResult<Transaction>,
         reason: String,
         finishAfterSync: Bool
-    ) async {
+    ) async -> Bool {
         guard case .verified(let transaction) = verification else {
             log(.error, "검증되지 않은 StoreKit 거래는 완료 처리하지 않았습니다. reason=\(reason)")
-            return
+            return false
         }
         guard isCommunitySessionActive,
               !recoveringAppleTransactionIDs.contains(transaction.id),
               !synchronizedAppleTransactionIDs.contains(transaction.id) else {
-            return
+            return false
         }
 
         recoveringAppleTransactionIDs.insert(transaction.id)
@@ -6250,16 +6280,17 @@ final class AppState: ObservableObject {
                 .warning,
                 "현재 로그인 계정과 다른 StoreKit 거래를 보류했습니다. transactionID=\(transaction.id), reason=\(reason)"
             )
-            return
+            return false
         }
 
         for attempt in 1...Self.appleBillingRecoveryAttempts {
             do {
-                _ = try await syncAppleBillingTransaction(
+                let invoice = try await syncAppleBillingTransaction(
                     signedTransaction: verification.jwsRepresentation,
                     environment: AppleBillingStore.backendEnvironment(transaction),
                     invoiceNumber: nil
                 )
+                _ = try AppleBillingStore.requireApplied(invoice)
                 synchronizedAppleTransactionIDs.insert(transaction.id)
                 if finishAfterSync {
                     await transaction.finish()
@@ -6269,23 +6300,33 @@ final class AppState: ObservableObject {
                     "StoreKit 거래를 백엔드에 동기화했습니다. transactionID=\(transaction.id), " +
                         "attempt=\(attempt), reason=\(reason)"
                 )
-                return
+                return true
             } catch {
                 log(
                     .warning,
                     "StoreKit 거래 백엔드 동기화를 보류했습니다. transactionID=\(transaction.id), " +
                         "attempt=\(attempt), reason=\(reason), error=\(error.localizedDescription)"
                 )
+                // A 200 response whose invoice is not fully applied is a completed business
+                // response, not a transient transport failure. Reposting the same JWS several
+                // times cannot repair an older/incomplete backend contract and only creates
+                // duplicate traffic. Keep the entitlement unfinished so a later launch/restore
+                // can retry after the backend is fixed.
+                if let billingError = error as? AppleBillingStoreError,
+                   case .membershipApplicationIncomplete = billingError {
+                    return false
+                }
                 guard attempt < Self.appleBillingRecoveryAttempts else {
-                    return
+                    return false
                 }
                 let delay = Self.appleBillingRecoveryDelayNanoseconds[attempt - 1]
                 try? await Task.sleep(nanoseconds: delay)
                 guard !Task.isCancelled else {
-                    return
+                    return false
                 }
             }
         }
+        return false
     }
     #endif
 
@@ -6338,8 +6379,6 @@ final class AppState: ObservableObject {
                 }
             )
         }
-        await refreshBilling()
-        await refreshQuestionQuota()
         return latest
     }
 
@@ -6859,6 +6898,9 @@ final class AppState: ObservableObject {
             pendingSettings,
             apiKey: ""
         )
+        if let initialCategory = pendingSettings.activeCategory ?? pendingSettings.studyCategories.first {
+            _ = await createBackendStudyIfPossible(initialCategory, settings: pendingSettings)
+        }
         onboardingStateUseCase.setHasCompletedOnboarding(true)
         hasCompletedOnboarding = true
         #if os(iOS)
@@ -10024,21 +10066,10 @@ final class AppState: ObservableObject {
     }
 
     private func settingsForRootScheduleSync(_ source: StudySettings) -> StudySettings {
-        let childStudyIDs = Set(
-            backendStudyRooms
-                .filter { $0.parentStudyId != nil }
-                .map(\.id)
+        let rootCategories = StudyRoomDisplayPolicy.rootCategories(
+            from: source.studyCategories,
+            rooms: backendStudyRooms
         )
-        guard !childStudyIDs.isEmpty else {
-            return source
-        }
-
-        let rootCategories = source.studyCategories.filter { category in
-            guard let studyID = Int(category.id) else {
-                return true
-            }
-            return !childStudyIDs.contains(studyID)
-        }
         let selectedRootID = source.selectedStudyCategoryID.flatMap { selectedID in
             rootCategories.contains(where: { $0.id == selectedID }) ? selectedID : nil
         } ?? rootCategories.first?.id
@@ -10071,19 +10102,18 @@ final class AppState: ObservableObject {
         let token = Self.hexDeviceToken(deviceToken)
         do {
             let existingRegistration = storedBackendIdentityUseCase.loadRegistration()
-            let registration: RemotePushRegistration
 
             if let existingRegistration,
                existingRegistration.apnsToken == token {
-                guard let tokenRegistration = await registrationWithAccessToken(existingRegistration, reason: "device-token-existing") else {
-                    return
-                }
-                registration = tokenRegistration
+                // APNs invokes this callback on every launch even when nothing changed.
+                // Startup/login already refresh settings and studies, so doing it here again
+                // caused a second full study-list request.
+                return
             } else if let existingRegistration {
                 guard let tokenRegistration = await registrationWithAccessToken(existingRegistration, reason: "device-token-update") else {
                     return
                 }
-                registration = try await performWithBackendIdentityRecovery(
+                let registration = try await performWithBackendIdentityRecovery(
                     registration: tokenRegistration,
                     reason: "device-token-update",
                     operation: { recoveredRegistration in
@@ -10096,8 +10126,9 @@ final class AppState: ObservableObject {
                 )
                 storedBackendIdentityUseCase.saveRegistration(registration)
                 log(.info, "서버 push 백엔드의 iPhone APNs 토큰을 갱신했습니다.")
+                return
             } else {
-                registration = try await backendIdentityUseCase.registerDevice(
+                let registration = try await backendIdentityUseCase.registerDevice(
                     installationIdentifier: storedBackendIdentityUseCase.installationIdentifier(),
                     apnsToken: token,
                     language: settings.appLanguage,
@@ -10106,19 +10137,18 @@ final class AppState: ObservableObject {
                 )
                 storedBackendIdentityUseCase.saveRegistration(registration)
                 log(.info, "서버 push 백엔드에 iPhone 기기를 등록했습니다.")
+                try await performWithBackendIdentityRecovery(
+                    registration: registration,
+                    reason: "device-token",
+                    operation: { recoveredRegistration in
+                        try await updateBackendSettings(
+                            registration: recoveredRegistration,
+                            reason: "device-token"
+                        )
+                    }
+                )
+                await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
             }
-
-            try await performWithBackendIdentityRecovery(
-                registration: registration,
-                reason: "device-token",
-                operation: { recoveredRegistration in
-                    try await updateBackendSettings(
-                        registration: recoveredRegistration,
-                        reason: "device-token"
-                    )
-                }
-            )
-            await refreshBackendStudyIfPossible(updateVisibleQuestion: false)
         } catch {
             log(.warning, "서버 push 백엔드 등록 실패: \(error.localizedDescription)")
         }

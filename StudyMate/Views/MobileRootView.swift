@@ -6099,10 +6099,9 @@ private struct MobileProfilePage: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             if appState.isCommunitySessionActive {
-                async let quotaRefresh: Void = appState.refreshQuestionQuota()
                 async let billingRefresh: Void = appState.refreshBilling()
                 async let profileRefresh: Void = appState.loadCommunityProfile()
-                _ = await (quotaRefresh, billingRefresh, profileRefresh)
+                _ = await (billingRefresh, profileRefresh)
             }
         }
         .sheet(isPresented: $isMembershipManagementPresented) {
@@ -6589,7 +6588,6 @@ private struct MobileMembershipManagementView: View {
     }
 
     private func refreshMembershipData() async {
-        await appState.refreshQuestionQuota()
         await appState.refreshBilling()
         guard let catalog = appState.billingCatalog else { return }
         await billingStore.load(catalog: catalog)
