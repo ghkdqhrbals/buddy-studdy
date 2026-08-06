@@ -289,6 +289,29 @@ final class MobileHomeStudyPresentationPolicyTests: XCTestCase {
         )
     }
 
+    func testSelectedChildResolvesToItsRootStudy() {
+        let rooms = [
+            backendRoom(id: 11, topic: "Message Queue", parentStudyId: nil),
+            backendRoom(id: 12, topic: "Retry", parentStudyId: 11),
+            backendRoom(id: 13, topic: "Dead Letter Queue", parentStudyId: 12),
+        ]
+
+        XCTAssertEqual(
+            StudyRoomDisplayPolicy.rootRoomID(containing: 13, rooms: rooms),
+            11
+        )
+    }
+
+    func testBrokenStudyHierarchyDoesNotResolveARoot() {
+        let rooms = [
+            backendRoom(id: 12, topic: "Retry", parentStudyId: 99),
+        ]
+
+        XCTAssertNil(
+            StudyRoomDisplayPolicy.rootRoomID(containing: 12, rooms: rooms)
+        )
+    }
+
     func testStudyPresentationShowsLoadingFailureAndContentWithoutFlatFallback() {
         XCTAssertEqual(
             MobileHomeStudyPresentationPolicy.resolve(

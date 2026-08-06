@@ -1600,7 +1600,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
             )
             XCTAssertNil(body["customPrompt"])
             let schedules = try XCTUnwrap(body["schedules"] as? [[String: Any]])
-            XCTAssertNil(try XCTUnwrap(schedules.first)["customPrompt"])
+            XCTAssertTrue(schedules.isEmpty)
             return Self.response(for: request, statusCode: 200, body: "{}")
         }
 

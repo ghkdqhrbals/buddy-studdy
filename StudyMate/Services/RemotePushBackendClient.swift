@@ -981,23 +981,14 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         apiKey: String?,
         enabled: Bool
     ) async throws {
-        let scheduleItems = settings.studyCategories.isEmpty
-            ? [
-                ScheduleItemRequest(
-                    topic: settings.effectiveTopic,
-                    difficultyLevel: settings.difficulty.level,
-                    customPrompt: customPromptOverride(settings.customPrompt),
-                    openAIModel: settings.sanitizedOpenAIModel
-                )
-            ]
-            : settings.studyCategories.map { category in
-                ScheduleItemRequest(
-                    topic: category.normalizedTitle,
-                    difficultyLevel: category.difficulty.level,
-                    customPrompt: customPromptOverride(category.normalizedCustomPrompt),
-                    openAIModel: category.sanitizedOpenAIModel
-                )
-            }
+        let scheduleItems = settings.studyCategories.map { category in
+            ScheduleItemRequest(
+                topic: category.normalizedTitle,
+                difficultyLevel: category.difficulty.level,
+                customPrompt: customPromptOverride(category.normalizedCustomPrompt),
+                openAIModel: category.sanitizedOpenAIModel
+            )
+        }
         let requestBody = ScheduleRequest(
             topic: settings.effectiveTopic,
             difficultyLevel: settings.difficulty.level,

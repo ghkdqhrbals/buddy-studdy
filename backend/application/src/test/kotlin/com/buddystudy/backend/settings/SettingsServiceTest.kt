@@ -38,7 +38,7 @@ class SettingsServiceTest {
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
     @Test
-    fun `upsert schedule loads existing studies by topics in one query`(): Unit = runBlocking {
+    fun `upsert schedule updates only existing root studies in one query`(): Unit = runBlocking {
         users.row = UserEntity(id = 7, providerId = "u7", status = UserStatus.ACTIVE)
         studies.rows += StudyEntity(id = 11, userId = 7, deviceId = "dev-1", topic = "Kotlin")
 
@@ -55,7 +55,7 @@ class SettingsServiceTest {
 
         assertThat(studies.findByUserIdAndTopicsCalls).isEqualTo(1)
         assertThat(studies.findByUserIdAndTopicCalls).isEqualTo(0)
-        assertThat(studies.saved.map { it.topic }).containsExactly("Kotlin", "Swift")
+        assertThat(studies.saved.map { it.topic }).containsExactly("Kotlin")
         assertThat(studies.saved.map { it.nextDueAt }).allSatisfy { assertThat(it).isNotNull() }
     }
 
@@ -167,7 +167,7 @@ class SettingsServiceTest {
     }
 
     @Test
-    fun `upsert schedule preserves an explicitly requested SwiftUI study`(): Unit = runBlocking {
+    fun `upsert schedule never creates an unknown root study`(): Unit = runBlocking {
         users.row = UserEntity(id = 7, providerId = "u7", status = UserStatus.ACTIVE)
 
         service.upsertSchedule(
@@ -175,7 +175,34 @@ class SettingsServiceTest {
             ScheduleCommand(topic = "SwiftUI", schedules = null),
         )
 
-        assertThat(studies.saved.map { it.topic }).containsExactly("SwiftUI")
+        assertThat(studies.rows).isEmpty()
+        assertThat(studies.saved).isEmpty()
+    }
+
+    @Test
+    fun `upsert schedule never promotes an existing child topic to a root study`(): Unit = runBlocking {
+        users.row = UserEntity(id = 7, providerId = "u7", status = UserStatus.ACTIVE)
+        studies.rows += StudyEntity(id = 11, userId = 7, deviceId = "dev-1", topic = "Redis")
+        studies.rows += StudyEntity(
+            id = 12,
+            userId = 7,
+            deviceId = "dev-1",
+            parentStudyId = 11,
+            topic = "Producer Consumer Pattern",
+        )
+
+        service.upsertSchedule(
+            principal,
+            ScheduleCommand(
+                schedules = listOf(
+                    ScheduleItemCommand(topic = "Redis", difficultyLevel = 6),
+                    ScheduleItemCommand(topic = "Producer Consumer Pattern", difficultyLevel = 5),
+                ),
+            ),
+        )
+
+        assertThat(studies.rows.filter { it.parentStudyId == null }.map { it.topic }).containsExactly("Redis")
+        assertThat(studies.saved.map { it.topic }).containsExactly("Redis")
     }
 
     @Test
@@ -249,7 +276,7 @@ class SettingsServiceTest {
         }
         override suspend fun findByUserIdAndTopics(userId: Long, topics: Collection<String>): List<StudyEntity> {
             findByUserIdAndTopicsCalls += 1
-            return rows.filter { it.userId == userId && it.topic in topics }
+            return rows.filter { it.userId == userId && it.parentStudyId == null && it.topic in topics }
         }
         override suspend fun findByUserId(userId: Long, pageable: Pageable): Page<StudyEntity> =
             PageImpl(rows.filter { it.userId == userId }, pageable, rows.count { it.userId == userId }.toLong())

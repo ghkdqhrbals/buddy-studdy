@@ -12,6 +12,26 @@ enum StudyRoomDisplayPolicy {
         )
         return categories.filter { rootIDs.contains($0.id) }
     }
+
+    static func rootRoomID(
+        containing studyID: Int?,
+        rooms: [BackendStudyRoom]
+    ) -> Int? {
+        guard var currentID = studyID else {
+            return nil
+        }
+
+        let roomsByID = Dictionary(uniqueKeysWithValues: rooms.map { ($0.id, $0) })
+        var visited = Set<Int>()
+        while visited.insert(currentID).inserted,
+              let room = roomsByID[currentID] {
+            guard let parentStudyID = room.parentStudyId else {
+                return room.id
+            }
+            currentID = parentStudyID
+        }
+        return nil
+    }
 }
 
 struct StudyRoomStateStore {

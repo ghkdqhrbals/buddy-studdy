@@ -22,6 +22,7 @@ import com.buddystudy.study.domain.StudyRoomSettingsUpdate
 import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.common.domain.SupportedLanguage
 import org.springframework.http.HttpStatus
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
@@ -33,12 +34,13 @@ class SettingsService(
     private val cipher: KeyCipher,
     private val properties: BuddyStudyProperties,
 ) : SettingsUseCase {
+    private val log = LoggerFactory.getLogger(javaClass)
+
     @Transactional
     override suspend fun upsertSchedule(principal: Principal, command: ScheduleCommand): ScheduleResponse {
         val now = Instant.now()
         val encryptedKey = cipher.encrypt(command.openaiApiKey)
         val items = command.schedules
-            ?.takeIf { it.isNotEmpty() }
             ?: command.topic.trim().takeIf { it.isNotEmpty() }?.let { topic ->
                 listOf(ScheduleItemCommand(topic, command.difficultyLevel, command.customPrompt, command.openaiModel))
             }.orEmpty()
@@ -58,10 +60,16 @@ class SettingsService(
             .associateBy { it.topic }
             .toMutableMap()
         items.forEach { item ->
-            val study = studiesByTopic.getOrPut(item.topic) {
-                StudyEntity(deviceId = principal.deviceId, userId = principal.userId, topic = item.topic, createdAt = now)
+            val study = studiesByTopic[item.topic]
+            if (study == null) {
+                log.warn(
+                    "study_schedule_unknown_topic_ignored userId={} deviceId={} topic={}",
+                    principal.userId,
+                    principal.deviceId,
+                    item.topic,
+                )
+                return@forEach
             }
-            val isNewStudy = study.id == 0L
             val previousEnabled = study.enabled
             val previousIntervalMinutes = study.intervalMinutes
             val previousNextDueAt = study.nextDueAt
@@ -80,7 +88,7 @@ class SettingsService(
                 anonymous = principal.anonymous,
                 now = now,
             ))
-            if (study.shouldReschedule(isNewStudy, previousEnabled, previousIntervalMinutes, previousNextDueAt)) {
+            if (study.shouldReschedule(false, previousEnabled, previousIntervalMinutes, previousNextDueAt)) {
                 study.reschedule(now)
             }
             if (command.enabled && StudyTreeSelector.nextActiveTopic(study, allUserStudies + study) == null) {
