@@ -2196,8 +2196,6 @@ private struct StudyGrowthTreeCard: View {
             )
 
             ZStack {
-                StudyTreePixelBackdrop(accentColor: .green)
-
                 ScrollView([.horizontal, .vertical]) {
                     ZStack(alignment: .topLeading) {
                         Canvas { context, _ in
@@ -2220,12 +2218,8 @@ private struct StudyGrowthTreeCard: View {
                                     continue
                                 }
 
-                                let edgeColor = nodesByID[edge.childID]
-                                    .map { StudyGrowthFormat.color($0.growth) }
-                                    ?? Color.accentColor
-                                StudyTreePixelConnector.draw(
+                                StudyTreeConnector.draw(
                                     edgeGeometry,
-                                    color: edgeColor,
                                     in: &context
                                 )
                             }
@@ -2360,16 +2354,18 @@ private struct StudyGrowthScoreTreeNode: View {
         }
         .overlay {
             Circle()
-                .strokeBorder(Color(.separator).opacity(0.34), lineWidth: 1)
+                .strokeBorder(Color.secondary.opacity(0.22), lineWidth: 2.5)
         }
         .overlay {
-            StudyTreePixelProgressRing(
-                progress: fillFraction,
-                color: nodeColor
-            )
-            .padding(2)
+            Circle()
+                .trim(from: 0, to: fillFraction)
+                .stroke(
+                    nodeColor,
+                    style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+                .padding(1.5)
         }
-        .shadow(color: nodeColor.opacity(0.12), radius: 10, y: 5)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             "\(topic), \(strings.currentAbility) \(StudyGrowthFormat.level(currentLevel)), "

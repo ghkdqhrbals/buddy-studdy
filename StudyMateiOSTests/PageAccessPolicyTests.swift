@@ -1336,31 +1336,6 @@ final class StudyTreeLayoutPolicyTests: XCTestCase {
         XCTAssertEqual(geometry.arrowRight, CGPoint(x: 105, y: 216))
     }
 
-    func testPixelTreeEdgesUseAStableOrthogonalBranch() throws {
-        let geometry = try XCTUnwrap(
-            StudyTreeEdgePolicy.steppedGeometry(
-                start: CGPoint(x: 100, y: 160),
-                end: CGPoint(x: 254, y: 226)
-            )
-        )
-
-        XCTAssertEqual(
-            geometry,
-            StudyTreeSteppedEdgeGeometry(
-                start: CGPoint(x: 100, y: 160),
-                parentCorner: CGPoint(x: 100, y: 193),
-                childCorner: CGPoint(x: 254, y: 193),
-                end: CGPoint(x: 254, y: 226)
-            )
-        )
-        XCTAssertNil(
-            StudyTreeEdgePolicy.steppedGeometry(
-                start: CGPoint(x: 12, y: 12),
-                end: CGPoint(x: 12, y: 12)
-            )
-        )
-    }
-
     func testStudySubtreeDeletesChildrenBeforeTheirParent() {
         let parentByRoomID = [
             2: 1,

@@ -82,13 +82,6 @@ struct StudyTreeDirectionalEdgeGeometry: Equatable {
     var arrowRight: CGPoint
 }
 
-struct StudyTreeSteppedEdgeGeometry: Equatable {
-    var start: CGPoint
-    var parentCorner: CGPoint
-    var childCorner: CGPoint
-    var end: CGPoint
-}
-
 enum StudyTreeNodeStylePolicy {
     static func levelFillFraction(_ difficultyLevel: Int) -> CGFloat {
         CGFloat(min(max(difficultyLevel, 1), 10)) / 10
@@ -185,27 +178,6 @@ enum StudyTreeEdgePolicy {
                 x: arrowBase.x - perpendicularX,
                 y: arrowBase.y - perpendicularY
             )
-        )
-    }
-
-    static func steppedGeometry(
-        start: CGPoint,
-        end: CGPoint
-    ) -> StudyTreeSteppedEdgeGeometry? {
-        guard start.x.isFinite,
-              start.y.isFinite,
-              end.x.isFinite,
-              end.y.isFinite,
-              hypot(end.x - start.x, end.y - start.y) > 0.5 else {
-            return nil
-        }
-
-        let branchY = start.y + (end.y - start.y) / 2
-        return StudyTreeSteppedEdgeGeometry(
-            start: start,
-            parentCorner: CGPoint(x: start.x, y: branchY),
-            childCorner: CGPoint(x: end.x, y: branchY),
-            end: end
         )
     }
 }

@@ -3138,142 +3138,33 @@ struct StudyTreeLayoutSnapshot {
     }
 }
 
-struct StudyTreePixelBackdrop: View {
-    var accentColor: Color = .accentColor
-
-    var body: some View {
-        Canvas { context, size in
-            let spacing: CGFloat = 24
-            let columns = max(1, Int(size.width / spacing) + 1)
-            let rows = max(1, Int(size.height / spacing) + 1)
-
-            for row in 0..<rows {
-                for column in 0..<columns {
-                    let isAnchor = row.isMultiple(of: 4) && column.isMultiple(of: 4)
-                    let side: CGFloat = isAnchor ? 2.5 : 1.5
-                    let color = isAnchor
-                        ? accentColor.opacity(0.15)
-                        : Color.secondary.opacity(0.09)
-                    let rect = CGRect(
-                        x: CGFloat(column) * spacing - side / 2,
-                        y: CGFloat(row) * spacing - side / 2,
-                        width: side,
-                        height: side
-                    )
-                    context.fill(Path(rect), with: .color(color))
-                }
-            }
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-}
-
-enum StudyTreePixelConnector {
+enum StudyTreeConnector {
     static func draw(
         _ geometry: StudyTreeDirectionalEdgeGeometry,
-        color: Color,
+        color: Color = .secondary,
         in context: inout GraphicsContext
     ) {
-        guard let stepped = StudyTreeEdgePolicy.steppedGeometry(
-            start: geometry.start,
-            end: geometry.end
-        ) else {
-            return
-        }
-
         var path = Path()
-        path.move(to: stepped.start)
-        path.addLine(to: stepped.parentCorner)
-        path.addLine(to: stepped.childCorner)
-        path.addLine(to: stepped.end)
+        path.move(to: geometry.start)
+        let midpoint = (geometry.start.y + geometry.end.y) / 2
+        path.addCurve(
+            to: geometry.end,
+            control1: CGPoint(x: geometry.start.x, y: midpoint),
+            control2: CGPoint(x: geometry.end.x, y: midpoint)
+        )
 
         context.stroke(
             path,
-            with: .color(Color(.systemBackground).opacity(0.92)),
-            style: StrokeStyle(lineWidth: 5, lineCap: .square, lineJoin: .miter)
+            with: .color(color.opacity(0.48)),
+            style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round)
         )
-        context.stroke(
-            path,
-            with: .color(color.opacity(0.72)),
-            style: StrokeStyle(lineWidth: 2, lineCap: .square, lineJoin: .miter)
-        )
-
-        let jointSize: CGFloat = 5
-        let jointRect = CGRect(
-            x: stepped.childCorner.x - jointSize / 2,
-            y: stepped.childCorner.y - jointSize / 2,
-            width: jointSize,
-            height: jointSize
-        )
-        context.fill(Path(jointRect), with: .color(color.opacity(0.92)))
 
         var arrow = Path()
         arrow.move(to: geometry.end)
         arrow.addLine(to: geometry.arrowLeft)
         arrow.addLine(to: geometry.arrowRight)
         arrow.closeSubpath()
-        context.fill(arrow, with: .color(color.opacity(0.9)))
-    }
-}
-
-struct StudyTreePixelTexture: View {
-    var seed: Int
-    var color: Color
-
-    var body: some View {
-        Canvas { context, size in
-            let pixel: CGFloat = 7
-            let columns = Int(size.width / pixel)
-            let rows = Int(size.height / pixel)
-
-            for row in 0..<rows {
-                for column in 0..<columns {
-                    let value = abs(seed &* 31 &+ row &* 17 &+ column &* 13)
-                    guard value.isMultiple(of: 11) else { continue }
-                    let rect = CGRect(
-                        x: CGFloat(column) * pixel,
-                        y: CGFloat(row) * pixel,
-                        width: pixel - 1,
-                        height: pixel - 1
-                    )
-                    context.fill(Path(rect), with: .color(color.opacity(0.08)))
-                }
-            }
-        }
-        .clipShape(Circle())
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-}
-
-struct StudyTreePixelProgressRing: View {
-    var progress: CGFloat
-    var color: Color
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .stroke(
-                    Color.secondary.opacity(0.16),
-                    style: StrokeStyle(lineWidth: 3, dash: [3, 4])
-                )
-
-            Circle()
-                .trim(from: 0, to: min(max(progress, 0), 1))
-                .stroke(
-                    color,
-                    style: StrokeStyle(
-                        lineWidth: 4,
-                        lineCap: .butt,
-                        lineJoin: .miter,
-                        dash: [7, 3]
-                    )
-                )
-                .rotationEffect(.degrees(-90))
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+        context.fill(arrow, with: .color(color.opacity(0.48)))
     }
 }
 
@@ -3378,8 +3269,6 @@ struct MobileStudyTreeView: View {
                         height: canvasLayout.size.height * zoomScale
                     )
                     ZStack(alignment: .bottom) {
-                        StudyTreePixelBackdrop()
-
                         ScrollView([.horizontal, .vertical]) {
                             ZStack(alignment: .topLeading) {
                                 ZStack(alignment: .topLeading) {
@@ -3404,14 +3293,8 @@ struct MobileStudyTreeView: View {
                                             ) else {
                                                 continue
                                             }
-                                            let childColor = appState
-                                                .backendStudyRoom(id: edge.childID)?
-                                                .activeForQuestions == true
-                                                ? Color.green
-                                                : Color.accentColor
-                                            StudyTreePixelConnector.draw(
+                                            StudyTreeConnector.draw(
                                                 geometry,
-                                                color: childColor,
                                                 in: &context
                                             )
                                         }
@@ -3421,7 +3304,6 @@ struct MobileStudyTreeView: View {
                                         StudyTreeNode(
                                             room: placement.room,
                                             strings: strings,
-                                            isRoot: placement.room.id == rootStudyID,
                                             hasPendingQuestion:
                                                 appState.pendingQuestionCount(
                                                     categoryID: String(placement.room.id)
@@ -4283,7 +4165,6 @@ private extension UIView {
 private struct StudyTreeNode: View {
     var room: BackendStudyRoom
     var strings: AppStrings
-    var isRoot: Bool
     var hasPendingQuestion: Bool
     var isSelectionMode: Bool
     var isSelected: Bool
@@ -4295,10 +4176,7 @@ private struct StudyTreeNode: View {
     var onDelete: () -> Void
 
     private var levelProgressColor: Color {
-        if isRoot {
-            return .accentColor
-        }
-        return room.activeForQuestions ? Color.green : Color.secondary.opacity(0.62)
+        room.activeForQuestions ? Color.green : Color.secondary.opacity(0.6)
     }
 
     private var levelFillFraction: CGFloat {
@@ -4309,22 +4187,17 @@ private struct StudyTreeNode: View {
         Button {
             isSelectionMode ? onSelect() : onOpen()
         } label: {
-            VStack(spacing: 7) {
-                HStack(spacing: 5) {
-                    Rectangle()
-                        .fill(levelProgressColor)
-                        .frame(width: 6, height: 6)
-                    Text(isRoot ? strings.rootTopic : StudyTreeNodeStylePolicy.levelText(room.difficultyLevel))
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
-                        .textCase(.uppercase)
-                        .foregroundStyle(levelProgressColor)
-                }
-
+            VStack(spacing: 5) {
                 Text(room.topic)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
+
+                Text(StudyTreeNodeStylePolicy.levelText(room.difficultyLevel))
+                    .font(.caption2.weight(.bold))
+                    .monospacedDigit()
+                    .foregroundStyle(room.activeForQuestions ? Color.green : Color.secondary)
             }
             .padding(12)
             .frame(
@@ -4333,22 +4206,22 @@ private struct StudyTreeNode: View {
                 alignment: .center
             )
             .background {
-                ZStack {
-                    Circle()
-                        .fill(Color(.secondarySystemBackground))
-                    StudyTreePixelTexture(seed: room.id, color: levelProgressColor)
-                }
+                Circle()
+                    .fill(Color(.secondarySystemBackground))
             }
             .overlay {
                 Circle()
-                    .strokeBorder(Color(.separator).opacity(0.34), lineWidth: 1)
+                    .strokeBorder(Color.secondary.opacity(0.22), lineWidth: 2.5)
             }
             .overlay {
-                StudyTreePixelProgressRing(
-                    progress: levelFillFraction,
-                    color: levelProgressColor
-                )
-                .padding(2)
+                Circle()
+                    .trim(from: 0, to: levelFillFraction)
+                    .stroke(
+                        levelProgressColor,
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+                    .padding(1.5)
             }
             .overlay {
                 if isSelected {
@@ -4358,7 +4231,6 @@ private struct StudyTreeNode: View {
                 }
             }
             .contentShape(Circle())
-            .shadow(color: levelProgressColor.opacity(0.12), radius: 10, y: 5)
         }
         .buttonStyle(.plain)
         .contentShape(.contextMenuPreview, Circle())
