@@ -174,6 +174,7 @@ struct BackendBaseURLConfiguration: Equatable {
 
     var isDebuggingEnabled: Bool
     var debugBackendBaseURL: String
+    var isTestFlight: Bool = AppDistributionContext.live.isTestFlight
     var launchBackendBaseURL: String? = ProcessInfo.processInfo.environment["BUDDYSTUDY_BACKEND_BASE_URL"]
 
     var normalizedDebugBackendBaseURL: String {
@@ -185,6 +186,10 @@ struct BackendBaseURLConfiguration: Equatable {
     }
 
     var effectiveBaseURL: URL {
+        // TestFlight purchases and the sandbox-only webhook must share one ledger.
+        if isTestFlight {
+            return Self.defaultDebugBaseURL
+        }
         if let launchBackendBaseURL,
            let launchURL = Self.resolvedDebugBackendURL(from: launchBackendBaseURL) {
             return launchURL

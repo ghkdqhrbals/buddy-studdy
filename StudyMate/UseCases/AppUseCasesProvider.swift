@@ -3,9 +3,14 @@ import Foundation
 @MainActor
 struct AppUseCasesProvider {
     private let injectedBackendClient: RemotePushBackendClientProtocol?
+    private let appDistributionContext: AppDistributionContext
 
-    init(backendClient: RemotePushBackendClientProtocol? = nil) {
+    init(
+        backendClient: RemotePushBackendClientProtocol? = nil,
+        appDistributionContext: AppDistributionContext = .live
+    ) {
         self.injectedBackendClient = backendClient
+        self.appDistributionContext = appDistributionContext
     }
 
     var usesConfigurableBackendClient: Bool {
@@ -26,7 +31,8 @@ struct AppUseCasesProvider {
     ) -> String {
         BackendBaseURLConfiguration(
             isDebuggingEnabled: isDebuggingEnabled,
-            debugBackendBaseURL: debugBackendBaseURL
+            debugBackendBaseURL: debugBackendBaseURL,
+            isTestFlight: appDistributionContext.isTestFlight
         ).displayBaseURL
     }
 
@@ -37,7 +43,8 @@ struct AppUseCasesProvider {
         AppUseCases(
             backendClient: injectedBackendClient ?? BackendBaseURLConfiguration(
                 isDebuggingEnabled: isDebuggingEnabled,
-                debugBackendBaseURL: debugBackendBaseURL
+                debugBackendBaseURL: debugBackendBaseURL,
+                isTestFlight: appDistributionContext.isTestFlight
             ).makeClient()
         )
     }

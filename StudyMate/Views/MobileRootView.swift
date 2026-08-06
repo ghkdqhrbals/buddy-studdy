@@ -6257,6 +6257,7 @@ private struct MobileMembershipManagementView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var billingStore = AppleBillingStore()
     @State private var billingNotice: String?
+    @State private var isBillingRecoveryPresented = false
     @State private var isCustomerCenterPresented = false
     @State private var selectedTierCode: String?
     @State private var purchaseTask: Task<Void, Never>?
@@ -6382,6 +6383,14 @@ private struct MobileMembershipManagementView: View {
             Button(strings.close, role: .cancel) {}
         } message: {
             Text(billingNotice ?? "")
+        }
+        .alert(strings.billingRecoveryTitle, isPresented: $isBillingRecoveryPresented) {
+            Button(strings.reviewCancelledPurchase) {
+                openPurchaseRecovery()
+            }
+            Button(strings.close, role: .cancel) {}
+        } message: {
+            Text(strings.billingRecoveryMessage)
         }
         .sheet(isPresented: $isCustomerCenterPresented, onDismiss: {
             Task { await refreshMembershipData() }
@@ -6689,7 +6698,30 @@ private struct MobileMembershipManagementView: View {
             } catch {
                 guard !Task.isCancelled else { return }
                 await appState.refreshBilling()
-                billingNotice = error.localizedDescription
+                if let billingError = error as? AppleBillingStoreError,
+                   case .membershipApplicationIncomplete = billingError {
+                    isBillingRecoveryPresented = true
+                } else {
+                    billingNotice = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func openPurchaseRecovery() {
+        Task {
+            guard let appAccountToken = appState.billingCatalog?.appAccountToken else {
+                billingNotice = strings.customerCenterUnavailable
+                return
+            }
+            do {
+                try await billingStore.prepareCustomerCenter(
+                    appAccountToken: appAccountToken,
+                    language: appState.settings.appLanguage
+                )
+                isCustomerCenterPresented = true
+            } catch {
+                billingNotice = strings.customerCenterUnavailable
             }
         }
     }

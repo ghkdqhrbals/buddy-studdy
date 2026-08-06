@@ -2852,6 +2852,18 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertEqual(configuration.effectiveBaseURL.absoluteString, "https://lowfidev.cloud")
     }
 
+    @MainActor
+    func testTestFlightAlwaysUsesDevelopmentBackend() {
+        let configuration = BackendBaseURLConfiguration(
+            isDebuggingEnabled: false,
+            debugBackendBaseURL: "https://api.ghkdqhrbals.org",
+            isTestFlight: true,
+            launchBackendBaseURL: "https://api.ghkdqhrbals.org"
+        )
+
+        XCTAssertEqual(configuration.effectiveBaseURL.absoluteString, "https://lowfidev.cloud")
+    }
+
     func testDevelopmentStoreKitConfigurationLoadsAllPaidProducts() async throws {
         let session = try SKTestSession(configurationFileNamed: "StudyMateDev")
         session.disableDialogs = true

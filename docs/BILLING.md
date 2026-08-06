@@ -122,6 +122,10 @@ separate transaction before lifecycle processing, so processing failure remains
 observable and retryable. Projection and RevenueCat reconciliation retry at
 most three times; exhausted work and its complete error remain stored for an
 operator alert. A backend failure never initiates or claims an Apple refund.
+Apple exposes no API that lets BuddyStudy silently cancel or refund an approved
+App Store transaction. The app preserves recoverable transaction evidence and
+opens Apple/RevenueCat purchase management so the user can restore the purchase
+or explicitly request a refund.
 
 RevenueCat event claims use a five-minute processing lease. A process that dies
 after claiming an event cannot leave it permanently in `PROCESSING`; another
@@ -451,6 +455,11 @@ monitoring administrator session. The monitoring UI exposes the flow at
    backend. The app does not embed or select a RevenueCat Test Store key.
    RevenueCat remains configured once per process with the `appl_` key. Release
    validates that the public key starts with `appl_`.
+8. TestFlight is detected from its `sandboxReceipt` and always uses
+   `https://lowfidev.cloud`, regardless of persisted developer settings or the
+   launch environment override. App Store builds use the production API. This
+   keeps TestFlight checkouts and the Sandbox-only RevenueCat webhook on the
+   same development billing ledger.
 
 The committed App Store Connect source of truth is
 `app-store/billing/subscriptions.json`. Product metadata can take up to one hour

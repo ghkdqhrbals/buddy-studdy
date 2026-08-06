@@ -2875,6 +2875,14 @@ struct AppStrings {
     }
     var billingPurchased: String { text("멤버십이 적용됐습니다.", "Your membership is active.", "メンバーシップが有効になりました。") }
     var billingRestored: String { text("구매 내역을 복원했습니다.", "Purchases restored.", "購入履歴を復元しました。") }
+    var billingRecoveryTitle: String { text("결제 확인 필요", "Purchase needs attention", "購入の確認が必要です") }
+    var billingRecoveryMessage: String {
+        text(
+            "App Store 결제는 완료됐지만 멤버십 반영을 확인하지 못했습니다. 결제 관리에서 구매 복원 또는 환불을 진행해 주세요.",
+            "The App Store purchase completed, but membership activation could not be confirmed. Open purchase management to restore the purchase or request a refund.",
+            "App Storeでの購入は完了しましたが、メンバーシップの反映を確認できませんでした。購入管理で復元または返金を申請してください。"
+        )
+    }
     var refundSubmitted: String { text("Apple에 환불 요청을 제출했습니다.", "Refund request submitted to Apple.", "Appleに返金リクエストを送信しました。") }
     var billingStatus: String { text("상태", "Status", "ステータス") }
     var monthlyQuestionAllowance: String { text("월 질문", "Monthly questions", "月間質問数") }
