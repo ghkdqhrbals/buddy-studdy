@@ -3086,6 +3086,47 @@ struct AppStrings {
         )
     }
     var onboardingLanguage: String { text("언어", "Language") }
+    var onboardingLanguageTitle: String {
+        text("사용할 언어를 선택하세요", "Choose your language", "使用する言語を選択")
+    }
+    var onboardingLanguageDescription: String {
+        text(
+            "앱 화면과 학습 질문에 사용할 언어입니다. 설정에서 언제든 변경할 수 있습니다.",
+            "This language is used for the app and study questions. You can change it later in Settings.",
+            "アプリ画面と学習質問に使用します。設定からいつでも変更できます。"
+        )
+    }
+    var onboardingStudyTitle: String {
+        text("첫 학습을 설정하세요", "Set up your first study", "最初の学習を設定")
+    }
+    var onboardingStudyDescription: String {
+        text(
+            "지금 집중하고 싶은 주제와 시작 난이도를 정하세요.",
+            "Choose what you want to focus on and a starting difficulty.",
+            "集中したいテーマと開始レベルを選びます。"
+        )
+    }
+    var onboardingTopicPlaceholder: String {
+        text("예: Redis, 영어 회화, 운영체제", "For example: Redis, English, Operating Systems", "例：Redis、英会話、オペレーティングシステム")
+    }
+    var onboardingRhythmTitle: String {
+        text("학습 리듬을 정하세요", "Choose your study rhythm", "学習リズムを選択")
+    }
+    var onboardingRhythmDescription: String {
+        text(
+            "질문을 받을 기본 간격입니다. 나중에 학습 설정에서 바꿀 수 있습니다.",
+            "This is the default interval between questions. You can change it later in study settings.",
+            "質問を受け取る基本間隔です。後から学習設定で変更できます。"
+        )
+    }
+    var onboardingQuestionInterval: String {
+        text("질문 간격", "Question interval", "質問間隔")
+    }
+    var onboardingContinue: String { text("계속", "Continue", "続ける") }
+    var onboardingBack: String { text("이전", "Back", "戻る") }
+    func onboardingStep(current: Int, total: Int) -> String {
+        text("총 \(total)단계 중 \(current)단계", "Step \(current) of \(total)", "\(total)ステップ中\(current)ステップ")
+    }
     var onboardingOpenAI: String { text("OpenAI 연결", "OpenAI Connection") }
     var onboardingStudySetup: String { text("학습 설정", "Study Setup") }
     var onboardingAPIKeyHelp: String {
@@ -3099,7 +3140,13 @@ struct AppStrings {
     var onboardingStart: String { text("시작하기", "Start") }
     var onboardingSkip: String { text("나중에 설정", "Set Up Later") }
     var onboardingCompleted: String { text("온보딩을 완료했습니다.", "Onboarding complete.") }
-    var onboardingSkipped: String { text("설정 탭에서 나중에 마저 설정하세요.", "Finish setup later in Settings.") }
+    var onboardingSkipped: String {
+        text(
+            "프로필의 설정에서 나중에 마저 설정하세요.",
+            "Finish setup later from Profile settings.",
+            "プロフィール設定から後で設定できます。"
+        )
+    }
     var onboardingCompletedWithoutAPIKey: String {
         text(
             "API 키가 없어 타이머를 일시정지했습니다. Settings > Secrets에서 키를 입력하세요.",

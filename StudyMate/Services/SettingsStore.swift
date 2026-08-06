@@ -140,9 +140,7 @@ final class SettingsStore {
     func loadSettings() -> StudySettings {
         guard let data = defaults.data(forKey: Keys.settings),
               let settings = try? decoder.decode(StudySettings.self, from: data) else {
-            let initialSettings = StudySettings.initial(for: preferredAppLanguageProvider())
-            saveSettings(initialSettings)
-            return initialSettings
+            return StudySettings.initial(for: preferredAppLanguageProvider())
         }
 
         return StudySettings(

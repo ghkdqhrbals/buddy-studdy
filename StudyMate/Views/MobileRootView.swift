@@ -10058,110 +10058,390 @@ private extension View {
     }
 }
 
+private enum MobileOnboardingStep: Int, CaseIterable {
+    case language
+    case study
+    case rhythm
+
+    var next: MobileOnboardingStep? {
+        MobileOnboardingStep(rawValue: rawValue + 1)
+    }
+
+    var previous: MobileOnboardingStep? {
+        MobileOnboardingStep(rawValue: rawValue - 1)
+    }
+}
+
 private struct MobileOnboardingView: View {
     @EnvironmentObject private var appState: AppState
     @State private var language: AppLanguage = .korean
     @State private var topic = ""
     @State private var difficultyLevel = Difficulty.beginner.level
     @State private var intervalMinutes = 15
+    @State private var step: MobileOnboardingStep = .language
+    @State private var didPrepare = false
     @State private var isCompleting = false
+    @FocusState private var isTopicFocused: Bool
 
     private var strings: AppStrings {
         AppStrings(language: language)
     }
 
-    private var canStart: Bool {
-        !isCompleting
+    private var canAdvance: Bool {
+        guard !isCompleting else {
+            return false
+        }
+
+        switch step {
+        case .language, .rhythm:
+            return true
+        case .study:
+            return !topic.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Text(strings.onboardingSubtitle)
+        ZStack {
+            Color(.systemBackground)
+                .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                onboardingHeader
+                onboardingProgress
+
+                ScrollView {
+                    onboardingContent
+                        .frame(maxWidth: 560)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 34)
+                        .padding(.bottom, 28)
                 }
+                .scrollDismissesKeyboard(.interactively)
 
-                Section(strings.onboardingLanguage) {
-                    Picker(strings.appLanguage, selection: $language) {
-                        ForEach(AppLanguage.allCases) { language in
-                            Text(language.displayName).tag(language)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                }
+                onboardingFooter
+            }
+        }
+        .keyboardDoneToolbar(strings.done)
+        .environment(\.locale, language.locale)
+        .onAppear(perform: prepareIfNeeded)
+        .onChange(of: language) { previousLanguage, nextLanguage in
+            let previousFallback = StudySettings.fallbackTopic(for: previousLanguage)
+            let normalizedTopic = topic.trimmingCharacters(in: .whitespacesAndNewlines)
+            if normalizedTopic.isEmpty || normalizedTopic == previousFallback {
+                topic = ""
+            }
+        }
+    }
 
-                Section(strings.onboardingStudySetup) {
-                    TextField(strings.studyTopic, text: $topic)
+    private var onboardingHeader: some View {
+        HStack(spacing: 10) {
+            Image("BuddyStudyBrandLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 32, height: 32)
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .accessibilityHidden(true)
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text(strings.difficulty)
-                            Spacer()
-                            Text(Difficulty(level: difficultyLevel).displayName(language: language))
-                                .fontWeight(.semibold)
-                                .monospacedDigit()
-                        }
+            Text("BuddyStudy")
+                .font(.headline.weight(.bold))
 
-                        Slider(
-                            value: Binding(
-                                get: { Double(difficultyLevel) },
-                                set: { difficultyLevel = min(max(Int($0.rounded()), 1), 10) }
-                            ),
-                            in: 1...10,
-                            step: 1
-                        )
+            Spacer()
 
-                        HStack {
-                            Text("1")
-                            Spacer()
-                            Text("10")
-                        }
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    }
+            Button(strings.onboardingSkip) {
+                appState.skipOnboarding(language: language)
+            }
+            .font(.subheadline.weight(.semibold))
+            .buttonStyle(.plain)
+            .disabled(isCompleting)
+        }
+        .frame(minHeight: 56)
+        .padding(.horizontal, 20)
+    }
 
-                    Stepper(
-                        strings.questionInterval(minutes: intervalMinutes),
-                        value: $intervalMinutes,
-                        in: 1...240
-                    )
+    private var onboardingProgress: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                ForEach(MobileOnboardingStep.allCases, id: \.rawValue) { progressStep in
+                    Capsule()
+                        .fill(progressStep.rawValue <= step.rawValue ? Color.accentColor : Color.secondary.opacity(0.2))
+                        .frame(height: 3)
                 }
             }
-            .keyboardDoneToolbar(strings.done)
-            .navigationTitle(strings.onboardingTitle)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(strings.onboardingSkip) {
-                        appState.skipOnboarding()
-                    }
-                }
 
-                ToolbarItem(placement: .topBarTrailing) {
+            Text(strings.onboardingStep(current: step.rawValue + 1, total: MobileOnboardingStep.allCases.count))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 24)
+    }
+
+    @ViewBuilder
+    private var onboardingContent: some View {
+        switch step {
+        case .language:
+            onboardingLanguageContent
+                .transition(.opacity)
+        case .study:
+            onboardingStudyContent
+                .transition(.opacity)
+        case .rhythm:
+            onboardingRhythmContent
+                .transition(.opacity)
+        }
+    }
+
+    private var onboardingLanguageContent: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            onboardingTitle(
+                title: strings.onboardingLanguageTitle,
+                description: strings.onboardingLanguageDescription
+            )
+
+            VStack(spacing: 10) {
+                ForEach(AppLanguage.allCases) { option in
                     Button {
-                        Task {
-                            isCompleting = true
-                            await appState.completeOnboarding(settings: pendingSettings)
-                            isCompleting = false
-                        }
+                        language = option
                     } label: {
-                        if isCompleting || appState.isValidatingAPIKey {
-                            ProgressView()
-                        } else {
-                            Text(strings.onboardingStart)
+                        HStack {
+                            Text(option.displayName)
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(.primary)
+
+                            Spacer()
+
+                            Image(systemName: language == option ? "checkmark.circle.fill" : "circle")
+                                .font(.title3)
+                                .foregroundStyle(language == option ? Color.accentColor : Color.secondary)
                         }
+                        .padding(.horizontal, 16)
+                        .frame(height: 54)
+                        .background(Color(.secondarySystemBackground))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(language == option ? Color.accentColor : Color.clear, lineWidth: 1.5)
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
-                    .disabled(!canStart)
+                    .buttonStyle(.plain)
                 }
             }
-                .onAppear {
-                language = appState.settings.appLanguage
-                let fallbackTopic = StudySettings.fallbackTopic(for: language)
-                topic = appState.settings.topic.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    ? fallbackTopic
-                    : appState.settings.topic
-                difficultyLevel = appState.settings.difficulty.level
-                intervalMinutes = appState.settings.sanitizedIntervalMinutes
+        }
+    }
+
+    private var onboardingStudyContent: some View {
+        VStack(alignment: .leading, spacing: 30) {
+            onboardingTitle(
+                title: strings.onboardingStudyTitle,
+                description: strings.onboardingStudyDescription
+            )
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text(strings.studyTopic)
+                    .font(.subheadline.weight(.semibold))
+
+                TextField(strings.onboardingTopicPlaceholder, text: $topic)
+                    .textInputAutocapitalization(.sentences)
+                    .autocorrectionDisabled(false)
+                    .focused($isTopicFocused)
+                    .padding(.horizontal, 14)
+                    .frame(height: 52)
+                    .background(Color(.secondarySystemBackground))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(isTopicFocused ? Color.accentColor : Color.secondary.opacity(0.25), lineWidth: 1)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .submitLabel(.continue)
+                    .onSubmit {
+                        guard canAdvance else { return }
+                        advance()
+                    }
             }
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(strings.difficulty)
+                        .font(.subheadline.weight(.semibold))
+
+                    Spacer()
+
+                    Text("\(difficultyLevel)/10")
+                        .font(.headline.weight(.bold))
+                        .monospacedDigit()
+                }
+
+                Text(Difficulty(level: difficultyLevel).displayName(language: language))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                Slider(
+                    value: Binding(
+                        get: { Double(difficultyLevel) },
+                        set: { difficultyLevel = min(max(Int($0.rounded()), 1), 10) }
+                    ),
+                    in: 1...10,
+                    step: 1
+                )
+                .accessibilityValue("\(difficultyLevel)")
+
+                Text(strings.difficultyScaleHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var onboardingRhythmContent: some View {
+        VStack(alignment: .leading, spacing: 30) {
+            onboardingTitle(
+                title: strings.onboardingRhythmTitle,
+                description: strings.onboardingRhythmDescription
+            )
+
+            VStack(alignment: .leading, spacing: 16) {
+                Text(strings.onboardingQuestionInterval)
+                    .font(.subheadline.weight(.semibold))
+
+                HStack(spacing: 16) {
+                    Button {
+                        intervalMinutes = max(1, intervalMinutes - 5)
+                    } label: {
+                        Image(systemName: "minus")
+                            .font(.body.weight(.bold))
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(intervalMinutes <= 1)
+                    .accessibilityLabel(strings.decrease)
+
+                    VStack(spacing: 3) {
+                        Text("\(intervalMinutes)")
+                            .font(.system(size: 36, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                        Text(strings.minutes)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    Button {
+                        intervalMinutes = min(240, intervalMinutes + 5)
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.body.weight(.bold))
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(intervalMinutes >= 240)
+                    .accessibilityLabel(strings.increase)
+                }
+                .padding(.vertical, 12)
+
+                Divider()
+
+                HStack {
+                    Text(topic.trimmingCharacters(in: .whitespacesAndNewlines))
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(2)
+                    Spacer(minLength: 20)
+                    Text("\(difficultyLevel)/10")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+        }
+    }
+
+    private func onboardingTitle(title: String, description: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.system(size: 30, weight: .bold))
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(description)
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var onboardingFooter: some View {
+        HStack(spacing: 12) {
+            if step.previous != nil {
+                Button {
+                    move(to: step.previous)
+                } label: {
+                    Label(strings.onboardingBack, systemImage: "chevron.left")
+                        .font(.body.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                }
+                .buttonStyle(MobileOnboardingSecondaryButtonStyle())
+                .disabled(isCompleting)
+            }
+
+            Button {
+                advance()
+            } label: {
+                Group {
+                    if isCompleting {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Text(step == .rhythm ? strings.onboardingStart : strings.onboardingContinue)
+                            .font(.body.weight(.bold))
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 52)
+            }
+            .buttonStyle(MobileOnboardingPrimaryButtonStyle())
+            .disabled(!canAdvance)
+        }
+        .frame(maxWidth: 560)
+        .padding(.horizontal, 24)
+        .padding(.top, 14)
+        .padding(.bottom, 12)
+        .frame(maxWidth: .infinity)
+        .background(.bar)
+    }
+
+    private func prepareIfNeeded() {
+        guard !didPrepare else { return }
+        didPrepare = true
+        language = appState.settings.appLanguage
+        let storedTopic = appState.settings.topic.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackTopic = StudySettings.fallbackTopic(for: language)
+        topic = storedTopic == fallbackTopic ? "" : storedTopic
+        difficultyLevel = appState.settings.difficulty.level
+        intervalMinutes = appState.settings.sanitizedIntervalMinutes
+    }
+
+    private func advance() {
+        guard canAdvance else { return }
+
+        if let next = step.next {
+            move(to: next)
+            return
+        }
+
+        isTopicFocused = false
+        isCompleting = true
+        Task {
+            await appState.completeOnboarding(settings: pendingSettings)
+            isCompleting = false
+        }
+    }
+
+    private func move(to destination: MobileOnboardingStep?) {
+        guard let destination else { return }
+        isTopicFocused = false
+        withAnimation(.easeInOut(duration: 0.2)) {
+            step = destination
         }
     }
 
@@ -10188,6 +10468,30 @@ private struct MobileOnboardingView: View {
             ],
             selectedStudyCategoryID: nil
         )
+    }
+}
+
+private struct MobileOnboardingPrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(.white)
+            .background(isEnabled ? Color.accentColor : Color.secondary.opacity(0.35))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+private struct MobileOnboardingSecondaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(.primary)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 

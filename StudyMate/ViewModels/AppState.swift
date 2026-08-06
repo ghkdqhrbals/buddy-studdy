@@ -1373,6 +1373,7 @@ final class AppState: ObservableObject {
         let loadedLocalStudySettings = localUseCases.localStudySettings.loadSettings()
         let loadedCloudSyncState = localUseCases.cloudSyncState.loadState()
         let loadedSettings = loadedLocalStudySettings.settings
+        let loadedHasCompletedOnboarding = localUseCases.onboardingState.hasCompletedOnboarding()
         let synchronizedLoadedSettings = Self.synchronizedTopicCategories(
             for: loadedSettings,
             fallbackTopicResolver: Self.defaultFallbackTopic
@@ -1381,14 +1382,13 @@ final class AppState: ObservableObject {
         let effectiveLoadedSettings = loadedIsCommunitySignedIn
             ? synchronizedLoadedSettings
             : synchronizedLoadedSettings.withQuestionPrivacy(false)
-        if effectiveLoadedSettings != loadedSettings {
+        if loadedHasCompletedOnboarding, effectiveLoadedSettings != loadedSettings {
             localUseCases.localStudySettings.saveSettings(effectiveLoadedSettings)
         }
         let loadedAPIKey = loadedLocalStudySettings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let loadedAPIKeyUpdatedAt = loadedLocalStudySettings.openAIAPIKeyUpdatedAt
         let effectiveAPIKeyUpdatedAt = loadedAPIKeyUpdatedAt ?? (loadedAPIKey.isEmpty ? nil : appClock.now)
         let loadedLogPage = localUseCases.appLog.loadLogs(page: 0, pageSize: Self.developerLogPageSize)
-        let loadedHasCompletedOnboarding = localUseCases.onboardingState.hasCompletedOnboarding()
         let loadedCloudLastSyncedAt = loadedCloudSyncState.stateUpdatedAt
         let loadedLocalSettingsMutationAt = loadedLocalStudySettings.localSettingsMutationAt
         let loadedDeveloperSettings = localUseCases.developerSettings.loadSettings()
@@ -6897,13 +6897,13 @@ final class AppState: ObservableObject {
     }
 
     func completeOnboarding(settings pendingSettings: StudySettings, apiKey _: String = "") async {
+        let initialCategory = pendingSettings.activeCategory ?? pendingSettings.studyCategories.first
+        let completionLanguage = pendingSettings.appLanguage
+
         persistSettings(
             pendingSettings,
             apiKey: ""
         )
-        if let initialCategory = pendingSettings.activeCategory ?? pendingSettings.studyCategories.first {
-            _ = await createBackendStudyIfPossible(initialCategory, settings: pendingSettings)
-        }
         onboardingStateUseCase.setHasCompletedOnboarding(true)
         hasCompletedOnboarding = true
         #if os(iOS)
@@ -6912,32 +6912,63 @@ final class AppState: ObservableObject {
         selectedTab = .study
         #endif
         markCloudDataChanged()
-
-        #if os(iOS)
-        if isCommunitySessionActive {
-            _ = await notificationService.requestAuthorizationIfNeeded(language: settings.appLanguage)
-        } else {
-            notificationService.deactivateRemoteNotificationsForLogout()
-        }
-        #else
-        _ = await notificationService.requestAuthorizationIfNeeded(language: settings.appLanguage)
-        #endif
         isValidatingAPIKey = false
         hasAPIKeyError = false
         errorMessage = nil
-        statusMessage = strings.onboardingCompleted
+        statusMessage = AppStrings(language: completionLanguage).onboardingCompleted
         log(.info, "온보딩을 완료했습니다. OpenAI 요청은 서버 시스템 키로 처리됩니다.")
         restartTimer()
+
+        Task { [weak self] in
+            guard let self else { return }
+
+            if let initialCategory {
+                _ = await self.createBackendStudyIfPossible(initialCategory, settings: pendingSettings)
+            }
+
+            #if os(iOS)
+            if self.isCommunitySessionActive {
+                _ = await self.notificationService.requestAuthorizationIfNeeded(language: completionLanguage)
+            } else {
+                self.notificationService.deactivateRemoteNotificationsForLogout()
+            }
+            #else
+            _ = await self.notificationService.requestAuthorizationIfNeeded(language: completionLanguage)
+            #endif
+        }
     }
 
-    func skipOnboarding() {
+    func skipOnboarding(language selectedLanguage: AppLanguage? = nil) {
+        if let selectedLanguage {
+            var skippedSettings = settings
+            let currentTopic = skippedSettings.topic.trimmingCharacters(in: .whitespacesAndNewlines)
+            let previousFallback = StudySettings.fallbackTopic(for: skippedSettings.appLanguage)
+
+            skippedSettings.appLanguage = selectedLanguage
+            skippedSettings.language = selectedLanguage.studyLanguage
+            if currentTopic.isEmpty || currentTopic == previousFallback {
+                skippedSettings.topic = StudySettings.fallbackTopic(for: selectedLanguage)
+            }
+
+            persistSettings(
+                skippedSettings,
+                apiKey: apiKey,
+                syncBackendSchedule: false
+            )
+            AppAnalytics.setLanguage(selectedLanguage)
+        }
+
         onboardingStateUseCase.setHasCompletedOnboarding(true)
         hasCompletedOnboarding = true
+        #if os(iOS)
+        selectedTab = .home
+        #else
         selectedTab = .settings
+        #endif
 
         hasAPIKeyError = false
         errorMessage = nil
-        statusMessage = strings.onboardingSkipped
+        statusMessage = AppStrings(language: selectedLanguage ?? settings.appLanguage).onboardingSkipped
         log(.info, "온보딩을 나중에 설정하도록 건너뛰었습니다.")
         markCloudDataChanged()
         restartTimer()

@@ -495,7 +495,7 @@ final class PageAccessPolicyTests: XCTestCase {
         XCTAssertEqual(AppLanguage.preferred(from: ["zh-Hans"]), .english)
     }
 
-    func testFreshInstallPersistsSystemPreferredAppLanguage() {
+    func testFreshInstallUsesSystemPreferredLanguageWithoutCompletingOnboarding() {
         let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer {
@@ -511,12 +511,46 @@ final class PageAccessPolicyTests: XCTestCase {
         XCTAssertEqual(initialSettings.appLanguage, .japanese)
         XCTAssertEqual(initialSettings.language, .japanese)
         XCTAssertEqual(initialSettings.topic, StudySettings.fallbackTopicJapanese)
+        XCTAssertFalse(firstStore.loadHasCompletedOnboarding())
 
         let relaunchedStore = SettingsStore(
             defaults: defaults,
             preferredAppLanguageProvider: { .english }
         )
-        XCTAssertEqual(relaunchedStore.loadSettings().appLanguage, .japanese)
+        XCTAssertEqual(relaunchedStore.loadSettings().appLanguage, .english)
+        XCTAssertFalse(relaunchedStore.loadHasCompletedOnboarding())
+    }
+
+    func testLegacyStoredSettingsCountAsCompletedOnboarding() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        store.saveSettings(.initial(for: .korean))
+
+        XCTAssertTrue(store.loadHasCompletedOnboarding())
+    }
+
+    @MainActor
+    func testFreshAppStateStillRequiresOnboardingAfterInitialization() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(
+            defaults: defaults,
+            preferredAppLanguageProvider: { .japanese }
+        )
+        let appState = AppState(settingsStore: store)
+
+        XCTAssertFalse(appState.hasCompletedOnboarding)
+        XCTAssertEqual(appState.settings.appLanguage, .japanese)
+        XCTAssertFalse(store.loadHasCompletedOnboarding())
     }
 
     func testSavedAppLanguageOverridesCurrentSystemPreference() {
