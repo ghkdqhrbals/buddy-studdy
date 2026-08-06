@@ -2237,7 +2237,6 @@ private struct StudyGrowthTreeCard: View {
                                     StudyGrowthNodeDetailView(node: node, strings: strings)
                                 } label: {
                                     StudyGrowthScoreTreeNode(
-                                        nodeID: node.studyId,
                                         topic: node.topic,
                                         currentLevel: node.currentLevel,
                                         growth: node.growth,
@@ -2306,7 +2305,6 @@ private struct StudyGrowthTreeCard: View {
 }
 
 private struct StudyGrowthScoreTreeNode: View {
-    var nodeID: Int
     var topic: String
     var currentLevel: Double?
     var growth: Double?
@@ -2357,14 +2355,8 @@ private struct StudyGrowthScoreTreeNode: View {
             height: StudyTreeLayoutSnapshot.nodeSize.height
         )
         .background {
-            ZStack {
-                Circle()
-                    .fill(Color(.secondarySystemBackground))
-                StudyTreePixelTexture(
-                    seed: nodeID,
-                    color: nodeColor
-                )
-            }
+            Circle()
+                .fill(Color(.secondarySystemBackground))
         }
         .overlay {
             Circle()
