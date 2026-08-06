@@ -2883,6 +2883,13 @@ struct AppStrings {
     var remainingQuestions: String { text("개 남음", "left", "問残り") }
     var noBillingHistory: String { text("아직 결제 내역이 없습니다.", "No billing history yet.", "支払い履歴はまだありません。") }
     var billingPending: String { text("결제가 승인 대기 중입니다.", "The purchase is pending approval.", "購入は承認待ちです。") }
+    var membershipDowngradeScheduled: String {
+        text(
+            "멤버십 변경이 예약되었습니다. 현재 결제 기간이 끝나면 적용됩니다.",
+            "Your membership change is scheduled and will apply after the current billing period.",
+            "メンバーシップの変更を予約しました。現在の請求期間終了後に適用されます。"
+        )
+    }
     var billingPurchased: String { text("멤버십이 적용됐습니다.", "Your membership is active.", "メンバーシップが有効になりました。") }
     var billingRestored: String { text("구매 내역을 복원했습니다.", "Purchases restored.", "購入履歴を復元しました。") }
     var refundSubmitted: String { text("Apple에 환불 요청을 제출했습니다.", "Refund request submitted to Apple.", "Appleに返金リクエストを送信しました。") }

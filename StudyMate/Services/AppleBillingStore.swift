@@ -220,6 +220,7 @@ final class AppleBillingStore: ObservableObject {
     enum PurchaseOutcome: Equatable {
         case purchased(BackendBillingInvoice)
         case pending
+        case changeScheduled
         case cancelled
     }
 
@@ -271,6 +272,7 @@ final class AppleBillingStore: ObservableObject {
 
     func purchase(
         _ tierProduct: TierProduct,
+        action: MembershipPrimaryAction,
         appAccountToken: UUID,
         prepareCheckout: @escaping (String) async throws -> BackendBillingInvoice,
         synchronize: @escaping (String, String, UUID?) async throws -> BackendBillingInvoice,
@@ -283,19 +285,21 @@ final class AppleBillingStore: ObservableObject {
         processingProductID = tierProduct.id
         defer { processingProductID = nil }
 
-        // The backend owns the order lifecycle. Persist a WAITING/NORMAL invoice before StoreKit
-        // presents a sheet so every user-initiated attempt has an invoice aggregate.
-        let checkout = try await prepareCheckout(tierProduct.id)
+        // A downgrade does not charge now. Apple schedules it for the next renewal, so creating a
+        // financial invoice here would leave a WAITING order that can never receive a transaction.
+        let checkout = action == .downgrade ? nil : try await prepareCheckout(tierProduct.id)
         try await RevenueCatBillingBridge.shared.identify(appAccountToken: appAccountToken)
         switch tierProduct.source {
         case .revenueCat(let product):
             let (revenueCatTransaction, _, userCancelled) = try await Purchases.shared.purchase(product: product)
             if userCancelled {
-                try? await abandonCheckout(checkout.invoiceNumber)
+                if let checkout {
+                    try? await abandonCheckout(checkout.invoiceNumber)
+                }
                 return .cancelled
             }
             guard let transactionIdentifier = revenueCatTransaction?.transactionIdentifier else {
-                return .pending
+                return action == .downgrade ? .changeScheduled : .pending
             }
             if let evidence = await StoreKitTransactionSyncResolver.resolve(
                 revenueCatTransactionIdentifier: transactionIdentifier,
@@ -307,13 +311,20 @@ final class AppleBillingStore: ObservableObject {
                 let invoice = try await synchronize(
                     evidence.signedTransaction,
                     evidence.environment,
-                    checkout.invoiceNumber
+                    checkout?.invoiceNumber
                 )
                 return .purchased(try Self.requireApplied(invoice))
             }
 
+            if action == .downgrade {
+                return .changeScheduled
+            }
+
             // Webhooks remain the fallback for Test Store purchases and for a temporary client-to-
             // backend failure. A future launch also replays the active StoreKit entitlement JWS.
+            guard let checkout else {
+                return .changeScheduled
+            }
             let invoice = try await waitForFulfillment(checkout.id)
             return .purchased(try Self.requireApplied(invoice))
         case .appStore(let product):
@@ -331,7 +342,7 @@ final class AppleBillingStore: ObservableObject {
                 let invoice = try await synchronize(
                     verification.jwsRepresentation,
                     Self.backendEnvironment(transaction),
-                    checkout.invoiceNumber
+                    checkout?.invoiceNumber
                 )
                 let appliedInvoice = try Self.requireApplied(invoice)
                 await transaction.finish()
@@ -339,7 +350,9 @@ final class AppleBillingStore: ObservableObject {
             case .pending:
                 return .pending
             case .userCancelled:
-                try? await abandonCheckout(checkout.invoiceNumber)
+                if let checkout {
+                    try? await abandonCheckout(checkout.invoiceNumber)
+                }
                 return .cancelled
             @unknown default:
                 throw AppleBillingStoreError.unknownPurchaseResult

@@ -6717,6 +6717,7 @@ private struct MobileMembershipManagementView: View {
             do {
                 let outcome = try await billingStore.purchase(
                     tierProduct,
+                    action: primaryAction,
                     appAccountToken: appAccountToken,
                     prepareCheckout: appState.createAppleBillingCheckout,
                     synchronize: appState.syncAppleBillingTransaction,
@@ -6730,6 +6731,9 @@ private struct MobileMembershipManagementView: View {
                 case .pending:
                     billingNotice = strings.billingPending
                     await refreshMembershipData()
+                case .changeScheduled:
+                    await refreshMembershipData()
+                    billingNotice = strings.membershipDowngradeScheduled
                 case .cancelled:
                     break
                 }
