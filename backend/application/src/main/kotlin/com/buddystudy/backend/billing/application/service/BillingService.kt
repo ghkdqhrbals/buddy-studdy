@@ -10,6 +10,7 @@ import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
 import com.buddystudy.backend.billing.application.model.BillingRecoveryResult
 import com.buddystudy.backend.billing.application.model.BillingStatusResponse
 import com.buddystudy.backend.billing.application.model.BillingQuotaStatus
+import com.buddystudy.backend.billing.application.model.BillingPlanTransition
 import com.buddystudy.backend.billing.application.model.CreateBillingCheckoutCommand
 import com.buddystudy.backend.billing.application.model.RecordVerifiedPaymentCommand
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
@@ -54,6 +55,40 @@ class BillingService(
             ?: throw billingError(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Question quota was not found.")
         val periodStartedAt = quota.periodStartedAt ?: now
         val resetAt = quota.resetAt ?: now
+        val planTransition = entitlement?.let { current ->
+            val changesAt = current.expiresAt
+            if (changesAt == null || !current.accessStatus.grantsAccess()) {
+                null
+            } else if (current.pendingProductId != null) {
+                ledger.tierProduct(current.pendingProductId)
+                    ?.takeIf { it.tierCode != current.tierCode }
+                    ?.let { next ->
+                        BillingPlanTransition(
+                            currentTierCode = current.tierCode,
+                            currentProductId = current.productId,
+                            currentPlanEndsAt = changesAt,
+                            nextTierCode = next.tierCode,
+                            nextProductId = next.productId,
+                            nextPlanStartsAt = changesAt,
+                        )
+                    }
+            } else if (
+                !current.willRenew &&
+                current.renewalStatus == SubscriptionRenewalStatus.CANCELED &&
+                current.productId != null
+            ) {
+                BillingPlanTransition(
+                    currentTierCode = current.tierCode,
+                    currentProductId = current.productId,
+                    currentPlanEndsAt = changesAt,
+                    nextTierCode = "TIER1",
+                    nextProductId = null,
+                    nextPlanStartsAt = changesAt,
+                )
+            } else {
+                null
+            }
+        }
         return BillingStatusResponse(
             tierCode = entitlement?.tierCode ?: quota.tierCode,
             source = entitlement?.source ?: EntitlementSource.FREE,
@@ -64,6 +99,7 @@ class BillingService(
             expiresAt = entitlement?.expiresAt,
             willRenew = entitlement?.willRenew ?: false,
             pendingChange = entitlement?.pendingProductId,
+            planTransition = planTransition,
             synchronizedAt = entitlement?.synchronizedAt ?: now,
             quota = BillingQuotaStatus(
                 periodStartedAt = periodStartedAt,
@@ -78,6 +114,9 @@ class BillingService(
             ),
         )
     }
+
+    private fun SubscriptionAccessStatus.grantsAccess(): Boolean =
+        this == SubscriptionAccessStatus.ACTIVE || this == SubscriptionAccessStatus.GRACE_PERIOD
     override suspend fun catalog(principal: Principal): BillingCatalog {
         requireRegistered(principal)
         val now = clock.instant()

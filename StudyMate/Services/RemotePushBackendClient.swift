@@ -2827,12 +2827,22 @@ struct BackendBillingStatus: Decodable, Equatable {
     var expiresAt: Date?
     var willRenew: Bool
     var pendingChange: String?
+    var planTransition: BackendBillingPlanTransition?
     var synchronizedAt: Date
     var quota: BackendBillingQuotaStatus
 
     var isEntitlementActive: Bool {
         accessStatus == "ACTIVE" || accessStatus == "GRACE_PERIOD"
     }
+}
+
+struct BackendBillingPlanTransition: Decodable, Equatable {
+    var currentTierCode: String
+    var currentProductId: String?
+    var currentPlanEndsAt: Date
+    var nextTierCode: String
+    var nextProductId: String?
+    var nextPlanStartsAt: Date
 }
 
 struct BackendBillingQuotaStatus: Decodable, Equatable {

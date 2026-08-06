@@ -6398,6 +6398,10 @@ private struct MobileMembershipManagementView: View {
             LazyVStack(alignment: .leading, spacing: 20) {
                 membershipSummary
 
+                if let planTransition {
+                    membershipTimeline(planTransition)
+                }
+
                 VStack(alignment: .leading, spacing: 12) {
                     if appState.billingCatalog != nil {
                         if billingStore.isLoading {
@@ -6512,6 +6516,79 @@ private struct MobileMembershipManagementView: View {
         }) {
             CustomerCenterView()
                 .environment(\.locale, appState.settings.appLanguage.locale)
+        }
+    }
+
+    private var planTransition: MembershipPlanTransition? {
+        guard let status = appState.billingStatus else { return nil }
+        return MembershipPlanTimelinePolicy.resolve(
+            status: status,
+            catalogProducts: appState.billingCatalog?.products ?? []
+        )
+    }
+
+    private func membershipTimeline(_ transition: MembershipPlanTransition) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(strings.membershipChangeSchedule)
+                .font(.subheadline.weight(.semibold))
+
+            VStack(alignment: .leading, spacing: 0) {
+                membershipTimelineRow(
+                    label: strings.currentPlanPeriod,
+                    tierCode: transition.currentTierCode,
+                    dateText: strings.membershipAvailableUntil(transition.currentPlanEndsAt),
+                    isCurrent: true
+                )
+
+                Rectangle()
+                    .fill(Color.accentColor.opacity(0.32))
+                    .frame(width: 2, height: 18)
+                    .padding(.leading, 5)
+
+                membershipTimelineRow(
+                    label: strings.nextPlanPeriod,
+                    tierCode: transition.nextTierCode,
+                    dateText: strings.membershipStartsOn(transition.nextPlanStartsAt),
+                    isCurrent: false
+                )
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func membershipTimelineRow(
+        label: String,
+        tierCode: String,
+        dateText: String,
+        isCurrent: Bool
+    ) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Circle()
+                .fill(isCurrent ? Color.accentColor : Color(.secondarySystemGroupedBackground))
+                .overlay {
+                    Circle()
+                        .stroke(Color.accentColor, lineWidth: 2)
+                }
+                .frame(width: 12, height: 12)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(strings.membershipTierName(tierCode))
+                    .font(.body.weight(.semibold))
+            }
+
+            Spacer(minLength: 12)
+
+            Text(dateText)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.trailing)
         }
     }
 

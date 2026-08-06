@@ -172,6 +172,87 @@ final class BillingLocalizationTests: XCTestCase {
         XCTAssertTrue(try decode(accessStatus: "GRACE_PERIOD").isEntitlementActive)
         XCTAssertFalse(try decode(accessStatus: "EXPIRED").isEntitlementActive)
     }
+
+    func testMembershipTimelineUsesBackendScheduledPlanDates() throws {
+        let payload = """
+        {
+          "tierCode": "TIER3",
+          "source": "APP_STORE",
+          "accessStatus": "ACTIVE",
+          "renewalStatus": "WILL_RENEW",
+          "productId": "tier3.monthly",
+          "startedAt": "2026-08-06T00:00:00Z",
+          "expiresAt": "2026-09-06T00:00:00Z",
+          "willRenew": true,
+          "pendingChange": "tier2.monthly",
+          "planTransition": {
+            "currentTierCode": "TIER3",
+            "currentProductId": "tier3.monthly",
+            "currentPlanEndsAt": "2026-09-06T00:00:00Z",
+            "nextTierCode": "TIER2",
+            "nextProductId": "tier2.monthly",
+            "nextPlanStartsAt": "2026-09-06T00:00:00Z"
+          },
+          "synchronizedAt": "2026-08-06T01:00:00Z",
+          "quota": {
+            "periodStartedAt": "2026-08-06T00:00:00Z",
+            "resetAt": "2026-09-06T00:00:00Z",
+            "anchorType": "FIRST_PAID",
+            "baseLimit": 1000,
+            "bonusLimit": 0,
+            "usedCount": 20,
+            "reservedCount": 0,
+            "remainingCount": 980,
+            "policyVersion": 2
+          }
+        }
+        """.data(using: .utf8)!
+        let status = try RemotePushBackendClient.makeDecoder().decode(BackendBillingStatus.self, from: payload)
+
+        let timeline = try XCTUnwrap(
+            MembershipPlanTimelinePolicy.resolve(status: status, catalogProducts: [])
+        )
+
+        XCTAssertEqual(timeline.currentTierCode, "TIER3")
+        XCTAssertEqual(timeline.nextTierCode, "TIER2")
+        XCTAssertEqual(timeline.currentPlanEndsAt, timeline.nextPlanStartsAt)
+    }
+
+    func testMembershipTimelineShowsFreePlanAfterCancelledSubscriptionExpires() throws {
+        let payload = """
+        {
+          "tierCode": "TIER2",
+          "source": "APP_STORE",
+          "accessStatus": "ACTIVE",
+          "renewalStatus": "CANCELED",
+          "productId": "tier2.monthly",
+          "expiresAt": "2026-09-06T00:00:00Z",
+          "willRenew": false,
+          "pendingChange": null,
+          "synchronizedAt": "2026-08-06T01:00:00Z",
+          "quota": {
+            "periodStartedAt": "2026-08-06T00:00:00Z",
+            "resetAt": "2026-09-06T00:00:00Z",
+            "anchorType": "FIRST_PAID",
+            "baseLimit": 300,
+            "bonusLimit": 0,
+            "usedCount": 0,
+            "reservedCount": 0,
+            "remainingCount": 300,
+            "policyVersion": 2
+          }
+        }
+        """.data(using: .utf8)!
+        let status = try RemotePushBackendClient.makeDecoder().decode(BackendBillingStatus.self, from: payload)
+
+        let timeline = try XCTUnwrap(
+            MembershipPlanTimelinePolicy.resolve(status: status, catalogProducts: [])
+        )
+
+        XCTAssertEqual(timeline.currentTierCode, "TIER2")
+        XCTAssertEqual(timeline.nextTierCode, "TIER1")
+        XCTAssertEqual(timeline.currentPlanEndsAt, timeline.nextPlanStartsAt)
+    }
 }
 
 final class CommunityQuestionResultPresentationTests: XCTestCase {

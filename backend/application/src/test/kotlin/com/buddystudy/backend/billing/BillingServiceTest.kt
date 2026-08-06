@@ -84,6 +84,65 @@ class BillingServiceTest {
     )
 
     @Test
+    fun `billing status exposes the exact scheduled plan transition`() = runBlocking {
+        val changesAt = Instant.parse("2026-09-02T00:00:00Z")
+        val ledger = FakeLedger(token, product).apply {
+            projectedEntitlement = BillingEntitlementProjection(
+                tierCode = "TIER3",
+                source = EntitlementSource.APP_STORE,
+                accessStatus = SubscriptionAccessStatus.ACTIVE,
+                renewalStatus = SubscriptionRenewalStatus.WILL_RENEW,
+                productId = "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                startedAt = Instant.parse("2026-08-02T00:00:00Z"),
+                expiresAt = changesAt,
+                willRenew = true,
+                pendingProductId = product.productId,
+                synchronizedAt = now,
+            )
+        }
+
+        val status = service(ledger).status(principal())
+
+        assertEquals("TIER3", status.planTransition?.currentTierCode)
+        assertEquals("TIER2", status.planTransition?.nextTierCode)
+        assertEquals(changesAt, status.planTransition?.currentPlanEndsAt)
+        assertEquals(changesAt, status.planTransition?.nextPlanStartsAt)
+    }
+
+    @Test
+    fun `cancelled subscription status shows the free plan after expiry`() = runBlocking {
+        val changesAt = Instant.parse("2026-09-02T00:00:00Z")
+        val ledger = FakeLedger(token, product).apply {
+            projectedEntitlement = projectedEntitlement?.copy(
+                renewalStatus = SubscriptionRenewalStatus.CANCELED,
+                expiresAt = changesAt,
+                willRenew = false,
+                pendingProductId = null,
+            )
+        }
+
+        val status = service(ledger).status(principal())
+
+        assertEquals("TIER2", status.planTransition?.currentTierCode)
+        assertEquals("TIER1", status.planTransition?.nextTierCode)
+        assertEquals(changesAt, status.planTransition?.nextPlanStartsAt)
+    }
+
+    @Test
+    fun `billing retry does not claim that the user will fall back to free`() = runBlocking {
+        val ledger = FakeLedger(token, product).apply {
+            projectedEntitlement = projectedEntitlement?.copy(
+                renewalStatus = SubscriptionRenewalStatus.BILLING_RETRY,
+                willRenew = false,
+            )
+        }
+
+        val status = service(ledger).status(principal())
+
+        assertEquals(null, status.planTransition)
+    }
+
+    @Test
     fun `anonymous accounts cannot receive an app account token`() {
         val ledger = FakeLedger(token, product)
         val service = service(ledger)

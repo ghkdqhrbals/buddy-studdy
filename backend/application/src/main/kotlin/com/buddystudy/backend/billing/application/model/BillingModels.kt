@@ -65,8 +65,18 @@ data class BillingStatusResponse(
     val expiresAt: Instant?,
     val willRenew: Boolean,
     val pendingChange: String?,
+    val planTransition: BillingPlanTransition?,
     val synchronizedAt: Instant,
     val quota: BillingQuotaStatus,
+)
+
+data class BillingPlanTransition(
+    val currentTierCode: String,
+    val currentProductId: String?,
+    val currentPlanEndsAt: Instant,
+    val nextTierCode: String,
+    val nextProductId: String?,
+    val nextPlanStartsAt: Instant,
 )
 
 data class SyncAppleTransactionCommand(

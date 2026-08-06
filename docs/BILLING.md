@@ -26,6 +26,13 @@ subscriptions. Apple's native subscription management is the fallback when
 RevenueCat is unavailable. Apple, not BuddyStudy or RevenueCat, makes the final
 decision for an Apple refund.
 
+When a downgrade or cancellation is scheduled, the status response includes a
+structured `planTransition`. It names the current and next tiers and gives the
+exact shared boundary as `currentPlanEndsAt` and `nextPlanStartsAt`. iOS renders
+that projection as a compact timeline; it does not infer dates from RevenueCat
+or the local StoreKit state. The legacy `pendingChange` product ID remains for
+older clients.
+
 ## Product catalog
 
 `membership_tier_products` maps enabled App Store product IDs to

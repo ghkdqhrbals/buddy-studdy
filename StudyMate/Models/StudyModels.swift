@@ -2856,6 +2856,17 @@ struct AppStrings {
     }
     var membershipChangePending: String { text("App Store에서 변경 일정을 확인할 수 있습니다.", "Review the change schedule in the App Store.", "App Storeで変更予定を確認できます。") }
     var downgradeMembershipNotice: String { text("낮은 멤버십은 현재 결제 기간이 끝난 뒤 적용됩니다.", "A downgrade takes effect after the current billing period.", "ダウングレードは現在の請求期間終了後に適用されます。") }
+    var membershipChangeSchedule: String { text("변경 일정", "Plan timeline", "変更スケジュール") }
+    var currentPlanPeriod: String { text("현재", "Current", "現在") }
+    var nextPlanPeriod: String { text("다음", "Next", "次回") }
+    func membershipAvailableUntil(_ date: Date) -> String {
+        let formatted = membershipScheduleDate(date)
+        return text("\(formatted)까지", "Until \(formatted)", "\(formatted)まで")
+    }
+    func membershipStartsOn(_ date: Date) -> String {
+        let formatted = membershipScheduleDate(date)
+        return text("\(formatted)부터", "From \(formatted)", "\(formatted)から")
+    }
     var renewsOn: String { text("다음 갱신", "Renews", "次回更新") }
     var endsOn: String { text("이용 종료", "Ends", "利用終了") }
     var billingHistory: String { text("결제 내역", "Billing history", "支払い履歴") }
@@ -2928,6 +2939,14 @@ struct AppStrings {
             "Resets \(formatter.string(from: resetAt))",
             "\(formatter.string(from: resetAt))にリセット"
         )
+    }
+    private func membershipScheduleDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = language.locale
+        formatter.timeZone = .current
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
     }
     var maintenanceDefaultTitle: String {
         text("서비스 점검 중입니다", "Service maintenance", "サービスメンテナンス中です")
@@ -3395,6 +3414,9 @@ struct AppStrings {
     var appLanguage: String { text("언어", "Language") }
     var studyTopic: String { text("공부할 주제", "Study topic") }
     var difficulty: String { text("난이도", "Difficulty") }
+    var decrease: String { text("줄이기", "Decrease", "減らす") }
+    var increase: String { text("늘리기", "Increase", "増やす") }
+    var minutes: String { text("분", "minutes", "分") }
     var answerScore: String { text("답변 점수", "Answer score", "回答スコア") }
     func communityQuestionResult(score: Int, difficulty: Int) -> String {
         text(
@@ -4075,6 +4097,55 @@ struct MembershipProductPolicy {
         _ products: [BackendBillingTierProduct]
     ) -> [BackendBillingTierProduct] {
         products.filter { $0.billingPeriod?.uppercased() == "P1M" }
+    }
+}
+
+struct MembershipPlanTransition: Equatable {
+    var currentTierCode: String
+    var currentPlanEndsAt: Date
+    var nextTierCode: String
+    var nextPlanStartsAt: Date
+}
+
+struct MembershipPlanTimelinePolicy {
+    static func resolve(
+        status: BackendBillingStatus,
+        catalogProducts: [BackendBillingTierProduct]
+    ) -> MembershipPlanTransition? {
+        guard status.isEntitlementActive else { return nil }
+
+        if let transition = status.planTransition {
+            return MembershipPlanTransition(
+                currentTierCode: transition.currentTierCode,
+                currentPlanEndsAt: transition.currentPlanEndsAt,
+                nextTierCode: transition.nextTierCode,
+                nextPlanStartsAt: transition.nextPlanStartsAt
+            )
+        }
+
+        // Compatibility with a backend version that only exposes the pending product ID.
+        guard let changesAt = status.expiresAt else { return nil }
+        if let pendingProductID = status.pendingChange,
+           let nextProduct = catalogProducts.first(where: { $0.productId == pendingProductID }),
+           nextProduct.tierCode != status.tierCode {
+            return MembershipPlanTransition(
+                currentTierCode: status.tierCode,
+                currentPlanEndsAt: changesAt,
+                nextTierCode: nextProduct.tierCode,
+                nextPlanStartsAt: changesAt
+            )
+        }
+        if !status.willRenew,
+           status.renewalStatus == "CANCELED",
+           status.productId != nil {
+            return MembershipPlanTransition(
+                currentTierCode: status.tierCode,
+                currentPlanEndsAt: changesAt,
+                nextTierCode: "TIER1",
+                nextPlanStartsAt: changesAt
+            )
+        }
+        return nil
     }
 }
 
