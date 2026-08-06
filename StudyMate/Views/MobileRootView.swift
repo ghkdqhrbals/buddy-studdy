@@ -1168,7 +1168,9 @@ enum MobileHomeStudyPresentationPolicy {
 private struct MobileHomeView: View {
     @EnvironmentObject private var appState: AppState
     @State private var selectedHomeScope: HomeFeedScope = .all
-    @State private var editMode: EditMode = .inactive
+    @State private var isSelectingStudies = false
+    @State private var selectedStudyCategoryIDs = Set<String>()
+    @State private var showsSelectedStudiesDeleteConfirmation = false
     @State private var hasLoadedCommunityQuestions = false
     @State private var editingStudyCategory: StudyCategory?
     @State private var editingStudyRoom: BackendStudyRoom?
@@ -1358,6 +1360,10 @@ private struct MobileHomeView: View {
             homeTitleHeader
             homeScopePickerHeader
 
+            if isSelectingStudies {
+                myStudySelectionBar
+            }
+
             if selectedHomeScope == .tree, appState.isCommunitySessionActive {
                 homeStudyTreeGraph
             } else {
@@ -1372,7 +1378,6 @@ private struct MobileHomeView: View {
             }
         }
         .background(Color(.systemBackground))
-        .environment(\.editMode, $editMode)
         .navigationTitle("")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -1405,14 +1410,14 @@ private struct MobileHomeView: View {
             #if os(iOS)
             if #available(iOS 26.0, *) {
                 ToolbarItem(placement: .topBarLeading) {
-                    if !isHomeSearchActive {
+                    if !isHomeSearchActive && !isSelectingStudies {
                         profileToolbarControl
                     }
                 }
                 .sharedBackgroundVisibility(.hidden)
             } else {
                 ToolbarItem(placement: .topBarLeading) {
-                    if !isHomeSearchActive {
+                    if !isHomeSearchActive && !isSelectingStudies {
                         profileToolbarControl
                     }
                 }
@@ -1426,10 +1431,19 @@ private struct MobileHomeView: View {
                     .sharedBackgroundVisibility(.hidden)
                 }
 
-                ToolbarItem(placement: .topBarTrailing) {
-                    homeToolbarSearchControl(strings: strings)
+                if shouldShowStudySelectionToolbarButton {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        homeStudySelectionToolbarButton(strings: strings)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
                 }
-                .sharedBackgroundVisibility(isHomeSearchActive ? .hidden : .automatic)
+
+                if !isSelectingStudies {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        homeToolbarSearchControl(strings: strings)
+                    }
+                    .sharedBackgroundVisibility(isHomeSearchActive ? .hidden : .automatic)
+                }
             } else {
                 if shouldShowHomeAddToolbarButton {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -1437,8 +1451,16 @@ private struct MobileHomeView: View {
                     }
                 }
 
-                ToolbarItem(placement: .topBarTrailing) {
-                    homeToolbarSearchControl(strings: strings)
+                if shouldShowStudySelectionToolbarButton {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        homeStudySelectionToolbarButton(strings: strings)
+                    }
+                }
+
+                if !isSelectingStudies {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        homeToolbarSearchControl(strings: strings)
+                    }
                 }
             }
             #else
@@ -1474,11 +1496,14 @@ private struct MobileHomeView: View {
                 extra: ["scope=\(String(describing: newScope))"]
             )
             if newScope == .all {
-                editMode = .inactive
+                endStudySelection()
                 Task {
                     await loadCommunityQuestionsIfNeeded(userInitiated: false)
                 }
             } else if appState.isCommunitySessionActive {
+                if newScope != .my {
+                    endStudySelection()
+                }
                 Task {
                     await appState.refreshQuestionQuota()
                 }
@@ -1492,6 +1517,7 @@ private struct MobileHomeView: View {
             )
             hasLoadedCommunityQuestions = false
             guard isSignedIn else {
+                endStudySelection()
                 return
             }
 
@@ -1509,6 +1535,9 @@ private struct MobileHomeView: View {
             if trimmedHomeStudySearchText != submittedHomeStudySearchText {
                 appState.clearBackendStudySearchResults()
             }
+        }
+        .onChange(of: appState.rootStudyCategoriesForDisplay.map(\.id)) { _, categoryIDs in
+            selectedStudyCategoryIDs.formIntersection(categoryIDs)
         }
         .onDisappear {
             searchFocusTask?.cancel()
@@ -1582,6 +1611,17 @@ private struct MobileHomeView: View {
                     )
                 }
             }
+        }
+        .confirmationDialog(
+            strings.deleteSelectedStudies(selectedStudyCategoryIDs.count),
+            isPresented: $showsSelectedStudiesDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(strings.deleteSelectedStudiesAction, role: .destructive) {
+                appState.deleteStudyCategories(categoryIDs: selectedStudyCategoryIDs)
+                endStudySelection()
+            }
+            Button(strings.cancel, role: .cancel) {}
         }
         .confirmationDialog(
             strings.deleteQuestionConfirmation,
@@ -1758,6 +1798,51 @@ private struct MobileHomeView: View {
         }
     }
 
+    private var myStudySelectionBar: some View {
+        HStack(spacing: 14) {
+            Text(strings.selectedStudyCount(selectedStudyCategoryIDs.count))
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button {
+                toggleAllVisibleStudies()
+            } label: {
+                Image(
+                    systemName: areAllVisibleStudiesSelected
+                        ? "checkmark.circle.fill"
+                        : "checkmark.circle"
+                )
+                    .font(.body.weight(.semibold))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(areAllVisibleStudiesSelected ? strings.deselectAll : strings.selectAll)
+
+            Button(role: .destructive) {
+                showsSelectedStudiesDeleteConfirmation = true
+            } label: {
+                Image(systemName: "trash")
+                    .font(.body.weight(.semibold))
+            }
+            .buttonStyle(.plain)
+            .disabled(selectedStudyCategoryIDs.isEmpty)
+            .accessibilityLabel(strings.deleteSelectedStudiesAction)
+
+            Button {
+                endStudySelection()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.body.weight(.semibold))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(strings.cancel)
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 10)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+
     @ViewBuilder
     private var homeStudyTreeGraph: some View {
         if let category = selectedHomeTreeCategory,
@@ -1898,12 +1983,33 @@ private struct MobileHomeView: View {
 
     @ViewBuilder
     private func myStudyCategoryRow(_ category: StudyCategory) -> some View {
-        if editMode.isEditing {
-            MobileHomeCategoryRow(
-                category: category,
-                hasPendingQuestion: appState.pendingQuestionCount(for: category) > 0,
-                strings: strings
-            )
+        if isSelectingStudies {
+            Button {
+                toggleStudySelection(category.id)
+            } label: {
+                HStack(spacing: 10) {
+                    Image(
+                        systemName: selectedStudyCategoryIDs.contains(category.id)
+                            ? "checkmark.circle.fill"
+                            : "circle"
+                    )
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(
+                        selectedStudyCategoryIDs.contains(category.id)
+                            ? Color.accentColor
+                            : Color.secondary
+                    )
+
+                    MobileHomeCategoryRow(
+                        category: category,
+                        hasPendingQuestion: appState.pendingQuestionCount(for: category) > 0,
+                        strings: strings,
+                        showsDisclosureIndicator: false
+                    )
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
             .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
@@ -2106,7 +2212,18 @@ private struct MobileHomeView: View {
     }
 
     private var shouldShowHomeAddToolbarButton: Bool {
-        !isHomeSearchActive && selectedHomeScope.isPersonal && appState.isCommunitySessionActive
+        !isHomeSearchActive
+            && !isSelectingStudies
+            && selectedHomeScope.isPersonal
+            && appState.isCommunitySessionActive
+    }
+
+    private var shouldShowStudySelectionToolbarButton: Bool {
+        !isHomeSearchActive
+            && !isSelectingStudies
+            && selectedHomeScope == .my
+            && appState.isCommunitySessionActive
+            && !filteredStudyCategories.isEmpty
     }
 
     private var profileToolbarControl: some View {
@@ -2220,6 +2337,58 @@ private struct MobileHomeView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(strings.newStudyCategory)
+    }
+
+    private func homeStudySelectionToolbarButton(strings: AppStrings) -> some View {
+        Button {
+            beginStudySelection()
+        } label: {
+            MobileToolbarIconButtonLabel(systemName: "checkmark.circle")
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(strings.selectStudies)
+    }
+
+    @MainActor
+    private func beginStudySelection() {
+        selectedStudyCategoryIDs.removeAll()
+        withAnimation(.easeInOut(duration: 0.18)) {
+            isSelectingStudies = true
+        }
+    }
+
+    @MainActor
+    private func endStudySelection() {
+        showsSelectedStudiesDeleteConfirmation = false
+        selectedStudyCategoryIDs.removeAll()
+        withAnimation(.easeInOut(duration: 0.18)) {
+            isSelectingStudies = false
+        }
+    }
+
+    private func toggleStudySelection(_ categoryID: String) {
+        if selectedStudyCategoryIDs.contains(categoryID) {
+            selectedStudyCategoryIDs.remove(categoryID)
+        } else {
+            selectedStudyCategoryIDs.insert(categoryID)
+        }
+    }
+
+    private var visibleStudyCategoryIDs: Set<String> {
+        Set(filteredStudyCategories.map(\.id))
+    }
+
+    private var areAllVisibleStudiesSelected: Bool {
+        !visibleStudyCategoryIDs.isEmpty
+            && visibleStudyCategoryIDs.isSubset(of: selectedStudyCategoryIDs)
+    }
+
+    private func toggleAllVisibleStudies() {
+        if areAllVisibleStudiesSelected {
+            selectedStudyCategoryIDs.subtract(visibleStudyCategoryIDs)
+        } else {
+            selectedStudyCategoryIDs.formUnion(visibleStudyCategoryIDs)
+        }
     }
 
     @MainActor
@@ -8905,6 +9074,7 @@ private struct MobileHomeCategoryRow: View {
     var category: StudyCategory
     var hasPendingQuestion: Bool
     var strings: AppStrings
+    var showsDisclosureIndicator = true
 
     var body: some View {
         HStack(spacing: 14) {
@@ -8928,9 +9098,11 @@ private struct MobileHomeCategoryRow: View {
                 .accessibilityLabel(strings.pendingQuestionLimitTitle)
             }
 
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
+            if showsDisclosureIndicator {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
         }
         .padding(14)
         .frame(minHeight: 70)

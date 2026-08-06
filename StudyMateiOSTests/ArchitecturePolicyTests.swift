@@ -1416,6 +1416,24 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testMyStudiesProvidesExplicitConfirmedBulkDeletion() throws {
+        let root = try repositoryRoot()
+        let viewFile = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let viewSource = try String(contentsOf: viewFile, encoding: .utf8)
+        let appStateSource = try String(contentsOf: appStateFile, encoding: .utf8)
+
+        XCTAssertTrue(viewSource.contains("@State private var selectedStudyCategoryIDs = Set<String>()"))
+        XCTAssertTrue(viewSource.contains("homeStudySelectionToolbarButton(strings: strings)"))
+        XCTAssertTrue(viewSource.contains("strings.deleteSelectedStudies(selectedStudyCategoryIDs.count)"))
+        XCTAssertTrue(
+            viewSource.contains("appState.deleteStudyCategories(categoryIDs: selectedStudyCategoryIDs)")
+        )
+        XCTAssertTrue(
+            appStateSource.contains("func deleteStudyCategories(categoryIDs: Set<String>)")
+        )
+    }
+
     func testSelectedStudyToolbarOffersOnlyEditAndTreeActions() throws {
         let root = try repositoryRoot()
         let file = root.appendingPathComponent("StudyMate/Views/StudyView.swift")

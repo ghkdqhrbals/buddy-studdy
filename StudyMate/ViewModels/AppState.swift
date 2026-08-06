@@ -5912,10 +5912,13 @@ final class AppState: ObservableObject {
     }
 
     func deleteStudyCategories(ids: Set<Int>) {
-        let idStrings = Set(ids.map(String.init))
+        deleteStudyCategories(categoryIDs: Set(ids.map(String.init)))
+    }
+
+    func deleteStudyCategories(categoryIDs: Set<String>) {
         let offsets = IndexSet(
             studyCategoriesForDisplay.enumerated().compactMap { index, category in
-                idStrings.contains(category.id) ? index : nil
+                categoryIDs.contains(category.id) ? index : nil
             }
         )
         deleteStudyCategories(at: offsets)

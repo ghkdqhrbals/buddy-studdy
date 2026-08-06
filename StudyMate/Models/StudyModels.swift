@@ -3350,6 +3350,20 @@ struct AppStrings {
         )
     }
     var editCategories: String { text("학습 편집", "Edit Studies") }
+    var selectStudies: String { text("학습 선택", "Select studies", "学習を選択") }
+    func selectedStudyCount(_ count: Int) -> String {
+        text("학습 \(count)개 선택", "\(count) studies selected", "学習を\(count)件選択中")
+    }
+    func deleteSelectedStudies(_ count: Int) -> String {
+        text(
+            "선택한 학습 \(count)개와 모든 하위 주제를 삭제할까요?",
+            "Delete \(count) selected studies and all of their subtopics?",
+            "選択した学習\(count)件とすべてのサブトピックを削除しますか？"
+        )
+    }
+    var deleteSelectedStudiesAction: String {
+        text("선택한 학습 삭제", "Delete selected studies", "選択した学習を削除")
+    }
     var studyCategory: String { text("학습", "Study") }
     var newStudyCategory: String { text("학습 추가", "Add Study") }
     var editStudyCategory: String { text("학습 편집", "Edit Study") }
