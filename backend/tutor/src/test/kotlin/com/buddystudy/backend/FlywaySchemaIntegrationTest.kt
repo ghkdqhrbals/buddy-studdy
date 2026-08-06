@@ -258,6 +258,28 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
             "chk_questions_status",
             "chk_questions_grading_status",
         )
+
+        val membershipCheck = databaseClient.sql(
+            """
+            select check_clause
+            from information_schema.check_constraints
+            where constraint_schema = database()
+              and constraint_name = 'chk_user_memberships_status'
+            """.trimIndent(),
+        ).map { row, _ -> row.get("check_clause", String::class.java)!! }
+            .one().awaitSingle()
+        assertThat(membershipCheck).contains("ACTIVE", "INACTIVE")
+
+        val billingRepairMigrations = databaseClient.sql(
+            """
+            select version
+            from flyway_schema_history
+            where version in ('65', '66', '67') and success = true
+            order by installed_rank
+            """.trimIndent(),
+        ).map { row, _ -> row.get("version", String::class.java)!! }
+            .all().collectList().awaitSingle()
+        assertThat(billingRepairMigrations).containsExactly("65", "66", "67")
     }
 
     @Test

@@ -4,6 +4,7 @@ import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.billing.application.model.ApplyAppleNotificationCommand
 import com.buddystudy.backend.billing.application.model.BillingAction
 import com.buddystudy.backend.billing.application.model.BillingCatalog
+import com.buddystudy.backend.billing.application.model.BillingEntitlementProjection
 import com.buddystudy.backend.billing.application.model.BillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.BillingInvoicePage
 import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
@@ -51,6 +52,7 @@ class BillingService(
         requireRegistered(principal)
         val now = clock.instant()
         val entitlement = ledger.entitlementForUser(principal.userId)
+            ?.takeUnless { it.isExpiredAt(now) }
         val quota = memberships.quotaStatusForUser(principal.userId, now)
             ?: throw billingError(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Question quota was not found.")
         val periodStartedAt = quota.periodStartedAt ?: now
@@ -117,6 +119,11 @@ class BillingService(
 
     private fun SubscriptionAccessStatus.grantsAccess(): Boolean =
         this == SubscriptionAccessStatus.ACTIVE || this == SubscriptionAccessStatus.GRACE_PERIOD
+
+    private fun BillingEntitlementProjection.isExpiredAt(now: Instant): Boolean =
+        source == EntitlementSource.APP_STORE &&
+            accessStatus == SubscriptionAccessStatus.ACTIVE &&
+            expiresAt?.isAfter(now) == false
     override suspend fun catalog(principal: Principal): BillingCatalog {
         requireRegistered(principal)
         val now = clock.instant()

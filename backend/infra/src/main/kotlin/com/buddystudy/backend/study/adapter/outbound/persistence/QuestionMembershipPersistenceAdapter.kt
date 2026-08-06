@@ -22,10 +22,23 @@ class QuestionMembershipPersistenceAdapter(
     private val template: R2dbcEntityTemplate,
 ) : QuestionMembershipPort {
 
-    override suspend fun activePlanForUser(userId: Long): QuestionMembershipPlan? {
+    override suspend fun activePlanForUser(userId: Long): QuestionMembershipPlan? =
+        activePlanForUser(userId, Instant.now())
+
+    private suspend fun activePlanForUser(userId: Long, at: Instant): QuestionMembershipPlan? {
         val projectedTier = template.databaseClient.sql(
-            "select tier_code from user_entitlement_projection where user_id = :userId",
-        ).bind("userId", userId).map { row, _ -> row.get("tier_code", String::class.java)!! }
+            """
+            select tier_code
+            from user_entitlement_projection
+            where user_id = :userId
+              and (
+                    source = 'FREE'
+                    or access_status = 'GRACE_PERIOD'
+                    or (access_status = 'ACTIVE' and (expires_at is null or expires_at > :at))
+                  )
+            """.trimIndent(),
+        ).bind("userId", userId).bind("at", at.utc())
+            .map { row, _ -> row.get("tier_code", String::class.java)!! }
             .one().awaitSingleOrNull()
         if (projectedTier != null) {
             val tier = tiers.findByTierCode(projectedTier) ?: return null
@@ -33,9 +46,8 @@ class QuestionMembershipPersistenceAdapter(
         }
 
         val membership = memberships.findFirstByUserIdAndStatusOrderByUpdatedAtDesc(userId, MembershipStatus.ACTIVE)
-        val now = Instant.now()
         val activeMembership = membership?.takeIf {
-            !it.startedAt.isAfter(now) && it.expiresAt?.isAfter(now) != false
+            !it.startedAt.isAfter(at) && it.expiresAt?.isAfter(at) != false
         }
         val tierCode = activeMembership?.tier ?: DEFAULT_TIER
         val tier = tiers.findByTierCode(tierCode) ?: tiers.findByTierCode(DEFAULT_TIER) ?: return null
@@ -46,7 +58,7 @@ class QuestionMembershipPersistenceAdapter(
     }
 
     override suspend fun quotaStatusForUser(userId: Long, at: Instant): QuestionQuotaStatus? {
-        val plan = activePlanForUser(userId) ?: return null
+        val plan = activePlanForUser(userId, at) ?: return null
         // Status reads must stay side-effect free. A quota account/period is materialized only by
         // the first reservation or bonus grant; until then the user's creation instant is the
         // effective free-tier anchor and counters are zero.

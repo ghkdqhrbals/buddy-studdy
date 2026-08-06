@@ -153,6 +153,30 @@ class QuestionQuotaLifecycleIntegrationTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
+    fun `expired paid projection cannot grant paid question quota`(): Unit = runBlocking {
+        val now = Instant.now()
+        val userId = insertUser(now.minusSeconds(60))
+        database.sql(
+            """
+            insert into user_entitlement_projection (
+                user_id, subscription_id, tier_code, source, access_status, renewal_status,
+                product_id, started_at, expires_at, will_renew, projected_at, version
+            ) values (
+                :userId, null, 'TIER3', 'APP_STORE', 'ACTIVE', 'WILL_RENEW',
+                'io.github.ghkdqhrbals.StudyMate.tier3.monthly', :startedAt, :expiresAt, true, :now, 0
+            )
+            """.trimIndent(),
+        ).bind("userId", userId).bind("startedAt", now.minusSeconds(3_600))
+            .bind("expiresAt", now.minusSeconds(1)).bind("now", now)
+            .fetch().rowsUpdated().awaitSingle()
+
+        val status = requireNotNull(quota.quotaStatusForUser(userId, now))
+
+        assertThat(status.tierCode).isEqualTo("TIER1")
+        assertThat(status.baseLimit).isEqualTo(30)
+    }
+
+    @Test
     fun `bonus adjustments are idempotent clamped and expire at the next period`(): Unit = runBlocking {
         val now = Instant.now()
         val userId = insertUser(now.minusSeconds(60))

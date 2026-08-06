@@ -129,6 +129,24 @@ class BillingServiceTest {
     }
 
     @Test
+    fun `expired active projection cannot expose a paid membership`() = runBlocking {
+        val ledger = FakeLedger(token, product).apply {
+            projectedEntitlement = projectedEntitlement?.copy(
+                expiresAt = now.minusSeconds(1),
+                accessStatus = SubscriptionAccessStatus.ACTIVE,
+            )
+        }
+
+        val status = service(ledger, membershipTierCode = "TIER1", monthlyLimit = 30).status(principal())
+
+        assertEquals("TIER1", status.tierCode)
+        assertEquals(EntitlementSource.FREE, status.source)
+        assertEquals(SubscriptionAccessStatus.ACTIVE, status.accessStatus)
+        assertEquals(null, status.productId)
+        assertEquals(30, status.quota.baseLimit)
+    }
+
+    @Test
     fun `billing retry does not claim that the user will fall back to free`() = runBlocking {
         val ledger = FakeLedger(token, product).apply {
             projectedEntitlement = projectedEntitlement?.copy(
@@ -334,6 +352,8 @@ class BillingServiceTest {
     private fun service(
         ledger: FakeLedger,
         notification: VerifiedAppleNotification? = null,
+        membershipTierCode: String = "TIER2",
+        monthlyLimit: Int = 300,
     ) = BillingService(
         verifier = object : AppleBillingVerificationPort {
             override suspend fun verifyTransaction(
@@ -346,12 +366,12 @@ class BillingServiceTest {
         },
         ledger = ledger,
         memberships = object : QuestionMembershipPort {
-            override suspend fun activePlanForUser(userId: Long) = QuestionMembershipPlan("TIER2", 300)
+            override suspend fun activePlanForUser(userId: Long) = QuestionMembershipPlan(membershipTierCode, monthlyLimit)
             override suspend fun quotaStatusForUser(userId: Long, at: Instant) = QuestionQuotaStatus(
-                tierCode = "TIER2",
+                tierCode = membershipTierCode,
                 usedCount = 0,
-                monthlyQuestionLimit = 300,
-                baseLimit = 300,
+                monthlyQuestionLimit = monthlyLimit,
+                baseLimit = monthlyLimit,
                 periodStartedAt = now.minusSeconds(60),
                 resetAt = now.plusSeconds(2_592_000),
             )
