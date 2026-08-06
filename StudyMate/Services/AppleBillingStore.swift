@@ -223,6 +223,13 @@ final class AppleBillingStore: ObservableObject {
         case cancelled
     }
 
+    nonisolated static func requireApplied(_ invoice: BackendBillingInvoice) throws -> BackendBillingInvoice {
+        guard invoice.isApplied else {
+            throw AppleBillingStoreError.membershipApplicationIncomplete
+        }
+        return invoice
+    }
+
     @Published private(set) var products: [TierProduct] = []
     @Published private(set) var isLoading = false
     @Published private(set) var processingProductID: String?
@@ -287,25 +294,28 @@ final class AppleBillingStore: ObservableObject {
                 try? await abandonCheckout(checkout.invoiceNumber)
                 return .cancelled
             }
-            if let transactionIdentifier = revenueCatTransaction?.transactionIdentifier,
-               let evidence = await StoreKitTransactionSyncResolver.resolve(
+            guard let transactionIdentifier = revenueCatTransaction?.transactionIdentifier else {
+                return .pending
+            }
+            if let evidence = await StoreKitTransactionSyncResolver.resolve(
                 revenueCatTransactionIdentifier: transactionIdentifier,
                 productID: tierProduct.id,
                 appAccountToken: appAccountToken
-               ),
-               let invoice = try? await synchronize(
-                evidence.signedTransaction,
-                evidence.environment,
-                checkout.invoiceNumber
-               ),
-               invoice.status == "COMPLETED" {
-                return .purchased(invoice)
+            ) {
+                // A verified JWS path is synchronous: a non-2xx backend result is surfaced to the
+                // user and must never be converted into a generic approval-pending state.
+                let invoice = try await synchronize(
+                    evidence.signedTransaction,
+                    evidence.environment,
+                    checkout.invoiceNumber
+                )
+                return .purchased(try Self.requireApplied(invoice))
             }
 
             // Webhooks remain the fallback for Test Store purchases and for a temporary client-to-
             // backend failure. A future launch also replays the active StoreKit entitlement JWS.
             let invoice = try await waitForFulfillment(checkout.id)
-            return invoice.status == "COMPLETED" ? .purchased(invoice) : .pending
+            return .purchased(try Self.requireApplied(invoice))
         case .appStore(let product):
             let result = try await product.purchase(options: [.appAccountToken(appAccountToken)])
             switch result {
@@ -323,8 +333,9 @@ final class AppleBillingStore: ObservableObject {
                     Self.backendEnvironment(transaction),
                     checkout.invoiceNumber
                 )
+                let appliedInvoice = try Self.requireApplied(invoice)
                 await transaction.finish()
-                return .purchased(invoice)
+                return .purchased(appliedInvoice)
             case .pending:
                 return .pending
             case .userCancelled:
@@ -403,6 +414,7 @@ enum AppleBillingStoreError: LocalizedError {
     case accountTokenMismatch
     case invalidTransactionIdentifier
     case customerCenterUnavailable
+    case membershipApplicationIncomplete
     case unknownPurchaseResult
 
     var errorDescription: String? {
@@ -417,6 +429,8 @@ enum AppleBillingStoreError: LocalizedError {
             return "환불할 App Store 거래 번호가 올바르지 않습니다."
         case .customerCenterUnavailable:
             return "RevenueCat 결제 관리 기능을 사용할 수 없습니다."
+        case .membershipApplicationIncomplete:
+            return "결제 결과를 확인했지만 멤버십 적용이 완료되지 않았습니다. 구매 복원을 다시 시도해 주세요."
         case .unknownPurchaseResult:
             return "알 수 없는 App Store 결제 결과입니다."
         }

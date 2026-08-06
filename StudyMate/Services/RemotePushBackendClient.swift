@@ -2893,7 +2893,16 @@ struct BackendBillingInvoice: Decodable, Equatable, Identifiable {
     var expiresAt: Date?
     var createdAt: Date
     var updatedAt: Date
+    var fulfilledAt: Date? = nil
     var latestEventType: String? = nil
+
+    var isApplied: Bool {
+        (type ?? "NORMAL") == "NORMAL"
+            && status == "COMPLETED"
+            && paymentStatus == "SETTLED"
+            && fulfilledAt != nil
+            && transactionId != nil
+    }
 
     var isRefundable: Bool {
         (type ?? "NORMAL") == "NORMAL"

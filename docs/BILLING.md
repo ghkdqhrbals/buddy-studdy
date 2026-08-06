@@ -181,12 +181,19 @@ sequenceDiagram
 The direct `POST /api/v1/billing/apple/transactions` endpoint accepts
 `signedTransaction`, `environment`, and the optional `invoiceNumber`. It is a
 backward-compatible recovery path for StoreKit transactions that were not
-created through RevenueCat; it is not a second entitlement authority.
+created through RevenueCat; it is not a second entitlement authority. This
+request is nevertheless a synchronous application boundary: it returns 2xx
+only after the payment is `SETTLED`, the invoice has a durable `fulfilledAt`,
+and the effective entitlement plus quota expose the purchased tier. If payment
+evidence commits but application fails, the financial record remains durable
+and the endpoint returns `BILLING_APPLICATION_FAILED`. Retrying the same JWS is
+idempotent and resumes the existing fulfillment.
 
 | Contract | Required values | Purpose |
 | --- | --- | --- |
 | `GET /api/v1/billing/catalog` | authenticated user | Returns server-owned products and stable `appAccountToken` |
 | `POST /api/v1/billing/checkouts` | `productId`, user-scoped `idempotencyKey` | Creates the `NORMAL/WAITING` invoice before showing the purchase sheet |
+| `POST /api/v1/billing/apple/transactions` | verified JWS, environment, optional invoice number | Settles the ledger and applies membership synchronously; non-2xx means application did not complete |
 | RevenueCat purchase | product, `appAccountToken` as RevenueCat App User ID | Correlates Apple purchase, RevenueCat customer, and BuddyStudy user |
 | `POST /api/v1/billing/revenuecat/webhooks` | exact raw body, `X-RevenueCat-Webhook-Signature` | Primary at-least-once server delivery, deduplicated by event and transaction IDs |
 | `GET /api/v1/billing/invoices/{invoiceId}` | invoice ID owned by the user | Bounded client refresh; it does not replace webhook recovery |
@@ -217,6 +224,14 @@ Customer Center callback such as `onCustomerCenterRefundRequestCompleted` is
 useful for UI refresh and analytics only; it must never project `REFUNDED` in
 the backend. Only a verified RevenueCat or Apple server lifecycle event can do
 that.
+
+After a RevenueCat purchase callback, iOS first resolves the matching StoreKit
+2 JWS. When that JWS exists, the app propagates transaction-sync errors and
+accepts success only for a `COMPLETED`/`SETTLED` invoice with `fulfilledAt`. It
+must not use `try?` or convert a server failure into an approval-pending alert.
+The pending alert is reserved for an actual StoreKit approval state. If the
+bounded webhook fallback does not reach the same applied-invoice contract, the
+app shows a failure and offers purchase restoration as recovery.
 
 ## RevenueCat Customer Center
 

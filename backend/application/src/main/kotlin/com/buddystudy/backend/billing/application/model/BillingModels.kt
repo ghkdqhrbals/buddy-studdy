@@ -156,6 +156,7 @@ data class BillingInvoiceSummary(
     val expiresAt: Instant?,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val fulfilledAt: Instant? = null,
     val latestEventType: InvoiceEventType? = null,
 )
 

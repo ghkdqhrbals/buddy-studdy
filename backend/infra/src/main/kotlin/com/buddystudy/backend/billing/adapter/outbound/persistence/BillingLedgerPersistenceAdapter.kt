@@ -2382,6 +2382,7 @@ class BillingLedgerPersistenceAdapter(
         expiresAt = nullableInstant("expires_at"),
         createdAt = instant("created_at"),
         updatedAt = instant("updated_at"),
+        fulfilledAt = nullableInstant("fulfilled_at"),
         latestEventType = nullableString("latest_event_type")?.let(InvoiceEventType::valueOf),
     )
 
@@ -2585,7 +2586,7 @@ class BillingLedgerPersistenceAdapter(
                    p.id as payment_id, p.provider_transaction_id, p.provider_original_transaction_id,
                    p.status as payment_status, p.price_milliunits, p.currency, p.purchase_at,
                    coalesce(p.expires_at, i.expires_at) as expires_at,
-                   i.created_at, i.updated_at,
+                   i.created_at, i.updated_at, i.fulfilled_at,
                    latest_event.event_type as latest_event_type
             from invoices i
             left join payments p on p.invoice_id = coalesce(i.original_invoice_id, i.id)
@@ -2609,7 +2610,7 @@ class BillingLedgerPersistenceAdapter(
                    p.id as payment_id, p.provider_transaction_id, p.provider_original_transaction_id,
                    p.status as payment_status, p.price_milliunits, p.currency, p.purchase_at,
                    coalesce(p.expires_at, i.expires_at) as expires_at,
-                   i.created_at, i.updated_at,
+                   i.created_at, i.updated_at, i.fulfilled_at,
                    latest_event.event_type as latest_event_type,
                    u.id as user_id, u.email as user_email, u.display_name as user_display_name
             from invoices i

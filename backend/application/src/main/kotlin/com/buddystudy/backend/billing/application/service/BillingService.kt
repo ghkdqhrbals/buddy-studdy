@@ -25,8 +25,11 @@ import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystudy.billing.domain.BillingEventSource
 import com.buddystudy.billing.domain.EntitlementSource
+import com.buddystudy.billing.domain.InvoiceStatus
+import com.buddystudy.billing.domain.PaymentStatus
 import com.buddystudy.billing.domain.SubscriptionAccessStatus
 import com.buddystudy.billing.domain.SubscriptionRenewalStatus
+import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import java.time.Clock
@@ -41,6 +44,8 @@ class BillingService(
     private val memberships: QuestionMembershipPort,
     private val clock: Clock = Clock.systemUTC(),
 ) : BillingUseCase, AppleBillingNotificationUseCase, BillingRecoveryUseCase {
+    private val logger = LoggerFactory.getLogger(javaClass)
+
     override suspend fun status(principal: Principal): BillingStatusResponse {
         requireRegistered(principal)
         val now = clock.instant()
@@ -159,7 +164,24 @@ class BillingService(
 
         // This is deliberately a separate transaction. If the process dies after payment evidence
         // commits, the fulfillment job created above remains available to the recovery worker.
-        return ledger.fulfill(recorded.id, now)
+        val fulfilled = try {
+            ledger.fulfill(recorded.id, now)
+        } catch (error: Exception) {
+            logger.error(
+                "apple_transaction_membership_application_failed userId={} invoiceId={} invoiceNumber={} " +
+                    "transactionId={} productId={} errorType={} message={}",
+                principal.userId,
+                recorded.id,
+                recorded.invoiceNumber,
+                transaction.transactionId,
+                transaction.productId,
+                error.javaClass.name,
+                error.message,
+                error,
+            )
+            throw billingApplicationFailed()
+        }
+        return requireAppliedTransaction(principal.userId, product, transaction, fulfilled, now)
     }
 
     override suspend fun invoices(principal: Principal, limit: Int, offset: Int): BillingInvoicePage {
@@ -302,6 +324,53 @@ class BillingService(
             )
         }
     }
+
+    private suspend fun requireAppliedTransaction(
+        userId: Long,
+        product: com.buddystudy.backend.billing.application.model.BillingTierProduct,
+        transaction: VerifiedAppleTransaction,
+        invoice: BillingInvoiceSummary,
+        now: Instant,
+    ): BillingInvoiceSummary {
+        val entitlement = ledger.entitlementForUser(userId)
+        val quota = memberships.quotaStatusForUser(userId, now)
+        val invoiceApplied = invoice.status == InvoiceStatus.COMPLETED &&
+            invoice.paymentStatus == PaymentStatus.SETTLED &&
+            invoice.fulfilledAt != null &&
+            invoice.transactionId == transaction.transactionId &&
+            invoice.productId == transaction.productId
+        val entitlementApplied = entitlement?.tierCode == product.tierCode &&
+            entitlement.productId == product.productId &&
+            entitlement.accessStatus in setOf(SubscriptionAccessStatus.ACTIVE, SubscriptionAccessStatus.GRACE_PERIOD)
+        val quotaApplied = quota?.tierCode == product.tierCode && quota.baseLimit == product.monthlyQuestionLimit
+
+        if (invoiceApplied && entitlementApplied && quotaApplied) return invoice
+
+        logger.error(
+            "apple_transaction_application_postcondition_failed userId={} invoiceId={} invoiceStatus={} " +
+                "paymentStatus={} fulfilledAt={} transactionMatches={} expectedTier={} entitlementTier={} " +
+                "entitlementProduct={} entitlementAccess={} quotaTier={} quotaBaseLimit={}",
+            userId,
+            invoice.id,
+            invoice.status,
+            invoice.paymentStatus,
+            invoice.fulfilledAt,
+            invoice.transactionId == transaction.transactionId,
+            product.tierCode,
+            entitlement?.tierCode,
+            entitlement?.productId,
+            entitlement?.accessStatus,
+            quota?.tierCode,
+            quota?.baseLimit,
+        )
+        throw billingApplicationFailed()
+    }
+
+    private fun billingApplicationFailed() = billingError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        ApiErrorCode.BILLING_APPLICATION_FAILED,
+        "The verified App Store payment was persisted, but membership application did not complete.",
+    )
 
     private fun validateSignedPayload(payload: String) {
         val trimmed = payload.trim()

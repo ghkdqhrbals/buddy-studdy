@@ -24,6 +24,8 @@ import com.buddystudy.backend.billing.application.port.outbound.AppleBillingVeri
 import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPort
 import com.buddystudy.backend.billing.application.service.BillingService
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
+import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPlan
+import com.buddystudy.backend.study.application.port.outbound.QuestionQuotaStatus
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiRuntimeException
 import com.buddystudy.billing.domain.BillingActionStatus
@@ -34,6 +36,9 @@ import com.buddystudy.billing.domain.BillingProductType
 import com.buddystudy.billing.domain.InvoiceStatus
 import com.buddystudy.billing.domain.InvoiceType
 import com.buddystudy.billing.domain.PaymentStatus
+import com.buddystudy.billing.domain.EntitlementSource
+import com.buddystudy.billing.domain.SubscriptionAccessStatus
+import com.buddystudy.billing.domain.SubscriptionRenewalStatus
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -154,16 +159,30 @@ class BillingServiceTest {
     }
 
     @Test
-    fun `membership fulfillment failure leaves verified payment for durable recovery`() {
+    fun `membership fulfillment failure leaves verified payment and returns an explicit application failure`() {
         val ledger = FakeLedger(token, product).apply { fulfillmentError = IllegalStateException("membership rollback") }
         val service = service(ledger)
 
-        assertThrows(IllegalStateException::class.java) {
+        val error = assertThrows(ApiRuntimeException::class.java) {
             runBlocking { service.syncAppleTransaction(principal(), syncCommand()) }
         }
 
+        assertEquals(ApiErrorCode.BILLING_APPLICATION_FAILED, error.errorCode)
         assertEquals(1, ledger.recordedPayments.size)
         assertTrue(ledger.compensatedInvoices.isEmpty())
+    }
+
+    @Test
+    fun `transaction sync does not return success when entitlement projection is missing`() {
+        val ledger = FakeLedger(token, product).apply { projectedEntitlement = null }
+        val service = service(ledger)
+
+        val error = assertThrows(ApiRuntimeException::class.java) {
+            runBlocking { service.syncAppleTransaction(principal(), syncCommand()) }
+        }
+
+        assertEquals(ApiErrorCode.BILLING_APPLICATION_FAILED, error.errorCode)
+        assertEquals(InvoiceStatus.COMPLETED, ledger.lastFulfillmentStatus)
     }
 
     @Test
@@ -267,7 +286,24 @@ class BillingServiceTest {
                 notification ?: error("not used")
         },
         ledger = ledger,
-        memberships = org.mockito.Mockito.mock(QuestionMembershipPort::class.java),
+        memberships = object : QuestionMembershipPort {
+            override suspend fun activePlanForUser(userId: Long) = QuestionMembershipPlan("TIER2", 300)
+            override suspend fun quotaStatusForUser(userId: Long, at: Instant) = QuestionQuotaStatus(
+                tierCode = "TIER2",
+                usedCount = 0,
+                monthlyQuestionLimit = 300,
+                baseLimit = 300,
+                periodStartedAt = now.minusSeconds(60),
+                resetAt = now.plusSeconds(2_592_000),
+            )
+            override suspend fun tryConsumeMonthlySystemQuestion(
+                userId: Long,
+                periodStartedAt: Instant,
+                limit: Int,
+                now: Instant,
+            ) = true
+            override suspend fun refundMonthlySystemQuestion(userId: Long, periodStartedAt: Instant, now: Instant) = Unit
+        },
         clock = Clock.fixed(now, ZoneOffset.UTC),
     )
 
@@ -292,7 +328,19 @@ class BillingServiceTest {
         private val product: BillingTierProduct?,
         private val productEnabled: Boolean = true,
     ) : BillingLedgerPort {
-        override suspend fun entitlementForUser(userId: Long): BillingEntitlementProjection? = null
+        var projectedEntitlement: BillingEntitlementProjection? = BillingEntitlementProjection(
+            tierCode = "TIER2",
+            source = EntitlementSource.APP_STORE,
+            accessStatus = SubscriptionAccessStatus.ACTIVE,
+            renewalStatus = SubscriptionRenewalStatus.WILL_RENEW,
+            productId = "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+            startedAt = Instant.parse("2026-08-02T23:59:50Z"),
+            expiresAt = Instant.parse("2026-09-02T00:00:00Z"),
+            willRenew = true,
+            pendingProductId = null,
+            synchronizedAt = Instant.parse("2026-08-03T00:00:00Z"),
+        )
+        override suspend fun entitlementForUser(userId: Long): BillingEntitlementProjection? = projectedEntitlement
         var tokenReads = 0
         var fulfillmentError: Exception? = null
         var notificationApplyError: Exception? = null
@@ -349,7 +397,7 @@ class BillingServiceTest {
         override suspend fun fulfill(invoiceId: Long, now: Instant): BillingInvoiceSummary {
             fulfillmentError?.let { throw it }
             lastFulfillmentStatus = InvoiceStatus.COMPLETED
-            return invoice(InvoiceStatus.COMPLETED)
+            return invoice(InvoiceStatus.COMPLETED, applied = true)
         }
         override suspend fun requireCompensation(invoiceId: Long, reason: String, now: Instant): BillingInvoiceSummary {
             compensatedInvoices += invoiceId
@@ -403,7 +451,7 @@ class BillingServiceTest {
             invoiceId: Long, command: RequestBillingActionCommand, now: Instant,
         ): BillingAction = action(BillingActionType.CANCELLATION)
 
-        private fun invoice(status: InvoiceStatus) = BillingInvoiceSummary(
+        private fun invoice(status: InvoiceStatus, applied: Boolean = false) = BillingInvoiceSummary(
             id = 99,
             invoiceNumber = UUID.fromString("2306d81d-1323-48c4-bb2b-a40cc48f70da"),
             type = InvoiceType.NORMAL,
@@ -415,13 +463,14 @@ class BillingServiceTest {
             paymentId = 88,
             transactionId = "200000000000001",
             originalTransactionId = "200000000000000",
-            paymentStatus = PaymentStatus.VERIFIED,
+            paymentStatus = if (applied) PaymentStatus.SETTLED else PaymentStatus.VERIFIED,
             priceMilliunits = 4_900_000,
             currency = "KRW",
             purchaseAt = Instant.parse("2026-08-02T23:59:50Z"),
             expiresAt = Instant.parse("2026-09-02T00:00:00Z"),
             createdAt = Instant.parse("2026-08-03T00:00:00Z"),
             updatedAt = Instant.parse("2026-08-03T00:00:00Z"),
+            fulfilledAt = if (applied) Instant.parse("2026-08-03T00:00:00Z") else null,
         )
 
         private fun action(type: BillingActionType) = BillingAction(

@@ -6558,10 +6558,7 @@ private struct MobileMembershipManagementView: View {
                 switch outcome {
                 case .purchased:
                     await refreshMembershipData()
-                    billingNotice = appState.billingStatus?.productId == tierProduct.id
-                        && appState.billingStatus?.isEntitlementActive == true
-                        ? strings.billingPurchased
-                        : strings.billingPending
+                    billingNotice = strings.billingPurchased
                 case .pending:
                     billingNotice = strings.billingPending
                     await refreshMembershipData()

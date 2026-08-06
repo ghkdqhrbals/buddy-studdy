@@ -91,6 +91,12 @@ enum class ApiErrorCode(
         "error.billing.configuration",
         "Billing is temporarily unavailable.",
     ),
+    BILLING_APPLICATION_FAILED(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        510,
+        "error.billing.application_failed",
+        "The verified payment could not be applied to the membership.",
+    ),
 
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, 900, "error.internal.server_error", "Internal server error."),
     EMAIL_DELIVERY_FAILED(HttpStatus.SERVICE_UNAVAILABLE, 901, "error.email.delivery_failed", "Email delivery failed."),

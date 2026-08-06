@@ -102,8 +102,42 @@ final class AppControlPolicyTests: XCTestCase {
         XCTAssertTrue(billingStore.contains("StoreKitTransactionSyncResolver.resolve("))
         XCTAssertTrue(billingStore.contains("checkout.invoiceNumber"))
         XCTAssertTrue(billingStore.contains("let invoice = try await waitForFulfillment(checkout.id)"))
+        XCTAssertTrue(billingStore.contains("Self.requireApplied(invoice)"))
+        XCTAssertFalse(billingStore.contains("try? await synchronize("))
         XCTAssertTrue(appState.contains("for await verification in Transaction.currentEntitlements"))
         XCTAssertTrue(appState.contains("finishAfterSync: false"))
+    }
+
+    func testPurchaseSuccessRequiresSettledAndFulfilledBackendInvoice() throws {
+        let fulfilledAt = Date(timeIntervalSince1970: 1_785_744_722)
+        let applied = BackendBillingInvoice(
+            id: 41,
+            invoiceNumber: UUID(uuidString: "9f041446-e898-4ef7-974d-91ac70e1a89b")!,
+            tierCode: "TIER3",
+            productId: "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+            status: "COMPLETED",
+            version: 4,
+            paymentId: 87,
+            transactionId: "2000000812345678",
+            originalTransactionId: "2000000712345678",
+            paymentStatus: "SETTLED",
+            priceMilliunits: 17_900_000,
+            currency: "KRW",
+            purchaseAt: Date(timeIntervalSince1970: 1_785_744_720),
+            expiresAt: Date(timeIntervalSince1970: 1_788_422_720),
+            createdAt: Date(timeIntervalSince1970: 1_785_744_721),
+            updatedAt: fulfilledAt,
+            fulfilledAt: fulfilledAt
+        )
+
+        XCTAssertTrue(applied.isApplied)
+        XCTAssertNoThrow(try AppleBillingStore.requireApplied(applied))
+
+        var paymentOnly = applied
+        paymentOnly.paymentStatus = "VERIFIED"
+        paymentOnly.fulfilledAt = nil
+        XCTAssertFalse(paymentOnly.isApplied)
+        XCTAssertThrowsError(try AppleBillingStore.requireApplied(paymentOnly))
     }
 
     func testMaintenanceTakesPriorityOverForcedUpdate() {
