@@ -123,6 +123,23 @@ observable and retryable. Projection and RevenueCat reconciliation retry at
 most three times; exhausted work and its complete error remain stored for an
 operator alert. A backend failure never initiates or claims an Apple refund.
 
+RevenueCat event claims use a five-minute processing lease. A process that dies
+after claiming an event cannot leave it permanently in `PROCESSING`; another
+worker reclaims the expired lease. Failed Apple notifications are claimable on
+redelivery, and an Apple notification left in `RECEIVED` by process death is
+claimable after the same five-minute lease. Subscription projection is monotonic
+by the provider event timestamp under a row lock, so a late cancellation
+reversal, renewal, or purchase cannot overwrite a newer expiration or
+revocation. Provider lifecycle and fulfillment paths use the same payment,
+invoice, then subscription lock order. The fulfillment worker also refuses to
+grant entitlement from a payment already in `REFUNDED`, `REVOKED`, or `FAILED`,
+covering the boundary where a terminal Apple event commits after payment
+verification but before entitlement projection. The verified-payment
+transaction creates the subscription ledger row before queuing fulfillment,
+and fulfillment grants membership only while that row is `ACTIVE` or
+`GRACE_PERIOD`; an expiration received during the same recovery gap therefore
+cannot be lost or followed by a stale membership grant.
+
 RevenueCat completes new StoreKit transactions and reports them through an
 HMAC-signed webhook. The iOS client performs a short bounded invoice refresh;
 the durable webhook and backend recovery job remain authoritative if the app

@@ -315,6 +315,11 @@ class BillingLedgerPersistenceAdapter(
             reason = null,
             occurredAt = now,
         )
+        val recordedInvoice = lockInvoice(invoiceId)
+            ?: throw billingFailure(ApiErrorCode.INTERNAL_SERVER_ERROR, "Recorded invoice could not be locked.")
+        val recordedPayment = lockPayment(paymentId)
+            ?: throw billingFailure(ApiErrorCode.INTERNAL_SERVER_ERROR, "Recorded payment could not be locked.")
+        upsertActiveSubscription(recordedInvoice, recordedPayment, recordedPayment.purchaseAt, now)
         insertBillingJob(invoiceId, paymentId, BillingJobType.FULFILLMENT, now)
         return loadInvoiceSummary(invoiceId)
             ?: throw billingFailure(ApiErrorCode.INTERNAL_SERVER_ERROR, "Created invoice could not be read.")
@@ -322,6 +327,8 @@ class BillingLedgerPersistenceAdapter(
 
     @Transactional
     override suspend fun fulfill(invoiceId: Long, now: Instant): BillingInvoiceSummary {
+        val payment = lockPaymentByInvoice(invoiceId)
+            ?: throw billingFailure(ApiErrorCode.RESOURCE_NOT_FOUND, "Invoice payment is missing.", HttpStatus.NOT_FOUND)
         val locked = lockInvoice(invoiceId)
             ?: throw billingFailure(ApiErrorCode.RESOURCE_NOT_FOUND, "Invoice not found.", HttpStatus.NOT_FOUND)
         if (locked.status == InvoiceStatus.COMPLETED && hasInvoiceEvent(invoiceId, InvoiceEventType.FULFILLED)) {
@@ -333,6 +340,21 @@ class BillingLedgerPersistenceAdapter(
                 "Invoice cannot be fulfilled from ${locked.status}.",
                 HttpStatus.CONFLICT,
             )
+        }
+        if (payment.status in TERMINAL_ENTITLEMENT_DENIED_PAYMENT_STATES) {
+            if (!hasInvoiceEvent(invoiceId, InvoiceEventType.FULFILLMENT_FAILED)) {
+                appendInvoiceEvent(
+                    invoiceId,
+                    "invoice-fulfillment-suppressed:${locked.invoiceNumber}:${payment.status.name.lowercase()}",
+                    InvoiceEventType.FULFILLMENT_FAILED,
+                    BillingEventSource.SYSTEM,
+                    null,
+                    "Entitlement fulfillment was suppressed because payment is ${payment.status}.",
+                    now,
+                )
+            }
+            completeFulfillmentJob(invoiceId, now)
+            return requireInvoiceSummary(invoiceId)
         }
         if (!hasInvoiceEvent(invoiceId, InvoiceEventType.FULFILLMENT_STARTED)) {
             appendInvoiceEvent(
@@ -346,19 +368,19 @@ class BillingLedgerPersistenceAdapter(
             )
         }
 
-        val payment = lockPaymentByInvoice(invoiceId)
-            ?: throw billingFailure(ApiErrorCode.INTERNAL_SERVER_ERROR, "Invoice payment is missing.")
-        grantMembership(locked, payment, now)
-        transitionPayment(
-            payment,
-            PaymentStatus.SETTLED,
-            PaymentHistoryEventType.SETTLED,
-            "payment-settled:${payment.providerTransactionId}",
-            BillingEventSource.SYSTEM,
-            null,
-            null,
-            now,
-        )
+        grantMembership(locked, payment, payment.purchaseAt, now)
+        if (payment.status == PaymentStatus.VERIFIED) {
+            transitionPayment(
+                payment,
+                PaymentStatus.SETTLED,
+                PaymentHistoryEventType.SETTLED,
+                "payment-settled:${payment.providerTransactionId}",
+                BillingEventSource.SYSTEM,
+                null,
+                null,
+                now,
+            )
+        }
         appendInvoiceEvent(
             invoiceId,
             "invoice-fulfilled:${locked.invoiceNumber}",
@@ -368,6 +390,11 @@ class BillingLedgerPersistenceAdapter(
             null,
             now,
         )
+        completeFulfillmentJob(invoiceId, now)
+        return requireInvoiceSummary(invoiceId)
+    }
+
+    private suspend fun completeFulfillmentJob(invoiceId: Long, now: Instant) {
         database.sql(
             """
             update billing_jobs
@@ -376,7 +403,6 @@ class BillingLedgerPersistenceAdapter(
             where invoice_id = :invoiceId and job_type = 'FULFILLMENT'
             """.trimIndent(),
         ).bind("invoiceId", invoiceId).bind("now", now.utc()).fetch().rowsUpdated().awaitSingle()
-        return requireInvoiceSummary(invoiceId)
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -653,7 +679,19 @@ class BillingLedgerPersistenceAdapter(
             .bindNullable("transactionId", notification.transaction?.transactionId, String::class.java)
             .bind("now", now.utc())
             .fetch().rowsUpdated().awaitSingle()
-        return inserted == 1L
+        if (inserted == 1L) return true
+        return database.sql(
+            """
+            update apple_billing_notifications
+            set processing_status = 'RECEIVED', last_error = null, updated_at = :now
+            where notification_uuid = :uuid
+              and (
+                    processing_status = 'FAILED'
+                    or (processing_status = 'RECEIVED' and updated_at <= timestampadd(minute, -5, :now))
+                  )
+            """.trimIndent(),
+        ).bind("uuid", notification.notificationUUID).bind("now", now.utc())
+            .fetch().rowsUpdated().awaitSingle() == 1L
     }
 
     @Transactional
@@ -668,8 +706,13 @@ class BillingLedgerPersistenceAdapter(
         }
         val invoice = lockInvoice(payment.invoiceId)
             ?: throw billingFailure(ApiErrorCode.INTERNAL_SERVER_ERROR, "Notification invoice is missing.")
-        applyProviderLifecycle(invoice, payment, command)
-        markNotification(notification.notificationUUID, BillingReceiptStatus.PROCESSED, null, command.occurredAt)
+        val applied = applyProviderLifecycle(invoice, payment, command)
+        markNotification(
+            notification.notificationUUID,
+            if (applied) BillingReceiptStatus.PROCESSED else BillingReceiptStatus.IGNORED,
+            null,
+            command.occurredAt,
+        )
         return true
     }
 
@@ -735,8 +778,11 @@ class BillingLedgerPersistenceAdapter(
             from subscription_events e
             left join billing_accounts a on a.id = e.billing_account_id and a.status = 'ACTIVE'
             where e.provider = 'REVENUECAT'
-              and e.processing_status in ('PENDING', 'FAILED')
-              and e.attempt_count < e.max_attempts and e.next_attempt_at <= :now
+              and (
+                    (e.processing_status in ('PENDING', 'FAILED') and e.next_attempt_at <= :now)
+                    or (e.processing_status = 'PROCESSING' and e.updated_at <= timestampadd(minute, -5, :now))
+                  )
+              and e.attempt_count < e.max_attempts
             order by e.next_attempt_at, e.id
             limit :limit for update skip locked
             """.trimIndent(),
@@ -769,7 +815,10 @@ class BillingLedgerPersistenceAdapter(
                 update subscription_events
                 set processing_status = 'PROCESSING', updated_at = :now
                 where provider = 'REVENUECAT' and provider_event_id = :eventId
-                  and processing_status in ('PENDING', 'FAILED')
+                  and (
+                        processing_status in ('PENDING', 'FAILED')
+                        or (processing_status = 'PROCESSING' and updated_at <= timestampadd(minute, -5, :now))
+                      )
                 """.trimIndent(),
             ).bind("now", now.utc()).bind("eventId", event.eventId).fetch().rowsUpdated().awaitSingle()
         }
@@ -785,20 +834,35 @@ class BillingLedgerPersistenceAdapter(
             markRevenueCatEvent(event.eventId, BillingReceiptStatus.PROCESSED, null, now)
             return true
         }
+        val mapped = event.toProviderNotification()
+        val projectionOnlyEvent = event.eventType == "PRODUCT_CHANGE" || event.eventType == "BILLING_ISSUE" ||
+            (event.eventType == "CANCELLATION" && event.cancelReason == "CUSTOMER_SUPPORT")
+        if (mapped == null && !projectionOnlyEvent) {
+            markRevenueCatEvent(event.eventId, BillingReceiptStatus.IGNORED, null, now)
+            return true
+        }
+        val originalTransactionId = event.originalTransactionId
+        if (projectionOnlyEvent && originalTransactionId != null &&
+            !advanceProviderEventCursor(originalTransactionId, event.eventAt, now)
+        ) {
+            markRevenueCatEvent(event.eventId, BillingReceiptStatus.IGNORED, "Stale provider event.", now)
+            return true
+        }
         if (event.eventType == "PRODUCT_CHANGE") {
-            event.originalTransactionId?.let { originalTransactionId ->
+            originalTransactionId?.let {
                 updatePendingProduct(originalTransactionId, event.productId, event.eventAt, now)
             }
             markRevenueCatEvent(event.eventId, BillingReceiptStatus.PROCESSED, null, now)
             return true
         }
         if (event.eventType == "BILLING_ISSUE") {
-            event.originalTransactionId?.let { originalTransactionId ->
+            originalTransactionId?.let {
                 updateSubscriptionLifecycle(
                     originalTransactionId,
                     accessStatus = null,
                     renewalStatus = "BILLING_RETRY",
-                    now = now,
+                    providerEventAt = event.eventAt,
+                    processedAt = now,
                     nextReconcileAt = now.plusSeconds(15 * 60),
                 )
             }
@@ -806,36 +870,39 @@ class BillingLedgerPersistenceAdapter(
             return true
         }
         if (event.eventType == "CANCELLATION" && event.cancelReason == "CUSTOMER_SUPPORT") {
-            event.originalTransactionId?.let { originalTransactionId ->
+            originalTransactionId?.let {
                 updateSubscriptionLifecycle(
                     originalTransactionId,
                     accessStatus = null,
                     renewalStatus = null,
-                    now = now,
+                    providerEventAt = event.eventAt,
+                    processedAt = now,
                     nextReconcileAt = now,
                 )
             }
             markRevenueCatEvent(event.eventId, BillingReceiptStatus.PROCESSED, null, now)
             return true
         }
-        val mapped = event.toProviderNotification() ?: run {
-            markRevenueCatEvent(event.eventId, BillingReceiptStatus.IGNORED, null, now)
-            return true
-        }
+        requireNotNull(mapped)
         val transactionId = event.transactionId
             ?: throw billingFailure(ApiErrorCode.BILLING_TRANSACTION_INVALID, "RevenueCat lifecycle event has no transaction ID.")
         val payment = lockPaymentByTransaction(transactionId)
             ?: throw billingFailure(ApiErrorCode.RESOURCE_NOT_FOUND, "RevenueCat transaction has not reached the payment ledger yet.")
         val invoice = lockInvoice(payment.invoiceId)
             ?: throw billingFailure(ApiErrorCode.INTERNAL_SERVER_ERROR, "RevenueCat payment invoice is missing.")
-        applyProviderLifecycle(
+        val applied = applyProviderLifecycle(
             invoice = invoice,
             payment = payment,
             command = ApplyAppleNotificationCommand(mapped, now),
             source = BillingEventSource.REVENUECAT_WEBHOOK,
             eventPrefix = "revenuecat",
         )
-        markRevenueCatEvent(event.eventId, BillingReceiptStatus.PROCESSED, null, now)
+        markRevenueCatEvent(
+            event.eventId,
+            if (applied) BillingReceiptStatus.PROCESSED else BillingReceiptStatus.IGNORED,
+            if (applied) null else "Stale provider event.",
+            now,
+        )
         return true
     }
 
@@ -1190,9 +1257,17 @@ class BillingLedgerPersistenceAdapter(
         command: ApplyAppleNotificationCommand,
         source: BillingEventSource = BillingEventSource.APPLE_NOTIFICATION,
         eventPrefix: String = "apple",
-    ) {
+    ): Boolean {
         val notification = command.notification
         val now = command.occurredAt
+        if (!advanceProviderEventCursor(
+                payment.providerOriginalTransactionId,
+                notification.signedAt,
+                now,
+            )
+        ) {
+            return false
+        }
         when (notification.notificationType) {
             "DID_CHANGE_RENEWAL_STATUS" -> when (notification.subtype) {
                 "AUTO_RENEW_DISABLED" -> {
@@ -1217,7 +1292,8 @@ class BillingLedgerPersistenceAdapter(
                         payment.providerOriginalTransactionId,
                         accessStatus = null,
                         renewalStatus = "CANCELED",
-                        now = now,
+                        providerEventAt = notification.signedAt,
+                        processedAt = now,
                     )
                 }
                 "AUTO_RENEW_ENABLED" -> {
@@ -1242,7 +1318,8 @@ class BillingLedgerPersistenceAdapter(
                         payment.providerOriginalTransactionId,
                         accessStatus = null,
                         renewalStatus = "WILL_RENEW",
-                        now = now,
+                        providerEventAt = notification.signedAt,
+                        processedAt = now,
                     )
                 }
             }
@@ -1259,7 +1336,8 @@ class BillingLedgerPersistenceAdapter(
                     payment.providerOriginalTransactionId,
                     accessStatus = "REVOKED",
                     renewalStatus = "NOT_APPLICABLE",
-                    now = now,
+                    providerEventAt = notification.signedAt,
+                    processedAt = now,
                 )
             }
             "REFUND_DECLINED" -> {
@@ -1277,7 +1355,7 @@ class BillingLedgerPersistenceAdapter(
                     "$eventPrefix-refund-reversed:${notification.notificationUUID}", source,
                     notification.notificationUUID, null, now, historyInvoiceId = refundInvoice?.id ?: invoice.id)
                 refundInvoice?.let { appendIfAllowed(it.id, InvoiceEventType.REFUND_REVERSED, notification, now, source, eventPrefix) }
-                reactivateMembership(invoice, payment, now)
+                reactivateMembership(invoice, payment, notification.signedAt, now)
             }
             "REVOKE" -> {
                 val refundInvoice = requireRefundInvoice(invoice, notification, now, source)
@@ -1290,7 +1368,8 @@ class BillingLedgerPersistenceAdapter(
                     payment.providerOriginalTransactionId,
                     accessStatus = "REVOKED",
                     renewalStatus = "NOT_APPLICABLE",
-                    now = now,
+                    providerEventAt = notification.signedAt,
+                    processedAt = now,
                 )
             }
             "EXPIRED", "GRACE_PERIOD_EXPIRED" -> {
@@ -1300,22 +1379,24 @@ class BillingLedgerPersistenceAdapter(
                     payment.providerOriginalTransactionId,
                     accessStatus = "EXPIRED",
                     renewalStatus = "NOT_APPLICABLE",
-                    now = now,
+                    providerEventAt = notification.signedAt,
+                    processedAt = now,
                     nextReconcileAt = now.plusSeconds(24 * 60 * 60),
                 )
             }
             "CONSUMPTION_REQUEST" -> {
                 val refundInvoice = requireRefundInvoice(invoice, notification, now, source)
-                var current = lockInvoice(refundInvoice.id) ?: return
+                var current = lockInvoice(refundInvoice.id) ?: return true
                 if (InvoiceStateMachine.canApply(current.type, current.status, InvoiceEventType.REFUND_REQUESTED)) {
                     appendIfAllowed(refundInvoice.id, InvoiceEventType.REFUND_REQUESTED, notification, now, source, eventPrefix)
-                    current = lockInvoice(refundInvoice.id) ?: return
+                    current = lockInvoice(refundInvoice.id) ?: return true
                 }
                 if (InvoiceStateMachine.canApply(current.type, current.status, InvoiceEventType.REFUND_PENDING)) {
                     appendIfAllowed(refundInvoice.id, InvoiceEventType.REFUND_PENDING, notification, now, source, eventPrefix)
                 }
             }
         }
+        return true
     }
 
     private suspend fun requireRefundInvoice(
@@ -1668,7 +1749,38 @@ class BillingLedgerPersistenceAdapter(
             .fetch().rowsUpdated().awaitSingle()
     }
 
-    private suspend fun grantMembership(invoice: InvoiceEntity, payment: PaymentEntity, now: Instant) {
+    private suspend fun grantMembership(
+        invoice: InvoiceEntity,
+        payment: PaymentEntity,
+        providerEventAt: Instant,
+        now: Instant,
+    ) {
+        lockBillingAccountForProjection(invoice.userId)
+        val projectionAccepted = advanceProviderEventCursor(
+            payment.providerOriginalTransactionId,
+            providerEventAt,
+            now,
+        )
+        if (projectionAccepted) {
+            upsertActiveSubscription(invoice, payment, providerEventAt, now)
+        }
+        if (subscriptionAllowsEntitlement(payment.providerOriginalTransactionId)) {
+            upsertActiveMembership(invoice, payment, now)
+        } else {
+            deactivateMembership(payment.providerOriginalTransactionId, invoice.id, now)
+        }
+        rebuildEntitlementProjection(invoice.userId, now)
+        activateFirstPaidAnchor(invoice.userId, payment.purchaseAt, now)
+    }
+
+    private suspend fun lockBillingAccountForProjection(userId: Long) {
+        database.sql("select id from billing_accounts where user_id = :userId for update")
+            .bind("userId", userId)
+            .map { row, _ -> row.long("id") }
+            .one().awaitSingle()
+    }
+
+    private suspend fun upsertActiveMembership(invoice: InvoiceEntity, payment: PaymentEntity, now: Instant) {
         database.sql(
             """
             insert into user_memberships (
@@ -1687,12 +1799,14 @@ class BillingLedgerPersistenceAdapter(
             .bind("startedAt", payment.purchaseAt.utc())
             .bindNullable("expiresAt", payment.expiresAt?.utc(), LocalDateTime::class.java)
             .bind("now", now.utc()).fetch().rowsUpdated().awaitSingle()
-        projectActiveSubscription(invoice, payment, now)
-        activateFirstPaidAnchor(invoice.userId, payment.purchaseAt, now)
     }
 
-    private suspend fun reactivateMembership(invoice: InvoiceEntity, payment: PaymentEntity, now: Instant) =
-        grantMembership(invoice, payment, now)
+    private suspend fun reactivateMembership(
+        invoice: InvoiceEntity,
+        payment: PaymentEntity,
+        providerEventAt: Instant,
+        now: Instant,
+    ) = grantMembership(invoice, payment, providerEventAt, now)
 
     private suspend fun deactivateMembership(originalTransactionId: String, invoiceId: Long, now: Instant) {
         database.sql(
@@ -1706,7 +1820,12 @@ class BillingLedgerPersistenceAdapter(
             .bind("now", now.utc()).fetch().rowsUpdated().awaitSingle()
     }
 
-    private suspend fun projectActiveSubscription(invoice: InvoiceEntity, payment: PaymentEntity, now: Instant) {
+    private suspend fun upsertActiveSubscription(
+        invoice: InvoiceEntity,
+        payment: PaymentEntity,
+        providerEventAt: Instant,
+        now: Instant,
+    ) {
         database.sql(
             """
             insert into billing_accounts (user_id, app_account_token, status, created_at, updated_at)
@@ -1753,22 +1872,35 @@ class BillingLedgerPersistenceAdapter(
             ) values (
                 :accountId, :userId, 'APPLE', :originalTransactionId, :transactionId,
                 :productId, :tierCode, 'ACTIVE', 'WILL_RENEW', :startedAt, :expiresAt,
-                :now, :now, timestampadd(hour, 6, :now), 0, :now, :now
+                :providerEventAt, :now, timestampadd(hour, 6, :now), 0, :now, :now
             ) on duplicate key update
-                latest_transaction_id = values(latest_transaction_id), product_id = values(product_id),
-                tier_code = values(tier_code), access_status = 'ACTIVE',
+                latest_transaction_id = if(values(last_provider_event_at) >= last_provider_event_at, values(latest_transaction_id), latest_transaction_id),
+                product_id = if(values(last_provider_event_at) >= last_provider_event_at, values(product_id), product_id),
+                tier_code = if(values(last_provider_event_at) >= last_provider_event_at, values(tier_code), tier_code),
+                access_status = if(values(last_provider_event_at) >= last_provider_event_at, 'ACTIVE', access_status),
+                renewal_status = if(values(last_provider_event_at) >= last_provider_event_at, 'WILL_RENEW', renewal_status),
                 started_at = least(coalesce(started_at, values(started_at)), values(started_at)),
-                expires_at = values(expires_at), last_provider_event_at = values(last_provider_event_at),
-                next_reconcile_at = values(next_reconcile_at), version = version + 1, updated_at = values(updated_at)
+                expires_at = if(values(last_provider_event_at) >= last_provider_event_at, values(expires_at), expires_at),
+                next_reconcile_at = if(values(last_provider_event_at) >= last_provider_event_at, values(next_reconcile_at), next_reconcile_at),
+                version = if(values(last_provider_event_at) >= last_provider_event_at, version + 1, version),
+                updated_at = if(values(last_provider_event_at) >= last_provider_event_at, values(updated_at), updated_at),
+                last_provider_event_at = greatest(last_provider_event_at, values(last_provider_event_at))
             """.trimIndent(),
         ).bind("accountId", accountId).bind("userId", invoice.userId)
             .bind("originalTransactionId", payment.providerOriginalTransactionId)
             .bind("transactionId", payment.providerTransactionId).bind("productId", payment.productId)
             .bind("tierCode", invoice.tierCode).bind("startedAt", payment.purchaseAt.utc())
             .bindNullable("expiresAt", payment.expiresAt?.utc(), LocalDateTime::class.java)
-            .bind("now", now.utc()).fetch().rowsUpdated().awaitSingle()
-        rebuildEntitlementProjection(invoice.userId, now)
+            .bind("providerEventAt", providerEventAt.utc()).bind("now", now.utc())
+            .fetch().rowsUpdated().awaitSingle()
     }
+
+    private suspend fun subscriptionAllowsEntitlement(originalTransactionId: String): Boolean =
+        database.sql(
+            "select access_status from subscriptions where original_transaction_id = :id limit 1",
+        ).bind("id", originalTransactionId)
+            .map { row, _ -> row.string("access_status") in ENTITLEMENT_GRANTING_ACCESS_STATES }
+            .one().awaitSingleOrNull() == true
 
     private suspend fun rebuildEntitlementProjection(userId: Long, now: Instant) {
         val best = database.sql(
@@ -1830,32 +1962,61 @@ class BillingLedgerPersistenceAdapter(
         spec.fetch().rowsUpdated().awaitSingle()
     }
 
+    private suspend fun advanceProviderEventCursor(
+        originalTransactionId: String,
+        providerEventAt: Instant,
+        processedAt: Instant,
+    ): Boolean {
+        val lastProviderEventAt = database.sql(
+            "select last_provider_event_at from subscriptions where original_transaction_id = :id for update",
+        ).bind("id", originalTransactionId)
+            .map { row, _ -> row.nullableInstant("last_provider_event_at") ?: Instant.EPOCH }
+            .one().awaitSingleOrNull()
+            ?: throw billingFailure(
+                ApiErrorCode.RESOURCE_NOT_FOUND,
+                "Subscription projection has not been created for the provider event yet.",
+            )
+        if (lastProviderEventAt.isAfter(providerEventAt)) return false
+        database.sql(
+            """
+            update subscriptions
+            set last_provider_event_at = :providerEventAt, updated_at = :processedAt
+            where original_transaction_id = :originalTransactionId
+            """.trimIndent(),
+        ).bind("providerEventAt", providerEventAt.utc()).bind("processedAt", processedAt.utc())
+            .bind("originalTransactionId", originalTransactionId)
+            .fetch().rowsUpdated().awaitSingle()
+        return true
+    }
+
     private suspend fun updateSubscriptionLifecycle(
         originalTransactionId: String,
         accessStatus: String?,
         renewalStatus: String?,
-        now: Instant,
-        nextReconcileAt: Instant = now.plusSeconds(6 * 60 * 60),
+        providerEventAt: Instant,
+        processedAt: Instant,
+        nextReconcileAt: Instant = processedAt.plusSeconds(6 * 60 * 60),
     ) {
         var spec = database.sql(
             """
             update subscriptions
             set access_status = coalesce(:accessStatus, access_status),
                 renewal_status = coalesce(:renewalStatus, renewal_status),
-                last_provider_event_at = :now, next_reconcile_at = :nextReconcileAt,
-                version = version + 1, updated_at = :now
+                last_provider_event_at = :providerEventAt, next_reconcile_at = :nextReconcileAt,
+                version = version + 1, updated_at = :processedAt
             where original_transaction_id = :originalTransactionId
             """.trimIndent(),
         ).bindNullable("accessStatus", accessStatus, String::class.java)
             .bindNullable("renewalStatus", renewalStatus, String::class.java)
-            .bind("now", now.utc()).bind("nextReconcileAt", nextReconcileAt.utc())
+            .bind("providerEventAt", providerEventAt.utc()).bind("processedAt", processedAt.utc())
+            .bind("nextReconcileAt", nextReconcileAt.utc())
             .bind("originalTransactionId", originalTransactionId)
         spec.fetch().rowsUpdated().awaitSingle()
         val userId = database.sql(
             "select user_id from subscriptions where original_transaction_id = :originalTransactionId limit 1",
         ).bind("originalTransactionId", originalTransactionId)
             .map { row, _ -> row.long("user_id") }.one().awaitSingleOrNull()
-        if (userId != null) rebuildEntitlementProjection(userId, now)
+        if (userId != null) rebuildEntitlementProjection(userId, processedAt)
     }
 
     private suspend fun updatePendingProduct(
@@ -2572,6 +2733,12 @@ class BillingLedgerPersistenceAdapter(
             PaymentStatus.REFUND_DECLINED,
             PaymentStatus.REFUND_REVERSED,
         )
+        val TERMINAL_ENTITLEMENT_DENIED_PAYMENT_STATES = setOf(
+            PaymentStatus.REFUNDED,
+            PaymentStatus.REVOKED,
+            PaymentStatus.FAILED,
+        )
+        val ENTITLEMENT_GRANTING_ACCESS_STATES = setOf("ACTIVE", "GRACE_PERIOD")
         val TERMINAL_RECEIPT_STATES = setOf(BillingReceiptStatus.PROCESSED, BillingReceiptStatus.IGNORED)
 
         const val LOCK_PAYMENT_SQL = """

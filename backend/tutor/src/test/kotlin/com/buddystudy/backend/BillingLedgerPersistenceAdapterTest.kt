@@ -121,6 +121,310 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
+    fun `abandoned RevenueCat processing claim is reclaimed after its lease expires`(): Unit = runBlocking {
+        val eventId = "rc-lease-${UUID.randomUUID()}"
+        createdRevenueCatEventIds += eventId
+        val occurredAt = Instant.parse("2032-08-04T00:00:00Z")
+        val event = VerifiedRevenueCatEvent(
+            eventId = eventId,
+            eventType = "TEST",
+            appUserId = null,
+            originalAppUserId = null,
+            aliases = emptyList(),
+            store = "APP_STORE",
+            productId = null,
+            transactionId = null,
+            originalTransactionId = null,
+            environment = BillingEnvironment.SANDBOX,
+            priceMilliunits = null,
+            currency = null,
+            purchasedAt = null,
+            expiresAt = null,
+            eventAt = occurredAt,
+            cancelReason = null,
+            expirationReason = null,
+            signedPayloadSha256 = "e".repeat(64),
+        )
+
+        assertThat(ledger.recordRevenueCatEvent(event, occurredAt)).isTrue()
+        assertThat(ledger.claimDueRevenueCatEvents(occurredAt.plusSeconds(1), 100).map { it.eventId })
+            .containsExactly(eventId)
+        assertThat(ledger.claimDueRevenueCatEvents(occurredAt.plusSeconds(299), 100)).isEmpty()
+
+        // No completion or failure update simulates process death after the claim transaction commits.
+        assertThat(ledger.claimDueRevenueCatEvents(occurredAt.plusSeconds(302), 100).map { it.eventId })
+            .containsExactly(eventId)
+    }
+
+    @Test
+    fun `lifecycle event received before its purchase ledger remains retryable`(): Unit = runBlocking {
+        val fixture = fixture("lifecycle-before-purchase")
+        val transaction = fixture.transaction()
+        val event = fixture.revenueCatLifecycleEvent(
+            eventId = "rc-early-cancel-${fixture.suffix}",
+            eventType = "CANCELLATION",
+            transaction = transaction,
+            eventAt = fixture.now.plusSeconds(1),
+            cancelReason = "UNSUBSCRIBE",
+        )
+        createdRevenueCatEventIds += event.eventId
+        assertThat(ledger.recordRevenueCatEvent(event, fixture.now.plusSeconds(1))).isTrue()
+
+        assertThatThrownBy {
+            runBlocking { ledger.applyRevenueCatEvent(event, fixture.now.plusSeconds(2)) }
+        }.isInstanceOf(ApiException::class.java)
+
+        val processingStatus = database.sql(
+            "select processing_status from subscription_events where provider_event_id = :eventId",
+        ).bind("eventId", event.eventId)
+            .map { row, _ -> row.get("processing_status", String::class.java)!! }
+            .one().awaitSingle()
+        assertThat(processingStatus).isEqualTo("PENDING")
+    }
+
+    @Test
+    fun `failed or abandoned Apple notification can be claimed again`(): Unit = runBlocking {
+        val fixture = fixture("apple-notification-lease")
+        val notification = VerifiedAppleNotification(
+            notificationUUID = "apple-lease-${fixture.suffix}",
+            notificationType = "DID_CHANGE_RENEWAL_STATUS",
+            subtype = "AUTO_RENEW_DISABLED",
+            environment = BillingEnvironment.SANDBOX,
+            signedAt = fixture.now,
+            signedPayloadSha256 = "a".repeat(64),
+            transaction = fixture.transaction(),
+        )
+
+        assertThat(ledger.recordAppleNotification(notification, fixture.now)).isTrue()
+        assertThat(ledger.recordAppleNotification(notification, fixture.now.plusSeconds(1))).isFalse()
+
+        ledger.markAppleNotificationFailed(notification.notificationUUID, "simulated failure", fixture.now.plusSeconds(2))
+        assertThat(ledger.recordAppleNotification(notification, fixture.now.plusSeconds(3))).isTrue()
+        assertThat(ledger.recordAppleNotification(notification, fixture.now.plusSeconds(302))).isFalse()
+        assertThat(ledger.recordAppleNotification(notification, fixture.now.plusSeconds(304))).isTrue()
+    }
+
+    @Test
+    fun `late RevenueCat lifecycle event cannot overwrite a newer subscription state`(): Unit = runBlocking {
+        val fixture = fixture("revenuecat-order")
+        val checkout = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            fixture.product,
+            fixture.idempotencyKey,
+            fixture.now,
+        )
+        val transaction = fixture.transaction()
+        val recorded = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                userId = fixture.userId,
+                tierProduct = fixture.product,
+                transaction = transaction,
+                invoiceNumber = checkout.invoiceNumber,
+                source = BillingEventSource.CLIENT,
+                eventId = "apple-transaction:${transaction.transactionId}",
+                occurredAt = fixture.now.plusSeconds(1),
+            ),
+        )
+        ledger.fulfill(recorded.id, fixture.now.plusSeconds(2))
+
+        val cancellation = fixture.revenueCatLifecycleEvent(
+            eventId = "rc-cancel-${fixture.suffix}",
+            eventType = "CANCELLATION",
+            transaction = transaction,
+            eventAt = fixture.now.plusSeconds(100),
+            cancelReason = "UNSUBSCRIBE",
+        )
+        val staleUncancellation = fixture.revenueCatLifecycleEvent(
+            eventId = "rc-uncancel-${fixture.suffix}",
+            eventType = "UNCANCELLATION",
+            transaction = transaction,
+            eventAt = fixture.now.plusSeconds(50),
+        )
+        createdRevenueCatEventIds += cancellation.eventId
+        createdRevenueCatEventIds += staleUncancellation.eventId
+
+        assertThat(ledger.recordRevenueCatEvent(cancellation, fixture.now.plusSeconds(101))).isTrue()
+        assertThat(ledger.applyRevenueCatEvent(cancellation, fixture.now.plusSeconds(102))).isTrue()
+        assertThat(ledger.recordRevenueCatEvent(staleUncancellation, fixture.now.plusSeconds(103))).isTrue()
+        assertThat(ledger.applyRevenueCatEvent(staleUncancellation, fixture.now.plusSeconds(104))).isTrue()
+
+        val subscription = database.sql(
+            "select renewal_status, last_provider_event_at from subscriptions where original_transaction_id = :id",
+        ).bind("id", transaction.originalTransactionId).map { row, _ ->
+            row.get("renewal_status", String::class.java)!! to
+                row.get("last_provider_event_at", java.time.LocalDateTime::class.java)!!
+        }.one().awaitSingle()
+        assertThat(subscription.first).isEqualTo("CANCELED")
+        assertThat(subscription.second).isEqualTo(
+            java.time.LocalDateTime.ofInstant(cancellation.eventAt, java.time.ZoneOffset.UTC),
+        )
+        assertThat(eventTypes(recorded.id)).doesNotContain("CANCELLATION_REVERSED")
+    }
+
+    @Test
+    fun `late renewal payment cannot reactivate an expired subscription`(): Unit = runBlocking {
+        val fixture = fixture("revenuecat-late-renewal")
+        val checkout = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            fixture.product,
+            fixture.idempotencyKey,
+            fixture.now,
+        )
+        val initial = fixture.transaction()
+        val initialInvoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                fixture.product,
+                initial,
+                checkout.invoiceNumber,
+                BillingEventSource.CLIENT,
+                "apple-transaction:${initial.transactionId}",
+                fixture.now.plusSeconds(1),
+            ),
+        )
+        ledger.fulfill(initialInvoice.id, fixture.now.plusSeconds(2))
+
+        val expiration = fixture.revenueCatLifecycleEvent(
+            eventId = "rc-expire-${fixture.suffix}",
+            eventType = "EXPIRATION",
+            transaction = initial,
+            eventAt = fixture.now.plusSeconds(100),
+        )
+        createdRevenueCatEventIds += expiration.eventId
+        assertThat(ledger.recordRevenueCatEvent(expiration, fixture.now.plusSeconds(101))).isTrue()
+        assertThat(ledger.applyRevenueCatEvent(expiration, fixture.now.plusSeconds(102))).isTrue()
+
+        val staleRenewal = initial.copy(
+            transactionId = "stale-renewal-${fixture.suffix}",
+            originalPurchaseAt = initial.purchaseAt,
+            purchaseAt = fixture.now.plusSeconds(50),
+            expiresAt = fixture.now.plusSeconds(2_592_050),
+            signedAt = fixture.now.plusSeconds(103),
+        )
+        val staleInvoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                fixture.product,
+                staleRenewal,
+                null,
+                BillingEventSource.REVENUECAT_WEBHOOK,
+                "apple-transaction:${staleRenewal.transactionId}",
+                fixture.now.plusSeconds(103),
+            ),
+        )
+        ledger.fulfill(staleInvoice.id, fixture.now.plusSeconds(104))
+
+        val subscriptionStatus = database.sql(
+            "select access_status from subscriptions where original_transaction_id = :id",
+        ).bind("id", initial.originalTransactionId)
+            .map { row, _ -> row.get("access_status", String::class.java)!! }
+            .one().awaitSingle()
+        assertThat(subscriptionStatus).isEqualTo("EXPIRED")
+        assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER1")
+        assertThat(
+            longValue("select count(*) from user_memberships where user_id = ${fixture.userId} and status = 'ACTIVE'"),
+        ).isZero()
+    }
+
+    @Test
+    fun `refund committed before fulfillment prevents a late entitlement grant`(): Unit = runBlocking {
+        val fixture = fixture("refund-before-fulfillment")
+        val checkout = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            fixture.product,
+            fixture.idempotencyKey,
+            fixture.now,
+        )
+        val transaction = fixture.transaction()
+        val recorded = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                fixture.product,
+                transaction,
+                checkout.invoiceNumber,
+                BillingEventSource.CLIENT,
+                "apple-transaction:${transaction.transactionId}",
+                fixture.now.plusSeconds(1),
+            ),
+        )
+        val notification = VerifiedAppleNotification(
+            notificationUUID = "refund-before-fulfillment-${fixture.suffix}",
+            notificationType = "REFUND",
+            subtype = null,
+            environment = BillingEnvironment.SANDBOX,
+            signedAt = fixture.now.plusSeconds(2),
+            signedPayloadSha256 = "c".repeat(64),
+            transaction = transaction,
+        )
+        assertThat(ledger.recordAppleNotification(notification, fixture.now.plusSeconds(2))).isTrue()
+        assertThat(
+            ledger.applyAppleNotification(
+                ApplyAppleNotificationCommand(notification, fixture.now.plusSeconds(3)),
+            ),
+        ).isTrue()
+
+        val fulfilled = ledger.fulfill(recorded.id, fixture.now.plusSeconds(4))
+
+        assertThat(fulfilled.paymentStatus).isEqualTo(PaymentStatus.REFUNDED)
+        assertThat(eventTypes(recorded.id)).contains("FULFILLMENT_FAILED").doesNotContain("FULFILLED")
+        assertThat(
+            longValue("select count(*) from user_memberships where user_id = ${fixture.userId} and status = 'ACTIVE'"),
+        ).isZero()
+        assertThat(
+            longValue("select count(*) from billing_jobs where invoice_id = ${recorded.id} and status = 'COMPLETED'"),
+        ).isEqualTo(1)
+    }
+
+    @Test
+    fun `expiration committed before fulfillment prevents a late entitlement grant`(): Unit = runBlocking {
+        val fixture = fixture("expiration-before-fulfillment")
+        val checkout = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            fixture.product,
+            fixture.idempotencyKey,
+            fixture.now,
+        )
+        val transaction = fixture.transaction()
+        val recorded = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                fixture.product,
+                transaction,
+                checkout.invoiceNumber,
+                BillingEventSource.CLIENT,
+                "apple-transaction:${transaction.transactionId}",
+                fixture.now.plusSeconds(1),
+            ),
+        )
+        val expiration = fixture.revenueCatLifecycleEvent(
+            eventId = "rc-expire-before-fulfillment-${fixture.suffix}",
+            eventType = "EXPIRATION",
+            transaction = transaction,
+            eventAt = fixture.now.plusSeconds(2),
+        )
+        createdRevenueCatEventIds += expiration.eventId
+        assertThat(ledger.recordRevenueCatEvent(expiration, fixture.now.plusSeconds(2))).isTrue()
+        assertThat(ledger.applyRevenueCatEvent(expiration, fixture.now.plusSeconds(3))).isTrue()
+
+        ledger.fulfill(recorded.id, fixture.now.plusSeconds(4))
+
+        val subscriptionStatus = database.sql(
+            "select access_status from subscriptions where original_transaction_id = :id",
+        ).bind("id", transaction.originalTransactionId)
+            .map { row, _ -> row.get("access_status", String::class.java)!! }
+            .one().awaitSingle()
+        assertThat(subscriptionStatus).isEqualTo("EXPIRED")
+        assertThat(
+            longValue("select count(*) from user_memberships where user_id = ${fixture.userId} and status = 'ACTIVE'"),
+        ).isZero()
+        assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER1")
+    }
+
+    @Test
     fun `checkout is idempotent and abandoned invoice remains failed`(): Unit = runBlocking {
         val fixture = fixture("checkout")
         val first = ledger.createPendingInvoice(
@@ -763,6 +1067,33 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         )
         return Fixture(suffix, userId, token, product, "checkout-$suffix", now)
     }
+
+    private fun Fixture.revenueCatLifecycleEvent(
+        eventId: String,
+        eventType: String,
+        transaction: VerifiedAppleTransaction,
+        eventAt: Instant,
+        cancelReason: String? = null,
+    ) = VerifiedRevenueCatEvent(
+        eventId = eventId,
+        eventType = eventType,
+        appUserId = appAccountToken.toString(),
+        originalAppUserId = appAccountToken.toString(),
+        aliases = emptyList(),
+        store = "APP_STORE",
+        productId = product.productId,
+        transactionId = transaction.transactionId,
+        originalTransactionId = transaction.originalTransactionId,
+        environment = BillingEnvironment.SANDBOX,
+        priceMilliunits = transaction.priceMilliunits,
+        currency = transaction.currency,
+        purchasedAt = transaction.purchaseAt,
+        expiresAt = transaction.expiresAt,
+        eventAt = eventAt,
+        cancelReason = cancelReason,
+        expirationReason = null,
+        signedPayloadSha256 = eventId.padEnd(64, 'f').take(64),
+    )
 
     private suspend fun insertUser(suffix: String, createdAt: Instant): Long =
         database.sql(
