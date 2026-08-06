@@ -660,6 +660,29 @@ final class DeveloperAccessPolicyTests: XCTestCase {
         XCTAssertEqual(bottomRight, CGSize(width: 78, height: 768))
     }
 
+    func testDebugOverlayCapturesTouchesOnlyInsideItsVisiblePanel() {
+        let panelFrame = CGRect(x: 42, y: 100, width: 300, height: 64)
+
+        XCTAssertTrue(
+            DebugOverlayHitTestPolicy.captures(
+                point: CGPoint(x: 100, y: 120),
+                interactiveFrame: panelFrame
+            )
+        )
+        XCTAssertFalse(
+            DebugOverlayHitTestPolicy.captures(
+                point: CGPoint(x: 20, y: 120),
+                interactiveFrame: panelFrame
+            )
+        )
+        XCTAssertFalse(
+            DebugOverlayHitTestPolicy.captures(
+                point: CGPoint(x: 100, y: 120),
+                interactiveFrame: .null
+            )
+        )
+    }
+
     @MainActor
     func testTestFlightRequiresVersionGestureAgainForEachBuild() async {
         let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"

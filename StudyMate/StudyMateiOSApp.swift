@@ -141,14 +141,16 @@ private struct DebugOverlayWindowInstaller: UIViewRepresentable {
             if attachedScene !== scene || overlayWindow == nil {
                 detach()
 
+                let window = DebugOverlayPassthroughWindow(windowScene: scene)
                 let rootView = AnyView(
-                    FloatingDebugLogOverlay()
+                    FloatingDebugLogOverlay { [weak window] frame in
+                        window?.interactiveFrame = frame
+                    }
                         .environmentObject(appState)
                 )
                 let hostingController = UIHostingController(rootView: rootView)
                 hostingController.view.backgroundColor = .clear
 
-                let window = DebugOverlayPassthroughWindow(windowScene: scene)
                 window.backgroundColor = .clear
                 window.windowLevel = UIWindow.Level(rawValue: UIWindow.Level.alert.rawValue + 1)
                 window.rootViewController = hostingController
@@ -180,11 +182,16 @@ private final class DebugOverlayAttachmentView: UIView {
 }
 
 private final class DebugOverlayPassthroughWindow: UIWindow {
+    var interactiveFrame: CGRect = .null
+
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        guard let hitView = super.hitTest(point, with: event) else {
+        guard DebugOverlayHitTestPolicy.captures(
+            point: point,
+            interactiveFrame: interactiveFrame
+        ) else {
             return nil
         }
-        return hitView === rootViewController?.view ? nil : hitView
+        return super.hitTest(point, with: event)
     }
 }
 
@@ -480,8 +487,20 @@ private enum DebugLogTab: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+private struct DebugOverlayInteractiveFramePreferenceKey: PreferenceKey {
+    static let defaultValue: CGRect = .null
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if !next.isNull {
+            value = next
+        }
+    }
+}
+
 private struct FloatingDebugLogOverlay: View {
     @EnvironmentObject private var appState: AppState
+    let onInteractiveFrameChange: (CGRect) -> Void
     @State private var isExpanded = false
     @State private var committedOffset = CGSize(width: 12, height: 74)
     @State private var suppressTapAction = false
@@ -550,6 +569,19 @@ private struct FloatingDebugLogOverlay: View {
                 }
         }
         .ignoresSafeArea(.keyboard)
+        .onPreferenceChange(DebugOverlayInteractiveFramePreferenceKey.self) { frame in
+            onInteractiveFrameChange(
+                appState.isAPIDebugPanelPresented ? frame : .null
+            )
+        }
+        .onChange(of: appState.isAPIDebugPanelPresented) { _, isPresented in
+            if !isPresented {
+                onInteractiveFrameChange(.null)
+            }
+        }
+        .onDisappear {
+            onInteractiveFrameChange(.null)
+        }
     }
 
     @ViewBuilder
@@ -562,30 +594,30 @@ private struct FloatingDebugLogOverlay: View {
     private func panel(in size: CGSize) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Button {
-                    runTapAction {
-                        withAnimation(.smooth(duration: 0.18)) {
-                            committedOffset = DebugOverlayPositionPolicy.nextCornerOffset(
-                                current: boundedOffset(for: size),
-                                containerSize: size,
-                                panelSize: CGSize(
-                                    width: panelWidth(for: size),
-                                    height: panelEstimatedHeight(for: size)
-                                ),
-                                margin: 12
-                            )
+                Image(systemName: "line.3.horizontal")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        runTapAction {
+                            withAnimation(.smooth(duration: 0.18)) {
+                                committedOffset = DebugOverlayPositionPolicy.nextCornerOffset(
+                                    current: boundedOffset(for: size),
+                                    containerSize: size,
+                                    panelSize: CGSize(
+                                        width: panelWidth(for: size),
+                                        height: panelEstimatedHeight(for: size)
+                                    ),
+                                    margin: 12
+                                )
+                            }
                         }
                     }
-                } label: {
-                    Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .simultaneousGesture(dragGesture(in: size))
-                .accessibilityLabel(strings.moveDebugPanel)
+                    .gesture(dragGesture(in: size))
+                    .accessibilityElement()
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel(strings.moveDebugPanel)
 
                 Button {
                     runTapAction {
@@ -691,6 +723,14 @@ private struct FloatingDebugLogOverlay: View {
                 .stroke(Color.primary.opacity(0.12), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.18), radius: 12, y: 6)
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: DebugOverlayInteractiveFramePreferenceKey.self,
+                    value: proxy.frame(in: .global)
+                )
+            }
+        }
     }
 
     @ViewBuilder

@@ -176,7 +176,7 @@ final class ArchitecturePolicyTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(appContent.contains("FloatingDebugLogOverlay()"))
+        XCTAssertTrue(appContent.contains("FloatingDebugLogOverlay { [weak window] frame in"))
         XCTAssertFalse(appContent.contains("#if DEBUG\nprivate enum DebugLogTab"))
         XCTAssertTrue(
             mobileRootContent.contains(

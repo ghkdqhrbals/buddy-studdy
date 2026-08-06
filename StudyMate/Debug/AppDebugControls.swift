@@ -106,6 +106,14 @@ enum DebugOverlayPositionPolicy {
     }
 }
 
+enum DebugOverlayHitTestPolicy {
+    static func captures(point: CGPoint, interactiveFrame: CGRect) -> Bool {
+        !interactiveFrame.isNull
+            && !interactiveFrame.isEmpty
+            && interactiveFrame.contains(point)
+    }
+}
+
 struct AppDebugSettingsTabLongPressBridge: UIViewRepresentable {
     let onLongPressSettingsTab: () -> Void
 
