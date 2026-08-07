@@ -167,10 +167,24 @@ recovery cannot create a second payment or grant the membership twice.
 
 ### Successful purchase and fulfillment
 
-The normal RevenueCat path is asynchronous after App Store approval. The iOS
-app briefly refreshes the invoice for immediate feedback, but the signed
-RevenueCat webhook and the durable fulfillment job are the recovery path when
-the app closes, loses its response, or the backend restarts.
+The preferred path is synchronous from the user's point of view: iOS creates a
+checkout, RevenueCat completes the StoreKit purchase, iOS resolves the matching
+StoreKit 2 JWS, and the backend returns success only after the payment, invoice,
+entitlement, and quota are all durably applied. The RevenueCat webhook and
+invoice refresh are recovery paths when the JWS is temporarily unavailable,
+the app exits, the response is lost, or the backend restarts.
+
+Every authenticated iOS-to-API edge below sends these common headers. Values
+are examples and secrets must never be written to logs or analytics.
+
+| Header | Value |
+| --- | --- |
+| `Authorization` | `Bearer <accessToken>` |
+| `X-Device-Id` | Stable registered device ID |
+| `X-Client-Secret` | Device registration secret |
+| `X-App-Version` | `CFBundleShortVersionString`, for example `1.1.0` |
+| `X-App-Build` | `CFBundleVersion`, for example `16` |
+| `Content-Type` | `application/json` for requests with a JSON body |
 
 ```mermaid
 sequenceDiagram
@@ -182,39 +196,86 @@ sequenceDiagram
     participant Apple as App Store
     participant Worker as Subscription projector
 
-    User->>App: Select membership product
-    App->>API: GET /api/v1/billing/catalog
-    API-->>App: products + appAccountToken
-    App->>API: POST /api/v1/billing/checkouts<br/>{productId, idempotencyKey}
-    API->>DB: INVOICE_CREATED, NORMAL/WAITING
-    API-->>App: invoiceId + invoiceNumber
-    App->>RC: identify(appAccountToken) + purchase(product)
-    RC->>Apple: Present and complete App Store purchase
-    Apple-->>RC: Verified transaction result
-    RC-->>App: Purchase success
-    par Durable server delivery
-        RC->>API: POST /api/v1/billing/revenuecat/webhooks<br/>signed raw event
-        API->>DB: Deduplicate event and transaction IDs<br/>NORMAL/COMPLETED + subscription event
-        API->>Worker: Project due subscription event
-        Worker->>DB: Update subscription + effective entitlement
-        Worker->>DB: Reconcile provider snapshot when ordering is ambiguous
-    and Bounded user feedback
-        App->>API: GET /api/v1/billing/invoices/{invoiceId}
-        API-->>App: WAITING or COMPLETED
+    User->>App: E0 Select productId
+    App->>API: E1 GET /api/v1/billing/catalog<br/>query/body: none
+    API-->>App: E2 appAccountToken + products[]
+    App->>API: E3 POST /api/v1/billing/checkouts<br/>{productId, idempotencyKey}
+    API->>DB: E4 INVOICE_CREATED<br/>{invoiceNumber, userId, productId, NORMAL, WAITING}
+    API-->>App: E5 BillingInvoiceSummary<br/>{id, invoiceNumber, status=WAITING, version}
+    App->>RC: E6 logIn(appAccountToken)<br/>purchase(productId)
+    RC->>Apple: E7 StoreKit purchase<br/>{productId, appAccountToken}
+    Apple-->>RC: E8 verified transaction<br/>{transactionId, originalTransactionId, JWS}
+    RC-->>App: E9 purchase result<br/>{transactionIdentifier, userCancelled}
+    alt Matching StoreKit JWS is available
+        App->>API: E10 POST /api/v1/billing/apple/transactions<br/>{signedTransaction, environment, invoiceNumber}
+        API->>DB: E11a commit verified evidence<br/>payment=SETTLED + fulfillment job
+        API->>DB: E11b fulfill in a separate transaction<br/>invoice=COMPLETED + entitlement + quota
+        API-->>App: E12 applied BillingInvoiceSummary<br/>{status=COMPLETED, paymentStatus=SETTLED, fulfilledAt}
+    else JWS unavailable or app exits
+        RC->>API: E13 POST /api/v1/billing/revenuecat/webhooks<br/>signature header + exact raw event body
+        API->>DB: E14 deduplicate and store provider event<br/>eventId + transactionId
+        API->>Worker: E15 claim due event<br/>at-least-once, max 3 attempts
+        Worker->>DB: E16 project payment, invoice, subscription, entitlement
+        App->>API: E17 GET /api/v1/billing/invoices/{invoiceId}<br/>path: checkout invoice id
+        API-->>App: E18 WAITING or applied invoice
     end
-    App->>API: GET /api/v1/billing/invoices
-    API-->>App: Reconciled billing history
+    App->>API: E19 GET /api/v1/billing/status<br/>query/body: none
+    API-->>App: E20 entitlement + quota + planTransition
 ```
+
+#### Edge contracts
+
+`E0` is a local UI selection. The selected value must be one of the enabled
+monthly `productId` values returned by `E2`; the client cannot submit an
+arbitrary price, tier, currency, or allowance.
+
+| Edge | Call and transferred values | Result and guarantee |
+| --- | --- | --- |
+| E1 | `GET /api/v1/billing/catalog`; no query or body; common authenticated headers | Requests the server-owned product mapping for the signed-in user. |
+| E2 | `{"appAccountToken":"<uuid>","products":[{"tierCode":"TIER2","description":"...","monthlyQuestionLimit":300,"productId":"io.github.ghkdqhrbals.StudyMate.tier2.monthly","productType":"AUTO_RENEWABLE_SUBSCRIPTION","billingPeriod":"P1M","sortOrder":20}]}` | `appAccountToken` is the stable BuddyStudy billing identity and RevenueCat App User ID. Product price is still displayed from StoreKit/RevenueCat, not trusted from the client. |
+| E3 | `POST /api/v1/billing/checkouts` with `{"productId":"io.github.ghkdqhrbals.StudyMate.tier2.monthly","idempotencyKey":"ios-checkout-<uuid>"}` | `productId`: 1–191 characters, `[A-Za-z0-9._-]+`. `idempotencyKey`: 8–191 characters, `[A-Za-z0-9._:-]+`, scoped to the authenticated user. |
+| E4 | Internal transaction writes `INVOICE_CREATED`, invoice type `NORMAL`, status `WAITING`, authenticated `userId`, selected `tierCode/productId`, generated `invoiceNumber`, aggregate sequence and event ID. | Invoice and first event commit together. Replaying the same user-scoped idempotency key returns the existing checkout rather than creating another order. |
+| E5 | `BillingInvoiceSummary`: `id`, `invoiceNumber`, `type`, `tierCode`, `productId`, `status`, `version`, payment/transaction fields, timestamps, `fulfilledAt`, `latestEventType`. At creation, payment fields and `fulfilledAt` are `null`. | The app retains both numeric `id` and UUID `invoiceNumber`: `invoiceNumber` correlates the JWS submission; `id` is used for bounded invoice reads. |
+| E6 | SDK calls `Purchases.logIn(appAccountToken.lowercasedUUID)` and `Purchases.purchase(product)` where `product.productIdentifier == productId`. | RevenueCat must not remain anonymous. A different BuddyStudy account token produces an ownership conflict rather than transferring access. |
+| E7 | RevenueCat/StoreKit submits the selected `productId` with the same UUID as StoreKit `appAccountToken`. Apple owns price, currency, purchase sheet, approval and subscription-group rules. | Downgrades are scheduled by Apple and do **not** create a charge invoice at this edge. Upgrades may take effect immediately under App Store rules. |
+| E8 | Verified Apple transaction contains at least `transactionId`, `originalTransactionId`, `productId`, `appAccountToken`, environment, purchase/signing timestamps and signed JWS; subscriptions normally include `expiresAt`. | The JWS is the cryptographic payment evidence. The app does not construct or modify its payload. |
+| E9 | RevenueCat SDK returns `transactionIdentifier`, `CustomerInfo`, and `userCancelled`. BuddyStudy uses the transaction identifier to locate the identical StoreKit transaction and JWS. | `userCancelled=true` abandons the pending checkout. A StoreKit pending approval keeps it `WAITING`; it is not reported as success or failure. |
+| E10 | `POST /api/v1/billing/apple/transactions` with `{"signedTransaction":"<compact JWS>","environment":"SANDBOX|PRODUCTION|XCODE","invoiceNumber":"<checkout uuid or null>"}`. JWS length: 64–200,000. | `invoiceNumber` is supplied for the just-created checkout and may be `null` during restore/recovery. The declared environment must match the verified transaction and the server profile must permit it. |
+| E11a | Backend verifies JWS signature/trust chain, bundle ID, numeric App Store app ID, environment, enabled product mapping, `appAccountToken` ownership, transaction identity, timestamps, quantity, price and currency. The first transaction commits the verified payment evidence, invoice event and durable fulfillment job. | Apple `transactionId` is the payment deduplication key. Financial evidence remains durable even if the process exits before fulfillment. |
+| E11b | A separate fulfillment transaction applies the completed invoice, subscription/entitlement and quota projection. | This transaction boundary intentionally does not roll back E11a. Failure returns `BILLING_APPLICATION_FAILED`; the durable job and the same JWS retry resume application. |
+| E12 | Success body is the applied invoice with `type=NORMAL`, `status=COMPLETED`, `paymentStatus=SETTLED`, non-null `transactionId`, `paymentId`, and `fulfilledAt`; it also carries `originalTransactionId`, amount/currency, purchase and expiry timestamps. | 2xx means membership application completed. If verified payment was persisted but entitlement/quota application did not complete, the API returns `BILLING_APPLICATION_FAILED`; the same JWS can be retried idempotently. |
+| E13 | `POST /api/v1/billing/revenuecat/webhooks`; header `X-RevenueCat-Webhook-Signature: t=<unix-seconds>,v1=<64-hex-hmac>`; body is the **exact raw bytes** of `{"api_version":"1.0","event":{...}}`. Relevant event fields are `id`, `type`, `app_id`, `event_timestamp_ms`, `app_user_id`, `original_app_user_id`, `aliases`, `store`, `product_id`, `new_product_id`, `transaction_id`, `original_transaction_id`, `environment`, `price_in_purchased_currency`, `currency`, `purchased_at_ms`, `expiration_at_ms`, `cancel_reason`, and `expiration_reason`. | HMAC-SHA256 covers `<timestamp>.<rawBody>`. Timestamp tolerance is five minutes and body limit is 256 KiB. Invalid signatures, app IDs, API versions or required IDs are rejected before persistence. |
+| E14 | A separate receipt transaction stores the verified provider `eventId`, raw-body SHA-256, transaction identifiers, mapped account/product and processing state. | RevenueCat delivery is at-least-once. `eventId` and Apple transaction IDs deduplicate retries; the endpoint may safely receive the same event again. |
+| E15 | Worker claims committed, due receipts in batches of at most 100. Failed processing is retried up to three times; abandoned claims become reclaimable after their lease expires. | ACK/processed state is written only with the applicable business projection. Exhausted events remain auditable and emit an operational error. |
+| E16 | Projector writes or updates the payment/invoice, append-only `subscription_events`, `subscriptions`, and `user_entitlement_projection`; ambiguous or out-of-order lifecycle events trigger RevenueCat CustomerInfo reconciliation. | Ordering is enforced per subscription/aggregate timestamp and sequence. A stale event cannot overwrite a newer projection. |
+| E17 | `GET /api/v1/billing/invoices/{invoiceId}`; `invoiceId` is the numeric `id` returned by E5; no query or body. iOS retries after 1, 2 and 4 seconds only while the invoice remains `WAITING`. | The bounded read is user feedback, not the durable recovery mechanism. Leaving the screen cancels UI waiting; webhook processing continues independently. |
+| E18 | Returns `BillingInvoiceDetail`; iOS consumes its nested `invoice`. The invoice is accepted only when the same applied contract as E12 is satisfied. | Exhausting the bounded wait produces an explicit recovery/error UI, never a fabricated successful tier. |
+| E19 | `GET /api/v1/billing/status`; no query or body; common authenticated headers. | This is the only client authority for the effective tier and quota after purchase, restore, renewal, cancellation or product change. |
+| E20 | Returns `tierCode`, `source`, `accessStatus`, `renewalStatus`, `productId`, `startedAt`, `expiresAt`, `willRenew`, `pendingChange`, optional `planTransition`, `synchronizedAt`, and `quota`. | iOS renders the effective membership and the exact current-plan end/next-plan start timeline from this response; it does not derive access from RevenueCat `CustomerInfo` or invoice status. |
+
+Apple may independently deliver App Store Server Notifications V2 to
+`POST /api/v1/billing/apple/notifications`. That public endpoint has no BuddyStudy
+authentication headers and accepts only
+`{"signedPayload":"<Apple signed notification JWS>"}`. The backend verifies the
+outer notification and nested transaction JWS, then deduplicates by Apple's
+`notificationUUID` and transaction IDs. It is another durable lifecycle input,
+not a client purchase-success response.
+
+If the user cancels before Apple creates a transaction, iOS calls
+`POST /api/v1/billing/checkouts/{invoiceNumber}/abandon` with the checkout UUID
+as a path parameter and no body. The operation is idempotent and changes only an
+unpaid `NORMAL/WAITING` checkout to `FAILED`; a checkout with verified payment
+evidence cannot be abandoned.
 
 The direct `POST /api/v1/billing/apple/transactions` endpoint accepts
 `signedTransaction`, `environment`, and the optional `invoiceNumber`. It is a
-backward-compatible recovery path for StoreKit transactions that were not
-created through RevenueCat; it is not a second entitlement authority. This
-request is nevertheless a synchronous application boundary: it returns 2xx
-only after the payment is `SETTLED`, the invoice has a durable `fulfilledAt`,
-and the effective entitlement plus quota expose the purchased tier. If payment
-evidence commits but application fails, the financial record remains durable
-and the endpoint returns `BILLING_APPLICATION_FAILED`. Retrying the same JWS is
+preferred synchronous client-completion boundary and also a backward-compatible
+recovery path for StoreKit transactions that were not created through
+RevenueCat; it is not a second entitlement authority. It returns 2xx only after
+the payment is `SETTLED`, the invoice has a durable `fulfilledAt`, and the
+effective entitlement plus quota expose the purchased tier. If payment evidence
+commits but application fails, the financial record remains durable and the
+endpoint returns `BILLING_APPLICATION_FAILED`. Retrying the same JWS is
 idempotent and resumes the existing fulfillment.
 
 | Contract | Required values | Purpose |
