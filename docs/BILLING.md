@@ -263,6 +263,32 @@ arbitrary price, tier, currency, or allowance.
 | E20-E21 | `GET /api/v1/billing/invoices/{invoiceId}` returns the prepared invoice by its numeric ID. iOS retries after 1, 2, and 4 seconds only after retryable confirm errors. | Bounded polling is user feedback, not the durable mechanism. It accepts only `FULFILLED`; leaving the screen does not stop webhook recovery. |
 | E22-E23 | `GET /api/v1/billing/status` returns tier, entitlement, transition, and quota. | This remains the only client authority for effective membership after purchase, restore, renewal, cancellation, or product change. |
 
+#### Server-side failure state policy
+
+The confirmation endpoint separates provider verification from ledger mutation.
+Until RevenueCat or Apple's signed transaction has been verified, the backend
+must not create a payment row, grant an entitlement, or increase quota. The
+following table is the authoritative server-side behavior represented in the
+interactive billing sequence explorer.
+
+| Failure point | Classification | Invoice and ledger result | Recovery |
+| --- | --- | --- | --- |
+| RevenueCat has not indexed the transaction yet, request timeout, HTTP 429, or provider 5xx | Transient verification failure | The prepared invoice remains `WAITING`; no payment, entitlement, quota, or fulfillment job is written | The client performs only bounded 1s/2s/4s feedback retries. RevenueCat webhook delivery or a later confirmation converges through the same transaction ID. |
+| RevenueCat server API key is missing, rejected, or lacks subscription-read access | Configuration failure | The invoice remains `WAITING`; no financial projection is changed | Return `BILLING_CONFIGURATION_ERROR`, alert operations, and retry only after configuration is repaired. |
+| Transaction belongs to a different account, product/app/environment mismatch, malformed provider identifiers, invalid access state, or invalid Apple JWS | Permanent verification failure | The request returns `BILLING_TRANSACTION_INVALID` or `BILLING_TRANSACTION_CONFLICT`. No payment or membership state is written. The current implementation does not immediately mutate the invoice from the exception path. | A `NORMAL/WAITING` invoice that still has no payment after 10 minutes is selected by `expirePendingCheckouts`, receives a system `CANCELLED` event, and becomes `FAILED`. A failed checkout does not block a new checkout. |
+| Payment evidence commits but entitlement or quota fulfillment fails | Recoverable fulfillment failure | `PAYMENT_VERIFIED` and the payment row remain durable; the entitlement/quota transaction rolls back and the fulfillment job remains retryable | The recovery scheduler claims the job with a lease and bounded backoff. After the configured maximum attempts, it records `COMPENSATION_REQUIRED` and raises an operational alert; it never pretends Apple refunded the payment. |
+| Process crashes after payment commit | Crash between transaction boundaries | The verified payment and pending fulfillment job survive restart | A later scheduler claim resumes `fulfill(invoiceId)` idempotently. |
+| Duplicate client confirmation and RevenueCat webhook | At-least-once duplicate | Checkout idempotency key, provider event ID, and Apple transaction ID prevent duplicate invoices, payments, entitlement grants, and quota resets | Both paths converge on `VerifiedBillingPaymentUseCase`; an already fulfilled invoice is returned without applying it again. |
+| Prepared checkout has no verified payment for 10 minutes | Unpaid checkout expiry | Scheduler appends `CANCELLED` with source `SYSTEM`; invoice projection moves `WAITING -> FAILED` | No refund is created because no verified charge exists. The user can start a fresh checkout. |
+
+An immediate `WAITING -> FAILED` transition for every verification exception is
+intentionally avoided: a just-completed App Store transaction can be temporarily
+absent from RevenueCat's query API. Permanent invalid input is rejected to the
+caller, while durable invoice failure is produced only by an explicit abandon or
+the unpaid-checkout expiration rule. This prevents a real, delayed transaction
+from being mislabeled as a failed purchase while keeping abandoned invoices from
+remaining open indefinitely.
+
 Apple may independently deliver App Store Server Notifications V2 to
 `POST /api/v1/billing/apple/notifications`. That public endpoint has no BuddyStudy
 authentication headers and accepts only
