@@ -20,6 +20,7 @@ import java.security.MessageDigest
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.util.UUID
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -86,13 +87,15 @@ class RevenueCatWebhookVerificationAdapter(
         } else {
             event.productId?.trim()?.takeIf(String::isNotEmpty)
         }
+        val transferredTo = event.transferredTo.orEmpty().map(String::trim).filter(String::isNotEmpty).take(20)
+        val transferAccountToken = transferredTo.firstOrNull { runCatching { UUID.fromString(it) }.isSuccess }
 
         return VerifiedRevenueCatEvent(
             eventId = eventId,
             eventType = eventType,
-            appUserId = event.appUserId?.trim()?.takeIf(String::isNotEmpty),
+            appUserId = event.appUserId?.trim()?.takeIf(String::isNotEmpty) ?: transferAccountToken,
             originalAppUserId = event.originalAppUserId?.trim()?.takeIf(String::isNotEmpty),
-            aliases = event.aliases.orEmpty().map(String::trim).filter(String::isNotEmpty).take(20),
+            aliases = (event.aliases.orEmpty() + transferredTo).map(String::trim).filter(String::isNotEmpty).distinct().take(20),
             store = event.store?.trim()?.uppercase(),
             productId = productId,
             transactionId = event.transactionId?.trim()?.takeIf(String::isNotEmpty),
@@ -177,6 +180,7 @@ class RevenueCatWebhookVerificationAdapter(
         @param:JsonProperty("expiration_at_ms") val expirationAtMs: Long? = null,
         @param:JsonProperty("cancel_reason") val cancelReason: String? = null,
         @param:JsonProperty("expiration_reason") val expirationReason: String? = null,
+        @param:JsonProperty("transferred_to") val transferredTo: List<String>? = null,
     )
 
     private companion object {

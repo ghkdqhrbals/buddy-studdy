@@ -275,7 +275,7 @@ final class AppleBillingStore: ObservableObject {
         action: MembershipPrimaryAction,
         appAccountToken: UUID,
         prepareCheckout: @escaping (String) async throws -> BackendBillingInvoice,
-        confirmRevenueCat: @escaping (String, UUID) async throws -> BackendBillingInvoice,
+        confirmRevenueCat: @escaping (String?, UUID) async throws -> BackendBillingInvoice,
         synchronize: @escaping (String, String, UUID?) async throws -> BackendBillingInvoice,
         waitForFulfillment: @escaping (Int64) async throws -> BackendBillingInvoice,
         abandonCheckout: @escaping (UUID) async throws -> Void
@@ -299,19 +299,6 @@ final class AppleBillingStore: ObservableObject {
                 }
                 return .cancelled
             }
-            guard let transactionIdentifier = revenueCatTransaction?.transactionIdentifier else {
-                if action == .downgrade {
-                    return .changeScheduled
-                }
-                guard let checkout else {
-                    return .changeScheduled
-                }
-                // RevenueCat can complete a purchase while omitting StoreTransaction from the
-                // immediate SDK response. The webhook may already be applying this invoice, so
-                // resolve the backend ledger instead of presenting a false StoreKit approval state.
-                let invoice = try await waitForFulfillment(checkout.id)
-                return .purchased(try Self.requireApplied(invoice))
-            }
             if action == .downgrade {
                 return .changeScheduled
             }
@@ -319,7 +306,10 @@ final class AppleBillingStore: ObservableObject {
                 return .changeScheduled
             }
             do {
-                let invoice = try await confirmRevenueCat(transactionIdentifier, checkout.invoiceNumber)
+                let invoice = try await confirmRevenueCat(
+                    revenueCatTransaction?.transactionIdentifier,
+                    checkout.invoiceNumber
+                )
                 return .purchased(try Self.requireApplied(invoice))
             } catch let confirmationError {
                 guard Self.shouldWaitForRevenueCatWebhook(after: confirmationError) else {

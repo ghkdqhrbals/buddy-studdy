@@ -7,6 +7,7 @@ import com.buddystudy.backend.billing.application.model.RevenueCatWebhookRequest
 import com.buddystudy.backend.billing.application.model.VerifiedRevenueCatEvent
 import com.buddystudy.backend.billing.application.model.VerifiedAppleTransaction
 import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPort
+import com.buddystudy.backend.billing.application.port.outbound.RevenueCatTransactionVerificationPort
 import com.buddystudy.backend.billing.application.port.outbound.RevenueCatWebhookVerificationPort
 import com.buddystudy.backend.billing.application.port.inbound.VerifiedBillingPaymentUseCase
 import com.buddystudy.backend.billing.application.service.RevenueCatBillingService
@@ -73,7 +74,7 @@ class RevenueCatBillingServiceTest {
         Mockito.`when`(payments.apply(expectedCommand)).thenReturn(invoice(InvoiceStatus.COMPLETED))
         Mockito.`when`(ledger.applyRevenueCatEvent(event, now)).thenReturn(true)
 
-        val service = RevenueCatBillingService(verifier, ledger, payments, Clock.fixed(now, ZoneOffset.UTC))
+        val service = RevenueCatBillingService(verifier, ledger, payments, transactionVerifier(), Clock.fixed(now, ZoneOffset.UTC))
         service.receive(request)
         Mockito.verify(payments, Mockito.never()).apply(expectedCommand)
 
@@ -91,7 +92,7 @@ class RevenueCatBillingServiceTest {
         Mockito.`when`(verifier.verify(request)).thenReturn(event)
         Mockito.`when`(ledger.recordRevenueCatEvent(event, now)).thenReturn(false)
 
-        val service = RevenueCatBillingService(verifier, ledger, payments, Clock.fixed(now, ZoneOffset.UTC))
+        val service = RevenueCatBillingService(verifier, ledger, payments, transactionVerifier(), Clock.fixed(now, ZoneOffset.UTC))
         service.receive(request)
 
         Mockito.verify(ledger, Mockito.never()).userIdForAppAccountToken(token)
@@ -114,7 +115,7 @@ class RevenueCatBillingServiceTest {
         Mockito.`when`(payments.apply(paymentCommand(aliasedEvent))).thenReturn(invoice(InvoiceStatus.COMPLETED))
         Mockito.`when`(ledger.applyRevenueCatEvent(aliasedEvent, now)).thenReturn(true)
 
-        val service = RevenueCatBillingService(verifier, ledger, payments, Clock.fixed(now, ZoneOffset.UTC))
+        val service = RevenueCatBillingService(verifier, ledger, payments, transactionVerifier(), Clock.fixed(now, ZoneOffset.UTC))
         service.receive(request)
         Mockito.`when`(ledger.claimDueRevenueCatEvents(now, 100)).thenReturn(listOf(aliasedEvent))
         service.projectDueEvents()
@@ -139,6 +140,7 @@ class RevenueCatBillingServiceTest {
             verifier,
             ledger,
             payments,
+            transactionVerifier(),
             Clock.fixed(now, ZoneOffset.UTC),
             allowTestStore = true,
         )
@@ -161,6 +163,7 @@ class RevenueCatBillingServiceTest {
             verifier,
             ledger,
             payments,
+            transactionVerifier(),
             Clock.fixed(now, ZoneOffset.UTC),
             allowTestStore = false,
         )
@@ -190,7 +193,7 @@ class RevenueCatBillingServiceTest {
         Mockito.`when`(payments.apply(paymentCommand(nextEvent))).thenReturn(invoice(InvoiceStatus.COMPLETED))
         Mockito.`when`(ledger.applyRevenueCatEvent(nextEvent, now)).thenReturn(true)
 
-        val service = RevenueCatBillingService(verifier, ledger, payments, Clock.fixed(now, ZoneOffset.UTC))
+        val service = RevenueCatBillingService(verifier, ledger, payments, transactionVerifier(), Clock.fixed(now, ZoneOffset.UTC))
         service.projectDueEvents()
 
         Mockito.verify(ledger).markRevenueCatEventFailed(
@@ -201,6 +204,60 @@ class RevenueCatBillingServiceTest {
         Mockito.verify(payments).apply(paymentCommand(nextEvent))
         Mockito.verify(ledger).applyRevenueCatEvent(nextEvent, now)
     }
+
+    @Test
+    fun `transfer webhook recovers the latest prepared invoice`() = runBlocking<Unit> {
+        val transfer = event.copy(
+            eventId = "rc-transfer-1",
+            eventType = "TRANSFER",
+            productId = null,
+            transactionId = null,
+            originalTransactionId = null,
+            purchasedAt = null,
+            expiresAt = null,
+        )
+        val verifier = Mockito.mock(RevenueCatWebhookVerificationPort::class.java)
+        val transactionVerifier = Mockito.mock(RevenueCatTransactionVerificationPort::class.java)
+        val ledger = Mockito.mock(BillingLedgerPort::class.java)
+        val payments = Mockito.mock(VerifiedBillingPaymentUseCase::class.java)
+        val pendingInvoice = invoice().copy(
+            paymentId = null,
+            transactionId = null,
+            originalTransactionId = null,
+            paymentStatus = null,
+        )
+        val transaction = paymentCommand(event).transaction
+        Mockito.`when`(ledger.claimDueRevenueCatEvents(now, 100)).thenReturn(listOf(transfer))
+        Mockito.`when`(ledger.userIdForAppAccountToken(token)).thenReturn(733)
+        Mockito.`when`(ledger.latestPendingInvoice(733)).thenReturn(pendingInvoice)
+        Mockito.`when`(transactionVerifier.verifyLatest(token, pendingInvoice.productId)).thenReturn(transaction)
+        Mockito.`when`(ledger.tierProduct(product.productId)).thenReturn(product)
+        Mockito.`when`(ledger.applyRevenueCatEvent(transfer, now)).thenReturn(true)
+
+        val service = RevenueCatBillingService(
+            verifier,
+            ledger,
+            payments,
+            transactionVerifier,
+            Clock.fixed(now, ZoneOffset.UTC),
+        )
+        service.projectDueEvents()
+
+        Mockito.verify(payments).apply(
+            ApplyVerifiedBillingPaymentCommand(
+                userId = 733,
+                tierProduct = product,
+                transaction = transaction,
+                invoiceNumber = pendingInvoice.invoiceNumber,
+                source = BillingEventSource.REVENUECAT_WEBHOOK,
+                occurredAt = now,
+            ),
+        )
+        Mockito.verify(ledger).applyRevenueCatEvent(transfer, now)
+    }
+
+    private fun transactionVerifier(): RevenueCatTransactionVerificationPort =
+        Mockito.mock(RevenueCatTransactionVerificationPort::class.java)
 
     private fun paymentCommand(source: VerifiedRevenueCatEvent) = ApplyVerifiedBillingPaymentCommand(
         userId = 733,

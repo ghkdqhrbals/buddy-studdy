@@ -152,10 +152,9 @@ data class SyncAppleTransactionRequest(
 )
 
 data class ConfirmRevenueCatTransactionRequest(
-    @field:NotBlank
     @field:Size(max = 191)
     @field:Pattern(regexp = "[A-Za-z0-9._:-]+")
-    var transactionId: String = "",
+    var transactionId: String? = null,
 )
 
 data class CreateBillingCheckoutRequest(
@@ -241,7 +240,7 @@ class BillingWebAdapter(
         billing.confirmRevenueCatTransaction(
             principal,
             invoiceNumber,
-            ConfirmRevenueCatTransactionCommand(request.transactionId.trim()),
+            ConfirmRevenueCatTransactionCommand(request.transactionId?.trim()?.takeIf(String::isNotEmpty)),
         )
     } catch (error: ApiException) {
         if (error.code == ApiErrorCode.BILLING_TRANSACTION_CONFLICT) {

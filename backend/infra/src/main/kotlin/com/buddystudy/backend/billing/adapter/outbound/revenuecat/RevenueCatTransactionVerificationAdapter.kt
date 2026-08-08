@@ -7,8 +7,8 @@ import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.billing.domain.BillingEnvironment
 import com.buddystudy.billing.domain.BillingProductType
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties
-import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
 import io.netty.channel.ChannelOption
 import kotlinx.coroutines.reactor.awaitSingle
 import org.springframework.http.HttpStatus
@@ -30,6 +30,7 @@ import java.util.UUID
 class RevenueCatTransactionVerificationAdapter(
     private val properties: BuddyStudyProperties,
     webClientBuilder: WebClient.Builder,
+    private val objectMapper: ObjectMapper,
     private val clock: Clock = Clock.systemUTC(),
 ) : RevenueCatTransactionVerificationPort {
     private val client = webClientBuilder.clientConnector(
@@ -50,8 +51,7 @@ class RevenueCatTransactionVerificationAdapter(
             .queryParam("limit", 100)
             .buildAndExpand(config.projectId.trim())
             .toUri()
-        val search = request(searchUri.toString(), SubscriptionSearchResponse::class.java, config.serverApiKey)
-        val candidates = search.items.orEmpty().filter { subscription ->
+        val candidates = requestSubscriptions(searchUri.toString(), config.serverApiKey).filter { subscription ->
             subscription.store == "app_store" &&
                 (config.appId.isBlank() || subscription.appId == null || subscription.appId == config.appId)
         }
@@ -67,57 +67,83 @@ class RevenueCatTransactionVerificationAdapter(
             .mapNotNull { runCatching { UUID.fromString(it) }.getOrNull() }
             .firstOrNull()
             ?: throw invalidTransaction("RevenueCat customer ID is not a BuddyStudy appAccountToken.")
+        validateAccess(subscription)
+        val transaction = transactions(config, subscriptionId, descending = true)
+            .singleOrNull { it.id == normalizedTransactionId }
+            ?: throw temporarilyUnavailable("RevenueCat has not exposed the completed transaction yet.")
+        return verifiedTransaction(config, subscription, transaction, appAccountToken)
+    }
+
+    override suspend fun verifyLatest(
+        appAccountToken: UUID,
+        productId: String,
+    ): VerifiedAppleTransaction {
+        val config = configuredRevenueCat()
+        val subscriptionsUri = UriComponentsBuilder.fromUriString(config.apiBaseUrl.trimEnd('/'))
+            .path("/projects/{projectId}/customers/{customerId}/subscriptions")
+            .queryParam("limit", 100)
+            .buildAndExpand(config.projectId.trim(), appAccountToken.toString())
+            .toUri()
+        val subscriptions = requestSubscriptions(
+            subscriptionsUri.toString(),
+            config.serverApiKey,
+        ).filter { subscription ->
+            subscription.store == "app_store" &&
+                (config.appId.isBlank() || subscription.appId == null || subscription.appId == config.appId) &&
+                !subscription.pendingPayment && subscription.givesAccess &&
+                subscription.status in ACCESS_GRANTING_STATUSES
+        }
+
+        val matches = subscriptions.mapNotNull { subscription ->
+            val subscriptionId = subscription.id?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+            transactions(config, subscriptionId, descending = true)
+                .filter { it.productStoreIdentifier == productId && it.purchasedAt != null }
+                .maxByOrNull { it.purchasedAt!! }
+                ?.let { subscription to it }
+        }
+        val selected = matches.maxByOrNull { it.second.purchasedAt!! }
+            ?: throw temporarilyUnavailable("RevenueCat has not exposed the completed purchase for this invoice yet.")
+        return verifiedTransaction(config, selected.first, selected.second, appAccountToken, productId)
+    }
+
+    private suspend fun verifiedTransaction(
+        config: BuddyStudyProperties.RevenueCat,
+        subscription: RevenueCatSubscription,
+        transaction: SubscriptionTransaction,
+        appAccountToken: UUID,
+        expectedProductId: String? = null,
+    ): VerifiedAppleTransaction {
+        validateAccess(subscription)
+        val subscriptionId = subscription.id?.takeIf(String::isNotBlank)
+            ?: throw invalidTransaction("RevenueCat subscription ID is missing.")
+        val originalTransactionId = transactions(config, subscriptionId, descending = false, limit = 1)
+            .singleOrNull()?.id?.takeIf(String::isNotBlank)
+            ?: throw invalidTransaction("RevenueCat original App Store transaction ID is missing.")
+        val transactionId = transaction.id?.takeIf(String::isNotBlank)
+            ?: throw invalidTransaction("RevenueCat transaction ID is missing.")
+        val resolvedProductId = transaction.productStoreIdentifier?.takeIf(PRODUCT_ID::matches)
+            ?: throw invalidTransaction("RevenueCat transaction product ID is missing or invalid.")
+        if (expectedProductId != null && resolvedProductId != expectedProductId) {
+            throw invalidTransaction("RevenueCat transaction product does not match the prepared invoice.")
+        }
+        val purchasedAt = transaction.purchasedAt?.let(Instant::ofEpochMilli)
+            ?: throw invalidTransaction("RevenueCat transaction purchase timestamp is missing.")
+        val expiresAt = (transaction.effectiveExpirationDate ?: transaction.expirationDate)?.let(Instant::ofEpochMilli)
+            ?: subscription.currentPeriodEndsAt?.let(Instant::ofEpochMilli)
         val environment = when (subscription.environment) {
             "production" -> BillingEnvironment.PRODUCTION
             "sandbox" -> BillingEnvironment.SANDBOX
             else -> throw invalidTransaction("RevenueCat transaction environment is invalid.")
         }
-        if (subscription.pendingPayment || !subscription.givesAccess || subscription.status !in ACCESS_GRANTING_STATUSES) {
-            throw invalidTransaction("RevenueCat has not verified an access-granting purchase for the transaction.")
-        }
-
-        val newestTransactionsUri = UriComponentsBuilder.fromUriString(config.apiBaseUrl.trimEnd('/'))
-            .path("/projects/{projectId}/subscriptions/{subscriptionId}/transactions")
-            .queryParam("limit", 100)
-            .queryParam("sort", "purchased_at")
-            .queryParam("direction", "desc")
-            .buildAndExpand(config.projectId.trim(), subscriptionId)
-            .toUri()
-        val newestTransactions = request(
-            newestTransactionsUri.toString(),
-            SubscriptionTransactionsResponse::class.java,
-            config.serverApiKey,
-        )
-        val transaction = newestTransactions.items.orEmpty().singleOrNull { it.id == normalizedTransactionId }
-            ?: throw temporarilyUnavailable("RevenueCat has not exposed the completed transaction yet.")
-        val oldestTransactionsUri = UriComponentsBuilder.fromUriString(config.apiBaseUrl.trimEnd('/'))
-            .path("/projects/{projectId}/subscriptions/{subscriptionId}/transactions")
-            .queryParam("limit", 1)
-            .queryParam("sort", "purchased_at")
-            .queryParam("direction", "asc")
-            .buildAndExpand(config.projectId.trim(), subscriptionId)
-            .toUri()
-        val originalTransactionId = request(
-            oldestTransactionsUri.toString(),
-            SubscriptionTransactionsResponse::class.java,
-            config.serverApiKey,
-        ).items.orEmpty().singleOrNull()?.id?.takeIf(String::isNotBlank)
-            ?: throw invalidTransaction("RevenueCat original App Store transaction ID is missing.")
-        val productId = transaction.productStoreIdentifier?.takeIf(PRODUCT_ID::matches)
-            ?: throw invalidTransaction("RevenueCat transaction product ID is missing or invalid.")
-        val purchasedAt = transaction.purchasedAt?.let(Instant::ofEpochMilli)
-            ?: throw invalidTransaction("RevenueCat transaction purchase timestamp is missing.")
-        val expiresAt = (transaction.effectiveExpirationDate ?: transaction.expirationDate)?.let(Instant::ofEpochMilli)
-            ?: subscription.currentPeriodEndsAt?.let(Instant::ofEpochMilli)
         val verifiedAt = clock.instant().coerceAtLeast(purchasedAt)
 
         return VerifiedAppleTransaction(
-            transactionId = normalizedTransactionId,
+            transactionId = transactionId,
             originalTransactionId = originalTransactionId,
             appTransactionId = null,
             webOrderLineItemId = null,
             appAccountToken = appAccountToken,
-            productId = productId,
+            productId = resolvedProductId,
             productType = BillingProductType.AUTO_RENEWABLE_SUBSCRIPTION,
             environment = environment,
             quantity = 1,
@@ -133,18 +159,69 @@ class RevenueCatTransactionVerificationAdapter(
         )
     }
 
-    private suspend fun <T : Any> request(uri: String, bodyType: Class<T>, apiKey: String): T {
+    private suspend fun transactions(
+        config: BuddyStudyProperties.RevenueCat,
+        subscriptionId: String,
+        descending: Boolean,
+        limit: Int = 100,
+    ): List<SubscriptionTransaction> {
+        val uri = UriComponentsBuilder.fromUriString(config.apiBaseUrl.trimEnd('/'))
+            .path("/projects/{projectId}/subscriptions/{subscriptionId}/transactions")
+            .queryParam("limit", limit)
+            .queryParam("sort", "purchased_at")
+            .queryParam("direction", if (descending) "desc" else "asc")
+            .buildAndExpand(config.projectId.trim(), subscriptionId)
+            .toUri()
+        return requestTransactions(uri.toString(), config.serverApiKey)
+    }
+
+    private fun validateAccess(subscription: RevenueCatSubscription) {
+        if (subscription.pendingPayment || !subscription.givesAccess || subscription.status !in ACCESS_GRANTING_STATUSES) {
+            throw invalidTransaction("RevenueCat has not verified an access-granting purchase for the transaction.")
+        }
+    }
+
+    private suspend fun requestSubscriptions(uri: String, apiKey: String): List<RevenueCatSubscription> =
+        requestJson(uri, apiKey).items().map { item ->
+            RevenueCatSubscription(
+                id = item.textOrNull("id"),
+                customerId = item.textOrNull("customer_id"),
+                originalCustomerId = item.textOrNull("original_customer_id"),
+                appId = item.textOrNull("app_id"),
+                store = item.textOrNull("store"),
+                status = item.textOrNull("status"),
+                environment = item.textOrNull("environment"),
+                givesAccess = item.path("gives_access").asBoolean(false),
+                pendingPayment = item.path("pending_payment").asBoolean(false),
+                storeSubscriptionIdentifier = item.textOrNull("store_subscription_identifier"),
+                currentPeriodEndsAt = item.longOrNull("current_period_ends_at"),
+            )
+        }
+
+    private suspend fun requestTransactions(uri: String, apiKey: String): List<SubscriptionTransaction> =
+        requestJson(uri, apiKey).items().map { item ->
+            SubscriptionTransaction(
+                id = item.textOrNull("id"),
+                productStoreIdentifier = item.textOrNull("product_store_identifier"),
+                purchasedAt = item.longOrNull("purchased_at"),
+                expirationDate = item.longOrNull("expiration_date"),
+                effectiveExpirationDate = item.longOrNull("effective_expiration_date"),
+            )
+        }
+
+    private suspend fun requestJson(uri: String, apiKey: String): JsonNode {
         val config = properties.billing.revenueCat
         return try {
             client.get().uri(uri).headers { it.setBearerAuth(apiKey.trim()) }
                 .retrieve()
-                .bodyToMono(bodyType)
+                .bodyToMono(String::class.java)
                 .timeout(Duration.ofMillis(config.readTimeoutMs.coerceIn(500, 30_000)))
                 .retryWhen(
                     Retry.backoff((config.maxRetries.coerceIn(1, 3) - 1).toLong(), Duration.ofMillis(200))
                         .filter(::isRetryable),
                 )
                 .awaitSingle()
+                .let(objectMapper::readTree)
         } catch (error: WebClientResponseException.Unauthorized) {
             throw configurationError("RevenueCat server API key was rejected.")
         } catch (error: WebClientResponseException.Forbidden) {
@@ -201,34 +278,35 @@ class RevenueCatTransactionVerificationAdapter(
 
     private fun Instant.coerceAtLeast(other: Instant): Instant = if (isBefore(other)) other else this
 
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private data class SubscriptionSearchResponse(val items: List<RevenueCatSubscription>? = null)
+    private fun JsonNode.items(): List<JsonNode> =
+        path("items").takeIf(JsonNode::isArray)?.toList().orEmpty()
 
-    @JsonIgnoreProperties(ignoreUnknown = true)
+    private fun JsonNode.textOrNull(field: String): String? =
+        path(field).takeUnless { it.isMissingNode || it.isNull }?.asText()?.takeIf(String::isNotBlank)
+
+    private fun JsonNode.longOrNull(field: String): Long? =
+        path(field).takeUnless { it.isMissingNode || it.isNull }?.asLong()
+
     private data class RevenueCatSubscription(
-        val id: String? = null,
-        @param:JsonProperty("customer_id") val customerId: String? = null,
-        @param:JsonProperty("original_customer_id") val originalCustomerId: String? = null,
-        @param:JsonProperty("app_id") val appId: String? = null,
-        val store: String? = null,
-        val status: String? = null,
-        val environment: String? = null,
-        @param:JsonProperty("gives_access") val givesAccess: Boolean = false,
-        @param:JsonProperty("pending_payment") val pendingPayment: Boolean = false,
-        @param:JsonProperty("store_subscription_identifier") val storeSubscriptionIdentifier: String? = null,
-        @param:JsonProperty("current_period_ends_at") val currentPeriodEndsAt: Long? = null,
+        val id: String?,
+        val customerId: String?,
+        val originalCustomerId: String?,
+        val appId: String?,
+        val store: String?,
+        val status: String?,
+        val environment: String?,
+        val givesAccess: Boolean,
+        val pendingPayment: Boolean,
+        val storeSubscriptionIdentifier: String?,
+        val currentPeriodEndsAt: Long?,
     )
 
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private data class SubscriptionTransactionsResponse(val items: List<SubscriptionTransaction>? = null)
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
     private data class SubscriptionTransaction(
-        val id: String? = null,
-        @param:JsonProperty("product_store_identifier") val productStoreIdentifier: String? = null,
-        @param:JsonProperty("purchased_at") val purchasedAt: Long? = null,
-        @param:JsonProperty("expiration_date") val expirationDate: Long? = null,
-        @param:JsonProperty("effective_expiration_date") val effectiveExpirationDate: Long? = null,
+        val id: String?,
+        val productStoreIdentifier: String?,
+        val purchasedAt: Long?,
+        val expirationDate: Long?,
+        val effectiveExpirationDate: Long?,
     )
 
     private companion object {

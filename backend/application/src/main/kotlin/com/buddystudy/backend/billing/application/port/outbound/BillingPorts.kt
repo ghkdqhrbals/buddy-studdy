@@ -40,6 +40,7 @@ interface RevenueCatCustomerInfoPort {
 
 interface RevenueCatTransactionVerificationPort {
     suspend fun verify(transactionId: String): VerifiedAppleTransaction
+    suspend fun verifyLatest(appAccountToken: UUID, productId: String): VerifiedAppleTransaction
 }
 
 interface BillingLedgerPort {
@@ -91,6 +92,8 @@ interface BillingLedgerPort {
     )
 
     suspend fun invoice(userId: Long, invoiceId: Long): BillingInvoiceDetail?
+    suspend fun invoiceByNumber(userId: Long, invoiceNumber: UUID): BillingInvoiceSummary?
+    suspend fun latestPendingInvoice(userId: Long): BillingInvoiceSummary?
     suspend fun invoices(userId: Long, limit: Int, offset: Int): BillingInvoicePage
     suspend fun paymentOwner(paymentId: Long): Long?
 

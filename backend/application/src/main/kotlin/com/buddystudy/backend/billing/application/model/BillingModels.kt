@@ -86,7 +86,7 @@ data class SyncAppleTransactionCommand(
 )
 
 data class ConfirmRevenueCatTransactionCommand(
-    val transactionId: String,
+    val transactionId: String?,
 )
 
 data class CreateBillingCheckoutCommand(

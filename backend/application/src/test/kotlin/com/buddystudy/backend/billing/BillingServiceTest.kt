@@ -343,6 +343,24 @@ class BillingServiceTest {
     }
 
     @Test
+    fun `RevenueCat confirmation resolves the invoice purchase when SDK omits transaction ID`() = runBlocking {
+        val ledger = FakeLedger(token, product)
+        val verifier = RecordingRevenueCatVerifier(transaction)
+        val service = service(ledger, revenueCatVerifier = verifier)
+
+        val result = service.confirmRevenueCatTransaction(
+            principal(),
+            invoiceNumber,
+            ConfirmRevenueCatTransactionCommand(null),
+        )
+
+        assertEquals(InvoiceStatus.COMPLETED, result.status)
+        assertEquals(listOf(token to product.productId), verifier.latestRequests)
+        assertTrue(verifier.transactionRequests.isEmpty())
+        assertEquals(invoiceNumber, ledger.recordedPayments.single().invoiceNumber)
+    }
+
+    @Test
     fun `notification processing failure remains recorded after lifecycle rollback`() {
         val notification = notification()
         val ledger = FakeLedger(token, product).apply {
@@ -377,6 +395,7 @@ class BillingServiceTest {
         notification: VerifiedAppleNotification? = null,
         membershipTierCode: String = "TIER2",
         monthlyLimit: Int = 300,
+        revenueCatVerifier: RevenueCatTransactionVerificationPort = RecordingRevenueCatVerifier(transaction),
     ) = object {
         val membership = object : QuestionMembershipPort {
             override suspend fun activePlanForUser(userId: Long) = QuestionMembershipPlan(membershipTierCode, monthlyLimit)
@@ -407,15 +426,33 @@ class BillingServiceTest {
         }
         val service = BillingService(
             verifier = appleVerifier,
-            revenueCatTransactionVerifier = object : RevenueCatTransactionVerificationPort {
-                override suspend fun verify(transactionId: String): VerifiedAppleTransaction = transaction
-            },
+            revenueCatTransactionVerifier = revenueCatVerifier,
             verifiedPayments = VerifiedBillingPaymentService(ledger, membership),
             ledger = ledger,
             memberships = membership,
             clock = Clock.fixed(now, ZoneOffset.UTC),
         )
     }.service
+
+    private class RecordingRevenueCatVerifier(
+        private val transaction: VerifiedAppleTransaction,
+    ) : RevenueCatTransactionVerificationPort {
+        val transactionRequests = mutableListOf<String>()
+        val latestRequests = mutableListOf<Pair<UUID, String>>()
+
+        override suspend fun verify(transactionId: String): VerifiedAppleTransaction {
+            transactionRequests += transactionId
+            return transaction
+        }
+
+        override suspend fun verifyLatest(
+            appAccountToken: UUID,
+            productId: String,
+        ): VerifiedAppleTransaction {
+            latestRequests += appAccountToken to productId
+            return transaction
+        }
+    }
 
     private fun principal(anonymous: Boolean = false) = Principal(733, "device", 1, anonymous, if (anonymous) "ANONYMOUS" else "ACTIVE")
     private fun syncCommand() = SyncAppleTransactionCommand(
@@ -527,6 +564,10 @@ class BillingServiceTest {
             rescheduledClaims += claim
         }
         override suspend fun invoice(userId: Long, invoiceId: Long): BillingInvoiceDetail? = null
+        override suspend fun invoiceByNumber(userId: Long, invoiceNumber: UUID): BillingInvoiceSummary =
+            invoice(InvoiceStatus.WAITING, hasPayment = false)
+        override suspend fun latestPendingInvoice(userId: Long): BillingInvoiceSummary =
+            invoice(InvoiceStatus.WAITING, hasPayment = false)
         override suspend fun invoices(userId: Long, limit: Int, offset: Int) = BillingInvoicePage(limit, offset, emptyList())
         override suspend fun paymentOwner(paymentId: Long): Long? = 733
         override suspend fun requestRefund(

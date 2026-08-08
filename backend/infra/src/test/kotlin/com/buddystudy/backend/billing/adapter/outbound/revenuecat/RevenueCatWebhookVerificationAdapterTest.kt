@@ -65,6 +65,20 @@ class RevenueCatWebhookVerificationAdapterTest {
     }
 
     @Test
+    fun `maps transfer destination account token for durable recovery`() = runBlocking<Unit> {
+        val transferBody =
+            """{"api_version":"1.0","event":{"id":"rc-transfer-1","type":"TRANSFER","app_id":"app123","event_timestamp_ms":1785801600000,"store":"APP_STORE","transferred_from":["old-user"],"transferred_to":["${'$'}RCAnonymousID:temporary","3f0c5f50-6521-4ba0-a990-73500e915f57"],"environment":"SANDBOX"}}"""
+                .toByteArray()
+
+        val event = adapter().verify(
+            RevenueCatWebhookRequest(transferBody, signature(now.epochSecond, transferBody)),
+        )
+
+        assertThat(event.appUserId).isEqualTo("3f0c5f50-6521-4ba0-a990-73500e915f57")
+        assertThat(event.aliases).contains("\$RCAnonymousID:temporary")
+    }
+
+    @Test
     fun `rejects a signature produced for different body bytes`() {
         val adapter = adapter()
         val signature = signature(now.epochSecond, "{}".toByteArray())

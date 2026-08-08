@@ -402,7 +402,7 @@ protocol RemotePushBackendClientProtocol {
     func confirmRevenueCatTransaction(
         registration: RemotePushRegistration,
         invoiceNumber: UUID,
-        transactionID: String
+        transactionID: String?
     ) async throws -> BackendBillingInvoice
 
     func syncAppleTransaction(
@@ -682,7 +682,7 @@ extension RemotePushBackendClientProtocol {
     func confirmRevenueCatTransaction(
         registration: RemotePushRegistration,
         invoiceNumber: UUID,
-        transactionID: String
+        transactionID: String?
     ) async throws -> BackendBillingInvoice {
         throw RemotePushBackendError.invalidResponse
     }
@@ -1266,7 +1266,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func confirmRevenueCatTransaction(
         registration: RemotePushRegistration,
         invoiceNumber: UUID,
-        transactionID: String
+        transactionID: String?
     ) async throws -> BackendBillingInvoice {
         var request = authenticatedRequest(
             registration: registration,
@@ -2618,7 +2618,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     }
 
     private struct RevenueCatTransactionConfirmRequest: Encodable {
-        let transactionId: String
+        let transactionId: String?
     }
 
     private struct BillingCheckoutRequest: Encodable {

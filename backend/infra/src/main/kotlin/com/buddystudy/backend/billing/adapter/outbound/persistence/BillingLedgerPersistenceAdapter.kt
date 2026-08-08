@@ -534,6 +534,24 @@ class BillingLedgerPersistenceAdapter(
         )
     }
 
+    override suspend fun invoiceByNumber(userId: Long, invoiceNumber: UUID): BillingInvoiceSummary? =
+        database.sql(INVOICE_SUMMARY_SQL + " where i.user_id = :userId and i.invoice_number = :invoiceNumber")
+            .bind("userId", userId)
+            .bind("invoiceNumber", invoiceNumber.toString())
+            .map { row, _ -> row.invoiceSummary() }
+            .one()
+            .awaitSingleOrNull()
+
+    override suspend fun latestPendingInvoice(userId: Long): BillingInvoiceSummary? =
+        database.sql(
+            INVOICE_SUMMARY_SQL +
+                " where i.user_id = :userId and i.type = 'NORMAL' and i.status = 'WAITING' and p.id is null" +
+                " order by i.created_at desc, i.id desc limit 1",
+        ).bind("userId", userId)
+            .map { row, _ -> row.invoiceSummary() }
+            .one()
+            .awaitSingleOrNull()
+
     override suspend fun invoices(userId: Long, limit: Int, offset: Int): BillingInvoicePage {
         val items = database.sql(INVOICE_SUMMARY_SQL + " where i.user_id = :userId order by i.created_at desc, i.id desc limit :limit offset :offset")
             .bind("userId", userId).bind("limit", limit).bind("offset", offset)

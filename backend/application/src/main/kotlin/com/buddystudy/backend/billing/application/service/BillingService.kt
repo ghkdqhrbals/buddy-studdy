@@ -7,6 +7,7 @@ import com.buddystudy.backend.billing.application.model.BillingCatalog
 import com.buddystudy.backend.billing.application.model.BillingEntitlementProjection
 import com.buddystudy.backend.billing.application.model.BillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.BillingInvoicePage
+import com.buddystudy.backend.billing.application.model.BillingInvoicePhase
 import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
 import com.buddystudy.backend.billing.application.model.BillingRecoveryResult
 import com.buddystudy.backend.billing.application.model.BillingStatusResponse
@@ -170,10 +171,27 @@ class BillingService(
         command: ConfirmRevenueCatTransactionCommand,
     ): BillingInvoiceSummary {
         requireRegistered(principal)
-        validateProviderId(command.transactionId, "transactionId")
-
-        val transaction = revenueCatTransactionVerifier.verify(command.transactionId.trim())
         val now = clock.instant()
+        val invoice = ledger.invoiceByNumber(principal.userId, invoiceNumber)
+            ?: throw billingError(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Invoice not found.")
+        if (invoice.phase == BillingInvoicePhase.FULFILLED) {
+            return invoice
+        }
+        if (invoice.phase == BillingInvoicePhase.FAILED) {
+            throw billingError(
+                HttpStatus.CONFLICT,
+                ApiErrorCode.BILLING_TRANSACTION_CONFLICT,
+                "The billing invoice is no longer available for confirmation.",
+            )
+        }
+        val transactionId = command.transactionId?.trim()?.takeIf(String::isNotEmpty)
+        val transaction = if (transactionId != null) {
+            validateProviderId(transactionId, "transactionId")
+            revenueCatTransactionVerifier.verify(transactionId)
+        } else {
+            val appAccountToken = ledger.findOrCreateAppAccountToken(principal.userId, now)
+            revenueCatTransactionVerifier.verifyLatest(appAccountToken, invoice.productId)
+        }
         validateTransaction(transaction, now)
         return applyVerifiedTransaction(principal, transaction, invoiceNumber, BillingEventSource.CLIENT, now)
     }

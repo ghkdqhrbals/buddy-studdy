@@ -8,6 +8,7 @@ import com.buddystudy.backend.billing.application.port.inbound.RevenueCatBilling
 import com.buddystudy.backend.billing.application.port.inbound.RevenueCatEventProjectionUseCase
 import com.buddystudy.backend.billing.application.port.inbound.VerifiedBillingPaymentUseCase
 import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPort
+import com.buddystudy.backend.billing.application.port.outbound.RevenueCatTransactionVerificationPort
 import com.buddystudy.backend.billing.application.port.outbound.RevenueCatWebhookVerificationPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
@@ -25,6 +26,7 @@ class RevenueCatBillingService(
     private val verifier: RevenueCatWebhookVerificationPort,
     private val ledger: BillingLedgerPort,
     private val verifiedPayments: VerifiedBillingPaymentUseCase,
+    private val transactionVerifier: RevenueCatTransactionVerificationPort,
     private val clock: Clock = Clock.systemUTC(),
     @param:Value("\${buddystudy.billing.revenue-cat.allow-test-store:false}")
     private val allowTestStore: Boolean = false,
@@ -61,6 +63,8 @@ class RevenueCatBillingService(
                             occurredAt = now,
                         ),
                     )
+                } else if (event.eventType == "TRANSFER") {
+                    recoverTransferredPurchase(event, now)
                 }
                 ledger.applyRevenueCatEvent(event, now)
             } catch (error: Exception) {
@@ -82,13 +86,36 @@ class RevenueCatBillingService(
         return events.size
     }
 
+    private suspend fun recoverTransferredPurchase(event: VerifiedRevenueCatEvent, now: Instant) {
+        event.validateAcceptedStore()
+        val token = event.accountToken()
+        val userId = ledger.userIdForAppAccountToken(token)
+            ?: invalidEvent("RevenueCat transfer destination is not mapped to a BuddyStudy account.")
+        val invoice = ledger.latestPendingInvoice(userId) ?: return
+        val transaction = transactionVerifier.verifyLatest(token, invoice.productId)
+        if (transaction.appAccountToken != token || transaction.productId != invoice.productId) {
+            invalidEvent("RevenueCat transfer does not match the prepared invoice.")
+        }
+        val product = ledger.tierProduct(transaction.productId)
+            ?: invalidEvent("RevenueCat product is not mapped to a membership tier.")
+        if (product.productType != transaction.productType) {
+            invalidEvent("RevenueCat product type does not match the membership catalog.")
+        }
+        verifiedPayments.apply(
+            ApplyVerifiedBillingPaymentCommand(
+                userId = userId,
+                tierProduct = product,
+                transaction = transaction,
+                invoiceNumber = invoice.invoiceNumber,
+                source = BillingEventSource.REVENUECAT_WEBHOOK,
+                occurredAt = now,
+            ),
+        )
+    }
+
     private fun VerifiedRevenueCatEvent.toVerifiedAppleTransaction(): VerifiedAppleTransaction {
         validateAcceptedStore()
-        val token = sequenceOf(appUserId, originalAppUserId).plus(aliases.asSequence())
-            .filterNotNull()
-            .mapNotNull { runCatching { UUID.fromString(it) }.getOrNull() }
-            .firstOrNull()
-            ?: invalidEvent("RevenueCat App User ID must be the BuddyStudy appAccountToken UUID.")
+        val token = accountToken()
         val resolvedProductId = productId?.takeIf { PRODUCT_ID.matches(it) }
             ?: invalidEvent("RevenueCat product ID is missing or invalid.")
         val resolvedTransactionId = transactionId?.takeIf { PROVIDER_ID.matches(it) }
@@ -121,6 +148,13 @@ class RevenueCatBillingService(
             signedPayloadSha256 = signedPayloadSha256,
         )
     }
+
+    private fun VerifiedRevenueCatEvent.accountToken(): UUID =
+        sequenceOf(appUserId, originalAppUserId).plus(aliases.asSequence())
+            .filterNotNull()
+            .mapNotNull { runCatching { UUID.fromString(it) }.getOrNull() }
+            .firstOrNull()
+            ?: invalidEvent("RevenueCat App User ID must be the BuddyStudy appAccountToken UUID.")
 
     private fun VerifiedRevenueCatEvent.validateAcceptedStore() {
         val acceptedStore = store == "APP_STORE" || (store == "TEST_STORE" && allowTestStore)
