@@ -260,15 +260,30 @@ class BillingLedgerPersistenceAdapter(
         lockAndValidateAccount(command.userId, command.transaction.appAccountToken)
 
         existingInvoiceForTransaction(command.transaction.transactionId)?.let { existing ->
-            if (
-                existing.userId != command.userId ||
-                existing.productId != command.tierProduct.productId ||
-                (command.invoiceNumber != null && existing.invoiceNumber != command.invoiceNumber)
-            ) {
+            if (existing.userId != command.userId || existing.productId != command.tierProduct.productId) {
                 throw billingFailure(
                     ApiErrorCode.BILLING_TRANSACTION_CONFLICT,
                     "The App Store transaction is already attached to another invoice.",
                     HttpStatus.CONFLICT,
+                )
+            }
+            val requestedInvoiceNumber = command.invoiceNumber
+            if (requestedInvoiceNumber != null && existing.invoiceNumber != requestedInvoiceNumber) {
+                val duplicateCheckout = lockInvoiceByNumber(requestedInvoiceNumber)
+                    ?: throw billingFailure(
+                        ApiErrorCode.RESOURCE_NOT_FOUND,
+                        "Pending invoice not found.",
+                        HttpStatus.NOT_FOUND,
+                    )
+                validatePendingInvoice(duplicateCheckout, command)
+                appendInvoiceEvent(
+                    invoiceId = duplicateCheckout.id,
+                    eventId = "checkout-reconciled:${duplicateCheckout.invoiceNumber}:${command.transaction.transactionId}",
+                    eventType = InvoiceEventType.CANCELLED,
+                    source = command.source,
+                    actorUserId = command.userId,
+                    reason = "Checkout superseded because the verified transaction was already applied to invoice ${existing.invoiceNumber}.",
+                    occurredAt = command.occurredAt,
                 )
             }
             return loadInvoiceSummary(existing.invoiceId)
@@ -1795,7 +1810,8 @@ class BillingLedgerPersistenceAdapter(
                 :originalTransactionId, :startedAt, :expiresAt, :now, :now
             )
             on duplicate key update
-                tier = values(tier), status = 'ACTIVE', source = 'APPLE', source_invoice_id = values(source_invoice_id),
+                user_id = values(user_id), tier = values(tier), status = 'ACTIVE', source = 'APPLE',
+                source_invoice_id = values(source_invoice_id),
                 started_at = least(started_at, values(started_at)), expires_at = values(expires_at), updated_at = values(updated_at)
             """.trimIndent(),
         ).bind("userId", invoice.userId).bind("tier", invoice.tierCode).bind("invoiceId", invoice.id)
@@ -1830,6 +1846,10 @@ class BillingLedgerPersistenceAdapter(
         providerEventAt: Instant,
         now: Instant,
     ) {
+        val ownership = lockSubscriptionOwnership(payment.providerOriginalTransactionId)
+        val paymentOwnsProjection = ownership == null ||
+            ownership.latestPurchaseAt == null ||
+            !payment.purchaseAt.isBefore(ownership.latestPurchaseAt)
         database.sql(
             """
             insert into billing_accounts (user_id, app_account_token, status, created_at, updated_at)
@@ -1878,7 +1898,9 @@ class BillingLedgerPersistenceAdapter(
                 :productId, :tierCode, 'ACTIVE', 'WILL_RENEW', :startedAt, :expiresAt,
                 :providerEventAt, :now, timestampadd(hour, 6, :now), 0, :now, :now
             ) on duplicate key update
-                latest_transaction_id = if(values(last_provider_event_at) >= last_provider_event_at, values(latest_transaction_id), latest_transaction_id),
+                billing_account_id = if(:paymentOwnsProjection, values(billing_account_id), billing_account_id),
+                user_id = if(:paymentOwnsProjection, values(user_id), user_id),
+                latest_transaction_id = if(:paymentOwnsProjection, values(latest_transaction_id), latest_transaction_id),
                 product_id = if(values(last_provider_event_at) >= last_provider_event_at, values(product_id), product_id),
                 tier_code = if(values(last_provider_event_at) >= last_provider_event_at, values(tier_code), tier_code),
                 access_status = if(values(last_provider_event_at) >= last_provider_event_at, 'ACTIVE', access_status),
@@ -1891,13 +1913,49 @@ class BillingLedgerPersistenceAdapter(
                 last_provider_event_at = greatest(last_provider_event_at, values(last_provider_event_at))
             """.trimIndent(),
         ).bind("accountId", accountId).bind("userId", invoice.userId)
+            .bind("paymentOwnsProjection", paymentOwnsProjection)
             .bind("originalTransactionId", payment.providerOriginalTransactionId)
             .bind("transactionId", payment.providerTransactionId).bind("productId", payment.productId)
             .bind("tierCode", invoice.tierCode).bind("startedAt", payment.purchaseAt.utc())
             .bindNullable("expiresAt", payment.expiresAt?.utc(), LocalDateTime::class.java)
             .bind("providerEventAt", providerEventAt.utc()).bind("now", now.utc())
             .fetch().rowsUpdated().awaitSingle()
+        if (paymentOwnsProjection && ownership?.userId != null && ownership.userId != invoice.userId) {
+            database.sql(
+                """
+                update user_memberships
+                set status = 'INACTIVE', updated_at = :now
+                where source = 'APPLE' and original_transaction_id = :originalTransactionId
+                  and user_id = :previousUserId and status = 'ACTIVE'
+                """.trimIndent(),
+            ).bind("now", now.utc())
+                .bind("originalTransactionId", payment.providerOriginalTransactionId)
+                .bind("previousUserId", ownership.userId)
+                .fetch().rowsUpdated().awaitSingle()
+            rebuildEntitlementProjection(ownership.userId, now)
+        }
     }
+
+    private suspend fun lockSubscriptionOwnership(originalTransactionId: String): SubscriptionOwnership? =
+        database.sql(
+            """
+            select s.user_id,
+                   (select p.purchase_at
+                    from payments p
+                    where p.provider = 'APPLE'
+                      and p.provider_transaction_id = s.latest_transaction_id
+                    limit 1) as latest_purchase_at
+            from subscriptions s
+            where s.provider = 'APPLE' and s.original_transaction_id = :originalTransactionId
+            for update
+            """.trimIndent(),
+        ).bind("originalTransactionId", originalTransactionId)
+            .map { row, _ ->
+                SubscriptionOwnership(
+                    userId = row.get("user_id", java.lang.Long::class.java)?.toLong(),
+                    latestPurchaseAt = row.nullableInstant("latest_purchase_at"),
+                )
+            }.one().awaitSingleOrNull()
 
     private suspend fun subscriptionAllowsEntitlement(originalTransactionId: String): Boolean =
         database.sql(
@@ -2734,6 +2792,7 @@ class BillingLedgerPersistenceAdapter(
         val productId: String,
     )
     private data class ExistingCheckout(val invoiceId: Long, val productId: String)
+    private data class SubscriptionOwnership(val userId: Long?, val latestPurchaseAt: Instant?)
     private data class ActiveSubscriptionProjection(
         val id: Long,
         val tierCode: String,

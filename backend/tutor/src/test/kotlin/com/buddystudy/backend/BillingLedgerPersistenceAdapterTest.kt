@@ -495,7 +495,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
-    fun `verified transaction cannot be attached to a different prepared invoice`(): Unit = runBlocking {
+    fun `verified transaction reconciles a duplicate prepared invoice but rejects another user`(): Unit = runBlocking {
         val fixture = fixture("transaction-invoice-conflict")
         val first = ledger.createPendingInvoice(
             fixture.userId,
@@ -526,17 +526,35 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         )
 
         assertThat(recorded.id).isEqualTo(first.id)
+        val reconciled = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                userId = fixture.userId,
+                tierProduct = fixture.product,
+                transaction = transaction,
+                invoiceNumber = second.invoiceNumber,
+                source = BillingEventSource.CLIENT,
+                eventId = "apple-transaction:${transaction.transactionId}",
+                occurredAt = fixture.now.plusSeconds(3),
+            ),
+        )
+
+        assertThat(reconciled.id).isEqualTo(first.id)
+        assertThat(requireNotNull(ledger.invoice(fixture.userId, second.id)).invoice.status)
+            .isEqualTo(InvoiceStatus.FAILED)
+        assertThat(eventTypes(second.id)).containsExactly("INVOICE_CREATED", "CANCELLED")
+
+        val anotherUser = fixture("transaction-invoice-other-user", fixture.now)
         assertThatThrownBy {
             runBlocking {
                 ledger.recordVerifiedPayment(
                     RecordVerifiedPaymentCommand(
-                        userId = fixture.userId,
-                        tierProduct = fixture.product,
-                        transaction = transaction,
-                        invoiceNumber = second.invoiceNumber,
+                        userId = anotherUser.userId,
+                        tierProduct = anotherUser.product,
+                        transaction = transaction.copy(appAccountToken = anotherUser.appAccountToken),
+                        invoiceNumber = null,
                         source = BillingEventSource.REVENUECAT_WEBHOOK,
                         eventId = "apple-transaction:${transaction.transactionId}",
-                        occurredAt = fixture.now.plusSeconds(3),
+                        occurredAt = fixture.now.plusSeconds(4),
                     ),
                 )
             }
@@ -547,6 +565,83 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         assertThat(longValue("select count(*) from payments where invoice_id = ${second.id}"))
             .isZero()
     }
+
+    @Test
+    fun `newer verified transaction transfers subscription ownership and revokes the previous projection`(): Unit =
+        runBlocking {
+            val previous = fixture("subscription-owner-previous")
+            val originalTransaction = previous.transaction()
+            val previousCheckout = ledger.createPendingInvoice(
+                previous.userId,
+                previous.appAccountToken,
+                previous.product,
+                previous.idempotencyKey,
+                previous.now,
+            )
+            val previousInvoice = ledger.recordVerifiedPayment(
+                RecordVerifiedPaymentCommand(
+                    previous.userId,
+                    previous.product,
+                    originalTransaction,
+                    previousCheckout.invoiceNumber,
+                    BillingEventSource.CLIENT,
+                    "apple-transaction:${originalTransaction.transactionId}",
+                    previous.now,
+                ),
+            )
+            ledger.fulfill(previousInvoice.id, previous.now.plusSeconds(1))
+
+            val current = fixture("subscription-owner-current", previous.now.plusSeconds(60))
+            val renewalAt = previous.now.plusSeconds(120)
+            val renewalTransaction = originalTransaction.copy(
+                transactionId = "transferred-renewal-${current.suffix}",
+                appAccountToken = current.appAccountToken,
+                purchaseAt = renewalAt,
+                originalPurchaseAt = originalTransaction.purchaseAt,
+                expiresAt = renewalAt.plusSeconds(2_592_000),
+                signedAt = renewalAt,
+            )
+            val currentCheckout = ledger.createPendingInvoice(
+                current.userId,
+                current.appAccountToken,
+                current.product,
+                current.idempotencyKey,
+                renewalAt,
+            )
+            val currentInvoice = ledger.recordVerifiedPayment(
+                RecordVerifiedPaymentCommand(
+                    current.userId,
+                    current.product,
+                    renewalTransaction,
+                    currentCheckout.invoiceNumber,
+                    BillingEventSource.CLIENT,
+                    "apple-transaction:${renewalTransaction.transactionId}",
+                    renewalAt,
+                ),
+            )
+            ledger.fulfill(currentInvoice.id, renewalAt.plusSeconds(1))
+
+            val subscriptionOwner = longValue(
+                "select user_id from subscriptions where original_transaction_id = '${originalTransaction.originalTransactionId}'",
+            )
+            val membershipOwner = longValue(
+                "select user_id from user_memberships where original_transaction_id = '${originalTransaction.originalTransactionId}'",
+            )
+            assertThat(subscriptionOwner).isEqualTo(current.userId)
+            assertThat(membershipOwner).isEqualTo(current.userId)
+            assertThat(ledger.entitlementForUser(previous.userId)?.tierCode).isEqualTo("TIER1")
+            assertThat(ledger.entitlementForUser(current.userId)?.tierCode).isEqualTo("TIER2")
+            assertThat(
+                longValue(
+                    "select count(*) from user_memberships where user_id = ${previous.userId} and status = 'ACTIVE'",
+                ),
+            ).isZero()
+            assertThat(
+                longValue(
+                    "select count(*) from user_memberships where user_id = ${current.userId} and status = 'ACTIVE'",
+                ),
+            ).isEqualTo(1)
+        }
 
     @Test
     fun `checkout expiration cancels only old unpaid normal invoices`(): Unit = runBlocking {

@@ -300,7 +300,17 @@ final class AppleBillingStore: ObservableObject {
                 return .cancelled
             }
             guard let transactionIdentifier = revenueCatTransaction?.transactionIdentifier else {
-                return action == .downgrade ? .changeScheduled : .pending
+                if action == .downgrade {
+                    return .changeScheduled
+                }
+                guard let checkout else {
+                    return .changeScheduled
+                }
+                // RevenueCat can complete a purchase while omitting StoreTransaction from the
+                // immediate SDK response. The webhook may already be applying this invoice, so
+                // resolve the backend ledger instead of presenting a false StoreKit approval state.
+                let invoice = try await waitForFulfillment(checkout.id)
+                return .purchased(try Self.requireApplied(invoice))
             }
             if action == .downgrade {
                 return .changeScheduled

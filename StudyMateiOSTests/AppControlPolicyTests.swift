@@ -86,7 +86,7 @@ final class AppControlPolicyTests: XCTestCase {
         )
     }
 
-    func testRevenueCatPurchaseSynchronizesAppleJWSBeforeWebhookFallback() throws {
+    func testRevenueCatPurchaseConfirmsInvoiceOrWaitsForWebhook() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -99,7 +99,6 @@ final class AppControlPolicyTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(billingStore.contains("StoreKitTransactionSyncResolver.resolve("))
         XCTAssertTrue(billingStore.contains("checkout.invoiceNumber"))
         XCTAssertTrue(billingStore.contains("let invoice = try await waitForFulfillment(checkout.id)"))
         XCTAssertTrue(billingStore.contains("Self.requireApplied(invoice)"))
@@ -107,7 +106,8 @@ final class AppControlPolicyTests: XCTestCase {
         XCTAssertTrue(billingStore.contains("for await verification in Transaction.currentEntitlements"))
         XCTAssertTrue(billingStore.contains("let appliedInvoice = try Self.requireApplied(invoice)"))
         XCTAssertTrue(billingStore.contains("let checkout = action == .downgrade ? nil"))
-        XCTAssertTrue(billingStore.contains("return action == .downgrade ? .changeScheduled : .pending"))
+        XCTAssertFalse(billingStore.contains("return action == .downgrade ? .changeScheduled : .pending"))
+        XCTAssertTrue(billingStore.contains("guard let transactionIdentifier = revenueCatTransaction?.transactionIdentifier else"))
         XCTAssertTrue(billingStore.contains("if action == .downgrade"))
         XCTAssertTrue(appState.contains("for await verification in Transaction.currentEntitlements"))
         XCTAssertTrue(appState.contains("finishAfterSync: false"))
