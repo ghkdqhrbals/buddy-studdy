@@ -42,6 +42,7 @@ enum class InvoiceStatus {
 
 enum class InvoiceEventType {
     INVOICE_CREATED,
+    PAYMENT_VALIDATION_FAILED,
     PAYMENT_VERIFIED,
     FULFILLMENT_STARTED,
     FULFILLED,
@@ -183,6 +184,7 @@ object InvoiceStateMachine {
 
     private val transitions: Map<Key, InvoiceStatus> = buildMap {
         allow(InvoiceType.NORMAL, InvoiceStatus.WAITING, InvoiceEventType.PAYMENT_VERIFIED, InvoiceStatus.COMPLETED)
+        allow(InvoiceType.NORMAL, InvoiceStatus.WAITING, InvoiceEventType.PAYMENT_VALIDATION_FAILED, InvoiceStatus.FAILED)
         allowCompleted(InvoiceType.NORMAL, InvoiceEventType.FULFILLMENT_STARTED)
         allowCompleted(InvoiceType.NORMAL, InvoiceEventType.FULFILLED)
         allow(InvoiceType.NORMAL, InvoiceStatus.WAITING, InvoiceEventType.CANCELLED, InvoiceStatus.FAILED)

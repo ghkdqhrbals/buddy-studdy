@@ -22,6 +22,7 @@ import com.buddystudy.backend.billing.application.model.VerifiedAppleTransaction
 import com.buddystudy.backend.billing.application.model.RevenueCatWebhookRequest
 import com.buddystudy.backend.billing.application.model.VerifiedRevenueCatEvent
 import com.buddystudy.billing.domain.BillingEnvironment
+import com.buddystudy.billing.domain.BillingEventSource
 import java.time.Instant
 import java.util.UUID
 
@@ -63,6 +64,18 @@ interface BillingLedgerPort {
 
     /** Idempotently closes a checkout when StoreKit reports userCancelled before a transaction exists. */
     suspend fun abandonPendingInvoice(userId: Long, invoiceNumber: UUID, now: Instant): BillingInvoiceSummary
+
+    /**
+     * Idempotently fails a prepared invoice after a permanent provider-signature, ownership, or product validation error.
+     * Retryable provider lookup and configuration failures must leave the invoice WAITING.
+     */
+    suspend fun failPendingInvoiceValidation(
+        userId: Long,
+        invoiceNumber: UUID,
+        source: BillingEventSource,
+        reason: String,
+        now: Instant,
+    ): BillingInvoiceSummary
 
     /** Atomically expires unpaid NORMAL/WAITING checkouts created at or before the cutoff. */
     suspend fun expirePendingCheckouts(expiredBefore: Instant, now: Instant, limit: Int): Int

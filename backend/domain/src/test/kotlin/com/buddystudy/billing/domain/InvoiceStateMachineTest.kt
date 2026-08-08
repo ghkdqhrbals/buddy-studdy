@@ -64,6 +64,18 @@ class InvoiceStateMachineTest {
     }
 
     @Test
+    fun `permanent payment validation failure fails a prepared normal invoice`() {
+        assertEquals(
+            InvoiceStatus.FAILED,
+            InvoiceStateMachine.next(
+                InvoiceType.NORMAL,
+                InvoiceStatus.WAITING,
+                InvoiceEventType.PAYMENT_VALIDATION_FAILED,
+            ),
+        )
+    }
+
+    @Test
     fun `refund invoice completes only after Apple refund`() {
         val requested = InvoiceStateMachine.next(
             InvoiceType.REFUND,

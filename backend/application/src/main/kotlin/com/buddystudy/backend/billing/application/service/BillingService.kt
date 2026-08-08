@@ -29,12 +29,14 @@ import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPor
 import com.buddystudy.backend.billing.application.port.outbound.RevenueCatTransactionVerificationPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.common.application.error.ApiRuntimeException
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystudy.billing.domain.BillingEventSource
 import com.buddystudy.billing.domain.EntitlementSource
 import com.buddystudy.billing.domain.SubscriptionAccessStatus
 import com.buddystudy.billing.domain.SubscriptionRenewalStatus
 import org.springframework.http.HttpStatus
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.time.Clock
 import java.time.Duration
@@ -50,6 +52,8 @@ class BillingService(
     private val memberships: QuestionMembershipPort,
     private val clock: Clock = Clock.systemUTC(),
 ) : BillingUseCase, AppleBillingNotificationUseCase, BillingRecoveryUseCase {
+    private val logger = LoggerFactory.getLogger(javaClass)
+
     override suspend fun status(principal: Principal): BillingStatusResponse {
         requireRegistered(principal)
         val now = clock.instant()
@@ -184,16 +188,23 @@ class BillingService(
                 "The billing invoice is no longer available for confirmation.",
             )
         }
-        val transactionId = command.transactionId?.trim()?.takeIf(String::isNotEmpty)
-        val transaction = if (transactionId != null) {
-            validateProviderId(transactionId, "transactionId")
-            revenueCatTransactionVerifier.verify(transactionId)
-        } else {
-            val appAccountToken = ledger.findOrCreateAppAccountToken(principal.userId, now)
-            revenueCatTransactionVerifier.verifyLatest(appAccountToken, invoice.productId)
+        return withPreparedInvoiceValidationFailure(
+            userId = principal.userId,
+            invoiceNumber = invoiceNumber,
+            source = BillingEventSource.CLIENT,
+            now = now,
+        ) {
+            val transactionId = command.transactionId?.trim()?.takeIf(String::isNotEmpty)
+            val transaction = if (transactionId != null) {
+                validateProviderId(transactionId, "transactionId")
+                revenueCatTransactionVerifier.verify(transactionId)
+            } else {
+                val appAccountToken = ledger.findOrCreateAppAccountToken(principal.userId, now)
+                revenueCatTransactionVerifier.verifyLatest(appAccountToken, invoice.productId)
+            }
+            validateTransaction(transaction, now)
+            applyVerifiedTransaction(principal, transaction, invoiceNumber, BillingEventSource.CLIENT, now)
         }
-        validateTransaction(transaction, now)
-        return applyVerifiedTransaction(principal, transaction, invoiceNumber, BillingEventSource.CLIENT, now)
     }
 
     override suspend fun syncAppleTransaction(
@@ -201,19 +212,28 @@ class BillingService(
         command: SyncAppleTransactionCommand,
     ): BillingInvoiceSummary {
         requireRegistered(principal)
-        validateSignedPayload(command.signedTransaction)
-
-        val transaction = verifier.verifyTransaction(command.signedTransaction, command.environment)
         val now = clock.instant()
-        validateTransaction(transaction, now)
-
-        return applyVerifiedTransaction(
-            principal,
-            transaction,
-            command.invoiceNumber,
-            BillingEventSource.CLIENT,
-            now,
-        )
+        val operation: suspend () -> BillingInvoiceSummary = {
+            validateSignedPayload(command.signedTransaction)
+            val transaction = verifier.verifyTransaction(command.signedTransaction, command.environment)
+            validateTransaction(transaction, now)
+            applyVerifiedTransaction(
+                principal,
+                transaction,
+                command.invoiceNumber,
+                BillingEventSource.CLIENT,
+                now,
+            )
+        }
+        return command.invoiceNumber?.let { invoiceNumber ->
+            withPreparedInvoiceValidationFailure(
+                userId = principal.userId,
+                invoiceNumber = invoiceNumber,
+                source = BillingEventSource.CLIENT,
+                now = now,
+                operation = operation,
+            )
+        } ?: operation()
     }
 
     override suspend fun invoices(principal: Principal, limit: Int, offset: Int): BillingInvoicePage {
@@ -397,6 +417,40 @@ class BillingService(
         )
     }
 
+    private suspend fun <T> withPreparedInvoiceValidationFailure(
+        userId: Long,
+        invoiceNumber: UUID,
+        source: BillingEventSource,
+        now: Instant,
+        operation: suspend () -> T,
+    ): T = try {
+        operation()
+    } catch (error: ApiRuntimeException) {
+        if (error.errorCode in PERMANENT_PAYMENT_VALIDATION_ERRORS) {
+            try {
+                ledger.failPendingInvoiceValidation(
+                    userId = userId,
+                    invoiceNumber = invoiceNumber,
+                    source = source,
+                    reason = "${error.errorCode.name}: ${error.message}",
+                    now = now,
+                )
+            } catch (recordingError: Exception) {
+                logger.error(
+                    "billing_validation_failure_record_failed userId={} invoiceNumber={} validationCode={} " +
+                        "errorType={} message={}",
+                    userId,
+                    invoiceNumber,
+                    error.errorCode,
+                    recordingError.javaClass.name,
+                    recordingError.message,
+                    recordingError,
+                )
+            }
+        }
+        throw error
+    }
+
     private fun validateSignedPayload(payload: String) {
         val trimmed = payload.trim()
         if (trimmed.length !in 64..MAX_SIGNED_PAYLOAD_LENGTH || trimmed.count { it == '.' } != 2) {
@@ -469,6 +523,10 @@ class BillingService(
         ApiException(status, code, message)
 
     private companion object {
+        val PERMANENT_PAYMENT_VALIDATION_ERRORS = setOf(
+            ApiErrorCode.BILLING_TRANSACTION_INVALID,
+            ApiErrorCode.BILLING_TRANSACTION_CONFLICT,
+        )
         val CHECKOUT_TIMEOUT: Duration = Duration.ofMinutes(10)
         const val CHECKOUT_EXPIRATION_BATCH_SIZE = 100
         const val MAX_SIGNED_PAYLOAD_LENGTH = 200_000

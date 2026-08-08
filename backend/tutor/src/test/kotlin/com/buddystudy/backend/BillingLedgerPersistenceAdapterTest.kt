@@ -74,6 +74,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
             execute("delete from invoice_events where invoice_id in (select id from invoices where user_id = $userId)")
             execute("delete from payments where user_id = $userId")
             execute("delete from user_memberships where user_id = $userId")
+            execute("delete from invoices where user_id = $userId and original_invoice_id is not null")
             execute("delete from invoices where user_id = $userId")
             execute("delete from billing_accounts where user_id = $userId")
             execute("delete from apple_billing_accounts where user_id = $userId")
@@ -180,6 +181,76 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
             .map { row, _ -> row.get("processing_status", String::class.java)!! }
             .one().awaitSingle()
         assertThat(processingStatus).isEqualTo("PENDING")
+    }
+
+    @Test
+    fun `permanent validation failure idempotently fails only the prepared invoice`(): Unit = runBlocking {
+        val fixture = fixture("validation-failure")
+        val checkout = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            fixture.product,
+            fixture.idempotencyKey,
+            fixture.now,
+        )
+
+        val failed = ledger.failPendingInvoiceValidation(
+            userId = fixture.userId,
+            invoiceNumber = checkout.invoiceNumber,
+            source = BillingEventSource.CLIENT,
+            reason = "BILLING_TRANSACTION_INVALID: signature verification failed",
+            now = fixture.now.plusSeconds(1),
+        )
+        val repeated = ledger.failPendingInvoiceValidation(
+            userId = fixture.userId,
+            invoiceNumber = checkout.invoiceNumber,
+            source = BillingEventSource.CLIENT,
+            reason = "BILLING_TRANSACTION_INVALID: duplicate retry",
+            now = fixture.now.plusSeconds(2),
+        )
+
+        assertThat(failed.status).isEqualTo(InvoiceStatus.FAILED)
+        assertThat(failed.latestEventType).isEqualTo(InvoiceEventType.PAYMENT_VALIDATION_FAILED)
+        assertThat(repeated.status).isEqualTo(InvoiceStatus.FAILED)
+        assertThat(eventTypes(checkout.id).count { it == InvoiceEventType.PAYMENT_VALIDATION_FAILED.name }).isEqualTo(1)
+        assertThat(longValue("select count(*) from payments where invoice_id = ${checkout.id}")).isZero()
+    }
+
+    @Test
+    fun `late validation failure cannot regress an invoice with verified payment`(): Unit = runBlocking {
+        val fixture = fixture("late-validation-failure")
+        val checkout = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            fixture.product,
+            fixture.idempotencyKey,
+            fixture.now,
+        )
+        val transaction = fixture.transaction()
+        val verified = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                userId = fixture.userId,
+                tierProduct = fixture.product,
+                transaction = transaction,
+                invoiceNumber = checkout.invoiceNumber,
+                source = BillingEventSource.CLIENT,
+                eventId = "apple-transaction:${transaction.transactionId}",
+                occurredAt = fixture.now.plusSeconds(1),
+            ),
+        )
+
+        val unchanged = ledger.failPendingInvoiceValidation(
+            userId = fixture.userId,
+            invoiceNumber = checkout.invoiceNumber,
+            source = BillingEventSource.CLIENT,
+            reason = "late duplicate client request",
+            now = fixture.now.plusSeconds(2),
+        )
+
+        assertThat(verified.status).isEqualTo(InvoiceStatus.COMPLETED)
+        assertThat(unchanged.status).isEqualTo(InvoiceStatus.COMPLETED)
+        assertThat(unchanged.transactionId).isEqualTo(transaction.transactionId)
+        assertThat(eventTypes(checkout.id)).doesNotContain(InvoiceEventType.PAYMENT_VALIDATION_FAILED.name)
     }
 
     @Test

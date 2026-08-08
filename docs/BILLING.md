@@ -275,19 +275,44 @@ interactive billing sequence explorer.
 | --- | --- | --- | --- |
 | RevenueCat has not indexed the transaction yet, request timeout, HTTP 429, or provider 5xx | Transient verification failure | The prepared invoice remains `WAITING`; no payment, entitlement, quota, or fulfillment job is written | The client performs only bounded 1s/2s/4s feedback retries. RevenueCat webhook delivery or a later confirmation converges through the same transaction ID. |
 | RevenueCat server API key is missing, rejected, or lacks subscription-read access | Configuration failure | The invoice remains `WAITING`; no financial projection is changed | Return `BILLING_CONFIGURATION_ERROR`, alert operations, and retry only after configuration is repaired. |
-| Transaction belongs to a different account, product/app/environment mismatch, malformed provider identifiers, invalid access state, or invalid Apple JWS | Permanent verification failure | The request returns `BILLING_TRANSACTION_INVALID` or `BILLING_TRANSACTION_CONFLICT`. No payment or membership state is written. The current implementation does not immediately mutate the invoice from the exception path. | A `NORMAL/WAITING` invoice that still has no payment after 10 minutes is selected by `expirePendingCheckouts`, receives a system `CANCELLED` event, and becomes `FAILED`. A failed checkout does not block a new checkout. |
+| Transaction belongs to a different account, product/app/environment mismatch, invalid access state, or invalid Apple JWS | Permanent verification failure | The request returns `BILLING_TRANSACTION_INVALID` or `BILLING_TRANSACTION_CONFLICT`. A still-unpaid `NORMAL/WAITING` invoice receives `PAYMENT_VALIDATION_FAILED` and becomes `FAILED`. No payment, membership, entitlement, or quota state is written. | Repeating the same failure is idempotent. A verified payment can never be regressed to `FAILED`, and the failed checkout does not block a new checkout. |
+| Malformed client transaction identifier | Correctable request validation failure | The request returns `VALIDATION_ERROR`; no ledger state changes and the invoice remains `WAITING`. | The client may retry the same invoice with the exact RevenueCat transaction identifier. The unpaid checkout expires after 10 minutes if it is never corrected. |
 | Payment evidence commits but entitlement or quota fulfillment fails | Recoverable fulfillment failure | `PAYMENT_VERIFIED` and the payment row remain durable; the entitlement/quota transaction rolls back and the fulfillment job remains retryable | The recovery scheduler claims the job with a lease and bounded backoff. After the configured maximum attempts, it records `COMPENSATION_REQUIRED` and raises an operational alert; it never pretends Apple refunded the payment. |
 | Process crashes after payment commit | Crash between transaction boundaries | The verified payment and pending fulfillment job survive restart | A later scheduler claim resumes `fulfill(invoiceId)` idempotently. |
 | Duplicate client confirmation and RevenueCat webhook | At-least-once duplicate | Checkout idempotency key, provider event ID, and Apple transaction ID prevent duplicate invoices, payments, entitlement grants, and quota resets | Both paths converge on `VerifiedBillingPaymentUseCase`; an already fulfilled invoice is returned without applying it again. |
 | Prepared checkout has no verified payment for 10 minutes | Unpaid checkout expiry | Scheduler appends `CANCELLED` with source `SYSTEM`; invoice projection moves `WAITING -> FAILED` | No refund is created because no verified charge exists. The user can start a fresh checkout. |
 
+#### Internal transaction and idempotency boundaries
+
+The public confirmation request is an orchestration boundary, not one database
+transaction spanning RevenueCat and MySQL. Provider I/O finishes before ledger
+mutation. Each persistence operation below runs through the outbound port in its
+own Spring `@Transactional` boundary.
+
+| Internal operation | Locks and writes | Idempotency and failure behavior |
+| --- | --- | --- |
+| `createPendingInvoice` | Locks the user's billing account, then inserts the `NORMAL/WAITING` invoice and `INVOICE_CREATED` event together | `(userId, idempotencyKey)` returns the original invoice under concurrent retries. No StoreKit sheet is shown before this commit. |
+| `failPendingInvoiceValidation` | Locks the invoice and any payment for that invoice, then appends `PAYMENT_VALIDATION_FAILED` | It applies only to unpaid `NORMAL/WAITING` invoices. The event ID `invoice-payment-validation-failed:{invoiceNumber}` is unique. Repeats return the existing `FAILED` projection; an invoice with payment evidence is returned unchanged. |
+| `recordVerifiedPayment` | Locks the billing account, resolves and locks the explicit or recoverable invoice, inserts the payment/history, appends `PAYMENT_VERIFIED`, upserts the subscription ledger, and inserts a fulfillment job | `(provider, transactionId)`, one-payment-per-invoice, and invoice-event IDs are unique. Client confirmation and webhook delivery therefore converge on one payment and one invoice. This transaction commits before membership fulfillment. |
+| `fulfill` | Locks the invoice, verified payment and subscription projection, then applies entitlement, quota, payment settlement, `FULFILLED`, and fulfillment-job completion | All membership projections commit together or roll back together. Retrying the same invoice does not grant quota twice. A failure cannot erase committed payment evidence. |
+| RevenueCat webhook receipt | Stores the signed raw event receipt and SHA-256 before asynchronous projection | Provider `eventId` deduplicates deliveries. A worker lease permits retry after process death; projection calls the same verified-payment use case as direct confirmation. |
+| Unpaid checkout expiration | Selects old unpaid `WAITING` invoices with `FOR UPDATE SKIP LOCKED` and appends `CANCELLED` | Multiple scheduler instances cannot expire the same invoice twice. Invoices with a payment row are excluded. |
+
+`JWS` signature, RevenueCat ownership, app, environment, product, and access-state
+failures are permanent only when the provider evidence proves the mismatch. The
+failure recorder commits after the verification exception and records only the
+invoice terminal state. A timeout, provider indexing delay, rate limit, provider
+5xx, or missing server configuration does not prove that the App Store charge is
+invalid, so those errors must not fail the invoice.
+
 An immediate `WAITING -> FAILED` transition for every verification exception is
-intentionally avoided: a just-completed App Store transaction can be temporarily
-absent from RevenueCat's query API. Permanent invalid input is rejected to the
-caller, while durable invoice failure is produced only by an explicit abandon or
-the unpaid-checkout expiration rule. This prevents a real, delayed transaction
-from being mislabeled as a failed purchase while keeping abandoned invoices from
-remaining open indefinitely.
+unsafe because a just-completed App Store transaction can be temporarily absent
+from RevenueCat's query API. The service classifies the failure before mutating
+the ledger. Permanent ownership, product, app, environment, access-state, or
+Apple-signature failures append `PAYMENT_VALIDATION_FAILED`; RevenueCat indexing
+delays, timeouts, 429/5xx responses, and configuration failures leave the
+prepared invoice `WAITING`. A malformed client identifier also remains `WAITING`
+so the same invoice can be corrected without creating a second checkout.
 
 Apple may independently deliver App Store Server Notifications V2 to
 `POST /api/v1/billing/apple/notifications`. That public endpoint has no BuddyStudy

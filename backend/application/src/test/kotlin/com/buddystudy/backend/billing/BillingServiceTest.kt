@@ -31,6 +31,7 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionMembership
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPlan
 import com.buddystudy.backend.study.application.port.outbound.QuestionQuotaStatus
 import com.buddystudy.backend.common.application.error.ApiErrorCode
+import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.common.application.error.ApiRuntimeException
 import com.buddystudy.billing.domain.BillingActionStatus
 import com.buddystudy.billing.domain.BillingActionType
@@ -48,6 +49,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.springframework.http.HttpStatus
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -361,6 +363,107 @@ class BillingServiceTest {
     }
 
     @Test
+    fun `permanent RevenueCat verification failure fails the prepared invoice`() {
+        val ledger = FakeLedger(token, product)
+        val verifier = object : RevenueCatTransactionVerificationPort {
+            override suspend fun verify(transactionId: String): VerifiedAppleTransaction = throw ApiException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.BILLING_TRANSACTION_INVALID,
+                "RevenueCat transaction ownership verification failed.",
+            )
+
+            override suspend fun verifyLatest(appAccountToken: UUID, productId: String): VerifiedAppleTransaction =
+                error("not used")
+        }
+        val service = service(ledger, revenueCatVerifier = verifier)
+
+        val error = assertThrows(ApiRuntimeException::class.java) {
+            runBlocking {
+                service.confirmRevenueCatTransaction(
+                    principal(),
+                    invoiceNumber,
+                    ConfirmRevenueCatTransactionCommand(transaction.transactionId),
+                )
+            }
+        }
+
+        assertEquals(ApiErrorCode.BILLING_TRANSACTION_INVALID, error.errorCode)
+        assertEquals(listOf(invoiceNumber), ledger.failedValidationInvoices)
+        assertTrue(ledger.recordedPayments.isEmpty())
+    }
+
+    @Test
+    fun `retryable RevenueCat verification delay keeps the prepared invoice waiting`() {
+        val ledger = FakeLedger(token, product)
+        val verifier = object : RevenueCatTransactionVerificationPort {
+            override suspend fun verify(transactionId: String): VerifiedAppleTransaction = throw ApiException(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                ApiErrorCode.BILLING_APPLICATION_FAILED,
+                "RevenueCat has not indexed this transaction yet.",
+            )
+
+            override suspend fun verifyLatest(appAccountToken: UUID, productId: String): VerifiedAppleTransaction =
+                error("not used")
+        }
+        val service = service(ledger, revenueCatVerifier = verifier)
+
+        val error = assertThrows(ApiRuntimeException::class.java) {
+            runBlocking {
+                service.confirmRevenueCatTransaction(
+                    principal(),
+                    invoiceNumber,
+                    ConfirmRevenueCatTransactionCommand(transaction.transactionId),
+                )
+            }
+        }
+
+        assertEquals(ApiErrorCode.BILLING_APPLICATION_FAILED, error.errorCode)
+        assertTrue(ledger.failedValidationInvoices.isEmpty())
+        assertTrue(ledger.recordedPayments.isEmpty())
+    }
+
+    @Test
+    fun `malformed RevenueCat transaction identifier remains correctable`() {
+        val ledger = FakeLedger(token, product)
+        val verifier = RecordingRevenueCatVerifier(transaction)
+        val service = service(ledger, revenueCatVerifier = verifier)
+
+        val error = assertThrows(ApiRuntimeException::class.java) {
+            runBlocking {
+                service.confirmRevenueCatTransaction(
+                    principal(),
+                    invoiceNumber,
+                    ConfirmRevenueCatTransactionCommand("invalid transaction id"),
+                )
+            }
+        }
+
+        assertEquals(ApiErrorCode.VALIDATION_ERROR, error.errorCode)
+        assertTrue(ledger.failedValidationInvoices.isEmpty())
+        assertTrue(verifier.transactionRequests.isEmpty())
+        assertTrue(ledger.recordedPayments.isEmpty())
+    }
+
+    @Test
+    fun `malformed Apple JWS fails a correlated prepared invoice`() {
+        val ledger = FakeLedger(token, product)
+        val service = service(ledger)
+
+        val error = assertThrows(ApiRuntimeException::class.java) {
+            runBlocking {
+                service.syncAppleTransaction(
+                    principal(),
+                    SyncAppleTransactionCommand("not-a-jws", BillingEnvironment.SANDBOX, invoiceNumber),
+                )
+            }
+        }
+
+        assertEquals(ApiErrorCode.BILLING_TRANSACTION_INVALID, error.errorCode)
+        assertEquals(listOf(invoiceNumber), ledger.failedValidationInvoices)
+        assertTrue(ledger.recordedPayments.isEmpty())
+    }
+
+    @Test
     fun `notification processing failure remains recorded after lifecycle rollback`() {
         val notification = notification()
         val ledger = FakeLedger(token, product).apply {
@@ -499,6 +602,7 @@ class BillingServiceTest {
         val rescheduledClaims = mutableListOf<BillingFulfillmentJobClaim>()
         val recordedNotifications = mutableListOf<String>()
         val failedNotifications = mutableListOf<String>()
+        val failedValidationInvoices = mutableListOf<UUID>()
         var appliedNotifications = 0
         var lastFulfillmentStatus: InvoiceStatus? = null
         var expiredCheckoutCount = 0
@@ -531,6 +635,16 @@ class BillingServiceTest {
             invoiceNumber: UUID,
             now: Instant,
         ): BillingInvoiceSummary = invoice(InvoiceStatus.FAILED)
+        override suspend fun failPendingInvoiceValidation(
+            userId: Long,
+            invoiceNumber: UUID,
+            source: BillingEventSource,
+            reason: String,
+            now: Instant,
+        ): BillingInvoiceSummary {
+            failedValidationInvoices += invoiceNumber
+            return invoice(InvoiceStatus.FAILED, hasPayment = false)
+        }
         override suspend fun expirePendingCheckouts(expiredBefore: Instant, now: Instant, limit: Int): Int {
             checkoutExpirationCutoff = expiredBefore
             checkoutExpirationRunAt = now

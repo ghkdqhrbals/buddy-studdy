@@ -217,6 +217,40 @@ class BillingLedgerPersistenceAdapter(
     }
 
     @Transactional
+    override suspend fun failPendingInvoiceValidation(
+        userId: Long,
+        invoiceNumber: UUID,
+        source: BillingEventSource,
+        reason: String,
+        now: Instant,
+    ): BillingInvoiceSummary {
+        val invoice = lockInvoiceByNumber(invoiceNumber)
+            ?.takeIf { it.userId == userId }
+            ?: throw billingFailure(ApiErrorCode.RESOURCE_NOT_FOUND, "Invoice not found.", HttpStatus.NOT_FOUND)
+        val payment = lockPaymentByInvoice(invoice.id)
+        if (invoice.status == InvoiceStatus.FAILED || payment != null) {
+            return requireInvoiceSummary(invoice.id)
+        }
+        if (invoice.type != InvoiceType.NORMAL || invoice.status != InvoiceStatus.WAITING) {
+            throw billingFailure(
+                ApiErrorCode.BILLING_ACTION_NOT_ALLOWED,
+                "Only a prepared invoice can record a payment validation failure.",
+                HttpStatus.CONFLICT,
+            )
+        }
+        appendInvoiceEvent(
+            invoiceId = invoice.id,
+            eventId = "invoice-payment-validation-failed:${invoice.invoiceNumber}",
+            eventType = InvoiceEventType.PAYMENT_VALIDATION_FAILED,
+            source = source,
+            actorUserId = userId.takeIf { source == BillingEventSource.CLIENT },
+            reason = reason,
+            occurredAt = now,
+        )
+        return requireInvoiceSummary(invoice.id)
+    }
+
+    @Transactional
     override suspend fun expirePendingCheckouts(expiredBefore: Instant, now: Instant, limit: Int): Int {
         val invoiceIds = database.sql(
             """
