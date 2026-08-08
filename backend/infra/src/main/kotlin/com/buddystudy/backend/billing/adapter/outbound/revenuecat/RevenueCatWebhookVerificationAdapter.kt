@@ -10,6 +10,7 @@ import com.buddystudy.billing.domain.BillingEnvironment
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.ObjectMapper
+import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 import java.math.BigDecimal
@@ -28,6 +29,8 @@ class RevenueCatWebhookVerificationAdapter(
     private val objectMapper: ObjectMapper,
     private val clock: Clock = Clock.systemUTC(),
 ) : RevenueCatWebhookVerificationPort {
+    private val log = LoggerFactory.getLogger(javaClass)
+
     override suspend fun verify(request: RevenueCatWebhookRequest): VerifiedRevenueCatEvent {
         val secret = properties.billing.revenueCat.webhookSigningSecret.trim()
         if (secret.isEmpty()) {
@@ -37,12 +40,15 @@ class RevenueCatWebhookVerificationAdapter(
                 "RevenueCat webhook verification is not configured.",
             )
         }
-        if (request.rawBody.isEmpty() || request.rawBody.size > MAX_BODY_BYTES) invalidWebhook()
+        if (request.rawBody.isEmpty() || request.rawBody.size > MAX_BODY_BYTES) {
+            invalidWebhook("invalid_body_size", request.rawBody.size)
+        }
 
-        val signature = parseSignature(request.signature)
+        val signature = parseSignature(request.signature, request.rawBody.size)
         val now = clock.instant()
-        if (Duration.between(Instant.ofEpochSecond(signature.timestamp), now).abs() > SIGNATURE_TOLERANCE) {
-            invalidWebhook()
+        val signatureAge = Duration.between(Instant.ofEpochSecond(signature.timestamp), now).abs()
+        if (signatureAge > SIGNATURE_TOLERANCE) {
+            invalidWebhook("stale_timestamp", request.rawBody.size, signatureAge.seconds)
         }
 
         val mac = Mac.getInstance("HmacSHA256")
@@ -51,21 +57,29 @@ class RevenueCatWebhookVerificationAdapter(
         mac.update('.'.code.toByte())
         val computed = mac.doFinal(request.rawBody).toHex()
         if (!MessageDigest.isEqual(computed.toByteArray(), signature.value.lowercase().toByteArray())) {
-            invalidWebhook()
+            invalidWebhook("hmac_mismatch", request.rawBody.size, signatureAge.seconds)
         }
 
         val envelope = try {
             objectMapper.readValue(request.rawBody, RevenueCatEnvelope::class.java)
         } catch (_: Exception) {
-            invalidWebhook()
+            invalidWebhook("malformed_payload", request.rawBody.size, signatureAge.seconds)
         }
-        if (envelope.apiVersion != "1.0") invalidWebhook()
-        val event = envelope.event ?: invalidWebhook()
+        if (envelope.apiVersion != "1.0") {
+            invalidWebhook("unsupported_api_version", request.rawBody.size, signatureAge.seconds)
+        }
+        val event = envelope.event
+            ?: invalidWebhook("missing_event", request.rawBody.size, signatureAge.seconds)
         val expectedAppId = properties.billing.revenueCat.appId.trim()
-        if (expectedAppId.isNotEmpty() && event.appId != expectedAppId) invalidWebhook()
-        val eventId = event.id?.trim()?.takeIf { PROVIDER_ID.matches(it) } ?: invalidWebhook()
-        val eventType = event.type?.trim()?.uppercase()?.takeIf { EVENT_TYPE.matches(it) } ?: invalidWebhook()
-        val eventAt = event.eventTimestampMs?.toInstant() ?: invalidWebhook()
+        if (expectedAppId.isNotEmpty() && event.appId != expectedAppId) {
+            invalidWebhook("app_id_mismatch", request.rawBody.size, signatureAge.seconds)
+        }
+        val eventId = event.id?.trim()?.takeIf { PROVIDER_ID.matches(it) }
+            ?: invalidWebhook("invalid_event_id", request.rawBody.size, signatureAge.seconds)
+        val eventType = event.type?.trim()?.uppercase()?.takeIf { EVENT_TYPE.matches(it) }
+            ?: invalidWebhook("invalid_event_type", request.rawBody.size, signatureAge.seconds)
+        val eventAt = event.eventTimestampMs?.toInstant()
+            ?: invalidWebhook("invalid_event_timestamp", request.rawBody.size, signatureAge.seconds)
         val productId = if (eventType == "PRODUCT_CHANGE") {
             event.newProductId?.trim()?.takeIf(String::isNotEmpty)
                 ?: event.productId?.trim()?.takeIf(String::isNotEmpty)
@@ -95,13 +109,14 @@ class RevenueCatWebhookVerificationAdapter(
         )
     }
 
-    private fun parseSignature(value: String): Signature {
+    private fun parseSignature(value: String, bodySize: Int): Signature {
         val parts = value.split(',').mapNotNull { part ->
             val index = part.indexOf('=')
             if (index <= 0) null else part.substring(0, index).trim() to part.substring(index + 1).trim()
         }.toMap()
-        val timestamp = parts["t"]?.toLongOrNull() ?: invalidWebhook()
-        val signature = parts["v1"]?.takeIf { HEX_64.matches(it) } ?: invalidWebhook()
+        val timestamp = parts["t"]?.toLongOrNull() ?: invalidWebhook("invalid_signature_timestamp", bodySize)
+        val signature = parts["v1"]?.takeIf { HEX_64.matches(it) }
+            ?: invalidWebhook("invalid_signature_value", bodySize)
         return Signature(timestamp, signature)
     }
 
@@ -119,11 +134,19 @@ class RevenueCatWebhookVerificationAdapter(
 
     private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 
-    private fun invalidWebhook(): Nothing = throw ApiException(
-        HttpStatus.UNAUTHORIZED,
-        ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN,
-        "RevenueCat webhook signature or payload is invalid.",
-    )
+    private fun invalidWebhook(reason: String, bodySize: Int, signatureAgeSeconds: Long? = null): Nothing {
+        log.warn(
+            "revenuecat_webhook_rejected reason={} bodyBytes={} signatureAgeSeconds={}",
+            reason,
+            bodySize,
+            signatureAgeSeconds ?: -1,
+        )
+        throw ApiException(
+            HttpStatus.UNAUTHORIZED,
+            ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN,
+            "RevenueCat webhook signature or payload is invalid.",
+        )
+    }
 
     private data class Signature(val timestamp: Long, val value: String)
 
