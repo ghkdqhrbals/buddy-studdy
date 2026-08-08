@@ -260,7 +260,11 @@ class BillingLedgerPersistenceAdapter(
         lockAndValidateAccount(command.userId, command.transaction.appAccountToken)
 
         existingInvoiceForTransaction(command.transaction.transactionId)?.let { existing ->
-            if (existing.userId != command.userId || existing.productId != command.tierProduct.productId) {
+            if (
+                existing.userId != command.userId ||
+                existing.productId != command.tierProduct.productId ||
+                (command.invoiceNumber != null && existing.invoiceNumber != command.invoiceNumber)
+            ) {
                 throw billingFailure(
                     ApiErrorCode.BILLING_TRANSACTION_CONFLICT,
                     "The App Store transaction is already attached to another invoice.",
@@ -2347,9 +2351,19 @@ class BillingLedgerPersistenceAdapter(
 
     private suspend fun existingInvoiceForTransaction(transactionId: String): ExistingPayment? =
         database.sql(
-            "select invoice_id, user_id, product_id from payments where provider = 'APPLE' and provider_transaction_id = :id",
+            """
+            select p.invoice_id, p.user_id, p.product_id, i.invoice_number
+            from payments p
+            join invoices i on i.id = p.invoice_id
+            where p.provider = 'APPLE' and p.provider_transaction_id = :id
+            """.trimIndent(),
         ).bind("id", transactionId).map { row, _ ->
-            ExistingPayment(row.long("invoice_id"), row.long("user_id"), row.string("product_id"))
+            ExistingPayment(
+                row.long("invoice_id"),
+                UUID.fromString(row.string("invoice_number")),
+                row.long("user_id"),
+                row.string("product_id"),
+            )
         }.one().awaitSingleOrNull()
 
     private suspend fun existingCheckoutInvoice(userId: Long, idempotencyKey: String): ExistingCheckout? =
@@ -2713,7 +2727,12 @@ class BillingLedgerPersistenceAdapter(
         status: HttpStatus = code.status,
     ) = ApiException(status, code, message)
 
-    private data class ExistingPayment(val invoiceId: Long, val userId: Long, val productId: String)
+    private data class ExistingPayment(
+        val invoiceId: Long,
+        val invoiceNumber: UUID,
+        val userId: Long,
+        val productId: String,
+    )
     private data class ExistingCheckout(val invoiceId: Long, val productId: String)
     private data class ActiveSubscriptionProjection(
         val id: Long,

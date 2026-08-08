@@ -399,6 +399,12 @@ protocol RemotePushBackendClientProtocol {
         invoiceNumber: UUID
     ) async throws -> BackendBillingInvoice
 
+    func confirmRevenueCatTransaction(
+        registration: RemotePushRegistration,
+        invoiceNumber: UUID,
+        transactionID: String
+    ) async throws -> BackendBillingInvoice
+
     func syncAppleTransaction(
         registration: RemotePushRegistration,
         signedTransaction: String,
@@ -669,6 +675,14 @@ extension RemotePushBackendClientProtocol {
     func abandonBillingCheckout(
         registration: RemotePushRegistration,
         invoiceNumber: UUID
+    ) async throws -> BackendBillingInvoice {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func confirmRevenueCatTransaction(
+        registration: RemotePushRegistration,
+        invoiceNumber: UUID,
+        transactionID: String
     ) async throws -> BackendBillingInvoice {
         throw RemotePushBackendError.invalidResponse
     }
@@ -1245,6 +1259,27 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             )
         )
         request.httpMethod = "POST"
+        let data = try await perform(request)
+        return try decoder.decode(BackendBillingInvoice.self, from: data)
+    }
+
+    func confirmRevenueCatTransaction(
+        registration: RemotePushRegistration,
+        invoiceNumber: UUID,
+        transactionID: String
+    ) async throws -> BackendBillingInvoice {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint(
+                "api", "v1", "billing", "invoices",
+                invoiceNumber.uuidString.lowercased(), "confirm"
+            )
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(
+            RevenueCatTransactionConfirmRequest(transactionId: transactionID)
+        )
         let data = try await perform(request)
         return try decoder.decode(BackendBillingInvoice.self, from: data)
     }
@@ -2580,6 +2615,10 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var signedTransaction: String
         var environment: String
         var invoiceNumber: UUID?
+    }
+
+    private struct RevenueCatTransactionConfirmRequest: Encodable {
+        let transactionId: String
     }
 
     private struct BillingCheckoutRequest: Encodable {

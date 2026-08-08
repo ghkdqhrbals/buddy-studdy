@@ -495,6 +495,60 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
+    fun `verified transaction cannot be attached to a different prepared invoice`(): Unit = runBlocking {
+        val fixture = fixture("transaction-invoice-conflict")
+        val first = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            fixture.product,
+            "${fixture.idempotencyKey}-first",
+            fixture.now,
+        )
+        val second = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            fixture.product,
+            "${fixture.idempotencyKey}-second",
+            fixture.now.plusSeconds(1),
+        )
+        val transaction = fixture.transaction()
+
+        val recorded = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                userId = fixture.userId,
+                tierProduct = fixture.product,
+                transaction = transaction,
+                invoiceNumber = first.invoiceNumber,
+                source = BillingEventSource.CLIENT,
+                eventId = "apple-transaction:${transaction.transactionId}",
+                occurredAt = fixture.now.plusSeconds(2),
+            ),
+        )
+
+        assertThat(recorded.id).isEqualTo(first.id)
+        assertThatThrownBy {
+            runBlocking {
+                ledger.recordVerifiedPayment(
+                    RecordVerifiedPaymentCommand(
+                        userId = fixture.userId,
+                        tierProduct = fixture.product,
+                        transaction = transaction,
+                        invoiceNumber = second.invoiceNumber,
+                        source = BillingEventSource.REVENUECAT_WEBHOOK,
+                        eventId = "apple-transaction:${transaction.transactionId}",
+                        occurredAt = fixture.now.plusSeconds(3),
+                    ),
+                )
+            }
+        }.isInstanceOf(ApiException::class.java)
+
+        assertThat(longValue("select count(*) from payments where provider_transaction_id = '${transaction.transactionId}'"))
+            .isEqualTo(1)
+        assertThat(longValue("select count(*) from payments where invoice_id = ${second.id}"))
+            .isZero()
+    }
+
+    @Test
     fun `checkout expiration cancels only old unpaid normal invoices`(): Unit = runBlocking {
         val fixture = fixture("checkout-expiration")
         val oldUnpaid = ledger.createPendingInvoice(

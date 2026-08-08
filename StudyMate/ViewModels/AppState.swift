@@ -6194,9 +6194,44 @@ final class AppState: ObservableObject {
         return invoice
     }
 
+    func confirmRevenueCatBillingTransaction(
+        transactionID: String,
+        invoiceNumber: UUID
+    ) async throws -> BackendBillingInvoice {
+        guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
+              let registration = await registrationWithAccessToken(
+                storedRegistration,
+                reason: "billing-revenuecat-confirm"
+              ) else {
+            throw AppStateError.missingRemotePushRegistration
+        }
+        let invoice = try await performWithBackendIdentityRecovery(
+            registration: registration,
+            reason: "billing-revenuecat-confirm",
+            operation: { recoveredRegistration in
+                try await self.billingUseCase.confirmRevenueCatTransaction(
+                    registration: recoveredRegistration,
+                    invoiceNumber: invoiceNumber,
+                    transactionID: transactionID
+                )
+            }
+        )
+        log(
+            invoice.isApplied ? .info : .error,
+            "RevenueCat 결제 확정 응답을 확인했습니다. " +
+                "endpoint=/api/v1/billing/invoices/{invoiceNumber}/confirm " +
+                "invoiceId=\(invoice.id), status=\(invoice.status), " +
+                "paymentStatus=\(invoice.paymentStatus ?? "nil"), " +
+                "fulfilledAtPresent=\(invoice.fulfilledAt != nil)"
+        )
+        return invoice
+    }
+
     #if os(iOS)
     private func startAppleBillingTransactionListener() {
-        guard appleBillingUpdatesTask == nil else {
+        RevenueCatBillingBridge.shared.start()
+        guard !RevenueCatBillingBridge.shared.isEnabled,
+              appleBillingUpdatesTask == nil else {
             return
         }
         appleBillingUpdatesTask = Task { @MainActor [weak self] in
@@ -6220,7 +6255,10 @@ final class AppState: ObservableObject {
     }
 
     private func recoverAppleBillingTransactions(reason: String) async {
-        guard isCommunitySessionActive, appleBillingRecoveryTask == nil else {
+        RevenueCatBillingBridge.shared.start()
+        guard !RevenueCatBillingBridge.shared.isEnabled,
+              isCommunitySessionActive,
+              appleBillingRecoveryTask == nil else {
             return
         }
         let task = Task { @MainActor [weak self] in

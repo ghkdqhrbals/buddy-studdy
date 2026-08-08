@@ -275,6 +275,7 @@ final class AppleBillingStore: ObservableObject {
         action: MembershipPrimaryAction,
         appAccountToken: UUID,
         prepareCheckout: @escaping (String) async throws -> BackendBillingInvoice,
+        confirmRevenueCat: @escaping (String, UUID) async throws -> BackendBillingInvoice,
         synchronize: @escaping (String, String, UUID?) async throws -> BackendBillingInvoice,
         waitForFulfillment: @escaping (Int64) async throws -> BackendBillingInvoice,
         abandonCheckout: @escaping (UUID) async throws -> Void
@@ -301,32 +302,29 @@ final class AppleBillingStore: ObservableObject {
             guard let transactionIdentifier = revenueCatTransaction?.transactionIdentifier else {
                 return action == .downgrade ? .changeScheduled : .pending
             }
-            if let evidence = await StoreKitTransactionSyncResolver.resolve(
-                revenueCatTransactionIdentifier: transactionIdentifier,
-                productID: tierProduct.id,
-                appAccountToken: appAccountToken
-            ) {
-                // A verified JWS path is synchronous: a non-2xx backend result is surfaced to the
-                // user and must never be converted into a generic approval-pending state.
-                let invoice = try await synchronize(
-                    evidence.signedTransaction,
-                    evidence.environment,
-                    checkout?.invoiceNumber
-                )
-                return .purchased(try Self.requireApplied(invoice))
-            }
-
             if action == .downgrade {
                 return .changeScheduled
             }
-
-            // Webhooks remain the fallback for Test Store purchases and for a temporary client-to-
-            // backend failure. A future launch also replays the active StoreKit entitlement JWS.
             guard let checkout else {
                 return .changeScheduled
             }
-            let invoice = try await waitForFulfillment(checkout.id)
-            return .purchased(try Self.requireApplied(invoice))
+            do {
+                let invoice = try await confirmRevenueCat(transactionIdentifier, checkout.invoiceNumber)
+                return .purchased(try Self.requireApplied(invoice))
+            } catch let confirmationError {
+                guard Self.shouldWaitForRevenueCatWebhook(after: confirmationError) else {
+                    throw confirmationError
+                }
+                // RevenueCat webhooks are delivered at least once and may arrive before or after
+                // this API call. Poll the same prepared invoice only when immediate verification
+                // is temporarily unavailable; the backend transaction ID key keeps both paths idempotent.
+                do {
+                    let invoice = try await waitForFulfillment(checkout.id)
+                    return .purchased(try Self.requireApplied(invoice))
+                } catch {
+                    throw confirmationError
+                }
+            }
         case .appStore(let product):
             let result = try await product.purchase(options: [.appAccountToken(appAccountToken)])
             switch result {
@@ -367,6 +365,7 @@ final class AppleBillingStore: ObservableObject {
         try await RevenueCatBillingBridge.shared.identify(appAccountToken: appAccountToken)
         if RevenueCatBillingBridge.shared.isEnabled {
             _ = try await Purchases.shared.restorePurchases()
+            return []
         } else {
             try await AppStore.sync()
             try await RevenueCatBillingBridge.shared.syncPurchases()
@@ -391,6 +390,14 @@ final class AppleBillingStore: ObservableObject {
             restored.append(appliedInvoice)
         }
         return restored
+    }
+
+    private static func shouldWaitForRevenueCatWebhook(after error: Error) -> Bool {
+        guard let backendError = error as? RemotePushBackendError,
+              case .httpStatus(let statusCode, _, _) = backendError else {
+            return false
+        }
+        return statusCode == 429 || statusCode >= 500
     }
 
     func beginRefundRequest(transactionID: String, in scene: UIWindowScene) async throws -> Transaction.RefundRequestStatus {

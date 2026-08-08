@@ -8,6 +8,7 @@ import com.buddystudy.backend.billing.application.model.BillingInvoicePage
 import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
 import com.buddystudy.backend.billing.application.model.BillingStatusResponse
 import com.buddystudy.backend.billing.application.model.CreateBillingCheckoutCommand
+import com.buddystudy.backend.billing.application.model.ConfirmRevenueCatTransactionCommand
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
 import com.buddystudy.backend.billing.application.model.RevenueCatWebhookRequest
 import com.buddystudy.backend.billing.application.model.SyncAppleTransactionCommand
@@ -61,6 +62,17 @@ class BillingController(
         authentication: Authentication,
         @PathVariable invoiceNumber: UUID,
     ): BillingInvoiceSummary = billing.abandonCheckout(authentication.principalOrThrow(), invoiceNumber)
+
+    @PostMapping("/invoices/{invoiceNumber}/confirm")
+    suspend fun confirmRevenueCatTransaction(
+        authentication: Authentication,
+        @PathVariable invoiceNumber: UUID,
+        @Valid @RequestBody request: ConfirmRevenueCatTransactionRequest,
+    ): BillingInvoiceSummary = billing.confirmRevenueCatTransaction(
+        authentication.principalOrThrow(),
+        invoiceNumber,
+        request,
+    )
 
     @PostMapping("/apple/transactions")
     suspend fun syncAppleTransaction(
@@ -139,6 +151,13 @@ data class SyncAppleTransactionRequest(
     var invoiceNumber: UUID? = null,
 )
 
+data class ConfirmRevenueCatTransactionRequest(
+    @field:NotBlank
+    @field:Size(max = 191)
+    @field:Pattern(regexp = "[A-Za-z0-9._:-]+")
+    var transactionId: String = "",
+)
+
 data class CreateBillingCheckoutRequest(
     @field:NotBlank
     @field:Size(max = 191)
@@ -170,6 +189,11 @@ interface BillingWebPort {
     suspend fun catalog(principal: Principal): BillingCatalog
     suspend fun createCheckout(principal: Principal, request: CreateBillingCheckoutRequest): BillingInvoiceSummary
     suspend fun abandonCheckout(principal: Principal, invoiceNumber: UUID): BillingInvoiceSummary
+    suspend fun confirmRevenueCatTransaction(
+        principal: Principal,
+        invoiceNumber: UUID,
+        request: ConfirmRevenueCatTransactionRequest,
+    ): BillingInvoiceSummary
     suspend fun syncAppleTransaction(principal: Principal, request: SyncAppleTransactionRequest): BillingInvoiceSummary
     suspend fun invoices(principal: Principal, limit: Int, offset: Int): BillingInvoicePage
     suspend fun invoice(principal: Principal, invoiceId: Long): BillingInvoiceDetail
@@ -208,6 +232,23 @@ class BillingWebAdapter(
 
     override suspend fun abandonCheckout(principal: Principal, invoiceNumber: UUID): BillingInvoiceSummary =
         billing.abandonCheckout(principal, invoiceNumber)
+
+    override suspend fun confirmRevenueCatTransaction(
+        principal: Principal,
+        invoiceNumber: UUID,
+        request: ConfirmRevenueCatTransactionRequest,
+    ): BillingInvoiceSummary = try {
+        billing.confirmRevenueCatTransaction(
+            principal,
+            invoiceNumber,
+            ConfirmRevenueCatTransactionCommand(request.transactionId.trim()),
+        )
+    } catch (error: ApiException) {
+        if (error.code == ApiErrorCode.BILLING_TRANSACTION_CONFLICT) {
+            meterRegistry.counter("billing.lifecycle.ownership.conflicts").increment()
+        }
+        throw error
+    }
 
     override suspend fun syncAppleTransaction(
         principal: Principal,

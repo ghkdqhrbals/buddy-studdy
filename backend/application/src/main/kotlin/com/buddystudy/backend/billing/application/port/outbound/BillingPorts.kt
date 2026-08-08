@@ -38,6 +38,10 @@ interface RevenueCatCustomerInfoPort {
     suspend fun fetch(appAccountToken: UUID, originalTransactionId: String): RevenueCatCustomerSnapshot
 }
 
+interface RevenueCatTransactionVerificationPort {
+    suspend fun verify(transactionId: String): VerifiedAppleTransaction
+}
+
 interface BillingLedgerPort {
     suspend fun findOrCreateAppAccountToken(userId: Long, now: Instant): UUID
     suspend fun userIdForAppAccountToken(appAccountToken: UUID): Long?

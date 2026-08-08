@@ -14,6 +14,8 @@ import com.buddystudy.backend.billing.application.model.AdminQuotaAdjustment
 import com.buddystudy.backend.billing.application.model.AdminBillingReconcileRequest
 import com.buddystudy.backend.billing.application.model.AdminUserBillingTimeline
 import com.buddystudy.backend.billing.application.model.CreateBillingCheckoutCommand
+import com.buddystudy.backend.billing.application.model.ConfirmRevenueCatTransactionCommand
+import com.buddystudy.backend.billing.application.model.ApplyVerifiedBillingPaymentCommand
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
 import com.buddystudy.backend.billing.application.model.RevenueCatWebhookRequest
 import com.buddystudy.backend.billing.application.model.SyncAppleTransactionCommand
@@ -23,6 +25,11 @@ interface BillingUseCase {
     suspend fun catalog(principal: Principal): BillingCatalog
     suspend fun createCheckout(principal: Principal, command: CreateBillingCheckoutCommand): BillingInvoiceSummary
     suspend fun abandonCheckout(principal: Principal, invoiceNumber: java.util.UUID): BillingInvoiceSummary
+    suspend fun confirmRevenueCatTransaction(
+        principal: Principal,
+        invoiceNumber: java.util.UUID,
+        command: ConfirmRevenueCatTransactionCommand,
+    ): BillingInvoiceSummary
     suspend fun syncAppleTransaction(principal: Principal, command: SyncAppleTransactionCommand): BillingInvoiceSummary
     suspend fun invoices(principal: Principal, limit: Int, offset: Int): BillingInvoicePage
     suspend fun invoice(principal: Principal, invoiceId: Long): BillingInvoiceDetail
@@ -36,6 +43,10 @@ interface BillingUseCase {
         originalTransactionId: String,
         command: RequestBillingActionCommand,
     ): BillingAction
+}
+
+interface VerifiedBillingPaymentUseCase {
+    suspend fun apply(command: ApplyVerifiedBillingPaymentCommand): BillingInvoiceSummary
 }
 
 interface AppleBillingNotificationUseCase {

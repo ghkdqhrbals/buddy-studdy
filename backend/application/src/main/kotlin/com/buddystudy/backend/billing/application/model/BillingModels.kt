@@ -85,6 +85,10 @@ data class SyncAppleTransactionCommand(
     val invoiceNumber: UUID? = null,
 )
 
+data class ConfirmRevenueCatTransactionCommand(
+    val transactionId: String,
+)
+
 data class CreateBillingCheckoutCommand(
     val productId: String,
     val idempotencyKey: String,
@@ -168,7 +172,22 @@ data class BillingInvoiceSummary(
     val updatedAt: Instant,
     val fulfilledAt: Instant? = null,
     val latestEventType: InvoiceEventType? = null,
-)
+) {
+    val phase: BillingInvoicePhase
+        get() = when {
+            status == InvoiceStatus.FAILED -> BillingInvoicePhase.FAILED
+            fulfilledAt != null && paymentStatus == PaymentStatus.SETTLED -> BillingInvoicePhase.FULFILLED
+            paymentStatus == PaymentStatus.VERIFIED -> BillingInvoicePhase.VERIFIED
+            else -> BillingInvoicePhase.PREPARED
+        }
+}
+
+enum class BillingInvoicePhase {
+    PREPARED,
+    VERIFIED,
+    FULFILLED,
+    FAILED,
+}
 
 data class BillingInvoiceEvent(
     val eventId: String,
@@ -289,6 +308,15 @@ data class RecordVerifiedPaymentCommand(
     val invoiceNumber: UUID?,
     val source: BillingEventSource,
     val eventId: String,
+    val occurredAt: Instant,
+)
+
+data class ApplyVerifiedBillingPaymentCommand(
+    val userId: Long,
+    val tierProduct: BillingTierProduct,
+    val transaction: VerifiedAppleTransaction,
+    val invoiceNumber: UUID?,
+    val source: BillingEventSource,
     val occurredAt: Instant,
 )
 

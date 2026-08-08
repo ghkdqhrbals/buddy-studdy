@@ -6678,6 +6678,7 @@ private struct MobileMembershipManagementView: View {
                     action: primaryAction,
                     appAccountToken: appAccountToken,
                     prepareCheckout: appState.createAppleBillingCheckout,
+                    confirmRevenueCat: appState.confirmRevenueCatBillingTransaction,
                     synchronize: appState.syncAppleBillingTransaction,
                     waitForFulfillment: appState.waitForRevenueCatBillingFulfillment,
                     abandonCheckout: appState.abandonAppleBillingCheckout

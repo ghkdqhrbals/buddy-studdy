@@ -10,10 +10,12 @@ import com.buddystudy.backend.billing.application.model.BillingClientAction
 import com.buddystudy.backend.billing.application.model.BillingFulfillmentJobClaim
 import com.buddystudy.backend.billing.application.model.BillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.BillingInvoicePage
+import com.buddystudy.backend.billing.application.model.BillingInvoicePhase
 import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
 import com.buddystudy.backend.billing.application.model.BillingTierProduct
 import com.buddystudy.backend.billing.application.model.BillingEntitlementProjection
 import com.buddystudy.backend.billing.application.model.CreateBillingCheckoutCommand
+import com.buddystudy.backend.billing.application.model.ConfirmRevenueCatTransactionCommand
 import com.buddystudy.backend.billing.application.model.RecordVerifiedPaymentCommand
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
 import com.buddystudy.backend.billing.application.model.SyncAppleTransactionCommand
@@ -22,7 +24,9 @@ import com.buddystudy.backend.billing.application.model.VerifiedAppleTransaction
 import com.buddystudy.backend.billing.application.model.VerifiedRevenueCatEvent
 import com.buddystudy.backend.billing.application.port.outbound.AppleBillingVerificationPort
 import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPort
+import com.buddystudy.backend.billing.application.port.outbound.RevenueCatTransactionVerificationPort
 import com.buddystudy.backend.billing.application.service.BillingService
+import com.buddystudy.backend.billing.application.service.VerifiedBillingPaymentService
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPlan
 import com.buddystudy.backend.study.application.port.outbound.QuestionQuotaStatus
@@ -197,6 +201,7 @@ class BillingServiceTest {
         )
 
         assertEquals(InvoiceStatus.WAITING, result.status)
+        assertEquals(BillingInvoicePhase.PREPARED, result.phase)
         assertEquals(listOf("checkout-request-1"), ledger.pendingCheckoutKeys)
         assertTrue(ledger.recordedPayments.isEmpty())
     }
@@ -314,8 +319,26 @@ class BillingServiceTest {
         val result = service.syncAppleTransaction(principal(), syncCommand())
 
         assertEquals(InvoiceStatus.COMPLETED, result.status)
+        assertEquals(BillingInvoicePhase.FULFILLED, result.phase)
         assertEquals(1, ledger.recordedPayments.size)
         assertEquals(invoiceNumber, ledger.recordedPayments.single().invoiceNumber)
+        assertEquals(BillingEventSource.CLIENT, ledger.recordedPayments.single().source)
+    }
+
+    @Test
+    fun `RevenueCat transaction confirmation applies the prepared invoice`() = runBlocking {
+        val ledger = FakeLedger(token, product)
+        val service = service(ledger)
+
+        val result = service.confirmRevenueCatTransaction(
+            principal(),
+            invoiceNumber,
+            ConfirmRevenueCatTransactionCommand(transaction.transactionId),
+        )
+
+        assertEquals(InvoiceStatus.COMPLETED, result.status)
+        assertEquals(invoiceNumber, ledger.recordedPayments.single().invoiceNumber)
+        assertEquals(transaction.transactionId, ledger.recordedPayments.single().transaction.transactionId)
         assertEquals(BillingEventSource.CLIENT, ledger.recordedPayments.single().source)
     }
 
@@ -354,18 +377,8 @@ class BillingServiceTest {
         notification: VerifiedAppleNotification? = null,
         membershipTierCode: String = "TIER2",
         monthlyLimit: Int = 300,
-    ) = BillingService(
-        verifier = object : AppleBillingVerificationPort {
-            override suspend fun verifyTransaction(
-                signedTransaction: String,
-                environment: BillingEnvironment,
-            ): VerifiedAppleTransaction = transaction
-
-            override suspend fun verifyNotification(signedPayload: String): VerifiedAppleNotification =
-                notification ?: error("not used")
-        },
-        ledger = ledger,
-        memberships = object : QuestionMembershipPort {
+    ) = object {
+        val membership = object : QuestionMembershipPort {
             override suspend fun activePlanForUser(userId: Long) = QuestionMembershipPlan(membershipTierCode, monthlyLimit)
             override suspend fun quotaStatusForUser(userId: Long, at: Instant) = QuestionQuotaStatus(
                 tierCode = membershipTierCode,
@@ -382,9 +395,27 @@ class BillingServiceTest {
                 now: Instant,
             ) = true
             override suspend fun refundMonthlySystemQuestion(userId: Long, periodStartedAt: Instant, now: Instant) = Unit
-        },
-        clock = Clock.fixed(now, ZoneOffset.UTC),
-    )
+        }
+        val appleVerifier = object : AppleBillingVerificationPort {
+            override suspend fun verifyTransaction(
+                signedTransaction: String,
+                environment: BillingEnvironment,
+            ): VerifiedAppleTransaction = transaction
+
+            override suspend fun verifyNotification(signedPayload: String): VerifiedAppleNotification =
+                notification ?: error("not used")
+        }
+        val service = BillingService(
+            verifier = appleVerifier,
+            revenueCatTransactionVerifier = object : RevenueCatTransactionVerificationPort {
+                override suspend fun verify(transactionId: String): VerifiedAppleTransaction = transaction
+            },
+            verifiedPayments = VerifiedBillingPaymentService(ledger, membership),
+            ledger = ledger,
+            memberships = membership,
+            clock = Clock.fixed(now, ZoneOffset.UTC),
+        )
+    }.service
 
     private fun principal(anonymous: Boolean = false) = Principal(733, "device", 1, anonymous, if (anonymous) "ANONYMOUS" else "ACTIVE")
     private fun syncCommand() = SyncAppleTransactionCommand(
@@ -456,7 +487,7 @@ class BillingServiceTest {
             now: Instant,
         ): BillingInvoiceSummary {
             pendingCheckoutKeys += idempotencyKey
-            return invoice(InvoiceStatus.WAITING)
+            return invoice(InvoiceStatus.WAITING, hasPayment = false)
         }
         override suspend fun abandonPendingInvoice(
             userId: Long,
@@ -530,7 +561,11 @@ class BillingServiceTest {
             invoiceId: Long, command: RequestBillingActionCommand, now: Instant,
         ): BillingAction = action(BillingActionType.CANCELLATION)
 
-        private fun invoice(status: InvoiceStatus, applied: Boolean = false) = BillingInvoiceSummary(
+        private fun invoice(
+            status: InvoiceStatus,
+            applied: Boolean = false,
+            hasPayment: Boolean = true,
+        ) = BillingInvoiceSummary(
             id = 99,
             invoiceNumber = UUID.fromString("2306d81d-1323-48c4-bb2b-a40cc48f70da"),
             type = InvoiceType.NORMAL,
@@ -539,14 +574,14 @@ class BillingServiceTest {
             productId = "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
             status = status,
             version = 2,
-            paymentId = 88,
-            transactionId = "200000000000001",
-            originalTransactionId = "200000000000000",
-            paymentStatus = if (applied) PaymentStatus.SETTLED else PaymentStatus.VERIFIED,
-            priceMilliunits = 4_900_000,
-            currency = "KRW",
-            purchaseAt = Instant.parse("2026-08-02T23:59:50Z"),
-            expiresAt = Instant.parse("2026-09-02T00:00:00Z"),
+            paymentId = if (hasPayment) 88 else null,
+            transactionId = if (hasPayment) "200000000000001" else null,
+            originalTransactionId = if (hasPayment) "200000000000000" else null,
+            paymentStatus = if (!hasPayment) null else if (applied) PaymentStatus.SETTLED else PaymentStatus.VERIFIED,
+            priceMilliunits = if (hasPayment) 4_900_000 else null,
+            currency = if (hasPayment) "KRW" else null,
+            purchaseAt = if (hasPayment) Instant.parse("2026-08-02T23:59:50Z") else null,
+            expiresAt = if (hasPayment) Instant.parse("2026-09-02T00:00:00Z") else null,
             createdAt = Instant.parse("2026-08-03T00:00:00Z"),
             updatedAt = Instant.parse("2026-08-03T00:00:00Z"),
             fulfilledAt = if (applied) Instant.parse("2026-08-03T00:00:00Z") else null,

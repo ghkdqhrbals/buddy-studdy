@@ -1,11 +1,12 @@
 package com.buddystudy.backend.billing.application.service
 
-import com.buddystudy.backend.billing.application.model.RecordVerifiedPaymentCommand
+import com.buddystudy.backend.billing.application.model.ApplyVerifiedBillingPaymentCommand
 import com.buddystudy.backend.billing.application.model.RevenueCatWebhookRequest
 import com.buddystudy.backend.billing.application.model.VerifiedAppleTransaction
 import com.buddystudy.backend.billing.application.model.VerifiedRevenueCatEvent
 import com.buddystudy.backend.billing.application.port.inbound.RevenueCatBillingNotificationUseCase
 import com.buddystudy.backend.billing.application.port.inbound.RevenueCatEventProjectionUseCase
+import com.buddystudy.backend.billing.application.port.inbound.VerifiedBillingPaymentUseCase
 import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPort
 import com.buddystudy.backend.billing.application.port.outbound.RevenueCatWebhookVerificationPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
@@ -23,6 +24,7 @@ import java.util.UUID
 class RevenueCatBillingService(
     private val verifier: RevenueCatWebhookVerificationPort,
     private val ledger: BillingLedgerPort,
+    private val verifiedPayments: VerifiedBillingPaymentUseCase,
     private val clock: Clock = Clock.systemUTC(),
     @param:Value("\${buddystudy.billing.revenue-cat.allow-test-store:false}")
     private val allowTestStore: Boolean = false,
@@ -49,18 +51,16 @@ class RevenueCatBillingService(
                     if (product.productType != transaction.productType) {
                         invalidEvent("RevenueCat product type does not match the membership catalog.")
                     }
-                    val invoice = ledger.recordVerifiedPayment(
-                        RecordVerifiedPaymentCommand(
+                    verifiedPayments.apply(
+                        ApplyVerifiedBillingPaymentCommand(
                             userId = userId,
                             tierProduct = product,
                             transaction = transaction,
                             invoiceNumber = null,
                             source = BillingEventSource.REVENUECAT_WEBHOOK,
-                            eventId = "apple-transaction:${transaction.transactionId}",
                             occurredAt = now,
                         ),
                     )
-                    ledger.fulfill(invoice.id, now)
                 }
                 ledger.applyRevenueCatEvent(event, now)
             } catch (error: Exception) {

@@ -13,6 +13,8 @@ import com.buddystudy.backend.billing.application.model.BillingStatusResponse
 import com.buddystudy.backend.billing.application.model.BillingQuotaStatus
 import com.buddystudy.backend.billing.application.model.BillingPlanTransition
 import com.buddystudy.backend.billing.application.model.CreateBillingCheckoutCommand
+import com.buddystudy.backend.billing.application.model.ConfirmRevenueCatTransactionCommand
+import com.buddystudy.backend.billing.application.model.ApplyVerifiedBillingPaymentCommand
 import com.buddystudy.backend.billing.application.model.RecordVerifiedPaymentCommand
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
 import com.buddystudy.backend.billing.application.model.SyncAppleTransactionCommand
@@ -20,18 +22,17 @@ import com.buddystudy.backend.billing.application.model.VerifiedAppleTransaction
 import com.buddystudy.backend.billing.application.port.inbound.AppleBillingNotificationUseCase
 import com.buddystudy.backend.billing.application.port.inbound.BillingUseCase
 import com.buddystudy.backend.billing.application.port.inbound.BillingRecoveryUseCase
+import com.buddystudy.backend.billing.application.port.inbound.VerifiedBillingPaymentUseCase
 import com.buddystudy.backend.billing.application.port.outbound.AppleBillingVerificationPort
 import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPort
+import com.buddystudy.backend.billing.application.port.outbound.RevenueCatTransactionVerificationPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystudy.billing.domain.BillingEventSource
 import com.buddystudy.billing.domain.EntitlementSource
-import com.buddystudy.billing.domain.InvoiceStatus
-import com.buddystudy.billing.domain.PaymentStatus
 import com.buddystudy.billing.domain.SubscriptionAccessStatus
 import com.buddystudy.billing.domain.SubscriptionRenewalStatus
-import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import java.time.Clock
@@ -42,12 +43,12 @@ import java.util.UUID
 @Service
 class BillingService(
     private val verifier: AppleBillingVerificationPort,
+    private val revenueCatTransactionVerifier: RevenueCatTransactionVerificationPort,
+    private val verifiedPayments: VerifiedBillingPaymentUseCase,
     private val ledger: BillingLedgerPort,
     private val memberships: QuestionMembershipPort,
     private val clock: Clock = Clock.systemUTC(),
 ) : BillingUseCase, AppleBillingNotificationUseCase, BillingRecoveryUseCase {
-    private val logger = LoggerFactory.getLogger(javaClass)
-
     override suspend fun status(principal: Principal): BillingStatusResponse {
         requireRegistered(principal)
         val now = clock.instant()
@@ -163,6 +164,20 @@ class BillingService(
         return ledger.abandonPendingInvoice(principal.userId, invoiceNumber, clock.instant())
     }
 
+    override suspend fun confirmRevenueCatTransaction(
+        principal: Principal,
+        invoiceNumber: UUID,
+        command: ConfirmRevenueCatTransactionCommand,
+    ): BillingInvoiceSummary {
+        requireRegistered(principal)
+        validateProviderId(command.transactionId, "transactionId")
+
+        val transaction = revenueCatTransactionVerifier.verify(command.transactionId.trim())
+        val now = clock.instant()
+        validateTransaction(transaction, now)
+        return applyVerifiedTransaction(principal, transaction, invoiceNumber, BillingEventSource.CLIENT, now)
+    }
+
     override suspend fun syncAppleTransaction(
         principal: Principal,
         command: SyncAppleTransactionCommand,
@@ -174,60 +189,13 @@ class BillingService(
         val now = clock.instant()
         validateTransaction(transaction, now)
 
-        val expectedToken = ledger.findOrCreateAppAccountToken(principal.userId, now)
-        if (transaction.appAccountToken != expectedToken) {
-            throw billingError(
-                HttpStatus.CONFLICT,
-                ApiErrorCode.BILLING_TRANSACTION_CONFLICT,
-                "The App Store transaction appAccountToken does not match the signed-in user.",
-            )
-        }
-        val product = ledger.tierProduct(transaction.productId)
-            ?: throw billingError(
-                HttpStatus.UNPROCESSABLE_ENTITY,
-                ApiErrorCode.BILLING_TRANSACTION_INVALID,
-                "The App Store product is not enabled for a BuddyStudy tier.",
-            )
-        if (product.productType != transaction.productType) {
-            throw billingError(
-                HttpStatus.UNPROCESSABLE_ENTITY,
-                ApiErrorCode.BILLING_TRANSACTION_INVALID,
-                "The App Store product type does not match the server tier catalog.",
-            )
-        }
-
-        val recorded = ledger.recordVerifiedPayment(
-            RecordVerifiedPaymentCommand(
-                userId = principal.userId,
-                tierProduct = product,
-                transaction = transaction,
-                invoiceNumber = command.invoiceNumber,
-                source = BillingEventSource.CLIENT,
-                eventId = "apple-transaction:${transaction.transactionId}",
-                occurredAt = now,
-            ),
+        return applyVerifiedTransaction(
+            principal,
+            transaction,
+            command.invoiceNumber,
+            BillingEventSource.CLIENT,
+            now,
         )
-
-        // This is deliberately a separate transaction. If the process dies after payment evidence
-        // commits, the fulfillment job created above remains available to the recovery worker.
-        val fulfilled = try {
-            ledger.fulfill(recorded.id, now)
-        } catch (error: Exception) {
-            logger.error(
-                "apple_transaction_membership_application_failed userId={} invoiceId={} invoiceNumber={} " +
-                    "transactionId={} productId={} errorType={} message={}",
-                principal.userId,
-                recorded.id,
-                recorded.invoiceNumber,
-                transaction.transactionId,
-                transaction.productId,
-                error.javaClass.name,
-                error.message,
-                error,
-            )
-            throw billingApplicationFailed()
-        }
-        return requireAppliedTransaction(principal.userId, product, transaction, fulfilled, now)
     }
 
     override suspend fun invoices(principal: Principal, limit: Int, offset: Int): BillingInvoicePage {
@@ -371,52 +339,45 @@ class BillingService(
         }
     }
 
-    private suspend fun requireAppliedTransaction(
-        userId: Long,
-        product: com.buddystudy.backend.billing.application.model.BillingTierProduct,
+    private suspend fun applyVerifiedTransaction(
+        principal: Principal,
         transaction: VerifiedAppleTransaction,
-        invoice: BillingInvoiceSummary,
+        invoiceNumber: UUID?,
+        source: BillingEventSource,
         now: Instant,
     ): BillingInvoiceSummary {
-        val entitlement = ledger.entitlementForUser(userId)
-        val quota = memberships.quotaStatusForUser(userId, now)
-        val invoiceApplied = invoice.status == InvoiceStatus.COMPLETED &&
-            invoice.paymentStatus == PaymentStatus.SETTLED &&
-            invoice.fulfilledAt != null &&
-            invoice.transactionId == transaction.transactionId &&
-            invoice.productId == transaction.productId
-        val entitlementApplied = entitlement?.tierCode == product.tierCode &&
-            entitlement.productId == product.productId &&
-            entitlement.accessStatus in setOf(SubscriptionAccessStatus.ACTIVE, SubscriptionAccessStatus.GRACE_PERIOD)
-        val quotaApplied = quota?.tierCode == product.tierCode && quota.baseLimit == product.monthlyQuestionLimit
-
-        if (invoiceApplied && entitlementApplied && quotaApplied) return invoice
-
-        logger.error(
-            "apple_transaction_application_postcondition_failed userId={} invoiceId={} invoiceStatus={} " +
-                "paymentStatus={} fulfilledAt={} transactionMatches={} expectedTier={} entitlementTier={} " +
-                "entitlementProduct={} entitlementAccess={} quotaTier={} quotaBaseLimit={}",
-            userId,
-            invoice.id,
-            invoice.status,
-            invoice.paymentStatus,
-            invoice.fulfilledAt,
-            invoice.transactionId == transaction.transactionId,
-            product.tierCode,
-            entitlement?.tierCode,
-            entitlement?.productId,
-            entitlement?.accessStatus,
-            quota?.tierCode,
-            quota?.baseLimit,
+        val expectedToken = ledger.findOrCreateAppAccountToken(principal.userId, now)
+        if (transaction.appAccountToken != expectedToken) {
+            throw billingError(
+                HttpStatus.CONFLICT,
+                ApiErrorCode.BILLING_TRANSACTION_CONFLICT,
+                "The App Store transaction appAccountToken does not match the signed-in user.",
+            )
+        }
+        val product = ledger.tierProduct(transaction.productId)
+            ?: throw billingError(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.BILLING_TRANSACTION_INVALID,
+                "The App Store product is not enabled for a BuddyStudy tier.",
+            )
+        if (product.productType != transaction.productType) {
+            throw billingError(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.BILLING_TRANSACTION_INVALID,
+                "The App Store product type does not match the server tier catalog.",
+            )
+        }
+        return verifiedPayments.apply(
+            ApplyVerifiedBillingPaymentCommand(
+                userId = principal.userId,
+                tierProduct = product,
+                transaction = transaction,
+                invoiceNumber = invoiceNumber,
+                source = source,
+                occurredAt = now,
+            ),
         )
-        throw billingApplicationFailed()
     }
-
-    private fun billingApplicationFailed() = billingError(
-        HttpStatus.SERVICE_UNAVAILABLE,
-        ApiErrorCode.BILLING_APPLICATION_FAILED,
-        "The verified App Store payment was persisted, but membership application did not complete.",
-    )
 
     private fun validateSignedPayload(payload: String) {
         val trimmed = payload.trim()
