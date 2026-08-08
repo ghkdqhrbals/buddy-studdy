@@ -6734,6 +6734,17 @@ private struct MobileMembershipManagementView: View {
                     appAccountToken: appAccountToken,
                     synchronize: appState.syncAppleBillingTransaction
                 )
+                await appState.refreshBilling()
+                if RevenueCatBillingBridge.shared.isEnabled,
+                   let pendingInvoice = AppleBillingStore.latestRecoverableRevenueCatInvoice(
+                       from: appState.billingInvoices
+                   ) {
+                    let recoveredInvoice = try await appState.confirmRevenueCatBillingTransaction(
+                        transactionID: nil,
+                        invoiceNumber: pendingInvoice.invoiceNumber
+                    )
+                    _ = try AppleBillingStore.requireApplied(recoveredInvoice)
+                }
                 await refreshMembershipData()
                 billingNotice = strings.billingRestored
             } catch {

@@ -107,12 +107,41 @@ final class AppControlPolicyTests: XCTestCase {
         XCTAssertTrue(billingStore.contains("let appliedInvoice = try Self.requireApplied(invoice)"))
         XCTAssertTrue(billingStore.contains("let checkout = action == .downgrade ? nil"))
         XCTAssertFalse(billingStore.contains("return action == .downgrade ? .changeScheduled : .pending"))
-        XCTAssertTrue(billingStore.contains("guard let transactionIdentifier = revenueCatTransaction?.transactionIdentifier else"))
+        XCTAssertTrue(billingStore.contains("revenueCatTransaction?.transactionIdentifier"))
+        XCTAssertFalse(billingStore.contains("guard let transactionIdentifier = revenueCatTransaction?.transactionIdentifier else"))
         XCTAssertTrue(billingStore.contains("if action == .downgrade"))
         XCTAssertTrue(appState.contains("for await verification in Transaction.currentEntitlements"))
         XCTAssertTrue(appState.contains("finishAfterSync: false"))
         XCTAssertTrue(appState.contains("_ = try AppleBillingStore.requireApplied(invoice)"))
         XCTAssertTrue(appState.contains("case .membershipApplicationIncomplete = billingError"))
+    }
+
+    func testRevenueCatRestoreSelectsOnlyLatestUnpaidWaitingInvoice() {
+        let oldestWaiting = billingInvoice(id: 40, status: "WAITING", createdAt: 100)
+        let latestWaiting = billingInvoice(id: 42, status: "WAITING", createdAt: 300)
+        var paidWaiting = billingInvoice(id: 43, status: "WAITING", createdAt: 400)
+        paidWaiting.paymentId = 90
+        let completed = billingInvoice(id: 44, status: "COMPLETED", createdAt: 500)
+        var refund = billingInvoice(id: 45, status: "WAITING", createdAt: 600)
+        refund.type = "REFUND"
+
+        let selected = AppleBillingStore.latestRecoverableRevenueCatInvoice(
+            from: [completed, paidWaiting, oldestWaiting, refund, latestWaiting]
+        )
+
+        XCTAssertEqual(selected?.id, latestWaiting.id)
+        XCTAssertEqual(selected?.invoiceNumber, latestWaiting.invoiceNumber)
+    }
+
+    func testRevenueCatRestoreHasNoCandidateWithoutUnpaidWaitingInvoice() {
+        var paidWaiting = billingInvoice(id: 51, status: "WAITING", createdAt: 100)
+        paidWaiting.paymentId = 91
+
+        XCTAssertNil(
+            AppleBillingStore.latestRecoverableRevenueCatInvoice(
+                from: [paidWaiting, billingInvoice(id: 52, status: "FAILED", createdAt: 200)]
+            )
+        )
     }
 
     func testPurchaseSuccessRequiresSettledAndFulfilledBackendInvoice() throws {
@@ -151,6 +180,32 @@ final class AppControlPolicyTests: XCTestCase {
         XCTAssertEqual(unfulfilled.paymentStatus, "SETTLED")
         XCTAssertFalse(unfulfilled.isApplied)
         XCTAssertThrowsError(try AppleBillingStore.requireApplied(unfulfilled))
+    }
+
+    private func billingInvoice(
+        id: Int64,
+        status: String,
+        createdAt: TimeInterval
+    ) -> BackendBillingInvoice {
+        BackendBillingInvoice(
+            id: id,
+            invoiceNumber: UUID(),
+            tierCode: "TIER2",
+            productId: "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+            status: status,
+            version: 1,
+            paymentId: nil,
+            transactionId: nil,
+            originalTransactionId: nil,
+            paymentStatus: nil,
+            priceMilliunits: nil,
+            currency: nil,
+            purchaseAt: nil,
+            expiresAt: nil,
+            createdAt: Date(timeIntervalSince1970: createdAt),
+            updatedAt: Date(timeIntervalSince1970: createdAt),
+            fulfilledAt: nil
+        )
     }
 
     func testMaintenanceTakesPriorityOverForcedUpdate() {

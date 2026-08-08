@@ -231,6 +231,23 @@ final class AppleBillingStore: ObservableObject {
         return invoice
     }
 
+    nonisolated static func latestRecoverableRevenueCatInvoice(
+        from invoices: [BackendBillingInvoice]
+    ) -> BackendBillingInvoice? {
+        invoices
+            .filter {
+                ($0.type ?? "NORMAL") == "NORMAL"
+                    && $0.status == "WAITING"
+                    && $0.paymentId == nil
+            }
+            .max { lhs, rhs in
+                if lhs.createdAt == rhs.createdAt {
+                    return lhs.id < rhs.id
+                }
+                return lhs.createdAt < rhs.createdAt
+            }
+    }
+
     @Published private(set) var products: [TierProduct] = []
     @Published private(set) var isLoading = false
     @Published private(set) var processingProductID: String?
