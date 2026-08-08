@@ -1780,6 +1780,31 @@ final class QuestionGenerationFlowTests: XCTestCase {
         )
     }
 
+    func testRevenueCatConfirmationEncodesMissingTransactionAsExplicitNull() async throws {
+        let invoiceNumber = UUID(uuidString: "9f041446-e898-4ef7-974d-91ac70e1a89b")!
+        let client = makeClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(
+                request.url?.path,
+                "/api/v1/billing/invoices/9f041446-e898-4ef7-974d-91ac70e1a89b/confirm"
+            )
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+
+            let body = try JSONSerialization.jsonObject(
+                with: Self.bodyData(from: request)
+            ) as? [String: Any]
+            XCTAssertTrue(body?.keys.contains("transactionId") == true)
+            XCTAssertTrue(body?["transactionId"] is NSNull)
+            return Self.pendingInvoiceResponse(for: request)
+        }
+
+        _ = try await client.confirmRevenueCatTransaction(
+            registration: Self.signedInRegistration,
+            invoiceNumber: invoiceNumber,
+            transactionID: nil
+        )
+    }
+
     func testBillingInvoicesDecodeCompletedNormalAndLinkedRefundStates() async throws {
         let client = makeClient { request in
             XCTAssertEqual(request.httpMethod, "GET")

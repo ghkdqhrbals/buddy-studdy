@@ -2619,6 +2619,19 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     private struct RevenueCatTransactionConfirmRequest: Encodable {
         let transactionId: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case transactionId
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            if let transactionId {
+                try container.encode(transactionId, forKey: .transactionId)
+            } else {
+                try container.encodeNil(forKey: .transactionId)
+            }
+        }
     }
 
     private struct BillingCheckoutRequest: Encodable {
