@@ -56,7 +56,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     @AfterEach
     fun cleanUpBillingFixtures(): Unit = runBlocking {
         createdRevenueCatEventIds.forEach { eventId ->
-            database.sql("delete from revenuecat_billing_events where event_id = :eventId")
+            database.sql("delete from billing_revenuecat_event_inbox where event_id = :eventId")
                 .bind("eventId", eventId).fetch().rowsUpdated().awaitSingle()
         }
         createdRevenueCatEventIds.clear()
@@ -69,7 +69,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
             execute("delete from subscription_events where user_id = $userId")
             execute("delete from subscriptions where user_id = $userId")
             execute("delete from billing_actions where user_id = $userId")
-            execute("delete from billing_jobs where invoice_id in (select id from invoices where user_id = $userId)")
+            execute("delete from billing_fulfillment_outbox where invoice_id in (select id from invoices where user_id = $userId)")
             execute("delete from payments_history where invoice_id in (select id from invoices where user_id = $userId)")
             execute("delete from invoice_events where invoice_id in (select id from invoices where user_id = $userId)")
             execute("delete from payments where user_id = $userId")
@@ -114,7 +114,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         assertThat(ledger.applyRevenueCatEvent(event, event.eventAt.plusSeconds(3))).isTrue()
         assertThat(ledger.recordRevenueCatEvent(event, event.eventAt.plusSeconds(4))).isFalse()
         assertThat(
-            database.sql("select processing_status from revenuecat_billing_events where event_id = :eventId")
+            database.sql("select processing_status from billing_revenuecat_event_inbox where event_id = :eventId")
                 .bind("eventId", eventId)
                 .map { row -> row.get("processing_status", String::class.java)!! }
                 .one().awaitSingle(),
@@ -445,7 +445,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
             longValue("select count(*) from user_memberships where user_id = ${fixture.userId} and status = 'ACTIVE'"),
         ).isZero()
         assertThat(
-            longValue("select count(*) from billing_jobs where invoice_id = ${recorded.id} and status = 'COMPLETED'"),
+            longValue("select count(*) from billing_fulfillment_outbox where invoice_id = ${recorded.id} and status = 'COMPLETED'"),
         ).isEqualTo(1)
     }
 
@@ -837,7 +837,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
 
         assertThat(completed.status).isEqualTo(InvoiceStatus.COMPLETED)
         assertThat(
-            longValue("select count(*) from billing_jobs where invoice_id = ${recorded.id} and status = 'COMPLETED'"),
+            longValue("select count(*) from billing_fulfillment_outbox where invoice_id = ${recorded.id} and status = 'COMPLETED'"),
         ).isEqualTo(1)
     }
 

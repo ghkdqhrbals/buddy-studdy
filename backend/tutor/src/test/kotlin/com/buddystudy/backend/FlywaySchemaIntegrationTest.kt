@@ -79,8 +79,8 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
             where table_schema = database()
               and table_name in (
                 'membership_tier_products', 'apple_billing_accounts', 'invoices', 'invoice_events',
-                'payments', 'payments_history', 'billing_actions', 'billing_jobs',
-                'apple_billing_notifications', 'revenuecat_billing_events',
+                'payments', 'payments_history', 'billing_actions', 'billing_fulfillment_outbox',
+                'billing_apple_notification_inbox', 'billing_revenuecat_event_inbox',
                 'billing_accounts', 'subscription_events', 'subscriptions',
                 'user_entitlement_projection', 'quota_accounts', 'quota_periods',
                 'quota_reservations', 'quota_ledger'
@@ -97,9 +97,9 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
             "payments",
             "payments_history",
             "billing_actions",
-            "billing_jobs",
-            "apple_billing_notifications",
-            "revenuecat_billing_events",
+            "billing_fulfillment_outbox",
+            "billing_apple_notification_inbox",
+            "billing_revenuecat_event_inbox",
             "billing_accounts",
             "subscription_events",
             "subscriptions",
@@ -119,7 +119,7 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
                 (table_name = 'invoices' and column_name in ('type', 'status'))
                 or (table_name = 'payments' and column_name = 'status')
                 or (table_name = 'billing_actions' and column_name in ('action_type', 'status'))
-                or (table_name = 'revenuecat_billing_events' and column_name in (
+                or (table_name = 'billing_revenuecat_event_inbox' and column_name in (
                     'processing_status', 'original_app_user_id', 'cancel_reason', 'expiration_reason'
                 ))
                 or (table_name = 'billing_accounts' and column_name in ('app_account_token', 'status', 'anonymized_subject_hash'))
@@ -139,17 +139,56 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(comments.getValue("payments.status")).contains("SETTLED", "REFUND_PENDING", "REVOKED")
         assertThat(comments.getValue("billing_actions.action_type")).contains("REFUND", "CANCELLATION", "COMPENSATION")
         assertThat(comments.getValue("billing_actions.status")).contains("AWAITING_APPLE", "COMPLETED", "DECLINED")
-        assertThat(comments.getValue("revenuecat_billing_events.processing_status"))
+        assertThat(comments.getValue("billing_revenuecat_event_inbox.processing_status"))
             .contains("RECEIVED", "PROCESSED", "IGNORED", "FAILED")
-        assertThat(comments.getValue("revenuecat_billing_events.original_app_user_id"))
+        assertThat(comments.getValue("billing_revenuecat_event_inbox.original_app_user_id"))
             .contains("RevenueCat App User ID", "appAccountToken")
-        assertThat(comments.getValue("revenuecat_billing_events.cancel_reason"))
+        assertThat(comments.getValue("billing_revenuecat_event_inbox.cancel_reason"))
             .contains("CUSTOMER_SUPPORT")
-        assertThat(comments.getValue("revenuecat_billing_events.expiration_reason"))
+        assertThat(comments.getValue("billing_revenuecat_event_inbox.expiration_reason"))
             .contains("BILLING_ERROR")
         assertThat(comments.getValue("billing_accounts.status")).contains("ACTIVE", "ANONYMIZED")
         assertThat(comments.getValue("subscription_events.processing_status"))
             .contains("PENDING", "COMPLETED", "FAILED")
+
+        val compatibilityObjects = databaseClient.sql(
+            """
+            select table_name, table_type
+            from information_schema.tables
+            where table_schema = database()
+              and table_name in (
+                'billing_jobs', 'apple_billing_notifications', 'revenuecat_billing_events',
+                'billing_fulfillment_outbox', 'billing_apple_notification_inbox',
+                'billing_revenuecat_event_inbox'
+              )
+            """.trimIndent(),
+        ).map { row, _ ->
+            row.get("table_name", String::class.java)!! to row.get("table_type", String::class.java)!!
+        }.all().collectList().awaitSingle().toMap()
+
+        assertThat(compatibilityObjects).containsEntry("billing_fulfillment_outbox", "BASE TABLE")
+        assertThat(compatibilityObjects).containsEntry("billing_apple_notification_inbox", "BASE TABLE")
+        assertThat(compatibilityObjects).containsEntry("billing_revenuecat_event_inbox", "BASE TABLE")
+        assertThat(compatibilityObjects).containsEntry("billing_jobs", "VIEW")
+        assertThat(compatibilityObjects).containsEntry("apple_billing_notifications", "VIEW")
+        assertThat(compatibilityObjects).containsEntry("revenuecat_billing_events", "VIEW")
+
+        val compatibilityViews = databaseClient.sql(
+            """
+            select table_name, is_updatable
+            from information_schema.views
+            where table_schema = database()
+              and table_name in (
+                'billing_jobs', 'apple_billing_notifications', 'revenuecat_billing_events'
+              )
+            """.trimIndent(),
+        ).map { row, _ ->
+            row.get("table_name", String::class.java)!! to row.get("is_updatable", String::class.java)!!
+        }.all().collectList().awaitSingle().toMap()
+
+        assertThat(compatibilityViews).containsEntry("billing_jobs", "YES")
+        assertThat(compatibilityViews).containsEntry("apple_billing_notifications", "YES")
+        assertThat(compatibilityViews).containsEntry("revenuecat_billing_events", "YES")
 
         data class TierProduct(
             val tierCode: String,

@@ -450,7 +450,7 @@ class BillingLedgerPersistenceAdapter(
     private suspend fun completeFulfillmentJob(invoiceId: Long, now: Instant) {
         database.sql(
             """
-            update billing_jobs
+            update billing_fulfillment_outbox
             set status = 'COMPLETED', completed_at = :now, claimed_at = null, claim_token = null,
                 last_error = null, updated_at = :now
             where invoice_id = :invoiceId and job_type = 'FULFILLMENT'
@@ -476,7 +476,7 @@ class BillingLedgerPersistenceAdapter(
         )
         database.sql(
             """
-            update billing_jobs
+            update billing_fulfillment_outbox
             set status = 'FAILED', attempts = least(attempts + 1, max_attempts), last_error = :reason,
                 claimed_at = null, claim_token = null, updated_at = :now
             where invoice_id = :invoiceId and job_type = 'FULFILLMENT'
@@ -498,7 +498,7 @@ class BillingLedgerPersistenceAdapter(
         val claims = database.sql(
             """
             select *
-            from billing_jobs
+            from billing_fulfillment_outbox
             where job_type = 'FULFILLMENT'
               and (
                 (status = 'PENDING' and next_attempt_at <= :now)
@@ -523,7 +523,7 @@ class BillingLedgerPersistenceAdapter(
         for (claim in claims) {
             database.sql(
                 """
-                update billing_jobs
+                update billing_fulfillment_outbox
                 set status = 'PROCESSING', claimed_at = :now, claim_token = :claimToken,
                     updated_at = :now
                 where id = :jobId
@@ -543,7 +543,7 @@ class BillingLedgerPersistenceAdapter(
     ) {
         database.sql(
             """
-            update billing_jobs
+            update billing_fulfillment_outbox
             set status = 'PENDING', attempts = least(attempts + 1, max_attempts),
                 next_attempt_at = :nextAttemptAt, claimed_at = null, claim_token = null,
                 last_error = :error, updated_at = :now
@@ -735,7 +735,7 @@ class BillingLedgerPersistenceAdapter(
     override suspend fun recordAppleNotification(notification: VerifiedAppleNotification, now: Instant): Boolean {
         val inserted = database.sql(
             """
-            insert ignore into apple_billing_notifications (
+            insert ignore into billing_apple_notification_inbox (
                 notification_uuid, notification_type, subtype, environment, signed_payload_sha256,
                 transaction_id, processing_status, received_at, updated_at
             ) values (
@@ -753,7 +753,7 @@ class BillingLedgerPersistenceAdapter(
         if (inserted == 1L) return true
         return database.sql(
             """
-            update apple_billing_notifications
+            update billing_apple_notification_inbox
             set processing_status = 'RECEIVED', last_error = null, updated_at = :now
             where notification_uuid = :uuid
               and (
@@ -799,7 +799,7 @@ class BillingLedgerPersistenceAdapter(
     ): Boolean {
         val inserted = database.sql(
             """
-            insert ignore into revenuecat_billing_events (
+            insert ignore into billing_revenuecat_event_inbox (
                 event_id, event_type, app_user_id, original_app_user_id, store, product_id, transaction_id,
                 environment, cancel_reason, expiration_reason, signed_payload_sha256,
                 processing_status, event_at, received_at, updated_at
@@ -830,7 +830,7 @@ class BillingLedgerPersistenceAdapter(
 
         return database.sql(
             """
-            update revenuecat_billing_events
+            update billing_revenuecat_event_inbox
             set processing_status = 'RECEIVED', last_error = null, updated_at = :now
             where event_id = :eventId and processing_status = 'FAILED'
             """.trimIndent(),
@@ -2242,7 +2242,7 @@ class BillingLedgerPersistenceAdapter(
     private suspend fun insertBillingJob(invoiceId: Long, paymentId: Long, type: BillingJobType, now: Instant) {
         database.sql(
             """
-            insert into billing_jobs (
+            insert into billing_fulfillment_outbox (
                 job_id, invoice_id, payment_id, job_type, status, attempts, max_attempts,
                 next_attempt_at, created_at, updated_at
             ) values (
@@ -2317,7 +2317,7 @@ class BillingLedgerPersistenceAdapter(
     private suspend fun markNotification(uuid: String, status: BillingReceiptStatus, error: String?, now: Instant) {
         database.sql(
             """
-            update apple_billing_notifications
+            update billing_apple_notification_inbox
             set processing_status = :status, processed_at = :processedAt, last_error = :error, updated_at = :now
             where notification_uuid = :uuid
             """.trimIndent(),
@@ -2330,7 +2330,7 @@ class BillingLedgerPersistenceAdapter(
     private suspend fun markRevenueCatEvent(eventId: String, status: BillingReceiptStatus, error: String?, now: Instant) {
         database.sql(
             """
-            update revenuecat_billing_events
+            update billing_revenuecat_event_inbox
             set processing_status = :status, processed_at = :processedAt, last_error = :error, updated_at = :now
             where event_id = :eventId
             """.trimIndent(),

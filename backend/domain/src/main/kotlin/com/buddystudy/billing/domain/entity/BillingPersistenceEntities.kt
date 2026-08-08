@@ -158,7 +158,7 @@ class BillingActionEntity(
     var updatedAt: Instant = Instant.EPOCH,
 )
 
-@Table("billing_jobs")
+@Table("billing_fulfillment_outbox")
 class BillingJobEntity(
     @Id var id: Long = 0,
     var jobId: UUID = UUID(0, 0),
@@ -177,7 +177,7 @@ class BillingJobEntity(
     var updatedAt: Instant = Instant.EPOCH,
 )
 
-@Table("apple_billing_notifications")
+@Table("billing_apple_notification_inbox")
 class AppleBillingNotificationEntity(
     @Id var id: Long = 0,
     @Column("notification_uuid") var notificationUuid: String = "",
@@ -193,7 +193,7 @@ class AppleBillingNotificationEntity(
     var updatedAt: Instant = Instant.EPOCH,
 )
 
-@Table("revenuecat_billing_events")
+@Table("billing_revenuecat_event_inbox")
 class RevenueCatBillingEventEntity(
     @Id var id: Long = 0,
     var eventId: String = "",

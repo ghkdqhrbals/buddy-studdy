@@ -16,9 +16,9 @@ class BillingPersistenceModelContractTest {
             PaymentEntity::class.java to "payments",
             PaymentHistoryEntity::class.java to "payments_history",
             BillingActionEntity::class.java to "billing_actions",
-            BillingJobEntity::class.java to "billing_jobs",
-            AppleBillingNotificationEntity::class.java to "apple_billing_notifications",
-            RevenueCatBillingEventEntity::class.java to "revenuecat_billing_events",
+            BillingJobEntity::class.java to "billing_fulfillment_outbox",
+            AppleBillingNotificationEntity::class.java to "billing_apple_notification_inbox",
+            RevenueCatBillingEventEntity::class.java to "billing_revenuecat_event_inbox",
         )
 
         models.forEach { (model, tableName) ->

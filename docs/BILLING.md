@@ -298,6 +298,20 @@ own Spring `@Transactional` boundary.
 | RevenueCat webhook receipt | Stores the signed raw event receipt and SHA-256 before asynchronous projection | Provider `eventId` deduplicates deliveries. A worker lease permits retry after process death; projection calls the same verified-payment use case as direct confirmation. |
 | Unpaid checkout expiration | Selects old unpaid `WAITING` invoices with `FOR UPDATE SKIP LOCKED` and appends `CANCELLED` | Multiple scheduler instances cannot expire the same invoice twice. Invoices with a payment row are excluded. |
 
+The durable billing queues use role-specific physical table names:
+
+| Physical table | Role | Idempotency and recovery key |
+| --- | --- | --- |
+| `billing_fulfillment_outbox` | Verified payments waiting for entitlement and quota fulfillment | One fulfillment job per invoice and job type; leased claims resume after process death |
+| `billing_revenuecat_event_inbox` | Verified RevenueCat webhook receipts | RevenueCat provider `eventId` |
+| `billing_apple_notification_inbox` | Verified App Store Server Notification V2 receipts | Apple `notificationUUID` |
+
+The migration retains `billing_jobs`, `revenuecat_billing_events`, and
+`apple_billing_notifications` as writable MySQL compatibility views for one
+rolling-deployment rollback window. New application code reads and writes only
+the role-specific physical tables. Billing recovery pollers execute through the
+managed-job lock and retry policy; they do not run as uncoordinated local loops.
+
 `JWS` signature, RevenueCat ownership, app, environment, product, and access-state
 failures are permanent only when the provider evidence proves the mismatch. The
 failure recorder commits after the verification exception and records only the

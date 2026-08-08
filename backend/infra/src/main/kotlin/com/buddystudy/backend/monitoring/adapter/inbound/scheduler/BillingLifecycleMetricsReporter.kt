@@ -97,7 +97,7 @@ class BillingLifecycleMetricsReporter(
         webhookLagSeconds = scalar(
             """
             select coalesce(max(timestampdiff(second, received_at, utc_timestamp(6))), 0)
-            from revenuecat_billing_events
+            from billing_revenuecat_event_inbox
             where processing_status in ('RECEIVED', 'FAILED')
             """.trimIndent(),
         ),
