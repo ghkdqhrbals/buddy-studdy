@@ -78,6 +78,37 @@ class LocalAwsSecretMappingTest {
     }
 
     @Test
+    fun `local RevenueCat server key is sourced from the namespaced aws secret`() {
+        contextRunner
+            .withPropertyValues(
+                "local-secret.REVENUECAT_PROJECT_ID=project-from-aws",
+                "local-secret.REVENUECAT_APP_ID=app-from-aws",
+                "local-secret.REVENUECAT_SERVER_API_KEY=server-key-from-aws",
+            )
+            .run { context ->
+                val revenueCat = context.getBean(BuddyStudyProperties::class.java).billing.revenueCat
+
+                assertThat(revenueCat.projectId).isEqualTo("project-from-aws")
+                assertThat(revenueCat.appId).isEqualTo("app-from-aws")
+                assertThat(revenueCat.serverApiKey).isEqualTo("server-key-from-aws")
+            }
+    }
+
+    @Test
+    fun `explicit RevenueCat server key overrides the namespaced aws secret`() {
+        contextRunner
+            .withPropertyValues(
+                "REVENUECAT_SERVER_API_KEY=server-key-from-environment",
+                "local-secret.REVENUECAT_SERVER_API_KEY=server-key-from-aws",
+            )
+            .run { context ->
+                val revenueCat = context.getBean(BuddyStudyProperties::class.java).billing.revenueCat
+
+                assertThat(revenueCat.serverApiKey).isEqualTo("server-key-from-environment")
+            }
+    }
+
+    @Test
     fun `local smtp settings are sourced from the namespaced aws secret`() {
         contextRunner
             .withPropertyValues(
