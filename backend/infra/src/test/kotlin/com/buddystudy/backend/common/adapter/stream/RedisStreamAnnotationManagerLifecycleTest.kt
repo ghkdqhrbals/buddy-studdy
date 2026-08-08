@@ -1,12 +1,18 @@
 package com.buddystudy.backend.common.adapter.stream
 
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamClaimBatch
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumerOperations
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.awaitCancellation
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.mock
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.support.StaticListableBeanFactory
 import org.springframework.mock.env.MockEnvironment
 import java.time.Duration
@@ -75,6 +81,33 @@ class RedisStreamAnnotationManagerLifecycleTest {
 
         assertThat(manager.isRunning).isTrue()
         manager.stop()
+    }
+
+    @Test
+    fun `listener exits when a cancelled read is wrapped as a Redis failure during shutdown`() {
+        val streams = ShutdownInterruptedStreamOperations()
+        val manager = manager(streams)
+        val logger = LoggerFactory.getLogger(RedisStreamAnnotationManager::class.java) as Logger
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        logger.addAppender(appender)
+
+        try {
+            manager.afterSingletonsInstantiated()
+            manager.start()
+            waitUntil { streams.readCount.get() == 1 }
+
+            manager.stop()
+            Thread.sleep(30)
+
+            assertThat(manager.isRunning).isFalse()
+            assertThat(streams.readCount.get()).isEqualTo(1)
+            assertThat(appender.list.map(ILoggingEvent::getFormattedMessage))
+                .noneMatch { it.startsWith("redis_stream_listener_poll_failed") }
+        } finally {
+            logger.detachAppender(appender)
+            appender.stop()
+            manager.stop()
+        }
     }
 
     private fun manager(streams: RedisStreamConsumerOperations): RedisStreamAnnotationManager =
@@ -200,6 +233,37 @@ class RedisStreamAnnotationManagerLifecycleTest {
                 kotlinx.coroutines.delay(5_000)
             }
             return emptyList()
+        }
+
+        override suspend fun autoClaim(
+            topic: RedisStreamTopic,
+            group: String,
+            consumer: String,
+            minIdleTime: Duration,
+            count: Long,
+            startId: String,
+        ): RedisStreamClaimBatch = RedisStreamClaimBatch(startId, emptyList())
+    }
+
+    private class ShutdownInterruptedStreamOperations : RedisStreamConsumerOperations {
+        val readCount = AtomicInteger()
+
+        override suspend fun acknowledge(message: RedisStreamMessage, group: String) = Unit
+        override suspend fun acknowledgeAndDelete(message: RedisStreamMessage, group: String) = Unit
+
+        override suspend fun readNew(
+            topic: RedisStreamTopic,
+            group: String,
+            consumer: String,
+            count: Long,
+            timeout: Duration,
+        ): List<RedisStreamMessage> {
+            readCount.incrementAndGet()
+            try {
+                awaitCancellation()
+            } catch (error: CancellationException) {
+                throw IllegalStateException("Redis command interrupted", InterruptedException())
+            }
         }
 
         override suspend fun autoClaim(

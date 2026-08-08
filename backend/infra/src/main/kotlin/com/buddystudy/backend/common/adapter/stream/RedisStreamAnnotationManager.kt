@@ -173,6 +173,7 @@ class RedisStreamAnnotationManager(
                         throw error
                     } catch (error: Throwable) {
                         if (error.isFatalStreamWorkerFailure()) throw error
+                        if (!running.get() || !currentCoroutineContext().isActive) return@launch
                         logger.warn(
                             "redis_stream_listener_poll_failed bean={} method={} topic={} group={} consumer={} errorType={} error={}",
                             handler.beanName,
@@ -225,6 +226,7 @@ class RedisStreamAnnotationManager(
                     throw error
                 } catch (error: Throwable) {
                     if (error.isFatalStreamWorkerFailure()) throw error
+                    if (!running.get() || !currentCoroutineContext().isActive) return@launch
                     logger.warn(
                         "redis_stream_autoclaim_failed bean={} method={} topic={} group={} consumer={} errorType={} error={}",
                         handler.beanName,
@@ -260,6 +262,7 @@ class RedisStreamAnnotationManager(
                 throw error
             } catch (error: Throwable) {
                 if (error.isFatalStreamWorkerFailure()) throw error
+                if (!running.get() || !currentCoroutineContext().isActive) return
                 logger.error(
                     "redis_stream_recovery_consumer_create_failed bean={} method={} topic={} group={} consumer={} " +
                         "errorType={} error={}",
