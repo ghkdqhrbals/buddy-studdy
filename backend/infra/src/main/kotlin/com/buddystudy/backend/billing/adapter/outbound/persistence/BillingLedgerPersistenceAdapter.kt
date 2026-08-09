@@ -311,6 +311,8 @@ class BillingLedgerPersistenceAdapter(
                     )
                 }
                 transferVerifiedSubscriptionOwnership(existing, command)
+            } else {
+                repairInconclusiveExistingEntitlement(existing, command)
             }
             val requestedInvoiceNumber = command.invoiceNumber
             if (requestedInvoiceNumber != null && existing.invoiceNumber != requestedInvoiceNumber) {
@@ -1271,8 +1273,13 @@ class BillingLedgerPersistenceAdapter(
                    ) as failure_count
             from subscriptions s join billing_accounts a on a.id = s.billing_account_id
             where s.user_id = :userId and a.status = 'ACTIVE'
-              and s.access_status in ('ACTIVE', 'GRACE_PERIOD', 'PENDING')
-            order by case s.access_status when 'ACTIVE' then 1 when 'GRACE_PERIOD' then 2 else 3 end,
+              and s.access_status in ('ACTIVE', 'GRACE_PERIOD', 'PENDING', 'UNKNOWN')
+            order by case s.access_status
+                         when 'ACTIVE' then 1
+                         when 'GRACE_PERIOD' then 2
+                         when 'PENDING' then 3
+                         else 4
+                     end,
                      s.updated_at desc, s.id desc
             limit :limit for update skip locked
             """.trimIndent(),
@@ -1299,6 +1306,35 @@ class BillingLedgerPersistenceAdapter(
         now: Instant,
     ) {
         val eventId = "reconcile:${claim.subscriptionId}:${snapshot.fetchedAt.toEpochMilli()}".take(191)
+        if (snapshot.accessStatus == SubscriptionAccessStatus.UNKNOWN) {
+            database.sql(
+                """
+                insert ignore into subscription_events (
+                    provider_event_id, provider, event_type, user_id, billing_account_id,
+                    original_transaction_id, access_status, renewal_status, processing_status,
+                    attempt_count, max_attempts, next_attempt_at, payload_sha256, last_error,
+                    occurred_at, processed_at, created_at, updated_at
+                ) select :eventId, 'REVENUECAT', 'SUBSCRIPTION_SNAPSHOT_INCONCLUSIVE', s.user_id, s.billing_account_id,
+                         s.original_transaction_id, 'UNKNOWN', :renewal, 'IGNORED',
+                         :attempt, 3, timestampadd(minute, 15, :now), :hash, :reason,
+                         :fetchedAt, :now, :now, :now
+                  from subscriptions s where s.id = :subscriptionId and s.user_id = :userId
+                """.trimIndent(),
+            ).bind("eventId", eventId).bind("renewal", snapshot.renewalStatus.name)
+                .bind("attempt", claim.attempt).bind("now", now.utc()).bind("hash", "0".repeat(64))
+                .bind("reason", "RevenueCat did not return an authoritative subscription for this customer.")
+                .bind("fetchedAt", snapshot.fetchedAt.utc()).bind("subscriptionId", claim.subscriptionId)
+                .bind("userId", claim.userId).fetch().rowsUpdated().awaitSingle()
+            database.sql(
+                """
+                update subscriptions
+                set next_reconcile_at = timestampadd(minute, 15, :now), updated_at = :now
+                where id = :id and user_id = :userId
+                """.trimIndent(),
+            ).bind("now", now.utc()).bind("id", claim.subscriptionId).bind("userId", claim.userId)
+                .fetch().rowsUpdated().awaitSingle()
+            return
+        }
         val access = snapshot.accessStatus.name
         val renewal = snapshot.renewalStatus.name
         val nextReconcileAt = when {
@@ -1959,6 +1995,25 @@ class BillingLedgerPersistenceAdapter(
         now: Instant,
     ) = grantMembership(invoice, payment, providerEventAt, now)
 
+    private suspend fun repairInconclusiveExistingEntitlement(
+        existing: ExistingPayment,
+        command: RecordVerifiedPaymentCommand,
+    ) {
+        val invoice = lockInvoice(existing.invoiceId)
+            ?: throw billingFailure(ApiErrorCode.INTERNAL_SERVER_ERROR, "Existing payment invoice is missing.")
+        val payment = lockPaymentByTransaction(command.transaction.transactionId)
+            ?: throw billingFailure(ApiErrorCode.INTERNAL_SERVER_ERROR, "Existing verified payment is missing.")
+        if (
+            invoice.userId != command.userId ||
+            invoice.status != InvoiceStatus.COMPLETED ||
+            invoice.fulfilledAt == null ||
+            payment.status != PaymentStatus.SETTLED
+        ) {
+            return
+        }
+        reactivateMembership(invoice, payment, payment.purchaseAt, command.occurredAt)
+    }
+
     private suspend fun deactivateMembership(originalTransactionId: String, invoiceId: Long, now: Instant) {
         database.sql(
             """
@@ -1992,6 +2047,13 @@ class BillingLedgerPersistenceAdapter(
             !lifecycleProjectionAccepted &&
             ownership?.pendingProductId == payment.productId &&
             ownership.accessStatus in ENTITLEMENT_GRANTING_ACCESS_STATES
+        // A verified current StoreKit transaction proves access until its signed expiry, but it does
+        // not prove renewal intent. Repair only an inconclusive projection and preserve UNKNOWN
+        // renewal state so a later RevenueCat snapshot can settle renewal/cancellation accurately.
+        val inconclusiveAccessRepairAccepted = paymentOwnsProjection &&
+            !lifecycleProjectionAccepted &&
+            ownership?.accessStatus == SubscriptionAccessStatus.UNKNOWN.name &&
+            payment.expiresAt?.isAfter(now) == true
         val downgradeScheduled = ownership != null &&
             ownership.accessStatus in ENTITLEMENT_GRANTING_ACCESS_STATES &&
             MonthlyQuestionQuotaPolicy.shouldDeferUntilRenewal(
@@ -2001,8 +2063,11 @@ class BillingLedgerPersistenceAdapter(
                 purchasedAt = payment.purchaseAt,
             )
         val productProjectionAccepted =
-            (lifecycleProjectionAccepted || pendingTransitionRepairAccepted) && !downgradeScheduled
-        val lifecycleStateProjectionAccepted = lifecycleProjectionAccepted && !downgradeScheduled
+            (lifecycleProjectionAccepted || pendingTransitionRepairAccepted || inconclusiveAccessRepairAccepted) &&
+                !downgradeScheduled
+        val accessStateProjectionAccepted =
+            (lifecycleProjectionAccepted || inconclusiveAccessRepairAccepted) && !downgradeScheduled
+        val renewalStateProjectionAccepted = lifecycleProjectionAccepted && !downgradeScheduled
         val latestTransactionProjectionAccepted = paymentOwnsProjection && !downgradeScheduled
         database.sql(
             """
@@ -2061,16 +2126,16 @@ class BillingLedgerPersistenceAdapter(
                 ),
                 product_id = if(:productProjectionAccepted, values(product_id), product_id),
                 tier_code = if(:productProjectionAccepted, values(tier_code), tier_code),
-                access_status = if(:lifecycleStateProjectionAccepted, 'ACTIVE', access_status),
-                renewal_status = if(:lifecycleStateProjectionAccepted, 'WILL_RENEW', renewal_status),
+                access_status = if(:accessStateProjectionAccepted, 'ACTIVE', access_status),
+                renewal_status = if(:renewalStateProjectionAccepted, 'WILL_RENEW', renewal_status),
                 started_at = if(
                     :productProjectionAccepted,
                     least(coalesce(started_at, values(started_at)), values(started_at)),
                     started_at
                 ),
                 expires_at = case
-                    when :lifecycleStateProjectionAccepted then values(expires_at)
-                    when :pendingTransitionRepairAccepted then case
+                    when :renewalStateProjectionAccepted then values(expires_at)
+                    when :pendingTransitionRepairAccepted or :inconclusiveAccessRepairAccepted then case
                         when expires_at is null then values(expires_at)
                         when values(expires_at) is null then expires_at
                         else greatest(expires_at, values(expires_at))
@@ -2091,23 +2156,33 @@ class BillingLedgerPersistenceAdapter(
                     else pending_product_id
                 end,
                 next_reconcile_at = if(
-                    :lifecycleStateProjectionAccepted or :downgradeScheduled,
+                    :accessStateProjectionAccepted or :downgradeScheduled,
                     values(next_reconcile_at),
                     next_reconcile_at
                 ),
-                version = if(:productProjectionAccepted or :downgradeScheduled, version + 1, version),
-                updated_at = if(:productProjectionAccepted or :downgradeScheduled, values(updated_at), updated_at),
+                version = if(
+                    :productProjectionAccepted or :accessStateProjectionAccepted or :downgradeScheduled,
+                    version + 1,
+                    version
+                ),
+                updated_at = if(
+                    :productProjectionAccepted or :accessStateProjectionAccepted or :downgradeScheduled,
+                    values(updated_at),
+                    updated_at
+                ),
                 last_provider_event_at = if(
-                    :lifecycleStateProjectionAccepted,
+                    :renewalStateProjectionAccepted,
                     greatest(coalesce(last_provider_event_at, values(last_provider_event_at)), values(last_provider_event_at)),
                     last_provider_event_at
                 )
             """.trimIndent(),
         ).bind("accountId", accountId).bind("userId", invoice.userId)
             .bind("paymentOwnsProjection", paymentOwnsProjection)
-            .bind("lifecycleStateProjectionAccepted", lifecycleStateProjectionAccepted)
+            .bind("accessStateProjectionAccepted", accessStateProjectionAccepted)
+            .bind("renewalStateProjectionAccepted", renewalStateProjectionAccepted)
             .bind("latestTransactionProjectionAccepted", latestTransactionProjectionAccepted)
             .bind("pendingTransitionRepairAccepted", pendingTransitionRepairAccepted)
+            .bind("inconclusiveAccessRepairAccepted", inconclusiveAccessRepairAccepted)
             .bind("productProjectionAccepted", productProjectionAccepted)
             .bind("downgradeScheduled", downgradeScheduled)
             .bind("originalTransactionId", payment.providerOriginalTransactionId)

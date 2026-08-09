@@ -7,13 +7,15 @@ import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.billing.domain.SubscriptionAccessStatus
 import com.buddystudy.billing.domain.SubscriptionRenewalStatus
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
 import io.netty.channel.ChannelOption
 import org.springframework.http.HttpStatus
 import org.springframework.http.client.reactive.ReactorClientHttpConnector
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.web.reactive.function.client.WebClientResponseException
+import org.springframework.web.util.UriComponentsBuilder
 import kotlinx.coroutines.reactor.awaitSingle
 import reactor.util.retry.Retry
 import reactor.netty.http.client.HttpClient
@@ -26,6 +28,7 @@ import java.util.UUID
 class RevenueCatCustomerInfoAdapter(
     private val properties: BuddyStudyProperties,
     webClientBuilder: WebClient.Builder,
+    private val objectMapper: ObjectMapper,
     private val clock: Clock = Clock.systemUTC(),
 ) : RevenueCatCustomerInfoPort {
     private val client = webClientBuilder.clientConnector(
@@ -51,21 +54,27 @@ class RevenueCatCustomerInfoAdapter(
                 "RevenueCat server reconciliation is not configured.",
             )
         }
-        val uri = "${config.apiBaseUrl.trimEnd('/')}/projects/$projectId/customers/" +
-            "${appAccountToken.toString().lowercase()}/subscriptions?limit=100"
-        val response = client.get().uri(uri).headers { it.setBearerAuth(key) }
-            .retrieve()
-            .bodyToMono(CustomerSubscriptionsResponse::class.java)
-            .timeout(Duration.ofMillis(config.readTimeoutMs.coerceIn(500, 30_000)))
-            .retryWhen(
-                Retry.backoff((config.maxRetries.coerceIn(1, 3) - 1).toLong(), Duration.ofMillis(200))
-                    .filter(::isRetryable),
-            )
-            .awaitSingle()
+        val transactionLookupUri = UriComponentsBuilder.fromUriString(config.apiBaseUrl.trimEnd('/'))
+            .path("/projects/{projectId}/subscriptions")
+            .queryParam("store_subscription_identifier", originalTransactionId)
+            .queryParam("limit", 100)
+            .buildAndExpand(projectId)
+            .toUri()
+        val customerSubscriptionsUri = UriComponentsBuilder.fromUriString(config.apiBaseUrl.trimEnd('/'))
+            .path("/projects/{projectId}/customers/{customerId}/subscriptions")
+            .queryParam("limit", 100)
+            .buildAndExpand(projectId, appAccountToken.toString().lowercase())
+            .toUri()
         val now = clock.instant()
-        val subscription = response.items.orEmpty().firstOrNull {
-            it.storeSubscriptionIdentifier == originalTransactionId
+        val customerSubscriptionIds = requestSubscriptions(customerSubscriptionsUri.toString(), key, config)
+            .mapNotNull(CustomerSubscription::id)
+            .toSet()
+        val candidates = requestSubscriptions(transactionLookupUri.toString(), key, config).filter { subscription ->
+            subscription.id in customerSubscriptionIds &&
+            subscription.store == "app_store" &&
+                (config.appId.isBlank() || subscription.appId == null || subscription.appId == config.appId)
         }
+        val subscription = candidates.singleOrNull()
         if (subscription == null) {
             return RevenueCatCustomerSnapshot(
                 accessStatus = SubscriptionAccessStatus.UNKNOWN,
@@ -86,17 +95,31 @@ class RevenueCatCustomerInfoAdapter(
         error is java.util.concurrent.TimeoutException ||
             (error is WebClientResponseException && (error.statusCode.is5xxServerError || error.statusCode.value() == 429))
 
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private data class CustomerSubscriptionsResponse(val items: List<CustomerSubscription>? = null)
+    private suspend fun requestSubscriptions(
+        uri: String,
+        key: String,
+        config: BuddyStudyProperties.RevenueCat,
+    ): List<CustomerSubscription> = client.get().uri(uri).headers { it.setBearerAuth(key) }
+        .retrieve()
+        .bodyToMono(String::class.java)
+        .timeout(Duration.ofMillis(config.readTimeoutMs.coerceIn(500, 30_000)))
+        .retryWhen(
+            Retry.backoff((config.maxRetries.coerceIn(1, 3) - 1).toLong(), Duration.ofMillis(200))
+                .filter(::isRetryable),
+        )
+        .awaitSingle()
+        .let(objectMapper::readTree)
+        .items()
+        .map(::subscription)
 
-    @JsonIgnoreProperties(ignoreUnknown = true)
     private data class CustomerSubscription(
-        val status: String? = null,
-        @param:com.fasterxml.jackson.annotation.JsonProperty("gives_access") val givesAccess: Boolean = false,
-        @param:com.fasterxml.jackson.annotation.JsonProperty("auto_renewal_status") val autoRenewalStatus: String? = null,
-        @param:com.fasterxml.jackson.annotation.JsonProperty("current_period_ends_at") val currentPeriodEndsAt: Long? = null,
-        @param:com.fasterxml.jackson.annotation.JsonProperty("store_subscription_identifier")
-        val storeSubscriptionIdentifier: String? = null,
+        val id: String?,
+        val appId: String?,
+        val store: String?,
+        val status: String?,
+        val givesAccess: Boolean,
+        val autoRenewalStatus: String?,
+        val currentPeriodEndsAt: Long?,
     ) {
         fun accessStatus(): SubscriptionAccessStatus = when (status) {
             "trialing", "active" -> if (givesAccess) SubscriptionAccessStatus.ACTIVE else SubscriptionAccessStatus.PENDING
@@ -116,4 +139,23 @@ class RevenueCatCustomerInfoAdapter(
             else -> SubscriptionRenewalStatus.UNKNOWN
         }
     }
+
+    private fun subscription(node: JsonNode): CustomerSubscription = CustomerSubscription(
+        id = node.textOrNull("id"),
+        appId = node.textOrNull("app_id"),
+        store = node.textOrNull("store"),
+        status = node.textOrNull("status"),
+        givesAccess = node.path("gives_access").asBoolean(false),
+        autoRenewalStatus = node.textOrNull("auto_renewal_status"),
+        currentPeriodEndsAt = node.longOrNull("current_period_ends_at"),
+    )
+
+    private fun JsonNode.items(): List<JsonNode> =
+        path("items").takeIf(JsonNode::isArray)?.toList().orEmpty()
+
+    private fun JsonNode.textOrNull(field: String): String? =
+        path(field).takeUnless { it.isMissingNode || it.isNull }?.asText()?.takeIf(String::isNotBlank)
+
+    private fun JsonNode.longOrNull(field: String): Long? =
+        path(field).takeUnless { it.isMissingNode || it.isNull }?.asLong()
 }

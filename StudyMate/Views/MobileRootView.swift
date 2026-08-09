@@ -6684,15 +6684,21 @@ private struct MobileMembershipManagementView: View {
     }
 
     private var primaryAction: MembershipPrimaryAction {
+        purchaseAction(for: selectedProduct)
+    }
+
+    private func purchaseAction(
+        for tierProduct: AppleBillingStore.TierProduct?
+    ) -> MembershipPrimaryAction {
         if appState.billingStatus?.isEntitlementActive == true,
-           selectedTierCode == activeTierCode {
+           tierProduct?.tier.tierCode == activeTierCode {
             return .current
         }
         return MembershipPlanActionPolicy.resolve(
             activeProductID: activeProductID,
             activeMonthlyLimit: appState.billingStatus?.quota.baseLimit,
-            selectedProductID: selectedProduct?.id,
-            selectedMonthlyLimit: selectedProduct?.tier.monthlyQuestionLimit
+            selectedProductID: tierProduct?.id,
+            selectedMonthlyLimit: tierProduct?.tier.monthlyQuestionLimit
         )
     }
 
@@ -6706,8 +6712,12 @@ private struct MobileMembershipManagementView: View {
             do {
                 let outcome = try await billingStore.purchase(
                     tierProduct,
-                    action: primaryAction,
                     appAccountToken: appAccountToken,
+                    resolveActionAfterSynchronization: {
+                        _ = await appState.reconcileBillingSubscription()
+                        await appState.refreshBilling()
+                        return purchaseAction(for: tierProduct)
+                    },
                     prepareCheckout: appState.createAppleBillingCheckout,
                     confirmRevenueCat: appState.confirmRevenueCatBillingTransaction,
                     synchronize: appState.syncAppleBillingTransaction,
@@ -6718,6 +6728,9 @@ private struct MobileMembershipManagementView: View {
                 case .purchased:
                     await refreshMembershipData()
                     billingNotice = strings.billingPurchased
+                case .alreadyCurrent:
+                    await refreshMembershipData()
+                    billingNotice = strings.currentMembership
                 case .pending:
                     billingNotice = strings.billingPending
                     await refreshMembershipData()
@@ -6766,16 +6779,6 @@ private struct MobileMembershipManagementView: View {
                     synchronize: appState.syncAppleBillingTransaction
                 )
                 await appState.refreshBilling()
-                if RevenueCatBillingBridge.shared.isEnabled,
-                   let pendingInvoice = AppleBillingStore.latestRecoverableRevenueCatInvoice(
-                       from: appState.billingInvoices
-                   ) {
-                    let recoveredInvoice = try await appState.confirmRevenueCatBillingTransaction(
-                        transactionID: nil,
-                        invoiceNumber: pendingInvoice.invoiceNumber
-                    )
-                    _ = try AppleBillingStore.requireApplied(recoveredInvoice)
-                }
                 await refreshMembershipData()
                 billingNotice = strings.billingRestored
             } catch {

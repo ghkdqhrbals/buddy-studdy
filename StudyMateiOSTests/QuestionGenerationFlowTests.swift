@@ -1780,7 +1780,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         )
     }
 
-    func testRevenueCatConfirmationEncodesMissingTransactionAsExplicitNull() async throws {
+    func testRevenueCatConfirmationEncodesTheExactTransactionIdentifier() async throws {
         let invoiceNumber = UUID(uuidString: "9f041446-e898-4ef7-974d-91ac70e1a89b")!
         let client = makeClient { request in
             XCTAssertEqual(request.httpMethod, "POST")
@@ -1793,15 +1793,14 @@ final class QuestionGenerationFlowTests: XCTestCase {
             let body = try JSONSerialization.jsonObject(
                 with: Self.bodyData(from: request)
             ) as? [String: Any]
-            XCTAssertTrue(body?.keys.contains("transactionId") == true)
-            XCTAssertTrue(body?["transactionId"] is NSNull)
+            XCTAssertEqual(body?["transactionId"] as? String, "200000000000002")
             return Self.pendingInvoiceResponse(for: request)
         }
 
         _ = try await client.confirmRevenueCatTransaction(
             registration: Self.signedInRegistration,
             invoiceNumber: invoiceNumber,
-            transactionID: nil
+            transactionID: "200000000000002"
         )
     }
 

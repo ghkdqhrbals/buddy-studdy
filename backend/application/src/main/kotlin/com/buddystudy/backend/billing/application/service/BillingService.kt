@@ -187,14 +187,14 @@ class BillingService(
             source = BillingEventSource.CLIENT,
             now = now,
         ) {
-            val transactionId = command.transactionId?.trim()?.takeIf(String::isNotEmpty)
-            val transaction = if (transactionId != null) {
-                validateProviderId(transactionId, "transactionId")
-                revenueCatTransactionVerifier.verify(transactionId)
-            } else {
-                val appAccountToken = ledger.findOrCreateAppAccountToken(principal.userId, now)
-                revenueCatTransactionVerifier.verifyLatest(appAccountToken, invoice.productId)
-            }
+            val transactionId = command.transactionId.trim()
+            validateProviderId(transactionId, "transactionId")
+            val appAccountToken = ledger.findOrCreateAppAccountToken(principal.userId, now)
+            val transaction = revenueCatTransactionVerifier.verify(
+                transactionId = transactionId,
+                appAccountToken = appAccountToken,
+                expectedProductId = invoice.productId,
+            )
             validateTransaction(transaction, now)
             applyVerifiedTransaction(
                 principal,

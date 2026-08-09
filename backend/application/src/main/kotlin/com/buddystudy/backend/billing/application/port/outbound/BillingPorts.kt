@@ -40,7 +40,11 @@ interface RevenueCatCustomerInfoPort {
 }
 
 interface RevenueCatTransactionVerificationPort {
-    suspend fun verify(transactionId: String): VerifiedAppleTransaction
+    suspend fun verify(
+        transactionId: String,
+        appAccountToken: UUID,
+        expectedProductId: String,
+    ): VerifiedAppleTransaction
     suspend fun verifyLatest(appAccountToken: UUID, productId: String): VerifiedAppleTransaction
 }
 

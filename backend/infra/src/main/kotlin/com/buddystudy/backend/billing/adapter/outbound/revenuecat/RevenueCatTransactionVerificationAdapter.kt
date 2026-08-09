@@ -42,8 +42,16 @@ class RevenueCatTransactionVerificationAdapter(
         ),
     ).build()
 
-    override suspend fun verify(transactionId: String): VerifiedAppleTransaction {
+    override suspend fun verify(
+        transactionId: String,
+        appAccountToken: UUID,
+        expectedProductId: String,
+    ): VerifiedAppleTransaction {
         val normalizedTransactionId = transactionId.trim()
+        val normalizedProductId = expectedProductId.trim()
+        if (!PRODUCT_ID.matches(normalizedProductId)) {
+            throw invalidTransaction("Prepared invoice product ID is invalid.")
+        }
         val config = configuredRevenueCat()
         val searchUri = UriComponentsBuilder.fromUriString(config.apiBaseUrl.trimEnd('/'))
             .path("/projects/{projectId}/subscriptions")
@@ -62,16 +70,31 @@ class RevenueCatTransactionVerificationAdapter(
         }
         val subscriptionId = subscription.id?.takeIf(String::isNotBlank)
             ?: throw invalidTransaction("RevenueCat subscription ID is missing.")
-        val appAccountToken = sequenceOf(subscription.customerId, subscription.originalCustomerId)
-            .filterNotNull()
-            .mapNotNull { runCatching { UUID.fromString(it) }.getOrNull() }
-            .firstOrNull()
-            ?: throw invalidTransaction("RevenueCat customer ID is not a BuddyStudy appAccountToken.")
-        validateAccess(subscription)
         val transaction = transactions(config, subscriptionId, descending = true)
             .singleOrNull { it.id == normalizedTransactionId }
             ?: throw temporarilyUnavailable("RevenueCat has not exposed the completed transaction yet.")
-        return verifiedTransaction(config, subscription, transaction, appAccountToken)
+        val transactionProductId = transaction.productStoreIdentifier?.takeIf(PRODUCT_ID::matches)
+            ?: throw invalidTransaction("RevenueCat transaction product ID is missing or invalid.")
+        if (transactionProductId != normalizedProductId) {
+            throw invalidTransaction("RevenueCat transaction product does not match the prepared invoice.")
+        }
+        val customerSubscription = customerSubscriptions(config, appAccountToken)
+            .singleOrNull { candidate ->
+                candidate.id == subscriptionId &&
+                    candidate.store == "app_store" &&
+                    (config.appId.isBlank() || candidate.appId == null || candidate.appId == config.appId)
+            }
+            ?: throw temporarilyUnavailable(
+                "RevenueCat has not associated the completed transaction with the signed-in BuddyStudy account yet.",
+            )
+        validateAccess(customerSubscription)
+        return verifiedTransaction(
+            config = config,
+            subscription = customerSubscription,
+            transaction = transaction,
+            appAccountToken = appAccountToken,
+            expectedProductId = normalizedProductId,
+        )
     }
 
     override suspend fun verifyLatest(
@@ -79,15 +102,7 @@ class RevenueCatTransactionVerificationAdapter(
         productId: String,
     ): VerifiedAppleTransaction {
         val config = configuredRevenueCat()
-        val subscriptionsUri = UriComponentsBuilder.fromUriString(config.apiBaseUrl.trimEnd('/'))
-            .path("/projects/{projectId}/customers/{customerId}/subscriptions")
-            .queryParam("limit", 100)
-            .buildAndExpand(config.projectId.trim(), appAccountToken.toString())
-            .toUri()
-        val subscriptions = requestSubscriptions(
-            subscriptionsUri.toString(),
-            config.serverApiKey,
-        ).filter { subscription ->
+        val subscriptions = customerSubscriptions(config, appAccountToken).filter { subscription ->
             subscription.store == "app_store" &&
                 (config.appId.isBlank() || subscription.appId == null || subscription.appId == config.appId) &&
                 !subscription.pendingPayment && subscription.givesAccess &&
@@ -104,6 +119,18 @@ class RevenueCatTransactionVerificationAdapter(
         val selected = matches.maxByOrNull { it.second.purchasedAt!! }
             ?: throw temporarilyUnavailable("RevenueCat has not exposed the completed purchase for this invoice yet.")
         return verifiedTransaction(config, selected.first, selected.second, appAccountToken, productId)
+    }
+
+    private suspend fun customerSubscriptions(
+        config: BuddyStudyProperties.RevenueCat,
+        appAccountToken: UUID,
+    ): List<RevenueCatSubscription> {
+        val uri = UriComponentsBuilder.fromUriString(config.apiBaseUrl.trimEnd('/'))
+            .path("/projects/{projectId}/customers/{customerId}/subscriptions")
+            .queryParam("limit", 100)
+            .buildAndExpand(config.projectId.trim(), appAccountToken.toString().lowercase())
+            .toUri()
+        return requestSubscriptions(uri.toString(), config.serverApiKey)
     }
 
     private suspend fun verifiedTransaction(

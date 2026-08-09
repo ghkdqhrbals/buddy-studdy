@@ -475,6 +475,115 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
+    fun `inconclusive reconciliation cannot revoke a paid entitlement or pending change`(): Unit = runBlocking {
+        val fixture = fixture("reconcile-inconclusive")
+        val checkout = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            fixture.product,
+            fixture.idempotencyKey,
+            fixture.now,
+        )
+        val transaction = fixture.transaction()
+        val invoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                fixture.product,
+                transaction,
+                checkout.invoiceNumber,
+                BillingEventSource.CLIENT,
+                "initial-payment-${fixture.suffix}",
+                fixture.now,
+            ),
+        )
+        ledger.fulfill(invoice.id, fixture.now.plusSeconds(1))
+        val pendingProductId = "io.github.ghkdqhrbals.StudyMate.tier3.monthly"
+        forceStaleSubscriptionProjection(
+            fixture,
+            transaction,
+            pendingProductId = pendingProductId,
+            accessStatus = "ACTIVE",
+            renewalStatus = "WILL_RENEW",
+            lastProviderEventAt = fixture.now.plusSeconds(10),
+        )
+
+        val subscriptionId = longValue(
+            "select id from subscriptions where original_transaction_id = '${transaction.originalTransactionId}'",
+        )
+        val fetchedAt = fixture.now.plusSeconds(100)
+        ledger.applySubscriptionSnapshot(
+            SubscriptionReconciliationClaim(
+                subscriptionId,
+                fixture.userId,
+                transaction.originalTransactionId,
+                fixture.appAccountToken,
+                1,
+            ),
+            RevenueCatCustomerSnapshot(
+                SubscriptionAccessStatus.UNKNOWN,
+                SubscriptionRenewalStatus.UNKNOWN,
+                null,
+                fetchedAt,
+            ),
+            fetchedAt,
+        )
+
+        val entitlement = requireNotNull(ledger.entitlementForUser(fixture.userId))
+        assertThat(entitlement.tierCode).isEqualTo("TIER2")
+        assertThat(entitlement.accessStatus).isEqualTo(SubscriptionAccessStatus.ACTIVE)
+        assertThat(entitlement.renewalStatus).isEqualTo(SubscriptionRenewalStatus.WILL_RENEW)
+        assertThat(entitlement.pendingProductId).isEqualTo(pendingProductId)
+        assertThat(
+            database.sql("select access_status from subscriptions where id = :id")
+                .bind("id", subscriptionId)
+                .map { row -> row.get("access_status", String::class.java)!! }
+                .one().awaitSingle(),
+        ).isEqualTo("ACTIVE")
+        assertThat(
+            database.sql(
+                "select processing_status from subscription_events where provider_event_id = :eventId",
+            ).bind("eventId", "reconcile:$subscriptionId:${fetchedAt.toEpochMilli()}")
+                .map { row -> row.get("processing_status", String::class.java)!! }
+                .one().awaitSingle(),
+        ).isEqualTo("IGNORED")
+    }
+
+    @Test
+    fun `user reconciliation claims a subscription previously corrupted to unknown`(): Unit = runBlocking {
+        val fixture = fixture("reconcile-unknown-claim")
+        val checkout = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            fixture.product,
+            fixture.idempotencyKey,
+            fixture.now,
+        )
+        val transaction = fixture.transaction()
+        val invoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                fixture.product,
+                transaction,
+                checkout.invoiceNumber,
+                BillingEventSource.CLIENT,
+                "initial-payment-${fixture.suffix}",
+                fixture.now,
+            ),
+        )
+        ledger.fulfill(invoice.id, fixture.now.plusSeconds(1))
+        execute(
+            "update subscriptions set access_status = 'UNKNOWN' " +
+                "where original_transaction_id = '${transaction.originalTransactionId}'",
+        )
+
+        val claims = ledger.claimUserSubscriptionReconciliations(fixture.userId, fixture.now.plusSeconds(2), 10)
+
+        assertThat(claims).hasSize(1)
+        assertThat(claims.single().originalTransactionId).isEqualTo(transaction.originalTransactionId)
+        assertThat(claims.single().appAccountToken).isEqualTo(fixture.appAccountToken)
+    }
+
+    @Test
     fun `late renewal payment cannot reactivate an expired subscription`(): Unit = runBlocking {
         val fixture = fixture("revenuecat-late-renewal")
         val checkout = ledger.createPendingInvoice(
@@ -1627,6 +1736,113 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
+    fun `completed transaction replay repairs an unexpired subscription corrupted to unknown`(): Unit = runBlocking {
+        val fixture = fixture("unknown-transaction-replay")
+        val transaction = fixture.transaction()
+        val invoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                fixture.product,
+                transaction,
+                null,
+                BillingEventSource.REVENUECAT_WEBHOOK,
+                "initial-payment-${fixture.suffix}",
+                fixture.now,
+            ),
+        )
+        ledger.fulfill(invoice.id, fixture.now.plusSeconds(1))
+
+        val inconclusiveAt = fixture.now.plusSeconds(300)
+        execute(
+            """
+            update subscriptions
+            set access_status = 'UNKNOWN',
+                renewal_status = 'UNKNOWN',
+                last_provider_event_at = '${inconclusiveAt.utcText()}',
+                updated_at = '${inconclusiveAt.utcText()}'
+            where original_transaction_id = '${transaction.originalTransactionId}'
+            """.trimIndent(),
+        )
+        execute(
+            """
+            update user_memberships
+            set status = 'INACTIVE', updated_at = '${inconclusiveAt.utcText()}'
+            where source_invoice_id = ${invoice.id}
+            """.trimIndent(),
+        )
+        execute(
+            """
+            update user_entitlement_projection
+            set tier_code = 'TIER1',
+                source = 'FREE',
+                access_status = 'ACTIVE',
+                renewal_status = 'NOT_APPLICABLE',
+                product_id = null,
+                pending_product_id = null,
+                projected_at = '${inconclusiveAt.utcText()}',
+                version = version + 1
+            where user_id = ${fixture.userId}
+            """.trimIndent(),
+        )
+        assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER1")
+        assertThat(
+            longValue(
+                "select count(*) from invoices where id = ${invoice.id} and status = 'COMPLETED' " +
+                    "and fulfilled_at is not null",
+            ),
+        ).isEqualTo(1)
+        assertThat(
+            longValue(
+                "select count(*) from payments where invoice_id = ${invoice.id} and status = 'SETTLED'",
+            ),
+        ).isEqualTo(1)
+
+        val replayed = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                fixture.product,
+                transaction,
+                null,
+                BillingEventSource.CLIENT,
+                "current-entitlement-replay-${fixture.suffix}",
+                inconclusiveAt.plusSeconds(1),
+            ),
+        )
+
+        assertThat(replayed.id).isEqualTo(invoice.id)
+        assertThat(
+            longValue(
+                "select count(*) from subscriptions where original_transaction_id = " +
+                    "'${transaction.originalTransactionId}' and access_status = 'ACTIVE' " +
+                    "and product_id = '${fixture.product.productId}' and tier_code = 'TIER2'",
+            ),
+        ).isEqualTo(1)
+        assertThat(
+            longValue(
+                "select count(*) from user_memberships where source_invoice_id = ${invoice.id} " +
+                    "and status = 'ACTIVE' and tier = 'TIER2'",
+            ),
+        ).isEqualTo(1)
+        val entitlement = requireNotNull(ledger.entitlementForUser(fixture.userId))
+        assertThat(entitlement.tierCode).isEqualTo("TIER2")
+        assertThat(entitlement.accessStatus).isEqualTo(SubscriptionAccessStatus.ACTIVE)
+        assertThat(entitlement.renewalStatus).isEqualTo(SubscriptionRenewalStatus.UNKNOWN)
+        assertThat(
+            longValue(
+                "select count(*) from subscriptions where original_transaction_id = " +
+                    "'${transaction.originalTransactionId}' and access_status = 'ACTIVE' " +
+                    "and renewal_status = 'UNKNOWN' and last_provider_event_at = '${inconclusiveAt.utcText()}'",
+            ),
+        ).isEqualTo(1)
+        assertThat(
+            longValue("select count(*) from invoices where user_id = ${fixture.userId}"),
+        ).isEqualTo(1)
+        assertThat(
+            longValue("select count(*) from payments where user_id = ${fixture.userId}"),
+        ).isEqualTo(1)
+    }
+
+    @Test
     fun `completed transaction replay never revives an expired stale subscription`(): Unit = runBlocking {
         val fixture = fixture("expired-stale-upgrade")
         val tier2Invoice = ledger.recordVerifiedPayment(
@@ -1676,9 +1892,37 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
             renewalStatus = "NOT_APPLICABLE",
             lastProviderEventAt = expirationAt,
         )
+        assertThat(
+            longValue(
+                "select count(*) from invoices where id = ${tier3Invoice.id} and status = 'COMPLETED' " +
+                    "and fulfilled_at is not null",
+            ),
+        ).isEqualTo(1)
+        assertThat(
+            longValue(
+                "select count(*) from payments where invoice_id = ${tier3Invoice.id} and status = 'SETTLED'",
+            ),
+        ).isEqualTo(1)
+        assertThat(
+            longValue(
+                "select count(*) from user_memberships where source_invoice_id = ${tier3Invoice.id} " +
+                    "and status = 'ACTIVE'",
+            ),
+        ).isEqualTo(1)
 
-        ledger.fulfill(tier3Invoice.id, expirationAt.plusSeconds(1))
+        val replayed = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                tier3,
+                tier3Transaction,
+                null,
+                BillingEventSource.CLIENT,
+                "expired-transaction-replay-${fixture.suffix}",
+                expirationAt.plusSeconds(1),
+            ),
+        )
 
+        assertThat(replayed.id).isEqualTo(tier3Invoice.id)
         assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER1")
         assertThat(
             longValue(

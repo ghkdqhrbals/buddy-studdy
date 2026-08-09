@@ -117,6 +117,25 @@ Entitlement projection and reconciliation proceed independently. StoreKit user
 cancellation before a transaction exists makes it `FAILED`; StoreKit's `.pending`
 result deliberately keeps it `WAITING` for later approval or webhook recovery.
 
+Immediately before checkout, iOS replays verified current StoreKit entitlements
+that belong to the current `appAccountToken` through the signed-JWS recovery
+endpoint, then refreshes the backend-owned billing status. If the selected
+product is already active, no invoice or App Store sheet is created. If the
+selected product is a downgrade, no invoice is created because Apple schedules
+the lower tier for the next renewal. Only a genuine subscription or immediate
+plan change creates a new `WAITING` invoice. This ordering prevents a previously
+purchased transaction returned by RevenueCat from being attached to a fresh
+invoice.
+
+Replaying an existing transaction is also the repair path for an inconclusive
+server projection. The ledger may restore access from `UNKNOWN` to `ACTIVE`
+only when the exact transaction already belongs to the same user, its invoice
+is `COMPLETED` and fulfilled, its payment is `SETTLED`, and its signed expiry is
+still in the future. The replay reuses the original invoice and payment and
+does not infer renewal intent: `UNKNOWN` renewal remains `UNKNOWN` until a
+RevenueCat lifecycle snapshot resolves it. Expired, revoked, or refunded
+transactions can never reactivate access through this path.
+
 Invoice projection status is intentionally limited to `WAITING`, `COMPLETED`,
 and `FAILED`. Invoice type is `NORMAL` (일반) or `REFUND` (환불). A refund never
 rewrites the completed normal invoice: it creates a separate `REFUND` invoice

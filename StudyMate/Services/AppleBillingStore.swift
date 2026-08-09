@@ -128,12 +128,22 @@ final class RevenueCatBillingBridge {
         language.locale.identifier
     }
 
+    nonisolated static func matchesExpectedAppUserID(
+        currentAppUserID: String,
+        expectedAppAccountToken: UUID
+    ) -> Bool {
+        currentAppUserID.caseInsensitiveCompare(expectedAppAccountToken.uuidString) == .orderedSame
+    }
+
     nonisolated static func shouldLogOut(
         currentAppUserID: String,
         expectedAppAccountToken: UUID?
     ) -> Bool {
         guard let expectedAppAccountToken else { return false }
-        return currentAppUserID == expectedAppAccountToken.uuidString.lowercased()
+        return matchesExpectedAppUserID(
+            currentAppUserID: currentAppUserID,
+            expectedAppAccountToken: expectedAppAccountToken
+        )
     }
 
     func start() {
@@ -164,8 +174,17 @@ final class RevenueCatBillingBridge {
         start()
         guard isEnabled else { return }
         let appUserID = appAccountToken.uuidString.lowercased()
-        guard Purchases.shared.appUserID != appUserID else { return }
+        guard !Self.matchesExpectedAppUserID(
+            currentAppUserID: Purchases.shared.appUserID,
+            expectedAppAccountToken: appAccountToken
+        ) else { return }
         _ = try await Purchases.shared.logIn(appUserID)
+        guard Self.matchesExpectedAppUserID(
+            currentAppUserID: Purchases.shared.appUserID,
+            expectedAppAccountToken: appAccountToken
+        ) else {
+            throw RevenueCatBillingBridgeError.identityMismatch
+        }
     }
 
     func setPreferredUILocale(for language: AppLanguage) {
@@ -232,6 +251,7 @@ final class AppleBillingStore: ObservableObject {
 
     enum PurchaseOutcome: Equatable {
         case purchased(BackendBillingInvoice)
+        case alreadyCurrent
         case pending
         case changeScheduled
         case cancelled
@@ -244,21 +264,8 @@ final class AppleBillingStore: ObservableObject {
         return invoice
     }
 
-    nonisolated static func latestRecoverableRevenueCatInvoice(
-        from invoices: [BackendBillingInvoice]
-    ) -> BackendBillingInvoice? {
-        invoices
-            .filter {
-                ($0.type ?? "NORMAL") == "NORMAL"
-                    && $0.status == "WAITING"
-                    && $0.paymentId == nil
-            }
-            .max { lhs, rhs in
-                if lhs.createdAt == rhs.createdAt {
-                    return lhs.id < rhs.id
-                }
-                return lhs.createdAt < rhs.createdAt
-            }
+    nonisolated static func shouldCreateCheckout(for action: MembershipPrimaryAction) -> Bool {
+        action == .subscribe || action == .change
     }
 
     @Published private(set) var products: [TierProduct] = []
@@ -302,10 +309,10 @@ final class AppleBillingStore: ObservableObject {
 
     func purchase(
         _ tierProduct: TierProduct,
-        action: MembershipPrimaryAction,
         appAccountToken: UUID,
+        resolveActionAfterSynchronization: @escaping () async -> MembershipPrimaryAction,
         prepareCheckout: @escaping (String) async throws -> BackendBillingInvoice,
-        confirmRevenueCat: @escaping (String?, UUID) async throws -> BackendBillingInvoice,
+        confirmRevenueCat: @escaping (String, UUID) async throws -> BackendBillingInvoice,
         synchronize: @escaping (String, String, UUID?) async throws -> BackendBillingInvoice,
         waitForFulfillment: @escaping (Int64) async throws -> BackendBillingInvoice,
         abandonCheckout: @escaping (UUID) async throws -> Void
@@ -316,10 +323,25 @@ final class AppleBillingStore: ObservableObject {
         processingProductID = tierProduct.id
         defer { processingProductID = nil }
 
+        try await RevenueCatBillingBridge.shared.identify(appAccountToken: appAccountToken)
+        try await synchronizeCurrentEntitlements(
+            appAccountToken: appAccountToken,
+            synchronize: synchronize
+        )
+
+        // StoreKit may already own an active transaction while the backend projection is stale.
+        // Re-read the server-owned status before creating an invoice so an existing transaction is
+        // never attached to a fresh checkout for the same product or a scheduled downgrade.
+        let action = await resolveActionAfterSynchronization()
+        if action == .current {
+            return .alreadyCurrent
+        }
+
         // A downgrade does not charge now. Apple schedules it for the next renewal, so creating a
         // financial invoice here would leave a WAITING order that can never receive a transaction.
-        let checkout = action == .downgrade ? nil : try await prepareCheckout(tierProduct.id)
-        try await RevenueCatBillingBridge.shared.identify(appAccountToken: appAccountToken)
+        let checkout = Self.shouldCreateCheckout(for: action)
+            ? try await prepareCheckout(tierProduct.id)
+            : nil
         switch tierProduct.source {
         case .revenueCat(let product):
             let (revenueCatTransaction, _, userCancelled) = try await Purchases.shared.purchase(product: product)
@@ -335,9 +357,29 @@ final class AppleBillingStore: ObservableObject {
             guard let checkout else {
                 return .changeScheduled
             }
+            guard let revenueCatTransaction else {
+                try? await abandonCheckout(checkout.invoiceNumber)
+                throw AppleBillingStoreError.missingRevenueCatTransaction
+            }
+            let transactionIdentifier = revenueCatTransaction.transactionIdentifier
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !transactionIdentifier.isEmpty,
+                  revenueCatTransaction.productIdentifier == tierProduct.id,
+                  let storeKitTransaction = revenueCatTransaction.sk2Transaction,
+                  StoreKitTransactionSyncResolver.matches(
+                    revenueCatTransactionIdentifier: transactionIdentifier,
+                    storeKitTransactionID: storeKitTransaction.id,
+                    storeKitProductID: storeKitTransaction.productID,
+                    expectedProductID: tierProduct.id,
+                    storeKitAppAccountToken: storeKitTransaction.appAccountToken,
+                    expectedAppAccountToken: appAccountToken
+                  ) else {
+                try? await abandonCheckout(checkout.invoiceNumber)
+                throw AppleBillingStoreError.revenueCatTransactionMismatch
+            }
             do {
                 let invoice = try await confirmRevenueCat(
-                    revenueCatTransaction?.transactionIdentifier,
+                    transactionIdentifier,
                     checkout.invoiceNumber
                 )
                 return .purchased(try Self.requireApplied(invoice))
@@ -345,14 +387,30 @@ final class AppleBillingStore: ObservableObject {
                 guard Self.shouldWaitForRevenueCatWebhook(after: confirmationError) else {
                     throw confirmationError
                 }
-                // RevenueCat webhooks are delivered at least once and may arrive before or after
-                // this API call. Poll the same prepared invoice only when immediate verification
-                // is temporarily unavailable; the backend transaction ID key keeps both paths idempotent.
+                var latestConfirmationError = confirmationError
+                for delay in Self.revenueCatConfirmationRetryDelays {
+                    try await Task.sleep(nanoseconds: delay)
+                    do {
+                        let invoice = try await confirmRevenueCat(
+                            transactionIdentifier,
+                            checkout.invoiceNumber
+                        )
+                        return .purchased(try Self.requireApplied(invoice))
+                    } catch {
+                        guard Self.shouldWaitForRevenueCatWebhook(after: error) else {
+                            throw error
+                        }
+                        latestConfirmationError = error
+                    }
+                }
+
+                // The webhook and the client confirmation update the same prepared invoice
+                // idempotently. Poll only after retrying the exact transaction/invoice pair.
                 do {
                     let invoice = try await waitForFulfillment(checkout.id)
                     return .purchased(try Self.requireApplied(invoice))
                 } catch {
-                    throw confirmationError
+                    throw latestConfirmationError
                 }
             }
         case .appStore(let product):
@@ -388,6 +446,24 @@ final class AppleBillingStore: ObservableObject {
         }
     }
 
+    private func synchronizeCurrentEntitlements(
+        appAccountToken: UUID,
+        synchronize: @escaping (String, String, UUID?) async throws -> BackendBillingInvoice
+    ) async throws {
+        for await verification in Transaction.currentEntitlements {
+            guard case .verified(let transaction) = verification,
+                  transaction.appAccountToken == appAccountToken else {
+                continue
+            }
+            let invoice = try await synchronize(
+                verification.jwsRepresentation,
+                Self.backendEnvironment(transaction),
+                nil
+            )
+            _ = try Self.requireApplied(invoice)
+        }
+    }
+
     func restore(
         appAccountToken: UUID,
         synchronize: @escaping (String, String, UUID?) async throws -> BackendBillingInvoice
@@ -395,10 +471,8 @@ final class AppleBillingStore: ObservableObject {
         try await RevenueCatBillingBridge.shared.identify(appAccountToken: appAccountToken)
         if RevenueCatBillingBridge.shared.isEnabled {
             _ = try await Purchases.shared.restorePurchases()
-            return []
         } else {
             try await AppStore.sync()
-            try await RevenueCatBillingBridge.shared.syncPurchases()
         }
 
         // RevenueCat restores the Store account, but BuddyStudy still needs Apple's verified JWS
@@ -429,6 +503,12 @@ final class AppleBillingStore: ObservableObject {
         }
         return statusCode == 429 || statusCode >= 500
     }
+
+    private static let revenueCatConfirmationRetryDelays: [UInt64] = [
+        750_000_000,
+        1_500_000_000,
+        3_000_000_000,
+    ]
 
     func beginRefundRequest(transactionID: String, in scene: UIWindowScene) async throws -> Transaction.RefundRequestStatus {
         guard let identifier = UInt64(transactionID) else {
@@ -463,6 +543,17 @@ final class AppleBillingStore: ObservableObject {
     }
 }
 
+enum RevenueCatBillingBridgeError: LocalizedError {
+    case identityMismatch
+
+    var errorDescription: String? {
+        switch self {
+        case .identityMismatch:
+            return "RevenueCat 결제 계정을 현재 BuddyStudy 계정으로 전환하지 못했습니다."
+        }
+    }
+}
+
 enum AppleBillingStoreError: LocalizedError {
     case purchaseAlreadyInProgress
     case unverifiedTransaction
@@ -470,6 +561,8 @@ enum AppleBillingStoreError: LocalizedError {
     case invalidTransactionIdentifier
     case customerCenterUnavailable
     case membershipApplicationIncomplete
+    case missingRevenueCatTransaction
+    case revenueCatTransactionMismatch
     case unknownPurchaseResult
 
     var errorDescription: String? {
@@ -486,6 +579,10 @@ enum AppleBillingStoreError: LocalizedError {
             return "RevenueCat 결제 관리 기능을 사용할 수 없습니다."
         case .membershipApplicationIncomplete:
             return "결제 결과를 확인했지만 멤버십 적용이 완료되지 않았습니다. 구매 복원을 다시 시도해 주세요."
+        case .missingRevenueCatTransaction:
+            return "이번 App Store 결제의 거래 정보를 확인할 수 없습니다. 구매 복원을 시도해 주세요."
+        case .revenueCatTransactionMismatch:
+            return "이번 App Store 결제와 일치하는 거래를 확인할 수 없습니다. 구매 복원을 시도해 주세요."
         case .unknownPurchaseResult:
             return "알 수 없는 App Store 결제 결과입니다."
         }

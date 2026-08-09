@@ -220,7 +220,7 @@ protocol BillingRepository {
     func confirmRevenueCatTransaction(
         registration: RemotePushRegistration,
         invoiceNumber: UUID,
-        transactionID: String?
+        transactionID: String
     ) async throws -> BackendBillingInvoice
     func syncAppleTransaction(
         registration: RemotePushRegistration,
@@ -289,7 +289,7 @@ struct RemoteBillingRepository: BillingRepository {
     func confirmRevenueCatTransaction(
         registration: RemotePushRegistration,
         invoiceNumber: UUID,
-        transactionID: String?
+        transactionID: String
     ) async throws -> BackendBillingInvoice {
         try await backendClient.confirmRevenueCatTransaction(
             registration: registration,
@@ -391,7 +391,7 @@ struct BillingUseCase {
     func confirmRevenueCatTransaction(
         registration: RemotePushRegistration,
         invoiceNumber: UUID,
-        transactionID: String?
+        transactionID: String
     ) async throws -> BackendBillingInvoice {
         try await repository.confirmRevenueCatTransaction(
             registration: registration,

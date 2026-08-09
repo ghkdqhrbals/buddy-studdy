@@ -30,6 +30,23 @@ final class AppControlPolicyTests: XCTestCase {
         )
     }
 
+    func testRevenueCatIdentityMustMatchTheBackendAccountToken() {
+        let accountToken = UUID(uuidString: "f9d47348-7b53-41c3-9f06-ef0b6f3c5e22")!
+
+        XCTAssertTrue(
+            RevenueCatBillingBridge.matchesExpectedAppUserID(
+                currentAppUserID: accountToken.uuidString.uppercased(),
+                expectedAppAccountToken: accountToken
+            )
+        )
+        XCTAssertFalse(
+            RevenueCatBillingBridge.matchesExpectedAppUserID(
+                currentAppUserID: "$RCAnonymousID:other-account",
+                expectedAppAccountToken: accountToken
+            )
+        )
+    }
+
     func testRevenueCatStoreKitTransactionMatchRequiresTransactionProductAndAccount() {
         let accountToken = UUID(uuidString: "3f0c5f50-6521-4ba0-a990-73500e915f57")!
         let otherAccountToken = UUID(uuidString: "4f0c5f50-6521-4ba0-a990-73500e915f57")!
@@ -105,10 +122,14 @@ final class AppControlPolicyTests: XCTestCase {
         XCTAssertFalse(billingStore.contains("try? await synchronize("))
         XCTAssertTrue(billingStore.contains("for await verification in Transaction.currentEntitlements"))
         XCTAssertTrue(billingStore.contains("let appliedInvoice = try Self.requireApplied(invoice)"))
-        XCTAssertTrue(billingStore.contains("let checkout = action == .downgrade ? nil"))
+        XCTAssertTrue(billingStore.contains("try await synchronizeCurrentEntitlements("))
+        XCTAssertTrue(billingStore.contains("let action = await resolveActionAfterSynchronization()"))
+        XCTAssertTrue(billingStore.contains("let checkout = Self.shouldCreateCheckout(for: action)"))
         XCTAssertFalse(billingStore.contains("return action == .downgrade ? .changeScheduled : .pending"))
-        XCTAssertTrue(billingStore.contains("revenueCatTransaction?.transactionIdentifier"))
-        XCTAssertFalse(billingStore.contains("guard let transactionIdentifier = revenueCatTransaction?.transactionIdentifier else"))
+        XCTAssertTrue(billingStore.contains("revenueCatTransaction.transactionIdentifier"))
+        XCTAssertTrue(billingStore.contains("revenueCatTransaction.productIdentifier == tierProduct.id"))
+        XCTAssertTrue(billingStore.contains("StoreKitTransactionSyncResolver.matches("))
+        XCTAssertTrue(billingStore.contains("for delay in Self.revenueCatConfirmationRetryDelays"))
         XCTAssertTrue(billingStore.contains("if action == .downgrade"))
         XCTAssertTrue(appState.contains("for await verification in Transaction.currentEntitlements"))
         XCTAssertTrue(appState.contains("finishAfterSync: false"))
@@ -116,32 +137,34 @@ final class AppControlPolicyTests: XCTestCase {
         XCTAssertTrue(appState.contains("case .membershipApplicationIncomplete = billingError"))
     }
 
-    func testRevenueCatRestoreSelectsOnlyLatestUnpaidWaitingInvoice() {
-        let oldestWaiting = billingInvoice(id: 40, status: "WAITING", createdAt: 100)
-        let latestWaiting = billingInvoice(id: 42, status: "WAITING", createdAt: 300)
-        var paidWaiting = billingInvoice(id: 43, status: "WAITING", createdAt: 400)
-        paidWaiting.paymentId = 90
-        let completed = billingInvoice(id: 44, status: "COMPLETED", createdAt: 500)
-        var refund = billingInvoice(id: 45, status: "WAITING", createdAt: 600)
-        refund.type = "REFUND"
-
-        let selected = AppleBillingStore.latestRecoverableRevenueCatInvoice(
-            from: [completed, paidWaiting, oldestWaiting, refund, latestWaiting]
-        )
-
-        XCTAssertEqual(selected?.id, latestWaiting.id)
-        XCTAssertEqual(selected?.invoiceNumber, latestWaiting.invoiceNumber)
+    func testCheckoutIsCreatedOnlyForAChargeablePurchaseAction() {
+        XCTAssertTrue(AppleBillingStore.shouldCreateCheckout(for: .subscribe))
+        XCTAssertTrue(AppleBillingStore.shouldCreateCheckout(for: .change))
+        XCTAssertFalse(AppleBillingStore.shouldCreateCheckout(for: .current))
+        XCTAssertFalse(AppleBillingStore.shouldCreateCheckout(for: .downgrade))
     }
 
-    func testRevenueCatRestoreHasNoCandidateWithoutUnpaidWaitingInvoice() {
-        var paidWaiting = billingInvoice(id: 51, status: "WAITING", createdAt: 100)
-        paidWaiting.paymentId = 91
-
-        XCTAssertNil(
-            AppleBillingStore.latestRecoverableRevenueCatInvoice(
-                from: [paidWaiting, billingInvoice(id: 52, status: "FAILED", createdAt: 200)]
-            )
+    func testCurrentEntitlementSynchronizationPrecedesCheckoutCreation() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let billingStore = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Services/AppleBillingStore.swift"),
+            encoding: .utf8
         )
+
+        let synchronization = try XCTUnwrap(
+            billingStore.range(of: "try await synchronizeCurrentEntitlements(")
+        )
+        let actionResolution = try XCTUnwrap(
+            billingStore.range(of: "let action = await resolveActionAfterSynchronization()")
+        )
+        let checkoutCreation = try XCTUnwrap(
+            billingStore.range(of: "let checkout = Self.shouldCreateCheckout(for: action)")
+        )
+
+        XCTAssertLessThan(synchronization.lowerBound, actionResolution.lowerBound)
+        XCTAssertLessThan(actionResolution.lowerBound, checkoutCreation.lowerBound)
     }
 
     func testPurchaseSuccessRequiresSettledAndFulfilledBackendInvoice() throws {

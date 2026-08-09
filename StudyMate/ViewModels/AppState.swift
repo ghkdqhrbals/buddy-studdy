@@ -6236,7 +6236,7 @@ final class AppState: ObservableObject {
     }
 
     func confirmRevenueCatBillingTransaction(
-        transactionID: String?,
+        transactionID: String,
         invoiceNumber: UUID
     ) async throws -> BackendBillingInvoice {
         guard let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),

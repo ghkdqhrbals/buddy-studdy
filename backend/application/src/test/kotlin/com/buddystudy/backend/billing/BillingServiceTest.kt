@@ -476,7 +476,8 @@ class BillingServiceTest {
     @Test
     fun `RevenueCat transaction confirmation applies the prepared invoice`() = runBlocking {
         val ledger = FakeLedger(token, product)
-        val service = service(ledger)
+        val verifier = RecordingRevenueCatVerifier(transaction)
+        val service = service(ledger, revenueCatVerifier = verifier)
 
         val result = service.confirmRevenueCatTransaction(
             principal(),
@@ -489,32 +490,21 @@ class BillingServiceTest {
         assertEquals(transaction.transactionId, ledger.recordedPayments.single().transaction.transactionId)
         assertEquals(BillingEventSource.CLIENT, ledger.recordedPayments.single().source)
         assertTrue(ledger.recordedPayments.single().authoritativeOwnershipTransfer)
-    }
-
-    @Test
-    fun `RevenueCat confirmation resolves the invoice purchase when SDK omits transaction ID`() = runBlocking {
-        val ledger = FakeLedger(token, product)
-        val verifier = RecordingRevenueCatVerifier(transaction)
-        val service = service(ledger, revenueCatVerifier = verifier)
-
-        val result = service.confirmRevenueCatTransaction(
-            principal(),
-            invoiceNumber,
-            ConfirmRevenueCatTransactionCommand(null),
+        assertEquals(
+            listOf(Triple(transaction.transactionId, token, product.productId)),
+            verifier.transactionRequests,
         )
-
-        assertEquals(InvoiceStatus.COMPLETED, result.status)
-        assertEquals(listOf(token to product.productId), verifier.latestRequests)
-        assertTrue(verifier.transactionRequests.isEmpty())
-        assertEquals(invoiceNumber, ledger.recordedPayments.single().invoiceNumber)
-        assertTrue(ledger.recordedPayments.single().authoritativeOwnershipTransfer)
     }
 
     @Test
     fun `permanent RevenueCat verification failure fails the prepared invoice`() {
         val ledger = FakeLedger(token, product)
         val verifier = object : RevenueCatTransactionVerificationPort {
-            override suspend fun verify(transactionId: String): VerifiedAppleTransaction = throw ApiException(
+            override suspend fun verify(
+                transactionId: String,
+                appAccountToken: UUID,
+                expectedProductId: String,
+            ): VerifiedAppleTransaction = throw ApiException(
                 HttpStatus.UNPROCESSABLE_ENTITY,
                 ApiErrorCode.BILLING_TRANSACTION_INVALID,
                 "RevenueCat transaction ownership verification failed.",
@@ -544,7 +534,11 @@ class BillingServiceTest {
     fun `retryable RevenueCat verification delay keeps the prepared invoice waiting`() {
         val ledger = FakeLedger(token, product)
         val verifier = object : RevenueCatTransactionVerificationPort {
-            override suspend fun verify(transactionId: String): VerifiedAppleTransaction = throw ApiException(
+            override suspend fun verify(
+                transactionId: String,
+                appAccountToken: UUID,
+                expectedProductId: String,
+            ): VerifiedAppleTransaction = throw ApiException(
                 HttpStatus.SERVICE_UNAVAILABLE,
                 ApiErrorCode.BILLING_APPLICATION_FAILED,
                 "RevenueCat has not indexed this transaction yet.",
@@ -688,11 +682,15 @@ class BillingServiceTest {
     private class RecordingRevenueCatVerifier(
         private val transaction: VerifiedAppleTransaction,
     ) : RevenueCatTransactionVerificationPort {
-        val transactionRequests = mutableListOf<String>()
+        val transactionRequests = mutableListOf<Triple<String, UUID, String>>()
         val latestRequests = mutableListOf<Pair<UUID, String>>()
 
-        override suspend fun verify(transactionId: String): VerifiedAppleTransaction {
-            transactionRequests += transactionId
+        override suspend fun verify(
+            transactionId: String,
+            appAccountToken: UUID,
+            expectedProductId: String,
+        ): VerifiedAppleTransaction {
+            transactionRequests += Triple(transactionId, appAccountToken, expectedProductId)
             return transaction
         }
 
