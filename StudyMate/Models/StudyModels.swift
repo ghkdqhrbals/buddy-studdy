@@ -2829,9 +2829,9 @@ struct AppStrings {
     var membershipChangePending: String { text("App Store에서 변경 일정을 확인할 수 있습니다.", "Review the change schedule in the App Store.", "App Storeで変更予定を確認できます。") }
     var downgradeMembershipNotice: String {
         text(
-            "App Store에서 변경 결제가 확인되면 낮은 멤버십이 즉시 적용되고, 남은 질문은 이번 기간에 이어서 사용할 수 있습니다.",
-            "Once the App Store confirms the plan change, the lower tier applies immediately and your remaining questions carry into this period.",
-            "App Storeでプラン変更が確認されると下位メンバーシップがすぐに適用され、残りの質問数は今回の期間に引き継がれます。"
+            "낮은 멤버십은 다음 갱신 시 적용됩니다. 그전까지 현재 멤버십과 남은 질문 수가 유지됩니다.",
+            "The lower tier starts at your next renewal. Your current membership and remaining questions stay unchanged until then.",
+            "下位メンバーシップは次回更新時に適用されます。それまでは現在のメンバーシップと残りの質問数が維持されます。"
         )
     }
     var membershipChangeSchedule: String { text("변경 일정", "Plan timeline", "変更スケジュール") }
@@ -2848,6 +2848,12 @@ struct AppStrings {
     var renewsOn: String { text("다음 갱신", "Renews", "次回更新") }
     var endsOn: String { text("이용 종료", "Ends", "利用終了") }
     var billingHistory: String { text("결제 내역", "Billing history", "支払い履歴") }
+    var billingDetails: String { text("결제 상세", "Payment details", "支払い詳細") }
+    var billingAmount: String { text("결제 금액", "Amount", "支払い金額") }
+    var billingDate: String { text("결제 일시", "Purchase date", "購入日時") }
+    var billingExpiresAt: String { text("이용 만료", "Access expires", "利用期限") }
+    var billingInvoiceNumber: String { text("결제 번호", "Payment reference", "支払い番号") }
+    var billingTransactionID: String { text("거래 번호", "Transaction ID", "取引番号") }
     var restorePurchases: String { text("구매 복원", "Restore purchases", "購入を復元") }
     var manageSubscription: String { text("구독 관리", "Manage subscription", "サブスクリプションを管理") }
     var managePurchases: String { text("결제 관리", "Manage purchases", "購入を管理") }

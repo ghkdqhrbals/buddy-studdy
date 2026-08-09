@@ -6815,9 +6815,6 @@ private struct MembershipProductGroup: Identifiable {
 
 private struct MobileBillingHistoryView: View {
     @EnvironmentObject private var appState: AppState
-    @StateObject private var billingStore = AppleBillingStore()
-    @State private var billingNotice: String?
-    @State private var isCustomerCenterPresented = false
 
     private var strings: AppStrings {
         appState.strings
@@ -6858,54 +6855,29 @@ private struct MobileBillingHistoryView: View {
         .refreshable {
             await appState.refreshBilling()
         }
-        .alert(
-            strings.errorPopupTitle,
-            isPresented: Binding(
-                get: { billingNotice != nil },
-                set: { if !$0 { billingNotice = nil } }
-            )
-        ) {
-            Button(strings.close, role: .cancel) {}
-        } message: {
-            Text(billingNotice ?? "")
-        }
-        .sheet(isPresented: $isCustomerCenterPresented, onDismiss: {
-            Task { await appState.refreshBilling() }
-        }) {
-            CustomerCenterView()
-                .environment(\.locale, appState.settings.appLanguage.locale)
-        }
     }
 
-    @ViewBuilder
     private func invoiceRow(_ invoice: BackendBillingInvoice) -> some View {
-        if invoice.requiresCustomerCenterResolution || invoice.isRefundable || invoice.isCancellable {
-            Button {
-                openCustomerCenter()
-            } label: {
-                invoiceRowContent(invoice, showsDisclosure: true)
-            }
-            .buttonStyle(.plain)
-        } else {
-            invoiceRowContent(invoice, showsDisclosure: false)
+        NavigationLink {
+            MobileBillingInvoiceDetailView(invoice: invoice)
+        } label: {
+            invoiceRowContent(invoice)
         }
     }
 
-    private func invoiceRowContent(
-        _ invoice: BackendBillingInvoice,
-        showsDisclosure: Bool
-    ) -> some View {
-        HStack(spacing: 12) {
+    private func invoiceRowContent(_ invoice: BackendBillingInvoice) -> some View {
+        let display = BillingInvoiceDisplay(invoice: invoice, strings: strings)
+        return HStack(spacing: 12) {
             Circle()
-                .fill(statusColor(invoice))
+                .fill(display.statusColor)
                 .frame(width: 8, height: 8)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(invoiceTitle(invoice))
+                Text(display.title)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(.primary)
 
-                Text(invoiceDateText(invoice.purchaseAt ?? invoice.createdAt))
+                Text(display.shortDate(invoice.purchaseAt ?? invoice.createdAt))
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -6920,20 +6892,14 @@ private struct MobileBillingHistoryView: View {
             Spacer(minLength: 12)
 
             VStack(alignment: .trailing, spacing: 4) {
-                Text(invoiceAmount(invoice))
+                Text(display.amount)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(.primary)
                     .monospacedDigit()
 
-                Text(statusText(invoice))
+                Text(display.statusText)
                     .font(.caption)
-                    .foregroundStyle(statusColor(invoice))
-            }
-
-            if showsDisclosure {
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(display.statusColor)
             }
         }
         .padding(.vertical, 5)
@@ -6958,17 +6924,74 @@ private struct MobileBillingHistoryView: View {
             .sorted { $0.month > $1.month }
     }
 
-    private func invoiceTitle(_ invoice: BackendBillingInvoice) -> String {
-        invoice.type == "REFUND"
-            ? invoiceTypeText("REFUND")
-            : strings.membershipTierName(invoice.tierCode)
+}
+
+private struct MobileBillingInvoiceDetailView: View {
+    @EnvironmentObject private var appState: AppState
+    @StateObject private var billingStore = AppleBillingStore()
+    @State private var billingNotice: String?
+    @State private var isCustomerCenterPresented = false
+
+    let invoice: BackendBillingInvoice
+
+    private var strings: AppStrings { appState.strings }
+    private var display: BillingInvoiceDisplay { BillingInvoiceDisplay(invoice: invoice, strings: strings) }
+    private var offersPurchaseManagement: Bool {
+        invoice.requiresCustomerCenterResolution || invoice.isRefundable || invoice.isCancellable
     }
 
-    private func invoiceDateText(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = strings.language.locale
-        formatter.setLocalizedDateFormatFromTemplate("MMM d, HH:mm")
-        return formatter.string(from: date)
+    var body: some View {
+        List {
+            Section {
+                LabeledContent(strings.membershipPlans, value: display.title)
+                LabeledContent(strings.billingStatus, value: display.statusText)
+                LabeledContent(strings.billingAmount, value: display.amount)
+                LabeledContent(strings.billingDate, value: display.fullDate(invoice.purchaseAt ?? invoice.createdAt))
+                if let expiresAt = invoice.expiresAt {
+                    LabeledContent(strings.billingExpiresAt, value: display.fullDate(expiresAt))
+                }
+            }
+
+            Section {
+                BillingReferenceRow(title: strings.billingInvoiceNumber, value: invoice.invoiceNumber.uuidString)
+                if let transactionID = invoice.transactionId {
+                    BillingReferenceRow(title: strings.billingTransactionID, value: transactionID)
+                }
+            }
+
+            if offersPurchaseManagement {
+                Section {
+                    Button {
+                        openCustomerCenter()
+                    } label: {
+                        Label(strings.managePurchases, systemImage: "creditcard")
+                    }
+                } footer: {
+                    if invoice.requiresCustomerCenterResolution {
+                        Text(strings.cancelledPurchaseGuidance)
+                    }
+                }
+            }
+        }
+        .navigationTitle(strings.billingDetails)
+        .navigationBarTitleDisplayMode(.inline)
+        .alert(
+            strings.errorPopupTitle,
+            isPresented: Binding(
+                get: { billingNotice != nil },
+                set: { if !$0 { billingNotice = nil } }
+            )
+        ) {
+            Button(strings.close, role: .cancel) {}
+        } message: {
+            Text(billingNotice ?? "")
+        }
+        .sheet(isPresented: $isCustomerCenterPresented, onDismiss: {
+            Task { await appState.refreshBilling() }
+        }) {
+            CustomerCenterView()
+                .environment(\.locale, appState.settings.appLanguage.locale)
+        }
     }
 
     private func openCustomerCenter() {
@@ -6988,12 +7011,66 @@ private struct MobileBillingHistoryView: View {
             }
         }
     }
+}
 
-    private func invoiceAmount(_ invoice: BackendBillingInvoice) -> String {
+private struct BillingReferenceRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.footnote.monospaced())
+                .textSelection(.enabled)
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+private struct BillingInvoiceDisplay {
+    let invoice: BackendBillingInvoice
+    let strings: AppStrings
+
+    var title: String {
+        invoice.type == "REFUND" ? invoiceTypeText("REFUND") : strings.membershipTierName(invoice.tierCode)
+    }
+
+    var amount: String {
         guard let raw = invoice.priceMilliunits, let currency = invoice.currency else { return "-" }
         let sign: Decimal = invoice.type == "REFUND" ? -1 : 1
-        let amount = sign * Decimal(raw) / 1_000_000
-        return amount.formatted(.currency(code: currency))
+        return (sign * Decimal(raw) / 1_000_000).formatted(.currency(code: currency))
+    }
+
+    var statusText: String {
+        statusText(invoice.requiresCustomerCenterResolution ? "CANCELLED" : invoice.status)
+    }
+
+    var statusColor: Color {
+        if invoice.requiresCustomerCenterResolution { return .secondary }
+        let status = invoice.status
+        if ["COMPLETED", "FULFILLED", "REFUNDED"].contains(status) { return .green }
+        if ["FAILED", "REFUND_DECLINED", "COMPENSATION_REQUIRED"].contains(status) { return .red }
+        if ["WAITING", "PENDING_PAYMENT", "FULFILLMENT_PENDING", "REFUND_PENDING"].contains(status) {
+            return .orange
+        }
+        return .secondary
+    }
+
+    func shortDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = strings.language.locale
+        formatter.setLocalizedDateFormatFromTemplate("MMM d, HH:mm")
+        return formatter.string(from: date)
+    }
+
+    func fullDate(_ date: Date) -> String {
+        date.formatted(
+            Date.FormatStyle(date: .long, time: .shortened)
+                .locale(strings.language.locale)
+        )
     }
 
     private func invoiceTypeText(_ type: String) -> String {
@@ -7003,13 +7080,6 @@ private struct MobileBillingHistoryView: View {
         case (.japanese, "REFUND"): return "返金"
         default: return type
         }
-    }
-
-    private func statusText(_ invoice: BackendBillingInvoice) -> String {
-        if invoice.requiresCustomerCenterResolution {
-            return statusText("CANCELLED")
-        }
-        return statusText(invoice.status)
     }
 
     private func statusText(_ status: String) -> String {
@@ -7042,17 +7112,6 @@ private struct MobileBillingHistoryView: View {
         case .english: return english[status] ?? status
         case .japanese: return japanese[status] ?? status
         }
-    }
-
-    private func statusColor(_ invoice: BackendBillingInvoice) -> Color {
-        if invoice.requiresCustomerCenterResolution { return .secondary }
-        let status = invoice.status
-        if ["COMPLETED", "FULFILLED", "REFUNDED"].contains(status) { return .green }
-        if ["FAILED", "REFUND_DECLINED", "COMPENSATION_REQUIRED"].contains(status) { return .red }
-        if ["WAITING", "PENDING_PAYMENT", "FULFILLMENT_PENDING", "REFUND_PENDING"].contains(status) {
-            return .orange
-        }
-        return .secondary
     }
 }
 

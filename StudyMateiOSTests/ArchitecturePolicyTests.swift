@@ -458,6 +458,20 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertTrue(refreshSource.contains("await billingRefreshTask.value"))
     }
 
+    func testBillingHistoryRowsOpenInvoiceDetailsInsteadOfCustomerCenter() throws {
+        let root = try repositoryRoot()
+        let mobileRootFile = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let content = try String(contentsOf: mobileRootFile, encoding: .utf8)
+        let start = try XCTUnwrap(content.range(of: "private struct MobileBillingHistoryView")?.lowerBound)
+        let end = try XCTUnwrap(
+            content.range(of: "private struct MobileBillingInvoiceDetailView", range: start..<content.endIndex)?.lowerBound
+        )
+        let historySource = content[start..<end]
+
+        XCTAssertTrue(historySource.contains("MobileBillingInvoiceDetailView(invoice: invoice)"))
+        XCTAssertFalse(historySource.contains("openCustomerCenter()"))
+    }
+
     func testUnchangedAPNSTokenDoesNotTriggerStartupDataRefreshAgain() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
