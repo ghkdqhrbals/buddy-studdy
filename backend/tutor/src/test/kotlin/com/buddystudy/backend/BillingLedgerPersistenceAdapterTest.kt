@@ -13,6 +13,7 @@ import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPor
 import com.buddystudy.backend.admin.management.application.port.outbound.AdminManagementPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.common.application.quota.MonthlyQuestionQuotaPolicy
 import com.buddystudy.billing.domain.BillingActionStatus
 import com.buddystudy.billing.domain.BillingEnvironment
 import com.buddystudy.billing.domain.BillingEventSource
@@ -1219,6 +1220,12 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         assertThat(quota.reserveMonthlySystemQuestion(fixture.userId, fixture.now, quotaKey, quotaKey, fixture.now))
             .isTrue()
         quota.commitMonthlySystemQuestion(quotaKey, fixture.now.plusSeconds(2))
+        assertThat(
+            intValue(
+                "select system_question_count from user_monthly_question_usage " +
+                    "where user_id = ${fixture.userId} order by period_start desc limit 1",
+            ),
+        ).isEqualTo(1)
 
         val tier3 = requireNotNull(
             ledger.enabledTierProduct("io.github.ghkdqhrbals.StudyMate.tier3.monthly"),
@@ -1386,7 +1393,16 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         assertThat(upgradedQuota.baseLimit).isEqualTo(1_000)
         assertThat(upgradedQuota.usedCount).isZero()
         assertThat(upgradedQuota.reservedCount).isZero()
+        assertThat(upgradedQuota.bonusLimit).isZero()
+        assertThat(upgradedQuota.monthlyQuestionLimit).isEqualTo(1_000)
         assertThat(upgradedQuota.periodStartedAt).isEqualTo(tier3PurchasedAt)
+        assertThat(upgradedQuota.policyVersion).isEqualTo(MonthlyQuestionQuotaPolicy.VERSION)
+        assertThat(
+            intValue(
+                "select system_question_count from user_monthly_question_usage " +
+                    "where user_id = ${fixture.userId} order by period_start desc limit 1",
+            ),
+        ).isZero()
         assertThat(
             longValue(
                 "select count(*) from subscriptions where original_transaction_id = " +
@@ -1543,7 +1559,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
-    fun `same-chain downgrade immediately switches tier and carries remaining quota for one period`(): Unit = runBlocking {
+    fun `same-chain downgrade keeps the higher tier until renewal and then resets the lower tier quota`(): Unit = runBlocking {
         val fixture = fixture("same-chain-downgrade")
         val tier3 = requireNotNull(
             ledger.enabledTierProduct("io.github.ghkdqhrbals.StudyMate.tier3.monthly"),
@@ -1621,15 +1637,15 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         assertThat(ledger.recordRevenueCatEvent(productChange, productChangeAt)).isTrue()
         assertThat(ledger.applyRevenueCatEvent(productChange, productChangeAt)).isTrue()
 
-        val downgradedAt = fixture.now.plusSeconds(100)
+        val downgradeRequestedAt = fixture.now.plusSeconds(100)
         val tier2Transaction = tier3Transaction.copy(
             transactionId = "tier2-downgrade-${fixture.suffix}",
             productId = fixture.product.productId,
             productType = fixture.product.productType,
             priceMilliunits = 7_900_000,
-            purchaseAt = downgradedAt,
-            expiresAt = downgradedAt.plusSeconds(2_592_000),
-            signedAt = downgradedAt,
+            purchaseAt = downgradeRequestedAt,
+            expiresAt = downgradeRequestedAt.plusSeconds(2_592_000),
+            signedAt = downgradeRequestedAt,
         )
         val tier2Invoice = ledger.recordVerifiedPayment(
             RecordVerifiedPaymentCommand(
@@ -1639,49 +1655,60 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
                 null,
                 BillingEventSource.REVENUECAT_WEBHOOK,
                 "tier2-downgrade-payment-${fixture.suffix}",
-                downgradedAt,
+                downgradeRequestedAt,
             ),
         )
-        ledger.fulfill(tier2Invoice.id, downgradedAt.plusSeconds(1))
+        ledger.fulfill(tier2Invoice.id, downgradeRequestedAt.plusSeconds(1))
 
-        assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER2")
-        val downgradedQuota = requireNotNull(quota.quotaStatusForUser(fixture.userId, downgradedAt.plusSeconds(2)))
-        assertThat(downgradedQuota.tierCode).isEqualTo("TIER2")
-        assertThat(downgradedQuota.baseLimit).isEqualTo(300)
-        assertThat(downgradedQuota.usedCount).isZero()
-        assertThat(downgradedQuota.reservedCount).isEqualTo(1)
-        assertThat(downgradedQuota.bonusLimit).isEqualTo(1_024)
-        assertThat(downgradedQuota.monthlyQuestionLimit).isEqualTo(1_324)
-        assertThat(downgradedQuota.monthlyQuestionLimit - downgradedQuota.usedCount - downgradedQuota.reservedCount)
-            .isEqualTo(1_323)
-        assertThat(downgradedQuota.periodStartedAt).isEqualTo(downgradedAt)
-        assertThat(downgradedQuota.policyVersion).isEqualTo(3)
+        val scheduledEntitlement = requireNotNull(ledger.entitlementForUser(fixture.userId))
+        assertThat(scheduledEntitlement.tierCode).isEqualTo("TIER3")
+        assertThat(scheduledEntitlement.productId).isEqualTo(tier3.productId)
+        assertThat(scheduledEntitlement.pendingProductId).isEqualTo(fixture.product.productId)
+        assertThat(scheduledEntitlement.expiresAt).isEqualTo(tier3Transaction.expiresAt)
+        val scheduledQuota = requireNotNull(
+            quota.quotaStatusForUser(fixture.userId, downgradeRequestedAt.plusSeconds(2)),
+        )
+        assertThat(scheduledQuota.tierCode).isEqualTo("TIER3")
+        assertThat(scheduledQuota.baseLimit).isEqualTo(1_000)
+        assertThat(scheduledQuota.usedCount).isEqualTo(1)
+        assertThat(scheduledQuota.reservedCount).isEqualTo(1)
+        assertThat(scheduledQuota.bonusLimit).isEqualTo(25)
+        assertThat(scheduledQuota.periodStartedAt).isEqualTo(beforeDowngrade.periodStartedAt)
         assertThat(
-            database.sql(
-                "select reserved_count from quota_periods where user_id = :userId and period_started_at = :startedAt",
-            ).bind("userId", fixture.userId)
-                .bind(
-                    "startedAt",
-                    java.time.LocalDateTime.ofInstant(beforeDowngrade.periodStartedAt, java.time.ZoneOffset.UTC),
-                )
-                .map { row, _ -> row.get("reserved_count", Integer::class.java)?.toInt() ?: 0 }
-                .one().awaitSingle(),
-        ).isZero()
+            intValue(
+                "select system_question_count from user_monthly_question_usage " +
+                    "where user_id = ${fixture.userId} order by period_start desc limit 1",
+            ),
+        ).isEqualTo(1)
         assertThat(
             longValue(
                 "select count(*) from subscriptions where original_transaction_id = " +
-                    "'${tier3Transaction.originalTransactionId}' and pending_product_id is not null",
+                    "'${tier3Transaction.originalTransactionId}' and product_id = '${tier3.productId}' " +
+                    "and tier_code = 'TIER3' and pending_product_id = '${fixture.product.productId}'",
+            ),
+        ).isEqualTo(1)
+        assertThat(
+            longValue("select count(*) from quota_ledger where ledger_event_id = 'billing-tier-change:${tier2Invoice.id}'"),
+        ).isZero()
+        assertThat(
+            longValue(
+                "select count(*) from user_memberships where source_invoice_id = ${tier2Invoice.id} " +
+                    "and status = 'ACTIVE'",
             ),
         ).isZero()
 
-        ledger.fulfill(tier2Invoice.id, downgradedAt.plusSeconds(3))
+        ledger.fulfill(tier2Invoice.id, downgradeRequestedAt.plusSeconds(3))
         assertThat(
             longValue("select count(*) from quota_ledger where ledger_event_id = 'billing-tier-change:${tier2Invoice.id}'"),
-        ).isEqualTo(1)
-        val replayedQuota = requireNotNull(quota.quotaStatusForUser(fixture.userId, downgradedAt.plusSeconds(4)))
-        assertThat(replayedQuota.bonusLimit).isEqualTo(1_024)
+        ).isZero()
+        val replayedQuota = requireNotNull(
+            quota.quotaStatusForUser(fixture.userId, downgradeRequestedAt.plusSeconds(4)),
+        )
+        assertThat(replayedQuota.tierCode).isEqualTo("TIER3")
+        assertThat(replayedQuota.usedCount).isEqualTo(1)
+        assertThat(replayedQuota.bonusLimit).isEqualTo(25)
 
-        val renewalAt = requireNotNull(tier2Transaction.expiresAt).minusSeconds(1)
+        val renewalAt = requireNotNull(tier3Transaction.expiresAt)
         val renewalTransaction = tier2Transaction.copy(
             transactionId = "tier2-renewal-${fixture.suffix}",
             purchaseAt = renewalAt,
@@ -1702,19 +1729,32 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         ledger.fulfill(renewalInvoice.id, renewalAt.plusSeconds(1))
         val renewedQuota = requireNotNull(quota.quotaStatusForUser(fixture.userId, renewalAt.plusSeconds(2)))
         assertThat(renewedQuota.tierCode).isEqualTo("TIER2")
-        assertThat(renewedQuota.periodStartedAt).isEqualTo(downgradedAt)
+        assertThat(renewedQuota.periodStartedAt).isEqualTo(renewalAt)
         assertThat(renewedQuota.usedCount).isZero()
         assertThat(renewedQuota.reservedCount).isEqualTo(1)
-        assertThat(renewedQuota.bonusLimit).isEqualTo(1_024)
-
-        val nextPeriod = requireNotNull(downgradedQuota.resetAt).plusSeconds(1)
-        val resetQuota = requireNotNull(quota.quotaStatusForUser(fixture.userId, nextPeriod))
-        assertThat(resetQuota.tierCode).isEqualTo("TIER2")
-        assertThat(resetQuota.baseLimit).isEqualTo(300)
-        assertThat(resetQuota.usedCount).isZero()
-        assertThat(resetQuota.reservedCount).isZero()
-        assertThat(resetQuota.bonusLimit).isZero()
-        assertThat(resetQuota.monthlyQuestionLimit).isEqualTo(300)
+        assertThat(renewedQuota.bonusLimit).isZero()
+        assertThat(renewedQuota.monthlyQuestionLimit).isEqualTo(300)
+        assertThat(renewedQuota.policyVersion).isEqualTo(MonthlyQuestionQuotaPolicy.VERSION)
+        assertThat(
+            intValue(
+                "select system_question_count from user_monthly_question_usage " +
+                    "where user_id = ${fixture.userId} order by period_start desc limit 1",
+            ),
+        ).isZero()
+        val renewedEntitlement = requireNotNull(ledger.entitlementForUser(fixture.userId))
+        assertThat(renewedEntitlement.tierCode).isEqualTo("TIER2")
+        assertThat(renewedEntitlement.productId).isEqualTo(fixture.product.productId)
+        assertThat(renewedEntitlement.pendingProductId).isNull()
+        assertThat(
+            longValue(
+                "select count(*) from subscriptions where original_transaction_id = " +
+                    "'${tier3Transaction.originalTransactionId}' and product_id = '${fixture.product.productId}' " +
+                    "and tier_code = 'TIER2' and pending_product_id is null",
+            ),
+        ).isEqualTo(1)
+        assertThat(
+            longValue("select count(*) from quota_ledger where ledger_event_id = 'billing-tier-change:${renewalInvoice.id}'"),
+        ).isEqualTo(1)
     }
 
     @Test
@@ -1847,6 +1887,12 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     private suspend fun longValue(sql: String): Long =
         database.sql(sql)
             .map { row -> row.get(0, java.lang.Long::class.java)!!.toLong() }
+            .one()
+            .awaitSingle()
+
+    private suspend fun intValue(sql: String): Int =
+        database.sql(sql)
+            .map { row -> row.get(0, Integer::class.java)!!.toInt() }
             .one()
             .awaitSingle()
 

@@ -1,7 +1,9 @@
 package com.buddystudy.backend.common.application.quota
 
+import java.time.Instant
+
 object MonthlyQuestionQuotaPolicy {
-    const val VERSION = 3
+    const val VERSION = 4
 
     fun tierRank(tierCode: String?): Int = when (tierCode) {
         "TIER3" -> 3
@@ -12,17 +14,14 @@ object MonthlyQuestionQuotaPolicy {
     fun isDowngrade(previousTierCode: String?, nextTierCode: String?): Boolean =
         tierRank(nextTierCode) < tierRank(previousTierCode)
 
-    fun carriedBonusForTierChange(
-        previousTierRank: Int,
-        nextTierRank: Int,
-        previousBaseLimit: Int,
-        previousBonusLimit: Int,
-        previousCommittedCount: Int,
-    ): Int {
-        if (nextTierRank >= previousTierRank) return 0
+    fun isUpgrade(previousTierCode: String?, nextTierCode: String?): Boolean =
+        tierRank(nextTierCode) > tierRank(previousTierCode)
 
-        return (previousBaseLimit.toLong() + previousBonusLimit - previousCommittedCount)
-            .coerceIn(0L, Int.MAX_VALUE.toLong())
-            .toInt()
-    }
+    fun shouldDeferUntilRenewal(
+        previousTierCode: String?,
+        nextTierCode: String?,
+        currentPlanEndsAt: Instant?,
+        purchasedAt: Instant,
+    ): Boolean = isDowngrade(previousTierCode, nextTierCode) &&
+        (currentPlanEndsAt == null || purchasedAt.isBefore(currentPlanEndsAt))
 }

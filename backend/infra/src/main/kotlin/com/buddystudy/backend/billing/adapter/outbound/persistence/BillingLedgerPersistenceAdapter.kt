@@ -1846,18 +1846,11 @@ class BillingLedgerPersistenceAdapter(
     ) {
         lockBillingAccountForProjection(invoice.userId)
         val previousTierCode = projectedTierCode(invoice.userId)
-        val previousTierRank = MonthlyQuestionQuotaPolicy.tierRank(previousTierCode)
-        val nextTierRank = MonthlyQuestionQuotaPolicy.tierRank(invoice.tierCode)
-        val downgradeSnapshot = if (nextTierRank < previousTierRank) {
-            quotaTransitionSnapshot(invoice.userId, previousTierCode, payment.purchaseAt)
-                ?: throw billingFailure(
-                    ApiErrorCode.INTERNAL_SERVER_ERROR,
-                    "Previous quota could not be locked for a paid tier downgrade.",
-                )
-        } else {
-            null
+        val productApplication = upsertActiveSubscription(invoice, payment, providerEventAt, now)
+        if (productApplication == SubscriptionProductApplication.DOWNGRADE_SCHEDULED) {
+            rebuildEntitlementProjection(invoice.userId, now)
+            return
         }
-        upsertActiveSubscription(invoice, payment, providerEventAt, now)
         if (subscriptionAllowsEntitlement(payment.providerOriginalTransactionId)) {
             upsertActiveMembership(invoice, payment, now)
         } else {
@@ -1870,7 +1863,6 @@ class BillingLedgerPersistenceAdapter(
             resetQuotaForPaidTierChange(
                 invoice = invoice,
                 previousTierCode = previousTierCode,
-                previousQuota = downgradeSnapshot,
                 purchasedAt = payment.purchaseAt,
                 now = now,
             )
@@ -1936,7 +1928,7 @@ class BillingLedgerPersistenceAdapter(
         payment: PaymentEntity,
         providerEventAt: Instant,
         now: Instant,
-    ) {
+    ): SubscriptionProductApplication {
         val ownership = lockSubscriptionOwnership(payment.providerOriginalTransactionId)
         val paymentMatchesLatestTransaction =
             ownership?.latestTransactionId == payment.providerTransactionId
@@ -1952,7 +1944,18 @@ class BillingLedgerPersistenceAdapter(
             !lifecycleProjectionAccepted &&
             ownership?.pendingProductId == payment.productId &&
             ownership.accessStatus in ENTITLEMENT_GRANTING_ACCESS_STATES
-        val productProjectionAccepted = lifecycleProjectionAccepted || pendingTransitionRepairAccepted
+        val downgradeScheduled = ownership != null &&
+            ownership.accessStatus in ENTITLEMENT_GRANTING_ACCESS_STATES &&
+            MonthlyQuestionQuotaPolicy.shouldDeferUntilRenewal(
+                previousTierCode = ownership.tierCode,
+                nextTierCode = invoice.tierCode,
+                currentPlanEndsAt = ownership.expiresAt,
+                purchasedAt = payment.purchaseAt,
+            )
+        val productProjectionAccepted =
+            (lifecycleProjectionAccepted || pendingTransitionRepairAccepted) && !downgradeScheduled
+        val lifecycleStateProjectionAccepted = lifecycleProjectionAccepted && !downgradeScheduled
+        val latestTransactionProjectionAccepted = paymentOwnsProjection && !downgradeScheduled
         database.sql(
             """
             insert into billing_accounts (user_id, app_account_token, status, created_at, updated_at)
@@ -2003,18 +2006,22 @@ class BillingLedgerPersistenceAdapter(
             ) on duplicate key update
                 billing_account_id = if(:paymentOwnsProjection, values(billing_account_id), billing_account_id),
                 user_id = if(:paymentOwnsProjection, values(user_id), user_id),
-                latest_transaction_id = if(:paymentOwnsProjection, values(latest_transaction_id), latest_transaction_id),
+                latest_transaction_id = if(
+                    :latestTransactionProjectionAccepted,
+                    values(latest_transaction_id),
+                    latest_transaction_id
+                ),
                 product_id = if(:productProjectionAccepted, values(product_id), product_id),
                 tier_code = if(:productProjectionAccepted, values(tier_code), tier_code),
-                access_status = if(:lifecycleProjectionAccepted, 'ACTIVE', access_status),
-                renewal_status = if(:lifecycleProjectionAccepted, 'WILL_RENEW', renewal_status),
+                access_status = if(:lifecycleStateProjectionAccepted, 'ACTIVE', access_status),
+                renewal_status = if(:lifecycleStateProjectionAccepted, 'WILL_RENEW', renewal_status),
                 started_at = if(
                     :productProjectionAccepted,
                     least(coalesce(started_at, values(started_at)), values(started_at)),
                     started_at
                 ),
                 expires_at = case
-                    when :lifecycleProjectionAccepted then values(expires_at)
+                    when :lifecycleStateProjectionAccepted then values(expires_at)
                     when :pendingTransitionRepairAccepted then case
                         when expires_at is null then values(expires_at)
                         when values(expires_at) is null then expires_at
@@ -2022,30 +2029,39 @@ class BillingLedgerPersistenceAdapter(
                     end
                     else expires_at
                 end,
-                pending_product_event_at = if(
-                    :productProjectionAccepted and pending_product_id = values(product_id),
-                    null,
-                    pending_product_event_at
+                pending_product_event_at = case
+                    when :downgradeScheduled then greatest(
+                        coalesce(pending_product_event_at, :providerEventAt),
+                        :providerEventAt
+                    )
+                    when :productProjectionAccepted and pending_product_id = values(product_id) then null
+                    else pending_product_event_at
+                end,
+                pending_product_id = case
+                    when :downgradeScheduled then values(product_id)
+                    when :productProjectionAccepted and pending_product_id = values(product_id) then null
+                    else pending_product_id
+                end,
+                next_reconcile_at = if(
+                    :lifecycleStateProjectionAccepted or :downgradeScheduled,
+                    values(next_reconcile_at),
+                    next_reconcile_at
                 ),
-                pending_product_id = if(
-                    :productProjectionAccepted and pending_product_id = values(product_id),
-                    null,
-                    pending_product_id
-                ),
-                next_reconcile_at = if(:lifecycleProjectionAccepted, values(next_reconcile_at), next_reconcile_at),
-                version = if(:productProjectionAccepted, version + 1, version),
-                updated_at = if(:productProjectionAccepted, values(updated_at), updated_at),
+                version = if(:productProjectionAccepted or :downgradeScheduled, version + 1, version),
+                updated_at = if(:productProjectionAccepted or :downgradeScheduled, values(updated_at), updated_at),
                 last_provider_event_at = if(
-                    :lifecycleProjectionAccepted,
+                    :lifecycleStateProjectionAccepted,
                     greatest(coalesce(last_provider_event_at, values(last_provider_event_at)), values(last_provider_event_at)),
                     last_provider_event_at
                 )
             """.trimIndent(),
         ).bind("accountId", accountId).bind("userId", invoice.userId)
             .bind("paymentOwnsProjection", paymentOwnsProjection)
-            .bind("lifecycleProjectionAccepted", lifecycleProjectionAccepted)
+            .bind("lifecycleStateProjectionAccepted", lifecycleStateProjectionAccepted)
+            .bind("latestTransactionProjectionAccepted", latestTransactionProjectionAccepted)
             .bind("pendingTransitionRepairAccepted", pendingTransitionRepairAccepted)
             .bind("productProjectionAccepted", productProjectionAccepted)
+            .bind("downgradeScheduled", downgradeScheduled)
             .bind("originalTransactionId", payment.providerOriginalTransactionId)
             .bind("transactionId", payment.providerTransactionId).bind("productId", payment.productId)
             .bind("tierCode", invoice.tierCode).bind("startedAt", payment.purchaseAt.utc())
@@ -2066,13 +2082,18 @@ class BillingLedgerPersistenceAdapter(
                 .fetch().rowsUpdated().awaitSingle()
             rebuildEntitlementProjection(ownership.userId, now)
         }
+        return if (downgradeScheduled) {
+            SubscriptionProductApplication.DOWNGRADE_SCHEDULED
+        } else {
+            SubscriptionProductApplication.APPLIED
+        }
     }
 
     private suspend fun lockSubscriptionOwnership(originalTransactionId: String): SubscriptionOwnership? =
         database.sql(
             """
-            select s.user_id, s.latest_transaction_id, s.pending_product_id,
-                   s.access_status, s.last_provider_event_at,
+            select s.user_id, s.latest_transaction_id, s.product_id, s.tier_code, s.pending_product_id,
+                   s.access_status, s.expires_at, s.last_provider_event_at,
                    (select p.purchase_at
                     from payments p
                     where p.provider = 'APPLE'
@@ -2088,8 +2109,11 @@ class BillingLedgerPersistenceAdapter(
                     userId = row.get("user_id", java.lang.Long::class.java)?.toLong(),
                     latestTransactionId = row.nullableString("latest_transaction_id"),
                     latestPurchaseAt = row.nullableInstant("latest_purchase_at"),
+                    productId = row.nullableString("product_id"),
+                    tierCode = row.nullableString("tier_code"),
                     pendingProductId = row.nullableString("pending_product_id"),
                     accessStatus = row.string("access_status"),
+                    expiresAt = row.nullableInstant("expires_at"),
                     lastProviderEventAt = row.nullableInstant("last_provider_event_at"),
                 )
             }.one().awaitSingleOrNull()
@@ -2341,45 +2365,9 @@ class BillingLedgerPersistenceAdapter(
             .bind("now", now.utc()).bind("userId", userId).fetch().rowsUpdated().awaitSingle()
     }
 
-    private suspend fun quotaTransitionSnapshot(
-        userId: Long,
-        tierCode: String,
-        purchasedAt: Instant,
-    ): QuotaTransitionSnapshot? {
-        val accountAnchor = database.sql(
-            "select anchor_at from quota_accounts where user_id = :userId for update",
-        ).bind("userId", userId)
-            .map { row, _ -> row.instant("anchor_at") }
-            .one().awaitSingleOrNull() ?: return null
-        val snapshotAt = purchasedAt.minusNanos(1).takeUnless { it.isBefore(accountAnchor) } ?: accountAnchor
-        val previousWindow = MonthlyQuotaWindow.periodAt(accountAnchor, snapshotAt)
-        val baseLimit = database.sql(
-            "select monthly_question_limit from user_membership_tiers where tier_code = :tierCode",
-        ).bind("tierCode", tierCode)
-            .map { row, _ -> row.int("monthly_question_limit") }
-            .one().awaitSingleOrNull() ?: return null
-        val counters = database.sql(
-            """
-            select committed_count, bonus_count
-            from quota_periods
-            where user_id = :userId and period_started_at = :periodStartedAt
-            for update
-            """.trimIndent(),
-        ).bind("userId", userId).bind("periodStartedAt", previousWindow.startedAt.utc())
-            .map { row, _ -> row.int("committed_count") to row.int("bonus_count") }
-            .one().awaitSingleOrNull() ?: (0 to 0)
-        return QuotaTransitionSnapshot(
-            baseLimit = baseLimit,
-            committedCount = counters.first,
-            bonusCount = counters.second,
-            periodStartedAt = previousWindow.startedAt,
-        )
-    }
-
     private suspend fun resetQuotaForPaidTierChange(
         invoice: InvoiceEntity,
         previousTierCode: String,
-        previousQuota: QuotaTransitionSnapshot?,
         purchasedAt: Instant,
         now: Instant,
     ) {
@@ -2404,14 +2392,6 @@ class BillingLedgerPersistenceAdapter(
         val previousAt = purchasedAt.minusNanos(1).takeUnless { it.isBefore(accountAnchor) } ?: accountAnchor
         val previousWindow = MonthlyQuotaWindow.periodAt(accountAnchor, previousAt)
         val changedWindow = MonthlyQuotaWindow.periodAt(purchasedAt, purchasedAt)
-        val previousPeriodStartedAt = previousQuota?.periodStartedAt ?: previousWindow.startedAt
-        val carriedBonus = MonthlyQuestionQuotaPolicy.carriedBonusForTierChange(
-            previousTierRank = MonthlyQuestionQuotaPolicy.tierRank(previousTierCode),
-            nextTierRank = MonthlyQuestionQuotaPolicy.tierRank(invoice.tierCode),
-            previousBaseLimit = previousQuota?.baseLimit ?: 0,
-            previousBonusLimit = previousQuota?.bonusCount ?: 0,
-            previousCommittedCount = previousQuota?.committedCount ?: 0,
-        )
 
         database.sql(
             """
@@ -2437,7 +2417,7 @@ class BillingLedgerPersistenceAdapter(
                 where r.user_id = :userId and p.period_started_at = :previousStart and r.status = 'RESERVED'
                 """.trimIndent(),
             ).bind("newPeriodId", changedPeriodId).bind("now", now.utc()).bind("userId", invoice.userId)
-                .bind("previousStart", previousPeriodStartedAt.utc())
+                .bind("previousStart", previousWindow.startedAt.utc())
                 .fetch().rowsUpdated().awaitSingle()
             database.sql(
                 """
@@ -2446,7 +2426,7 @@ class BillingLedgerPersistenceAdapter(
                 where user_id = :userId and period_started_at = :previousStart
                 """.trimIndent(),
             ).bind("now", now.utc()).bind("userId", invoice.userId)
-                .bind("previousStart", previousPeriodStartedAt.utc())
+                .bind("previousStart", previousWindow.startedAt.utc())
                 .fetch().rowsUpdated().awaitSingle()
         }
         val reservedCount = database.sql(
@@ -2460,7 +2440,7 @@ class BillingLedgerPersistenceAdapter(
                 policy_version = :policyVersion, updated_at = :now
             where id = :periodId
             """.trimIndent(),
-        ).bind("reservedCount", reservedCount).bind("bonusCount", carriedBonus)
+        ).bind("reservedCount", reservedCount).bind("bonusCount", 0)
             .bind("policyVersion", MonthlyQuestionQuotaPolicy.VERSION)
             .bind("now", now.utc()).bind("periodId", changedPeriodId)
             .fetch().rowsUpdated().awaitSingle()
@@ -2483,8 +2463,8 @@ class BillingLedgerPersistenceAdapter(
             ) values (:eventId, :userId, :periodId, null, 'MIGRATION_ADJUSTMENT', 0, 0, :bonusDelta, :reason, :now, :now)
             """.trimIndent(),
         ).bind("eventId", ledgerEventId).bind("userId", invoice.userId).bind("periodId", changedPeriodId)
-            .bind("bonusDelta", carriedBonus)
-            .bind("reason", "Immediate quota reset for paid tier change $previousTierCode -> ${invoice.tierCode}")
+            .bind("bonusDelta", 0)
+            .bind("reason", "Quota reset for effective paid tier change $previousTierCode -> ${invoice.tierCode}")
             .bind("now", now.utc()).fetch().rowsUpdated().awaitSingle()
         database.sql(
             """
@@ -2499,13 +2479,6 @@ class BillingLedgerPersistenceAdapter(
             .bind("startedAt", changedWindow.startedAt.utc()).bind("now", now.utc())
             .fetch().rowsUpdated().awaitSingle()
     }
-
-    private data class QuotaTransitionSnapshot(
-        val baseLimit: Int,
-        val committedCount: Int,
-        val bonusCount: Int,
-        val periodStartedAt: Instant,
-    )
 
     private suspend fun insertBillingJob(invoiceId: Long, paymentId: Long, type: BillingJobType, now: Instant) {
         database.sql(
@@ -3220,10 +3193,17 @@ class BillingLedgerPersistenceAdapter(
         val userId: Long?,
         val latestTransactionId: String?,
         val latestPurchaseAt: Instant?,
+        val productId: String?,
+        val tierCode: String?,
         val pendingProductId: String?,
         val accessStatus: String,
+        val expiresAt: Instant?,
         val lastProviderEventAt: Instant?,
     )
+    private enum class SubscriptionProductApplication {
+        APPLIED,
+        DOWNGRADE_SCHEDULED,
+    }
     private data class ActiveSubscriptionProjection(
         val id: Long,
         val tierCode: String,

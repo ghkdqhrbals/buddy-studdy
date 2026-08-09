@@ -21,9 +21,10 @@ The membership screen uses `GET /api/v1/billing/status` as its only entitlement
 and quota authority. RevenueCat `CustomerInfo` is used by the SDK only for
 products, purchase, restore, and Customer Center. Selecting another product in
 the same App Store subscription group supports upgrades, crossgrades, and
-downgrades. A requested change is only a schedule until a verified transaction
-for the new product is fulfilled; that transaction changes the server-owned
-tier immediately. When RevenueCat is
+downgrades. A verified higher-tier transaction changes the server-owned tier
+immediately. A lower-tier selection remains a pending change while the current
+higher-tier period is active; only the first verified lower-tier renewal at or
+after `currentPlanEndsAt` applies it. When RevenueCat is
 enabled, the visible cancellation action opens Customer Center for App Store
 subscriptions. Apple's native subscription management is the fallback when
 RevenueCat is unavailable. Apple, not BuddyStudy or RevenueCat, makes the final
@@ -485,37 +486,37 @@ subscriptions daily. Customer-support refund notices force reconciliation so a
 historical refund cannot revoke a newer valid subscription. If multiple valid
 subscriptions exist, the highest tier wins and limits are never added together.
 
-### Monthly question policy v3
+### Monthly question policy v4
 
 The monthly window starts at account creation until a verified paid purchase.
-An initial paid purchase or a verified paid tier change starts a new question
-window at the provider `purchasedAt` timestamp and resets committed usage to
-zero. UTC month arithmetic preserves that new anchor day, including January 31
-→ February end → March 31. A same-tier renewal is idempotent and does not open a
-second window; the normal monthly boundary performs the next reset.
+An initial paid purchase, an effective upgrade, or an effective downgrade starts
+a new question window at the provider `purchasedAt` timestamp. UTC month
+arithmetic preserves that new anchor day, including January 31 → February end
+→ March 31. A same-tier renewal is idempotent and does not open a second
+window; the normal monthly boundary performs the next reset.
 
 Tier changes use these rules:
 
-- Upgrade: the higher tier applies immediately, committed usage starts at zero,
-  and no unused allowance is carried.
-- Downgrade: the lower tier applies immediately. The previous tier's unused
-  allowance is represented by a one-window `bonus_count`, so visible capacity
-  for that window is `new tier base + previous visible remainder`.
-- The stored carry credit is `max(0, previous base + previous bonus - previous
-  committed)`. Active reservations move to the new window and remain reserved,
-  so the visible inherited remainder is that credit minus the same reservations;
-  they are neither lost nor granted twice.
-- The downgrade carry expires at the next monthly boundary. Only the lower
-  tier's base allowance remains after that reset.
-- Each invoice can apply this transition once through its unique
+- Upgrade: the higher tier applies immediately. Committed usage and bonus are
+  reset to zero and the new higher-tier base limit becomes available. Active
+  in-flight reservations move to the new window and remain reserved.
+- Downgrade request before `currentPlanEndsAt`: the higher tier, quota window,
+  committed usage, bonus, and active reservations remain unchanged. Only
+  `pending_product_id` and the exact transition boundary are exposed.
+- First verified lower-tier renewal at or after `currentPlanEndsAt`: the lower
+  tier becomes effective and a new lower-tier window starts with committed usage
+  and bonus reset to zero. Active in-flight reservations remain reserved.
+- No unused allowance is carried in either direction.
+- Each effective invoice can apply its transition once through its unique
   `billing-tier-change:{invoiceId}` quota-ledger event. Client confirmation,
   webhook delivery, reconciliation, and replay therefore converge without a
-  second reset or duplicate carry.
+  second reset. A deferred downgrade creates no quota-ledger transition until
+  its renewal transaction becomes effective.
 
-Example: a TIER3 user with a base of 1,000, a bonus of 25, 100 committed
-questions, and 5 reserved questions has 920 unused questions. An immediate
-change to TIER2 starts with 300 + 920 usable capacity for that window; after the
-next monthly reset, the allowance is the normal TIER2 base of 300.
+Example: a TIER3 user with 100 committed questions and 5 reservations selects
+TIER2. Until the TIER3 period ends, the user keeps TIER3 and the same counters.
+At the first verified TIER2 renewal, the new TIER2 window has a base of 300,
+zero committed questions, zero bonus, and the same 5 in-flight reservations.
 
 Question generation uses its Saga correlation ID as an exactly-once quota key:
 
@@ -530,8 +531,9 @@ No reset batch exists. The current window is calculated from the current quota
 anchor, and a period row is created lazily on the first reservation or bonus.
 Remaining quota is `max(0, base tier limit + current-period bonus - committed -
 reserved)`. Administrative bonuses are append-only
-`BONUS_GRANT`/`BONUS_REVOKE` ledger events, while a downgrade carry is recorded
-as one `MIGRATION_ADJUSTMENT`; both expire with their period.
+`BONUS_GRANT`/`BONUS_REVOKE` ledger events and expire with their period. Paid
+tier transitions record an idempotent zero-delta `MIGRATION_ADJUSTMENT` as the
+reset marker.
 
 Every five minutes the backend records `billing_lifecycle_metrics` for webhook
 lag, entitlement mismatch, exhausted reconciliation, stale reservations,
