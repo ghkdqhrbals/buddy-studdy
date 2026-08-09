@@ -5,6 +5,7 @@ import com.buddystudy.backend.admin.management.application.model.AdminUserPageRe
 import com.buddystudy.backend.admin.management.application.model.AdminUserSummary
 import com.buddystudy.backend.admin.management.application.model.AssignUserPlanCommand
 import com.buddystudy.backend.admin.management.application.port.outbound.AdminManagementPort
+import com.buddystudy.backend.common.application.quota.MonthlyQuestionQuotaPolicy
 import com.buddystudy.backend.common.application.quota.MonthlyQuotaWindow
 import io.r2dbc.spi.Row
 import kotlinx.coroutines.reactive.awaitSingle
@@ -197,7 +198,7 @@ class AdminManagementPersistenceAdapter(
             coalesce(t.description, fallback_tier.description, '') as tier_description,
             coalesce(t.monthly_question_limit, fallback_tier.monthly_question_limit, 30) as monthly_limit,
             coalesce(qa.anchor_at, u.created_at) as quota_anchor_at,
-            coalesce(qa.policy_version, 2) as quota_policy_version,
+            coalesce(qa.policy_version, ${MonthlyQuestionQuotaPolicy.VERSION}) as quota_policy_version,
             d.app_version,
             d.app_build,
             d.app_version_seen_at
@@ -318,7 +319,7 @@ class AdminManagementPersistenceAdapter(
         val committedCount: Int = 0,
         val reservedCount: Int = 0,
         val bonusCount: Int = 0,
-        val policyVersion: Int = 2,
+        val policyVersion: Int = MonthlyQuestionQuotaPolicy.VERSION,
     )
 
     private fun Row.string(name: String): String = get(name, String::class.java).orEmpty()

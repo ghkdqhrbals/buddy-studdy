@@ -1178,6 +1178,10 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
 
         val renewedStatus = requireNotNull(quota.quotaStatusForUser(fixture.userId, renewalAt.plusSeconds(2)))
         assertThat(renewedStatus.usedCount).isZero()
+        assertThat(renewedStatus.reservedCount).isEqualTo(1)
+        assertThat(renewedStatus.baseLimit).isEqualTo(300)
+        assertThat(renewedStatus.bonusLimit).isEqualTo(20)
+        assertThat(renewedStatus.monthlyQuestionLimit).isEqualTo(320)
         assertThat(renewedStatus.periodStartedAt).isEqualTo(fixture.now)
         assertThat(
             database.sql("select first_paid_at from quota_accounts where user_id = :userId")
@@ -1392,14 +1396,189 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
 
         ledger.fulfill(tier3Invoice.id, tier3PurchasedAt.plusSeconds(3))
         assertThat(
-            longValue("select count(*) from quota_ledger where ledger_event_id = 'billing-tier-upgrade:${tier3Invoice.id}'"),
+            longValue("select count(*) from quota_ledger where ledger_event_id = 'billing-tier-change:${tier3Invoice.id}'"),
         ).isEqualTo(1)
         assertThat(requireNotNull(quota.quotaStatusForUser(fixture.userId, tier3PurchasedAt.plusSeconds(4))).usedCount)
             .isZero()
     }
 
     @Test
-    fun `late older purchase moves the lifetime anchor backward without losing usage`(): Unit = runBlocking {
+    fun `same-chain downgrade immediately switches tier and carries remaining quota for one period`(): Unit = runBlocking {
+        val fixture = fixture("same-chain-downgrade")
+        val tier3 = requireNotNull(
+            ledger.enabledTierProduct("io.github.ghkdqhrbals.StudyMate.tier3.monthly"),
+        )
+        val tier3Checkout = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            tier3,
+            "tier3-${fixture.suffix}",
+            fixture.now,
+        )
+        val tier3Transaction = fixture.transaction().copy(
+            productId = tier3.productId,
+            productType = tier3.productType,
+            priceMilliunits = 17_900_000,
+        )
+        val tier3Invoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                tier3,
+                tier3Transaction,
+                tier3Checkout.invoiceNumber,
+                BillingEventSource.CLIENT,
+                "tier3-payment-${fixture.suffix}",
+                fixture.now,
+            ),
+        )
+        ledger.fulfill(tier3Invoice.id, fixture.now.plusSeconds(1))
+
+        val committedKey = "downgrade-committed-${fixture.suffix}"
+        assertThat(
+            quota.reserveMonthlySystemQuestion(
+                fixture.userId,
+                fixture.now.plusSeconds(2),
+                committedKey,
+                committedKey,
+                fixture.now.plusSeconds(2),
+            ),
+        ).isTrue()
+        quota.commitMonthlySystemQuestion(committedKey, fixture.now.plusSeconds(3))
+        val reservedKey = "downgrade-reserved-${fixture.suffix}"
+        assertThat(
+            quota.reserveMonthlySystemQuestion(
+                fixture.userId,
+                fixture.now.plusSeconds(4),
+                reservedKey,
+                reservedKey,
+                fixture.now.plusSeconds(4),
+            ),
+        ).isTrue()
+        ledger.adminAdjustQuota(
+            fixture.userId,
+            25,
+            "support bonus before downgrade",
+            "downgrade-bonus-${fixture.suffix}",
+            fixture.now.plusSeconds(5),
+        )
+        val beforeDowngrade = requireNotNull(quota.quotaStatusForUser(fixture.userId, fixture.now.plusSeconds(6)))
+        assertThat(beforeDowngrade.tierCode).isEqualTo("TIER3")
+        assertThat(beforeDowngrade.baseLimit).isEqualTo(1_000)
+        assertThat(beforeDowngrade.bonusLimit).isEqualTo(25)
+        assertThat(beforeDowngrade.usedCount).isEqualTo(1)
+        assertThat(beforeDowngrade.reservedCount).isEqualTo(1)
+
+        val productChangeAt = fixture.now.plusSeconds(90)
+        val productChangeEventId = "downgrade-product-change-${fixture.suffix}"
+        createdRevenueCatEventIds += productChangeEventId
+        val productChange = fixture.revenueCatLifecycleEvent(
+            productChangeEventId,
+            "PRODUCT_CHANGE",
+            tier3Transaction.copy(productId = fixture.product.productId),
+            productChangeAt,
+            productOverride = fixture.product,
+        )
+        assertThat(ledger.recordRevenueCatEvent(productChange, productChangeAt)).isTrue()
+        assertThat(ledger.applyRevenueCatEvent(productChange, productChangeAt)).isTrue()
+
+        val downgradedAt = fixture.now.plusSeconds(100)
+        val tier2Transaction = tier3Transaction.copy(
+            transactionId = "tier2-downgrade-${fixture.suffix}",
+            productId = fixture.product.productId,
+            productType = fixture.product.productType,
+            priceMilliunits = 7_900_000,
+            purchaseAt = downgradedAt,
+            expiresAt = downgradedAt.plusSeconds(2_592_000),
+            signedAt = downgradedAt,
+        )
+        val tier2Invoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                fixture.product,
+                tier2Transaction,
+                null,
+                BillingEventSource.REVENUECAT_WEBHOOK,
+                "tier2-downgrade-payment-${fixture.suffix}",
+                downgradedAt,
+            ),
+        )
+        ledger.fulfill(tier2Invoice.id, downgradedAt.plusSeconds(1))
+
+        assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER2")
+        val downgradedQuota = requireNotNull(quota.quotaStatusForUser(fixture.userId, downgradedAt.plusSeconds(2)))
+        assertThat(downgradedQuota.tierCode).isEqualTo("TIER2")
+        assertThat(downgradedQuota.baseLimit).isEqualTo(300)
+        assertThat(downgradedQuota.usedCount).isZero()
+        assertThat(downgradedQuota.reservedCount).isEqualTo(1)
+        assertThat(downgradedQuota.bonusLimit).isEqualTo(1_024)
+        assertThat(downgradedQuota.monthlyQuestionLimit).isEqualTo(1_324)
+        assertThat(downgradedQuota.monthlyQuestionLimit - downgradedQuota.usedCount - downgradedQuota.reservedCount)
+            .isEqualTo(1_323)
+        assertThat(downgradedQuota.periodStartedAt).isEqualTo(downgradedAt)
+        assertThat(downgradedQuota.policyVersion).isEqualTo(3)
+        assertThat(
+            database.sql(
+                "select reserved_count from quota_periods where user_id = :userId and period_started_at = :startedAt",
+            ).bind("userId", fixture.userId)
+                .bind(
+                    "startedAt",
+                    java.time.LocalDateTime.ofInstant(beforeDowngrade.periodStartedAt, java.time.ZoneOffset.UTC),
+                )
+                .map { row, _ -> row.get("reserved_count", Integer::class.java)?.toInt() ?: 0 }
+                .one().awaitSingle(),
+        ).isZero()
+        assertThat(
+            longValue(
+                "select count(*) from subscriptions where original_transaction_id = " +
+                    "'${tier3Transaction.originalTransactionId}' and pending_product_id is not null",
+            ),
+        ).isZero()
+
+        ledger.fulfill(tier2Invoice.id, downgradedAt.plusSeconds(3))
+        assertThat(
+            longValue("select count(*) from quota_ledger where ledger_event_id = 'billing-tier-change:${tier2Invoice.id}'"),
+        ).isEqualTo(1)
+        val replayedQuota = requireNotNull(quota.quotaStatusForUser(fixture.userId, downgradedAt.plusSeconds(4)))
+        assertThat(replayedQuota.bonusLimit).isEqualTo(1_024)
+
+        val renewalAt = requireNotNull(tier2Transaction.expiresAt).minusSeconds(1)
+        val renewalTransaction = tier2Transaction.copy(
+            transactionId = "tier2-renewal-${fixture.suffix}",
+            purchaseAt = renewalAt,
+            expiresAt = renewalAt.plusSeconds(2_592_000),
+            signedAt = renewalAt,
+        )
+        val renewalInvoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                fixture.product,
+                renewalTransaction,
+                null,
+                BillingEventSource.REVENUECAT_WEBHOOK,
+                "tier2-renewal-payment-${fixture.suffix}",
+                renewalAt,
+            ),
+        )
+        ledger.fulfill(renewalInvoice.id, renewalAt.plusSeconds(1))
+        val renewedQuota = requireNotNull(quota.quotaStatusForUser(fixture.userId, renewalAt.plusSeconds(2)))
+        assertThat(renewedQuota.tierCode).isEqualTo("TIER2")
+        assertThat(renewedQuota.periodStartedAt).isEqualTo(downgradedAt)
+        assertThat(renewedQuota.usedCount).isZero()
+        assertThat(renewedQuota.reservedCount).isEqualTo(1)
+        assertThat(renewedQuota.bonusLimit).isEqualTo(1_024)
+
+        val nextPeriod = requireNotNull(downgradedQuota.resetAt).plusSeconds(1)
+        val resetQuota = requireNotNull(quota.quotaStatusForUser(fixture.userId, nextPeriod))
+        assertThat(resetQuota.tierCode).isEqualTo("TIER2")
+        assertThat(resetQuota.baseLimit).isEqualTo(300)
+        assertThat(resetQuota.usedCount).isZero()
+        assertThat(resetQuota.reservedCount).isZero()
+        assertThat(resetQuota.bonusLimit).isZero()
+        assertThat(resetQuota.monthlyQuestionLimit).isEqualTo(300)
+    }
+
+    @Test
+    fun `late earlier initial purchase corrects the first paid anchor without losing usage`(): Unit = runBlocking {
         val fixture = fixture("late-first-paid")
         val initialInvoice = ledger.recordVerifiedPayment(
             RecordVerifiedPaymentCommand(

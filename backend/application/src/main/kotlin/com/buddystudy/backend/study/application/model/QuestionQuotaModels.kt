@@ -1,5 +1,6 @@
 package com.buddystudy.backend.study.application.model
 
+import com.buddystudy.backend.common.application.quota.MonthlyQuestionQuotaPolicy
 import java.time.Instant
 
 data class QuestionQuotaResponse(
@@ -13,5 +14,5 @@ data class QuestionQuotaResponse(
     val baseLimit: Int = monthlyLimit,
     val bonusLimit: Int = 0,
     val anchorType: String = "ACCOUNT_CREATED",
-    val policyVersion: Int = 2,
+    val policyVersion: Int = MonthlyQuestionQuotaPolicy.VERSION,
 )

@@ -2827,7 +2827,13 @@ struct AppStrings {
         return text("\(tierName) 변경하기", "Switch to \(tierName)", "\(tierName)に変更")
     }
     var membershipChangePending: String { text("App Store에서 변경 일정을 확인할 수 있습니다.", "Review the change schedule in the App Store.", "App Storeで変更予定を確認できます。") }
-    var downgradeMembershipNotice: String { text("낮은 멤버십은 현재 결제 기간이 끝난 뒤 적용됩니다.", "A downgrade takes effect after the current billing period.", "ダウングレードは現在の請求期間終了後に適用されます。") }
+    var downgradeMembershipNotice: String {
+        text(
+            "App Store에서 변경 결제가 확인되면 낮은 멤버십이 즉시 적용되고, 남은 질문은 이번 기간에 이어서 사용할 수 있습니다.",
+            "Once the App Store confirms the plan change, the lower tier applies immediately and your remaining questions carry into this period.",
+            "App Storeでプラン変更が確認されると下位メンバーシップがすぐに適用され、残りの質問数は今回の期間に引き継がれます。"
+        )
+    }
     var membershipChangeSchedule: String { text("변경 일정", "Plan timeline", "変更スケジュール") }
     var currentPlanPeriod: String { text("현재", "Current", "現在") }
     var nextPlanPeriod: String { text("다음", "Next", "次回") }
@@ -4137,11 +4143,15 @@ struct MembershipPlanTransition: Equatable {
 struct MembershipPlanTimelinePolicy {
     static func resolve(
         status: BackendBillingStatus,
-        catalogProducts: [BackendBillingTierProduct]
+        catalogProducts: [BackendBillingTierProduct],
+        at now: Date = Date()
     ) -> MembershipPlanTransition? {
         guard status.isEntitlementActive else { return nil }
 
-        if let transition = status.planTransition {
+        if let transition = status.planTransition,
+           tierRank(transition.nextTierCode) < tierRank(transition.currentTierCode),
+           transition.currentPlanEndsAt > now,
+           transition.nextPlanStartsAt > now {
             return MembershipPlanTransition(
                 currentTierCode: transition.currentTierCode,
                 currentPlanEndsAt: transition.currentPlanEndsAt,
@@ -4151,10 +4161,10 @@ struct MembershipPlanTimelinePolicy {
         }
 
         // Compatibility with a backend version that only exposes the pending product ID.
-        guard let changesAt = status.expiresAt else { return nil }
+        guard let changesAt = status.expiresAt, changesAt > now else { return nil }
         if let pendingProductID = status.pendingChange,
            let nextProduct = catalogProducts.first(where: { $0.productId == pendingProductID }),
-           nextProduct.tierCode != status.tierCode {
+           tierRank(nextProduct.tierCode) < tierRank(status.tierCode) {
             return MembershipPlanTransition(
                 currentTierCode: status.tierCode,
                 currentPlanEndsAt: changesAt,
@@ -4173,6 +4183,14 @@ struct MembershipPlanTimelinePolicy {
             )
         }
         return nil
+    }
+
+    private static func tierRank(_ tierCode: String) -> Int {
+        switch tierCode.uppercased() {
+        case "TIER3": return 3
+        case "TIER2": return 2
+        default: return 1
+        }
     }
 }
 

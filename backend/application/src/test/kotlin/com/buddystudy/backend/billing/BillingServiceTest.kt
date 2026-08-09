@@ -116,6 +116,31 @@ class BillingServiceTest {
     }
 
     @Test
+    fun `pending upgrade is not exposed as a future plan transition`() = runBlocking {
+        val changesAt = Instant.parse("2026-09-02T00:00:00Z")
+        val tier2ProductId = product.productId
+        val tier3Product = product.copy(
+            tierCode = "TIER3",
+            monthlyQuestionLimit = 1_000,
+            productId = "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+            sortOrder = 30,
+        )
+        val ledger = FakeLedger(token, tier3Product).apply {
+            projectedEntitlement = projectedEntitlement?.copy(
+                tierCode = "TIER2",
+                productId = tier2ProductId,
+                expiresAt = changesAt,
+                pendingProductId = tier3Product.productId,
+            )
+        }
+
+        val status = service(ledger).status(principal())
+
+        assertEquals(null, status.planTransition)
+        assertEquals(null, status.pendingChange)
+    }
+
+    @Test
     fun `cancelled subscription status shows the free plan after expiry`() = runBlocking {
         val changesAt = Instant.parse("2026-09-02T00:00:00Z")
         val ledger = FakeLedger(token, product).apply {
@@ -132,6 +157,29 @@ class BillingServiceTest {
         assertEquals("TIER2", status.planTransition?.currentTierCode)
         assertEquals("TIER1", status.planTransition?.nextTierCode)
         assertEquals(changesAt, status.planTransition?.nextPlanStartsAt)
+    }
+
+    @Test
+    fun `already effective product change is not exposed as a future transition`() = runBlocking {
+        val ledger = FakeLedger(token, product).apply {
+            projectedEntitlement = BillingEntitlementProjection(
+                tierCode = "TIER3",
+                source = EntitlementSource.APP_STORE,
+                accessStatus = SubscriptionAccessStatus.GRACE_PERIOD,
+                renewalStatus = SubscriptionRenewalStatus.WILL_RENEW,
+                productId = "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                startedAt = now.minusSeconds(2_592_000),
+                expiresAt = now.minusSeconds(1),
+                willRenew = true,
+                pendingProductId = product.productId,
+                synchronizedAt = now,
+            )
+        }
+
+        val status = service(ledger).status(principal())
+
+        assertEquals(null, status.planTransition)
+        assertEquals(null, status.pendingChange)
     }
 
     @Test

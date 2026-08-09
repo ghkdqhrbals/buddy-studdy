@@ -19,20 +19,26 @@ as a failed payment.
 
 The membership screen uses `GET /api/v1/billing/status` as its only entitlement
 and quota authority. RevenueCat `CustomerInfo` is used by the SDK only for
-products, purchase, restore, and Customer Center. Selecting another product in the same App Store
-subscription group supports upgrades, crossgrades, and downgrades; a downgrade
-takes effect at the next renewal according to Apple's rules. When RevenueCat is
+products, purchase, restore, and Customer Center. Selecting another product in
+the same App Store subscription group supports upgrades, crossgrades, and
+downgrades. A requested change is only a schedule until a verified transaction
+for the new product is fulfilled; that transaction changes the server-owned
+tier immediately. When RevenueCat is
 enabled, the visible cancellation action opens Customer Center for App Store
 subscriptions. Apple's native subscription management is the fallback when
 RevenueCat is unavailable. Apple, not BuddyStudy or RevenueCat, makes the final
 decision for an Apple refund.
 
-When a downgrade or cancellation is scheduled, the status response includes a
+When a future downgrade or cancellation is scheduled, the status response includes a
 structured `planTransition`. It names the current and next tiers and gives the
 exact shared boundary as `currentPlanEndsAt` and `nextPlanStartsAt`. iOS renders
-that projection as a compact timeline; it does not infer dates from RevenueCat
-or the local StoreKit state. The legacy `pendingChange` product ID remains for
-older clients.
+that projection, including the local date, hour, and minute, as a compact
+timeline; it does not infer dates from RevenueCat or the local StoreKit state.
+Only future downgrades and cancellations appear in this timeline. A pending
+upgrade is not presented as a future change because a verified upgrade payment
+must apply the higher tier immediately. Expired or already-effective schedules
+are omitted. The legacy `pendingChange` product ID remains for older clients and
+follows the same rules.
 
 ## Product catalog
 
@@ -74,7 +80,7 @@ or has a different product type is rejected before an invoice is written.
   `subscriptions` projects one Apple `originalTransactionId` each.
 - `user_entitlement_projection` selects the single highest currently valid tier
   without summing duplicate subscriptions.
-- `quota_accounts` stores the immutable account-created or first-paid anchor.
+- `quota_accounts` stores the current monthly anchor and quota policy version.
   `quota_periods` is the current projection, while `quota_reservations` and
   `quota_ledger` provide idempotent reserve/commit/release accounting.
 
@@ -479,13 +485,37 @@ subscriptions daily. Customer-support refund notices force reconciliation so a
 historical refund cannot revoke a newer valid subscription. If multiple valid
 subscriptions exist, the highest tier wins and limits are never added together.
 
-The monthly window starts at account creation until the first verified paid
-purchase. That purchase's provider `purchasedAt` becomes `first_paid_at` once
-and remains the lifetime anchor through renewal, cancellation, expiration,
-refund, plan change, and resubscription. Existing usage and in-flight
-reservations move to the reprojected current window; purchase never resets them.
-UTC month arithmetic preserves the original anchor day, including
-January 31 → February end → March 31.
+### Monthly question policy v3
+
+The monthly window starts at account creation until a verified paid purchase.
+An initial paid purchase or a verified paid tier change starts a new question
+window at the provider `purchasedAt` timestamp and resets committed usage to
+zero. UTC month arithmetic preserves that new anchor day, including January 31
+→ February end → March 31. A same-tier renewal is idempotent and does not open a
+second window; the normal monthly boundary performs the next reset.
+
+Tier changes use these rules:
+
+- Upgrade: the higher tier applies immediately, committed usage starts at zero,
+  and no unused allowance is carried.
+- Downgrade: the lower tier applies immediately. The previous tier's unused
+  allowance is represented by a one-window `bonus_count`, so visible capacity
+  for that window is `new tier base + previous visible remainder`.
+- The stored carry credit is `max(0, previous base + previous bonus - previous
+  committed)`. Active reservations move to the new window and remain reserved,
+  so the visible inherited remainder is that credit minus the same reservations;
+  they are neither lost nor granted twice.
+- The downgrade carry expires at the next monthly boundary. Only the lower
+  tier's base allowance remains after that reset.
+- Each invoice can apply this transition once through its unique
+  `billing-tier-change:{invoiceId}` quota-ledger event. Client confirmation,
+  webhook delivery, reconciliation, and replay therefore converge without a
+  second reset or duplicate carry.
+
+Example: a TIER3 user with a base of 1,000, a bonus of 25, 100 committed
+questions, and 5 reserved questions has 920 unused questions. An immediate
+change to TIER2 starts with 300 + 920 usable capacity for that window; after the
+next monthly reset, the allowance is the normal TIER2 base of 300.
 
 Question generation uses its Saga correlation ID as an exactly-once quota key:
 
@@ -496,12 +526,12 @@ Question generation uses its Saga correlation ID as an exactly-once quota key:
    the appropriate counter.
 4. Replayed requests return the existing reservation result.
 
-No reset batch exists. The current window is calculated from the immutable
+No reset batch exists. The current window is calculated from the current quota
 anchor, and a period row is created lazily on the first reservation or bonus.
 Remaining quota is `max(0, base tier limit + current-period bonus - committed -
-reserved)`. Upgrades therefore increase capacity without clearing usage;
-downgrades, expiration, or refund lower only the limit. Bonuses are append-only
-`BONUS_GRANT`/`BONUS_REVOKE` ledger events and expire with their period.
+reserved)`. Administrative bonuses are append-only
+`BONUS_GRANT`/`BONUS_REVOKE` ledger events, while a downgrade carry is recorded
+as one `MIGRATION_ADJUSTMENT`; both expire with their period.
 
 Every five minutes the backend records `billing_lifecycle_metrics` for webhook
 lag, entitlement mismatch, exhausted reconciliation, stale reservations,

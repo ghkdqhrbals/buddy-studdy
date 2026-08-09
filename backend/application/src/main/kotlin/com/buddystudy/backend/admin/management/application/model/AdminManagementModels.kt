@@ -1,5 +1,6 @@
 package com.buddystudy.backend.admin.management.application.model
 
+import com.buddystudy.backend.common.application.quota.MonthlyQuestionQuotaPolicy
 import com.buddystudy.backend.common.application.model.PageResponse
 import java.time.Instant
 
@@ -19,7 +20,7 @@ data class AdminUserSummary(
     val usedCount: Int,
     val reservedCount: Int = 0,
     val remainingCount: Int,
-    val quotaPolicyVersion: Int = 2,
+    val quotaPolicyVersion: Int = MonthlyQuestionQuotaPolicy.VERSION,
     val periodStartedAt: Instant,
     val resetAt: Instant,
     val createdAt: Instant,

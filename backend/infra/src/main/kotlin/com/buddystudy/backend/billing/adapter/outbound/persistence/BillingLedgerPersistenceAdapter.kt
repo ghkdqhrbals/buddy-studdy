@@ -29,6 +29,7 @@ import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPor
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.common.application.quota.MonthlyQuotaWindow
+import com.buddystudy.backend.common.application.quota.MonthlyQuestionQuotaPolicy
 import com.buddystudy.billing.domain.BillingActionStatus
 import com.buddystudy.billing.domain.BillingActionType
 import com.buddystudy.billing.domain.BillingEventSource
@@ -1096,9 +1097,10 @@ class BillingLedgerPersistenceAdapter(
             insert ignore into quota_periods (
                 user_id, period_started_at, period_ends_at, committed_count, reserved_count, bonus_count,
                 policy_version, created_at, updated_at
-            ) values (:userId, :start, :end, 0, 0, 0, 2, :now, :now)
+            ) values (:userId, :start, :end, 0, 0, 0, :policyVersion, :now, :now)
             """.trimIndent(),
         ).bind("userId", userId).bind("start", window.startedAt.utc()).bind("end", window.resetAt.utc())
+            .bind("policyVersion", MonthlyQuestionQuotaPolicy.VERSION)
             .bind("now", now.utc()).fetch().rowsUpdated().awaitSingle()
         val period = database.sql(
             "select id, bonus_count from quota_periods where user_id = :userId and period_started_at = :start for update",
@@ -1844,6 +1846,17 @@ class BillingLedgerPersistenceAdapter(
     ) {
         lockBillingAccountForProjection(invoice.userId)
         val previousTierCode = projectedTierCode(invoice.userId)
+        val previousTierRank = MonthlyQuestionQuotaPolicy.tierRank(previousTierCode)
+        val nextTierRank = MonthlyQuestionQuotaPolicy.tierRank(invoice.tierCode)
+        val downgradeSnapshot = if (nextTierRank < previousTierRank) {
+            quotaTransitionSnapshot(invoice.userId, previousTierCode, payment.purchaseAt)
+                ?: throw billingFailure(
+                    ApiErrorCode.INTERNAL_SERVER_ERROR,
+                    "Previous quota could not be locked for a paid tier downgrade.",
+                )
+        } else {
+            null
+        }
         val projectionAccepted = advanceProviderEventCursor(
             payment.providerOriginalTransactionId,
             providerEventAt,
@@ -1858,9 +1871,16 @@ class BillingLedgerPersistenceAdapter(
             deactivateMembership(payment.providerOriginalTransactionId, invoice.id, now)
         }
         rebuildEntitlementProjection(invoice.userId, now)
+        val appliedTierCode = projectedTierCode(invoice.userId)
         activateFirstPaidAnchor(invoice.userId, payment.purchaseAt, now)
-        if (tierRank(invoice.tierCode) > tierRank(previousTierCode)) {
-            resetQuotaForTierUpgrade(invoice, payment.purchaseAt, now)
+        if (appliedTierCode == invoice.tierCode && appliedTierCode != previousTierCode) {
+            resetQuotaForPaidTierChange(
+                invoice = invoice,
+                previousTierCode = previousTierCode,
+                previousQuota = downgradeSnapshot,
+                purchasedAt = payment.purchaseAt,
+                now = now,
+            )
         }
     }
 
@@ -2216,10 +2236,11 @@ class BillingLedgerPersistenceAdapter(
                 user_id, anchor_type, anchor_at, anchor_day, first_paid_at,
                 policy_version, created_at, updated_at
             )
-            select id, 'ACCOUNT_CREATED', created_at, day(created_at), null, 2, :now, :now
+            select id, 'ACCOUNT_CREATED', created_at, day(created_at), null, :policyVersion, :now, :now
             from users where id = :userId
             """.trimIndent(),
-        ).bind("now", now.utc()).bind("userId", userId).fetch().rowsUpdated().awaitSingle()
+        ).bind("policyVersion", MonthlyQuestionQuotaPolicy.VERSION)
+            .bind("now", now.utc()).bind("userId", userId).fetch().rowsUpdated().awaitSingle()
         val account = database.sql(
             "select anchor_at, first_paid_at from quota_accounts where user_id = :userId for update",
         ).bind("userId", userId).map { row, _ ->
@@ -2291,11 +2312,57 @@ class BillingLedgerPersistenceAdapter(
             .bind("now", now.utc()).bind("userId", userId).fetch().rowsUpdated().awaitSingle()
     }
 
-    private suspend fun resetQuotaForTierUpgrade(invoice: InvoiceEntity, purchasedAt: Instant, now: Instant) {
-        val ledgerEventId = "billing-tier-upgrade:${invoice.id}".take(191)
+    private suspend fun quotaTransitionSnapshot(
+        userId: Long,
+        tierCode: String,
+        purchasedAt: Instant,
+    ): QuotaTransitionSnapshot? {
+        val accountAnchor = database.sql(
+            "select anchor_at from quota_accounts where user_id = :userId for update",
+        ).bind("userId", userId)
+            .map { row, _ -> row.instant("anchor_at") }
+            .one().awaitSingleOrNull() ?: return null
+        val snapshotAt = purchasedAt.minusNanos(1).takeUnless { it.isBefore(accountAnchor) } ?: accountAnchor
+        val previousWindow = MonthlyQuotaWindow.periodAt(accountAnchor, snapshotAt)
+        val baseLimit = database.sql(
+            "select monthly_question_limit from user_membership_tiers where tier_code = :tierCode",
+        ).bind("tierCode", tierCode)
+            .map { row, _ -> row.int("monthly_question_limit") }
+            .one().awaitSingleOrNull() ?: return null
+        val counters = database.sql(
+            """
+            select committed_count, bonus_count
+            from quota_periods
+            where user_id = :userId and period_started_at = :periodStartedAt
+            for update
+            """.trimIndent(),
+        ).bind("userId", userId).bind("periodStartedAt", previousWindow.startedAt.utc())
+            .map { row, _ -> row.int("committed_count") to row.int("bonus_count") }
+            .one().awaitSingleOrNull() ?: (0 to 0)
+        return QuotaTransitionSnapshot(
+            baseLimit = baseLimit,
+            committedCount = counters.first,
+            bonusCount = counters.second,
+            periodStartedAt = previousWindow.startedAt,
+        )
+    }
+
+    private suspend fun resetQuotaForPaidTierChange(
+        invoice: InvoiceEntity,
+        previousTierCode: String,
+        previousQuota: QuotaTransitionSnapshot?,
+        purchasedAt: Instant,
+        now: Instant,
+    ) {
+        val ledgerEventId = "billing-tier-change:${invoice.id}".take(191)
+        val legacyUpgradeEventId = "billing-tier-upgrade:${invoice.id}".take(191)
         val alreadyApplied = database.sql(
-            "select count(*) as count_value from quota_ledger where ledger_event_id = :eventId",
-        ).bind("eventId", ledgerEventId)
+            """
+            select count(*) as count_value
+            from quota_ledger
+            where ledger_event_id in (:eventId, :legacyEventId)
+            """.trimIndent(),
+        ).bind("eventId", ledgerEventId).bind("legacyEventId", legacyUpgradeEventId)
             .map { row, _ -> row.long("count_value") > 0 }
             .one().awaitSingle()
         if (alreadyApplied) return
@@ -2305,64 +2372,90 @@ class BillingLedgerPersistenceAdapter(
         ).bind("userId", invoice.userId)
             .map { row, _ -> row.instant("anchor_at") }
             .one().awaitSingleOrNull() ?: return
-        val previousWindow = MonthlyQuotaWindow.periodAt(accountAnchor, now)
-        val upgradedWindow = MonthlyQuotaWindow.periodAt(purchasedAt, now)
+        val previousAt = purchasedAt.minusNanos(1).takeUnless { it.isBefore(accountAnchor) } ?: accountAnchor
+        val previousWindow = MonthlyQuotaWindow.periodAt(accountAnchor, previousAt)
+        val changedWindow = MonthlyQuotaWindow.periodAt(purchasedAt, purchasedAt)
+        val previousPeriodStartedAt = previousQuota?.periodStartedAt ?: previousWindow.startedAt
+        val carriedBonus = MonthlyQuestionQuotaPolicy.carriedBonusForTierChange(
+            previousTierRank = MonthlyQuestionQuotaPolicy.tierRank(previousTierCode),
+            nextTierRank = MonthlyQuestionQuotaPolicy.tierRank(invoice.tierCode),
+            previousBaseLimit = previousQuota?.baseLimit ?: 0,
+            previousBonusLimit = previousQuota?.bonusCount ?: 0,
+            previousCommittedCount = previousQuota?.committedCount ?: 0,
+        )
 
         database.sql(
             """
             insert ignore into quota_periods (
                 user_id, period_started_at, period_ends_at, committed_count, reserved_count, bonus_count,
                 policy_version, created_at, updated_at
-            ) values (:userId, :startedAt, :endsAt, 0, 0, 0, 2, :now, :now)
+            ) values (:userId, :startedAt, :endsAt, 0, 0, 0, :policyVersion, :now, :now)
             """.trimIndent(),
-        ).bind("userId", invoice.userId).bind("startedAt", upgradedWindow.startedAt.utc())
-            .bind("endsAt", upgradedWindow.resetAt.utc()).bind("now", now.utc())
+        ).bind("userId", invoice.userId).bind("startedAt", changedWindow.startedAt.utc())
+            .bind("endsAt", changedWindow.resetAt.utc()).bind("policyVersion", MonthlyQuestionQuotaPolicy.VERSION)
+            .bind("now", now.utc())
             .fetch().rowsUpdated().awaitSingle()
-        val upgradedPeriodId = database.sql(
+        val changedPeriodId = database.sql(
             "select id from quota_periods where user_id = :userId and period_started_at = :startedAt for update",
-        ).bind("userId", invoice.userId).bind("startedAt", upgradedWindow.startedAt.utc())
+        ).bind("userId", invoice.userId).bind("startedAt", changedWindow.startedAt.utc())
             .map { row, _ -> row.long("id") }.one().awaitSingle()
 
-        if (previousWindow.startedAt != upgradedWindow.startedAt) {
+        if (previousWindow.startedAt != changedWindow.startedAt) {
             database.sql(
                 """
                 update quota_reservations r join quota_periods p on p.id = r.quota_period_id
                 set r.quota_period_id = :newPeriodId, r.updated_at = :now
                 where r.user_id = :userId and p.period_started_at = :previousStart and r.status = 'RESERVED'
                 """.trimIndent(),
-            ).bind("newPeriodId", upgradedPeriodId).bind("now", now.utc()).bind("userId", invoice.userId)
-                .bind("previousStart", previousWindow.startedAt.utc()).fetch().rowsUpdated().awaitSingle()
+            ).bind("newPeriodId", changedPeriodId).bind("now", now.utc()).bind("userId", invoice.userId)
+                .bind("previousStart", previousPeriodStartedAt.utc())
+                .fetch().rowsUpdated().awaitSingle()
+            database.sql(
+                """
+                update quota_periods
+                set reserved_count = 0, updated_at = :now
+                where user_id = :userId and period_started_at = :previousStart
+                """.trimIndent(),
+            ).bind("now", now.utc()).bind("userId", invoice.userId)
+                .bind("previousStart", previousPeriodStartedAt.utc())
+                .fetch().rowsUpdated().awaitSingle()
         }
         val reservedCount = database.sql(
             "select count(*) as count_value from quota_reservations where quota_period_id = :periodId and status = 'RESERVED'",
-        ).bind("periodId", upgradedPeriodId)
+        ).bind("periodId", changedPeriodId)
             .map { row, _ -> row.long("count_value").toInt() }.one().awaitSingle()
         database.sql(
             """
             update quota_periods
-            set committed_count = 0, reserved_count = :reservedCount, bonus_count = 0, updated_at = :now
+            set committed_count = 0, reserved_count = :reservedCount, bonus_count = :bonusCount,
+                policy_version = :policyVersion, updated_at = :now
             where id = :periodId
             """.trimIndent(),
-        ).bind("reservedCount", reservedCount).bind("now", now.utc()).bind("periodId", upgradedPeriodId)
+        ).bind("reservedCount", reservedCount).bind("bonusCount", carriedBonus)
+            .bind("policyVersion", MonthlyQuestionQuotaPolicy.VERSION)
+            .bind("now", now.utc()).bind("periodId", changedPeriodId)
             .fetch().rowsUpdated().awaitSingle()
         database.sql(
             """
             update quota_accounts
             set anchor_type = 'FIRST_PAID', anchor_at = :purchasedAt, anchor_day = :anchorDay,
-                first_paid_at = least(coalesce(first_paid_at, :purchasedAt), :purchasedAt), updated_at = :now
+                first_paid_at = least(coalesce(first_paid_at, :purchasedAt), :purchasedAt),
+                policy_version = :policyVersion, updated_at = :now
             where user_id = :userId
             """.trimIndent(),
         ).bind("purchasedAt", purchasedAt.utc()).bind("anchorDay", purchasedAt.atZone(ZoneOffset.UTC).dayOfMonth)
+            .bind("policyVersion", MonthlyQuestionQuotaPolicy.VERSION)
             .bind("now", now.utc()).bind("userId", invoice.userId).fetch().rowsUpdated().awaitSingle()
         database.sql(
             """
             insert into quota_ledger (
                 ledger_event_id, user_id, quota_period_id, reservation_id, ledger_type,
                 committed_delta, reserved_delta, bonus_delta, reason, occurred_at, created_at
-            ) values (:eventId, :userId, :periodId, null, 'MIGRATION_ADJUSTMENT', 0, 0, 0, :reason, :now, :now)
+            ) values (:eventId, :userId, :periodId, null, 'MIGRATION_ADJUSTMENT', 0, 0, :bonusDelta, :reason, :now, :now)
             """.trimIndent(),
-        ).bind("eventId", ledgerEventId).bind("userId", invoice.userId).bind("periodId", upgradedPeriodId)
-            .bind("reason", "Immediate quota reset for upgrade to ${invoice.tierCode}")
+        ).bind("eventId", ledgerEventId).bind("userId", invoice.userId).bind("periodId", changedPeriodId)
+            .bind("bonusDelta", carriedBonus)
+            .bind("reason", "Immediate quota reset for paid tier change $previousTierCode -> ${invoice.tierCode}")
             .bind("now", now.utc()).fetch().rowsUpdated().awaitSingle()
         database.sql(
             """
@@ -2373,16 +2466,17 @@ class BillingLedgerPersistenceAdapter(
             on duplicate key update system_question_count = 0,
                 current_period_question_limit_override = null, updated_at = :now
             """.trimIndent(),
-        ).bind("userId", invoice.userId).bind("usageMonth", upgradedWindow.usageMonth.toString())
-            .bind("startedAt", upgradedWindow.startedAt.utc()).bind("now", now.utc())
+        ).bind("userId", invoice.userId).bind("usageMonth", changedWindow.usageMonth.toString())
+            .bind("startedAt", changedWindow.startedAt.utc()).bind("now", now.utc())
             .fetch().rowsUpdated().awaitSingle()
     }
 
-    private fun tierRank(tierCode: String?): Int = when (tierCode) {
-        "TIER3" -> 3
-        "TIER2" -> 2
-        else -> 1
-    }
+    private data class QuotaTransitionSnapshot(
+        val baseLimit: Int,
+        val committedCount: Int,
+        val bonusCount: Int,
+        val periodStartedAt: Instant,
+    )
 
     private suspend fun insertBillingJob(invoiceId: Long, paymentId: Long, type: BillingJobType, now: Instant) {
         database.sql(

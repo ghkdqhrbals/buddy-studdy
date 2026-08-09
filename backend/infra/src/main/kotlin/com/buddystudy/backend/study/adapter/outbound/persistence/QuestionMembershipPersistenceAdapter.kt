@@ -1,6 +1,7 @@
 package com.buddystudy.backend.study.adapter.outbound.persistence
 
 import com.buddystudy.account.domain.entity.MembershipStatus
+import com.buddystudy.backend.common.application.quota.MonthlyQuestionQuotaPolicy
 import com.buddystudy.backend.common.application.quota.MonthlyQuotaWindow
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPlan
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
@@ -242,10 +243,11 @@ class QuestionMembershipPersistenceAdapter(
             """
             insert ignore into quota_accounts (
                 user_id, anchor_type, anchor_at, anchor_day, first_paid_at, policy_version, created_at, updated_at
-            ) values (:userId, 'ACCOUNT_CREATED', :anchorAt, :anchorDay, null, 2, :now, :now)
+            ) values (:userId, 'ACCOUNT_CREATED', :anchorAt, :anchorDay, null, :policyVersion, :now, :now)
             """.trimIndent(),
         ).bind("userId", userId).bind("anchorAt", createdAt.utc())
-            .bind("anchorDay", createdAt.atZone(ZoneOffset.UTC).dayOfMonth).bind("now", now.utc())
+            .bind("anchorDay", createdAt.atZone(ZoneOffset.UTC).dayOfMonth)
+            .bind("policyVersion", MonthlyQuestionQuotaPolicy.VERSION).bind("now", now.utc())
             .fetch().rowsUpdated().awaitSingle()
         return loadQuotaAccount(userId)
     }
@@ -255,7 +257,7 @@ class QuestionMembershipPersistenceAdapter(
             QuotaAccount(
                 anchorType = "ACCOUNT_CREATED",
                 anchorAt = createdAt,
-                policyVersion = 2,
+                policyVersion = MonthlyQuestionQuotaPolicy.VERSION,
             )
         }
 
@@ -281,9 +283,10 @@ class QuestionMembershipPersistenceAdapter(
             insert ignore into quota_periods (
                 user_id, period_started_at, period_ends_at, committed_count, reserved_count, bonus_count,
                 policy_version, created_at, updated_at
-            ) values (:userId, :startedAt, :endsAt, 0, 0, 0, 2, :now, :now)
+            ) values (:userId, :startedAt, :endsAt, 0, 0, 0, :policyVersion, :now, :now)
             """.trimIndent(),
-        ).bind("userId", userId).bind("startedAt", start.utc()).bind("endsAt", end.utc()).bind("now", now.utc())
+        ).bind("userId", userId).bind("startedAt", start.utc()).bind("endsAt", end.utc())
+            .bind("policyVersion", MonthlyQuestionQuotaPolicy.VERSION).bind("now", now.utc())
             .fetch().rowsUpdated().awaitSingle()
     }
 

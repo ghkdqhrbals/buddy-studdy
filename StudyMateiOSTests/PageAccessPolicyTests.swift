@@ -210,12 +210,55 @@ final class BillingLocalizationTests: XCTestCase {
         let status = try RemotePushBackendClient.makeDecoder().decode(BackendBillingStatus.self, from: payload)
 
         let timeline = try XCTUnwrap(
-            MembershipPlanTimelinePolicy.resolve(status: status, catalogProducts: [])
+            MembershipPlanTimelinePolicy.resolve(
+                status: status,
+                catalogProducts: [],
+                at: try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-08-06T01:00:00Z"))
+            )
         )
 
         XCTAssertEqual(timeline.currentTierCode, "TIER3")
         XCTAssertEqual(timeline.nextTierCode, "TIER2")
         XCTAssertEqual(timeline.currentPlanEndsAt, timeline.nextPlanStartsAt)
+    }
+
+    func testMembershipTimelineDoesNotPresentAnUpgradeAsFutureDated() throws {
+        let payload = """
+        {
+          "tierCode": "TIER2",
+          "source": "APP_STORE",
+          "accessStatus": "ACTIVE",
+          "renewalStatus": "WILL_RENEW",
+          "productId": "tier2.monthly",
+          "expiresAt": "2026-09-06T12:34:00Z",
+          "willRenew": true,
+          "pendingChange": "tier3.monthly",
+          "planTransition": {
+            "currentTierCode": "TIER2",
+            "currentProductId": "tier2.monthly",
+            "currentPlanEndsAt": "2026-09-06T12:34:00Z",
+            "nextTierCode": "TIER3",
+            "nextProductId": "tier3.monthly",
+            "nextPlanStartsAt": "2026-09-06T12:34:00Z"
+          },
+          "synchronizedAt": "2026-08-06T01:00:00Z",
+          "quota": {
+            "periodStartedAt": "2026-08-06T00:00:00Z",
+            "resetAt": "2026-09-06T00:00:00Z",
+            "anchorType": "FIRST_PAID",
+            "baseLimit": 300,
+            "bonusLimit": 0,
+            "usedCount": 20,
+            "reservedCount": 0,
+            "remainingCount": 280,
+            "policyVersion": 3
+          }
+        }
+        """.data(using: .utf8)!
+        let status = try RemotePushBackendClient.makeDecoder().decode(BackendBillingStatus.self, from: payload)
+        let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-08-06T01:00:00Z"))
+
+        XCTAssertNil(MembershipPlanTimelinePolicy.resolve(status: status, catalogProducts: [], at: now))
     }
 
     func testMembershipTimelineShowsFreePlanAfterCancelledSubscriptionExpires() throws {
@@ -246,12 +289,55 @@ final class BillingLocalizationTests: XCTestCase {
         let status = try RemotePushBackendClient.makeDecoder().decode(BackendBillingStatus.self, from: payload)
 
         let timeline = try XCTUnwrap(
-            MembershipPlanTimelinePolicy.resolve(status: status, catalogProducts: [])
+            MembershipPlanTimelinePolicy.resolve(
+                status: status,
+                catalogProducts: [],
+                at: try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-08-06T01:00:00Z"))
+            )
         )
 
         XCTAssertEqual(timeline.currentTierCode, "TIER2")
         XCTAssertEqual(timeline.nextTierCode, "TIER1")
         XCTAssertEqual(timeline.currentPlanEndsAt, timeline.nextPlanStartsAt)
+    }
+
+    func testMembershipTimelineHidesAnAlreadyEffectiveTransition() throws {
+        let payload = """
+        {
+          "tierCode": "TIER3",
+          "source": "APP_STORE",
+          "accessStatus": "GRACE_PERIOD",
+          "renewalStatus": "WILL_RENEW",
+          "productId": "tier3.monthly",
+          "expiresAt": "2026-08-09T08:19:00Z",
+          "willRenew": true,
+          "pendingChange": "tier2.monthly",
+          "planTransition": {
+            "currentTierCode": "TIER3",
+            "currentProductId": "tier3.monthly",
+            "currentPlanEndsAt": "2026-08-09T08:19:00Z",
+            "nextTierCode": "TIER2",
+            "nextProductId": "tier2.monthly",
+            "nextPlanStartsAt": "2026-08-09T08:19:00Z"
+          },
+          "synchronizedAt": "2026-08-09T08:20:00Z",
+          "quota": {
+            "periodStartedAt": "2026-08-04T06:30:00Z",
+            "resetAt": "2026-09-04T06:30:00Z",
+            "anchorType": "FIRST_PAID",
+            "baseLimit": 1000,
+            "bonusLimit": 0,
+            "usedCount": 25,
+            "reservedCount": 0,
+            "remainingCount": 975,
+            "policyVersion": 3
+          }
+        }
+        """.data(using: .utf8)!
+        let status = try RemotePushBackendClient.makeDecoder().decode(BackendBillingStatus.self, from: payload)
+        let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-08-09T08:20:00Z"))
+
+        XCTAssertNil(MembershipPlanTimelinePolicy.resolve(status: status, catalogProducts: [], at: now))
     }
 }
 

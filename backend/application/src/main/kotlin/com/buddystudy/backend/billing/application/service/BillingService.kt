@@ -30,6 +30,7 @@ import com.buddystudy.backend.billing.application.port.outbound.RevenueCatTransa
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.common.application.error.ApiRuntimeException
+import com.buddystudy.backend.common.application.quota.MonthlyQuestionQuotaPolicy
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystudy.billing.domain.BillingEventSource
 import com.buddystudy.billing.domain.EntitlementSource
@@ -65,11 +66,11 @@ class BillingService(
         val resetAt = quota.resetAt ?: now
         val planTransition = entitlement?.let { current ->
             val changesAt = current.expiresAt
-            if (changesAt == null || !current.accessStatus.grantsAccess()) {
+            if (changesAt == null || !changesAt.isAfter(now) || !current.accessStatus.grantsAccess()) {
                 null
             } else if (current.pendingProductId != null) {
                 ledger.tierProduct(current.pendingProductId)
-                    ?.takeIf { it.tierCode != current.tierCode }
+                    ?.takeIf { MonthlyQuestionQuotaPolicy.isDowngrade(current.tierCode, it.tierCode) }
                     ?.let { next ->
                         BillingPlanTransition(
                             currentTierCode = current.tierCode,
@@ -106,7 +107,7 @@ class BillingService(
             startedAt = entitlement?.startedAt,
             expiresAt = entitlement?.expiresAt,
             willRenew = entitlement?.willRenew ?: false,
-            pendingChange = entitlement?.pendingProductId,
+            pendingChange = planTransition?.nextProductId,
             planTransition = planTransition,
             synchronizedAt = entitlement?.synchronizedAt ?: now,
             quota = BillingQuotaStatus(

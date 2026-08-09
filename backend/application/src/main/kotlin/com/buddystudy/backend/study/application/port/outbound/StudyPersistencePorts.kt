@@ -1,5 +1,6 @@
 package com.buddystudy.backend.study.application.port.outbound
 
+import com.buddystudy.backend.common.application.quota.MonthlyQuestionQuotaPolicy
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
@@ -229,7 +230,7 @@ data class QuestionQuotaStatus(
     val periodStartedAt: Instant? = null,
     val resetAt: Instant? = null,
     val anchorType: String = "ACCOUNT_CREATED",
-    val policyVersion: Int = 2,
+    val policyVersion: Int = MonthlyQuestionQuotaPolicy.VERSION,
 )
 
 interface QuestionMembershipPort {
