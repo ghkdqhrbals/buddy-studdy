@@ -11,6 +11,27 @@ struct DeveloperSettingsUseCase {
         repository.loadDeveloperSettings()
     }
 
+    func prepareForLaunch(distribution: AppDistributionContext) -> DeveloperSettings {
+        var settings = repository.loadDeveloperSettings()
+        guard distribution.isTestFlight else {
+            return settings
+        }
+
+        if !settings.isDeveloperAccessUnlocked {
+            repository.saveDeveloperAccessUnlocked(true)
+            settings.isDeveloperAccessUnlocked = true
+        }
+        if settings.developerAccessBuildIdentifier != distribution.buildIdentifier {
+            repository.saveDeveloperAccessBuildIdentifier(distribution.buildIdentifier)
+            settings.developerAccessBuildIdentifier = distribution.buildIdentifier
+        }
+        if !settings.isDebuggingEnabled {
+            repository.saveIsDebuggingEnabled(true)
+            settings.isDebuggingEnabled = true
+        }
+        return settings
+    }
+
     func saveDebugBackendBaseURL(_ baseURL: String) {
         repository.saveDebugBackendBaseURL(baseURL)
     }

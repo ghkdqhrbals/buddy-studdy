@@ -1392,7 +1392,9 @@ final class AppState: ObservableObject {
         let loadedLogPage = localUseCases.appLog.loadLogs(page: 0, pageSize: Self.developerLogPageSize)
         let loadedCloudLastSyncedAt = loadedCloudSyncState.stateUpdatedAt
         let loadedLocalSettingsMutationAt = loadedLocalStudySettings.localSettingsMutationAt
-        let loadedDeveloperSettings = localUseCases.developerSettings.loadSettings()
+        let loadedDeveloperSettings = localUseCases.developerSettings.prepareForLaunch(
+            distribution: appDistributionContext
+        )
         let shouldRestoreDeveloperAccess = Self.shouldRestoreDeveloperAccess(
             settings: loadedDeveloperSettings,
             distribution: appDistributionContext
