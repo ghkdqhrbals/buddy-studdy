@@ -7,6 +7,7 @@ import com.buddystudy.backend.billing.application.port.inbound.VerifiedBillingPa
 import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.common.application.quota.MonthlyQuestionQuotaPolicy
 import com.buddystudy.backend.study.application.port.outbound.QuestionMembershipPort
 import com.buddystudy.billing.domain.InvoiceStatus
 import com.buddystudy.billing.domain.PaymentStatus
@@ -68,13 +69,27 @@ class VerifiedBillingPaymentService(
             entitlement.accessStatus in setOf(SubscriptionAccessStatus.ACTIVE, SubscriptionAccessStatus.GRACE_PERIOD)
         val quotaApplied = quota?.tierCode == command.tierProduct.tierCode &&
             quota.baseLimit == command.tierProduct.monthlyQuestionLimit
+        val scheduledDowngrade = entitlement != null &&
+            entitlement.accessStatus in setOf(SubscriptionAccessStatus.ACTIVE, SubscriptionAccessStatus.GRACE_PERIOD) &&
+            entitlement.pendingProductId == command.tierProduct.productId &&
+            MonthlyQuestionQuotaPolicy.isDowngrade(entitlement.tierCode, command.tierProduct.tierCode)
+        val currentProduct = if (scheduledDowngrade) {
+            entitlement.productId?.let { ledger.tierProduct(it) }
+        } else {
+            null
+        }
+        val scheduledDowngradeApplied = scheduledDowngrade &&
+            currentProduct?.tierCode == entitlement?.tierCode &&
+            quota?.tierCode == entitlement?.tierCode &&
+            quota?.baseLimit == currentProduct?.monthlyQuestionLimit
 
-        if (invoiceApplied && entitlementApplied && quotaApplied) return fulfilled
+        if (invoiceApplied && ((entitlementApplied && quotaApplied) || scheduledDowngradeApplied)) return fulfilled
 
         logger.error(
             "verified_payment_application_postcondition_failed userId={} invoiceId={} invoiceStatus={} " +
                 "paymentStatus={} fulfilledAt={} transactionMatches={} expectedTier={} entitlementTier={} " +
-                "entitlementProduct={} entitlementAccess={} quotaTier={} quotaBaseLimit={}",
+                "entitlementProduct={} entitlementAccess={} pendingProduct={} immediateApplied={} " +
+                "scheduledDowngradeApplied={} quotaTier={} quotaBaseLimit={}",
             command.userId,
             fulfilled.id,
             fulfilled.status,
@@ -85,6 +100,9 @@ class VerifiedBillingPaymentService(
             entitlement?.tierCode,
             entitlement?.productId,
             entitlement?.accessStatus,
+            entitlement?.pendingProductId,
+            entitlementApplied && quotaApplied,
+            scheduledDowngradeApplied,
             quota?.tierCode,
             quota?.baseLimit,
         )

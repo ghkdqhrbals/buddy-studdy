@@ -376,6 +376,79 @@ class BillingServiceTest {
     }
 
     @Test
+    fun `scheduled downgrade succeeds while the current higher tier remains active`() = runBlocking {
+        val ledger = FakeLedger(token, product).apply {
+            additionalProducts += product.copy(
+                tierCode = "TIER3",
+                monthlyQuestionLimit = 1_000,
+                productId = "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                sortOrder = 30,
+            )
+            projectedEntitlement = projectedEntitlement?.copy(
+                tierCode = "TIER3",
+                productId = "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                pendingProductId = product.productId,
+            )
+        }
+        val service = service(ledger, membershipTierCode = "TIER3", monthlyLimit = 1_000)
+
+        val result = service.syncAppleTransaction(principal(), syncCommand())
+
+        assertEquals(InvoiceStatus.COMPLETED, result.status)
+        assertEquals(BillingInvoicePhase.FULFILLED, result.phase)
+        assertEquals("TIER3", ledger.projectedEntitlement?.tierCode)
+        assertEquals(product.productId, ledger.projectedEntitlement?.pendingProductId)
+    }
+
+    @Test
+    fun `downgrade without a matching pending product remains an application failure`() {
+        val ledger = FakeLedger(token, product).apply {
+            additionalProducts += product.copy(
+                tierCode = "TIER3",
+                monthlyQuestionLimit = 1_000,
+                productId = "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                sortOrder = 30,
+            )
+            projectedEntitlement = projectedEntitlement?.copy(
+                tierCode = "TIER3",
+                productId = "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                pendingProductId = null,
+            )
+        }
+        val service = service(ledger, membershipTierCode = "TIER3", monthlyLimit = 1_000)
+
+        val error = assertThrows(ApiRuntimeException::class.java) {
+            runBlocking { service.syncAppleTransaction(principal(), syncCommand()) }
+        }
+
+        assertEquals(ApiErrorCode.BILLING_APPLICATION_FAILED, error.errorCode)
+    }
+
+    @Test
+    fun `scheduled downgrade with a stale current quota remains an application failure`() {
+        val ledger = FakeLedger(token, product).apply {
+            additionalProducts += product.copy(
+                tierCode = "TIER3",
+                monthlyQuestionLimit = 1_000,
+                productId = "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                sortOrder = 30,
+            )
+            projectedEntitlement = projectedEntitlement?.copy(
+                tierCode = "TIER3",
+                productId = "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                pendingProductId = product.productId,
+            )
+        }
+        val service = service(ledger, membershipTierCode = "TIER3", monthlyLimit = 300)
+
+        val error = assertThrows(ApiRuntimeException::class.java) {
+            runBlocking { service.syncAppleTransaction(principal(), syncCommand()) }
+        }
+
+        assertEquals(ApiErrorCode.BILLING_APPLICATION_FAILED, error.errorCode)
+    }
+
+    @Test
     fun `RevenueCat transaction confirmation applies the prepared invoice`() = runBlocking {
         val ledger = FakeLedger(token, product)
         val service = service(ledger)
@@ -640,6 +713,7 @@ class BillingServiceTest {
             pendingProductId = null,
             synchronizedAt = Instant.parse("2026-08-03T00:00:00Z"),
         )
+        val additionalProducts = mutableListOf<BillingTierProduct>()
         override suspend fun entitlementForUser(userId: Long): BillingEntitlementProjection? = projectedEntitlement
         var tokenReads = 0
         var fulfillmentError: Exception? = null
@@ -669,7 +743,8 @@ class BillingServiceTest {
             if (productEnabled) listOfNotNull(product) else emptyList()
         override suspend fun enabledTierProduct(productId: String): BillingTierProduct? =
             product?.takeIf { productEnabled && it.productId == productId }
-        override suspend fun tierProduct(productId: String): BillingTierProduct? = product?.takeIf { it.productId == productId }
+        override suspend fun tierProduct(productId: String): BillingTierProduct? =
+            product?.takeIf { it.productId == productId } ?: additionalProducts.firstOrNull { it.productId == productId }
         override suspend fun createPendingInvoice(
             userId: Long,
             appAccountToken: UUID,
