@@ -1403,6 +1403,146 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
+    fun `completed upgrade repairs a stale product projection without regressing newer lifecycle state`(): Unit = runBlocking {
+        val fixture = fixture("stale-upgrade-projection")
+        val tier2Invoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                fixture.product,
+                fixture.transaction(),
+                null,
+                BillingEventSource.REVENUECAT_WEBHOOK,
+                "tier2-payment-${fixture.suffix}",
+                fixture.now,
+            ),
+        )
+        ledger.fulfill(tier2Invoice.id, fixture.now.plusSeconds(1))
+
+        val tier3 = requireNotNull(
+            ledger.enabledTierProduct("io.github.ghkdqhrbals.StudyMate.tier3.monthly"),
+        )
+        val tier3PurchasedAt = fixture.now.plusSeconds(100)
+        val tier3Transaction = fixture.transaction().copy(
+            transactionId = "tier3-stale-tx-${fixture.suffix}",
+            productId = tier3.productId,
+            priceMilliunits = 17_900_000,
+            purchaseAt = tier3PurchasedAt,
+            expiresAt = tier3PurchasedAt.plusSeconds(2_592_000),
+            signedAt = tier3PurchasedAt,
+        )
+        val tier3Invoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                tier3,
+                tier3Transaction,
+                null,
+                BillingEventSource.REVENUECAT_WEBHOOK,
+                "tier3-payment-${fixture.suffix}",
+                tier3PurchasedAt,
+            ),
+        )
+        ledger.fulfill(tier3Invoice.id, tier3PurchasedAt.plusSeconds(1))
+
+        val laterLifecycleAt = tier3PurchasedAt.plusSeconds(300)
+        forceStaleSubscriptionProjection(
+            fixture = fixture,
+            transaction = tier3Transaction,
+            pendingProductId = tier3.productId,
+            accessStatus = "ACTIVE",
+            renewalStatus = "CANCELED",
+            lastProviderEventAt = laterLifecycleAt,
+        )
+        assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER2")
+        assertThat(requireNotNull(quota.quotaStatusForUser(fixture.userId, laterLifecycleAt)).baseLimit)
+            .isEqualTo(300)
+
+        ledger.fulfill(tier3Invoice.id, laterLifecycleAt.plusSeconds(1))
+
+        val entitlement = requireNotNull(ledger.entitlementForUser(fixture.userId))
+        assertThat(entitlement.tierCode).isEqualTo("TIER3")
+        assertThat(entitlement.renewalStatus).isEqualTo(SubscriptionRenewalStatus.CANCELED)
+        assertThat(requireNotNull(quota.quotaStatusForUser(fixture.userId, laterLifecycleAt.plusSeconds(2))).baseLimit)
+            .isEqualTo(1_000)
+        assertThat(
+            longValue(
+                "select count(*) from subscriptions where original_transaction_id = " +
+                    "'${tier3Transaction.originalTransactionId}' and product_id = '${tier3.productId}' " +
+                    "and tier_code = 'TIER3' and pending_product_id is null " +
+                    "and renewal_status = 'CANCELED' and last_provider_event_at = '${laterLifecycleAt.utcText()}'",
+            ),
+        ).isEqualTo(1)
+    }
+
+    @Test
+    fun `completed transaction replay never revives an expired stale subscription`(): Unit = runBlocking {
+        val fixture = fixture("expired-stale-upgrade")
+        val tier2Invoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                fixture.product,
+                fixture.transaction(),
+                null,
+                BillingEventSource.REVENUECAT_WEBHOOK,
+                "tier2-payment-${fixture.suffix}",
+                fixture.now,
+            ),
+        )
+        ledger.fulfill(tier2Invoice.id, fixture.now.plusSeconds(1))
+
+        val tier3 = requireNotNull(
+            ledger.enabledTierProduct("io.github.ghkdqhrbals.StudyMate.tier3.monthly"),
+        )
+        val tier3PurchasedAt = fixture.now.plusSeconds(100)
+        val tier3Transaction = fixture.transaction().copy(
+            transactionId = "tier3-expired-tx-${fixture.suffix}",
+            productId = tier3.productId,
+            priceMilliunits = 17_900_000,
+            purchaseAt = tier3PurchasedAt,
+            expiresAt = tier3PurchasedAt.plusSeconds(2_592_000),
+            signedAt = tier3PurchasedAt,
+        )
+        val tier3Invoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                tier3,
+                tier3Transaction,
+                null,
+                BillingEventSource.REVENUECAT_WEBHOOK,
+                "tier3-payment-${fixture.suffix}",
+                tier3PurchasedAt,
+            ),
+        )
+        ledger.fulfill(tier3Invoice.id, tier3PurchasedAt.plusSeconds(1))
+
+        val expirationAt = tier3PurchasedAt.plusSeconds(300)
+        forceStaleSubscriptionProjection(
+            fixture = fixture,
+            transaction = tier3Transaction,
+            pendingProductId = tier3.productId,
+            accessStatus = "EXPIRED",
+            renewalStatus = "NOT_APPLICABLE",
+            lastProviderEventAt = expirationAt,
+        )
+
+        ledger.fulfill(tier3Invoice.id, expirationAt.plusSeconds(1))
+
+        assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER1")
+        assertThat(
+            longValue(
+                "select count(*) from subscriptions where original_transaction_id = " +
+                    "'${tier3Transaction.originalTransactionId}' and access_status = 'EXPIRED' " +
+                    "and product_id = '${fixture.product.productId}' and tier_code = 'TIER2'",
+            ),
+        ).isEqualTo(1)
+        assertThat(
+            longValue(
+                "select count(*) from user_memberships where source_invoice_id = ${tier3Invoice.id} " +
+                    "and status = 'ACTIVE'",
+            ),
+        ).isZero()
+    }
+
+    @Test
     fun `same-chain downgrade immediately switches tier and carries remaining quota for one period`(): Unit = runBlocking {
         val fixture = fixture("same-chain-downgrade")
         val tier3 = requireNotNull(
@@ -1735,6 +1875,64 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
             now,
         )
     }
+
+    private suspend fun forceStaleSubscriptionProjection(
+        fixture: Fixture,
+        transaction: VerifiedAppleTransaction,
+        pendingProductId: String,
+        accessStatus: String,
+        renewalStatus: String,
+        lastProviderEventAt: Instant,
+    ) {
+        database.sql(
+            """
+            update subscriptions
+            set latest_transaction_id = :transactionId,
+                product_id = :productId,
+                tier_code = 'TIER2',
+                access_status = :accessStatus,
+                renewal_status = :renewalStatus,
+                pending_product_id = :pendingProductId,
+                pending_product_event_at = :pendingProductEventAt,
+                last_provider_event_at = :lastProviderEventAt,
+                updated_at = :lastProviderEventAt
+            where original_transaction_id = :originalTransactionId
+            """.trimIndent(),
+        ).bind("transactionId", transaction.transactionId)
+            .bind("productId", fixture.product.productId)
+            .bind("accessStatus", accessStatus)
+            .bind("renewalStatus", renewalStatus)
+            .bind("pendingProductId", pendingProductId)
+            .bind("pendingProductEventAt", transaction.purchaseAt)
+            .bind("lastProviderEventAt", lastProviderEventAt)
+            .bind("originalTransactionId", transaction.originalTransactionId)
+            .fetch().rowsUpdated().awaitSingle()
+        database.sql(
+            """
+            update user_entitlement_projection
+            set tier_code = :tierCode,
+                source = :source,
+                access_status = :accessStatus,
+                renewal_status = :renewalStatus,
+                product_id = :productId,
+                pending_product_id = :pendingProductId,
+                projected_at = :projectedAt,
+                version = version + 1
+            where user_id = :userId
+            """.trimIndent(),
+        ).bind("tierCode", if (accessStatus == "EXPIRED") "TIER1" else "TIER2")
+            .bind("source", if (accessStatus == "EXPIRED") "FREE" else "APP_STORE")
+            .bind("accessStatus", if (accessStatus == "EXPIRED") "ACTIVE" else accessStatus)
+            .bind("renewalStatus", if (accessStatus == "EXPIRED") "NOT_APPLICABLE" else renewalStatus)
+            .bind("productId", fixture.product.productId)
+            .bind("pendingProductId", pendingProductId)
+            .bind("projectedAt", lastProviderEventAt)
+            .bind("userId", fixture.userId)
+            .fetch().rowsUpdated().awaitSingle()
+    }
+
+    private fun Instant.utcText(): String =
+        java.time.LocalDateTime.ofInstant(this, java.time.ZoneOffset.UTC).toString().replace('T', ' ')
 
     private data class Fixture(
         val suffix: String,

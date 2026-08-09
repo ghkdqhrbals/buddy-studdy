@@ -1857,14 +1857,7 @@ class BillingLedgerPersistenceAdapter(
         } else {
             null
         }
-        val projectionAccepted = advanceProviderEventCursor(
-            payment.providerOriginalTransactionId,
-            providerEventAt,
-            now,
-        )
-        if (projectionAccepted) {
-            upsertActiveSubscription(invoice, payment, providerEventAt, now)
-        }
+        upsertActiveSubscription(invoice, payment, providerEventAt, now)
         if (subscriptionAllowsEntitlement(payment.providerOriginalTransactionId)) {
             upsertActiveMembership(invoice, payment, now)
         } else {
@@ -1945,9 +1938,21 @@ class BillingLedgerPersistenceAdapter(
         now: Instant,
     ) {
         val ownership = lockSubscriptionOwnership(payment.providerOriginalTransactionId)
+        val paymentMatchesLatestTransaction =
+            ownership?.latestTransactionId == payment.providerTransactionId
         val paymentOwnsProjection = ownership == null ||
             ownership.latestPurchaseAt == null ||
-            !payment.purchaseAt.isBefore(ownership.latestPurchaseAt)
+            payment.purchaseAt.isAfter(ownership.latestPurchaseAt) ||
+            (payment.purchaseAt == ownership.latestPurchaseAt && paymentMatchesLatestTransaction)
+        // Product changes and lifecycle events have independent provider clocks. A newer cancellation
+        // may preserve lifecycle state while the verified transaction completes its pending tier change.
+        val lifecycleProjectionAccepted = paymentOwnsProjection &&
+            ownership?.lastProviderEventAt?.isAfter(providerEventAt) != true
+        val pendingTransitionRepairAccepted = paymentOwnsProjection &&
+            !lifecycleProjectionAccepted &&
+            ownership?.pendingProductId == payment.productId &&
+            ownership.accessStatus in ENTITLEMENT_GRANTING_ACCESS_STATES
+        val productProjectionAccepted = lifecycleProjectionAccepted || pendingTransitionRepairAccepted
         database.sql(
             """
             insert into billing_accounts (user_id, app_account_token, status, created_at, updated_at)
@@ -1999,29 +2004,48 @@ class BillingLedgerPersistenceAdapter(
                 billing_account_id = if(:paymentOwnsProjection, values(billing_account_id), billing_account_id),
                 user_id = if(:paymentOwnsProjection, values(user_id), user_id),
                 latest_transaction_id = if(:paymentOwnsProjection, values(latest_transaction_id), latest_transaction_id),
-                product_id = if(values(last_provider_event_at) >= last_provider_event_at, values(product_id), product_id),
-                tier_code = if(values(last_provider_event_at) >= last_provider_event_at, values(tier_code), tier_code),
-                access_status = if(values(last_provider_event_at) >= last_provider_event_at, 'ACTIVE', access_status),
-                renewal_status = if(values(last_provider_event_at) >= last_provider_event_at, 'WILL_RENEW', renewal_status),
-                started_at = least(coalesce(started_at, values(started_at)), values(started_at)),
-                expires_at = if(values(last_provider_event_at) >= last_provider_event_at, values(expires_at), expires_at),
+                product_id = if(:productProjectionAccepted, values(product_id), product_id),
+                tier_code = if(:productProjectionAccepted, values(tier_code), tier_code),
+                access_status = if(:lifecycleProjectionAccepted, 'ACTIVE', access_status),
+                renewal_status = if(:lifecycleProjectionAccepted, 'WILL_RENEW', renewal_status),
+                started_at = if(
+                    :productProjectionAccepted,
+                    least(coalesce(started_at, values(started_at)), values(started_at)),
+                    started_at
+                ),
+                expires_at = case
+                    when :lifecycleProjectionAccepted then values(expires_at)
+                    when :pendingTransitionRepairAccepted then case
+                        when expires_at is null then values(expires_at)
+                        when values(expires_at) is null then expires_at
+                        else greatest(expires_at, values(expires_at))
+                    end
+                    else expires_at
+                end,
                 pending_product_event_at = if(
-                    :paymentOwnsProjection and pending_product_id = values(product_id),
+                    :productProjectionAccepted and pending_product_id = values(product_id),
                     null,
                     pending_product_event_at
                 ),
                 pending_product_id = if(
-                    :paymentOwnsProjection and pending_product_id = values(product_id),
+                    :productProjectionAccepted and pending_product_id = values(product_id),
                     null,
                     pending_product_id
                 ),
-                next_reconcile_at = if(values(last_provider_event_at) >= last_provider_event_at, values(next_reconcile_at), next_reconcile_at),
-                version = if(values(last_provider_event_at) >= last_provider_event_at, version + 1, version),
-                updated_at = if(values(last_provider_event_at) >= last_provider_event_at, values(updated_at), updated_at),
-                last_provider_event_at = greatest(last_provider_event_at, values(last_provider_event_at))
+                next_reconcile_at = if(:lifecycleProjectionAccepted, values(next_reconcile_at), next_reconcile_at),
+                version = if(:productProjectionAccepted, version + 1, version),
+                updated_at = if(:productProjectionAccepted, values(updated_at), updated_at),
+                last_provider_event_at = if(
+                    :lifecycleProjectionAccepted,
+                    greatest(coalesce(last_provider_event_at, values(last_provider_event_at)), values(last_provider_event_at)),
+                    last_provider_event_at
+                )
             """.trimIndent(),
         ).bind("accountId", accountId).bind("userId", invoice.userId)
             .bind("paymentOwnsProjection", paymentOwnsProjection)
+            .bind("lifecycleProjectionAccepted", lifecycleProjectionAccepted)
+            .bind("pendingTransitionRepairAccepted", pendingTransitionRepairAccepted)
+            .bind("productProjectionAccepted", productProjectionAccepted)
             .bind("originalTransactionId", payment.providerOriginalTransactionId)
             .bind("transactionId", payment.providerTransactionId).bind("productId", payment.productId)
             .bind("tierCode", invoice.tierCode).bind("startedAt", payment.purchaseAt.utc())
@@ -2047,7 +2071,8 @@ class BillingLedgerPersistenceAdapter(
     private suspend fun lockSubscriptionOwnership(originalTransactionId: String): SubscriptionOwnership? =
         database.sql(
             """
-            select s.user_id,
+            select s.user_id, s.latest_transaction_id, s.pending_product_id,
+                   s.access_status, s.last_provider_event_at,
                    (select p.purchase_at
                     from payments p
                     where p.provider = 'APPLE'
@@ -2061,7 +2086,11 @@ class BillingLedgerPersistenceAdapter(
             .map { row, _ ->
                 SubscriptionOwnership(
                     userId = row.get("user_id", java.lang.Long::class.java)?.toLong(),
+                    latestTransactionId = row.nullableString("latest_transaction_id"),
                     latestPurchaseAt = row.nullableInstant("latest_purchase_at"),
+                    pendingProductId = row.nullableString("pending_product_id"),
+                    accessStatus = row.string("access_status"),
+                    lastProviderEventAt = row.nullableInstant("last_provider_event_at"),
                 )
             }.one().awaitSingleOrNull()
 
@@ -3187,7 +3216,14 @@ class BillingLedgerPersistenceAdapter(
         val productId: String,
     )
     private data class ExistingCheckout(val invoiceId: Long, val productId: String)
-    private data class SubscriptionOwnership(val userId: Long?, val latestPurchaseAt: Instant?)
+    private data class SubscriptionOwnership(
+        val userId: Long?,
+        val latestTransactionId: String?,
+        val latestPurchaseAt: Instant?,
+        val pendingProductId: String?,
+        val accessStatus: String,
+        val lastProviderEventAt: Instant?,
+    )
     private data class ActiveSubscriptionProjection(
         val id: Long,
         val tierCode: String,
