@@ -659,8 +659,11 @@ monitoring administrator session. The monitoring UI exposes the flow at
    `https://api.ghkdqhrbals.org/api/v1/billing/revenuecat/webhooks`; the Sandbox
    webhook accepts Sandbox events for the App Store app and
    targets `https://lowfidev.cloud/api/v1/billing/revenuecat/webhooks`.
-7. RevenueCat must own transaction completion and use the same four App Store
-   product IDs. Debug, ordinary TestFlight, and App Store builds use the `appl_`
+7. RevenueCat must own transaction completion and use the same two monthly App
+   Store product IDs. Retired annual products remain available only for historical
+   transaction, entitlement, and refund processing; they must not appear in an
+   Offering or remain available for sale in App Store Connect. Debug, ordinary
+   TestFlight, and App Store builds use the `appl_`
    Apple public key so StoreKit determines Apple Sandbox versus Production from
    the transaction environment. TestFlight always uses the `appl_` key,
    including when developer access points API traffic at the development
