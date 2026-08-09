@@ -2925,7 +2925,7 @@ struct AppStrings {
         formatter.locale = language.locale
         formatter.timeZone = .current
         formatter.dateStyle = .medium
-        formatter.timeStyle = .none
+        formatter.timeStyle = .short
         return formatter.string(from: date)
     }
     var maintenanceDefaultTitle: String {

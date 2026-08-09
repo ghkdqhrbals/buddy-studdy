@@ -1089,7 +1089,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
-    fun `first paid purchase and fast renewal preserve usage and the lifetime quota anchor`(): Unit = runBlocking {
+    fun `first paid upgrade resets usage while renewal preserves the upgraded quota window`(): Unit = runBlocking {
         val fixture = fixture("quota-anchor", Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).minusSeconds(60))
         val beforePurchase = fixture.now.minusSeconds(10)
         assertThat(
@@ -1127,7 +1127,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
 
         val paidStatus = requireNotNull(quota.quotaStatusForUser(fixture.userId, fixture.now.plusSeconds(3)))
         assertThat(paidStatus.tierCode).isEqualTo("TIER2")
-        assertThat(paidStatus.usedCount).isEqualTo(1)
+        assertThat(paidStatus.usedCount).isZero()
         assertThat(paidStatus.baseLimit).isEqualTo(300)
         assertThat(paidStatus.anchorType).isEqualTo("FIRST_PAID")
         assertThat(paidStatus.periodStartedAt).isEqualTo(fixture.now)
@@ -1152,9 +1152,9 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         assertThat(adminSummary.tierCode).isEqualTo("TIER2")
         assertThat(adminSummary.baseLimit).isEqualTo(300)
         assertThat(adminSummary.bonusLimit).isEqualTo(20)
-        assertThat(adminSummary.usedCount).isEqualTo(1)
+        assertThat(adminSummary.usedCount).isZero()
         assertThat(adminSummary.reservedCount).isEqualTo(1)
-        assertThat(adminSummary.remainingCount).isEqualTo(318)
+        assertThat(adminSummary.remainingCount).isEqualTo(319)
 
         val renewalAt = fixture.now.plusSeconds(86_400)
         val renewalTransaction = initialTransaction.copy(
@@ -1177,7 +1177,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         ledger.fulfill(renewalInvoice.id, renewalAt.plusSeconds(1))
 
         val renewedStatus = requireNotNull(quota.quotaStatusForUser(fixture.userId, renewalAt.plusSeconds(2)))
-        assertThat(renewedStatus.usedCount).isEqualTo(1)
+        assertThat(renewedStatus.usedCount).isZero()
         assertThat(renewedStatus.periodStartedAt).isEqualTo(fixture.now)
         assertThat(
             database.sql("select first_paid_at from quota_accounts where user_id = :userId")
@@ -1252,8 +1252,9 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
 
         assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER3")
         val tier3Quota = requireNotNull(quota.quotaStatusForUser(fixture.userId, tier3PurchasedAt.plusSeconds(2)))
-        assertThat(tier3Quota.usedCount).isEqualTo(1)
+        assertThat(tier3Quota.usedCount).isZero()
         assertThat(tier3Quota.baseLimit).isEqualTo(1_000)
+        assertThat(tier3Quota.periodStartedAt).isEqualTo(tier3PurchasedAt)
 
         expireSubscription(
             fixture.userId,
@@ -1263,7 +1264,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         )
         assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER2")
         assertThat(requireNotNull(quota.quotaStatusForUser(fixture.userId, tier3PurchasedAt.plusSeconds(4))).usedCount)
-            .isEqualTo(1)
+            .isZero()
 
         expireSubscription(
             fixture.userId,
@@ -1273,7 +1274,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         )
         val expiredQuota = requireNotNull(quota.quotaStatusForUser(fixture.userId, tier3PurchasedAt.plusSeconds(6)))
         assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER1")
-        assertThat(expiredQuota.usedCount).isEqualTo(1)
+        assertThat(expiredQuota.usedCount).isZero()
         assertThat(expiredQuota.baseLimit).isEqualTo(30)
 
         val resubscribeAt = tier3PurchasedAt.plusSeconds(10)
@@ -1299,8 +1300,102 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         ledger.fulfill(resubscribeInvoice.id, resubscribeAt.plusSeconds(1))
         val resubscribedQuota = requireNotNull(quota.quotaStatusForUser(fixture.userId, resubscribeAt.plusSeconds(2)))
         assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER3")
-        assertThat(resubscribedQuota.usedCount).isEqualTo(1)
-        assertThat(resubscribedQuota.periodStartedAt).isEqualTo(fixture.now)
+        assertThat(resubscribedQuota.usedCount).isZero()
+        assertThat(resubscribedQuota.periodStartedAt).isEqualTo(resubscribeAt)
+    }
+
+    @Test
+    fun `product change cannot block an immediate same-chain upgrade and quota reset is idempotent`(): Unit = runBlocking {
+        val fixture = fixture("same-chain-upgrade")
+        val tier2Checkout = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            fixture.product,
+            "tier2-${fixture.suffix}",
+            fixture.now,
+        )
+        val tier2Transaction = fixture.transaction()
+        val tier2Invoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                fixture.product,
+                tier2Transaction,
+                tier2Checkout.invoiceNumber,
+                BillingEventSource.CLIENT,
+                "tier2-payment-${fixture.suffix}",
+                fixture.now,
+            ),
+        )
+        ledger.fulfill(tier2Invoice.id, fixture.now.plusSeconds(1))
+        val quotaKey = "same-chain-quota-${fixture.suffix}"
+        assertThat(quota.reserveMonthlySystemQuestion(fixture.userId, fixture.now, quotaKey, quotaKey, fixture.now))
+            .isTrue()
+        quota.commitMonthlySystemQuestion(quotaKey, fixture.now.plusSeconds(2))
+
+        val tier3 = requireNotNull(
+            ledger.enabledTierProduct("io.github.ghkdqhrbals.StudyMate.tier3.monthly"),
+        )
+        val tier3PurchasedAt = fixture.now.plusSeconds(100)
+        val productChangeAt = fixture.now.plusSeconds(120)
+        val productChangeEventId = "product-change-${fixture.suffix}"
+        createdRevenueCatEventIds += productChangeEventId
+        val productChange = fixture.revenueCatLifecycleEvent(
+            productChangeEventId,
+            "PRODUCT_CHANGE",
+            tier2Transaction.copy(productId = tier3.productId),
+            productChangeAt,
+            productOverride = tier3,
+        )
+        assertThat(ledger.recordRevenueCatEvent(productChange, productChangeAt)).isTrue()
+        assertThat(ledger.applyRevenueCatEvent(productChange, productChangeAt)).isTrue()
+
+        val tier3Checkout = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            tier3,
+            "tier3-${fixture.suffix}",
+            tier3PurchasedAt,
+        )
+        val tier3Transaction = tier2Transaction.copy(
+            transactionId = "tier3-tx-${fixture.suffix}",
+            productId = tier3.productId,
+            priceMilliunits = 17_900_000,
+            purchaseAt = tier3PurchasedAt,
+            expiresAt = tier3PurchasedAt.plusSeconds(2_592_000),
+            signedAt = tier3PurchasedAt,
+        )
+        val tier3Invoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                tier3,
+                tier3Transaction,
+                tier3Checkout.invoiceNumber,
+                BillingEventSource.CLIENT,
+                "tier3-payment-${fixture.suffix}",
+                tier3PurchasedAt,
+            ),
+        )
+        ledger.fulfill(tier3Invoice.id, tier3PurchasedAt.plusSeconds(1))
+
+        assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER3")
+        val upgradedQuota = requireNotNull(quota.quotaStatusForUser(fixture.userId, tier3PurchasedAt.plusSeconds(2)))
+        assertThat(upgradedQuota.baseLimit).isEqualTo(1_000)
+        assertThat(upgradedQuota.usedCount).isZero()
+        assertThat(upgradedQuota.reservedCount).isZero()
+        assertThat(upgradedQuota.periodStartedAt).isEqualTo(tier3PurchasedAt)
+        assertThat(
+            longValue(
+                "select count(*) from subscriptions where original_transaction_id = " +
+                    "'${tier2Transaction.originalTransactionId}' and pending_product_id is not null",
+            ),
+        ).isZero()
+
+        ledger.fulfill(tier3Invoice.id, tier3PurchasedAt.plusSeconds(3))
+        assertThat(
+            longValue("select count(*) from quota_ledger where ledger_event_id = 'billing-tier-upgrade:${tier3Invoice.id}'"),
+        ).isEqualTo(1)
+        assertThat(requireNotNull(quota.quotaStatusForUser(fixture.userId, tier3PurchasedAt.plusSeconds(4))).usedCount)
+            .isZero()
     }
 
     @Test
@@ -1377,6 +1472,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         transaction: VerifiedAppleTransaction,
         eventAt: Instant,
         cancelReason: String? = null,
+        productOverride: BillingTierProduct = product,
     ) = VerifiedRevenueCatEvent(
         eventId = eventId,
         eventType = eventType,
@@ -1384,7 +1480,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         originalAppUserId = appAccountToken.toString(),
         aliases = emptyList(),
         store = "APP_STORE",
-        productId = product.productId,
+        productId = productOverride.productId,
         transactionId = transaction.transactionId,
         originalTransactionId = transaction.originalTransactionId,
         environment = BillingEnvironment.SANDBOX,
