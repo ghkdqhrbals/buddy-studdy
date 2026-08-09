@@ -2475,16 +2475,16 @@ class BillingLedgerPersistenceAdapter(
     ) {
         val payment = lockPaymentByTransaction(command.transaction.transactionId)
             ?: throw billingFailure(ApiErrorCode.INTERNAL_SERVER_ERROR, "Existing payment is missing.")
-        if (
-            payment.providerOriginalTransactionId != command.transaction.originalTransactionId ||
-            payment.productId != command.transaction.productId
-        ) {
+        if (payment.productId != command.transaction.productId) {
             throw billingFailure(
                 ApiErrorCode.BILLING_TRANSACTION_CONFLICT,
                 "The verified RevenueCat transaction does not match the existing purchase chain.",
                 HttpStatus.CONFLICT,
             )
         }
+        // RevenueCat can model a resubscription as a new subscription whose original transaction ID
+        // is the latest transaction. Preserve the Apple JWS chain already recorded for that transaction.
+        val canonicalOriginalTransactionId = payment.providerOriginalTransactionId
 
         val accountId = database.sql(
             "select id from billing_accounts where user_id = :userId and app_account_token = :token and status = 'ACTIVE' for update",
@@ -2521,7 +2521,7 @@ class BillingLedgerPersistenceAdapter(
             .bind("tierCode", command.tierProduct.tierCode)
             .bindNullable("expiresAt", command.transaction.expiresAt?.utc(), LocalDateTime::class.java)
             .bind("occurredAt", command.occurredAt.utc())
-            .bind("originalTransactionId", command.transaction.originalTransactionId)
+            .bind("originalTransactionId", canonicalOriginalTransactionId)
             .fetch().rowsUpdated().awaitSingle()
 
         database.sql(
@@ -2538,7 +2538,7 @@ class BillingLedgerPersistenceAdapter(
             .bind("tierCode", command.tierProduct.tierCode)
             .bindNullable("expiresAt", command.transaction.expiresAt?.utc(), LocalDateTime::class.java)
             .bind("occurredAt", command.occurredAt.utc())
-            .bind("originalTransactionId", command.transaction.originalTransactionId)
+            .bind("originalTransactionId", canonicalOriginalTransactionId)
             .fetch().rowsUpdated().awaitSingle()
 
         database.sql(
@@ -2558,7 +2558,7 @@ class BillingLedgerPersistenceAdapter(
         ).bind("eventId", "revenuecat-transfer:${command.transaction.transactionId}:${command.userId}".take(191))
             .bind("userId", command.userId)
             .bind("accountId", accountId)
-            .bind("originalTransactionId", command.transaction.originalTransactionId)
+            .bind("originalTransactionId", canonicalOriginalTransactionId)
             .bind("transactionId", command.transaction.transactionId)
             .bind("productId", command.transaction.productId)
             .bind("environment", command.transaction.environment.name)

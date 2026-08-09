@@ -641,7 +641,9 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     fun `RevenueCat verified ownership transfer reassigns projections without duplicating payment`(): Unit =
         runBlocking {
             val previous = fixture("revenuecat-transfer-previous")
-            val transaction = previous.transaction()
+            val transaction = previous.transaction().copy(
+                originalTransactionId = "original-${previous.suffix}",
+            )
             val previousCheckout = ledger.createPendingInvoice(
                 previous.userId,
                 previous.appAccountToken,
@@ -672,6 +674,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
             )
             val transferred = transaction.copy(
                 appAccountToken = current.appAccountToken,
+                originalTransactionId = transaction.transactionId,
                 signedAt = current.now,
             )
 
@@ -710,6 +713,11 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
             assertThat(
                 longValue("select user_id from payments where provider_transaction_id = '${transaction.transactionId}'"),
             ).isEqualTo(previous.userId)
+            assertThat(
+                longValue(
+                    "select count(*) from subscriptions where original_transaction_id = '${transferred.originalTransactionId}'",
+                ),
+            ).isZero()
         }
 
     @Test
