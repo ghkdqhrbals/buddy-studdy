@@ -71,13 +71,6 @@ class ScheduledQuestionService(
                 retryAt = backoffPolicy.pendingLimitNextDueAt(now),
                 now = now,
             )
-            log.info(
-                "scheduled_question_skipped_all_topics_pending userId={} rootStudyId={} activeTopics={} blockedTopics={}",
-                root.userId,
-                root.id,
-                context.activeTopics.size,
-                blockedTopicIds.size,
-            )
             return
         }
         try {
