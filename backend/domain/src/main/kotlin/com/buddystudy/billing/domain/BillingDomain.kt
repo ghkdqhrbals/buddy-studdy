@@ -166,12 +166,18 @@ enum class QuotaReservationStatus {
     RELEASED,
 }
 
-enum class QuotaLedgerType {
-    RESERVE,
-    COMMIT,
-    RELEASE,
-    BONUS_GRANT,
-    BONUS_REVOKE,
+enum class QuotaHistoryType {
+    QUOTA_CREATED,
+    ANCHOR_CHANGED,
+    PERIOD_RESET,
+    RESERVED,
+    COMMITTED,
+    RELEASED,
+    PLAN_UPGRADED,
+    PLAN_DOWNGRADED,
+    BONUS_GRANTED,
+    BONUS_REVOKED,
+    ADMIN_ADJUSTED,
     MIGRATION_ADJUSTMENT,
 }
 

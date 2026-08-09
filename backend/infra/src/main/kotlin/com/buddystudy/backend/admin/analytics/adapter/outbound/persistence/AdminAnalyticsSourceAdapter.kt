@@ -2,13 +2,11 @@ package com.buddystudy.backend.admin.analytics.adapter.outbound.persistence
 
 import com.buddystudy.backend.admin.analytics.application.model.AdminDailyMetricPoint
 import com.buddystudy.backend.admin.analytics.application.port.outbound.AdminAnalyticsSourcePort
-import com.buddystudy.backend.common.application.quota.MonthlyQuotaWindow
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.stereotype.Repository
 import java.time.Instant
 import java.time.LocalDate
-import java.time.LocalDateTime
 import java.time.ZoneOffset
 
 @Repository
@@ -64,31 +62,15 @@ class AdminAnalyticsSourceAdapter(
         val at = date.plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC).minusNanos(1)
         return client.sql(
             """
-            select monthly_usage.user_id, monthly_usage.period_start, monthly_usage.system_question_count, users.created_at
-            from user_monthly_question_usage monthly_usage
-            join users on users.id = monthly_usage.user_id
-            where monthly_usage.period_start <= :at
-              and monthly_usage.period_start > :oldestPossiblePeriod
+            select coalesce(sum(committed_delta), 0) as quota_used
+            from user_quota_history
+            where affected_period_started_at <= :at
+              and affected_period_ends_at > :at
+              and occurred_at <= :at
             """.trimIndent(),
-        ).bind("at", LocalDateTime.ofInstant(at, ZoneOffset.UTC))
-            .bind(
-                "oldestPossiblePeriod",
-                LocalDateTime.ofInstant(at.minus(32, java.time.temporal.ChronoUnit.DAYS), ZoneOffset.UTC),
-            )
-            .map { row, _ ->
-                val createdAt = row.get("created_at", LocalDateTime::class.java)?.toInstant(ZoneOffset.UTC)
-                    ?: Instant.EPOCH
-                val activePeriodStart = MonthlyQuotaWindow.periodAt(createdAt, at).startedAt
-                val storedPeriodStart = row.get("period_start", LocalDateTime::class.java)?.toInstant(ZoneOffset.UTC)
-                if (storedPeriodStart == activePeriodStart) {
-                    (row.get("system_question_count") as Number).toLong()
-                } else {
-                    0L
-                }
-            }.all()
-            .reduce(0L, Long::plus)
-            .awaitSingleOrNull()
-            ?: 0L
+        ).bind("at", at)
+            .map { row, _ -> (row.get("quota_used") as Number).toLong().coerceAtLeast(0) }
+            .one().awaitSingleOrNull() ?: 0L
     }
 
     private fun point(date: LocalDate, key: String, value: Long) = AdminDailyMetricPoint(date, key, null, value.toDouble(), value)

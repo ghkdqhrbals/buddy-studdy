@@ -28,6 +28,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.test.context.TestPropertySource
+import java.time.Instant
 
 @SpringBootTest
 @TestPropertySource(
@@ -68,6 +69,238 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
         }.one().awaitSingle()
 
         assertThat(schedule).containsExactly("FIXED_DELAY", "5s", 3, 300, 300)
+    }
+
+    @Test
+    fun `user quota rollover job is registered with bounded retries`(): Unit = runBlocking {
+        val schedule = databaseClient.sql(
+            """
+            select enabled, schedule_type, schedule_value, max_retry_count, timeout_seconds, lock_seconds
+            from scheduled_jobs
+            where job_name = 'user-quota-rollover'
+            """.trimIndent(),
+        ).map { row, _ ->
+            listOf(
+                row.get("enabled", java.lang.Boolean::class.java)?.booleanValue(),
+                row.get("schedule_type", String::class.java),
+                row.get("schedule_value", String::class.java),
+                row.get("max_retry_count", java.lang.Integer::class.java)?.toInt(),
+                row.get("timeout_seconds", java.lang.Integer::class.java)?.toInt(),
+                row.get("lock_seconds", java.lang.Integer::class.java)?.toInt(),
+            )
+        }.one().awaitSingle()
+
+        assertThat(schedule).containsExactly(true, "FIXED_DELAY", "60s", 3, 300, 300)
+    }
+
+    @Test
+    fun `user quota current row history and reservation snapshots match policy version five`(): Unit = runBlocking {
+        val tables = databaseClient.sql(
+            """
+            select table_name
+            from information_schema.tables
+            where table_schema = database()
+              and table_name in ('user_quota', 'user_quota_history', 'quota_reservations')
+            """.trimIndent(),
+        ).map { row, _ -> row.get("table_name", String::class.java)!! }
+            .all().collectList().awaitSingle()
+        assertThat(tables).containsExactlyInAnyOrder("user_quota", "user_quota_history", "quota_reservations")
+
+        val uncommentedColumns = databaseClient.sql(
+            """
+            select concat(table_name, '.', column_name) as column_key
+            from information_schema.columns
+            where table_schema = database()
+              and table_name in ('user_quota', 'user_quota_history')
+              and column_comment = ''
+            """.trimIndent(),
+        ).map { row, _ -> row.get("column_key", String::class.java)!! }
+            .all().collectList().awaitSingle()
+        assertThat(uncommentedColumns).isEmpty()
+
+        data class ColumnContract(
+            val nullable: String,
+            val extra: String,
+            val generationExpression: String,
+            val comment: String,
+        )
+
+        val columnContracts = databaseClient.sql(
+            """
+            select table_name, column_name, is_nullable, extra, generation_expression, column_comment
+            from information_schema.columns
+            where table_schema = database()
+              and (
+                (table_name = 'user_quota' and column_name in ('remaining_count', 'policy_version'))
+                or (table_name = 'user_quota_history' and column_name = 'event_type')
+                or (table_name = 'quota_reservations' and column_name in ('period_started_at', 'period_ends_at'))
+              )
+            """.trimIndent(),
+        ).map { row, _ ->
+            val key = "${row.get("table_name", String::class.java)!!}.${row.get("column_name", String::class.java)!!}"
+            key to ColumnContract(
+                nullable = row.get("is_nullable", String::class.java)!!,
+                extra = row.get("extra", String::class.java)!!,
+                generationExpression = row.get("generation_expression", String::class.java) ?: "",
+                comment = row.get("column_comment", String::class.java)!!,
+            )
+        }.all().collectList().awaitSingle().toMap()
+
+        assertThat(columnContracts).hasSize(5)
+        assertThat(columnContracts.getValue("user_quota.remaining_count").extra).contains("STORED GENERATED")
+        assertThat(columnContracts.getValue("user_quota.remaining_count").generationExpression)
+            .contains("greatest", "base_limit", "bonus_limit", "committed_count", "reserved_count")
+        assertThat(columnContracts.getValue("user_quota.remaining_count").comment).contains("max(0")
+        assertThat(columnContracts.getValue("user_quota.policy_version").comment).contains("version 5")
+        assertThat(columnContracts.getValue("user_quota_history.event_type").comment)
+            .contains("ANCHOR_CHANGED", "PERIOD_RESET", "MIGRATION_ADJUSTMENT")
+        assertThat(columnContracts.getValue("quota_reservations.period_started_at").nullable).isEqualTo("NO")
+        assertThat(columnContracts.getValue("quota_reservations.period_ends_at").nullable).isEqualTo("NO")
+        assertThat(columnContracts.getValue("quota_reservations.period_started_at").comment).contains("captured")
+        assertThat(columnContracts.getValue("quota_reservations.period_ends_at").comment).contains("Exclusive UTC end")
+
+        val indexes = databaseClient.sql(
+            """
+            select distinct concat(table_name, '.', index_name) as index_key
+            from information_schema.statistics
+            where table_schema = database()
+              and table_name in ('user_quota', 'user_quota_history', 'quota_reservations')
+            """.trimIndent(),
+        ).map { row, _ -> row.get("index_key", String::class.java)!! }
+            .all().collectList().awaitSingle()
+        assertThat(indexes).contains(
+            "user_quota.idx_user_quota_period_end",
+            "user_quota_history.uq_user_quota_history_event",
+            "user_quota_history.uq_user_quota_history_version",
+            "user_quota_history.idx_user_quota_history_user_time",
+            "user_quota_history.idx_user_quota_history_period_user",
+            "user_quota_history.idx_user_quota_history_reservation_time",
+            "quota_reservations.idx_quota_reservations_user_period_status",
+        )
+
+        val checks = databaseClient.sql(
+            """
+            select constraint_name, check_clause
+            from information_schema.check_constraints
+            where constraint_schema = database()
+              and constraint_name in (
+                'chk_user_quota_policy',
+                'chk_user_quota_history_type',
+                'chk_quota_reservations_period_snapshot'
+              )
+            """.trimIndent(),
+        ).map { row, _ ->
+            row.get("constraint_name", String::class.java)!! to row.get("check_clause", String::class.java)!!
+        }.all().collectList().awaitSingle().toMap()
+        assertThat(checks).hasSize(3)
+        assertThat(checks.getValue("chk_user_quota_policy")).contains("policy_version", "5")
+        assertThat(checks.getValue("chk_user_quota_history_type")).contains("ANCHOR_CHANGED")
+        assertThat(checks.getValue("chk_quota_reservations_period_snapshot"))
+            .contains("period_ends_at", "period_started_at")
+
+        val user = users.save(
+            UserEntity(
+                provider = UserProvider.EMAIL,
+                providerId = "quota-v73-contract@example.com",
+                email = "quota-v73-contract@example.com",
+                status = UserStatus.ACTIVE,
+                displayName = "Quota-V73-Contract",
+            ),
+        )
+        val periodStartedAt = Instant.parse("2030-01-15T00:00:00Z")
+        val periodEndsAt = Instant.parse("2030-02-15T00:00:00Z")
+
+        try {
+            databaseClient.sql(
+                """
+                insert into user_quota (
+                    user_id, tier_code, anchor_type, anchor_at, anchor_day, first_paid_at,
+                    period_started_at, period_ends_at, base_limit, bonus_limit,
+                    committed_count, reserved_count, policy_version, version, created_at, updated_at
+                ) values (
+                    :userId, 'TIER1', 'ACCOUNT_CREATED', :periodStartedAt, 15, null,
+                    :periodStartedAt, :periodEndsAt, 30, 5, 10, 3, 5, 41, :periodStartedAt, :periodStartedAt
+                )
+                """.trimIndent(),
+            ).bind("userId", user.id)
+                .bind("periodStartedAt", periodStartedAt)
+                .bind("periodEndsAt", periodEndsAt)
+                .fetch().rowsUpdated().awaitSingle()
+
+            databaseClient.sql(
+                """
+                insert into quota_reservations (
+                    reservation_key, correlation_id, user_id, quota_period_id,
+                    period_started_at, period_ends_at, status, reserved_at, created_at, updated_at
+                ) values (
+                    :reservationKey, :correlationId, :userId, null,
+                    :periodStartedAt, :periodEndsAt, 'RESERVED', :periodStartedAt, :periodStartedAt, :periodStartedAt
+                )
+                """.trimIndent(),
+            ).bind("reservationKey", "quota-v73-reservation-${user.id}")
+                .bind("correlationId", "quota-v73-correlation-${user.id}")
+                .bind("userId", user.id)
+                .bind("periodStartedAt", periodStartedAt)
+                .bind("periodEndsAt", periodEndsAt)
+                .fetch().rowsUpdated().awaitSingle()
+
+            databaseClient.sql(
+                """
+                insert into user_quota_history (
+                    event_id, user_id, event_type,
+                    affected_period_started_at, affected_period_ends_at, applied_to_current,
+                    tier_code_before, tier_code_after, quota_version_after, occurred_at, created_at
+                ) values (
+                    :eventId, :userId, 'ANCHOR_CHANGED',
+                    :periodStartedAt, :periodEndsAt, true,
+                    'TIER1', 'TIER1', 42, :periodStartedAt, :periodStartedAt
+                )
+                """.trimIndent(),
+            ).bind("eventId", "quota-v73-anchor-${user.id}")
+                .bind("userId", user.id)
+                .bind("periodStartedAt", periodStartedAt)
+                .bind("periodEndsAt", periodEndsAt)
+                .fetch().rowsUpdated().awaitSingle()
+
+            val remaining = databaseClient.sql(
+                "select remaining_count from user_quota where user_id = :userId",
+            ).bind("userId", user.id)
+                .map { row, _ -> row.get("remaining_count", java.lang.Integer::class.java)!!.toInt() }
+                .one().awaitSingle()
+            assertThat(remaining).isEqualTo(22)
+
+            databaseClient.sql(
+                "update user_quota set committed_count = 99 where user_id = :userId",
+            ).bind("userId", user.id).fetch().rowsUpdated().awaitSingle()
+            val exhaustedRemaining = databaseClient.sql(
+                "select remaining_count from user_quota where user_id = :userId",
+            ).bind("userId", user.id)
+                .map { row, _ -> row.get("remaining_count", java.lang.Integer::class.java)!!.toInt() }
+                .one().awaitSingle()
+            assertThat(exhaustedRemaining).isZero()
+
+            val reservationSnapshot = databaseClient.sql(
+                """
+                select quota_period_id, period_started_at, period_ends_at
+                from quota_reservations
+                where reservation_key = :reservationKey
+                """.trimIndent(),
+            ).bind("reservationKey", "quota-v73-reservation-${user.id}")
+                .map { row, _ ->
+                    listOf(
+                        row.get("quota_period_id", java.lang.Long::class.java),
+                        row.get("period_started_at", java.time.LocalDateTime::class.java),
+                        row.get("period_ends_at", java.time.LocalDateTime::class.java),
+                    )
+                }.one().awaitSingle()
+            assertThat(reservationSnapshot[0]).isNull()
+            assertThat(reservationSnapshot[1]).isNotNull()
+            assertThat(reservationSnapshot[2]).isNotNull()
+        } finally {
+            databaseClient.sql("delete from users where id = :userId")
+                .bind("userId", user.id)
+                .fetch().rowsUpdated().awaitSingle()
+        }
     }
 
     @Test

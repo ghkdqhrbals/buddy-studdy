@@ -15,11 +15,84 @@ import com.buddystudy.billing.domain.InvoiceStatus
 import com.buddystudy.billing.domain.InvoiceType
 import com.buddystudy.billing.domain.PaymentHistoryEventType
 import com.buddystudy.billing.domain.PaymentStatus
+import com.buddystudy.billing.domain.QuotaAnchorType
+import com.buddystudy.billing.domain.QuotaHistoryType
+import com.buddystudy.billing.domain.QuotaReservationStatus
 import org.springframework.data.annotation.Id
+import org.springframework.data.annotation.ReadOnlyProperty
 import org.springframework.data.relational.core.mapping.Column
 import org.springframework.data.relational.core.mapping.Table
 import java.time.Instant
 import java.util.UUID
+
+@Table("user_quota")
+class UserQuotaEntity(
+    @Id var userId: Long = 0,
+    var tierCode: String = "TIER1",
+    var anchorType: QuotaAnchorType = QuotaAnchorType.ACCOUNT_CREATED,
+    var anchorAt: Instant = Instant.EPOCH,
+    var anchorDay: Int = 1,
+    var firstPaidAt: Instant? = null,
+    var periodStartedAt: Instant = Instant.EPOCH,
+    var periodEndsAt: Instant = Instant.EPOCH,
+    var baseLimit: Int = 30,
+    var bonusLimit: Int = 0,
+    var committedCount: Int = 0,
+    var reservedCount: Int = 0,
+    @ReadOnlyProperty var remainingCount: Int = 30,
+    var policyVersion: Int = 5,
+    var version: Long = 0,
+    var createdAt: Instant = Instant.EPOCH,
+    var updatedAt: Instant = Instant.EPOCH,
+)
+
+@Table("user_quota_history")
+class UserQuotaHistoryEntity(
+    @Id var id: Long = 0,
+    var eventId: String = "",
+    var userId: Long = 0,
+    var reservationId: Long? = null,
+    var eventType: QuotaHistoryType = QuotaHistoryType.QUOTA_CREATED,
+    var affectedPeriodStartedAt: Instant = Instant.EPOCH,
+    var affectedPeriodEndsAt: Instant = Instant.EPOCH,
+    var appliedToCurrent: Boolean = true,
+    var tierCodeBefore: String? = null,
+    var tierCodeAfter: String? = null,
+    var baseLimitBefore: Int? = null,
+    var baseLimitAfter: Int? = null,
+    var bonusLimitBefore: Int? = null,
+    var bonusLimitAfter: Int? = null,
+    var committedCountBefore: Int? = null,
+    var committedCountAfter: Int? = null,
+    var reservedCountBefore: Int? = null,
+    var reservedCountAfter: Int? = null,
+    var committedDelta: Int = 0,
+    var reservedDelta: Int = 0,
+    var bonusDelta: Int = 0,
+    var reason: String? = null,
+    var actorUserId: Long? = null,
+    var quotaVersionAfter: Long? = null,
+    var occurredAt: Instant = Instant.EPOCH,
+    var createdAt: Instant = Instant.EPOCH,
+)
+
+@Table("quota_reservations")
+class QuotaReservationEntity(
+    @Id var id: Long = 0,
+    var reservationKey: String = "",
+    var correlationId: String = "",
+    var userId: Long = 0,
+    var quotaPeriodId: Long? = null,
+    var periodStartedAt: Instant = Instant.EPOCH,
+    var periodEndsAt: Instant = Instant.EPOCH,
+    var status: QuotaReservationStatus = QuotaReservationStatus.RESERVED,
+    var reservedAt: Instant = Instant.EPOCH,
+    var committedAt: Instant? = null,
+    var releasedAt: Instant? = null,
+    var releaseReason: String? = null,
+    var createdAt: Instant = Instant.EPOCH,
+    var updatedAt: Instant = Instant.EPOCH,
+)
 
 @Table("membership_tier_products")
 class MembershipTierProductEntity(

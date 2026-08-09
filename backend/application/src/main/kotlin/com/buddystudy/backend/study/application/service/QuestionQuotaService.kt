@@ -18,7 +18,9 @@ class QuestionQuotaService(
     private val memberships: QuestionMembershipPort,
     private val users: UserPort,
 ) : QuestionQuotaUseCase {
-    @Transactional(readOnly = true)
+    // A read may materialize or roll over the single current quota row. The persistence adapter
+    // writes that state and its audit event atomically, so this transaction must remain writable.
+    @Transactional
     override suspend fun status(principal: Principal): QuestionQuotaResponse {
         val now = Instant.now()
         val user = users.findById(principal.userId)

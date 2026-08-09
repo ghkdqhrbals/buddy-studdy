@@ -81,9 +81,15 @@ or has a different product type is rejected before an invoice is written.
   `subscriptions` projects one Apple `originalTransactionId` each.
 - `user_entitlement_projection` selects the single highest currently valid tier
   without summing duplicate subscriptions.
-- `quota_accounts` stores the current monthly anchor and quota policy version.
-  `quota_periods` is the current projection, while `quota_reservations` and
-  `quota_ledger` provide idempotent reserve/commit/release accounting.
+- `user_quota` stores one authoritative current row per user: monthly anchor and
+  boundaries, effective tier and base limit, bonus, committed and reserved
+  counters, derived remaining capacity, policy version, and row version.
+- `user_quota_history` is the append-only audit source for every quota mutation.
+  The current-row update and its unique history event always commit in the same
+  transaction.
+- `quota_reservations` retains the exactly-once question-generation identity and
+  the period in which the reservation was accepted, including after the current
+  `user_quota` row advances.
 
 Each billing table has an explicit Spring Data relational persistence model in
 `billing/domain/entity/BillingPersistenceEntities.kt`. Closed database values
@@ -286,7 +292,7 @@ interactive billing sequence explorer.
 | Malformed client transaction identifier | Correctable request validation failure | The request returns `VALIDATION_ERROR`; no ledger state changes and the invoice remains `WAITING`. | The client may retry the same invoice with the exact RevenueCat transaction identifier. The unpaid checkout expires after 10 minutes if it is never corrected. |
 | Payment evidence commits but entitlement or quota fulfillment fails | Recoverable fulfillment failure | `PAYMENT_VERIFIED` and the payment row remain durable; the entitlement/quota transaction rolls back and the fulfillment job remains retryable | The recovery scheduler claims the job with a lease and bounded backoff. After the configured maximum attempts, it records `COMPENSATION_REQUIRED` and raises an operational alert; it never pretends Apple refunded the payment. |
 | Process crashes after payment commit | Crash between transaction boundaries | The verified payment and pending fulfillment job survive restart | A later scheduler claim resumes `fulfill(invoiceId)` idempotently. |
-| Duplicate client confirmation and RevenueCat webhook | At-least-once duplicate | Checkout idempotency key, provider event ID, and Apple transaction ID prevent duplicate invoices, payments, entitlement grants, and quota resets | Both paths converge on `VerifiedBillingPaymentUseCase`; an already fulfilled invoice is returned without applying it again. |
+| Duplicate client confirmation and RevenueCat webhook | At-least-once duplicate | Checkout idempotency key, provider event ID, Apple transaction ID, and the invoice-scoped quota-history event prevent duplicate invoices, payments, entitlement grants, or plan-limit mutations | Both paths converge on `VerifiedBillingPaymentUseCase`; an already fulfilled invoice is returned without applying it again. |
 | Prepared checkout has no verified payment for 10 minutes | Unpaid checkout expiry | Scheduler appends `CANCELLED` with source `SYSTEM`; invoice projection moves `WAITING -> FAILED` | No refund is created because no verified charge exists. The user can start a fresh checkout. |
 
 #### Internal transaction and idempotency boundaries
@@ -301,7 +307,7 @@ own Spring `@Transactional` boundary.
 | `createPendingInvoice` | Locks the user's billing account, then inserts the `NORMAL/WAITING` invoice and `INVOICE_CREATED` event together | `(userId, idempotencyKey)` returns the original invoice under concurrent retries. No StoreKit sheet is shown before this commit. |
 | `failPendingInvoiceValidation` | Locks the invoice and any payment for that invoice, then appends `PAYMENT_VALIDATION_FAILED` | It applies only to unpaid `NORMAL/WAITING` invoices. The event ID `invoice-payment-validation-failed:{invoiceNumber}` is unique. Repeats return the existing `FAILED` projection; an invoice with payment evidence is returned unchanged. |
 | `recordVerifiedPayment` | Locks the billing account, resolves and locks the explicit or recoverable invoice, inserts the payment/history, appends `PAYMENT_VERIFIED`, upserts the subscription ledger, and inserts a fulfillment job | `(provider, transactionId)`, one-payment-per-invoice, and invoice-event IDs are unique. Client confirmation and webhook delivery therefore converge on one payment and one invoice. This transaction commits before membership fulfillment. |
-| `fulfill` | Locks the invoice, verified payment and subscription projection, then applies entitlement, quota, payment settlement, `FULFILLED`, and fulfillment-job completion | All membership projections commit together or roll back together. Retrying the same invoice does not grant quota twice. A failure cannot erase committed payment evidence. |
+| `fulfill` | Locks the invoice, verified payment, subscription projection, and `user_quota`, then applies entitlement, the idempotent plan-limit history event, payment settlement, `FULFILLED`, and fulfillment-job completion | All membership projections commit together or roll back together. Retrying the same invoice cannot change the quota row twice, and a tier change never clears current-period counters. A failure cannot erase committed payment evidence. |
 | RevenueCat webhook receipt | Stores the signed raw event receipt and SHA-256 before asynchronous projection | Provider `eventId` deduplicates deliveries. A worker lease permits retry after process death; projection calls the same verified-payment use case as direct confirmation. |
 | Unpaid checkout expiration | Selects old unpaid `WAITING` invoices with `FOR UPDATE SKIP LOCKED` and appends `CANCELLED` | Multiple scheduler instances cannot expire the same invoice twice. Invoices with a payment row are excluded. |
 
@@ -486,54 +492,83 @@ subscriptions daily. Customer-support refund notices force reconciliation so a
 historical refund cannot revoke a newer valid subscription. If multiple valid
 subscriptions exist, the highest tier wins and limits are never added together.
 
-### Monthly question policy v4
+### Monthly question policy v5
 
-The monthly window starts at account creation until a verified paid purchase.
-An initial paid purchase, an effective upgrade, or an effective downgrade starts
-a new question window at the provider `purchasedAt` timestamp. UTC month
-arithmetic preserves that new anchor day, including January 31 → February end
-→ March 31. A same-tier renewal is idempotent and does not open a second
-window; the normal monthly boundary performs the next reset.
+`user_quota` is the only current-state read authority. It stores the user's
+anchor, current `period_started_at` and `period_ends_at`, effective tier and base
+limit, current-period bonus, committed and reserved counts, policy version, and
+row version. Remaining quota is derived as:
+
+```text
+max(0, base_limit + bonus_limit - committed_count - reserved_count)
+```
+
+The monthly anchor starts at account creation. The first verified paid purchase
+may replace it once with the earliest provider `purchasedAt`; existing committed,
+reserved, and bonus counters are carried into the recalculated window rather
+than cleared. Later upgrades, downgrades, same-tier renewals, cancellations,
+expirations, refunds, and resubscriptions never move the anchor. UTC month
+arithmetic preserves the original day without drift, including January 31 →
+February end → March 31.
 
 Tier changes use these rules:
 
-- Upgrade: the higher tier applies immediately. Committed usage and bonus are
-  reset to zero and the new higher-tier base limit becomes available. Active
-  in-flight reservations move to the new window and remain reserved.
-- Downgrade request before `currentPlanEndsAt`: the higher tier, quota window,
-  committed usage, bonus, and active reservations remain unchanged. Only
-  `pending_product_id` and the exact transition boundary are exposed.
+- Upgrade: the higher tier and base limit apply immediately. The current period,
+  committed usage, bonus, and active reservations remain unchanged. For example,
+  20 committed and 2 reserved in TIER1 becomes 278 remaining in TIER2.
+- Downgrade request before `currentPlanEndsAt`: the higher tier and quota row
+  remain unchanged. Only `pending_product_id` and the exact transition boundary
+  are exposed.
 - First verified lower-tier renewal at or after `currentPlanEndsAt`: the lower
-  tier becomes effective and a new lower-tier window starts with committed usage
-  and bonus reset to zero. Active in-flight reservations remain reserved.
-- No unused allowance is carried in either direction.
-- Each effective invoice can apply its transition once through its unique
-  `billing-tier-change:{invoiceId}` quota-ledger event. Client confirmation,
-  webhook delivery, reconciliation, and replay therefore converge without a
-  second reset. A deferred downgrade creates no quota-ledger transition until
-  its renewal transaction becomes effective.
+  tier and base limit become effective while period and counters remain. If the
+  preserved committed plus reserved total is at least the lower allowance,
+  remaining is zero until the natural monthly rollover.
+- Same-tier renewal changes neither the quota row nor its history. Cancellation,
+  expiration, refund, and resubscription follow the effective entitlement tier
+  without granting a fresh allowance inside the same quota period.
+- Each effective invoice uses one unique plan-change history event. Client
+  confirmation, webhook delivery, reconciliation, and replay therefore converge
+  without a second mutation. A deferred downgrade writes no quota change until
+  its lower-tier renewal becomes effective.
 
-Example: a TIER3 user with 100 committed questions and 5 reservations selects
-TIER2. Until the TIER3 period ends, the user keeps TIER3 and the same counters.
-At the first verified TIER2 renewal, the new TIER2 window has a base of 300,
-zero committed questions, zero bonus, and the same 5 in-flight reservations.
+Example: a TIER3 user with 320 committed questions, 5 active reservations, and
+10 bonus questions selects TIER2. Until the TIER3 period ends the full TIER3
+state remains active. When TIER2 becomes effective, the base becomes 300 while
+all counters remain; remaining is `max(0, 300 + 10 - 320 - 5) = 0`. The counters
+reset only at the next natural quota boundary.
 
 Question generation uses its Saga correlation ID as an exactly-once quota key:
 
-1. Acceptance appends `RESERVE` and increments `reserved_count` atomically.
-2. A usable persisted system question appends `COMMIT`, moving one reserved
-   unit to committed usage.
-3. Permanent generation failure or rollback appends one `RELEASE` and reverses
-   the appropriate counter.
-4. Replayed requests return the existing reservation result.
+1. Acceptance stores a `quota_reservations` row, appends `RESERVED`, and
+   increments `user_quota.reserved_count` atomically.
+2. A usable persisted system question appends `COMMITTED`, moves one current
+   reservation into committed usage, and marks the reservation committed.
+3. Permanent generation failure or rollback appends `RELEASED` and reverses the
+   appropriate current-period counter exactly once.
+4. Replayed requests return the existing reservation result without advancing
+   the quota version.
 
-No reset batch exists. The current window is calculated from the current quota
-anchor, and a period row is created lazily on the first reservation or bonus.
-Remaining quota is `max(0, base tier limit + current-period bonus - committed -
-reserved)`. Administrative bonuses are append-only
-`BONUS_GRANT`/`BONUS_REVOKE` ledger events and expire with their period. Paid
-tier transitions record an idempotent zero-delta `MIGRATION_ADJUSTMENT` as the
-reset marker.
+Reservations snapshot their accepted period and are retained after rollover. A
+late commit or release for an older-period reservation finalizes that reservation
+and appends its history, but it does not modify the counters of the new current
+period.
+
+Every mutation appends one `user_quota_history` row in the same transaction as
+the `user_quota` update. History includes a unique event ID, mutation type,
+period, deltas, tier and limit before/after values, reason, timestamp, and the
+resulting row version. Types include `PERIOD_RESET`, `RESERVED`, `COMMITTED`,
+`RELEASED`, `PLAN_UPGRADED`, `PLAN_DOWNGRADED`, `BONUS_GRANTED`,
+`BONUS_REVOKED`, `ADMIN_ADJUSTED`, and `MIGRATION_ADJUSTMENT`.
+
+The managed `user-quota-rollover` job runs every minute. It claims due rows with
+bounded locking, advances an overdue row directly to the monthly window
+containing the current UTC instant, resets committed, reserved, and bonus
+counters, and appends one deterministic `PERIOD_RESET` history event. Quota
+reads and writes invoke the same idempotent rollover transaction whenever they
+encounter `period_ends_at <= now`, so scheduler delay, process downtime, or a
+race between the job and a request cannot expose or reset an allowance twice.
+Administrative bonuses remain current-period history events and expire only at
+this natural rollover.
 
 Every five minutes the backend records `billing_lifecycle_metrics` for webhook
 lag, entitlement mismatch, exhausted reconciliation, stale reservations,

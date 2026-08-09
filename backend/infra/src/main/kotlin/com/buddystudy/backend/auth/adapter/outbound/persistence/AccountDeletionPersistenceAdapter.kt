@@ -108,6 +108,7 @@ class AccountDeletionPersistenceAdapter(
             withdrawnAt,
         )
         listOf(
+            "update user_quota_history set actor_user_id = null where actor_user_id = :userId",
             "update quota_ledger set actor_user_id = null where actor_user_id = :userId",
             "delete from user_entitlement_projection where user_id = :userId",
             "update subscription_events set user_id = null where user_id = :userId",

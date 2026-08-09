@@ -137,47 +137,49 @@ class PermissionPolicyPersistenceAdapter(
     }
 
     override suspend fun status(userId: Long, key: String, now: Instant): PermissionQuotaStatus {
-        val accountCreatedAt = client.sql("select created_at from users where id = :userId")
-            .bind("userId", userId)
+        val quota = client.sql(
+            """
+            select u.created_at,
+                   q.anchor_at, q.period_started_at, q.period_ends_at,
+                   q.base_limit, q.bonus_limit, q.committed_count, q.reserved_count,
+                   coalesce(free_tier.monthly_question_limit, 30) as free_limit
+            from users u
+            left join user_quota q on q.user_id = u.id
+            left join user_membership_tiers free_tier on free_tier.tier_code = 'TIER1'
+            where u.id = :userId
+            """.trimIndent(),
+        ).bind("userId", userId)
             .map { row, _ ->
-                row.get("created_at", LocalDateTime::class.java)?.toInstant(ZoneOffset.UTC)
-                    ?: now
+                PermissionQuotaRow(
+                    accountCreatedAt = row.get("created_at", LocalDateTime::class.java)?.toInstant(ZoneOffset.UTC) ?: now,
+                    anchorAt = row.get("anchor_at", LocalDateTime::class.java)?.toInstant(ZoneOffset.UTC),
+                    storedPeriodStartedAt = row.get("period_started_at", LocalDateTime::class.java)?.toInstant(ZoneOffset.UTC),
+                    storedPeriodEndsAt = row.get("period_ends_at", LocalDateTime::class.java)?.toInstant(ZoneOffset.UTC),
+                    baseLimit = (row.get("base_limit") as? Number)?.toLong(),
+                    bonusLimit = (row.get("bonus_limit") as? Number)?.toLong() ?: 0,
+                    committedCount = (row.get("committed_count") as? Number)?.toLong() ?: 0,
+                    reservedCount = (row.get("reserved_count") as? Number)?.toLong() ?: 0,
+                    freeLimit = (row.get("free_limit") as Number).toLong(),
+                )
             }
             .one()
             .awaitSingleOrNull()
-            ?: now
-        val period = MonthlyQuotaWindow.periodAt(accountCreatedAt, now)
+            ?: return PermissionQuotaStatus(0, now, now)
+        val period = MonthlyQuotaWindow.periodAt(quota.anchorAt ?: quota.accountCreatedAt, now)
         if (key != "monthly_question") {
             return PermissionQuotaStatus(0, period.startedAt, period.resetAt)
         }
-        val remaining = client.sql(
-            """
-            select greatest(
-                coalesce(
-                    u.current_period_question_limit_override,
-                    m.monthly_question_limit_override,
-                    t.monthly_question_limit,
-                    0
-                ) - coalesce(u.system_question_count, 0),
-                0
-            ) as remaining
-            from users usr
-            left join user_memberships m on m.id = (
-                select active_membership.id from user_memberships active_membership
-                where active_membership.user_id = usr.id and active_membership.status = 'ACTIVE'
-                  and active_membership.started_at <= :now
-                  and (active_membership.expires_at is null or active_membership.expires_at > :now)
-                order by active_membership.updated_at desc, active_membership.id desc limit 1
-            )
-            left join user_membership_tiers t on t.tier_code = coalesce(m.tier, 'TIER1')
-            left join user_monthly_question_usage u on u.user_id = usr.id and u.period_start = :periodStartedAt
-            where usr.id = :userId
-            """.trimIndent(),
-        ).bind("now", now)
-            .bind("periodStartedAt", LocalDateTime.ofInstant(period.startedAt, ZoneOffset.UTC))
-            .bind("userId", userId)
-            .map { row, _ -> (row.get("remaining") as Number).toLong() }
-            .one().awaitSingleOrNull() ?: 0L
+        // The reservation path performs the transactional rollover. This pre-check computes the
+        // same effective result so a delayed scheduler can never block the first request of a period.
+        val isStoredCurrent = quota.storedPeriodStartedAt == period.startedAt &&
+            quota.storedPeriodEndsAt == period.resetAt
+        val remaining = if (quota.baseLimit == null) {
+            quota.freeLimit
+        } else if (!isStoredCurrent) {
+            quota.baseLimit
+        } else {
+            (quota.baseLimit + quota.bonusLimit - quota.committedCount - quota.reservedCount).coerceAtLeast(0)
+        }
         return PermissionQuotaStatus(remaining, period.startedAt, period.resetAt)
     }
 
@@ -212,6 +214,18 @@ class PermissionPolicyPersistenceAdapter(
 
     private fun <T : Any> DatabaseClient.GenericExecuteSpec.bindNullable(name: String, value: T?, type: Class<T>) =
         if (value == null) bindNull(name, type) else bind(name, value)
+
+    private data class PermissionQuotaRow(
+        val accountCreatedAt: Instant,
+        val anchorAt: Instant?,
+        val storedPeriodStartedAt: Instant?,
+        val storedPeriodEndsAt: Instant?,
+        val baseLimit: Long?,
+        val bonusLimit: Long,
+        val committedCount: Long,
+        val reservedCount: Long,
+        val freeLimit: Long,
+    )
 
     internal companion object {
         fun defaultNotificationPreference(userId: Long?, key: String): Boolean =

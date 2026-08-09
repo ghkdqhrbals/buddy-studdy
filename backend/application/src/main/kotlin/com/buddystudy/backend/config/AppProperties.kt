@@ -18,6 +18,7 @@ data class BuddyStudyProperties(
     var analytics: Analytics = Analytics(),
     var monitoring: Monitoring = Monitoring(),
     var billing: Billing = Billing(),
+    var quota: Quota = Quota(),
 ) {
     data class Auth(var jwtSecret: String = "", var accessTokenDays: Long = 90)
     data class Crypto(var masterKey: String = "")
@@ -109,6 +110,7 @@ data class BuddyStudyProperties(
         var schedulerStartupGraceMinutes: Long = 15,
         var schedulerMonitoredJobs: List<String> = listOf(
             "question-schedule",
+            "user-quota-rollover",
             "event-outbox-dispatch",
             "user-stats-refresh",
             "answer-grading-watchdog",
@@ -148,6 +150,16 @@ data class BuddyStudyProperties(
         var connectTimeoutMs: Long = 3_000,
         var readTimeoutMs: Long = 5_000,
         var maxRetries: Int = 3,
+    )
+    data class Quota(
+        var rollover: QuotaRollover = QuotaRollover(),
+    )
+    data class QuotaRollover(
+        var enabled: Boolean = true,
+        var pollMs: Long = 60_000,
+        var initialDelayMs: Long = 10_000,
+        var batchSize: Int = 200,
+        var maxBatchesPerRun: Int = 10,
     )
 }
 

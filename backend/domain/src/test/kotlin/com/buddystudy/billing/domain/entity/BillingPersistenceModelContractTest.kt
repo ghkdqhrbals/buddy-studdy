@@ -9,6 +9,9 @@ class BillingPersistenceModelContractTest {
     @Test
     fun `every billing ledger table has an explicit persistence model`() {
         val models = mapOf(
+            UserQuotaEntity::class.java to "user_quota",
+            UserQuotaHistoryEntity::class.java to "user_quota_history",
+            QuotaReservationEntity::class.java to "quota_reservations",
             MembershipTierProductEntity::class.java to "membership_tier_products",
             AppleBillingAccountEntity::class.java to "apple_billing_accounts",
             InvoiceEntity::class.java to "invoices",

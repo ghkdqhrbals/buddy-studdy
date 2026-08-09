@@ -143,8 +143,8 @@ class BillingLifecycleMetricsReporter(
         ),
         negativeQuotaCounters = scalar(
             """
-            select count(*) from quota_periods
-            where committed_count < 0 or reserved_count < 0 or bonus_count < 0
+            select count(*) from user_quota
+            where committed_count < 0 or reserved_count < 0 or bonus_limit < 0 or remaining_count < 0
             """.trimIndent(),
         ),
         duplicateActiveSubscriptions = scalar(

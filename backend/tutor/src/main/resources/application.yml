@@ -128,6 +128,13 @@ buddystudy:
       enabled: ${BILLING_EVENT_PROJECTOR_ENABLED:true}
       poll-ms: ${BILLING_EVENT_PROJECTOR_POLL_MS:1000}
       initial-delay-ms: ${BILLING_EVENT_PROJECTOR_INITIAL_DELAY_MS:1000}
+  quota:
+    rollover:
+      enabled: ${USER_QUOTA_ROLLOVER_ENABLED:true}
+      poll-ms: ${USER_QUOTA_ROLLOVER_POLL_MS:60000}
+      initial-delay-ms: ${USER_QUOTA_ROLLOVER_INITIAL_DELAY_MS:10000}
+      batch-size: ${USER_QUOTA_ROLLOVER_BATCH_SIZE:200}
+      max-batches-per-run: ${USER_QUOTA_ROLLOVER_MAX_BATCHES_PER_RUN:10}
   streams:
     enabled: ${BUDDYSTUDY_STREAMS_ENABLED:true}
     notification-requested-key: ${BUDDYSTUDY_NOTIFICATION_REQUESTED_STREAM_KEY:notification.message.requested.v1}
@@ -198,7 +205,7 @@ buddystudy:
     scheduler-readiness-enabled: ${MONITORING_SCHEDULER_READINESS_ENABLED:true}
     scheduler-stale-threshold-minutes: ${MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES:15}
     scheduler-startup-grace-minutes: ${MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES:15}
-    scheduler-monitored-jobs: ${MONITORING_SCHEDULER_MONITORED_JOBS:question-schedule,event-outbox-dispatch,user-stats-refresh,answer-grading-watchdog,billing-fulfillment-recovery,billing-subscription-event-projector}
+    scheduler-monitored-jobs: ${MONITORING_SCHEDULER_MONITORED_JOBS:question-schedule,user-quota-rollover,event-outbox-dispatch,user-stats-refresh,answer-grading-watchdog,billing-fulfillment-recovery,billing-subscription-event-projector}
     runtime-metrics:
       enabled: ${RUNTIME_METRICS_ENABLED:true}
       interval-ms: ${RUNTIME_METRICS_INTERVAL_MS:30000}
