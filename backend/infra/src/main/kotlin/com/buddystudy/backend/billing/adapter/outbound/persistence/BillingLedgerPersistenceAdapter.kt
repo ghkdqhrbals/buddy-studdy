@@ -966,6 +966,7 @@ class BillingLedgerPersistenceAdapter(
                     providerEventAt = event.eventAt,
                     processedAt = now,
                     nextReconcileAt = now,
+                    clearPendingProduct = true,
                 )
             }
             markRevenueCatEvent(event.eventId, BillingReceiptStatus.PROCESSED, null, now)
@@ -1254,6 +1255,44 @@ class BillingLedgerPersistenceAdapter(
     }
 
     @Transactional
+    override suspend fun claimUserSubscriptionReconciliations(
+        userId: Long,
+        now: Instant,
+        limit: Int,
+    ): List<SubscriptionReconciliationClaim> {
+        val claims = database.sql(
+            """
+            select s.id, s.user_id, s.original_transaction_id, a.app_account_token,
+                   (
+                       select count(*) from subscription_events e
+                       where e.original_transaction_id = s.original_transaction_id
+                         and e.event_type = 'SUBSCRIPTION_RECONCILE_FAILED'
+                         and (s.last_reconciled_at is null or e.occurred_at > s.last_reconciled_at)
+                   ) as failure_count
+            from subscriptions s join billing_accounts a on a.id = s.billing_account_id
+            where s.user_id = :userId and a.status = 'ACTIVE'
+              and s.access_status in ('ACTIVE', 'GRACE_PERIOD', 'PENDING')
+            order by case s.access_status when 'ACTIVE' then 1 when 'GRACE_PERIOD' then 2 else 3 end,
+                     s.updated_at desc, s.id desc
+            limit :limit for update skip locked
+            """.trimIndent(),
+        ).bind("userId", userId).bind("limit", limit.coerceIn(1, 10)).map { row, _ ->
+            SubscriptionReconciliationClaim(
+                subscriptionId = row.long("id"), userId = row.long("user_id"),
+                originalTransactionId = row.string("original_transaction_id"),
+                appAccountToken = UUID.fromString(row.string("app_account_token")),
+                attempt = row.int("failure_count") + 1,
+            )
+        }.all().collectList().awaitSingle()
+        claims.forEach { claim ->
+            database.sql(
+                "update subscriptions set next_reconcile_at = timestampadd(minute, 5, :now), updated_at = :now where id = :id",
+            ).bind("now", now.utc()).bind("id", claim.subscriptionId).fetch().rowsUpdated().awaitSingle()
+        }
+        return claims
+    }
+
+    @Transactional
     override suspend fun applySubscriptionSnapshot(
         claim: SubscriptionReconciliationClaim,
         snapshot: RevenueCatCustomerSnapshot,
@@ -1273,6 +1312,12 @@ class BillingLedgerPersistenceAdapter(
             ) -> now.plusSeconds(6 * 60 * 60)
             else -> now.plusSeconds(24 * 60 * 60)
         }
+        val clearsPendingProduct = snapshot.renewalStatus ==
+            com.buddystudy.billing.domain.SubscriptionRenewalStatus.CANCELED ||
+            snapshot.accessStatus in setOf(
+                com.buddystudy.billing.domain.SubscriptionAccessStatus.EXPIRED,
+                com.buddystudy.billing.domain.SubscriptionAccessStatus.REVOKED,
+            )
         database.sql(
             """
             insert ignore into subscription_events (
@@ -1294,6 +1339,11 @@ class BillingLedgerPersistenceAdapter(
             update subscriptions
             set access_status = :access, renewal_status = :renewal,
                 expires_at = coalesce(:expiresAt, expires_at),
+                pending_product_id = case when :clearPendingProduct = 1 then null else pending_product_id end,
+                pending_product_event_at = case
+                    when :clearPendingProduct = 1 then greatest(coalesce(pending_product_event_at, :fetchedAt), :fetchedAt)
+                    else pending_product_event_at
+                end,
                 last_reconciled_at = :fetchedAt,
                 next_reconcile_at = :nextReconcileAt,
                 version = version + 1, updated_at = :now
@@ -1301,6 +1351,7 @@ class BillingLedgerPersistenceAdapter(
             """.trimIndent(),
         ).bind("access", access).bind("renewal", renewal)
             .bindNullable("expiresAt", snapshot.expiresAt?.utc(), LocalDateTime::class.java)
+            .bind("clearPendingProduct", if (clearsPendingProduct) 1 else 0)
             .bind("fetchedAt", snapshot.fetchedAt.utc()).bind("nextReconcileAt", nextReconcileAt.utc())
             .bind("now", now.utc()).bind("id", claim.subscriptionId).bind("userId", claim.userId)
             .fetch().rowsUpdated().awaitSingle()
@@ -1377,6 +1428,7 @@ class BillingLedgerPersistenceAdapter(
                         renewalStatus = "CANCELED",
                         providerEventAt = notification.signedAt,
                         processedAt = now,
+                        clearPendingProduct = true,
                     )
                 }
                 "AUTO_RENEW_ENABLED" -> {
@@ -1421,6 +1473,7 @@ class BillingLedgerPersistenceAdapter(
                     renewalStatus = "NOT_APPLICABLE",
                     providerEventAt = notification.signedAt,
                     processedAt = now,
+                    clearPendingProduct = true,
                 )
             }
             "REFUND_DECLINED" -> {
@@ -1453,6 +1506,7 @@ class BillingLedgerPersistenceAdapter(
                     renewalStatus = "NOT_APPLICABLE",
                     providerEventAt = notification.signedAt,
                     processedAt = now,
+                    clearPendingProduct = true,
                 )
             }
             "EXPIRED", "GRACE_PERIOD_EXPIRED" -> {
@@ -1465,6 +1519,7 @@ class BillingLedgerPersistenceAdapter(
                     providerEventAt = notification.signedAt,
                     processedAt = now,
                     nextReconcileAt = now.plusSeconds(24 * 60 * 60),
+                    clearPendingProduct = true,
                 )
             }
             "CONSUMPTION_REQUEST" -> {
@@ -2276,18 +2331,25 @@ class BillingLedgerPersistenceAdapter(
         providerEventAt: Instant,
         processedAt: Instant,
         nextReconcileAt: Instant = processedAt.plusSeconds(6 * 60 * 60),
+        clearPendingProduct: Boolean = false,
     ) {
         var spec = database.sql(
             """
             update subscriptions
             set access_status = coalesce(:accessStatus, access_status),
                 renewal_status = coalesce(:renewalStatus, renewal_status),
+                pending_product_id = case when :clearPendingProduct = 1 then null else pending_product_id end,
+                pending_product_event_at = case
+                    when :clearPendingProduct = 1 then greatest(coalesce(pending_product_event_at, :providerEventAt), :providerEventAt)
+                    else pending_product_event_at
+                end,
                 last_provider_event_at = :providerEventAt, next_reconcile_at = :nextReconcileAt,
                 version = version + 1, updated_at = :processedAt
             where original_transaction_id = :originalTransactionId
             """.trimIndent(),
         ).bindNullable("accessStatus", accessStatus, String::class.java)
             .bindNullable("renewalStatus", renewalStatus, String::class.java)
+            .bind("clearPendingProduct", if (clearPendingProduct) 1 else 0)
             .bind("providerEventAt", providerEventAt.utc()).bind("processedAt", processedAt.utc())
             .bind("nextReconcileAt", nextReconcileAt.utc())
             .bind("originalTransactionId", originalTransactionId)
@@ -2311,7 +2373,9 @@ class BillingLedgerPersistenceAdapter(
             set pending_product_id = :productId, pending_product_event_at = :eventAt,
                 next_reconcile_at = :now, version = version + 1, updated_at = :now
             where original_transaction_id = :originalTransactionId
-              and (pending_product_event_at is null or pending_product_event_at <= :eventAt)
+              and renewal_status <> 'CANCELED'
+              and (last_provider_event_at is null or last_provider_event_at < :eventAt)
+              and (pending_product_event_at is null or pending_product_event_at < :eventAt)
             """.trimIndent(),
         ).bindNullable("productId", productId, String::class.java)
             .bind("eventAt", providerEventAt.utc()).bind("now", now.utc())

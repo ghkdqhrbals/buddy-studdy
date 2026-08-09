@@ -164,6 +164,11 @@ interface BillingLedgerPort {
     suspend fun adminUserTimeline(userId: Long, limit: Int): AdminUserBillingTimeline =
         error("Billing timeline is not supported by this billing ledger.")
     suspend fun claimDueSubscriptionReconciliations(now: Instant, limit: Int): List<SubscriptionReconciliationClaim> = emptyList()
+    suspend fun claimUserSubscriptionReconciliations(
+        userId: Long,
+        now: Instant,
+        limit: Int,
+    ): List<SubscriptionReconciliationClaim> = emptyList()
     suspend fun applySubscriptionSnapshot(
         claim: SubscriptionReconciliationClaim,
         snapshot: RevenueCatCustomerSnapshot,

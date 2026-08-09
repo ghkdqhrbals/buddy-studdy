@@ -206,6 +206,7 @@ struct TermsUseCase {
 @MainActor
 protocol BillingRepository {
     func status(registration: RemotePushRegistration) async throws -> BackendBillingStatus
+    func reconcileSubscription(registration: RemotePushRegistration) async throws -> BackendBillingStatus
     func catalog(registration: RemotePushRegistration) async throws -> BackendBillingCatalog
     func createCheckout(
         registration: RemotePushRegistration,
@@ -253,6 +254,10 @@ struct RemoteBillingRepository: BillingRepository {
 
     func status(registration: RemotePushRegistration) async throws -> BackendBillingStatus {
         try await backendClient.fetchBillingStatus(registration: registration)
+    }
+
+    func reconcileSubscription(registration: RemotePushRegistration) async throws -> BackendBillingStatus {
+        try await backendClient.reconcileBillingSubscription(registration: registration)
     }
 
     func catalog(registration: RemotePushRegistration) async throws -> BackendBillingCatalog {
@@ -354,6 +359,10 @@ struct BillingUseCase {
 
     func status(registration: RemotePushRegistration) async throws -> BackendBillingStatus {
         try await repository.status(registration: registration)
+    }
+
+    func reconcileSubscription(registration: RemotePushRegistration) async throws -> BackendBillingStatus {
+        try await repository.reconcileSubscription(registration: registration)
     }
 
     func catalog(registration: RemotePushRegistration) async throws -> BackendBillingCatalog {

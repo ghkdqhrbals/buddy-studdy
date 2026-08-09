@@ -14,6 +14,7 @@ import com.buddystudy.backend.billing.application.model.RevenueCatWebhookRequest
 import com.buddystudy.backend.billing.application.model.SyncAppleTransactionCommand
 import com.buddystudy.backend.billing.application.port.inbound.AppleBillingNotificationUseCase
 import com.buddystudy.backend.billing.application.port.inbound.BillingUseCase
+import com.buddystudy.backend.billing.application.port.inbound.BillingReconciliationUseCase
 import com.buddystudy.backend.billing.application.port.inbound.RevenueCatBillingNotificationUseCase
 import com.buddystudy.backend.common.adapter.inbound.web.principalOrThrow
 import com.buddystudy.backend.common.application.error.ApiErrorCode
@@ -92,6 +93,10 @@ class BillingController(
         authentication: Authentication,
         @PathVariable invoiceId: Long,
     ): BillingInvoiceDetail = billing.invoice(authentication.principalOrThrow(), invoiceId)
+
+    @PostMapping("/subscriptions/reconcile")
+    suspend fun reconcileSubscription(authentication: Authentication): BillingStatusResponse =
+        billing.reconcileSubscription(authentication.principalOrThrow())
 
     @PostMapping("/payments/{paymentId}/refund-requests")
     suspend fun requestRefund(
@@ -196,6 +201,7 @@ interface BillingWebPort {
     suspend fun syncAppleTransaction(principal: Principal, request: SyncAppleTransactionRequest): BillingInvoiceSummary
     suspend fun invoices(principal: Principal, limit: Int, offset: Int): BillingInvoicePage
     suspend fun invoice(principal: Principal, invoiceId: Long): BillingInvoiceDetail
+    suspend fun reconcileSubscription(principal: Principal): BillingStatusResponse
     suspend fun requestRefund(principal: Principal, paymentId: Long, request: BillingActionRequest): BillingAction
     suspend fun requestCancellation(
         principal: Principal,
@@ -215,6 +221,7 @@ interface RevenueCatBillingNotificationWebPort {
 @Component
 class BillingWebAdapter(
     private val billing: BillingUseCase,
+    private val reconciliation: BillingReconciliationUseCase,
     private val meterRegistry: MeterRegistry,
 ) : BillingWebPort {
     override suspend fun status(principal: Principal): BillingStatusResponse = billing.status(principal)
@@ -273,6 +280,12 @@ class BillingWebAdapter(
 
     override suspend fun invoice(principal: Principal, invoiceId: Long): BillingInvoiceDetail =
         billing.invoice(principal, invoiceId)
+
+    override suspend fun reconcileSubscription(principal: Principal): BillingStatusResponse {
+        billing.status(principal)
+        reconciliation.reconcileUserSubscription(principal.userId)
+        return billing.status(principal)
+    }
 
     override suspend fun requestRefund(
         principal: Principal,

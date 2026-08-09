@@ -6038,6 +6038,42 @@ final class AppState: ObservableObject {
         billingRefreshTask = nil
     }
 
+    @discardableResult
+    func reconcileBillingSubscription() async -> Bool {
+        guard isCommunitySessionActive,
+              let storedRegistration = storedBackendIdentityUseCase.loadRegistration(),
+              let registration = await registrationWithAccessToken(
+                storedRegistration,
+                reason: "billing-subscription-reconcile"
+              ) else {
+            return false
+        }
+
+        do {
+            let resolvedStatus = try await performWithBackendIdentityRecovery(
+                registration: registration,
+                reason: "billing-subscription-reconcile",
+                operation: { recoveredRegistration in
+                    try await self.billingUseCase.reconcileSubscription(registration: recoveredRegistration)
+                }
+            )
+            applyBillingStatus(resolvedStatus)
+            billingErrorMessage = nil
+            let pendingChange = resolvedStatus.pendingChange ?? "-"
+            log(
+                .info,
+                "구독 공급자 상태를 즉시 재조정했습니다. tier=\(resolvedStatus.tierCode), " +
+                    "renewal=\(resolvedStatus.renewalStatus), pending=\(pendingChange)"
+            )
+            return true
+        } catch where !Self.isCancellationLikeError(error) {
+            log(.warning, "구독 공급자 상태 재조정에 실패했습니다: \(error.localizedDescription)")
+            return false
+        } catch {
+            return false
+        }
+    }
+
     private func performBillingRefresh() async {
         let refreshOrder = membershipRefreshOrder.issue()
         let clientGeneration = backendClientGeneration

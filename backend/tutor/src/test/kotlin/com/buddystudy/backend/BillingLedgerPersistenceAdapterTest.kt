@@ -334,6 +334,147 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
+    fun `cancellation clears a scheduled downgrade and stale product change cannot restore it`(): Unit = runBlocking {
+        val fixture = fixture("cancel-scheduled-downgrade")
+        val tier3 = requireNotNull(
+            ledger.enabledTierProduct("io.github.ghkdqhrbals.StudyMate.tier3.monthly"),
+        )
+        val checkout = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            tier3,
+            "tier3-${fixture.suffix}",
+            fixture.now,
+        )
+        val transaction = fixture.transaction().copy(
+            productId = tier3.productId,
+            productType = tier3.productType,
+            priceMilliunits = 17_900_000,
+        )
+        val invoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                tier3,
+                transaction,
+                checkout.invoiceNumber,
+                BillingEventSource.CLIENT,
+                "tier3-payment-${fixture.suffix}",
+                fixture.now,
+            ),
+        )
+        ledger.fulfill(invoice.id, fixture.now.plusSeconds(1))
+        val invoiceCountBeforeChange = longValue("select count(*) from invoices where user_id = ${fixture.userId}")
+        val paymentCountBeforeChange = longValue("select count(*) from payments where user_id = ${fixture.userId}")
+
+        val productChangeAt = fixture.now.plusSeconds(90)
+        val productChange = fixture.revenueCatLifecycleEvent(
+            eventId = "rc-downgrade-${fixture.suffix}",
+            eventType = "PRODUCT_CHANGE",
+            transaction = transaction.copy(productId = fixture.product.productId),
+            eventAt = productChangeAt,
+            productOverride = fixture.product,
+        )
+        createdRevenueCatEventIds += productChange.eventId
+        assertThat(ledger.recordRevenueCatEvent(productChange, productChangeAt)).isTrue()
+        assertThat(ledger.applyRevenueCatEvent(productChange, productChangeAt)).isTrue()
+        assertThat(ledger.entitlementForUser(fixture.userId)?.pendingProductId)
+            .isEqualTo(fixture.product.productId)
+        assertThat(longValue("select count(*) from invoices where user_id = ${fixture.userId}"))
+            .isEqualTo(invoiceCountBeforeChange)
+        assertThat(longValue("select count(*) from payments where user_id = ${fixture.userId}"))
+            .isEqualTo(paymentCountBeforeChange)
+
+        val cancellationAt = fixture.now.plusSeconds(100)
+        val cancellation = fixture.revenueCatLifecycleEvent(
+            eventId = "rc-cancel-downgrade-${fixture.suffix}",
+            eventType = "CANCELLATION",
+            transaction = transaction,
+            eventAt = cancellationAt,
+            cancelReason = "UNSUBSCRIBE",
+            productOverride = tier3,
+        )
+        createdRevenueCatEventIds += cancellation.eventId
+        assertThat(ledger.recordRevenueCatEvent(cancellation, cancellationAt)).isTrue()
+        assertThat(ledger.applyRevenueCatEvent(cancellation, cancellationAt)).isTrue()
+
+        val staleProductChange = productChange.copy(
+            eventId = "rc-stale-downgrade-${fixture.suffix}",
+            eventAt = fixture.now.plusSeconds(95),
+            signedPayloadSha256 = "stale-${fixture.suffix}".padEnd(64, 'f').take(64),
+        )
+        createdRevenueCatEventIds += staleProductChange.eventId
+        assertThat(ledger.recordRevenueCatEvent(staleProductChange, cancellationAt.plusSeconds(1))).isTrue()
+        assertThat(ledger.applyRevenueCatEvent(staleProductChange, cancellationAt.plusSeconds(2))).isTrue()
+
+        val entitlement = requireNotNull(ledger.entitlementForUser(fixture.userId))
+        assertThat(entitlement.renewalStatus).isEqualTo(SubscriptionRenewalStatus.CANCELED)
+        assertThat(entitlement.willRenew).isFalse()
+        assertThat(entitlement.pendingProductId).isNull()
+        assertThat(longValue("select count(*) from invoices where user_id = ${fixture.userId}"))
+            .isEqualTo(invoiceCountBeforeChange)
+        assertThat(longValue("select count(*) from payments where user_id = ${fixture.userId}"))
+            .isEqualTo(paymentCountBeforeChange)
+    }
+
+    @Test
+    fun `cancelled reconciliation snapshot clears a stale pending product`(): Unit = runBlocking {
+        val fixture = fixture("reconcile-cancelled-pending")
+        val checkout = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            fixture.product,
+            fixture.idempotencyKey,
+            fixture.now,
+        )
+        val transaction = fixture.transaction()
+        val invoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                fixture.product,
+                transaction,
+                checkout.invoiceNumber,
+                BillingEventSource.CLIENT,
+                "initial-payment-${fixture.suffix}",
+                fixture.now,
+            ),
+        )
+        ledger.fulfill(invoice.id, fixture.now.plusSeconds(1))
+        forceStaleSubscriptionProjection(
+            fixture,
+            transaction,
+            pendingProductId = fixture.product.productId,
+            accessStatus = "ACTIVE",
+            renewalStatus = "WILL_RENEW",
+            lastProviderEventAt = fixture.now.plusSeconds(10),
+        )
+
+        val subscriptionId = longValue(
+            "select id from subscriptions where original_transaction_id = '${transaction.originalTransactionId}'",
+        )
+        val fetchedAt = fixture.now.plusSeconds(100)
+        ledger.applySubscriptionSnapshot(
+            SubscriptionReconciliationClaim(
+                subscriptionId,
+                fixture.userId,
+                transaction.originalTransactionId,
+                fixture.appAccountToken,
+                1,
+            ),
+            RevenueCatCustomerSnapshot(
+                SubscriptionAccessStatus.ACTIVE,
+                SubscriptionRenewalStatus.CANCELED,
+                transaction.expiresAt,
+                fetchedAt,
+            ),
+            fetchedAt,
+        )
+
+        val entitlement = requireNotNull(ledger.entitlementForUser(fixture.userId))
+        assertThat(entitlement.renewalStatus).isEqualTo(SubscriptionRenewalStatus.CANCELED)
+        assertThat(entitlement.pendingProductId).isNull()
+    }
+
+    @Test
     fun `late renewal payment cannot reactivate an expired subscription`(): Unit = runBlocking {
         val fixture = fixture("revenuecat-late-renewal")
         val checkout = ledger.createPendingInvoice(

@@ -209,13 +209,16 @@ final class BillingLocalizationTests: XCTestCase {
         """.data(using: .utf8)!
         let status = try RemotePushBackendClient.makeDecoder().decode(BackendBillingStatus.self, from: payload)
 
-        let timeline = try XCTUnwrap(
+        let schedule = try XCTUnwrap(
             MembershipPlanTimelinePolicy.resolve(
                 status: status,
                 catalogProducts: [],
                 at: try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-08-06T01:00:00Z"))
             )
         )
+        guard case .change(let timeline) = schedule else {
+            return XCTFail("Expected a scheduled plan change")
+        }
 
         XCTAssertEqual(timeline.currentTierCode, "TIER3")
         XCTAssertEqual(timeline.nextTierCode, "TIER2")
@@ -261,7 +264,7 @@ final class BillingLocalizationTests: XCTestCase {
         XCTAssertNil(MembershipPlanTimelinePolicy.resolve(status: status, catalogProducts: [], at: now))
     }
 
-    func testMembershipTimelineShowsFreePlanAfterCancelledSubscriptionExpires() throws {
+    func testMembershipTimelineShowsOnlyExpiryForCancelledSubscription() throws {
         let payload = """
         {
           "tierCode": "TIER2",
@@ -288,7 +291,56 @@ final class BillingLocalizationTests: XCTestCase {
         """.data(using: .utf8)!
         let status = try RemotePushBackendClient.makeDecoder().decode(BackendBillingStatus.self, from: payload)
 
-        let timeline = try XCTUnwrap(
+        let schedule = try XCTUnwrap(
+            MembershipPlanTimelinePolicy.resolve(
+                status: status,
+                catalogProducts: [],
+                at: try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-08-06T01:00:00Z"))
+            )
+        )
+        guard case .expiration(let currentTierCode, let expiresAt) = schedule else {
+            return XCTFail("Expected a subscription expiration schedule")
+        }
+
+        XCTAssertEqual(currentTierCode, "TIER2")
+        XCTAssertEqual(expiresAt, try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-09-06T00:00:00Z")))
+    }
+
+    func testCancelledSubscriptionIgnoresStaleDowngradeFields() throws {
+        let payload = """
+        {
+          "tierCode": "TIER3",
+          "source": "APP_STORE",
+          "accessStatus": "ACTIVE",
+          "renewalStatus": "CANCELED",
+          "productId": "tier3.monthly",
+          "expiresAt": "2026-09-06T00:00:00Z",
+          "willRenew": false,
+          "pendingChange": "tier2.monthly",
+          "planTransition": {
+            "currentTierCode": "TIER3",
+            "currentProductId": "tier3.monthly",
+            "currentPlanEndsAt": "2026-09-06T00:00:00Z",
+            "nextTierCode": "TIER2",
+            "nextProductId": "tier2.monthly",
+            "nextPlanStartsAt": "2026-09-06T00:00:00Z"
+          },
+          "synchronizedAt": "2026-08-06T01:00:00Z",
+          "quota": {
+            "periodStartedAt": "2026-08-06T00:00:00Z",
+            "resetAt": "2026-09-06T00:00:00Z",
+            "anchorType": "FIRST_PAID",
+            "baseLimit": 1000,
+            "bonusLimit": 0,
+            "usedCount": 0,
+            "reservedCount": 0,
+            "remainingCount": 1000,
+            "policyVersion": 3
+          }
+        }
+        """.data(using: .utf8)!
+        let status = try RemotePushBackendClient.makeDecoder().decode(BackendBillingStatus.self, from: payload)
+        let schedule = try XCTUnwrap(
             MembershipPlanTimelinePolicy.resolve(
                 status: status,
                 catalogProducts: [],
@@ -296,9 +348,11 @@ final class BillingLocalizationTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(timeline.currentTierCode, "TIER2")
-        XCTAssertEqual(timeline.nextTierCode, "TIER1")
-        XCTAssertEqual(timeline.currentPlanEndsAt, timeline.nextPlanStartsAt)
+        guard case .expiration(let currentTierCode, let expiresAt) = schedule else {
+            return XCTFail("Cancellation must override stale plan-change fields")
+        }
+        XCTAssertEqual(currentTierCode, "TIER3")
+        XCTAssertEqual(expiresAt, try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-09-06T00:00:00Z")))
     }
 
     func testMembershipTimelineHidesAnAlreadyEffectiveTransition() throws {

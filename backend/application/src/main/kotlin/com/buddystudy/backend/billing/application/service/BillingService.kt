@@ -68,6 +68,11 @@ class BillingService(
             val changesAt = current.expiresAt
             if (changesAt == null || !changesAt.isAfter(now) || !current.accessStatus.grantsAccess()) {
                 null
+            } else if (
+                !current.willRenew &&
+                current.renewalStatus == SubscriptionRenewalStatus.CANCELED
+            ) {
+                null
             } else if (current.pendingProductId != null) {
                 ledger.tierProduct(current.pendingProductId)
                     ?.takeIf { MonthlyQuestionQuotaPolicy.isDowngrade(current.tierCode, it.tierCode) }
@@ -81,19 +86,6 @@ class BillingService(
                             nextPlanStartsAt = changesAt,
                         )
                     }
-            } else if (
-                !current.willRenew &&
-                current.renewalStatus == SubscriptionRenewalStatus.CANCELED &&
-                current.productId != null
-            ) {
-                BillingPlanTransition(
-                    currentTierCode = current.tierCode,
-                    currentProductId = current.productId,
-                    currentPlanEndsAt = changesAt,
-                    nextTierCode = "TIER1",
-                    nextProductId = null,
-                    nextPlanStartsAt = changesAt,
-                )
             } else {
                 null
             }

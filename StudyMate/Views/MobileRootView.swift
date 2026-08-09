@@ -6271,8 +6271,8 @@ private struct MobileMembershipManagementView: View {
             LazyVStack(alignment: .leading, spacing: 20) {
                 membershipSummary
 
-                if let planTransition {
-                    membershipTimeline(planTransition)
+                if let membershipSchedule {
+                    membershipScheduleView(membershipSchedule)
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
@@ -6364,10 +6364,10 @@ private struct MobileMembershipManagementView: View {
         .navigationTitle(strings.membershipManagement)
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            await refreshMembershipData()
+            await synchronizeMembershipData()
         }
         .refreshable {
-            await refreshMembershipData()
+            await synchronizeMembershipData()
         }
         .onDisappear {
             purchaseTask?.cancel()
@@ -6393,19 +6393,31 @@ private struct MobileMembershipManagementView: View {
             Text(strings.billingRecoveryMessage)
         }
         .sheet(isPresented: $isCustomerCenterPresented, onDismiss: {
-            Task { await refreshMembershipData() }
+            Task {
+                await synchronizeMembershipData()
+            }
         }) {
             CustomerCenterView()
                 .environment(\.locale, appState.settings.appLanguage.locale)
         }
     }
 
-    private var planTransition: MembershipPlanTransition? {
+    private var membershipSchedule: MembershipPlanSchedule? {
         guard let status = appState.billingStatus else { return nil }
         return MembershipPlanTimelinePolicy.resolve(
             status: status,
             catalogProducts: appState.billingCatalog?.products ?? []
         )
+    }
+
+    @ViewBuilder
+    private func membershipScheduleView(_ schedule: MembershipPlanSchedule) -> some View {
+        switch schedule {
+        case .change(let transition):
+            membershipTimeline(transition)
+        case .expiration(let currentTierCode, let expiresAt):
+            membershipExpirationTimeline(currentTierCode: currentTierCode, expiresAt: expiresAt)
+        }
     }
 
     private func membershipTimeline(_ transition: MembershipPlanTransition) -> some View {
@@ -6433,6 +6445,25 @@ private struct MobileMembershipManagementView: View {
                     isCurrent: false
                 )
             }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func membershipExpirationTimeline(currentTierCode: String, expiresAt: Date) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(strings.membershipExpirationSchedule)
+                .font(.subheadline.weight(.semibold))
+
+            membershipTimelineRow(
+                label: strings.currentPlanPeriod,
+                tierCode: currentTierCode,
+                dateText: strings.membershipAvailableUntil(expiresAt),
+                isCurrent: true
+            )
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -6760,6 +6791,11 @@ private struct MobileMembershipManagementView: View {
         initializeSelection()
     }
 
+    private func synchronizeMembershipData() async {
+        await appState.reconcileBillingSubscription()
+        await refreshMembershipData()
+    }
+
     private func initializeSelection() {
         if let activeProduct {
             selectedTierCode = activeProduct.tier.tierCode
@@ -6987,7 +7023,10 @@ private struct MobileBillingInvoiceDetailView: View {
             Text(billingNotice ?? "")
         }
         .sheet(isPresented: $isCustomerCenterPresented, onDismiss: {
-            Task { await appState.refreshBilling() }
+            Task {
+                await appState.reconcileBillingSubscription()
+                await appState.refreshBilling()
+            }
         }) {
             CustomerCenterView()
                 .environment(\.locale, appState.settings.appLanguage.locale)

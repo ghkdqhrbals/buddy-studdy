@@ -46,6 +46,31 @@ class BillingReconciliationServiceTest {
     }
 
     @Test
+    fun `user reconciliation immediately refreshes only that users subscription`() = runBlocking {
+        val ledger = Mockito.mock(BillingLedgerPort::class.java)
+        val revenueCat = Mockito.mock(RevenueCatCustomerInfoPort::class.java)
+        val snapshot = RevenueCatCustomerSnapshot(
+            SubscriptionAccessStatus.ACTIVE,
+            SubscriptionRenewalStatus.CANCELED,
+            now.plusSeconds(86_400),
+            now,
+        )
+        Mockito.`when`(ledger.claimUserSubscriptionReconciliations(claim.userId, now, 10))
+            .thenReturn(listOf(claim))
+        Mockito.`when`(revenueCat.fetch(token, claim.originalTransactionId)).thenReturn(snapshot)
+
+        val count = BillingReconciliationService(
+            ledger,
+            revenueCat,
+            Clock.fixed(now, ZoneOffset.UTC),
+        ).reconcileUserSubscription(claim.userId)
+
+        assertThat(count).isEqualTo(1)
+        Mockito.verify(ledger).claimUserSubscriptionReconciliations(claim.userId, now, 10)
+        Mockito.verify(ledger).applySubscriptionSnapshot(claim, snapshot, now)
+    }
+
+    @Test
     fun `provider failure is committed to reconciliation history without aborting the batch`() = runBlocking {
         val ledger = Mockito.mock(BillingLedgerPort::class.java)
         val revenueCat = Mockito.mock(RevenueCatCustomerInfoPort::class.java)
@@ -60,6 +85,29 @@ class BillingReconciliationServiceTest {
         ).reconcileDueSubscriptions()
 
         assertThat(count).isEqualTo(1)
+        Mockito.verify(ledger).recordSubscriptionReconcileFailure(claim, "provider unavailable", now)
+    }
+
+    @Test
+    fun `user reconciliation reports provider failure instead of returning stale status`() = runBlocking {
+        val ledger = Mockito.mock(BillingLedgerPort::class.java)
+        val revenueCat = Mockito.mock(RevenueCatCustomerInfoPort::class.java)
+        Mockito.`when`(ledger.claimUserSubscriptionReconciliations(claim.userId, now, 10))
+            .thenReturn(listOf(claim))
+        Mockito.`when`(revenueCat.fetch(token, claim.originalTransactionId))
+            .thenThrow(IllegalStateException("provider unavailable"))
+
+        val service = BillingReconciliationService(
+            ledger,
+            revenueCat,
+            Clock.fixed(now, ZoneOffset.UTC),
+        )
+
+        val error = runCatching { service.reconcileUserSubscription(claim.userId) }.exceptionOrNull()
+
+        assertThat(error)
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessage("provider unavailable")
         Mockito.verify(ledger).recordSubscriptionReconcileFailure(claim, "provider unavailable", now)
     }
 

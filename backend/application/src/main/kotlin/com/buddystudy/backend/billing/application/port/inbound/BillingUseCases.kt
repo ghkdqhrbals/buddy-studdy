@@ -67,6 +67,7 @@ interface BillingRecoveryUseCase {
 
 interface BillingReconciliationUseCase {
     suspend fun reconcileDueSubscriptions(): Int
+    suspend fun reconcileUserSubscription(userId: Long): Int
 }
 
 interface AdminBillingUseCase {

@@ -141,7 +141,7 @@ class BillingServiceTest {
     }
 
     @Test
-    fun `cancelled subscription status shows the free plan after expiry`() = runBlocking {
+    fun `cancelled subscription status does not expose a future plan change`() = runBlocking {
         val changesAt = Instant.parse("2026-09-02T00:00:00Z")
         val ledger = FakeLedger(token, product).apply {
             projectedEntitlement = projectedEntitlement?.copy(
@@ -154,9 +154,34 @@ class BillingServiceTest {
 
         val status = service(ledger).status(principal())
 
-        assertEquals("TIER2", status.planTransition?.currentTierCode)
-        assertEquals("TIER1", status.planTransition?.nextTierCode)
-        assertEquals(changesAt, status.planTransition?.nextPlanStartsAt)
+        assertEquals(null, status.planTransition)
+        assertEquals(null, status.pendingChange)
+        assertEquals(SubscriptionRenewalStatus.CANCELED, status.renewalStatus)
+        assertEquals(changesAt, status.expiresAt)
+    }
+
+    @Test
+    fun `cancelled subscription ignores a stale pending downgrade`() = runBlocking {
+        val changesAt = Instant.parse("2026-09-02T00:00:00Z")
+        val ledger = FakeLedger(token, product).apply {
+            projectedEntitlement = BillingEntitlementProjection(
+                tierCode = "TIER3",
+                source = EntitlementSource.APP_STORE,
+                accessStatus = SubscriptionAccessStatus.ACTIVE,
+                renewalStatus = SubscriptionRenewalStatus.CANCELED,
+                productId = "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                startedAt = Instant.parse("2026-08-02T00:00:00Z"),
+                expiresAt = changesAt,
+                willRenew = false,
+                pendingProductId = product.productId,
+                synchronizedAt = now,
+            )
+        }
+
+        val status = service(ledger).status(principal())
+
+        assertEquals(null, status.planTransition)
+        assertEquals(null, status.pendingChange)
     }
 
     @Test

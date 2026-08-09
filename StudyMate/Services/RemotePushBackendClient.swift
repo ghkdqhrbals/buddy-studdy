@@ -388,6 +388,10 @@ protocol RemotePushBackendClientProtocol {
         registration: RemotePushRegistration
     ) async throws -> BackendBillingStatus
 
+    func reconcileBillingSubscription(
+        registration: RemotePushRegistration
+    ) async throws -> BackendBillingStatus
+
     func createBillingCheckout(
         registration: RemotePushRegistration,
         productID: String,
@@ -644,6 +648,12 @@ protocol RemotePushBackendClientProtocol {
 
 extension RemotePushBackendClientProtocol {
     func fetchBillingStatus(
+        registration: RemotePushRegistration
+    ) async throws -> BackendBillingStatus {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func reconcileBillingSubscription(
         registration: RemotePushRegistration
     ) async throws -> BackendBillingStatus {
         throw RemotePushBackendError.invalidResponse
@@ -1214,6 +1224,18 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             registration: registration,
             url: endpoint("api", "v1", "billing", "status")
         )
+        let data = try await perform(request)
+        return try decoder.decode(BackendBillingStatus.self, from: data)
+    }
+
+    func reconcileBillingSubscription(
+        registration: RemotePushRegistration
+    ) async throws -> BackendBillingStatus {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "billing", "subscriptions", "reconcile")
+        )
+        request.httpMethod = "POST"
         let data = try await perform(request)
         return try decoder.decode(BackendBillingStatus.self, from: data)
     }

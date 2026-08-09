@@ -2835,6 +2835,7 @@ struct AppStrings {
         )
     }
     var membershipChangeSchedule: String { text("변경 일정", "Plan timeline", "変更スケジュール") }
+    var membershipExpirationSchedule: String { text("구독 만료 예정", "Subscription ending", "サブスクリプション終了予定") }
     var currentPlanPeriod: String { text("현재", "Current", "現在") }
     var nextPlanPeriod: String { text("다음", "Next", "次回") }
     func membershipAvailableUntil(_ date: Date) -> String {
@@ -4146,24 +4147,37 @@ struct MembershipPlanTransition: Equatable {
     var nextPlanStartsAt: Date
 }
 
+enum MembershipPlanSchedule: Equatable {
+    case change(MembershipPlanTransition)
+    case expiration(currentTierCode: String, expiresAt: Date)
+}
+
 struct MembershipPlanTimelinePolicy {
     static func resolve(
         status: BackendBillingStatus,
         catalogProducts: [BackendBillingTierProduct],
         at now: Date = Date()
-    ) -> MembershipPlanTransition? {
+    ) -> MembershipPlanSchedule? {
         guard status.isEntitlementActive else { return nil }
+
+        if !status.willRenew,
+           status.renewalStatus.uppercased() == "CANCELED",
+           status.productId != nil,
+           let expiresAt = status.expiresAt,
+           expiresAt > now {
+            return .expiration(currentTierCode: status.tierCode, expiresAt: expiresAt)
+        }
 
         if let transition = status.planTransition,
            tierRank(transition.nextTierCode) < tierRank(transition.currentTierCode),
            transition.currentPlanEndsAt > now,
            transition.nextPlanStartsAt > now {
-            return MembershipPlanTransition(
+            return .change(MembershipPlanTransition(
                 currentTierCode: transition.currentTierCode,
                 currentPlanEndsAt: transition.currentPlanEndsAt,
                 nextTierCode: transition.nextTierCode,
                 nextPlanStartsAt: transition.nextPlanStartsAt
-            )
+            ))
         }
 
         // Compatibility with a backend version that only exposes the pending product ID.
@@ -4171,22 +4185,12 @@ struct MembershipPlanTimelinePolicy {
         if let pendingProductID = status.pendingChange,
            let nextProduct = catalogProducts.first(where: { $0.productId == pendingProductID }),
            tierRank(nextProduct.tierCode) < tierRank(status.tierCode) {
-            return MembershipPlanTransition(
+            return .change(MembershipPlanTransition(
                 currentTierCode: status.tierCode,
                 currentPlanEndsAt: changesAt,
                 nextTierCode: nextProduct.tierCode,
                 nextPlanStartsAt: changesAt
-            )
-        }
-        if !status.willRenew,
-           status.renewalStatus == "CANCELED",
-           status.productId != nil {
-            return MembershipPlanTransition(
-                currentTierCode: status.tierCode,
-                currentPlanEndsAt: changesAt,
-                nextTierCode: "TIER1",
-                nextPlanStartsAt: changesAt
-            )
+            ))
         }
         return nil
     }
