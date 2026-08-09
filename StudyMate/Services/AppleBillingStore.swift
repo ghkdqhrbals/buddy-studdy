@@ -128,6 +128,14 @@ final class RevenueCatBillingBridge {
         language.locale.identifier
     }
 
+    nonisolated static func shouldLogOut(
+        currentAppUserID: String,
+        expectedAppAccountToken: UUID?
+    ) -> Bool {
+        guard let expectedAppAccountToken else { return false }
+        return currentAppUserID == expectedAppAccountToken.uuidString.lowercased()
+    }
+
     func start() {
         guard !Purchases.isConfigured else {
             return
@@ -173,8 +181,13 @@ final class RevenueCatBillingBridge {
         _ = try await Purchases.shared.syncPurchases()
     }
 
-    func logOut() async {
-        guard isEnabled, !Purchases.shared.isAnonymous else { return }
+    func logOut(expectedAppAccountToken: UUID?) async {
+        guard isEnabled,
+              !Purchases.shared.isAnonymous,
+              Self.shouldLogOut(
+                currentAppUserID: Purchases.shared.appUserID,
+                expectedAppAccountToken: expectedAppAccountToken
+              ) else { return }
         _ = try? await Purchases.shared.logOut()
     }
 }

@@ -13,6 +13,30 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertFalse(RevenueCatBillingBridge.isValidPublicSDKKey("sk_live_secret"))
     }
 
+    func testRevenueCatLogoutOnlyTargetsTheSessionBeingReset() {
+        let previous = UUID(uuidString: "6d3a6958-1eed-4a16-8f36-b2bf22bf7c21")!
+        let current = UUID(uuidString: "f9d47348-7b53-41c3-9f06-ef0b6f3c5e22")!
+
+        XCTAssertTrue(
+            RevenueCatBillingBridge.shouldLogOut(
+                currentAppUserID: previous.uuidString.lowercased(),
+                expectedAppAccountToken: previous
+            )
+        )
+        XCTAssertFalse(
+            RevenueCatBillingBridge.shouldLogOut(
+                currentAppUserID: current.uuidString.lowercased(),
+                expectedAppAccountToken: previous
+            )
+        )
+        XCTAssertFalse(
+            RevenueCatBillingBridge.shouldLogOut(
+                currentAppUserID: current.uuidString.lowercased(),
+                expectedAppAccountToken: nil
+            )
+        )
+    }
+
     func testHomeStudyScopesAreLocalizedForAllSupportedLanguages() {
         let korean = AppStrings(language: .korean)
         let english = AppStrings(language: .english)

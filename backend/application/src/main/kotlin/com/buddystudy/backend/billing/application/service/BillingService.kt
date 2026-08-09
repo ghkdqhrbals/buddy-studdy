@@ -203,7 +203,14 @@ class BillingService(
                 revenueCatTransactionVerifier.verifyLatest(appAccountToken, invoice.productId)
             }
             validateTransaction(transaction, now)
-            applyVerifiedTransaction(principal, transaction, invoiceNumber, BillingEventSource.CLIENT, now)
+            applyVerifiedTransaction(
+                principal,
+                transaction,
+                invoiceNumber,
+                BillingEventSource.CLIENT,
+                now,
+                authoritativeOwnershipTransfer = true,
+            )
         }
     }
 
@@ -383,6 +390,7 @@ class BillingService(
         invoiceNumber: UUID?,
         source: BillingEventSource,
         now: Instant,
+        authoritativeOwnershipTransfer: Boolean = false,
     ): BillingInvoiceSummary {
         val expectedToken = ledger.findOrCreateAppAccountToken(principal.userId, now)
         if (transaction.appAccountToken != expectedToken) {
@@ -413,6 +421,7 @@ class BillingService(
                 invoiceNumber = invoiceNumber,
                 source = source,
                 occurredAt = now,
+                authoritativeOwnershipTransfer = authoritativeOwnershipTransfer,
             ),
         )
     }

@@ -294,12 +294,22 @@ class BillingLedgerPersistenceAdapter(
         lockAndValidateAccount(command.userId, command.transaction.appAccountToken)
 
         existingInvoiceForTransaction(command.transaction.transactionId)?.let { existing ->
-            if (existing.userId != command.userId || existing.productId != command.tierProduct.productId) {
+            if (existing.productId != command.tierProduct.productId) {
                 throw billingFailure(
                     ApiErrorCode.BILLING_TRANSACTION_CONFLICT,
                     "The App Store transaction is already attached to another invoice.",
                     HttpStatus.CONFLICT,
                 )
+            }
+            if (existing.userId != command.userId) {
+                if (!command.authoritativeOwnershipTransfer) {
+                    throw billingFailure(
+                        ApiErrorCode.BILLING_TRANSACTION_CONFLICT,
+                        "The App Store transaction is already attached to another invoice.",
+                        HttpStatus.CONFLICT,
+                    )
+                }
+                transferVerifiedSubscriptionOwnership(existing, command)
             }
             val requestedInvoiceNumber = command.invoiceNumber
             if (requestedInvoiceNumber != null && existing.invoiceNumber != requestedInvoiceNumber) {
@@ -2458,6 +2468,110 @@ class BillingLedgerPersistenceAdapter(
         database.sql("select app_account_token from apple_billing_accounts where user_id = :userId")
             .bind("userId", userId).map { row, _ -> UUID.fromString(row.string("app_account_token")) }
             .one().awaitSingleOrNull()
+
+    private suspend fun transferVerifiedSubscriptionOwnership(
+        existing: ExistingPayment,
+        command: RecordVerifiedPaymentCommand,
+    ) {
+        val payment = lockPaymentByTransaction(command.transaction.transactionId)
+            ?: throw billingFailure(ApiErrorCode.INTERNAL_SERVER_ERROR, "Existing payment is missing.")
+        if (
+            payment.providerOriginalTransactionId != command.transaction.originalTransactionId ||
+            payment.productId != command.transaction.productId
+        ) {
+            throw billingFailure(
+                ApiErrorCode.BILLING_TRANSACTION_CONFLICT,
+                "The verified RevenueCat transaction does not match the existing purchase chain.",
+                HttpStatus.CONFLICT,
+            )
+        }
+
+        val accountId = database.sql(
+            "select id from billing_accounts where user_id = :userId and app_account_token = :token and status = 'ACTIVE' for update",
+        ).bind("userId", command.userId)
+            .bind("token", command.transaction.appAccountToken.toString().lowercase())
+            .map { row, _ -> row.long("id") }
+            .one().awaitSingleOrNull()
+            ?: throw billingFailure(
+                ApiErrorCode.BILLING_TRANSACTION_CONFLICT,
+                "The RevenueCat transfer destination is not an active billing account.",
+                HttpStatus.CONFLICT,
+            )
+
+        database.sql(
+            """
+            update subscriptions
+            set billing_account_id = :accountId,
+                user_id = :userId,
+                latest_transaction_id = :transactionId,
+                product_id = :productId,
+                tier_code = :tierCode,
+                access_status = 'ACTIVE',
+                expires_at = :expiresAt,
+                last_provider_event_at = greatest(coalesce(last_provider_event_at, :occurredAt), :occurredAt),
+                next_reconcile_at = timestampadd(hour, 6, :occurredAt),
+                version = version + 1,
+                updated_at = :occurredAt
+            where provider = 'APPLE' and original_transaction_id = :originalTransactionId
+            """.trimIndent(),
+        ).bind("accountId", accountId)
+            .bind("userId", command.userId)
+            .bind("transactionId", command.transaction.transactionId)
+            .bind("productId", command.transaction.productId)
+            .bind("tierCode", command.tierProduct.tierCode)
+            .bindNullable("expiresAt", command.transaction.expiresAt?.utc(), LocalDateTime::class.java)
+            .bind("occurredAt", command.occurredAt.utc())
+            .bind("originalTransactionId", command.transaction.originalTransactionId)
+            .fetch().rowsUpdated().awaitSingle()
+
+        database.sql(
+            """
+            update user_memberships
+            set user_id = :userId,
+                tier = :tierCode,
+                status = 'ACTIVE',
+                expires_at = :expiresAt,
+                updated_at = :occurredAt
+            where source = 'APPLE' and original_transaction_id = :originalTransactionId
+            """.trimIndent(),
+        ).bind("userId", command.userId)
+            .bind("tierCode", command.tierProduct.tierCode)
+            .bindNullable("expiresAt", command.transaction.expiresAt?.utc(), LocalDateTime::class.java)
+            .bind("occurredAt", command.occurredAt.utc())
+            .bind("originalTransactionId", command.transaction.originalTransactionId)
+            .fetch().rowsUpdated().awaitSingle()
+
+        database.sql(
+            """
+            insert ignore into subscription_events (
+                provider_event_id, provider, event_type, user_id, billing_account_id,
+                original_transaction_id, transaction_id, product_id, environment, purchased_at, expires_at,
+                access_status, renewal_status, processing_status, attempt_count, max_attempts, next_attempt_at,
+                payload_sha256, occurred_at, processed_at, created_at, updated_at
+            ) values (
+                :eventId, 'REVENUECAT', 'TRANSFER', :userId, :accountId,
+                :originalTransactionId, :transactionId, :productId, :environment, :purchasedAt, :expiresAt,
+                'ACTIVE', 'UNKNOWN', 'COMPLETED', 1, 3, :occurredAt,
+                :hash, :occurredAt, :occurredAt, :occurredAt, :occurredAt
+            )
+            """.trimIndent(),
+        ).bind("eventId", "revenuecat-transfer:${command.transaction.transactionId}:${command.userId}".take(191))
+            .bind("userId", command.userId)
+            .bind("accountId", accountId)
+            .bind("originalTransactionId", command.transaction.originalTransactionId)
+            .bind("transactionId", command.transaction.transactionId)
+            .bind("productId", command.transaction.productId)
+            .bind("environment", command.transaction.environment.name)
+            .bind("purchasedAt", command.transaction.purchaseAt.utc())
+            .bindNullable("expiresAt", command.transaction.expiresAt?.utc(), LocalDateTime::class.java)
+            .bind("hash", command.transaction.signedPayloadSha256)
+            .bind("occurredAt", command.occurredAt.utc())
+            .fetch().rowsUpdated().awaitSingle()
+
+        rebuildEntitlementProjection(existing.userId, command.occurredAt)
+        rebuildEntitlementProjection(command.userId, command.occurredAt)
+        activateFirstPaidAnchor(command.userId, payment.purchaseAt, command.occurredAt)
+    }
 
     private suspend fun existingInvoiceForTransaction(transactionId: String): ExistingPayment? =
         database.sql(

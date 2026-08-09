@@ -61,6 +61,7 @@ class RevenueCatBillingService(
                             invoiceNumber = null,
                             source = BillingEventSource.REVENUECAT_WEBHOOK,
                             occurredAt = now,
+                            authoritativeOwnershipTransfer = true,
                         ),
                     )
                 } else if (event.eventType == "TRANSFER") {
@@ -109,6 +110,7 @@ class RevenueCatBillingService(
                 invoiceNumber = invoice.invoiceNumber,
                 source = BillingEventSource.REVENUECAT_WEBHOOK,
                 occurredAt = now,
+                authoritativeOwnershipTransfer = true,
             ),
         )
     }

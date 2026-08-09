@@ -342,6 +342,7 @@ class BillingServiceTest {
         assertEquals(invoiceNumber, ledger.recordedPayments.single().invoiceNumber)
         assertEquals(transaction.transactionId, ledger.recordedPayments.single().transaction.transactionId)
         assertEquals(BillingEventSource.CLIENT, ledger.recordedPayments.single().source)
+        assertTrue(ledger.recordedPayments.single().authoritativeOwnershipTransfer)
     }
 
     @Test
@@ -360,6 +361,7 @@ class BillingServiceTest {
         assertEquals(listOf(token to product.productId), verifier.latestRequests)
         assertTrue(verifier.transactionRequests.isEmpty())
         assertEquals(invoiceNumber, ledger.recordedPayments.single().invoiceNumber)
+        assertTrue(ledger.recordedPayments.single().authoritativeOwnershipTransfer)
     }
 
     @Test

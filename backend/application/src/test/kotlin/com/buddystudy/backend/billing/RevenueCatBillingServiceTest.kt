@@ -251,6 +251,7 @@ class RevenueCatBillingServiceTest {
                 invoiceNumber = pendingInvoice.invoiceNumber,
                 source = BillingEventSource.REVENUECAT_WEBHOOK,
                 occurredAt = now,
+                authoritativeOwnershipTransfer = true,
             ),
         )
         Mockito.verify(ledger).applyRevenueCatEvent(transfer, now)
@@ -285,6 +286,7 @@ class RevenueCatBillingServiceTest {
         invoiceNumber = null,
         source = BillingEventSource.REVENUECAT_WEBHOOK,
         occurredAt = now,
+        authoritativeOwnershipTransfer = true,
     )
 
     private fun invoice(status: InvoiceStatus = InvoiceStatus.WAITING) = BillingInvoiceSummary(

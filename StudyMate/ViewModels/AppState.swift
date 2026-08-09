@@ -4371,6 +4371,7 @@ final class AppState: ObservableObject {
         activeTerms = []
         notificationPreferences = []
         communityCommentsCache.removeAll()
+        let revenueCatAppAccountToken = billingCatalog?.appAccountToken
         billingCatalog = nil
         billingStatus = nil
         billingInvoices = []
@@ -4378,7 +4379,9 @@ final class AppState: ObservableObject {
         isLoadingBilling = false
         #if os(iOS)
         Task { @MainActor in
-            await RevenueCatBillingBridge.shared.logOut()
+            await RevenueCatBillingBridge.shared.logOut(
+                expectedAppAccountToken: revenueCatAppAccountToken
+            )
         }
         #endif
         updateNotificationState { state in

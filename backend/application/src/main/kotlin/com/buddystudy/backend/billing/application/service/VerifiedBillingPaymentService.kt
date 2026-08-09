@@ -33,6 +33,7 @@ class VerifiedBillingPaymentService(
                 source = command.source,
                 eventId = "apple-transaction:${transaction.transactionId}",
                 occurredAt = command.occurredAt,
+                authoritativeOwnershipTransfer = command.authoritativeOwnershipTransfer,
             ),
         )
 

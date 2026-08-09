@@ -309,6 +309,7 @@ data class RecordVerifiedPaymentCommand(
     val source: BillingEventSource,
     val eventId: String,
     val occurredAt: Instant,
+    val authoritativeOwnershipTransfer: Boolean = false,
 )
 
 data class ApplyVerifiedBillingPaymentCommand(
@@ -318,6 +319,7 @@ data class ApplyVerifiedBillingPaymentCommand(
     val invoiceNumber: UUID?,
     val source: BillingEventSource,
     val occurredAt: Instant,
+    val authoritativeOwnershipTransfer: Boolean = false,
 )
 
 data class ApplyAppleNotificationCommand(

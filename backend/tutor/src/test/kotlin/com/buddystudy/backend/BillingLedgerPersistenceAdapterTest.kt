@@ -623,7 +623,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
                         tierProduct = anotherUser.product,
                         transaction = transaction.copy(appAccountToken = anotherUser.appAccountToken),
                         invoiceNumber = null,
-                        source = BillingEventSource.REVENUECAT_WEBHOOK,
+                        source = BillingEventSource.CLIENT,
                         eventId = "apple-transaction:${transaction.transactionId}",
                         occurredAt = fixture.now.plusSeconds(4),
                     ),
@@ -636,6 +636,81 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         assertThat(longValue("select count(*) from payments where invoice_id = ${second.id}"))
             .isZero()
     }
+
+    @Test
+    fun `RevenueCat verified ownership transfer reassigns projections without duplicating payment`(): Unit =
+        runBlocking {
+            val previous = fixture("revenuecat-transfer-previous")
+            val transaction = previous.transaction()
+            val previousCheckout = ledger.createPendingInvoice(
+                previous.userId,
+                previous.appAccountToken,
+                previous.product,
+                previous.idempotencyKey,
+                previous.now,
+            )
+            val previousInvoice = ledger.recordVerifiedPayment(
+                RecordVerifiedPaymentCommand(
+                    previous.userId,
+                    previous.product,
+                    transaction,
+                    previousCheckout.invoiceNumber,
+                    BillingEventSource.CLIENT,
+                    "apple-transaction:${transaction.transactionId}",
+                    previous.now,
+                ),
+            )
+            ledger.fulfill(previousInvoice.id, previous.now.plusSeconds(1))
+
+            val current = fixture("revenuecat-transfer-current", previous.now.plusSeconds(60))
+            val currentCheckout = ledger.createPendingInvoice(
+                current.userId,
+                current.appAccountToken,
+                current.product,
+                current.idempotencyKey,
+                current.now,
+            )
+            val transferred = transaction.copy(
+                appAccountToken = current.appAccountToken,
+                signedAt = current.now,
+            )
+
+            val reconciled = ledger.recordVerifiedPayment(
+                RecordVerifiedPaymentCommand(
+                    current.userId,
+                    current.product,
+                    transferred,
+                    currentCheckout.invoiceNumber,
+                    BillingEventSource.CLIENT,
+                    "revenuecat-transfer:${transaction.transactionId}:${current.userId}",
+                    current.now,
+                    authoritativeOwnershipTransfer = true,
+                ),
+            )
+            ledger.fulfill(reconciled.id, current.now.plusSeconds(1))
+
+            assertThat(reconciled.id).isEqualTo(previousInvoice.id)
+            assertThat(requireNotNull(ledger.invoice(current.userId, currentCheckout.id)).invoice.status)
+                .isEqualTo(InvoiceStatus.FAILED)
+            assertThat(
+                longValue(
+                    "select user_id from subscriptions where original_transaction_id = '${transaction.originalTransactionId}'",
+                ),
+            ).isEqualTo(current.userId)
+            assertThat(
+                longValue(
+                    "select user_id from user_memberships where original_transaction_id = '${transaction.originalTransactionId}'",
+                ),
+            ).isEqualTo(current.userId)
+            assertThat(ledger.entitlementForUser(previous.userId)?.tierCode).isEqualTo("TIER1")
+            assertThat(ledger.entitlementForUser(current.userId)?.tierCode).isEqualTo("TIER2")
+            assertThat(
+                longValue("select count(*) from payments where provider_transaction_id = '${transaction.transactionId}'"),
+            ).isEqualTo(1)
+            assertThat(
+                longValue("select user_id from payments where provider_transaction_id = '${transaction.transactionId}'"),
+            ).isEqualTo(previous.userId)
+        }
 
     @Test
     fun `newer verified transaction transfers subscription ownership and revokes the previous projection`(): Unit =
