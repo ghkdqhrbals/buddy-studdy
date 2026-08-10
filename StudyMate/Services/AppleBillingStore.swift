@@ -268,6 +268,12 @@ final class AppleBillingStore: ObservableObject {
         action == .subscribe || action == .change
     }
 
+    nonisolated static func shouldSynchronizeCurrentEntitlementsBeforePurchase(
+        for action: MembershipPrimaryAction
+    ) -> Bool {
+        action == .subscribe || action == .change
+    }
+
     @Published private(set) var products: [TierProduct] = []
     @Published private(set) var isLoading = false
     @Published private(set) var processingProductID: String?
@@ -324,17 +330,27 @@ final class AppleBillingStore: ObservableObject {
         defer { processingProductID = nil }
 
         try await RevenueCatBillingBridge.shared.identify(appAccountToken: appAccountToken)
-        try await synchronizeCurrentEntitlements(
-            appAccountToken: appAccountToken,
-            synchronize: synchronize
-        )
-
-        // StoreKit may already own an active transaction while the backend projection is stale.
-        // Re-read the server-owned status before creating an invoice so an existing transaction is
-        // never attached to a fresh checkout for the same product or a scheduled downgrade.
-        let action = await resolveActionAfterSynchronization()
+        var action = await resolveActionAfterSynchronization()
         if action == .current {
             return .alreadyCurrent
+        }
+
+        // A server-confirmed downgrade is a future Store subscription change, not a replay of the
+        // current entitlement. Replaying the active higher-tier transaction here can be rejected as
+        // already owned and must not prevent RevenueCat from scheduling the lower tier.
+        if Self.shouldSynchronizeCurrentEntitlementsBeforePurchase(for: action) {
+            try await synchronizeCurrentEntitlements(
+                appAccountToken: appAccountToken,
+                synchronize: synchronize
+            )
+
+            // StoreKit may already own an active transaction while the backend projection is stale.
+            // Re-read the server-owned status before creating an invoice so an existing transaction
+            // is never attached to a fresh checkout for the same product or a scheduled downgrade.
+            action = await resolveActionAfterSynchronization()
+            if action == .current {
+                return .alreadyCurrent
+            }
         }
 
         // A downgrade does not charge now. Apple schedules it for the next renewal, so creating a

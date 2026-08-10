@@ -123,7 +123,7 @@ final class AppControlPolicyTests: XCTestCase {
         XCTAssertTrue(billingStore.contains("for await verification in Transaction.currentEntitlements"))
         XCTAssertTrue(billingStore.contains("let appliedInvoice = try Self.requireApplied(invoice)"))
         XCTAssertTrue(billingStore.contains("try await synchronizeCurrentEntitlements("))
-        XCTAssertTrue(billingStore.contains("let action = await resolveActionAfterSynchronization()"))
+        XCTAssertTrue(billingStore.contains("var action = await resolveActionAfterSynchronization()"))
         XCTAssertTrue(billingStore.contains("let checkout = Self.shouldCreateCheckout(for: action)"))
         XCTAssertFalse(billingStore.contains("return action == .downgrade ? .changeScheduled : .pending"))
         XCTAssertTrue(billingStore.contains("revenueCatTransaction.transactionIdentifier"))
@@ -144,7 +144,22 @@ final class AppControlPolicyTests: XCTestCase {
         XCTAssertFalse(AppleBillingStore.shouldCreateCheckout(for: .downgrade))
     }
 
-    func testCurrentEntitlementSynchronizationPrecedesCheckoutCreation() throws {
+    func testCurrentEntitlementsAreReplayedOnlyForSubscribeAndUpgrade() {
+        XCTAssertTrue(
+            AppleBillingStore.shouldSynchronizeCurrentEntitlementsBeforePurchase(for: .subscribe)
+        )
+        XCTAssertTrue(
+            AppleBillingStore.shouldSynchronizeCurrentEntitlementsBeforePurchase(for: .change)
+        )
+        XCTAssertFalse(
+            AppleBillingStore.shouldSynchronizeCurrentEntitlementsBeforePurchase(for: .current)
+        )
+        XCTAssertFalse(
+            AppleBillingStore.shouldSynchronizeCurrentEntitlementsBeforePurchase(for: .downgrade)
+        )
+    }
+
+    func testPurchaseActionIsResolvedBeforeEntitlementReplayAndCheckoutCreation() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -157,14 +172,14 @@ final class AppControlPolicyTests: XCTestCase {
             billingStore.range(of: "try await synchronizeCurrentEntitlements(")
         )
         let actionResolution = try XCTUnwrap(
-            billingStore.range(of: "let action = await resolveActionAfterSynchronization()")
+            billingStore.range(of: "var action = await resolveActionAfterSynchronization()")
         )
         let checkoutCreation = try XCTUnwrap(
             billingStore.range(of: "let checkout = Self.shouldCreateCheckout(for: action)")
         )
 
-        XCTAssertLessThan(synchronization.lowerBound, actionResolution.lowerBound)
-        XCTAssertLessThan(actionResolution.lowerBound, checkoutCreation.lowerBound)
+        XCTAssertLessThan(actionResolution.lowerBound, synchronization.lowerBound)
+        XCTAssertLessThan(synchronization.lowerBound, checkoutCreation.lowerBound)
     }
 
     func testPurchaseSuccessRequiresSettledAndFulfilledBackendInvoice() throws {
