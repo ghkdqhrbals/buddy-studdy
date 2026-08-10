@@ -440,15 +440,25 @@ the transaction to a different user's invoice.
 
 ## RevenueCat Customer Center
 
-RevenueCat's default iOS Customer Center configuration supports cancellation,
-missing purchases, refund requests, and plan changes. Configure it under
-RevenueCat Project Settings > Monetization Tools > Customer Center, and keep
-the following BuddyStudy paths enabled:
+BuddyStudy's App Store storefront is monthly-only. Tier selection and plan
+changes belong to the app's membership screen, which loads only the active
+`P1M` products returned by the backend catalog. RevenueCat Customer Center is a
+support and recovery surface, not a plan picker.
+
+Configure it under RevenueCat Project Settings > Monetization Tools > Customer
+Center, and keep only the following active-subscriber paths enabled:
 
 1. **Missing Purchase** for restore and account-correlation recovery.
-2. **Refund Request** for a paid purchase that BuddyStudy could not fulfill.
-3. **Cancel Subscription** for stopping future renewals; cancellation is not a refund.
-4. **Change Plans** when membership upgrades or downgrades are enabled.
+2. **Manage** for Apple's subscription management and cancellation.
+3. **Refund Request** for a paid purchase that BuddyStudy could not fulfill.
+
+**Change Plans must remain disabled.** RevenueCat may build that screen from
+the complete App Store subscription group, including canceled historical
+products. Enabling it can therefore surface the retired Tier 2 and Tier 3
+annual products even though the backend catalog and current offering contain
+only monthly products. Annual App Store records are retained for historical
+transaction reconciliation only; they must not be added to an offering,
+paywall, Customer Center plan-change path, or backend active catalog.
 
 The active-subscription and inactive-subscription screens must use localized
 Korean, English, and Japanese labels. Configure a support email for a missing
