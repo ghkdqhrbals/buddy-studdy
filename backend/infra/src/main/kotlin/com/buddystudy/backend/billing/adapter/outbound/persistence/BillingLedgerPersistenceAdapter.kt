@@ -312,7 +312,7 @@ class BillingLedgerPersistenceAdapter(
                 }
                 transferVerifiedSubscriptionOwnership(existing, command)
             } else {
-                repairInconclusiveExistingEntitlement(existing, command)
+                repairCurrentExistingEntitlement(existing, command)
             }
             val requestedInvoiceNumber = command.invoiceNumber
             if (requestedInvoiceNumber != null && existing.invoiceNumber != requestedInvoiceNumber) {
@@ -1307,32 +1307,38 @@ class BillingLedgerPersistenceAdapter(
     ) {
         val eventId = "reconcile:${claim.subscriptionId}:${snapshot.fetchedAt.toEpochMilli()}".take(191)
         if (snapshot.accessStatus == SubscriptionAccessStatus.UNKNOWN) {
-            database.sql(
-                """
-                insert ignore into subscription_events (
-                    provider_event_id, provider, event_type, user_id, billing_account_id,
-                    original_transaction_id, access_status, renewal_status, processing_status,
-                    attempt_count, max_attempts, next_attempt_at, payload_sha256, last_error,
-                    occurred_at, processed_at, created_at, updated_at
-                ) select :eventId, 'REVENUECAT', 'SUBSCRIPTION_SNAPSHOT_INCONCLUSIVE', s.user_id, s.billing_account_id,
-                         s.original_transaction_id, 'UNKNOWN', :renewal, 'IGNORED',
-                         :attempt, 3, timestampadd(minute, 15, :now), :hash, :reason,
-                         :fetchedAt, :now, :now, :now
-                  from subscriptions s where s.id = :subscriptionId and s.user_id = :userId
-                """.trimIndent(),
-            ).bind("eventId", eventId).bind("renewal", snapshot.renewalStatus.name)
-                .bind("attempt", claim.attempt).bind("now", now.utc()).bind("hash", "0".repeat(64))
-                .bind("reason", "RevenueCat did not return an authoritative subscription for this customer.")
-                .bind("fetchedAt", snapshot.fetchedAt.utc()).bind("subscriptionId", claim.subscriptionId)
-                .bind("userId", claim.userId).fetch().rowsUpdated().awaitSingle()
-            database.sql(
-                """
-                update subscriptions
-                set next_reconcile_at = timestampadd(minute, 15, :now), updated_at = :now
-                where id = :id and user_id = :userId
-                """.trimIndent(),
-            ).bind("now", now.utc()).bind("id", claim.subscriptionId).bind("userId", claim.userId)
-                .fetch().rowsUpdated().awaitSingle()
+            ignoreSubscriptionSnapshot(
+                claim = claim,
+                snapshot = snapshot,
+                eventId = eventId,
+                eventType = "SUBSCRIPTION_SNAPSHOT_INCONCLUSIVE",
+                reason = "RevenueCat did not return an authoritative subscription for this customer.",
+                now = now,
+            )
+            return
+        }
+        val latestSettledAccess = latestSettledAccess(claim.userId, claim.originalTransactionId)
+        val verifiedExpiry = latestSettledAccess?.expiresAt
+        val verifiedAccessIsCurrent = verifiedExpiry?.isAfter(now) == true
+        val lifecycleRegressed = snapshot.accessStatus in setOf(
+            SubscriptionAccessStatus.EXPIRED,
+            SubscriptionAccessStatus.PENDING,
+        )
+        val expiryRegressed = verifiedExpiry != null && snapshot.expiresAt?.isBefore(verifiedExpiry) == true
+        if (
+            verifiedAccessIsCurrent &&
+            snapshot.accessStatus != SubscriptionAccessStatus.REVOKED &&
+            (lifecycleRegressed || expiryRegressed)
+        ) {
+            ignoreSubscriptionSnapshot(
+                claim = claim,
+                snapshot = snapshot,
+                eventId = eventId,
+                eventType = "SUBSCRIPTION_SNAPSHOT_STALE",
+                reason = "RevenueCat snapshot predates verified transaction " +
+                    "${latestSettledAccess?.transactionId ?: "unknown"} with access through $verifiedExpiry.",
+                now = now,
+            )
             return
         }
         val access = snapshot.accessStatus.name
@@ -1392,6 +1398,66 @@ class BillingLedgerPersistenceAdapter(
             .bind("now", now.utc()).bind("id", claim.subscriptionId).bind("userId", claim.userId)
             .fetch().rowsUpdated().awaitSingle()
         rebuildEntitlementProjection(claim.userId, now)
+    }
+
+    private suspend fun latestSettledAccess(
+        userId: Long,
+        originalTransactionId: String,
+    ): LatestSettledAccess? = database.sql(
+        """
+        select provider_transaction_id, expires_at
+        from payments
+        where user_id = :userId
+          and provider_original_transaction_id = :originalTransactionId
+          and status = 'SETTLED'
+          and revocation_at is null
+        order by purchase_at desc, id desc
+        limit 1
+        """.trimIndent(),
+    ).bind("userId", userId).bind("originalTransactionId", originalTransactionId)
+        .map { row, _ ->
+            LatestSettledAccess(
+                transactionId = row.string("provider_transaction_id"),
+                expiresAt = row.nullableInstant("expires_at"),
+            )
+        }.one().awaitSingleOrNull()
+
+    private suspend fun ignoreSubscriptionSnapshot(
+        claim: SubscriptionReconciliationClaim,
+        snapshot: RevenueCatCustomerSnapshot,
+        eventId: String,
+        eventType: String,
+        reason: String,
+        now: Instant,
+    ) {
+        database.sql(
+            """
+            insert ignore into subscription_events (
+                provider_event_id, provider, event_type, user_id, billing_account_id,
+                original_transaction_id, expires_at, access_status, renewal_status, processing_status,
+                attempt_count, max_attempts, next_attempt_at, payload_sha256, last_error,
+                occurred_at, processed_at, created_at, updated_at
+            ) select :eventId, 'REVENUECAT', :eventType, s.user_id, s.billing_account_id,
+                     s.original_transaction_id, :expiresAt, :access, :renewal, 'IGNORED',
+                     :attempt, 3, timestampadd(minute, 15, :now), :hash, :reason,
+                     :fetchedAt, :now, :now, :now
+              from subscriptions s where s.id = :subscriptionId and s.user_id = :userId
+            """.trimIndent(),
+        ).bind("eventId", eventId).bind("eventType", eventType)
+            .bindNullable("expiresAt", snapshot.expiresAt?.utc(), LocalDateTime::class.java)
+            .bind("access", snapshot.accessStatus.name).bind("renewal", snapshot.renewalStatus.name)
+            .bind("attempt", claim.attempt).bind("now", now.utc()).bind("hash", "0".repeat(64))
+            .bind("reason", reason).bind("fetchedAt", snapshot.fetchedAt.utc())
+            .bind("subscriptionId", claim.subscriptionId).bind("userId", claim.userId)
+            .fetch().rowsUpdated().awaitSingle()
+        database.sql(
+            """
+            update subscriptions
+            set next_reconcile_at = timestampadd(minute, 15, :now), updated_at = :now
+            where id = :id and user_id = :userId
+            """.trimIndent(),
+        ).bind("now", now.utc()).bind("id", claim.subscriptionId).bind("userId", claim.userId)
+            .fetch().rowsUpdated().awaitSingle()
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -1995,7 +2061,7 @@ class BillingLedgerPersistenceAdapter(
         now: Instant,
     ) = grantMembership(invoice, payment, providerEventAt, now)
 
-    private suspend fun repairInconclusiveExistingEntitlement(
+    private suspend fun repairCurrentExistingEntitlement(
         existing: ExistingPayment,
         command: RecordVerifiedPaymentCommand,
     ) {
@@ -2047,12 +2113,18 @@ class BillingLedgerPersistenceAdapter(
             !lifecycleProjectionAccepted &&
             ownership?.pendingProductId == payment.productId &&
             ownership.accessStatus in ENTITLEMENT_GRANTING_ACCESS_STATES
-        // A verified current StoreKit transaction proves access until its signed expiry, but it does
-        // not prove renewal intent. Repair only an inconclusive projection and preserve UNKNOWN
-        // renewal state so a later RevenueCat snapshot can settle renewal/cancellation accurately.
-        val inconclusiveAccessRepairAccepted = paymentOwnsProjection &&
+        // A settled StoreKit transaction proves access until its signed expiry. It can repair a
+        // projection that a stale provider snapshot incorrectly moved to a non-granting state, but
+        // it must not alter renewal intent or revive access after the signed period has ended.
+        val verifiedAccessRepairAccepted = paymentOwnsProjection &&
             !lifecycleProjectionAccepted &&
-            ownership?.accessStatus == SubscriptionAccessStatus.UNKNOWN.name &&
+            (
+                ownership?.accessStatus == SubscriptionAccessStatus.UNKNOWN.name ||
+                    (
+                        ownership?.accessStatus in VERIFIED_SNAPSHOT_REPAIRABLE_STATES &&
+                            ownership.latestEventType in VERIFIED_ACCESS_REPAIR_EVENT_TYPES
+                    )
+                ) &&
             payment.expiresAt?.isAfter(now) == true
         val downgradeScheduled = ownership != null &&
             ownership.accessStatus in ENTITLEMENT_GRANTING_ACCESS_STATES &&
@@ -2063,10 +2135,10 @@ class BillingLedgerPersistenceAdapter(
                 purchasedAt = payment.purchaseAt,
             )
         val productProjectionAccepted =
-            (lifecycleProjectionAccepted || pendingTransitionRepairAccepted || inconclusiveAccessRepairAccepted) &&
+            (lifecycleProjectionAccepted || pendingTransitionRepairAccepted || verifiedAccessRepairAccepted) &&
                 !downgradeScheduled
         val accessStateProjectionAccepted =
-            (lifecycleProjectionAccepted || inconclusiveAccessRepairAccepted) && !downgradeScheduled
+            (lifecycleProjectionAccepted || verifiedAccessRepairAccepted) && !downgradeScheduled
         val renewalStateProjectionAccepted = lifecycleProjectionAccepted && !downgradeScheduled
         val latestTransactionProjectionAccepted = paymentOwnsProjection && !downgradeScheduled
         database.sql(
@@ -2135,7 +2207,7 @@ class BillingLedgerPersistenceAdapter(
                 ),
                 expires_at = case
                     when :renewalStateProjectionAccepted then values(expires_at)
-                    when :pendingTransitionRepairAccepted or :inconclusiveAccessRepairAccepted then case
+                    when :pendingTransitionRepairAccepted or :verifiedAccessRepairAccepted then case
                         when expires_at is null then values(expires_at)
                         when values(expires_at) is null then expires_at
                         else greatest(expires_at, values(expires_at))
@@ -2182,7 +2254,7 @@ class BillingLedgerPersistenceAdapter(
             .bind("renewalStateProjectionAccepted", renewalStateProjectionAccepted)
             .bind("latestTransactionProjectionAccepted", latestTransactionProjectionAccepted)
             .bind("pendingTransitionRepairAccepted", pendingTransitionRepairAccepted)
-            .bind("inconclusiveAccessRepairAccepted", inconclusiveAccessRepairAccepted)
+            .bind("verifiedAccessRepairAccepted", verifiedAccessRepairAccepted)
             .bind("productProjectionAccepted", productProjectionAccepted)
             .bind("downgradeScheduled", downgradeScheduled)
             .bind("originalTransactionId", payment.providerOriginalTransactionId)
@@ -2217,6 +2289,12 @@ class BillingLedgerPersistenceAdapter(
             """
             select s.user_id, s.latest_transaction_id, s.product_id, s.tier_code, s.pending_product_id,
                    s.access_status, s.expires_at, s.last_provider_event_at,
+                   (select se.event_type
+                    from subscription_events se
+                    where se.original_transaction_id = s.original_transaction_id
+                      and se.processing_status in ('COMPLETED', 'IGNORED')
+                    order by se.occurred_at desc, se.id desc
+                    limit 1) as latest_event_type,
                    (select p.purchase_at
                     from payments p
                     where p.provider = 'APPLE'
@@ -2238,6 +2316,7 @@ class BillingLedgerPersistenceAdapter(
                     accessStatus = row.string("access_status"),
                     expiresAt = row.nullableInstant("expires_at"),
                     lastProviderEventAt = row.nullableInstant("last_provider_event_at"),
+                    latestEventType = row.nullableString("latest_event_type"),
                 )
             }.one().awaitSingleOrNull()
 
@@ -3457,6 +3536,10 @@ class BillingLedgerPersistenceAdapter(
         val userId: Long,
         val productId: String,
     )
+    private data class LatestSettledAccess(
+        val transactionId: String,
+        val expiresAt: Instant?,
+    )
     private data class ExistingCheckout(val invoiceId: Long, val productId: String)
     private data class BillingQuotaRow(
         val userId: Long,
@@ -3484,6 +3567,7 @@ class BillingLedgerPersistenceAdapter(
         val accessStatus: String,
         val expiresAt: Instant?,
         val lastProviderEventAt: Instant?,
+        val latestEventType: String?,
     )
     private enum class SubscriptionProductApplication {
         APPLIED,
@@ -3513,6 +3597,11 @@ class BillingLedgerPersistenceAdapter(
             PaymentStatus.FAILED,
         )
         val ENTITLEMENT_GRANTING_ACCESS_STATES = setOf("ACTIVE", "GRACE_PERIOD")
+        val VERIFIED_SNAPSHOT_REPAIRABLE_STATES = setOf("PENDING", "EXPIRED")
+        val VERIFIED_ACCESS_REPAIR_EVENT_TYPES = setOf(
+            "SUBSCRIPTION_SNAPSHOT_RECONCILED",
+            "SUBSCRIPTION_SNAPSHOT_STALE",
+        )
         val TERMINAL_RECEIPT_STATES = setOf(BillingReceiptStatus.PROCESSED, BillingReceiptStatus.IGNORED)
 
         const val LOCK_PAYMENT_SQL = """

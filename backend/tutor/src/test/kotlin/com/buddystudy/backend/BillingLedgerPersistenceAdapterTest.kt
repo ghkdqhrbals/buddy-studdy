@@ -549,6 +549,123 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
+    fun `stale expired reconciliation cannot override current verified payment`(): Unit = runBlocking {
+        val fixture = fixture("reconcile-stale-expired")
+        val checkout = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            fixture.product,
+            fixture.idempotencyKey,
+            fixture.now,
+        )
+        val transaction = fixture.transaction()
+        val invoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                fixture.product,
+                transaction,
+                checkout.invoiceNumber,
+                BillingEventSource.CLIENT,
+                "initial-payment-${fixture.suffix}",
+                fixture.now,
+            ),
+        )
+        ledger.fulfill(invoice.id, fixture.now.plusSeconds(1))
+        val subscriptionId = longValue(
+            "select id from subscriptions where original_transaction_id = '${transaction.originalTransactionId}'",
+        )
+        val fetchedAt = fixture.now.plusSeconds(30)
+
+        ledger.applySubscriptionSnapshot(
+            SubscriptionReconciliationClaim(
+                subscriptionId,
+                fixture.userId,
+                transaction.originalTransactionId,
+                fixture.appAccountToken,
+                1,
+            ),
+            RevenueCatCustomerSnapshot(
+                SubscriptionAccessStatus.EXPIRED,
+                SubscriptionRenewalStatus.NOT_APPLICABLE,
+                fixture.now.minusSeconds(86_400),
+                fetchedAt,
+            ),
+            fetchedAt,
+        )
+
+        val entitlement = requireNotNull(ledger.entitlementForUser(fixture.userId))
+        assertThat(entitlement.tierCode).isEqualTo("TIER2")
+        assertThat(entitlement.accessStatus).isEqualTo(SubscriptionAccessStatus.ACTIVE)
+        assertThat(requireNotNull(quota.quotaStatusForUser(fixture.userId, fetchedAt)).baseLimit).isEqualTo(300)
+        assertThat(
+            database.sql("select expires_at from subscriptions where id = :id")
+                .bind("id", subscriptionId)
+                .map { row -> row.get("expires_at", java.time.LocalDateTime::class.java)!! }
+                .one().awaitSingle(),
+        ).isEqualTo(java.time.LocalDateTime.ofInstant(transaction.expiresAt, java.time.ZoneOffset.UTC))
+        val eventId = "reconcile:$subscriptionId:${fetchedAt.toEpochMilli()}"
+        assertThat(
+            database.sql(
+                "select event_type, processing_status from subscription_events where provider_event_id = :eventId",
+            ).bind("eventId", eventId)
+                .map { row ->
+                    row.get("event_type", String::class.java)!! to
+                        row.get("processing_status", String::class.java)!!
+                }.one().awaitSingle(),
+        ).isEqualTo("SUBSCRIPTION_SNAPSHOT_STALE" to "IGNORED")
+    }
+
+    @Test
+    fun `expired reconciliation applies after verified payment period ends`(): Unit = runBlocking {
+        val fixture = fixture("reconcile-current-expired")
+        val checkout = ledger.createPendingInvoice(
+            fixture.userId,
+            fixture.appAccountToken,
+            fixture.product,
+            fixture.idempotencyKey,
+            fixture.now,
+        )
+        val expiresAt = fixture.now.plusSeconds(30)
+        val transaction = fixture.transaction().copy(expiresAt = expiresAt)
+        val invoice = ledger.recordVerifiedPayment(
+            RecordVerifiedPaymentCommand(
+                fixture.userId,
+                fixture.product,
+                transaction,
+                checkout.invoiceNumber,
+                BillingEventSource.CLIENT,
+                "initial-payment-${fixture.suffix}",
+                fixture.now,
+            ),
+        )
+        ledger.fulfill(invoice.id, fixture.now.plusSeconds(1))
+        val subscriptionId = longValue(
+            "select id from subscriptions where original_transaction_id = '${transaction.originalTransactionId}'",
+        )
+        val fetchedAt = expiresAt.plusSeconds(1)
+
+        ledger.applySubscriptionSnapshot(
+            SubscriptionReconciliationClaim(
+                subscriptionId,
+                fixture.userId,
+                transaction.originalTransactionId,
+                fixture.appAccountToken,
+                1,
+            ),
+            RevenueCatCustomerSnapshot(
+                SubscriptionAccessStatus.EXPIRED,
+                SubscriptionRenewalStatus.NOT_APPLICABLE,
+                expiresAt,
+                fetchedAt,
+            ),
+            fetchedAt,
+        )
+
+        assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER1")
+        assertThat(requireNotNull(quota.quotaStatusForUser(fixture.userId, fetchedAt)).baseLimit).isEqualTo(30)
+    }
+
+    @Test
     fun `user reconciliation claims a subscription previously corrupted to unknown`(): Unit = runBlocking {
         val fixture = fixture("reconcile-unknown-claim")
         val checkout = ledger.createPendingInvoice(
@@ -1451,7 +1568,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
             "tier2-${fixture.suffix}",
             fixture.now,
         )
-        val tier2Transaction = fixture.transaction()
+        val tier2Transaction = fixture.transaction().copy(expiresAt = fixture.now.plusSeconds(105))
         val tier2Invoice = ledger.recordVerifiedPayment(
             RecordVerifiedPaymentCommand(
                 fixture.userId,
@@ -1484,7 +1601,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
             priceMilliunits = 17_900_000,
             purchaseAt = tier3PurchasedAt,
             originalPurchaseAt = tier3PurchasedAt,
-            expiresAt = tier3PurchasedAt.plusSeconds(2_592_000),
+            expiresAt = tier3PurchasedAt.plusSeconds(3),
             signedAt = tier3PurchasedAt,
         )
         val tier3Checkout = ledger.createPendingInvoice(
@@ -1843,7 +1960,76 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
-    fun `completed transaction replay never revives an expired stale subscription`(): Unit = runBlocking {
+    fun `completed transaction replay repairs a stale expired projection while signed access is current`(): Unit =
+        runBlocking {
+            val fixture = fixture("expired-current-replay")
+            val transaction = fixture.transaction()
+            val invoice = ledger.recordVerifiedPayment(
+                RecordVerifiedPaymentCommand(
+                    fixture.userId,
+                    fixture.product,
+                    transaction,
+                    null,
+                    BillingEventSource.REVENUECAT_WEBHOOK,
+                    "initial-payment-${fixture.suffix}",
+                    fixture.now,
+                ),
+            )
+            ledger.fulfill(invoice.id, fixture.now.plusSeconds(1))
+
+            val staleSnapshotAt = fixture.now.plusSeconds(300)
+            forceStaleSubscriptionProjection(
+                fixture = fixture,
+                transaction = transaction,
+                pendingProductId = fixture.product.productId,
+                accessStatus = "EXPIRED",
+                renewalStatus = "NOT_APPLICABLE",
+                lastProviderEventAt = staleSnapshotAt,
+            )
+            val subscriptionId = longValue(
+                "select id from subscriptions where original_transaction_id = '${transaction.originalTransactionId}'",
+            )
+            ledger.applySubscriptionSnapshot(
+                SubscriptionReconciliationClaim(
+                    subscriptionId,
+                    fixture.userId,
+                    transaction.originalTransactionId,
+                    fixture.appAccountToken,
+                    1,
+                ),
+                RevenueCatCustomerSnapshot(
+                    SubscriptionAccessStatus.EXPIRED,
+                    SubscriptionRenewalStatus.NOT_APPLICABLE,
+                    fixture.now.minusSeconds(86_400),
+                    staleSnapshotAt,
+                ),
+                staleSnapshotAt,
+            )
+            assertThat(ledger.entitlementForUser(fixture.userId)?.tierCode).isEqualTo("TIER1")
+
+            val replayed = ledger.recordVerifiedPayment(
+                RecordVerifiedPaymentCommand(
+                    fixture.userId,
+                    fixture.product,
+                    transaction,
+                    null,
+                    BillingEventSource.CLIENT,
+                    "expired-current-replay-${fixture.suffix}",
+                    staleSnapshotAt.plusSeconds(1),
+                ),
+            )
+
+            assertThat(replayed.id).isEqualTo(invoice.id)
+            val entitlement = requireNotNull(ledger.entitlementForUser(fixture.userId))
+            assertThat(entitlement.tierCode).isEqualTo("TIER2")
+            assertThat(entitlement.accessStatus).isEqualTo(SubscriptionAccessStatus.ACTIVE)
+            assertThat(entitlement.renewalStatus).isEqualTo(SubscriptionRenewalStatus.NOT_APPLICABLE)
+            assertThat(requireNotNull(quota.quotaStatusForUser(fixture.userId, staleSnapshotAt)).baseLimit)
+                .isEqualTo(300)
+        }
+
+    @Test
+    fun `completed transaction replay never revives access after signed expiry`(): Unit = runBlocking {
         val fixture = fixture("expired-stale-upgrade")
         val tier2Invoice = ledger.recordVerifiedPayment(
             RecordVerifiedPaymentCommand(
@@ -1867,7 +2053,7 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
             productId = tier3.productId,
             priceMilliunits = 17_900_000,
             purchaseAt = tier3PurchasedAt,
-            expiresAt = tier3PurchasedAt.plusSeconds(2_592_000),
+            expiresAt = tier3PurchasedAt.plusSeconds(200),
             signedAt = tier3PurchasedAt,
         )
         val tier3Invoice = ledger.recordVerifiedPayment(

@@ -6714,7 +6714,6 @@ private struct MobileMembershipManagementView: View {
                     tierProduct,
                     appAccountToken: appAccountToken,
                     resolveActionAfterSynchronization: {
-                        _ = await appState.reconcileBillingSubscription()
                         await appState.refreshBilling()
                         return purchaseAction(for: tierProduct)
                     },
