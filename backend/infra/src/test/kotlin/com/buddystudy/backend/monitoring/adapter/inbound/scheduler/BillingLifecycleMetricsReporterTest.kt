@@ -10,10 +10,10 @@ class BillingLifecycleMetricsReporterTest {
     }
 
     @Test
-    fun `each durable lifecycle anomaly alerts`() {
+    fun `active lifecycle anomalies alert while exhausted records remain observable`() {
         assertThat(snapshot(webhookLagSeconds = 901).hasOperationalAnomaly()).isTrue()
         assertThat(snapshot(entitlementMismatches = 1).hasOperationalAnomaly()).isTrue()
-        assertThat(snapshot(exhaustedReconciliations = 1).hasOperationalAnomaly()).isTrue()
+        assertThat(snapshot(exhaustedReconciliations = 1).hasOperationalAnomaly()).isFalse()
         assertThat(snapshot(staleReservations = 1).hasOperationalAnomaly()).isTrue()
         assertThat(snapshot(negativeQuotaCounters = 1).hasOperationalAnomaly()).isTrue()
         assertThat(snapshot(duplicateActiveSubscriptions = 1).hasOperationalAnomaly()).isTrue()

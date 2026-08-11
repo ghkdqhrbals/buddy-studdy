@@ -10,6 +10,7 @@ import com.buddystudy.backend.billing.application.model.BillingRecoveryResult
 import com.buddystudy.backend.billing.application.model.BillingStatusResponse
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoicePage
+import com.buddystudy.backend.billing.application.model.AdminBillingProcessingFailurePage
 import com.buddystudy.backend.billing.application.model.AdminQuotaAdjustment
 import com.buddystudy.backend.billing.application.model.AdminBillingReconcileRequest
 import com.buddystudy.backend.billing.application.model.AdminUserBillingTimeline
@@ -73,6 +74,12 @@ interface BillingReconciliationUseCase {
 interface AdminBillingUseCase {
     suspend fun invoices(query: String?, status: String?, limit: Int, offset: Int): AdminBillingInvoicePage
     suspend fun invoice(invoiceId: Long): AdminBillingInvoiceDetail
+    suspend fun processingFailures(
+        source: String?,
+        status: String?,
+        limit: Int,
+        offset: Int,
+    ): AdminBillingProcessingFailurePage
     suspend fun requestRefund(invoiceId: Long, command: RequestBillingActionCommand): BillingAction
     suspend fun requestCancellation(invoiceId: Long, command: RequestBillingActionCommand): BillingAction
     suspend fun adjustQuota(

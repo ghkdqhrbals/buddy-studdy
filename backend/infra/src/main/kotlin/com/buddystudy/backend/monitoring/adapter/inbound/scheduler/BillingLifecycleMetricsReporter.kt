@@ -96,9 +96,11 @@ class BillingLifecycleMetricsReporter(
     private suspend fun snapshot(ownershipConflicts: Long): BillingLifecycleMetricsSnapshot = BillingLifecycleMetricsSnapshot(
         webhookLagSeconds = scalar(
             """
-            select coalesce(max(timestampdiff(second, received_at, utc_timestamp(6))), 0)
-            from billing_revenuecat_event_inbox
-            where processing_status in ('RECEIVED', 'FAILED')
+            select coalesce(max(timestampdiff(second, occurred_at, utc_timestamp(6))), 0)
+            from subscription_events
+            where provider = 'REVENUECAT'
+              and processing_status in ('PENDING', 'PROCESSING', 'FAILED')
+              and attempt_count < max_attempts
             """.trimIndent(),
         ),
         entitlementMismatches = scalar(
@@ -126,13 +128,10 @@ class BillingLifecycleMetricsReporter(
         ),
         exhaustedReconciliations = scalar(
             """
-            select count(*) from subscriptions s
-            where (
-                select count(*) from subscription_events e
-                where e.original_transaction_id = s.original_transaction_id
-                  and e.event_type = 'SUBSCRIPTION_RECONCILE_FAILED'
-                  and (s.last_reconciled_at is null or e.occurred_at > s.last_reconciled_at)
-            ) >= 3
+            select count(*) from subscription_events
+            where provider = 'REVENUECAT'
+              and event_type = 'SUBSCRIPTION_RECONCILE_FAILED'
+              and processing_status = 'EXHAUSTED'
             """.trimIndent(),
         ),
         staleReservations = scalar(
@@ -183,7 +182,7 @@ internal data class BillingLifecycleMetricsSnapshot(
     val ownershipConflicts: Long,
 ) {
     fun hasOperationalAnomaly(): Boolean =
-        webhookLagSeconds > 15 * 60 || entitlementMismatches > 0 || exhaustedReconciliations > 0 ||
+        webhookLagSeconds > 15 * 60 || entitlementMismatches > 0 ||
             staleReservations > 0 || negativeQuotaCounters > 0 || duplicateActiveSubscriptions > 0 ||
             ownershipConflicts > 0
 }

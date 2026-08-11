@@ -3,12 +3,14 @@ package com.buddystudy.backend.billing.application.port.outbound
 import com.buddystudy.backend.billing.application.model.ApplyAppleNotificationCommand
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoicePage
+import com.buddystudy.backend.billing.application.model.AdminBillingProcessingFailurePage
 import com.buddystudy.backend.billing.application.model.AdminQuotaAdjustment
 import com.buddystudy.backend.billing.application.model.AdminBillingReconcileRequest
 import com.buddystudy.backend.billing.application.model.AdminUserBillingTimeline
 import com.buddystudy.backend.billing.application.model.SubscriptionReconciliationClaim
 import com.buddystudy.backend.billing.application.model.RevenueCatCustomerSnapshot
 import com.buddystudy.backend.billing.application.model.BillingAction
+import com.buddystudy.backend.billing.application.model.BillingProcessingFailureOutcome
 import com.buddystudy.backend.billing.application.model.BillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.BillingInvoicePage
 import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
@@ -147,10 +149,16 @@ interface BillingLedgerPort {
     suspend fun applyRevenueCatEvent(event: VerifiedRevenueCatEvent, now: Instant): Boolean
 
     /** REQUIRES_NEW failure update so processing errors survive transaction rollback. */
-    suspend fun markRevenueCatEventFailed(eventId: String, error: String, now: Instant)
+    suspend fun markRevenueCatEventFailed(eventId: String, error: String, now: Instant): BillingProcessingFailureOutcome
 
     suspend fun adminInvoices(query: String?, status: String?, limit: Int, offset: Int): AdminBillingInvoicePage
     suspend fun adminInvoice(invoiceId: Long): AdminBillingInvoiceDetail?
+    suspend fun adminProcessingFailures(
+        source: String?,
+        status: String?,
+        limit: Int,
+        offset: Int,
+    ): AdminBillingProcessingFailurePage
     suspend fun adminRequestRefund(invoiceId: Long, command: RequestBillingActionCommand, now: Instant): BillingAction
     suspend fun adminRequestCancellation(invoiceId: Long, command: RequestBillingActionCommand, now: Instant): BillingAction
     suspend fun adminAdjustQuota(
@@ -182,5 +190,5 @@ interface BillingLedgerPort {
         claim: SubscriptionReconciliationClaim,
         error: String,
         now: Instant,
-    ) = Unit
+    ): BillingProcessingFailureOutcome
 }

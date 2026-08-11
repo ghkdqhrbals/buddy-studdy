@@ -57,6 +57,8 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     @AfterEach
     fun cleanUpBillingFixtures(): Unit = runBlocking {
         createdRevenueCatEventIds.forEach { eventId ->
+            database.sql("delete from subscription_events where provider = 'REVENUECAT' and provider_event_id = :eventId")
+                .bind("eventId", eventId).fetch().rowsUpdated().awaitSingle()
             database.sql("delete from billing_revenuecat_event_inbox where event_id = :eventId")
                 .bind("eventId", eventId).fetch().rowsUpdated().awaitSingle()
         }
@@ -119,6 +121,64 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
                 .map { row -> row.get("processing_status", String::class.java)!! }
                 .one().awaitSingle(),
         ).isEqualTo("IGNORED")
+    }
+
+    @Test
+    fun `RevenueCat processing exhausts after three failures and is visible to administrators`(): Unit = runBlocking {
+        val eventId = "rc-exhausted-${UUID.randomUUID()}"
+        createdRevenueCatEventIds += eventId
+        val occurredAt = Instant.parse("2032-08-04T00:00:00Z")
+        val event = VerifiedRevenueCatEvent(
+            eventId = eventId,
+            eventType = "TEST_FAILURE",
+            appUserId = null,
+            originalAppUserId = null,
+            aliases = emptyList(),
+            store = "APP_STORE",
+            productId = "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+            transactionId = "transaction-${UUID.randomUUID()}",
+            originalTransactionId = "original-${UUID.randomUUID()}",
+            environment = BillingEnvironment.SANDBOX,
+            priceMilliunits = null,
+            currency = null,
+            purchasedAt = null,
+            expiresAt = null,
+            eventAt = occurredAt,
+            cancelReason = null,
+            expirationReason = null,
+            signedPayloadSha256 = "f".repeat(64),
+        )
+
+        assertThat(ledger.recordRevenueCatEvent(event, occurredAt)).isTrue()
+
+        val first = ledger.markRevenueCatEventFailed(eventId, "provider timeout 1", occurredAt.plusSeconds(1))
+        val second = ledger.markRevenueCatEventFailed(eventId, "provider timeout 2", occurredAt.plusSeconds(2))
+        val third = ledger.markRevenueCatEventFailed(eventId, "provider timeout 3", occurredAt.plusSeconds(3))
+        val repeated = ledger.markRevenueCatEventFailed(eventId, "late duplicate", occurredAt.plusSeconds(4))
+
+        assertThat(first.status).isEqualTo("RETRYING")
+        assertThat(first.attemptCount).isEqualTo(1)
+        assertThat(second.status).isEqualTo("RETRYING")
+        assertThat(second.attemptCount).isEqualTo(2)
+        assertThat(third.status).isEqualTo("EXHAUSTED")
+        assertThat(third.attemptCount).isEqualTo(3)
+        assertThat(third.terminalTransition).isTrue()
+        assertThat(repeated.attemptCount).isEqualTo(3)
+        assertThat(repeated.terminalTransition).isFalse()
+        assertThat(ledger.claimDueRevenueCatEvents(occurredAt.plusSeconds(3600), 100)).isEmpty()
+
+        val failures = ledger.adminProcessingFailures(
+            source = "REVENUECAT_EVENT",
+            status = "EXHAUSTED",
+            limit = 20,
+            offset = 0,
+        )
+        assertThat(failures.failures).hasSize(1)
+        val failure = failures.failures.single()
+        assertThat(failure.eventId).isEqualTo(eventId)
+        assertThat(failure.attemptCount).isEqualTo(3)
+        assertThat(failure.maxAttempts).isEqualTo(3)
+        assertThat(failure.lastError).isEqualTo("provider timeout 3")
     }
 
     @Test

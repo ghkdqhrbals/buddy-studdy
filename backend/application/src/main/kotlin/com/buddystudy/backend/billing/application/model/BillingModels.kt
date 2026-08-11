@@ -251,6 +251,41 @@ data class AdminBillingInvoicePage(
     val invoices: List<AdminBillingInvoice>,
 )
 
+data class BillingProcessingFailureOutcome(
+    val attemptCount: Int,
+    val maxAttempts: Int,
+    val status: String,
+    val nextAttemptAt: Instant?,
+    val terminalTransition: Boolean,
+)
+
+data class AdminBillingProcessingFailure(
+    val id: Long,
+    val source: String,
+    val eventId: String,
+    val eventType: String,
+    val userId: Long?,
+    val userEmail: String?,
+    val userDisplayName: String?,
+    val originalTransactionId: String?,
+    val transactionId: String?,
+    val productId: String?,
+    val status: String,
+    val attemptCount: Int,
+    val maxAttempts: Int,
+    val nextAttemptAt: Instant?,
+    val lastError: String,
+    val occurredAt: Instant,
+    val updatedAt: Instant,
+)
+
+data class AdminBillingProcessingFailurePage(
+    val limit: Int,
+    val offset: Int,
+    val totalCount: Long,
+    val failures: List<AdminBillingProcessingFailure>,
+)
+
 data class AdminBillingInvoiceDetail(
     val userId: Long,
     val userEmail: String,

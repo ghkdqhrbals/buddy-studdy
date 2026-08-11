@@ -4,6 +4,8 @@ import com.buddystudy.backend.billing.application.model.ApplyAppleNotificationCo
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoice
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoicePage
+import com.buddystudy.backend.billing.application.model.AdminBillingProcessingFailure
+import com.buddystudy.backend.billing.application.model.AdminBillingProcessingFailurePage
 import com.buddystudy.backend.billing.application.model.AdminQuotaAdjustment
 import com.buddystudy.backend.billing.application.model.AdminBillingReconcileRequest
 import com.buddystudy.backend.billing.application.model.AdminBillingTimelineEntry
@@ -16,6 +18,7 @@ import com.buddystudy.backend.billing.application.model.BillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.BillingInvoiceEvent
 import com.buddystudy.backend.billing.application.model.BillingInvoicePage
 import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
+import com.buddystudy.backend.billing.application.model.BillingProcessingFailureOutcome
 import com.buddystudy.backend.billing.application.model.BillingFulfillmentJobClaim
 import com.buddystudy.backend.billing.application.model.BillingTierProduct
 import com.buddystudy.backend.billing.application.model.BillingEntitlementProjection
@@ -998,17 +1001,64 @@ class BillingLedgerPersistenceAdapter(
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    override suspend fun markRevenueCatEventFailed(eventId: String, error: String, now: Instant) {
-        markRevenueCatEvent(eventId, BillingReceiptStatus.FAILED, error.take(4000), now)
+    override suspend fun markRevenueCatEventFailed(
+        eventId: String,
+        error: String,
+        now: Instant,
+    ): BillingProcessingFailureOutcome {
+        val current = database.sql(
+            """
+            select attempt_count, max_attempts, processing_status
+            from subscription_events
+            where provider = 'REVENUECAT' and provider_event_id = :eventId
+            for update
+            """.trimIndent(),
+        ).bind("eventId", eventId).map { row, _ ->
+            BillingFailureState(
+                attemptCount = row.int("attempt_count"),
+                maxAttempts = row.int("max_attempts"),
+                processingStatus = row.string("processing_status"),
+            )
+        }.one().awaitSingleOrNull()
+            ?: throw billingFailure(ApiErrorCode.INTERNAL_SERVER_ERROR, "RevenueCat processing event is missing.")
+        if (current.processingStatus == BILLING_PROCESSING_EXHAUSTED) {
+            return current.outcome(nextAttemptAt = null, terminalTransition = false)
+        }
+        val attemptCount = (current.attemptCount + 1).coerceAtMost(current.maxAttempts)
+        val exhausted = attemptCount >= current.maxAttempts
+        val processingStatus = if (exhausted) BILLING_PROCESSING_EXHAUSTED else "FAILED"
+        val nextAttemptAt = if (exhausted) null else now.plusSeconds(BILLING_RETRY_DELAY_SECONDS)
         database.sql(
             """
             update subscription_events
-            set processing_status = 'FAILED', attempt_count = least(attempt_count + 1, max_attempts),
-                last_error = :error, next_attempt_at = timestampadd(minute, 15, :now), updated_at = :now
+            set processing_status = :status, attempt_count = :attemptCount,
+                last_error = :error, next_attempt_at = coalesce(:nextAttemptAt, :now),
+                processed_at = :processedAt, updated_at = :now
             where provider = 'REVENUECAT' and provider_event_id = :eventId
             """.trimIndent(),
-        ).bind("error", error.take(4000)).bind("now", now.utc()).bind("eventId", eventId)
+        ).bind("status", processingStatus).bind("attemptCount", attemptCount).bind("error", error.take(4000))
+            .bindNullable("nextAttemptAt", nextAttemptAt?.utc(), LocalDateTime::class.java)
+            .bindNullable("processedAt", if (exhausted) now.utc() else null, LocalDateTime::class.java)
+            .bind("now", now.utc()).bind("eventId", eventId)
             .fetch().rowsUpdated().awaitSingle()
+        database.sql(
+            """
+            update billing_revenuecat_event_inbox
+            set processing_status = :status, processed_at = :processedAt,
+                last_error = :error, updated_at = :now
+            where event_id = :eventId
+            """.trimIndent(),
+        ).bind("status", if (exhausted) BILLING_PROCESSING_EXHAUSTED else "FAILED")
+            .bindNullable("processedAt", if (exhausted) now.utc() else null, LocalDateTime::class.java)
+            .bind("error", error.take(4000)).bind("now", now.utc()).bind("eventId", eventId)
+            .fetch().rowsUpdated().awaitSingle()
+        return BillingProcessingFailureOutcome(
+            attemptCount = attemptCount,
+            maxAttempts = current.maxAttempts,
+            status = if (exhausted) BILLING_PROCESSING_EXHAUSTED else BILLING_PROCESSING_RETRYING,
+            nextAttemptAt = nextAttemptAt,
+            terminalTransition = exhausted,
+        )
     }
 
     override suspend fun adminInvoices(
@@ -1051,6 +1101,82 @@ class BillingLedgerPersistenceAdapter(
         }.one().awaitSingleOrNull() ?: return null
         val detail = invoice(owner.first, invoiceId) ?: return null
         return AdminBillingInvoiceDetail(owner.first, owner.second, owner.third, detail)
+    }
+
+    override suspend fun adminProcessingFailures(
+        source: String?,
+        status: String?,
+        limit: Int,
+        offset: Int,
+    ): AdminBillingProcessingFailurePage {
+        val conditions = mutableListOf("rn = 1")
+        if (source != null) conditions += "failure_source = '$source'"
+        if (status != null) conditions += "admin_status = '$status'"
+        val where = conditions.joinToString(" and ", prefix = " where ")
+        val cte = """
+            with ranked_failures as (
+                select e.id, e.provider_event_id, e.event_type, e.user_id,
+                       u.email as user_email, u.display_name as user_display_name,
+                       e.original_transaction_id, e.transaction_id, e.product_id,
+                       case when e.event_type = 'SUBSCRIPTION_RECONCILE_FAILED'
+                            then 'SUBSCRIPTION_RECONCILIATION' else 'REVENUECAT_EVENT' end as failure_source,
+                       case when e.processing_status = 'EXHAUSTED'
+                            then 'EXHAUSTED' else 'RETRYING' end as admin_status,
+                       e.attempt_count, e.max_attempts,
+                       case when e.processing_status = 'EXHAUSTED' then null else e.next_attempt_at end as next_attempt_at,
+                       coalesce(e.last_error, 'Unknown billing processing failure.') as last_error,
+                       e.occurred_at, e.updated_at,
+                       row_number() over (
+                           partition by case
+                               when e.event_type = 'SUBSCRIPTION_RECONCILE_FAILED'
+                                   then concat('reconcile:', coalesce(e.original_transaction_id, cast(e.id as char)))
+                               else concat('event:', e.provider_event_id)
+                           end
+                           order by e.attempt_count desc, e.occurred_at desc, e.id desc
+                       ) as rn
+                from subscription_events e
+                left join users u on u.id = e.user_id
+                where e.provider = 'REVENUECAT'
+                  and e.processing_status in ('FAILED', 'EXHAUSTED')
+                  and (
+                      e.event_type <> 'SUBSCRIPTION_RECONCILE_FAILED'
+                      or not exists (
+                          select 1 from subscription_events recovered
+                          where recovered.original_transaction_id = e.original_transaction_id
+                            and recovered.event_type in ('SUBSCRIPTION_SNAPSHOT_RECONCILED', 'SUBSCRIPTION_SNAPSHOT_STALE')
+                            and recovered.processing_status in ('COMPLETED', 'IGNORED')
+                            and recovered.occurred_at > e.occurred_at
+                      )
+                  )
+            )
+        """.trimIndent()
+        val failures = database.sql(
+            "$cte select * from ranked_failures$where order by updated_at desc, id desc limit :limit offset :offset",
+        ).bind("limit", limit).bind("offset", offset).map { row, _ ->
+            AdminBillingProcessingFailure(
+                id = row.long("id"),
+                source = row.string("failure_source"),
+                eventId = row.string("provider_event_id"),
+                eventType = row.string("event_type"),
+                userId = row.nullableLong("user_id"),
+                userEmail = row.nullableString("user_email"),
+                userDisplayName = row.nullableString("user_display_name"),
+                originalTransactionId = row.nullableString("original_transaction_id"),
+                transactionId = row.nullableString("transaction_id"),
+                productId = row.nullableString("product_id"),
+                status = row.string("admin_status"),
+                attemptCount = row.int("attempt_count"),
+                maxAttempts = row.int("max_attempts"),
+                nextAttemptAt = row.nullableInstant("next_attempt_at"),
+                lastError = row.string("last_error"),
+                occurredAt = row.instant("occurred_at"),
+                updatedAt = row.instant("updated_at"),
+            )
+        }.all().collectList().awaitSingle()
+        val totalCount = database.sql(
+            "$cte select count(*) as total_count from ranked_failures$where",
+        ).map { row, _ -> row.long("total_count") }.one().awaitSingle()
+        return AdminBillingProcessingFailurePage(limit, offset, totalCount, failures)
     }
 
     @Transactional
@@ -1274,6 +1400,12 @@ class BillingLedgerPersistenceAdapter(
             from subscriptions s join billing_accounts a on a.id = s.billing_account_id
             where s.user_id = :userId and a.status = 'ACTIVE'
               and s.access_status in ('ACTIVE', 'GRACE_PERIOD', 'PENDING', 'UNKNOWN')
+              and (
+                  select count(*) from subscription_events e
+                  where e.original_transaction_id = s.original_transaction_id
+                    and e.event_type = 'SUBSCRIPTION_RECONCILE_FAILED'
+                    and (s.last_reconciled_at is null or e.occurred_at > s.last_reconciled_at)
+              ) < 3
             order by case s.access_status
                          when 'ACTIVE' then 1
                          when 'GRACE_PERIOD' then 2
@@ -1465,26 +1597,40 @@ class BillingLedgerPersistenceAdapter(
         claim: SubscriptionReconciliationClaim,
         error: String,
         now: Instant,
-    ) {
-        database.sql(
+    ): BillingProcessingFailureOutcome {
+        val attemptCount = claim.attempt.coerceIn(1, BILLING_MAX_PROCESSING_ATTEMPTS)
+        val exhausted = attemptCount >= BILLING_MAX_PROCESSING_ATTEMPTS
+        val processingStatus = if (exhausted) BILLING_PROCESSING_EXHAUSTED else "FAILED"
+        val nextAttemptAt = if (exhausted) null else now.plusSeconds(BILLING_RETRY_DELAY_SECONDS)
+        val inserted = database.sql(
             """
             insert into subscription_events (
                 provider_event_id, provider, event_type, user_id, billing_account_id,
                 original_transaction_id, processing_status, attempt_count, max_attempts,
-                next_attempt_at, payload_sha256, last_error, occurred_at, created_at, updated_at
+                next_attempt_at, payload_sha256, last_error, occurred_at, processed_at, created_at, updated_at
             ) select :eventId, 'REVENUECAT', 'SUBSCRIPTION_RECONCILE_FAILED', s.user_id, s.billing_account_id,
-                     s.original_transaction_id, 'FAILED', :attempt, 3,
-                     timestampadd(minute, 15, :now), :hash, :error, :now, :now, :now
+                     s.original_transaction_id, :status, :attempt, 3,
+                     coalesce(:nextAttemptAt, :now), :hash, :error, :now, :processedAt, :now, :now
               from subscriptions s where s.id = :subscriptionId
             """.trimIndent(),
         ).bind("eventId", "reconcile-failed:${claim.subscriptionId}:${now.toEpochMilli()}".take(191))
-            .bind("attempt", claim.attempt).bind("now", now.utc()).bind("hash", "0".repeat(64))
+            .bind("status", processingStatus).bind("attempt", attemptCount)
+            .bindNullable("nextAttemptAt", nextAttemptAt?.utc(), LocalDateTime::class.java)
+            .bindNullable("processedAt", if (exhausted) now.utc() else null, LocalDateTime::class.java)
+            .bind("now", now.utc()).bind("hash", "0".repeat(64))
             .bind("error", error.take(4000)).bind("subscriptionId", claim.subscriptionId)
             .fetch().rowsUpdated().awaitSingle()
         database.sql(
             "update subscriptions set next_reconcile_at = timestampadd(minute, :delay, :now), updated_at = :now where id = :id",
-        ).bind("delay", if (claim.attempt >= 3) 1440 else 15).bind("now", now.utc())
+        ).bind("delay", if (exhausted) 1440 else 15).bind("now", now.utc())
             .bind("id", claim.subscriptionId).fetch().rowsUpdated().awaitSingle()
+        return BillingProcessingFailureOutcome(
+            attemptCount = attemptCount,
+            maxAttempts = BILLING_MAX_PROCESSING_ATTEMPTS,
+            status = if (exhausted) BILLING_PROCESSING_EXHAUSTED else BILLING_PROCESSING_RETRYING,
+            nextAttemptAt = nextAttemptAt,
+            terminalTransition = exhausted && inserted == 1L,
+        )
     }
 
     private suspend fun applyProviderLifecycle(
@@ -3530,11 +3676,31 @@ class BillingLedgerPersistenceAdapter(
         status: HttpStatus = code.status,
     ) = ApiException(status, code, message)
 
+    private fun BillingFailureState.outcome(
+        nextAttemptAt: Instant?,
+        terminalTransition: Boolean,
+    ) = BillingProcessingFailureOutcome(
+        attemptCount = attemptCount,
+        maxAttempts = maxAttempts,
+        status = if (processingStatus == BILLING_PROCESSING_EXHAUSTED) {
+            BILLING_PROCESSING_EXHAUSTED
+        } else {
+            BILLING_PROCESSING_RETRYING
+        },
+        nextAttemptAt = nextAttemptAt,
+        terminalTransition = terminalTransition,
+    )
+
     private data class ExistingPayment(
         val invoiceId: Long,
         val invoiceNumber: UUID,
         val userId: Long,
         val productId: String,
+    )
+    private data class BillingFailureState(
+        val attemptCount: Int,
+        val maxAttempts: Int,
+        val processingStatus: String,
     )
     private data class LatestSettledAccess(
         val transactionId: String,
@@ -3603,6 +3769,10 @@ class BillingLedgerPersistenceAdapter(
             "SUBSCRIPTION_SNAPSHOT_STALE",
         )
         val TERMINAL_RECEIPT_STATES = setOf(BillingReceiptStatus.PROCESSED, BillingReceiptStatus.IGNORED)
+        const val BILLING_MAX_PROCESSING_ATTEMPTS = 3
+        const val BILLING_RETRY_DELAY_SECONDS = 15 * 60L
+        const val BILLING_PROCESSING_RETRYING = "RETRYING"
+        const val BILLING_PROCESSING_EXHAUSTED = "EXHAUSTED"
 
         const val LOCK_PAYMENT_SQL = """
             select p.*

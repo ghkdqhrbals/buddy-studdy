@@ -1,6 +1,7 @@
 package com.buddystudy.backend.billing
 
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoicePage
+import com.buddystudy.backend.billing.application.model.AdminBillingProcessingFailurePage
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
 import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPort
 import com.buddystudy.backend.billing.application.service.AdminBillingService
@@ -55,6 +56,23 @@ class AdminBillingServiceTest {
                 service.requestRefund(11, RequestBillingActionCommand("short", "duplicate charge"))
             }
         }
+    }
+
+    @Test
+    fun `processing failure filters are normalized and pagination is bounded`() = runBlocking {
+        var captured: List<Any?> = emptyList()
+        val service = service { method, args ->
+            if (method == "adminProcessingFailures") {
+                captured = args.take(4)
+                AdminBillingProcessingFailurePage(100, 0, 0, emptyList())
+            } else {
+                error("Unexpected ledger method $method")
+            }
+        }
+
+        service.processingFailures(" revenuecat_event ", " exhausted ", 500, -4)
+
+        assertEquals(listOf("REVENUECAT_EVENT", "EXHAUSTED", 100, 0), captured)
     }
 
     private fun service(handler: (String, List<Any?>) -> Any?): AdminBillingService {

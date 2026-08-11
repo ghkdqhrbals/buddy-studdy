@@ -20,7 +20,10 @@ import { InlineNotice } from "../components/InlineNotice.jsx";
 import { formatDateTime, statusTone } from "../lib/format.js";
 
 const PAGE_SIZE = 30;
+const FAILURE_PAGE_SIZE = 20;
 const STATUSES = ["", "WAITING", "COMPLETED", "FAILED"];
+const FAILURE_SOURCES = ["", "REVENUECAT_EVENT", "SUBSCRIPTION_RECONCILIATION"];
+const FAILURE_STATUSES = ["", "RETRYING", "EXHAUSTED"];
 
 function amount(invoice) {
   if (invoice.priceMilliunits == null || !invoice.currency) return "-";
@@ -282,6 +285,121 @@ function OrdersWorkspace() {
   );
 }
 
+function ProcessingFailureDetail({ failure, onClose }) {
+  return (
+    <DetailDrawer
+      open={Boolean(failure)}
+      title={failure ? `${failure.source} failure` : "Billing processing failure"}
+      subtitle={failure ? `${failure.status} · attempt ${failure.attemptCount} of ${failure.maxAttempts}` : null}
+      onClose={onClose}
+    >
+      {failure ? (
+        <>
+          <div className="detail-summary">
+            <div><span>Status</span><strong><StatusBadge tone={statusTone(failure.status)}>{failure.status}</StatusBadge></strong></div>
+            <div><span>Attempts</span><strong>{failure.attemptCount} / {failure.maxAttempts}</strong></div>
+            <div><span>User</span><strong>{failure.userDisplayName || failure.userEmail || failure.userId || "-"}</strong></div>
+            <div><span>Next retry</span><strong>{formatDateTime(failure.nextAttemptAt)}</strong></div>
+            <div><span>Updated</span><strong>{formatDateTime(failure.updatedAt)}</strong></div>
+          </div>
+          <section className="drawer-section order-identifiers">
+            <h3>Processing identifiers</h3>
+            <dl>
+              <div><dt>Event ID</dt><dd>{failure.eventId}</dd></div>
+              <div><dt>Event type</dt><dd>{failure.eventType}</dd></div>
+              <div><dt>Transaction</dt><dd>{failure.transactionId || "-"}</dd></div>
+              <div><dt>Original transaction</dt><dd>{failure.originalTransactionId || "-"}</dd></div>
+              <div><dt>Product</dt><dd>{failure.productId || "-"}</dd></div>
+              <div><dt>First occurred</dt><dd>{formatDateTime(failure.occurredAt)}</dd></div>
+            </dl>
+          </section>
+          <section className="drawer-section">
+            <h3>Last error</h3>
+            <pre className="object-inspector">{failure.lastError}</pre>
+          </section>
+        </>
+      ) : null}
+    </DetailDrawer>
+  );
+}
+
+function ProcessingFailuresWorkspace() {
+  const [source, setSource] = useState("");
+  const [status, setStatus] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [selected, setSelected] = useState(null);
+  const params = new URLSearchParams({ limit: String(FAILURE_PAGE_SIZE), offset: String(offset) });
+  if (source) params.set("source", source);
+  if (status) params.set("status", status);
+  const failuresQuery = useQuery({
+    queryKey: ["admin", "billing", "processing-failures", source, status, offset],
+    queryFn: () => adminFetch(`/billing/processing-failures?${params}`),
+    placeholderData: keepPreviousData,
+  });
+  const rows = Array.isArray(failuresQuery.data?.failures) ? failuresQuery.data.failures : [];
+  const total = Number(failuresQuery.data?.totalCount) || 0;
+  const page = Math.floor(offset / FAILURE_PAGE_SIZE) + 1;
+  const totalPages = Math.max(1, Math.ceil(total / FAILURE_PAGE_SIZE));
+  const columns = useMemo(() => [
+    {
+      key: "status",
+      label: "Status",
+      render: (row) => <StatusBadge tone={statusTone(row.status)}>{row.status}</StatusBadge>,
+    },
+    { key: "source", label: "Source" },
+    { key: "event", label: "Event", render: (row) => <div className="primary-cell"><strong>{row.eventType}</strong><span className="mono">{row.eventId}</span></div> },
+    { key: "attempts", label: "Attempts", render: (row) => `${row.attemptCount} / ${row.maxAttempts}` },
+    { key: "user", label: "User", render: (row) => row.userDisplayName || row.userEmail || row.userId || "-" },
+    { key: "transaction", label: "Transaction", className: "mono", render: (row) => row.transactionId || row.originalTransactionId || "-" },
+    { key: "nextAttemptAt", label: "Next retry", render: (row) => formatDateTime(row.nextAttemptAt) },
+    { key: "updatedAt", label: "Updated", render: (row) => formatDateTime(row.updatedAt) },
+  ], []);
+
+  return (
+    <>
+      {failuresQuery.error ? <InlineNotice tone="danger">{failuresQuery.error.message}</InlineNotice> : null}
+      <section className="workspace-section">
+        <div className="section-heading toolbar-heading">
+          <div>
+            <h2>Billing processing failures</h2>
+            <p>{total.toLocaleString()} retrying or exhausted RevenueCat and subscription reconciliation records.</p>
+          </div>
+          <div className="inline-controls order-filters">
+            <label className="field compact-field">
+              <span>Source</span>
+              <select value={source} onChange={(event) => { setSource(event.target.value); setOffset(0); }}>
+                {FAILURE_SOURCES.map((value) => <option key={value || "ALL"} value={value}>{value || "All sources"}</option>)}
+              </select>
+            </label>
+            <label className="field compact-field">
+              <span>Status</span>
+              <select value={status} onChange={(event) => { setStatus(event.target.value); setOffset(0); }}>
+                {FAILURE_STATUSES.map((value) => <option key={value || "ALL"} value={value}>{value || "All statuses"}</option>)}
+              </select>
+            </label>
+          </div>
+        </div>
+        <DataTable
+          columns={columns}
+          rows={rows}
+          rowKey={(row) => `${row.source}-${row.id}`}
+          onRowClick={setSelected}
+          emptyText="No billing processing failures match this filter."
+          loading={failuresQuery.isLoading}
+        />
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          label={total ? `${Math.min(offset + 1, total)}–${Math.min(offset + FAILURE_PAGE_SIZE, total)} of ${total}` : "0 failures"}
+          onPrevious={() => setOffset(Math.max(0, offset - FAILURE_PAGE_SIZE))}
+          onNext={() => setOffset(offset + FAILURE_PAGE_SIZE)}
+        />
+      </section>
+      <ProcessingFailureDetail failure={selected} onClose={() => setSelected(null)} />
+    </>
+  );
+}
+
 export function OrdersPage() {
   const queryClient = useQueryClient();
   return (
@@ -289,7 +407,7 @@ export function OrdersPage() {
       <PageHeader
         eyebrow="Manage"
         title="Orders & billing"
-        description="Inspect invoices, Apple payment history, and audited cancellation or refund workflows."
+        description="Inspect invoices, Apple payment history, processing failures, and audited cancellation or refund workflows."
         actions={(
           <Button
             variant="secondary"
@@ -301,6 +419,7 @@ export function OrdersPage() {
         )}
       />
       <OrdersWorkspace />
+      <ProcessingFailuresWorkspace />
     </>
   );
 }

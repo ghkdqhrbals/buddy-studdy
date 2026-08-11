@@ -38,18 +38,36 @@ class BillingReconciliationService(
                 val snapshot = revenueCat.fetch(claim.appAccountToken, claim.originalTransactionId)
                 ledger.applySubscriptionSnapshot(claim, snapshot, now)
             } catch (error: Exception) {
-                ledger.recordSubscriptionReconcileFailure(
+                val outcome = ledger.recordSubscriptionReconcileFailure(
                     claim,
                     (error.message ?: error.javaClass.name).take(4000),
                     now,
                 )
-                log.error(
-                    "billing_subscription_reconcile_failed userId={} originalTransactionId={} attempt={}",
-                    claim.userId,
-                    claim.originalTransactionId,
-                    claim.attempt,
-                    error,
-                )
+                if (outcome.terminalTransition) {
+                    log.error(
+                        "billing_processing_exhausted source=SUBSCRIPTION_RECONCILIATION userId={} " +
+                            "originalTransactionId={} attempt={} maxAttempts={} errorType={} message={}",
+                        claim.userId,
+                        claim.originalTransactionId,
+                        outcome.attemptCount,
+                        outcome.maxAttempts,
+                        error.javaClass.name,
+                        error.message,
+                        error,
+                    )
+                } else {
+                    log.warn(
+                        "billing_processing_retry_scheduled source=SUBSCRIPTION_RECONCILIATION userId={} " +
+                            "originalTransactionId={} attempt={} maxAttempts={} nextAttemptAt={} errorType={} message={}",
+                        claim.userId,
+                        claim.originalTransactionId,
+                        outcome.attemptCount,
+                        outcome.maxAttempts,
+                        outcome.nextAttemptAt,
+                        error.javaClass.name,
+                        error.message,
+                    )
+                }
                 if (propagateFailure && firstFailure == null) firstFailure = error
             }
         }

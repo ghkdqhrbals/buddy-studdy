@@ -738,3 +738,26 @@ real purchases can complete.
 - `StudyMateDev.storekit` and `app-store/billing/subscriptions.json` must retain
   identical product IDs and Korean base prices; the iOS policy test guards this
   contract.
+
+## Processing failure operations
+
+RevenueCat event projection and subscription reconciliation failures use a
+durable three-attempt policy. The first and second failures remain `RETRYING`
+and become eligible again after 15 minutes. A third failure becomes
+`EXHAUSTED`; exhausted work is not claimed again automatically.
+
+The terminal transition writes one `billing_processing_exhausted` ERROR log.
+The production Loki rule `BuddyStudy backend operational ERROR log` forwards
+that event to the `BuddyStudy Slack` contact point. Keeping an exhausted record
+does not emit another ERROR on every lifecycle-metrics interval, so one failed
+operation does not repeatedly alert Slack.
+
+Administrators can inspect both retrying and exhausted work in Monitoring under
+**Manage > Orders & billing > Processing failures**. The table supports source
+and status filters, pagination, attempt count, last error, retry time, and the
+related event or subscription identifier. Its API is:
+
+- `GET /api/v1/admin/billing/processing-failures`
+
+The database remains the source of truth for attempt count and terminal state;
+application restarts therefore cannot reset or exceed the three-attempt limit.

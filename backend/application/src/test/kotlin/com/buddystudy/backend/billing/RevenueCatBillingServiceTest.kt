@@ -1,5 +1,6 @@
 package com.buddystudy.backend.billing
 
+import com.buddystudy.backend.billing.application.model.BillingProcessingFailureOutcome
 import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
 import com.buddystudy.backend.billing.application.model.BillingTierProduct
 import com.buddystudy.backend.billing.application.model.ApplyVerifiedBillingPaymentCommand
@@ -188,6 +189,15 @@ class RevenueCatBillingServiceTest {
         val ledger = Mockito.mock(BillingLedgerPort::class.java)
         val payments = Mockito.mock(VerifiedBillingPaymentUseCase::class.java)
         Mockito.`when`(ledger.claimDueRevenueCatEvents(now, 100)).thenReturn(listOf(invalidEvent, nextEvent))
+        Mockito.`when`(
+            ledger.markRevenueCatEventFailed(
+                invalidEvent.eventId,
+                "RevenueCat App User ID must be the BuddyStudy appAccountToken UUID.",
+                now,
+            ),
+        ).thenReturn(
+            BillingProcessingFailureOutcome(1, 3, "RETRYING", now.plusSeconds(900), false),
+        )
         Mockito.`when`(ledger.userIdForAppAccountToken(token)).thenReturn(733)
         Mockito.`when`(ledger.tierProduct(product.productId)).thenReturn(product)
         Mockito.`when`(payments.apply(paymentCommand(nextEvent))).thenReturn(invoice(InvoiceStatus.COMPLETED))

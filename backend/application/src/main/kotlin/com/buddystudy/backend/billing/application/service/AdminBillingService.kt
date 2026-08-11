@@ -2,6 +2,7 @@ package com.buddystudy.backend.billing.application.service
 
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoicePage
+import com.buddystudy.backend.billing.application.model.AdminBillingProcessingFailurePage
 import com.buddystudy.backend.billing.application.model.BillingAction
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
 import com.buddystudy.backend.billing.application.model.AdminQuotaAdjustment
@@ -43,6 +44,28 @@ class AdminBillingService(
         requireInvoiceId(invoiceId)
         return ledger.adminInvoice(invoiceId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Invoice not found.")
+    }
+
+    override suspend fun processingFailures(
+        source: String?,
+        status: String?,
+        limit: Int,
+        offset: Int,
+    ): AdminBillingProcessingFailurePage {
+        val normalizedSource = source?.trim()?.uppercase()?.takeIf(String::isNotEmpty)
+        if (normalizedSource != null && normalizedSource !in PROCESSING_FAILURE_SOURCES) {
+            throw invalid("Billing processing failure source is invalid.")
+        }
+        val normalizedStatus = status?.trim()?.uppercase()?.takeIf(String::isNotEmpty)
+        if (normalizedStatus != null && normalizedStatus !in PROCESSING_FAILURE_STATUSES) {
+            throw invalid("Billing processing failure status is invalid.")
+        }
+        return ledger.adminProcessingFailures(
+            normalizedSource,
+            normalizedStatus,
+            limit.coerceIn(1, 100),
+            offset.coerceAtLeast(0),
+        )
     }
 
     override suspend fun requestRefund(
@@ -111,4 +134,9 @@ class AdminBillingService(
 
     private fun invalid(message: String) =
         ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ApiErrorCode.VALIDATION_ERROR, message)
+
+    private companion object {
+        val PROCESSING_FAILURE_SOURCES = setOf("REVENUECAT_EVENT", "SUBSCRIPTION_RECONCILIATION")
+        val PROCESSING_FAILURE_STATUSES = setOf("RETRYING", "EXHAUSTED")
+    }
 }

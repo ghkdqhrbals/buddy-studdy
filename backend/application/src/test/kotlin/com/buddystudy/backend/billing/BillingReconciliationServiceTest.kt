@@ -1,6 +1,7 @@
 package com.buddystudy.backend.billing
 
 import com.buddystudy.backend.billing.application.model.RevenueCatCustomerSnapshot
+import com.buddystudy.backend.billing.application.model.BillingProcessingFailureOutcome
 import com.buddystudy.backend.billing.application.model.SubscriptionReconciliationClaim
 import com.buddystudy.backend.billing.application.port.outbound.BillingLedgerPort
 import com.buddystudy.backend.billing.application.port.outbound.RevenueCatCustomerInfoPort
@@ -77,6 +78,8 @@ class BillingReconciliationServiceTest {
         Mockito.`when`(ledger.claimDueSubscriptionReconciliations(now, 25)).thenReturn(listOf(claim))
         Mockito.`when`(revenueCat.fetch(token, claim.originalTransactionId))
             .thenThrow(IllegalStateException("provider unavailable"))
+        Mockito.`when`(ledger.recordSubscriptionReconcileFailure(claim, "provider unavailable", now))
+            .thenReturn(retryingOutcome(1))
 
         val count = BillingReconciliationService(
             ledger,
@@ -96,6 +99,8 @@ class BillingReconciliationServiceTest {
             .thenReturn(listOf(claim))
         Mockito.`when`(revenueCat.fetch(token, claim.originalTransactionId))
             .thenThrow(IllegalStateException("provider unavailable"))
+        Mockito.`when`(ledger.recordSubscriptionReconcileFailure(claim, "provider unavailable", now))
+            .thenReturn(retryingOutcome(1))
 
         val service = BillingReconciliationService(
             ledger,
@@ -125,6 +130,8 @@ class BillingReconciliationServiceTest {
         Mockito.`when`(ledger.claimDueSubscriptionReconciliations(now, 25)).thenReturn(listOf(claim, second))
         Mockito.`when`(revenueCat.fetch(token, claim.originalTransactionId))
             .thenThrow(IllegalStateException("first provider lookup failed"))
+        Mockito.`when`(ledger.recordSubscriptionReconcileFailure(claim, "first provider lookup failed", now))
+            .thenReturn(retryingOutcome(1))
         Mockito.`when`(revenueCat.fetch(token, second.originalTransactionId)).thenReturn(snapshot)
 
         val count = BillingReconciliationService(
@@ -137,4 +144,41 @@ class BillingReconciliationServiceTest {
         Mockito.verify(ledger).recordSubscriptionReconcileFailure(claim, "first provider lookup failed", now)
         Mockito.verify(ledger).applySubscriptionSnapshot(second, snapshot, now)
     }
+
+    @Test
+    fun `third reconciliation failure is persisted as exhausted`() = runBlocking {
+        val exhaustedClaim = claim.copy(attempt = 3)
+        val ledger = Mockito.mock(BillingLedgerPort::class.java)
+        val revenueCat = Mockito.mock(RevenueCatCustomerInfoPort::class.java)
+        Mockito.`when`(ledger.claimDueSubscriptionReconciliations(now, 25)).thenReturn(listOf(exhaustedClaim))
+        Mockito.`when`(revenueCat.fetch(token, exhaustedClaim.originalTransactionId))
+            .thenThrow(IllegalStateException("provider unavailable"))
+        Mockito.`when`(ledger.recordSubscriptionReconcileFailure(exhaustedClaim, "provider unavailable", now))
+            .thenReturn(
+                BillingProcessingFailureOutcome(
+                    attemptCount = 3,
+                    maxAttempts = 3,
+                    status = "EXHAUSTED",
+                    nextAttemptAt = null,
+                    terminalTransition = true,
+                ),
+            )
+
+        val count = BillingReconciliationService(
+            ledger,
+            revenueCat,
+            Clock.fixed(now, ZoneOffset.UTC),
+        ).reconcileDueSubscriptions()
+
+        assertThat(count).isEqualTo(1)
+        Mockito.verify(ledger).recordSubscriptionReconcileFailure(exhaustedClaim, "provider unavailable", now)
+    }
+
+    private fun retryingOutcome(attempt: Int) = BillingProcessingFailureOutcome(
+        attemptCount = attempt,
+        maxAttempts = 3,
+        status = "RETRYING",
+        nextAttemptAt = now.plusSeconds(900),
+        terminalTransition = false,
+    )
 }

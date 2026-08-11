@@ -69,19 +69,36 @@ class RevenueCatBillingService(
                 }
                 ledger.applyRevenueCatEvent(event, now)
             } catch (error: Exception) {
-                ledger.markRevenueCatEventFailed(
+                val outcome = ledger.markRevenueCatEventFailed(
                     event.eventId,
                     (error.message ?: error.javaClass.name).take(4000),
                     clock.instant(),
                 )
-                logger.error(
-                    "revenuecat_subscription_event_projection_failed eventId={} eventType={} errorType={} message={}",
-                    event.eventId,
-                    event.eventType,
-                    error.javaClass.name,
-                    error.message,
-                    error,
-                )
+                if (outcome.terminalTransition) {
+                    logger.error(
+                        "billing_processing_exhausted source=REVENUECAT_EVENT eventId={} eventType={} " +
+                            "attempt={} maxAttempts={} errorType={} message={}",
+                        event.eventId,
+                        event.eventType,
+                        outcome.attemptCount,
+                        outcome.maxAttempts,
+                        error.javaClass.name,
+                        error.message,
+                        error,
+                    )
+                } else {
+                    logger.warn(
+                        "billing_processing_retry_scheduled source=REVENUECAT_EVENT eventId={} eventType={} " +
+                            "attempt={} maxAttempts={} nextAttemptAt={} errorType={} message={}",
+                        event.eventId,
+                        event.eventType,
+                        outcome.attemptCount,
+                        outcome.maxAttempts,
+                        outcome.nextAttemptAt,
+                        error.javaClass.name,
+                        error.message,
+                    )
+                }
             }
         }
         return events.size

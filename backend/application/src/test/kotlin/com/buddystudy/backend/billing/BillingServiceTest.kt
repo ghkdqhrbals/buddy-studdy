@@ -4,6 +4,7 @@ import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.billing.application.model.ApplyAppleNotificationCommand
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoicePage
+import com.buddystudy.backend.billing.application.model.AdminBillingProcessingFailurePage
 import com.buddystudy.backend.billing.application.model.BillingAction
 import com.buddystudy.backend.billing.application.model.BillingCatalog
 import com.buddystudy.backend.billing.application.model.BillingClientAction
@@ -12,6 +13,7 @@ import com.buddystudy.backend.billing.application.model.BillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.BillingInvoicePage
 import com.buddystudy.backend.billing.application.model.BillingInvoicePhase
 import com.buddystudy.backend.billing.application.model.BillingInvoiceSummary
+import com.buddystudy.backend.billing.application.model.BillingProcessingFailureOutcome
 import com.buddystudy.backend.billing.application.model.BillingTierProduct
 import com.buddystudy.backend.billing.application.model.BillingEntitlementProjection
 import com.buddystudy.backend.billing.application.model.CreateBillingCheckoutCommand
@@ -852,17 +854,38 @@ class BillingServiceTest {
         }
         override suspend fun recordRevenueCatEvent(event: VerifiedRevenueCatEvent, now: Instant): Boolean = true
         override suspend fun applyRevenueCatEvent(event: VerifiedRevenueCatEvent, now: Instant): Boolean = true
-        override suspend fun markRevenueCatEventFailed(eventId: String, error: String, now: Instant) = Unit
+        override suspend fun markRevenueCatEventFailed(
+            eventId: String,
+            error: String,
+            now: Instant,
+        ) = BillingProcessingFailureOutcome(1, 3, "RETRYING", now.plusSeconds(900), false)
         override suspend fun adminInvoices(
             query: String?, status: String?, limit: Int, offset: Int,
         ): AdminBillingInvoicePage = AdminBillingInvoicePage(limit, offset, 0, emptyList())
         override suspend fun adminInvoice(invoiceId: Long): AdminBillingInvoiceDetail? = null
+        override suspend fun adminProcessingFailures(
+            source: String?,
+            status: String?,
+            limit: Int,
+            offset: Int,
+        ) = AdminBillingProcessingFailurePage(limit, offset, 0, emptyList())
         override suspend fun adminRequestRefund(
             invoiceId: Long, command: RequestBillingActionCommand, now: Instant,
         ): BillingAction = action(BillingActionType.REFUND)
         override suspend fun adminRequestCancellation(
             invoiceId: Long, command: RequestBillingActionCommand, now: Instant,
         ): BillingAction = action(BillingActionType.CANCELLATION)
+        override suspend fun recordSubscriptionReconcileFailure(
+            claim: com.buddystudy.backend.billing.application.model.SubscriptionReconciliationClaim,
+            error: String,
+            now: Instant,
+        ) = BillingProcessingFailureOutcome(
+            attemptCount = claim.attempt.coerceAtMost(3),
+            maxAttempts = 3,
+            status = if (claim.attempt >= 3) "EXHAUSTED" else "RETRYING",
+            nextAttemptAt = now.plusSeconds(900).takeIf { claim.attempt < 3 },
+            terminalTransition = claim.attempt == 3,
+        )
 
         private fun invoice(
             status: InvoiceStatus,

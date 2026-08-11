@@ -68,6 +68,11 @@ test("order administration exposes the invoice ledger and audited Apple actions"
   assert.match(page, /crypto\.randomUUID/);
   assert.match(page, /Pagination/);
   assert.match(page, /DetailDrawer/);
+  assert.match(page, /\/billing\/processing-failures\?/);
+  assert.match(page, /Billing processing failures/);
+  assert.match(page, /REVENUECAT_EVENT/);
+  assert.match(page, /SUBSCRIPTION_RECONCILIATION/);
+  assert.match(page, /EXHAUSTED/);
   assert.match(css, /\.drawer-content\s*\{[\s\S]*min-height:\s*0;[\s\S]*flex:\s*1 1 auto;[\s\S]*grid-auto-rows:\s*max-content/);
   assert.match(css, /\.detail-drawer > header\s*\{[\s\S]*flex:\s*0 0 auto/);
 });

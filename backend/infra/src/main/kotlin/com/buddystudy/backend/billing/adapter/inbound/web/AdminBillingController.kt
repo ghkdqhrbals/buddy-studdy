@@ -3,6 +3,7 @@ package com.buddystudy.backend.billing.adapter.inbound.web
 import com.buddystudy.backend.admin.analytics.application.port.inbound.AdminAnalyticsUseCase
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoiceDetail
 import com.buddystudy.backend.billing.application.model.AdminBillingInvoicePage
+import com.buddystudy.backend.billing.application.model.AdminBillingProcessingFailurePage
 import com.buddystudy.backend.billing.application.model.BillingAction
 import com.buddystudy.backend.billing.application.model.RequestBillingActionCommand
 import com.buddystudy.backend.billing.application.model.AdminQuotaAdjustment
@@ -45,6 +46,16 @@ class AdminBillingController(
         @RequestHeader("Authorization") authorization: String?,
         @PathVariable invoiceId: Long,
     ): AdminBillingInvoiceDetail = billing.invoice(authorization.bearerToken(), invoiceId)
+
+    @GetMapping("/processing-failures")
+    suspend fun processingFailures(
+        @RequestHeader("Authorization") authorization: String?,
+        @RequestParam(required = false) source: String?,
+        @RequestParam(required = false) status: String?,
+        @RequestParam(defaultValue = "30") limit: Int,
+        @RequestParam(defaultValue = "0") offset: Int,
+    ): AdminBillingProcessingFailurePage =
+        billing.processingFailures(authorization.bearerToken(), source, status, limit, offset)
 
     @PostMapping("/invoices/{invoiceId}/refund-requests")
     suspend fun requestRefund(
@@ -120,6 +131,13 @@ interface AdminBillingWebPort {
         offset: Int,
     ): AdminBillingInvoicePage
     suspend fun invoice(adminToken: String, invoiceId: Long): AdminBillingInvoiceDetail
+    suspend fun processingFailures(
+        adminToken: String,
+        source: String?,
+        status: String?,
+        limit: Int,
+        offset: Int,
+    ): AdminBillingProcessingFailurePage
     suspend fun requestRefund(adminToken: String, invoiceId: Long, request: AdminBillingActionRequest): BillingAction
     suspend fun requestCancellation(adminToken: String, invoiceId: Long, request: AdminBillingActionRequest): BillingAction
     suspend fun adjustQuota(
@@ -150,6 +168,17 @@ class AdminBillingWebAdapter(
     override suspend fun invoice(adminToken: String, invoiceId: Long): AdminBillingInvoiceDetail {
         authentication.validate(adminToken)
         return billing.invoice(invoiceId)
+    }
+
+    override suspend fun processingFailures(
+        adminToken: String,
+        source: String?,
+        status: String?,
+        limit: Int,
+        offset: Int,
+    ): AdminBillingProcessingFailurePage {
+        authentication.validate(adminToken)
+        return billing.processingFailures(source, status, limit, offset)
     }
 
     override suspend fun requestRefund(
