@@ -14,6 +14,90 @@ final class BillingLocalizationTests: XCTestCase {
         XCTAssertEqual(strings.monthlyQuestionAllowanceText(300), "毎月300問")
         XCTAssertEqual(AppStrings(language: .korean).monthlyQuestionAllowanceText(300), "매월 질문 300개")
         XCTAssertEqual(AppStrings(language: .english).monthlyQuestionAllowanceText(300), "300 questions each month")
+        XCTAssertEqual(strings.noRestorablePurchases, "復元できる有効な購入はありません。")
+    }
+
+    func testRestoreCandidateSelectsLatestActiveMonthlyEntitlement() {
+        let accountToken = UUID(uuidString: "7ec4cbca-03d2-45e6-91c9-e5e8931b4e52")!
+        let now = Date(timeIntervalSince1970: 1_786_000_000)
+        let candidates = [
+            StoreKitRestoreCandidate(
+                transactionID: 11,
+                originalTransactionID: 1,
+                productID: "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+                appAccountToken: accountToken,
+                purchaseDate: now.addingTimeInterval(-7_200),
+                expirationDate: now.addingTimeInterval(86_400),
+                revocationDate: nil
+            ),
+            StoreKitRestoreCandidate(
+                transactionID: 12,
+                originalTransactionID: 1,
+                productID: "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                appAccountToken: accountToken,
+                purchaseDate: now.addingTimeInterval(-3_600),
+                expirationDate: now.addingTimeInterval(172_800),
+                revocationDate: nil
+            ),
+        ]
+
+        let selected = StoreKitRestoreCandidateSelector.latestActiveMonthly(
+            from: candidates,
+            appAccountToken: accountToken,
+            now: now
+        )
+
+        XCTAssertEqual(selected?.transactionID, 12)
+    }
+
+    func testRestoreCandidateRejectsWrongAccountExpiredRevokedAndAnnualTransactions() {
+        let accountToken = UUID(uuidString: "7ec4cbca-03d2-45e6-91c9-e5e8931b4e52")!
+        let otherToken = UUID(uuidString: "c832dca9-77f6-46d1-bd76-76f8874403a5")!
+        let now = Date(timeIntervalSince1970: 1_786_000_000)
+        let candidates = [
+            StoreKitRestoreCandidate(
+                transactionID: 21,
+                originalTransactionID: 2,
+                productID: "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+                appAccountToken: otherToken,
+                purchaseDate: now,
+                expirationDate: now.addingTimeInterval(86_400),
+                revocationDate: nil
+            ),
+            StoreKitRestoreCandidate(
+                transactionID: 22,
+                originalTransactionID: 3,
+                productID: "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+                appAccountToken: accountToken,
+                purchaseDate: now,
+                expirationDate: now.addingTimeInterval(-1),
+                revocationDate: nil
+            ),
+            StoreKitRestoreCandidate(
+                transactionID: 23,
+                originalTransactionID: 4,
+                productID: "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                appAccountToken: accountToken,
+                purchaseDate: now,
+                expirationDate: now.addingTimeInterval(86_400),
+                revocationDate: now
+            ),
+            StoreKitRestoreCandidate(
+                transactionID: 24,
+                originalTransactionID: 5,
+                productID: "io.github.ghkdqhrbals.StudyMate.tier3.yearly",
+                appAccountToken: accountToken,
+                purchaseDate: now,
+                expirationDate: now.addingTimeInterval(86_400),
+                revocationDate: nil
+            ),
+        ]
+
+        XCTAssertNil(StoreKitRestoreCandidateSelector.latestActiveMonthly(
+            from: candidates,
+            appAccountToken: accountToken,
+            now: now
+        ))
     }
 
     func testMembershipCatalogOnlyOffersMonthlyProducts() {

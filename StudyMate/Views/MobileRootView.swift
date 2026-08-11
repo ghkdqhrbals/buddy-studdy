@@ -6766,9 +6766,21 @@ private struct MobileMembershipManagementView: View {
                 await refreshMembershipData()
                 billingNotice = strings.billingRestored
             } catch {
-                billingNotice = error.localizedDescription
+                billingNotice = billingRestoreMessage(for: error)
             }
         }
+    }
+
+    private func billingRestoreMessage(for error: Error) -> String {
+        if let billingError = error as? AppleBillingStoreError,
+           case .noRestorablePurchases = billingError {
+            return strings.noRestorablePurchases
+        }
+        return BackendErrorPresentationPolicy.presentation(
+            for: error,
+            fallback: strings.billingRestoreFailed,
+            language: appState.settings.appLanguage
+        ).message
     }
 
     private func refreshMembershipData() async {
@@ -7056,9 +7068,21 @@ private struct MobileBillingInvoiceDetailView: View {
                 await appState.refreshBilling()
                 billingNotice = strings.billingRestored
             } catch {
-                billingNotice = error.localizedDescription
+                billingNotice = billingRestoreMessage(for: error)
             }
         }
+    }
+
+    private func billingRestoreMessage(for error: Error) -> String {
+        if let billingError = error as? AppleBillingStoreError,
+           case .noRestorablePurchases = billingError {
+            return strings.noRestorablePurchases
+        }
+        return BackendErrorPresentationPolicy.presentation(
+            for: error,
+            fallback: strings.billingRestoreFailed,
+            language: appState.settings.appLanguage
+        ).message
     }
 
     private func openSubscriptionManagement() {

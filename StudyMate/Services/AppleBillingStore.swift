@@ -9,6 +9,38 @@ struct StoreKitTransactionSyncEvidence: Equatable {
     var environment: String
 }
 
+struct StoreKitRestoreCandidate: Equatable {
+    var transactionID: UInt64
+    var originalTransactionID: UInt64
+    var productID: String
+    var appAccountToken: UUID?
+    var purchaseDate: Date
+    var expirationDate: Date?
+    var revocationDate: Date?
+}
+
+enum StoreKitRestoreCandidateSelector {
+    nonisolated static func latestActiveMonthly(
+        from candidates: [StoreKitRestoreCandidate],
+        appAccountToken: UUID,
+        now: Date = Date()
+    ) -> StoreKitRestoreCandidate? {
+        candidates
+            .filter { candidate in
+                candidate.appAccountToken == appAccountToken
+                    && MembershipProductPolicy.purchasableMonthlyProductIDs.contains(candidate.productID)
+                    && candidate.revocationDate == nil
+                    && candidate.expirationDate.map { $0 > now } == true
+            }
+            .max { lhs, rhs in
+                if lhs.purchaseDate != rhs.purchaseDate {
+                    return lhs.purchaseDate < rhs.purchaseDate
+                }
+                return lhs.transactionID < rhs.transactionID
+            }
+    }
+}
+
 enum StoreKitTransactionSyncResolver {
     nonisolated static func matches(
         revenueCatTransactionIdentifier: String,
@@ -508,18 +540,17 @@ final class AppleBillingStore: ObservableObject {
         appAccountToken: UUID,
         synchronize: @escaping (String, String, UUID?) async throws -> BackendBillingInvoice
     ) async throws {
-        for await verification in Transaction.currentEntitlements {
-            guard case .verified(let transaction) = verification,
-                  transaction.appAccountToken == appAccountToken else {
-                continue
-            }
-            let invoice = try await synchronize(
-                verification.jwsRepresentation,
-                Self.backendEnvironment(transaction),
-                nil
-            )
-            _ = try Self.requireApplied(invoice)
+        guard let entitlement = await currentRestorableEntitlement(
+            appAccountToken: appAccountToken
+        ) else {
+            return
         }
+        let invoice = try await synchronize(
+            entitlement.verification.jwsRepresentation,
+            Self.backendEnvironment(entitlement.transaction),
+            nil
+        )
+        _ = try Self.requireApplied(invoice)
     }
 
     func restore(
@@ -533,25 +564,67 @@ final class AppleBillingStore: ObservableObject {
             try await AppStore.sync()
         }
 
-        // RevenueCat restores the Store account, but BuddyStudy still needs Apple's verified JWS
-        // for its own invoice/payment ledger. Replay every current entitlement through the same
-        // synchronous backend contract used by a new purchase.
-        var restored: [BackendBillingInvoice] = []
+        // RevenueCat restores the Store account, while BuddyStudy verifies Apple's signed
+        // transaction in its own ledger. One subscription group has one effective entitlement;
+        // replaying retired, expired, or superseded transactions makes an unrelated historical
+        // validation failure abort an otherwise valid restore.
+        guard let entitlement = await currentRestorableEntitlement(
+            appAccountToken: appAccountToken
+        ) else {
+            throw AppleBillingStoreError.noRestorablePurchases
+        }
+        let invoice = try await synchronize(
+            entitlement.verification.jwsRepresentation,
+            Self.backendEnvironment(entitlement.transaction),
+            nil
+        )
+        let appliedInvoice = try Self.requireApplied(invoice)
+        await entitlement.transaction.finish()
+        return [appliedInvoice]
+    }
+
+    private func currentRestorableEntitlement(
+        appAccountToken: UUID,
+        now: Date = Date()
+    ) async -> (
+        verification: StoreKit.VerificationResult<StoreKit.Transaction>,
+        transaction: StoreKit.Transaction
+    )? {
+        var verifiedEntitlements: [(
+            verification: StoreKit.VerificationResult<StoreKit.Transaction>,
+            transaction: StoreKit.Transaction,
+            candidate: StoreKitRestoreCandidate
+        )] = []
+
         for await verification in Transaction.currentEntitlements {
-            guard case .verified(let transaction) = verification,
-                  transaction.appAccountToken == appAccountToken else {
+            guard case .verified(let transaction) = verification else {
                 continue
             }
-            let invoice = try await synchronize(
-                verification.jwsRepresentation,
-                Self.backendEnvironment(transaction),
-                nil
-            )
-            let appliedInvoice = try Self.requireApplied(invoice)
-            await transaction.finish()
-            restored.append(appliedInvoice)
+            verifiedEntitlements.append((
+                verification: verification,
+                transaction: transaction,
+                candidate: StoreKitRestoreCandidate(
+                    transactionID: transaction.id,
+                    originalTransactionID: transaction.originalID,
+                    productID: transaction.productID,
+                    appAccountToken: transaction.appAccountToken,
+                    purchaseDate: transaction.purchaseDate,
+                    expirationDate: transaction.expirationDate,
+                    revocationDate: transaction.revocationDate
+                )
+            ))
         }
-        return restored
+
+        guard let selected = StoreKitRestoreCandidateSelector.latestActiveMonthly(
+            from: verifiedEntitlements.map(\.candidate),
+            appAccountToken: appAccountToken,
+            now: now
+        ), let entitlement = verifiedEntitlements.first(where: {
+            $0.transaction.id == selected.transactionID
+        }) else {
+            return nil
+        }
+        return (entitlement.verification, entitlement.transaction)
     }
 
     private static func shouldWaitForRevenueCatWebhook(after error: Error) -> Bool {
@@ -623,6 +696,7 @@ enum AppleBillingStoreError: LocalizedError {
     case membershipApplicationIncomplete
     case missingRevenueCatTransaction
     case revenueCatTransactionMismatch
+    case noRestorablePurchases
     case unknownPurchaseResult
 
     var errorDescription: String? {
@@ -645,6 +719,8 @@ enum AppleBillingStoreError: LocalizedError {
             return "이번 App Store 결제의 거래 정보를 확인할 수 없습니다. 구매 복원을 시도해 주세요."
         case .revenueCatTransactionMismatch:
             return "이번 App Store 결제와 일치하는 거래를 확인할 수 없습니다. 구매 복원을 시도해 주세요."
+        case .noRestorablePurchases:
+            return "복원할 수 있는 활성 구매가 없습니다."
         case .unknownPurchaseResult:
             return "알 수 없는 App Store 결제 결과입니다."
         }

@@ -2902,6 +2902,20 @@ struct AppStrings {
     }
     var billingPurchased: String { text("멤버십이 적용됐습니다.", "Your membership is active.", "メンバーシップが有効になりました。") }
     var billingRestored: String { text("구매 내역을 복원했습니다.", "Purchases restored.", "購入履歴を復元しました。") }
+    var noRestorablePurchases: String {
+        text(
+            "복원할 수 있는 활성 구매가 없습니다.",
+            "No active purchases are available to restore.",
+            "復元できる有効な購入はありません。"
+        )
+    }
+    var billingRestoreFailed: String {
+        text(
+            "구매 내역을 복원하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+            "Purchases could not be restored. Please try again shortly.",
+            "購入履歴を復元できませんでした。しばらくしてからもう一度お試しください。"
+        )
+    }
     var billingRecoveryTitle: String { text("결제 확인 필요", "Purchase needs attention", "購入の確認が必要です") }
     var billingRecoveryMessage: String {
         text(
