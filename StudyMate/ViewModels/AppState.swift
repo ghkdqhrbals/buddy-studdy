@@ -9355,6 +9355,10 @@ final class AppState: ObservableObject {
         log(isWarning ? .warning : .info, message)
     }
 
+    func logBillingEvent(_ message: String, isError: Bool = false) {
+        log(isError ? .error : .info, "billing_trace \(message)")
+    }
+
     func loadAppLogPage(_ page: Int) {
         let logPage = appLogUseCase.loadLogs(page: page, pageSize: Self.developerLogPageSize)
         var nextState = developerState

@@ -269,12 +269,6 @@ final class AppleBillingStore: ObservableObject {
         action == .subscribe || action == .change
     }
 
-    nonisolated static func canOpenUnfilteredSubscriptionManagement(
-        availableProductIDs: Set<String>
-    ) -> Bool {
-        MembershipProductPolicy.retiredAnnualProductIDs.isDisjoint(with: availableProductIDs)
-    }
-
     @Published private(set) var products: [TierProduct] = []
     @Published private(set) var isLoading = false
     @Published private(set) var processingProductID: String?
@@ -574,26 +568,24 @@ final class AppleBillingStore: ObservableObject {
         3_000_000_000,
     ]
 
-    func beginRefundRequest(transactionID: String, in scene: UIWindowScene) async throws -> Transaction.RefundRequestStatus {
+    func refundTransactionID(
+        transactionID: String,
+        productID: String,
+        appAccountToken: UUID
+    ) async throws -> Transaction.ID {
         guard let identifier = UInt64(transactionID) else {
             throw AppleBillingStoreError.invalidTransactionIdentifier
         }
-        return try await Transaction.beginRefundRequest(for: identifier, in: scene)
-    }
-
-    func showManageSubscriptions(in scene: UIWindowScene) async throws {
-        // Apple's subscription-management sheet renders every currently available product in the
-        // subscription group and offers no client-side product filter. Never open that unfiltered
-        // surface while either retired annual product is still returned by StoreKit.
-        let retiredAnnualProducts = try await Product.products(
-            for: MembershipProductPolicy.retiredAnnualProductIDs
-        )
-        guard Self.canOpenUnfilteredSubscriptionManagement(
-            availableProductIDs: Set(retiredAnnualProducts.map(\.id))
-        ) else {
-            throw AppleBillingStoreError.legacyAnnualProductsStillAvailable
+        for await verification in Transaction.all {
+            guard case .verified(let transaction) = verification,
+                  transaction.id == identifier,
+                  transaction.productID == productID,
+                  transaction.appAccountToken == nil || transaction.appAccountToken == appAccountToken else {
+                continue
+            }
+            return transaction.id
         }
-        try await AppStore.showManageSubscriptions(in: scene)
+        throw AppleBillingStoreError.refundTransactionNotFound
     }
 
     static func backendEnvironment(_ transaction: Transaction) -> String {
@@ -626,8 +618,8 @@ enum AppleBillingStoreError: LocalizedError {
     case unverifiedTransaction
     case accountTokenMismatch
     case invalidTransactionIdentifier
+    case refundTransactionNotFound
     case unsupportedProduct
-    case legacyAnnualProductsStillAvailable
     case membershipApplicationIncomplete
     case missingRevenueCatTransaction
     case revenueCatTransactionMismatch
@@ -643,10 +635,10 @@ enum AppleBillingStoreError: LocalizedError {
             return "결제 계정이 현재 로그인 계정과 일치하지 않습니다."
         case .invalidTransactionIdentifier:
             return "환불할 App Store 거래 번호가 올바르지 않습니다."
+        case .refundTransactionNotFound:
+            return "현재 App Store 계정에서 환불할 결제 내역을 확인할 수 없습니다."
         case .unsupportedProduct:
             return "현재 구매할 수 없는 요금제입니다."
-        case .legacyAnnualProductsStillAvailable:
-            return "App Store 요금제를 정리하고 있습니다. 잠시 후 다시 시도해 주세요."
         case .membershipApplicationIncomplete:
             return "결제 결과를 확인했지만 멤버십 적용이 완료되지 않았습니다. 구매 복원을 다시 시도해 주세요."
         case .missingRevenueCatTransaction:

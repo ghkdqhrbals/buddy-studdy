@@ -153,9 +153,19 @@ final class AppControlPolicyTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(mobileRoot.contains("try await billingStore.showManageSubscriptions(in: scene)"))
-        XCTAssertTrue(mobileRoot.contains("try await billingStore.beginRefundRequest("))
+        let billingStore = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Services/AppleBillingStore.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(mobileRoot.contains(".manageSubscriptionsSheet(isPresented:"))
+        XCTAssertTrue(mobileRoot.contains(".refundRequestSheet("))
+        XCTAssertTrue(mobileRoot.contains("try await billingStore.refundTransactionID("))
         XCTAssertTrue(mobileRoot.contains("try? await appState.requestBillingRefund(paymentID: paymentID)"))
+        XCTAssertTrue(billingStore.contains("for await verification in Transaction.all"))
+        XCTAssertTrue(billingStore.contains("transaction.id == identifier"))
+        XCTAssertTrue(billingStore.contains("transaction.productID == productID"))
+        XCTAssertFalse(billingStore.contains("Transaction.beginRefundRequest(for:"))
     }
 
     func testMembershipScreenUsesCachedProductsBeforeProviderReconciliation() throws {
@@ -178,23 +188,22 @@ final class AppControlPolicyTests: XCTestCase {
         XCTAssertTrue(billingStore.contains("private static let productCacheLifetime: TimeInterval = 15 * 60"))
     }
 
-    func testNativeSubscriptionManagementIsBlockedWhileAnnualProductsRemainAvailable() {
-        XCTAssertTrue(
-            AppleBillingStore.canOpenUnfilteredSubscriptionManagement(
-                availableProductIDs: [
-                    "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
-                    "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
-                ]
-            )
+    func testNativeSubscriptionManagementIsNotBlockedByRetiredProducts() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let mobileRoot = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Views/MobileRootView.swift"),
+            encoding: .utf8
         )
-        XCTAssertFalse(
-            AppleBillingStore.canOpenUnfilteredSubscriptionManagement(
-                availableProductIDs: [
-                    "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
-                    "io.github.ghkdqhrbals.StudyMate.tier3.yearly",
-                ]
-            )
+        let billingStore = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Services/AppleBillingStore.swift"),
+            encoding: .utf8
         )
+
+        XCTAssertTrue(mobileRoot.contains(".manageSubscriptionsSheet(isPresented:"))
+        XCTAssertFalse(billingStore.contains("canOpenUnfilteredSubscriptionManagement"))
+        XCTAssertFalse(billingStore.contains("legacyAnnualProductsStillAvailable"))
     }
 
     func testPurchaseActionIsResolvedBeforeEntitlementReplayAndCheckoutCreation() throws {

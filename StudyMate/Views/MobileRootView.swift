@@ -2,6 +2,7 @@ import SwiftUI
 #if os(iOS)
 import AuthenticationServices
 import SafariServices
+import StoreKit
 import UIKit
 #endif
 
@@ -6257,6 +6258,7 @@ private struct MobileMembershipManagementView: View {
     @StateObject private var billingStore = AppleBillingStore()
     @State private var billingNotice: String?
     @State private var isBillingRecoveryPresented = false
+    @State private var isSubscriptionManagementPresented = false
     @State private var selectedTierCode: String?
     @State private var purchaseTask: Task<Void, Never>?
 
@@ -6361,6 +6363,13 @@ private struct MobileMembershipManagementView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle(strings.membershipManagement)
         .navigationBarTitleDisplayMode(.inline)
+        .manageSubscriptionsSheet(isPresented: $isSubscriptionManagementPresented)
+        .onChange(of: isSubscriptionManagementPresented) { _, isPresented in
+            guard !isPresented else { return }
+            Task {
+                await synchronizeMembershipData()
+            }
+        }
         .task {
             await loadMembershipScreen()
         }
@@ -6804,25 +6813,7 @@ private struct MobileMembershipManagementView: View {
     }
 
     private func cancelSubscription() {
-        Task {
-            do {
-                guard let scene = activeWindowScene else {
-                    billingNotice = strings.subscriptionManagementUnavailable
-                    return
-                }
-                try await billingStore.showManageSubscriptions(in: scene)
-                await synchronizeMembershipData()
-            } catch {
-                billingNotice = strings.subscriptionManagementUnavailable
-            }
-        }
-    }
-
-    private var activeWindowScene: UIWindowScene? {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first(where: { $0.activationState == .foregroundActive })
-            ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        isSubscriptionManagementPresented = true
     }
 }
 
@@ -6952,6 +6943,9 @@ private struct MobileBillingInvoiceDetailView: View {
     @StateObject private var billingStore = AppleBillingStore()
     @State private var billingNotice: String?
     @State private var isSubmittingRefund = false
+    @State private var isSubscriptionManagementPresented = false
+    @State private var isRefundRequestPresented = false
+    @State private var refundTransactionID: StoreKit.Transaction.ID = 0
 
     let invoice: BackendBillingInvoice
 
@@ -7021,6 +7015,19 @@ private struct MobileBillingInvoiceDetailView: View {
         }
         .navigationTitle(strings.billingDetails)
         .navigationBarTitleDisplayMode(.inline)
+        .manageSubscriptionsSheet(isPresented: $isSubscriptionManagementPresented)
+        .refundRequestSheet(
+            for: refundTransactionID,
+            isPresented: $isRefundRequestPresented,
+            onDismiss: handleRefundRequestResult
+        )
+        .onChange(of: isSubscriptionManagementPresented) { _, isPresented in
+            guard !isPresented else { return }
+            Task {
+                await appState.reconcileBillingSubscription()
+                await appState.refreshBilling()
+            }
+        }
         .alert(
             strings.errorPopupTitle,
             isPresented: Binding(
@@ -7055,59 +7062,65 @@ private struct MobileBillingInvoiceDetailView: View {
     }
 
     private func openSubscriptionManagement() {
-        Task {
-            guard let scene = activeWindowScene else {
-                billingNotice = strings.subscriptionManagementUnavailable
-                return
-            }
-            do {
-                try await billingStore.showManageSubscriptions(in: scene)
-                await appState.reconcileBillingSubscription()
-                await appState.refreshBilling()
-            } catch {
-                billingNotice = strings.subscriptionManagementUnavailable
-            }
-        }
+        isSubscriptionManagementPresented = true
     }
 
     private func requestRefund() {
         Task {
             guard !isSubmittingRefund,
                   let transactionID = invoice.transactionId,
-                  let paymentID = invoice.paymentId,
-                  let scene = activeWindowScene else {
+                  invoice.paymentId != nil,
+                  let appAccountToken = appState.billingCatalog?.appAccountToken else {
                 billingNotice = strings.refundRequestUnavailable
                 return
             }
             isSubmittingRefund = true
-            defer { isSubmittingRefund = false }
             do {
-                let status = try await billingStore.beginRefundRequest(
+                refundTransactionID = try await billingStore.refundTransactionID(
                     transactionID: transactionID,
-                    in: scene
+                    productID: invoice.productId,
+                    appAccountToken: appAccountToken
                 )
-                switch status {
-                case .success:
-                    billingNotice = strings.refundSubmitted
-                    // Apple's accepted request is authoritative. The webhook can reconcile
-                    // billing state if this best-effort local tracking request is unavailable.
-                    _ = try? await appState.requestBillingRefund(paymentID: paymentID)
-                case .userCancelled:
-                    break
-                @unknown default:
-                    billingNotice = strings.refundRequestUnavailable
-                }
+                isRefundRequestPresented = true
             } catch {
+                isSubmittingRefund = false
+                appState.logBillingEvent(
+                    "환불 대상 StoreKit 거래 확인 실패. invoiceID=\(invoice.id), "
+                        + "transactionID=\(transactionID), error=\(error.localizedDescription)",
+                    isError: true
+                )
                 billingNotice = strings.refundRequestUnavailable
             }
         }
     }
 
-    private var activeWindowScene: UIWindowScene? {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first(where: { $0.activationState == .foregroundActive })
-            ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+    private func handleRefundRequestResult(
+        _ result: Result<StoreKit.Transaction.RefundRequestStatus, StoreKit.Transaction.RefundRequestError>
+    ) {
+        isSubmittingRefund = false
+        switch result {
+        case .success(.success):
+            billingNotice = strings.refundSubmitted
+            guard let paymentID = invoice.paymentId else { return }
+            Task {
+                // Apple's accepted request is authoritative. The webhook can reconcile billing
+                // state if this best-effort local tracking request is unavailable.
+                _ = try? await appState.requestBillingRefund(paymentID: paymentID)
+            }
+        case .success(.userCancelled):
+            break
+        case .failure(.duplicateRequest):
+            billingNotice = strings.refundSubmitted
+        case .failure(let error):
+            appState.logBillingEvent(
+                "StoreKit 환불 요청 화면 실패. invoiceID=\(invoice.id), "
+                    + "transactionID=\(invoice.transactionId ?? "-") error=\(error.localizedDescription)",
+                isError: true
+            )
+            billingNotice = strings.refundRequestUnavailable
+        @unknown default:
+            billingNotice = strings.refundRequestUnavailable
+        }
     }
 }
 
@@ -10852,8 +10865,8 @@ private struct MobileSettingsView: View {
 private struct MobileAccountSettingsView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var billingStore = AppleBillingStore()
     @State private var isShowingWithdrawalConfirmation = false
+    @State private var isSubscriptionManagementPresented = false
 
     private var strings: AppStrings { appState.strings }
 
@@ -10891,15 +10904,19 @@ private struct MobileAccountSettingsView: View {
         }
         .navigationTitle(strings.accountSettings)
         .navigationBarTitleDisplayMode(.inline)
+        .manageSubscriptionsSheet(isPresented: $isSubscriptionManagementPresented)
+        .onChange(of: isSubscriptionManagementPresented) { _, isPresented in
+            guard !isPresented else { return }
+            Task {
+                await appState.reconcileBillingSubscription()
+                await appState.refreshBilling()
+            }
+        }
         .alert(strings.deleteAccount, isPresented: $isShowingWithdrawalConfirmation) {
             Button(strings.cancel, role: .cancel) {}
             if appState.billingStatus?.willRenew == true {
                 Button(strings.manageSubscription) {
-                    Task {
-                        guard let scene = activeWindowScene else { return }
-                        try? await billingStore.showManageSubscriptions(in: scene)
-                        await appState.refreshBilling()
-                    }
+                    isSubscriptionManagementPresented = true
                 }
             }
             Button(strings.deleteAccount, role: .destructive) {
@@ -10918,11 +10935,6 @@ private struct MobileAccountSettingsView: View {
         }
     }
 
-    private var activeWindowScene: UIWindowScene? {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first { $0.activationState == .foregroundActive }
-    }
 }
 
 private struct MobileSettingsCard<Content: View>: View {
