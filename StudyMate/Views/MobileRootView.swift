@@ -6362,7 +6362,7 @@ private struct MobileMembershipManagementView: View {
         .navigationTitle(strings.membershipManagement)
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            await synchronizeMembershipData()
+            await loadMembershipScreen()
         }
         .refreshable {
             await synchronizeMembershipData()
@@ -6766,6 +6766,25 @@ private struct MobileMembershipManagementView: View {
         await appState.refreshBilling()
         guard let catalog = appState.billingCatalog else { return }
         await billingStore.load(catalog: catalog)
+        initializeSelection()
+    }
+
+    private func loadMembershipScreen() async {
+        guard let cachedCatalog = appState.billingCatalog else {
+            await refreshMembershipData()
+            return
+        }
+
+        async let billingRefresh: Void = appState.refreshBilling()
+        await billingStore.load(catalog: cachedCatalog)
+        initializeSelection()
+        await billingRefresh
+
+        guard let refreshedCatalog = appState.billingCatalog,
+              refreshedCatalog != cachedCatalog else {
+            return
+        }
+        await billingStore.load(catalog: refreshedCatalog)
         initializeSelection()
     }
 

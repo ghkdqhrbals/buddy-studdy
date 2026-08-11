@@ -158,6 +158,26 @@ final class AppControlPolicyTests: XCTestCase {
         XCTAssertTrue(mobileRoot.contains("try? await appState.requestBillingRefund(paymentID: paymentID)"))
     }
 
+    func testMembershipScreenUsesCachedProductsBeforeProviderReconciliation() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let mobileRoot = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Views/MobileRootView.swift"),
+            encoding: .utf8
+        )
+        let billingStore = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Services/AppleBillingStore.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(mobileRoot.contains("await loadMembershipScreen()"))
+        XCTAssertTrue(mobileRoot.contains("async let billingRefresh: Void = appState.refreshBilling()"))
+        XCTAssertTrue(mobileRoot.contains("await billingStore.load(catalog: cachedCatalog)"))
+        XCTAssertTrue(billingStore.contains("private static var productCache: ProductCacheEntry?"))
+        XCTAssertTrue(billingStore.contains("private static let productCacheLifetime: TimeInterval = 15 * 60"))
+    }
+
     func testNativeSubscriptionManagementIsBlockedWhileAnnualProductsRemainAvailable() {
         XCTAssertTrue(
             AppleBillingStore.canOpenUnfilteredSubscriptionManagement(

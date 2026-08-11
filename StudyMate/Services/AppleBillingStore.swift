@@ -201,6 +201,13 @@ final class RevenueCatBillingBridge {
 
 @MainActor
 final class AppleBillingStore: ObservableObject {
+    private struct ProductCacheEntry {
+        var productIDs: [String]
+        var usesRevenueCat: Bool
+        var sourcesByProductID: [String: TierProduct.StoreProductSource]
+        var expiresAt: Date
+    }
+
     struct ActiveSubscription: Equatable {
         var productID: String
         var expirationDate: Date?
@@ -273,17 +280,31 @@ final class AppleBillingStore: ObservableObject {
     @Published private(set) var processingProductID: String?
     @Published private(set) var errorMessage: String?
 
+    private static var productCache: ProductCacheEntry?
+    private static let productCacheLifetime: TimeInterval = 15 * 60
+
     func load(catalog: BackendBillingCatalog) async {
+        // Annual subscriptions are retained only as historical billing records on the backend.
+        // The storefront is monthly-only, so an older or stale catalog must never surface them.
+        let availableProducts = MembershipProductPolicy.monthlyProducts(catalog.products)
+        let identifiers = availableProducts.map(\.productId)
+        RevenueCatBillingBridge.shared.start()
+        let usesRevenueCat = RevenueCatBillingBridge.shared.isEnabled
+
+        if let cachedSources = Self.cachedProductSources(
+            productIDs: identifiers,
+            usesRevenueCat: usesRevenueCat
+        ) {
+            applyProducts(availableProducts, sourcesByProductID: cachedSources)
+            return
+        }
+
         isLoading = true
         defer { isLoading = false }
         do {
             try await RevenueCatBillingBridge.shared.identify(appAccountToken: catalog.appAccountToken)
-            // Annual subscriptions are retained only as historical billing records on the backend.
-            // The storefront is monthly-only, so an older or stale catalog must never surface them.
-            let availableProducts = MembershipProductPolicy.monthlyProducts(catalog.products)
-            let identifiers = availableProducts.map(\.productId)
             let byIdentifier: [String: TierProduct.StoreProductSource]
-            if RevenueCatBillingBridge.shared.isEnabled {
+            if usesRevenueCat {
                 let storeProducts = await Purchases.shared.products(identifiers)
                 byIdentifier = Dictionary(
                     uniqueKeysWithValues: storeProducts.map { ($0.productIdentifier, .revenueCat($0)) }
@@ -292,19 +313,49 @@ final class AppleBillingStore: ObservableObject {
                 let storeProducts = try await Product.products(for: identifiers)
                 byIdentifier = Dictionary(uniqueKeysWithValues: storeProducts.map { ($0.id, .appStore($0)) })
             }
-            products = availableProducts
-                .compactMap { tier in
-                    byIdentifier[tier.productId].map { TierProduct(tier: tier, source: $0) }
-                }
-                .sorted { $0.tier.sortOrder < $1.tier.sortOrder }
+            applyProducts(availableProducts, sourcesByProductID: byIdentifier)
             let missingProducts = Set(availableProducts.map(\.productId)).subtracting(byIdentifier.keys)
             errorMessage = missingProducts.isEmpty
                 ? nil
                 : "App Store에서 일부 요금제를 불러올 수 없습니다."
+            if missingProducts.isEmpty {
+                Self.productCache = ProductCacheEntry(
+                    productIDs: identifiers.sorted(),
+                    usesRevenueCat: usesRevenueCat,
+                    sourcesByProductID: byIdentifier,
+                    expiresAt: Date().addingTimeInterval(Self.productCacheLifetime)
+                )
+            }
         } catch {
             products = []
             errorMessage = error.localizedDescription
         }
+    }
+
+    private static func cachedProductSources(
+        productIDs: [String],
+        usesRevenueCat: Bool,
+        now: Date = Date()
+    ) -> [String: TierProduct.StoreProductSource]? {
+        guard let productCache,
+              productCache.expiresAt > now,
+              productCache.usesRevenueCat == usesRevenueCat,
+              productCache.productIDs == productIDs.sorted() else {
+            return nil
+        }
+        return productCache.sourcesByProductID
+    }
+
+    private func applyProducts(
+        _ availableProducts: [BackendBillingTierProduct],
+        sourcesByProductID: [String: TierProduct.StoreProductSource]
+    ) {
+        products = availableProducts
+            .compactMap { tier in
+                sourcesByProductID[tier.productId].map { TierProduct(tier: tier, source: $0) }
+            }
+            .sorted { $0.tier.sortOrder < $1.tier.sortOrder }
+        errorMessage = nil
     }
 
     func purchase(
