@@ -159,6 +159,20 @@ final class AppControlPolicyTests: XCTestCase {
         )
     }
 
+    func testSubscriptionCancellationAndRefundUseNativeStoreKitFlows() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let mobileRoot = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Views/MobileRootView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(mobileRoot.contains("try await billingStore.showManageSubscriptions(in: scene)"))
+        XCTAssertTrue(mobileRoot.contains("try await billingStore.beginRefundRequest("))
+        XCTAssertTrue(mobileRoot.contains("try? await appState.requestBillingRefund(paymentID: paymentID)"))
+    }
+
     func testPurchaseActionIsResolvedBeforeEntitlementReplayAndCheckoutCreation() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

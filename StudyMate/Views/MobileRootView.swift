@@ -6811,26 +6811,14 @@ private struct MobileMembershipManagementView: View {
     private func cancelSubscription() {
         Task {
             do {
-                if RevenueCatBillingBridge.shared.isEnabled {
-                    guard let appAccountToken = appState.billingCatalog?.appAccountToken else {
-                        billingNotice = strings.customerCenterUnavailable
-                        return
-                    }
-                    try await billingStore.prepareCustomerCenter(
-                        appAccountToken: appAccountToken,
-                        language: appState.settings.appLanguage
-                    )
-                    isCustomerCenterPresented = true
-                } else {
-                    guard let scene = activeWindowScene else {
-                        billingNotice = strings.customerCenterUnavailable
-                        return
-                    }
-                    try await billingStore.showManageSubscriptions(in: scene)
-                    await refreshMembershipData()
+                guard let scene = activeWindowScene else {
+                    billingNotice = strings.subscriptionManagementUnavailable
+                    return
                 }
+                try await billingStore.showManageSubscriptions(in: scene)
+                await synchronizeMembershipData()
             } catch {
-                billingNotice = strings.customerCenterUnavailable
+                billingNotice = strings.subscriptionManagementUnavailable
             }
         }
     }
@@ -6969,6 +6957,7 @@ private struct MobileBillingInvoiceDetailView: View {
     @StateObject private var billingStore = AppleBillingStore()
     @State private var billingNotice: String?
     @State private var isCustomerCenterPresented = false
+    @State private var isSubmittingRefund = false
 
     let invoice: BackendBillingInvoice
 
@@ -6999,10 +6988,35 @@ private struct MobileBillingInvoiceDetailView: View {
 
             if offersPurchaseManagement {
                 Section {
-                    Button {
-                        openCustomerCenter()
-                    } label: {
-                        Label(strings.managePurchases, systemImage: "creditcard")
+                    if invoice.isCancellable {
+                        Button {
+                            openSubscriptionManagement()
+                        } label: {
+                            Label(strings.cancelSubscription, systemImage: "calendar.badge.minus")
+                        }
+                    }
+
+                    if invoice.isRefundable, invoice.paymentId != nil, invoice.transactionId != nil {
+                        Button {
+                            requestRefund()
+                        } label: {
+                            HStack {
+                                Label(strings.requestRefund, systemImage: "arrow.uturn.backward.circle")
+                                if isSubmittingRefund {
+                                    Spacer()
+                                    ProgressView()
+                                }
+                            }
+                        }
+                        .disabled(isSubmittingRefund)
+                    }
+
+                    if invoice.requiresCustomerCenterResolution {
+                        Button {
+                            openCustomerCenter()
+                        } label: {
+                            Label(strings.managePurchases, systemImage: "creditcard")
+                        }
                     }
                 } footer: {
                     if invoice.requiresCustomerCenterResolution {
@@ -7051,6 +7065,62 @@ private struct MobileBillingInvoiceDetailView: View {
                 billingNotice = strings.customerCenterUnavailable
             }
         }
+    }
+
+    private func openSubscriptionManagement() {
+        Task {
+            guard let scene = activeWindowScene else {
+                billingNotice = strings.subscriptionManagementUnavailable
+                return
+            }
+            do {
+                try await billingStore.showManageSubscriptions(in: scene)
+                await appState.reconcileBillingSubscription()
+                await appState.refreshBilling()
+            } catch {
+                billingNotice = strings.subscriptionManagementUnavailable
+            }
+        }
+    }
+
+    private func requestRefund() {
+        Task {
+            guard !isSubmittingRefund,
+                  let transactionID = invoice.transactionId,
+                  let paymentID = invoice.paymentId,
+                  let scene = activeWindowScene else {
+                billingNotice = strings.refundRequestUnavailable
+                return
+            }
+            isSubmittingRefund = true
+            defer { isSubmittingRefund = false }
+            do {
+                let status = try await billingStore.beginRefundRequest(
+                    transactionID: transactionID,
+                    in: scene
+                )
+                switch status {
+                case .success:
+                    billingNotice = strings.refundSubmitted
+                    // Apple's accepted request is authoritative. The webhook can reconcile
+                    // billing state if this best-effort local tracking request is unavailable.
+                    _ = try? await appState.requestBillingRefund(paymentID: paymentID)
+                case .userCancelled:
+                    break
+                @unknown default:
+                    billingNotice = strings.refundRequestUnavailable
+                }
+            } catch {
+                billingNotice = strings.refundRequestUnavailable
+            }
+        }
+    }
+
+    private var activeWindowScene: UIWindowScene? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })
+            ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
     }
 }
 

@@ -2875,6 +2875,20 @@ struct AppStrings {
             "現在、購入管理を開けません。"
         )
     }
+    var subscriptionManagementUnavailable: String {
+        text(
+            "App Store 구독 관리 화면을 열 수 없습니다. 잠시 후 다시 시도해 주세요.",
+            "The App Store subscription management screen could not be opened. Please try again shortly.",
+            "App Storeのサブスクリプション管理画面を開けません。しばらくしてからもう一度お試しください。"
+        )
+    }
+    var refundRequestUnavailable: String {
+        text(
+            "이 결제의 환불 요청 화면을 열 수 없습니다.",
+            "The refund request screen could not be opened for this purchase.",
+            "この購入の返金リクエスト画面を開けません。"
+        )
+    }
     var perMonth: String { text("/월", "/month", "/月") }
     var remainingQuestions: String { text("개 남음", "left", "問残り") }
     var noBillingHistory: String { text("아직 결제 내역이 없습니다.", "No billing history yet.", "支払い履歴はまだありません。") }
