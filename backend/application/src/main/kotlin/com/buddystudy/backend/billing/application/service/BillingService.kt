@@ -13,6 +13,7 @@ import com.buddystudy.backend.billing.application.model.BillingRecoveryResult
 import com.buddystudy.backend.billing.application.model.BillingStatusResponse
 import com.buddystudy.backend.billing.application.model.BillingQuotaStatus
 import com.buddystudy.backend.billing.application.model.BillingPlanTransition
+import com.buddystudy.backend.billing.application.model.BillingTierProduct
 import com.buddystudy.backend.billing.application.model.CreateBillingCheckoutCommand
 import com.buddystudy.backend.billing.application.model.ConfirmRevenueCatTransactionCommand
 import com.buddystudy.backend.billing.application.model.ApplyVerifiedBillingPaymentCommand
@@ -123,12 +124,19 @@ class BillingService(
         source == EntitlementSource.APP_STORE &&
             accessStatus == SubscriptionAccessStatus.ACTIVE &&
             expiresAt?.isAfter(now) == false
+
+    /**
+     * New purchases are monthly-only. Disabled legacy products still resolve through [BillingLedgerPort.tierProduct]
+     * so historical renewals, restores, refunds, and webhook reconciliation remain recoverable.
+     */
+    private fun BillingTierProduct.isSellable(): Boolean = billingPeriod == MONTHLY_BILLING_PERIOD
+
     override suspend fun catalog(principal: Principal): BillingCatalog {
         requireRegistered(principal)
         val now = clock.instant()
         return BillingCatalog(
             appAccountToken = ledger.findOrCreateAppAccountToken(principal.userId, now),
-            products = ledger.enabledTierProducts(),
+            products = ledger.enabledTierProducts().filter { it.isSellable() },
         )
     }
 
@@ -140,7 +148,7 @@ class BillingService(
         val productId = command.productId.trim()
         if (!PRODUCT_ID.matches(productId)) invalidTransaction()
         validateIdempotencyKey(command.idempotencyKey)
-        val product = ledger.enabledTierProduct(productId)
+        val product = ledger.enabledTierProduct(productId)?.takeIf { it.isSellable() }
             ?: throw billingError(
                 HttpStatus.UNPROCESSABLE_ENTITY,
                 ApiErrorCode.BILLING_TRANSACTION_INVALID,
@@ -540,6 +548,7 @@ class BillingService(
         val SHA256 = Regex("^[0-9a-f]{64}$")
         val IDEMPOTENCY_KEY = Regex("^[A-Za-z0-9._:-]{8,191}$")
         val FULFILLMENT_NOTIFICATION_TYPES = setOf("SUBSCRIBED", "DID_RENEW", "ONE_TIME_CHARGE", "OFFER_REDEEMED")
+        const val MONTHLY_BILLING_PERIOD = "P1M"
         val FULFILLMENT_CLAIM_LEASE: Duration = Duration.ofMinutes(2)
         const val FULFILLMENT_RECOVERY_BATCH_SIZE = 25
     }

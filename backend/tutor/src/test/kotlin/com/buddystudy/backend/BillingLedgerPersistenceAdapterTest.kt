@@ -86,6 +86,19 @@ class BillingLedgerPersistenceAdapterTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
+    fun `annual mappings remain historical-only and cannot enter catalog or checkout lookup`(): Unit = runBlocking {
+        val annualProductId = "io.github.ghkdqhrbals.StudyMate.tier2.yearly"
+
+        assertThat(ledger.enabledTierProducts())
+            .isNotEmpty
+            .allMatch { it.billingPeriod == "P1M" }
+        assertThat(ledger.enabledTierProduct(annualProductId)).isNull()
+        val historicalProduct = ledger.tierProduct(annualProductId)
+        assertThat(historicalProduct?.billingPeriod).isEqualTo("P1Y")
+        assertThat(historicalProduct?.productId).isEqualTo(annualProductId)
+    }
+
+    @Test
     fun `failed RevenueCat receipt remains retryable and duplicate processed delivery is ignored`(): Unit = runBlocking {
         val eventId = "rc-${UUID.randomUUID()}"
         createdRevenueCatEventIds += eventId

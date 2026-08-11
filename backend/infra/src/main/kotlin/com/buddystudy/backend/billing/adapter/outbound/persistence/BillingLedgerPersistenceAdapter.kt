@@ -110,7 +110,9 @@ class BillingLedgerPersistenceAdapter(
                    p.product_type, p.billing_period, p.sort_order
             from membership_tier_products p
             join user_membership_tiers t on t.tier_code = p.tier_code
-            where p.provider = 'APPLE' and p.enabled = true
+            where p.provider = 'APPLE'
+              and p.enabled = true
+              and p.billing_period = 'P1M'
             order by p.sort_order, p.tier_code
             """.trimIndent(),
         ).map { row, _ -> row.tierProduct() }
@@ -130,7 +132,10 @@ class BillingLedgerPersistenceAdapter(
             from membership_tier_products p
             join user_membership_tiers t on t.tier_code = p.tier_code
             where p.provider = 'APPLE' and p.product_id = :productId
-              and (:enabledOnly = false or p.enabled = true)
+              and (
+                :enabledOnly = false
+                or (p.enabled = true and p.billing_period = 'P1M')
+              )
             """.trimIndent(),
         ).bind("productId", productId).bind("enabledOnly", enabledOnly)
             .map { row, _ -> row.tierProduct() }

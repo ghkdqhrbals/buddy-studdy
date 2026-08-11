@@ -445,6 +445,13 @@ changes belong to the app's membership screen, which loads only the active
 `P1M` products returned by the backend catalog. RevenueCat Customer Center is a
 support and recovery surface, not a plan picker.
 
+Monthly-only sale is enforced at three backend boundaries: catalog queries
+select `P1M` rows only, checkout creation rejects every non-`P1M` mapping, and
+the database prevents a historical `P1Y` mapping from being enabled. Generic
+transaction, webhook, restore, and refund reconciliation may still resolve a
+disabled `P1Y` mapping because deleting it would make an existing Apple charge
+unrecoverable; that compatibility path never creates a new checkout.
+
 Configure it under RevenueCat Project Settings > Monetization Tools > Customer
 Center, and keep only the following active-subscriber paths enabled:
 

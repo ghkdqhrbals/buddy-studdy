@@ -461,6 +461,30 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
         ).map { row, _ -> row.get("product_count", java.lang.Long::class.java)!!.toLong() }
             .one().awaitSingle()
         assertThat(retiredAnnualProducts).isEqualTo(2)
+
+        val monthlyOnlySaleConstraint = databaseClient.sql(
+            """
+            select count(*) as constraint_count
+            from information_schema.table_constraints
+            where constraint_schema = database()
+              and table_name = 'membership_tier_products'
+              and constraint_name = 'chk_membership_tier_products_no_annual_sale'
+              and constraint_type = 'CHECK'
+            """.trimIndent(),
+        ).map { row, _ -> row.get("constraint_count", java.lang.Long::class.java)!!.toLong() }
+            .one().awaitSingle()
+        assertThat(monthlyOnlySaleConstraint).isEqualTo(1)
+
+        val annualEnableFailure = runCatching {
+            databaseClient.sql(
+                """
+                update membership_tier_products
+                set enabled = true
+                where provider = 'APPLE' and billing_period = 'P1Y'
+                """.trimIndent(),
+            ).fetch().rowsUpdated().awaitSingle()
+        }.exceptionOrNull()
+        assertThat(annualEnableFailure).isNotNull()
     }
 
     @Test

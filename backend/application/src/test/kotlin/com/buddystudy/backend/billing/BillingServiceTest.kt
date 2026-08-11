@@ -284,6 +284,52 @@ class BillingServiceTest {
     }
 
     @Test
+    fun `annual product is absent from catalog and cannot open checkout even when marked enabled`() = runBlocking {
+        val annualProduct = product.copy(
+            productId = "io.github.ghkdqhrbals.StudyMate.tier2.yearly",
+            billingPeriod = "P1Y",
+            sortOrder = 21,
+        )
+        val ledger = FakeLedger(token, annualProduct, productEnabled = true)
+        val service = service(ledger)
+
+        assertTrue(service.catalog(principal()).products.isEmpty())
+
+        val error = assertThrows(ApiRuntimeException::class.java) {
+            runBlocking {
+                service.createCheckout(
+                    principal(),
+                    CreateBillingCheckoutCommand(annualProduct.productId, "annual-checkout-request"),
+                )
+            }
+        }
+
+        assertEquals(ApiErrorCode.BILLING_TRANSACTION_INVALID, error.errorCode)
+        assertTrue(ledger.pendingCheckoutKeys.isEmpty())
+    }
+
+    @Test
+    fun `retired annual transaction remains recoverable without reopening annual sales`() = runBlocking {
+        val annualTransaction = transaction.copy(
+            productId = "io.github.ghkdqhrbals.StudyMate.tier2.yearly",
+        )
+        val annualProduct = product.copy(
+            productId = annualTransaction.productId,
+            billingPeriod = "P1Y",
+            sortOrder = 21,
+        )
+        val ledger = FakeLedger(token, annualProduct, productEnabled = false).apply {
+            projectedEntitlement = projectedEntitlement?.copy(productId = annualProduct.productId)
+        }
+        val service = service(ledger, verifiedTransaction = annualTransaction)
+
+        val recovered = service.syncAppleTransaction(principal(), syncCommand())
+
+        assertEquals(InvoiceStatus.COMPLETED, recovered.status)
+        assertEquals(annualTransaction.productId, ledger.recordedPayments.single().transaction.productId)
+    }
+
+    @Test
     fun `retired product cannot open checkout but remains valid for transaction recovery`() = runBlocking {
         val ledger = FakeLedger(token, product, productEnabled = false)
         val service = service(ledger)
@@ -642,7 +688,8 @@ class BillingServiceTest {
         notification: VerifiedAppleNotification? = null,
         membershipTierCode: String = "TIER2",
         monthlyLimit: Int = 300,
-        revenueCatVerifier: RevenueCatTransactionVerificationPort = RecordingRevenueCatVerifier(transaction),
+        verifiedTransaction: VerifiedAppleTransaction = transaction,
+        revenueCatVerifier: RevenueCatTransactionVerificationPort = RecordingRevenueCatVerifier(verifiedTransaction),
     ) = object {
         val membership = object : QuestionMembershipPort {
             override suspend fun activePlanForUser(userId: Long) = QuestionMembershipPlan(membershipTierCode, monthlyLimit)
@@ -666,7 +713,7 @@ class BillingServiceTest {
             override suspend fun verifyTransaction(
                 signedTransaction: String,
                 environment: BillingEnvironment,
-            ): VerifiedAppleTransaction = transaction
+            ): VerifiedAppleTransaction = verifiedTransaction
 
             override suspend fun verifyNotification(signedPayload: String): VerifiedAppleNotification =
                 notification ?: error("not used")
@@ -896,8 +943,8 @@ class BillingServiceTest {
             invoiceNumber = UUID.fromString("2306d81d-1323-48c4-bb2b-a40cc48f70da"),
             type = InvoiceType.NORMAL,
             originalInvoiceId = null,
-            tierCode = "TIER2",
-            productId = "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+            tierCode = product?.tierCode ?: "TIER2",
+            productId = product?.productId ?: "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
             status = status,
             version = 2,
             paymentId = if (hasPayment) 88 else null,
