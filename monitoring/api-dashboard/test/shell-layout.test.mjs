@@ -175,7 +175,7 @@ test("app control administration publishes update campaigns and manages maintena
   assert.match(page, /Maintenance was published to Firebase Remote Config/);
 });
 
-test("user administration is searchable, paginated, and keeps plans internal", async () => {
+test("user administration is searchable, paginated, and supports period quota operations", async () => {
   const page = await source("pages/UsersPage.jsx");
   const adminApi = await source("admin/adminApi.js");
   assert.match(page, /const PAGE_SIZE = 20/);
@@ -183,19 +183,17 @@ test("user administration is searchable, paginated, and keeps plans internal", a
   assert.match(page, /Pagination/);
   assert.match(page, /DetailDrawer/);
   assert.match(page, /ObjectInspector/);
-  assert.match(page, /monthlyQuestionLimitOverride/);
-  assert.match(page, /currentPeriodQuestionLimitOverride/);
+  assert.match(page, /\/quota-adjustments/);
+  assert.match(page, /bonusDelta/);
+  assert.match(page, /idempotencyKey/);
   assert.match(page, /periodStartedAt/);
-  assert.match(page, /\/quota\/current-period/);
   assert.match(page, /Current limit/);
   assert.match(page, /Used/);
   assert.match(page, /Remaining/);
-  assert.match(page, /Update until reset/);
-  assert.match(page, /Restore default/);
+  assert.match(page, /Apply bonus until reset/);
   assert.match(page, /LIMIT_PRESETS/);
   assert.match(adminApi, /sessionStorage/);
   assert.match(adminApi, /Authorization: `Bearer \$\{session\.token\}`/);
-  assert.doesNotMatch(page, /payment|billing/i);
 });
 
 test("monitoring uses one full-page administrator session and manages database accounts", async () => {
