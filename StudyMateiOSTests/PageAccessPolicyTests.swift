@@ -22,7 +22,7 @@ final class BillingLocalizationTests: XCTestCase {
                 tierCode: "TIER2",
                 description: "Monthly",
                 monthlyQuestionLimit: 300,
-                productId: "tier2.monthly",
+                productId: "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
                 productType: "AUTO_RENEWABLE_SUBSCRIPTION",
                 billingPeriod: "P1M",
                 sortOrder: 20
@@ -31,25 +31,60 @@ final class BillingLocalizationTests: XCTestCase {
                 tierCode: "TIER2",
                 description: "Legacy annual",
                 monthlyQuestionLimit: 300,
-                productId: "tier2.yearly",
+                productId: "io.github.ghkdqhrbals.StudyMate.tier2.yearly",
                 productType: "AUTO_RENEWABLE_SUBSCRIPTION",
                 billingPeriod: "P1Y",
                 sortOrder: 21
             ),
             BackendBillingTierProduct(
                 tierCode: "TIER3",
+                description: "Legacy annual with stale period metadata",
+                monthlyQuestionLimit: 1_000,
+                productId: "io.github.ghkdqhrbals.StudyMate.tier3.yearly",
+                productType: "AUTO_RENEWABLE_SUBSCRIPTION",
+                billingPeriod: "P1M",
+                sortOrder: 29
+            ),
+            BackendBillingTierProduct(
+                tierCode: "TIER3",
                 description: "Monthly",
                 monthlyQuestionLimit: 1_000,
-                productId: "tier3.monthly",
+                productId: "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
                 productType: "AUTO_RENEWABLE_SUBSCRIPTION",
                 billingPeriod: "p1m",
                 sortOrder: 30
+            ),
+            BackendBillingTierProduct(
+                tierCode: "TIER3",
+                description: "Unknown monthly product",
+                monthlyQuestionLimit: 1_000,
+                productId: "io.github.ghkdqhrbals.StudyMate.tier3.monthly.promo",
+                productType: "AUTO_RENEWABLE_SUBSCRIPTION",
+                billingPeriod: "P1M",
+                sortOrder: 31
             ),
         ]
 
         XCTAssertEqual(
             MembershipProductPolicy.monthlyProducts(products).map(\.productId),
-            ["tier2.monthly", "tier3.monthly"]
+            [
+                "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+                "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+            ]
+        )
+        XCTAssertEqual(
+            MembershipProductPolicy.purchasableMonthlyProductIDs,
+            [
+                "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+                "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+            ]
+        )
+        XCTAssertEqual(
+            MembershipProductPolicy.retiredAnnualProductIDs,
+            [
+                "io.github.ghkdqhrbals.StudyMate.tier2.yearly",
+                "io.github.ghkdqhrbals.StudyMate.tier3.yearly",
+            ]
         )
     }
 

@@ -472,6 +472,38 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertFalse(historySource.contains("openCustomerCenter()"))
     }
 
+    func testBillingUIHasNoUnfilteredRevenueCatCustomerCenterSurface() throws {
+        let root = try repositoryRoot()
+        let mobileRoot = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Views/MobileRootView.swift"),
+            encoding: .utf8
+        )
+        let project = try String(
+            contentsOf: root.appendingPathComponent("StudyMate.xcodeproj/project.pbxproj"),
+            encoding: .utf8
+        )
+
+        XCTAssertFalse(mobileRoot.contains("import RevenueCatUI"))
+        XCTAssertFalse(mobileRoot.contains("CustomerCenterView"))
+        XCTAssertFalse(project.contains("RevenueCatUI"))
+    }
+
+    func testPurchaseRestorationStillReconcilesHistoricalEntitlements() throws {
+        let root = try repositoryRoot()
+        let source = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Services/AppleBillingStore.swift"),
+            encoding: .utf8
+        )
+        let start = try XCTUnwrap(source.range(of: "func restore(")?.lowerBound)
+        let end = try XCTUnwrap(
+            source.range(of: "private static func shouldWaitForRevenueCatWebhook", range: start..<source.endIndex)?.lowerBound
+        )
+        let restoreSource = source[start..<end]
+
+        XCTAssertTrue(restoreSource.contains("Transaction.currentEntitlements"))
+        XCTAssertFalse(restoreSource.contains("MembershipProductPolicy"))
+    }
+
     func testUnchangedAPNSTokenDoesNotTriggerStartupDataRefreshAgain() throws {
         let root = try repositoryRoot()
         let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")

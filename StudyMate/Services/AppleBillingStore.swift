@@ -124,10 +124,6 @@ final class RevenueCatBillingBridge {
         return appStoreKey?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    nonisolated static func preferredUILocaleIdentifier(for language: AppLanguage) -> String {
-        language.locale.identifier
-    }
-
     nonisolated static func matchesExpectedAppUserID(
         currentAppUserID: String,
         expectedAppAccountToken: UUID
@@ -185,14 +181,6 @@ final class RevenueCatBillingBridge {
         ) else {
             throw RevenueCatBillingBridgeError.identityMismatch
         }
-    }
-
-    func setPreferredUILocale(for language: AppLanguage) {
-        start()
-        guard isEnabled else { return }
-        Purchases.shared.overridePreferredUILocale(
-            Self.preferredUILocaleIdentifier(for: language)
-        )
     }
 
     func syncPurchases() async throws {
@@ -274,6 +262,12 @@ final class AppleBillingStore: ObservableObject {
         action == .subscribe || action == .change
     }
 
+    nonisolated static func canOpenUnfilteredSubscriptionManagement(
+        availableProductIDs: Set<String>
+    ) -> Bool {
+        MembershipProductPolicy.retiredAnnualProductIDs.isDisjoint(with: availableProductIDs)
+    }
+
     @Published private(set) var products: [TierProduct] = []
     @Published private(set) var isLoading = false
     @Published private(set) var processingProductID: String?
@@ -323,6 +317,9 @@ final class AppleBillingStore: ObservableObject {
         waitForFulfillment: @escaping (Int64) async throws -> BackendBillingInvoice,
         abandonCheckout: @escaping (UUID) async throws -> Void
     ) async throws -> PurchaseOutcome {
+        guard MembershipProductPolicy.isPurchasableMonthlyProduct(tierProduct.tier) else {
+            throw AppleBillingStoreError.unsupportedProduct
+        }
         guard processingProductID == nil else {
             throw AppleBillingStoreError.purchaseAlreadyInProgress
         }
@@ -534,15 +531,18 @@ final class AppleBillingStore: ObservableObject {
     }
 
     func showManageSubscriptions(in scene: UIWindowScene) async throws {
-        try await AppStore.showManageSubscriptions(in: scene)
-    }
-
-    func prepareCustomerCenter(appAccountToken: UUID, language: AppLanguage) async throws {
-        try await RevenueCatBillingBridge.shared.identify(appAccountToken: appAccountToken)
-        guard RevenueCatBillingBridge.shared.isEnabled else {
-            throw AppleBillingStoreError.customerCenterUnavailable
+        // Apple's subscription-management sheet renders every currently available product in the
+        // subscription group and offers no client-side product filter. Never open that unfiltered
+        // surface while either retired annual product is still returned by StoreKit.
+        let retiredAnnualProducts = try await Product.products(
+            for: MembershipProductPolicy.retiredAnnualProductIDs
+        )
+        guard Self.canOpenUnfilteredSubscriptionManagement(
+            availableProductIDs: Set(retiredAnnualProducts.map(\.id))
+        ) else {
+            throw AppleBillingStoreError.legacyAnnualProductsStillAvailable
         }
-        RevenueCatBillingBridge.shared.setPreferredUILocale(for: language)
+        try await AppStore.showManageSubscriptions(in: scene)
     }
 
     static func backendEnvironment(_ transaction: Transaction) -> String {
@@ -575,7 +575,8 @@ enum AppleBillingStoreError: LocalizedError {
     case unverifiedTransaction
     case accountTokenMismatch
     case invalidTransactionIdentifier
-    case customerCenterUnavailable
+    case unsupportedProduct
+    case legacyAnnualProductsStillAvailable
     case membershipApplicationIncomplete
     case missingRevenueCatTransaction
     case revenueCatTransactionMismatch
@@ -591,8 +592,10 @@ enum AppleBillingStoreError: LocalizedError {
             return "결제 계정이 현재 로그인 계정과 일치하지 않습니다."
         case .invalidTransactionIdentifier:
             return "환불할 App Store 거래 번호가 올바르지 않습니다."
-        case .customerCenterUnavailable:
-            return "RevenueCat 결제 관리 기능을 사용할 수 없습니다."
+        case .unsupportedProduct:
+            return "현재 구매할 수 없는 요금제입니다."
+        case .legacyAnnualProductsStillAvailable:
+            return "App Store 요금제를 정리하고 있습니다. 잠시 후 다시 시도해 주세요."
         case .membershipApplicationIncomplete:
             return "결제 결과를 확인했지만 멤버십 적용이 완료되지 않았습니다. 구매 복원을 다시 시도해 주세요."
         case .missingRevenueCatTransaction:

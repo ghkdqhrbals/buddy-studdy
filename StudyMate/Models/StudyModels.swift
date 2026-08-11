@@ -4147,10 +4147,26 @@ struct MembershipPlanActionPolicy {
 }
 
 struct MembershipProductPolicy {
+    static let purchasableMonthlyProductIDs: Set<String> = [
+        "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+        "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+    ]
+    static let retiredAnnualProductIDs: Set<String> = [
+        "io.github.ghkdqhrbals.StudyMate.tier2.yearly",
+        "io.github.ghkdqhrbals.StudyMate.tier3.yearly",
+    ]
+
+    static func isPurchasableMonthlyProduct(
+        _ product: BackendBillingTierProduct
+    ) -> Bool {
+        product.billingPeriod?.uppercased() == "P1M"
+            && purchasableMonthlyProductIDs.contains(product.productId)
+    }
+
     static func monthlyProducts(
         _ products: [BackendBillingTierProduct]
     ) -> [BackendBillingTierProduct] {
-        products.filter { $0.billingPeriod?.uppercased() == "P1M" }
+        products.filter(isPurchasableMonthlyProduct)
     }
 }
 

@@ -15,21 +15,6 @@ final class AppControlPolicyTests: XCTestCase {
         XCTAssertNil(RevenueCatBillingBridge.resolvedPublicSDKKey("test_internal"))
     }
 
-    func testRevenueCatUILocaleFollowsTheInAppLanguage() {
-        XCTAssertEqual(
-            RevenueCatBillingBridge.preferredUILocaleIdentifier(for: .korean),
-            "ko_KR"
-        )
-        XCTAssertEqual(
-            RevenueCatBillingBridge.preferredUILocaleIdentifier(for: .english),
-            "en_US"
-        )
-        XCTAssertEqual(
-            RevenueCatBillingBridge.preferredUILocaleIdentifier(for: .japanese),
-            "ja_JP"
-        )
-    }
-
     func testRevenueCatIdentityMustMatchTheBackendAccountToken() {
         let accountToken = UUID(uuidString: "f9d47348-7b53-41c3-9f06-ef0b6f3c5e22")!
 
@@ -171,6 +156,25 @@ final class AppControlPolicyTests: XCTestCase {
         XCTAssertTrue(mobileRoot.contains("try await billingStore.showManageSubscriptions(in: scene)"))
         XCTAssertTrue(mobileRoot.contains("try await billingStore.beginRefundRequest("))
         XCTAssertTrue(mobileRoot.contains("try? await appState.requestBillingRefund(paymentID: paymentID)"))
+    }
+
+    func testNativeSubscriptionManagementIsBlockedWhileAnnualProductsRemainAvailable() {
+        XCTAssertTrue(
+            AppleBillingStore.canOpenUnfilteredSubscriptionManagement(
+                availableProductIDs: [
+                    "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+                    "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                ]
+            )
+        )
+        XCTAssertFalse(
+            AppleBillingStore.canOpenUnfilteredSubscriptionManagement(
+                availableProductIDs: [
+                    "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+                    "io.github.ghkdqhrbals.StudyMate.tier3.yearly",
+                ]
+            )
+        )
     }
 
     func testPurchaseActionIsResolvedBeforeEntitlementReplayAndCheckoutCreation() throws {

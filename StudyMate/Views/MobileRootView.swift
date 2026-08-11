@@ -1,7 +1,6 @@
 import SwiftUI
 #if os(iOS)
 import AuthenticationServices
-import RevenueCatUI
 import SafariServices
 import UIKit
 #endif
@@ -6258,7 +6257,6 @@ private struct MobileMembershipManagementView: View {
     @StateObject private var billingStore = AppleBillingStore()
     @State private var billingNotice: String?
     @State private var isBillingRecoveryPresented = false
-    @State private var isCustomerCenterPresented = false
     @State private var selectedTierCode: String?
     @State private var purchaseTask: Task<Void, Never>?
 
@@ -6385,20 +6383,16 @@ private struct MobileMembershipManagementView: View {
             Text(billingNotice ?? "")
         }
         .alert(strings.billingRecoveryTitle, isPresented: $isBillingRecoveryPresented) {
-            Button(strings.reviewCancelledPurchase) {
-                openPurchaseRecovery()
+            Button(strings.restorePurchases) {
+                guard let appAccountToken = appState.billingCatalog?.appAccountToken else {
+                    billingNotice = strings.customerCenterUnavailable
+                    return
+                }
+                restorePurchases(appAccountToken: appAccountToken)
             }
             Button(strings.close, role: .cancel) {}
         } message: {
             Text(strings.billingRecoveryMessage)
-        }
-        .sheet(isPresented: $isCustomerCenterPresented, onDismiss: {
-            Task {
-                await synchronizeMembershipData()
-            }
-        }) {
-            CustomerCenterView()
-                .environment(\.locale, appState.settings.appLanguage.locale)
         }
     }
 
@@ -6752,24 +6746,6 @@ private struct MobileMembershipManagementView: View {
         }
     }
 
-    private func openPurchaseRecovery() {
-        Task {
-            guard let appAccountToken = appState.billingCatalog?.appAccountToken else {
-                billingNotice = strings.customerCenterUnavailable
-                return
-            }
-            do {
-                try await billingStore.prepareCustomerCenter(
-                    appAccountToken: appAccountToken,
-                    language: appState.settings.appLanguage
-                )
-                isCustomerCenterPresented = true
-            } catch {
-                billingNotice = strings.customerCenterUnavailable
-            }
-        }
-    }
-
     private func restorePurchases(appAccountToken: UUID) {
         Task {
             do {
@@ -6956,7 +6932,6 @@ private struct MobileBillingInvoiceDetailView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var billingStore = AppleBillingStore()
     @State private var billingNotice: String?
-    @State private var isCustomerCenterPresented = false
     @State private var isSubmittingRefund = false
 
     let invoice: BackendBillingInvoice
@@ -7013,9 +6988,9 @@ private struct MobileBillingInvoiceDetailView: View {
 
                     if invoice.requiresCustomerCenterResolution {
                         Button {
-                            openCustomerCenter()
+                            restorePurchase()
                         } label: {
-                            Label(strings.managePurchases, systemImage: "creditcard")
+                            Label(strings.restorePurchases, systemImage: "arrow.clockwise")
                         }
                     }
                 } footer: {
@@ -7038,31 +7013,24 @@ private struct MobileBillingInvoiceDetailView: View {
         } message: {
             Text(billingNotice ?? "")
         }
-        .sheet(isPresented: $isCustomerCenterPresented, onDismiss: {
-            Task {
-                await appState.reconcileBillingSubscription()
-                await appState.refreshBilling()
-            }
-        }) {
-            CustomerCenterView()
-                .environment(\.locale, appState.settings.appLanguage.locale)
-        }
     }
 
-    private func openCustomerCenter() {
+    private func restorePurchase() {
         Task {
             guard let appAccountToken = appState.billingCatalog?.appAccountToken else {
                 billingNotice = strings.customerCenterUnavailable
                 return
             }
             do {
-                try await billingStore.prepareCustomerCenter(
+                _ = try await billingStore.restore(
                     appAccountToken: appAccountToken,
-                    language: appState.settings.appLanguage
+                    synchronize: appState.syncAppleBillingTransaction
                 )
-                isCustomerCenterPresented = true
+                await appState.reconcileBillingSubscription()
+                await appState.refreshBilling()
+                billingNotice = strings.billingRestored
             } catch {
-                billingNotice = strings.customerCenterUnavailable
+                billingNotice = error.localizedDescription
             }
         }
     }
