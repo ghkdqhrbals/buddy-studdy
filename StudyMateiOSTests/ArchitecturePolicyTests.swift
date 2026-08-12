@@ -1566,22 +1566,23 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
-    func testProfileSheetUsesCloseAction() throws {
+    func testProfileUsesDedicatedPageAndMembershipSheetUsesCloseAction() throws {
         let root = try repositoryRoot()
         let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
         let content = try String(contentsOf: file, encoding: .utf8)
 
         guard let profileStart = content.range(
-            of: "private struct MobileProfileSettingsSheet: View"
+            of: "private struct MobileProfilePage: View"
         )?.lowerBound,
-        let usageStart = content.range(
-            of: "private struct MobileQuestionUsageView: View",
+        let profileEnd = content.range(
+            of: "private struct MobileProfileEditorView: View",
             range: profileStart..<content.endIndex
         )?.lowerBound else {
-            return XCTFail("Profile settings sheet boundaries were not found.")
+            return XCTFail("Profile page boundaries were not found.")
         }
-        let profileContent = String(content[profileStart..<usageStart])
+        let profileContent = String(content[profileStart..<profileEnd])
 
+        XCTAssertTrue(profileContent.contains(".navigationTitle(strings.profile)"))
         XCTAssertTrue(profileContent.contains("Button(strings.close)"))
         XCTAssertFalse(profileContent.contains("Button(strings.done)"))
     }
@@ -1592,14 +1593,11 @@ final class ArchitecturePolicyTests: XCTestCase {
         let content = try String(contentsOf: file, encoding: .utf8)
 
         guard let profileStart = content.range(
-            of: "private struct MobileProfileSettingsSheet: View"
-        )?.lowerBound,
-        let usageStart = content.range(
-            of: "private struct MobileQuestionUsageView: View",
-            range: profileStart..<content.endIndex
+            of: "private struct MobileProfilePage: View"
         )?.lowerBound,
         let editorStart = content.range(
-            of: "private struct MobileProfileEditorView: View"
+            of: "private struct MobileProfileEditorView: View",
+            range: profileStart..<content.endIndex
         )?.lowerBound,
         let termsStart = content.range(
             of: "private struct MobileTermsSettingsView: View",
@@ -1608,7 +1606,7 @@ final class ArchitecturePolicyTests: XCTestCase {
             return XCTFail("Profile view boundaries were not found.")
         }
 
-        let profileContent = String(content[profileStart..<usageStart])
+        let profileContent = String(content[profileStart..<editorStart])
         let editorContent = String(content[editorStart..<termsStart])
 
         XCTAssertTrue(

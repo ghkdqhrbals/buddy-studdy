@@ -601,7 +601,7 @@ final class AppState: ObservableObject {
     private var visibleDataRefreshTask: Task<Void, Never>?
     private var backendRecordRefreshTask: Task<Void, Never>?
     private var studyOpeningTask: Task<Void, Never>?
-    private var studyOpeningRequestID: UUID?
+    private var studyOpeningRequestID: String?
     private var answerDraftSaveTask: Task<Void, Never>?
     private var protectedPageAccessRefreshTask: Task<Void, Never>?
     private var questionGenerationPollingTask: Task<Void, Never>?
@@ -5773,7 +5773,7 @@ final class AppState: ObservableObject {
         cancelStudyOpening(reason: "replaced")
         studyOpeningErrorMessage = nil
 
-        let requestID = UUID()
+        let requestID = appIdentifierProvider.makeIdentifier()
         studyOpeningRequestID = requestID
         openingStudyCategoryID = categoryID
         selectedTab = .home
@@ -5836,7 +5836,7 @@ final class AppState: ObservableObject {
     private func refreshStudyRoomContent(
         categoryID: String?,
         initialCategory providedInitialCategory: StudyCategory? = nil,
-        openingRequestID: UUID? = nil
+        openingRequestID: String? = nil
     ) async -> Bool {
         guard !Task.isCancelled,
               openingRequestID == nil || studyOpeningRequestID == openingRequestID else {
@@ -6534,7 +6534,7 @@ final class AppState: ObservableObject {
                     return false
                 }
                 let delay = Self.appleBillingRecoveryDelayNanoseconds[attempt - 1]
-                try? await Task.sleep(nanoseconds: delay)
+                try? await appSleepProvider.sleep(nanoseconds: delay)
                 guard !Task.isCancelled else {
                     return false
                 }
@@ -6556,7 +6556,7 @@ final class AppState: ObservableObject {
                 try await self.billingUseCase.createCheckout(
                     registration: recoveredRegistration,
                     productID: productID,
-                    idempotencyKey: "ios-checkout-\(UUID().uuidString.lowercased())"
+                    idempotencyKey: "ios-checkout-\(self.appIdentifierProvider.makeIdentifier().lowercased())"
                 )
             }
         )
@@ -6581,7 +6581,7 @@ final class AppState: ObservableObject {
             }
         )
         for delay in delays where latest.status == "WAITING" {
-            try await Task.sleep(nanoseconds: delay)
+            try await appSleepProvider.sleep(nanoseconds: delay)
             latest = try await performWithBackendIdentityRecovery(
                 registration: registration,
                 reason: "billing-webhook",
@@ -6626,7 +6626,7 @@ final class AppState: ObservableObject {
                 try await self.billingUseCase.requestRefund(
                     registration: recoveredRegistration,
                     paymentID: paymentID,
-                    idempotencyKey: "ios-refund-\(UUID().uuidString.lowercased())"
+                    idempotencyKey: "ios-refund-\(self.appIdentifierProvider.makeIdentifier().lowercased())"
                 )
             }
         )
@@ -6646,7 +6646,7 @@ final class AppState: ObservableObject {
                 try await self.billingUseCase.requestCancellation(
                     registration: recoveredRegistration,
                     originalTransactionID: originalTransactionID,
-                    idempotencyKey: "ios-cancel-\(UUID().uuidString.lowercased())"
+                    idempotencyKey: "ios-cancel-\(self.appIdentifierProvider.makeIdentifier().lowercased())"
                 )
             }
         )
