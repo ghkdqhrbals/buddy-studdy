@@ -641,12 +641,11 @@ final class AppleBillingStore: ObservableObject {
         3_000_000_000,
     ]
 
-    func requestRefund(
+    func refundTransactionID(
         transactionID: String,
         productID: String,
-        appAccountToken: UUID,
-        in scene: UIWindowScene
-    ) async throws -> Transaction.RefundRequestStatus {
+        appAccountToken: UUID
+    ) async throws -> Transaction.ID {
         guard let identifier = UInt64(transactionID) else {
             throw AppleBillingStoreError.invalidTransactionIdentifier
         }
@@ -657,7 +656,7 @@ final class AppleBillingStore: ObservableObject {
                   transaction.appAccountToken == nil || transaction.appAccountToken == appAccountToken else {
                 continue
             }
-            return try await transaction.beginRefundRequest(in: scene)
+            return transaction.id
         }
         throw AppleBillingStoreError.refundTransactionNotFound
     }

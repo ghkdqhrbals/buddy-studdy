@@ -2860,9 +2860,6 @@ struct AppStrings {
     var managePurchases: String { text("결제 관리", "Manage purchases", "購入を管理") }
     var cancelSubscription: String { text("구독 취소", "Cancel subscription", "サブスクリプションを解約") }
     var requestRefund: String { text("환불 요청", "Request refund", "返金をリクエスト") }
-    var requestRefundOnWeb: String {
-        text("웹에서 환불 요청", "Request a refund on the web", "Webで返金をリクエスト")
-    }
     var reviewCancelledPurchase: String { text("결제 확인 및 환불", "Review purchase and refund", "購入確認と返金") }
     var cancelledPurchaseGuidance: String {
         text(

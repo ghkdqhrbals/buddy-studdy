@@ -159,15 +159,16 @@ final class AppControlPolicyTests: XCTestCase {
         )
 
         XCTAssertTrue(mobileRoot.contains(".manageSubscriptionsSheet(isPresented:"))
-        XCTAssertFalse(mobileRoot.contains(".refundRequestSheet("))
-        XCTAssertTrue(mobileRoot.contains("try await billingStore.requestRefund("))
-        XCTAssertTrue(mobileRoot.contains("https://reportaproblem.apple.com/"))
+        XCTAssertTrue(mobileRoot.contains(".refundRequestSheet("))
+        XCTAssertTrue(mobileRoot.contains("try await billingStore.refundTransactionID("))
+        XCTAssertFalse(mobileRoot.contains("https://reportaproblem.apple.com/"))
+        XCTAssertFalse(mobileRoot.contains("requestRefundOnWeb"))
         XCTAssertTrue(mobileRoot.contains("try? await appState.requestBillingRefund(paymentID: paymentID)"))
         XCTAssertTrue(billingStore.contains("for await verification in Transaction.all"))
         XCTAssertTrue(billingStore.contains("transaction.id == identifier"))
         XCTAssertTrue(billingStore.contains("transaction.productID == productID"))
         XCTAssertFalse(billingStore.contains("Transaction.beginRefundRequest(for:"))
-        XCTAssertTrue(billingStore.contains("transaction.beginRefundRequest(in: scene)"))
+        XCTAssertFalse(billingStore.contains("transaction.beginRefundRequest(in: scene)"))
     }
 
     func testMembershipScreenUsesCachedProductsBeforeProviderReconciliation() throws {
