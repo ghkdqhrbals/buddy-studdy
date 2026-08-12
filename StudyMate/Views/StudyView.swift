@@ -232,6 +232,10 @@ struct StudyView: View {
     }
 
     private var selectedDifficulty: Difficulty {
+        if let room = appState.backendStudyRoom(categoryID: preferredCategoryID) {
+            return Difficulty(level: room.difficultyLevel)
+        }
+
         if let preferredCategoryID,
            let category = appState.settings.category(for: preferredCategoryID) {
             return category.difficulty
@@ -254,6 +258,10 @@ struct StudyView: View {
     }
 
     private var selectedTopic: String {
+        if let room = appState.backendStudyRoom(categoryID: preferredCategoryID) {
+            return room.topic
+        }
+
         if let preferredCategoryID,
            let category = appState.settings.category(for: preferredCategoryID) {
             return category.title

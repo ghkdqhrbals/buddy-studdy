@@ -1304,6 +1304,32 @@ final class StudyRoomStateStoreTests: XCTestCase {
         )
     }
 
+    func testExplicitMissingNumericStudyIDDoesNotFallBackToSelectedRoot() {
+        let root = StudyCategory(id: "11", title: "Redis")
+        let settings = StudySettings(
+            topic: root.title,
+            difficulty: .level5,
+            customPrompt: "",
+            intervalMinutes: 30,
+            studyCategories: [root],
+            selectedStudyCategoryID: root.id
+        )
+        var state = StudyRoomStateStore()
+        state.replace(with: [
+            backendRoom(id: 11, topic: root.title, pendingQuestion: nil)
+        ])
+
+        XCTAssertNil(
+            state.room(categoryID: "999", settings: settings),
+            "An explicit missing child ID must not silently resolve to the selected root study."
+        )
+        XCTAssertEqual(
+            state.room(categoryID: nil, settings: settings)?.id,
+            11,
+            "The selected-root fallback remains valid only when no explicit study ID was requested."
+        )
+    }
+
     func testIncomingRecordOnlyUpdatesItsStudyID() {
         let record = StudyRecord(
             id: "record-12",

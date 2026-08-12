@@ -54,6 +54,122 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertEqual(requests.value, 0)
     }
 
+    func testOpeningNestedStudyRoutesToChildIdentifierWhenSettingsPersistOnlyTheRoot() async throws {
+        let suiteName = "NestedStudyNavigationTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+
+        let root = StudyCategory(id: "11", title: "Redis", difficulty: .level10)
+        let store = SettingsStore(
+            defaults: defaults,
+            recordDatabaseURL: databaseURL,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveSettings(
+            StudySettings(
+                topic: root.title,
+                difficulty: root.difficulty,
+                customPrompt: StudySettings.defaultCustomPrompt,
+                intervalMinutes: 30,
+                studyCategories: [root],
+                selectedStudyCategoryID: root.id
+            )
+        )
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        let client = makeClient { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/v1/studies")
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: Self.nestedStudyPageResponse
+            )
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+
+        await appState.refreshVisibleData()
+        appState.openStudyCategory("12")
+
+        XCTAssertEqual(appState.homeStudyRoute?.categoryID, "12")
+        XCTAssertFalse(appState.homeStudyRoute?.showsTree ?? true)
+        XCTAssertEqual(
+            store.loadSettings().selectedStudyCategoryID,
+            root.id,
+            "Opening a nested topic must not replace the persisted root-study selection."
+        )
+    }
+
+    func testPreparingNestedStudyRequestsChildDetailWithoutFallingBackToRoot() async throws {
+        let suiteName = "NestedStudyDetailTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+
+        let root = StudyCategory(id: "11", title: "Redis", difficulty: .level10)
+        let store = SettingsStore(
+            defaults: defaults,
+            recordDatabaseURL: databaseURL,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveSettings(
+            StudySettings(
+                topic: root.title,
+                difficulty: root.difficulty,
+                customPrompt: StudySettings.defaultCustomPrompt,
+                intervalMinutes: 30,
+                studyCategories: [root],
+                selectedStudyCategoryID: root.id
+            )
+        )
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        let requestedPaths = LockedValue<[String]>([])
+        let client = makeClient { request in
+            let path = request.url?.path ?? ""
+            requestedPaths.set(requestedPaths.value + [path])
+            switch path {
+            case "/api/v1/studies":
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: Self.nestedStudyPageResponse
+                )
+            case "/api/v1/studies/12":
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: Self.nestedChildStudyDetailResponse
+                )
+            case "/api/v1/studies/11":
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: Self.nestedRootStudyDetailResponse
+                )
+            default:
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+
+        await appState.refreshVisibleData()
+        await appState.prepareStudyRoom(categoryID: "12")
+
+        XCTAssertEqual(requestedPaths.value, ["/api/v1/studies", "/api/v1/studies/12"])
+        let displayed = try XCTUnwrap(appState.studyRoomRecordForDisplay(categoryID: "12"))
+        XCTAssertEqual(displayed.id, "latest-child-12")
+        XCTAssertEqual(displayed.studyID, 12)
+        XCTAssertEqual(displayed.topic, "메모리 관리와 만료 정책")
+    }
+
     func testDeletingStudyCategoryPreservesItsStudyRecords() throws {
         let suiteName = "StudyDeletionRecordLifecycleTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -1891,6 +2007,151 @@ final class QuestionGenerationFlowTests: XCTestCase {
         cancelledRefund.type = "REFUND"
         XCTAssertFalse(cancelledRefund.requiresCustomerCenterResolution)
     }
+
+    private static let nestedStudyPageResponse = """
+        {
+          "studies": [
+            {
+              "id": 11,
+              "topic": "Redis",
+              "parentStudyId": null,
+              "sortOrder": 0,
+              "difficultyLevel": 10,
+              "intervalMinutes": 30,
+              "enabled": true,
+              "activeForQuestions": true,
+              "notificationSound": "default",
+              "customPrompt": "",
+              "openaiModel": "gpt-5.4",
+              "maxHistoryCount": 100,
+              "nextDueAt": null,
+              "lastSentAt": null,
+              "lastError": null,
+              "pendingQuestion": null,
+              "latestQuestion": null,
+              "createdAt": "2026-08-01T00:00:00Z",
+              "updatedAt": "2026-08-12T00:00:00Z"
+            },
+            {
+              "id": 12,
+              "topic": "메모리 관리와 만료 정책",
+              "parentStudyId": 11,
+              "sortOrder": 0,
+              "difficultyLevel": 2,
+              "intervalMinutes": 30,
+              "enabled": true,
+              "activeForQuestions": true,
+              "notificationSound": "default",
+              "customPrompt": "",
+              "openaiModel": "gpt-5.4",
+              "maxHistoryCount": 100,
+              "nextDueAt": null,
+              "lastSentAt": null,
+              "lastError": null,
+              "pendingQuestion": null,
+              "latestQuestion": null,
+              "createdAt": "2026-08-01T00:00:00Z",
+              "updatedAt": "2026-08-12T00:00:00Z"
+            }
+          ],
+          "totalCount": 2,
+          "limit": 500,
+          "offset": 0,
+          "serverTime": "2026-08-12T00:00:00Z"
+        }
+        """
+
+    private static let nestedChildStudyDetailResponse = """
+        {
+          "id": 12,
+          "topic": "메모리 관리와 만료 정책",
+          "parentStudyId": 11,
+          "sortOrder": 0,
+          "difficultyLevel": 2,
+          "intervalMinutes": 30,
+          "enabled": true,
+          "activeForQuestions": true,
+          "notificationSound": "default",
+          "customPrompt": "",
+          "openaiModel": "gpt-5.4",
+          "maxHistoryCount": 100,
+          "nextDueAt": null,
+          "lastSentAt": null,
+          "lastError": null,
+          "pendingQuestion": null,
+          "latestQuestion": {
+            "id": "latest-child-12",
+            "studyId": 12,
+            "question": {
+              "question": "Redis의 만료 정책을 설명하세요.",
+              "expectedAnswerHint": null,
+              "createdAt": "2026-08-12T00:01:00Z"
+            },
+            "answer": "TTL 만료 키를 주기적으로 제거합니다.",
+            "gradingResult": {
+              "score": 72,
+              "correct": true,
+              "feedback": "핵심을 설명했습니다.",
+              "explanation": "능동 만료와 지연 만료가 함께 사용됩니다."
+            },
+            "topic": "메모리 관리와 만료 정책",
+            "difficulty": 2,
+            "answeredAt": "2026-08-12T00:02:00Z",
+            "isPublic": false,
+            "gradingRequestId": "grading-child-12",
+            "gradingStatus": "COMPLETED",
+            "gradingError": null
+          },
+          "createdAt": "2026-08-01T00:00:00Z",
+          "updatedAt": "2026-08-12T00:02:00Z"
+        }
+        """
+
+    private static let nestedRootStudyDetailResponse = """
+        {
+          "id": 11,
+          "topic": "Redis",
+          "parentStudyId": null,
+          "sortOrder": 0,
+          "difficultyLevel": 10,
+          "intervalMinutes": 30,
+          "enabled": true,
+          "activeForQuestions": true,
+          "notificationSound": "default",
+          "customPrompt": "",
+          "openaiModel": "gpt-5.4",
+          "maxHistoryCount": 100,
+          "nextDueAt": null,
+          "lastSentAt": null,
+          "lastError": null,
+          "pendingQuestion": null,
+          "latestQuestion": {
+            "id": "latest-root-11",
+            "studyId": 11,
+            "question": {
+              "question": "Redis를 한 문장으로 설명하세요.",
+              "expectedAnswerHint": null,
+              "createdAt": "2026-08-12T00:01:00Z"
+            },
+            "answer": "메모리 기반 데이터 저장소입니다.",
+            "gradingResult": {
+              "score": 72,
+              "correct": true,
+              "feedback": "핵심을 설명했습니다.",
+              "explanation": "루트 질문입니다."
+            },
+            "topic": "Redis",
+            "difficulty": 10,
+            "answeredAt": "2026-08-12T00:02:00Z",
+            "isPublic": false,
+            "gradingRequestId": "grading-root-11",
+            "gradingStatus": "COMPLETED",
+            "gradingError": null
+          },
+          "createdAt": "2026-08-01T00:00:00Z",
+          "updatedAt": "2026-08-12T00:02:00Z"
+        }
+        """
 
     private func makeClient(
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)

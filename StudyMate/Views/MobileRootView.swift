@@ -183,6 +183,10 @@ struct MobileRootView: View {
     }
 
     private func studyScreenTitle(for route: HomeStudyRoute) -> String {
+        if let room = appState.backendStudyRoom(categoryID: route.categoryID) {
+            return appState.strings.homePath(room.topic)
+        }
+
         if let categoryID = route.categoryID,
            let category = appState.settings.category(for: categoryID) {
             return appState.strings.homePath(category.title)

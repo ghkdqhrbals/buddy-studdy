@@ -69,18 +69,17 @@ struct StudyRoomStateStore {
     }
 
     func room(categoryID: String?, settings: StudySettings) -> BackendStudyRoom? {
-        if let categoryID,
-           let studyID = Int(categoryID),
-           let room = rooms.first(where: { $0.id == studyID }) {
-            return room
-        }
+        if let categoryID {
+            if let studyID = Int(categoryID) {
+                return rooms.first(where: { $0.id == studyID })
+            }
 
-        if let categoryID,
-           let category = settings.category(for: categoryID),
-           let room = rooms.first(where: {
-               Self.normalizedText($0.topic) == Self.normalizedText(category.title)
-           }) {
-            return room
+            guard let category = settings.category(for: categoryID) else {
+                return nil
+            }
+            return rooms.first {
+                Self.normalizedText($0.topic) == Self.normalizedText(category.title)
+            }
         }
 
         if let selectedCategoryID = settings.selectedStudyCategoryID,

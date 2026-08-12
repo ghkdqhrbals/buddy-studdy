@@ -3057,7 +3057,7 @@ final class AppState: ObservableObject {
             return nil
         }
 
-        return await actionRunner.run(
+        guard let detail = await actionRunner.run(
             operation: {
                 try await performWithBackendIdentityRecovery(
                     registration: registration,
@@ -3076,7 +3076,18 @@ final class AppState: ObservableObject {
                 handleAppError(error, fallback: strings.pageAccessRequiresLogin, target: .none)
                 log(.warning, "백엔드 학습 상세 로드 실패: studyID=\(studyID), error=\(error.localizedDescription)")
             }
-        )
+        ) else {
+            return nil
+        }
+
+        guard detail.id == studyID else {
+            log(
+                .error,
+                "백엔드 학습 상세 식별자가 요청과 다릅니다. requestedStudyID=\(studyID), returnedStudyID=\(detail.id)"
+            )
+            return nil
+        }
+        return detail
     }
 
     private func applyBackendStudyDetail(_ room: BackendStudyRoom) {
@@ -5585,19 +5596,31 @@ final class AppState: ObservableObject {
     }
 
     func openStudyCategory(_ categoryID: String) {
-        let categories = synchronizedTopicCategories(for: settings).studyCategories
-        guard let targetCategory = categories.first(where: { $0.id == categoryID }) ?? categories.first else {
+        guard let targetCategory = studyCategoryForRoom(categoryID) else {
             return
         }
 
-        if settings.selectedStudyCategoryID != targetCategory.id {
+        let persistentRootCategoryID: String
+        if let studyID = Int(targetCategory.id),
+           let rootStudyID = rootStudyRoom(for: studyID)?.id {
+            persistentRootCategoryID = String(rootStudyID)
+        } else {
+            persistentRootCategoryID = targetCategory.id
+        }
+
+        if settings.selectedStudyCategoryID != persistentRootCategoryID,
+           settings.category(for: persistentRootCategoryID) != nil {
             persistSettings(
-                settings.withSelectedCategoryID(targetCategory.id),
+                settings.withSelectedCategoryID(persistentRootCategoryID),
                 apiKey: apiKey,
                 syncBackendSchedule: false
             )
         }
 
+        log(
+            .info,
+            "학습 상세로 이동합니다. requestedCategoryID=\(categoryID), resolvedStudyID=\(targetCategory.id), rootStudyID=\(persistentRootCategoryID)"
+        )
         applyPreferredPendingRecord(for: targetCategory)
         showStudyScreen(categoryID: targetCategory.id)
     }
@@ -5699,21 +5722,24 @@ final class AppState: ObservableObject {
         gradingPollingOwnerID: String? = nil,
         onInitialStateResolved: (@MainActor () -> Void)? = nil
     ) async {
-        guard let initialCategory = studyCategoryForRoom(categoryID) else {
+        let initialCategory = studyCategoryForRoom(categoryID)
+        if let initialCategory {
+            applyPreferredPendingRecord(for: initialCategory)
+        }
+
+        guard let studyID = categoryID.flatMap(Int.init)
+                ?? initialCategory.flatMap({ category in Int(category.id) }) else {
             onInitialStateResolved?()
             return
         }
-
-        applyPreferredPendingRecord(for: initialCategory)
-
-        guard let studyID = Int(initialCategory.id),
-              let detail = await fetchBackendStudyDetailIfPossible(studyID: studyID) else {
+        guard let detail = await fetchBackendStudyDetailIfPossible(studyID: studyID) else {
             onInitialStateResolved?()
             return
         }
         applyBackendStudyDetail(detail)
 
-        guard let refreshedCategory = studyCategoryForRoom(categoryID) ?? studyCategoryMatchingTopic(initialCategory.title) else {
+        guard let refreshedCategory = studyCategoryForRoom(String(detail.id))
+                ?? initialCategory.flatMap({ category in studyCategoryMatchingTopic(category.title) }) else {
             onInitialStateResolved?()
             return
         }
@@ -7801,9 +7827,23 @@ final class AppState: ObservableObject {
 
     private func studyCategoryForRoom(_ categoryID: String?) -> StudyCategory? {
         let categories = synchronizedTopicCategories(for: settings).studyCategories
-        if let categoryID,
-           let category = categories.first(where: { $0.id == categoryID }) {
-            return category
+        if let categoryID {
+            if let category = categories.first(where: { $0.id == categoryID }) {
+                return category
+            }
+
+            guard let studyID = Int(categoryID),
+                  let room = backendStudyRoom(id: studyID) else {
+                return nil
+            }
+            return StudyCategory(
+                id: String(room.id),
+                title: room.topic,
+                difficulty: Difficulty(level: room.difficultyLevel),
+                customPrompt: room.customPrompt,
+                openAIModel: room.openAIModel,
+                createdAt: room.createdAt
+            )
         }
 
         if let selectedCategoryID = settings.selectedStudyCategoryID,

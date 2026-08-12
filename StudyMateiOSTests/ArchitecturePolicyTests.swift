@@ -1536,6 +1536,36 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testMyStudiesChildTapForwardsTheExactChildIdentifier() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+
+        let handlerStart = try XCTUnwrap(
+            content.range(
+                of: "private func handleStudyOutlineAction("
+            )
+        )
+        let handlerEnd = try XCTUnwrap(
+            content.range(
+                of: "private var communityQuestionSection: some View",
+                range: handlerStart.upperBound..<content.endIndex
+            )
+        )
+        let handlerSource = String(content[handlerStart.lowerBound..<handlerEnd.lowerBound])
+
+        XCTAssertTrue(
+            handlerSource.contains(
+                "case let .openTopic(room):\n            appState.openStudyCategory(String(room.id))"
+            ),
+            "A My Studies child tap must route with that child's study ID, never the containing root ID."
+        )
+        XCTAssertFalse(
+            handlerSource.contains("rootStudyRoom(for: room.id)"),
+            "Opening a topic must not resolve the tapped child back to its root."
+        )
+    }
+
     func testProfileSheetUsesCloseAction() throws {
         let root = try repositoryRoot()
         let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
