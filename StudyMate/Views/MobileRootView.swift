@@ -6956,8 +6956,6 @@ private struct MobileBillingInvoiceDetailView: View {
     @State private var billingNotice: String?
     @State private var isSubmittingRefund = false
     @State private var isSubscriptionManagementPresented = false
-    @State private var isRefundRequestPresented = false
-    @State private var refundTransactionID: StoreKit.Transaction.ID = 0
 
     let invoice: BackendBillingInvoice
 
@@ -7009,6 +7007,10 @@ private struct MobileBillingInvoiceDetailView: View {
                             }
                         }
                         .disabled(isSubmittingRefund)
+
+                        Link(destination: Self.appleRefundURL) {
+                            Label(strings.requestRefundOnWeb, systemImage: "safari")
+                        }
                     }
 
                     if invoice.requiresCustomerCenterResolution {
@@ -7028,11 +7030,6 @@ private struct MobileBillingInvoiceDetailView: View {
         .navigationTitle(strings.billingDetails)
         .navigationBarTitleDisplayMode(.inline)
         .manageSubscriptionsSheet(isPresented: $isSubscriptionManagementPresented)
-        .refundRequestSheet(
-            for: refundTransactionID,
-            isPresented: $isRefundRequestPresented,
-            onDismiss: handleRefundRequestResult
-        )
         .onChange(of: isSubscriptionManagementPresented) { _, isPresented in
             guard !isPresented else { return }
             Task {
@@ -7094,22 +7091,26 @@ private struct MobileBillingInvoiceDetailView: View {
             guard !isSubmittingRefund,
                   let transactionID = invoice.transactionId,
                   invoice.paymentId != nil,
-                  let appAccountToken = appState.billingCatalog?.appAccountToken else {
+                  let appAccountToken = appState.billingCatalog?.appAccountToken,
+                  let windowScene = activeWindowScene else {
                 billingNotice = strings.refundRequestUnavailable
                 return
             }
             isSubmittingRefund = true
+            defer { isSubmittingRefund = false }
             do {
-                refundTransactionID = try await billingStore.refundTransactionID(
+                let result = try await billingStore.requestRefund(
                     transactionID: transactionID,
                     productID: invoice.productId,
-                    appAccountToken: appAccountToken
+                    appAccountToken: appAccountToken,
+                    in: windowScene
                 )
-                isRefundRequestPresented = true
+                handleRefundRequestResult(result)
+            } catch let error as StoreKit.Transaction.RefundRequestError {
+                handleRefundRequestError(error)
             } catch {
-                isSubmittingRefund = false
                 appState.logBillingEvent(
-                    "환불 대상 StoreKit 거래 확인 실패. invoiceID=\(invoice.id), "
+                    "StoreKit 환불 요청 실패. invoiceID=\(invoice.id), "
                         + "transactionID=\(transactionID), error=\(error.localizedDescription)",
                     isError: true
                 )
@@ -7118,12 +7119,9 @@ private struct MobileBillingInvoiceDetailView: View {
         }
     }
 
-    private func handleRefundRequestResult(
-        _ result: Result<StoreKit.Transaction.RefundRequestStatus, StoreKit.Transaction.RefundRequestError>
-    ) {
-        isSubmittingRefund = false
+    private func handleRefundRequestResult(_ result: StoreKit.Transaction.RefundRequestStatus) {
         switch result {
-        case .success(.success):
+        case .success:
             billingNotice = strings.refundSubmitted
             guard let paymentID = invoice.paymentId else { return }
             Task {
@@ -7131,21 +7129,41 @@ private struct MobileBillingInvoiceDetailView: View {
                 // state if this best-effort local tracking request is unavailable.
                 _ = try? await appState.requestBillingRefund(paymentID: paymentID)
             }
-        case .success(.userCancelled):
+        case .userCancelled:
             break
-        case .failure(.duplicateRequest):
+        @unknown default:
+            billingNotice = strings.refundRequestUnavailable
+        }
+    }
+
+    private func handleRefundRequestError(_ error: StoreKit.Transaction.RefundRequestError) {
+        switch error {
+        case .duplicateRequest:
             billingNotice = strings.refundSubmitted
-        case .failure(let error):
+        case .failed:
+            appState.logBillingEvent(
+                "StoreKit 환불 요청 처리 실패. invoiceID=\(invoice.id), "
+                    + "transactionID=\(invoice.transactionId ?? "-") error=\(error.localizedDescription)",
+                isError: true
+            )
+            billingNotice = strings.refundRequestUnavailable
+        @unknown default:
             appState.logBillingEvent(
                 "StoreKit 환불 요청 화면 실패. invoiceID=\(invoice.id), "
                     + "transactionID=\(invoice.transactionId ?? "-") error=\(error.localizedDescription)",
                 isError: true
             )
             billingNotice = strings.refundRequestUnavailable
-        @unknown default:
-            billingNotice = strings.refundRequestUnavailable
         }
     }
+
+    private var activeWindowScene: UIWindowScene? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })
+    }
+
+    private static let appleRefundURL = URL(string: "https://reportaproblem.apple.com/")!
 }
 
 private struct BillingReferenceRow: View {
