@@ -101,6 +101,8 @@ final class AppState: ObservableObject {
     @Published var homeAnnouncement: HomeAnnouncement?
     @Published var selectedTab: AppTab = .study
     @Published var homeStudyRoute: HomeStudyRoute?
+    @Published private(set) var openingStudyCategoryID: String?
+    @Published private(set) var studyOpeningErrorMessage: String?
     @Published var appRouteRequest: AppRouteRequest?
     @Published var focusedRecordRequest: FocusedRecordRequest?
     @Published var openAIModelOptions: [OpenAIModelOption] = OpenAIModelOption.all
@@ -598,6 +600,8 @@ final class AppState: ObservableObject {
     private var cloudSyncTask: Task<Void, Never>?
     private var visibleDataRefreshTask: Task<Void, Never>?
     private var backendRecordRefreshTask: Task<Void, Never>?
+    private var studyOpeningTask: Task<Void, Never>?
+    private var studyOpeningRequestID: UUID?
     private var answerDraftSaveTask: Task<Void, Never>?
     private var protectedPageAccessRefreshTask: Task<Void, Never>?
     private var questionGenerationPollingTask: Task<Void, Never>?
@@ -795,6 +799,7 @@ final class AppState: ObservableObject {
     }
 
     private func applySelectedTab(_ nextTab: AppTab) {
+        cancelStudyOpening(reason: "tab-changed")
         selectedTab = nextTab
         if nextTab == .home {
             homeStudyRoute = nil
@@ -817,6 +822,7 @@ final class AppState: ObservableObject {
     }
 
     func presentHomeAnnouncement(_ announcement: HomeAnnouncement) {
+        cancelStudyOpening(reason: "home-announcement-presented")
         selectedTab = .home
         homeStudyRoute = nil
         homeAnnouncement = announcement
@@ -828,6 +834,7 @@ final class AppState: ObservableObject {
 
     @discardableResult
     func openRouteFromNotification(_ route: AppRoute) -> Bool {
+        cancelStudyOpening(reason: "notification-route-opened")
         log(
             .info,
             "push_route_applying route=\(route), selectedTabBefore=\(selectedTab)"
@@ -852,6 +859,7 @@ final class AppState: ObservableObject {
 
     @discardableResult
     func openRoute(_ route: AppRoute) -> Bool {
+        cancelStudyOpening(reason: "app-route-opened")
         switch route {
         case .home:
             selectedTab = .home
@@ -3073,6 +3081,9 @@ final class AppState: ObservableObject {
             },
             onSuccess: { _ in },
             onFailure: { error in
+                guard !Self.isCancellationLikeError(error) else {
+                    return
+                }
                 handleAppError(error, fallback: strings.pageAccessRequiresLogin, target: .none)
                 log(.warning, "백엔드 학습 상세 로드 실패: studyID=\(studyID), error=\(error.localizedDescription)")
             }
@@ -5619,13 +5630,13 @@ final class AppState: ObservableObject {
 
         log(
             .info,
-            "학습 상세로 이동합니다. requestedCategoryID=\(categoryID), resolvedStudyID=\(targetCategory.id), rootStudyID=\(persistentRootCategoryID)"
+            "학습 상세를 준비합니다. requestedCategoryID=\(categoryID), resolvedStudyID=\(targetCategory.id), rootStudyID=\(persistentRootCategoryID)"
         )
-        applyPreferredPendingRecord(for: targetCategory)
-        showStudyScreen(categoryID: targetCategory.id)
+        beginPreparedStudyOpening(categoryID: targetCategory.id)
     }
 
     func openStudyTree(_ categoryID: String) {
+        cancelStudyOpening(reason: "study-tree-opened")
         guard backendStudyRoom(categoryID: categoryID) != nil else {
             openStudyCategory(categoryID)
             return
@@ -5720,31 +5731,26 @@ final class AppState: ObservableObject {
     func prepareStudyRoom(
         categoryID: String?,
         gradingPollingOwnerID: String? = nil,
-        onInitialStateResolved: (@MainActor () -> Void)? = nil
+        onInitialStateResolved: (@MainActor () -> Void)? = nil,
+        shouldRefreshDetail: Bool = true
     ) async {
         let initialCategory = studyCategoryForRoom(categoryID)
         if let initialCategory {
             applyPreferredPendingRecord(for: initialCategory)
         }
 
-        guard let studyID = categoryID.flatMap(Int.init)
-                ?? initialCategory.flatMap({ category in Int(category.id) }) else {
-            onInitialStateResolved?()
-            return
-        }
-        guard let detail = await fetchBackendStudyDetailIfPossible(studyID: studyID) else {
-            onInitialStateResolved?()
-            return
-        }
-        applyBackendStudyDetail(detail)
-
-        guard let refreshedCategory = studyCategoryForRoom(String(detail.id))
-                ?? initialCategory.flatMap({ category in studyCategoryMatchingTopic(category.title) }) else {
-            onInitialStateResolved?()
-            return
+        if shouldRefreshDetail {
+            guard await refreshStudyRoomContent(
+                categoryID: categoryID,
+                initialCategory: initialCategory
+            ) else {
+                onInitialStateResolved?()
+                return
+            }
+        } else if let initialCategory {
+            applyPreferredPendingRecord(for: initialCategory)
         }
 
-        applyPreferredPendingRecord(for: refreshedCategory)
         onInitialStateResolved?()
 
         guard let gradingPollingOwnerID,
@@ -5761,6 +5767,105 @@ final class AppState: ObservableObject {
             record,
             pollingOwnerID: gradingPollingOwnerID
         )
+    }
+
+    private func beginPreparedStudyOpening(categoryID: String) {
+        cancelStudyOpening(reason: "replaced")
+        studyOpeningErrorMessage = nil
+
+        let requestID = UUID()
+        studyOpeningRequestID = requestID
+        openingStudyCategoryID = categoryID
+        selectedTab = .home
+        homeStudyRoute = nil
+
+        studyOpeningTask = Task { [weak self] in
+            guard let self else { return }
+
+            async let contentPrepared = refreshStudyRoomContent(
+                categoryID: categoryID,
+                openingRequestID: requestID
+            )
+            async let quotaRefresh: Void = refreshQuestionQuota()
+            let (didPrepareContent, _) = await (contentPrepared, quotaRefresh)
+
+            guard studyOpeningRequestID == requestID else {
+                return
+            }
+
+            studyOpeningTask = nil
+            studyOpeningRequestID = nil
+            openingStudyCategoryID = nil
+
+            guard !Task.isCancelled,
+                  didPrepareContent,
+                  selectedTab == .home,
+                  homeStudyRoute == nil else {
+                if !didPrepareContent, !Task.isCancelled {
+                    studyOpeningErrorMessage = strings.unableToOpenStudyDescription
+                    log(
+                        .warning,
+                        "학습 상세 준비에 실패해 화면을 열지 않습니다. studyID=\(categoryID)"
+                    )
+                }
+                return
+            }
+
+            log(.info, "학습 상세 준비를 완료했습니다. studyID=\(categoryID)")
+            showStudyScreen(categoryID: categoryID, isContentPrepared: true)
+        }
+    }
+
+    private func cancelStudyOpening(reason: String) {
+        guard studyOpeningTask != nil || openingStudyCategoryID != nil else {
+            return
+        }
+
+        studyOpeningTask?.cancel()
+        studyOpeningTask = nil
+        studyOpeningRequestID = nil
+        openingStudyCategoryID = nil
+        log(.info, "학습 상세 준비를 취소했습니다. reason=\(reason)")
+    }
+
+    func dismissStudyOpeningError() {
+        studyOpeningErrorMessage = nil
+    }
+
+    @discardableResult
+    private func refreshStudyRoomContent(
+        categoryID: String?,
+        initialCategory providedInitialCategory: StudyCategory? = nil,
+        openingRequestID: UUID? = nil
+    ) async -> Bool {
+        guard !Task.isCancelled,
+              openingRequestID == nil || studyOpeningRequestID == openingRequestID else {
+            return false
+        }
+
+        let initialCategory = providedInitialCategory ?? studyCategoryForRoom(categoryID)
+        if openingRequestID == nil, let initialCategory {
+            applyPreferredPendingRecord(for: initialCategory)
+        }
+
+        guard let studyID = categoryID.flatMap(Int.init)
+                ?? initialCategory.flatMap({ category in Int(category.id) }) else {
+            return initialCategory != nil
+        }
+        guard let detail = await fetchBackendStudyDetailIfPossible(studyID: studyID),
+              !Task.isCancelled,
+              openingRequestID == nil || studyOpeningRequestID == openingRequestID else {
+            return false
+        }
+        applyBackendStudyDetail(detail)
+
+        guard let refreshedCategory = studyCategoryForRoom(String(detail.id))
+                ?? initialCategory.flatMap({ category in studyCategoryMatchingTopic(category.title) }) else {
+            return false
+        }
+
+        applyPreferredPendingRecord(for: refreshedCategory)
+        return true
     }
 
     func pendingStudyRecord(categoryID: String?) -> StudyRecord? {
@@ -11615,14 +11720,20 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func showStudyScreen(categoryID: String?) {
+    private func showStudyScreen(categoryID: String?, isContentPrepared: Bool = false) {
         guard requirePageAccess(.studyDetail) else {
             return
         }
 
+        cancelStudyOpening(reason: "study-screen-presented")
+
         #if os(iOS)
         selectedTab = .home
-        homeStudyRoute = HomeStudyRoute(categoryID: categoryID, showsTree: false)
+        homeStudyRoute = HomeStudyRoute(
+            categoryID: categoryID,
+            showsTree: false,
+            isContentPrepared: isContentPrepared
+        )
         #else
         selectedTab = .study
         #endif

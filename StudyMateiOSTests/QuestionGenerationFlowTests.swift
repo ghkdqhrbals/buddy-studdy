@@ -7,6 +7,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
     override func tearDown() {
         QuestionGenerationURLProtocol.requestHandler = nil
         QuestionGenerationURLProtocol.responseDelayNanoseconds = 0
+        QuestionGenerationURLProtocol.responseDelayHandler = nil
         super.tearDown()
     }
 
@@ -39,19 +40,41 @@ final class QuestionGenerationFlowTests: XCTestCase {
             )
         )
         store.saveRemotePushRegistration(Self.signedInRegistration)
-        let requests = LockedRequestCounter()
+        let requestedMethodsAndPaths = LockedValue<[String]>([])
         let client = makeClient { request in
-            requests.increment()
-            return Self.response(for: request, statusCode: 200, body: "{}")
+            let requestDescription = "\(request.httpMethod ?? "") \(request.url?.path ?? "")"
+            requestedMethodsAndPaths.set(requestedMethodsAndPaths.value + [requestDescription])
+            switch request.url?.path {
+            case "/api/v1/studies/12":
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: Self.nestedChildStudyDetailResponse
+                )
+            case "/api/v1/questions/quota":
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: Self.questionQuotaResponse
+                )
+            default:
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
         }
         let appState = AppState(settingsStore: store, remotePushBackendClient: client)
 
         appState.openStudyCategory(second.id)
-        try await Task.sleep(nanoseconds: 100_000_000)
+        let didFinishOpening = await waitUntil {
+            appState.homeStudyRoute?.categoryID == second.id
+        }
 
+        XCTAssertTrue(didFinishOpening)
         XCTAssertEqual(appState.settings.selectedStudyCategoryID, second.id)
         XCTAssertEqual(store.loadSettings().selectedStudyCategoryID, second.id)
-        XCTAssertEqual(requests.value, 0)
+        XCTAssertFalse(
+            requestedMethodsAndPaths.value.contains(where: { $0.hasPrefix("PUT ") }),
+            "Opening a study may preload its detail but must not persist backend schedule settings."
+        )
     }
 
     func testOpeningNestedStudyRoutesToChildIdentifierWhenSettingsPersistOnlyTheRoot() async throws {
@@ -83,20 +106,41 @@ final class QuestionGenerationFlowTests: XCTestCase {
         store.saveRemotePushRegistration(Self.signedInRegistration)
         let client = makeClient { request in
             XCTAssertEqual(request.httpMethod, "GET")
-            XCTAssertEqual(request.url?.path, "/api/v1/studies")
-            return Self.response(
-                for: request,
-                statusCode: 200,
-                body: Self.nestedStudyPageResponse
-            )
+            switch request.url?.path {
+            case "/api/v1/studies":
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: Self.nestedStudyPageResponse
+                )
+            case "/api/v1/studies/12":
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: Self.nestedChildStudyDetailResponse
+                )
+            case "/api/v1/questions/quota":
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: Self.questionQuotaResponse
+                )
+            default:
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
         }
         let appState = AppState(settingsStore: store, remotePushBackendClient: client)
 
         await appState.refreshVisibleData()
         appState.openStudyCategory("12")
+        let didFinishOpening = await waitUntil {
+            appState.homeStudyRoute?.categoryID == "12"
+        }
 
+        XCTAssertTrue(didFinishOpening)
         XCTAssertEqual(appState.homeStudyRoute?.categoryID, "12")
         XCTAssertFalse(appState.homeStudyRoute?.showsTree ?? true)
+        XCTAssertTrue(appState.homeStudyRoute?.isContentPrepared ?? false)
         XCTAssertEqual(
             store.loadSettings().selectedStudyCategoryID,
             root.id,
@@ -168,6 +212,171 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertEqual(displayed.id, "latest-child-12")
         XCTAssertEqual(displayed.studyID, 12)
         XCTAssertEqual(displayed.topic, "메모리 관리와 만료 정책")
+    }
+
+    func testOpeningNestedStudyWaitsForDetailAndQuotaBeforePublishingPreparedRoute() async throws {
+        let suiteName = "PreparedNestedStudyNavigationTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+
+        let store = makeNestedStudyStore(
+            defaults: defaults,
+            databaseURL: databaseURL
+        )
+        let requestedPaths = LockedValue<[String]>([])
+        let client = makeClient { request in
+            let path = request.url?.path ?? ""
+            requestedPaths.set(requestedPaths.value + [path])
+            switch path {
+            case "/api/v1/studies":
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: Self.nestedStudyPageResponse
+                )
+            case "/api/v1/studies/12":
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: Self.nestedChildStudyDetailResponse
+                )
+            case "/api/v1/questions/quota":
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: Self.questionQuotaResponse
+                )
+            default:
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        await appState.refreshVisibleData()
+
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            switch request.url?.path {
+            case "/api/v1/studies/12": 40_000_000
+            case "/api/v1/questions/quota": 250_000_000
+            default: 0
+            }
+        }
+
+        appState.openStudyCategory("12")
+
+        XCTAssertNil(appState.homeStudyRoute)
+        XCTAssertEqual(appState.openingStudyCategoryID, "12")
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(requestedPaths.value.contains("/api/v1/studies/12"))
+        XCTAssertNil(
+            appState.homeStudyRoute,
+            "The destination must remain hidden after detail finishes while quota is still loading."
+        )
+
+        let didFinishOpening = await waitUntil {
+            appState.homeStudyRoute?.categoryID == "12"
+        }
+        XCTAssertTrue(didFinishOpening)
+        XCTAssertTrue(appState.homeStudyRoute?.isContentPrepared ?? false)
+        XCTAssertNil(appState.openingStudyCategoryID)
+
+        let detailRequestCountBeforePreparation = requestedPaths.value.filter {
+            $0 == "/api/v1/studies/12"
+        }.count
+        await appState.prepareStudyRoom(
+            categoryID: "12",
+            shouldRefreshDetail: false
+        )
+        let detailRequestCountAfterPreparation = requestedPaths.value.filter {
+            $0 == "/api/v1/studies/12"
+        }.count
+
+        XCTAssertEqual(detailRequestCountBeforePreparation, 1)
+        XCTAssertEqual(
+            detailRequestCountAfterPreparation,
+            detailRequestCountBeforePreparation,
+            "A prepared destination must not immediately request the same study detail again."
+        )
+    }
+
+    func testRapidSecondStudySelectionCannotBeOverwrittenByStaleFirstPreload() async throws {
+        let suiteName = "RapidNestedStudyNavigationTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+
+        let store = makeNestedStudyStore(
+            defaults: defaults,
+            databaseURL: databaseURL
+        )
+        let client = makeClient { request in
+            switch request.url?.path {
+            case "/api/v1/studies":
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: Self.nestedStudyPageWithSecondChildResponse
+                )
+            case "/api/v1/studies/12":
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: Self.nestedChildStudyDetailResponse
+                )
+            case "/api/v1/studies/13":
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: Self.secondNestedChildStudyDetailResponse
+                )
+            case "/api/v1/questions/quota":
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: Self.questionQuotaResponse
+                )
+            default:
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        await appState.refreshVisibleData()
+
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            switch request.url?.path {
+            case "/api/v1/studies/12": 350_000_000
+            case "/api/v1/studies/13": 30_000_000
+            case "/api/v1/questions/quota": 30_000_000
+            default: 0
+            }
+        }
+
+        appState.openStudyCategory("12")
+        try await Task.sleep(nanoseconds: 20_000_000)
+        appState.openStudyCategory("13")
+
+        XCTAssertEqual(appState.openingStudyCategoryID, "13")
+        let didOpenSecondSelection = await waitUntil {
+            appState.homeStudyRoute?.categoryID == "13"
+        }
+        XCTAssertTrue(didOpenSecondSelection)
+        XCTAssertTrue(appState.homeStudyRoute?.isContentPrepared ?? false)
+
+        try await Task.sleep(nanoseconds: 450_000_000)
+        XCTAssertEqual(
+            appState.homeStudyRoute?.categoryID,
+            "13",
+            "A slower, cancelled preload must never replace the user's newer selection."
+        )
     }
 
     func testDeletingStudyCategoryPreservesItsStudyRecords() throws {
@@ -2061,6 +2270,80 @@ final class QuestionGenerationFlowTests: XCTestCase {
         }
         """
 
+    private static let nestedStudyPageWithSecondChildResponse = """
+        {
+          "studies": [
+            {
+              "id": 11,
+              "topic": "Redis",
+              "parentStudyId": null,
+              "sortOrder": 0,
+              "difficultyLevel": 10,
+              "intervalMinutes": 30,
+              "enabled": true,
+              "activeForQuestions": true,
+              "notificationSound": "default",
+              "customPrompt": "",
+              "openaiModel": "gpt-5.4",
+              "maxHistoryCount": 100,
+              "nextDueAt": null,
+              "lastSentAt": null,
+              "lastError": null,
+              "pendingQuestion": null,
+              "latestQuestion": null,
+              "createdAt": "2026-08-01T00:00:00Z",
+              "updatedAt": "2026-08-12T00:00:00Z"
+            },
+            {
+              "id": 12,
+              "topic": "메모리 관리와 만료 정책",
+              "parentStudyId": 11,
+              "sortOrder": 0,
+              "difficultyLevel": 2,
+              "intervalMinutes": 30,
+              "enabled": true,
+              "activeForQuestions": true,
+              "notificationSound": "default",
+              "customPrompt": "",
+              "openaiModel": "gpt-5.4",
+              "maxHistoryCount": 100,
+              "nextDueAt": null,
+              "lastSentAt": null,
+              "lastError": null,
+              "pendingQuestion": null,
+              "latestQuestion": null,
+              "createdAt": "2026-08-01T00:00:00Z",
+              "updatedAt": "2026-08-12T00:00:00Z"
+            },
+            {
+              "id": 13,
+              "topic": "지속성 설정: RDB와 AOF",
+              "parentStudyId": 11,
+              "sortOrder": 1,
+              "difficultyLevel": 3,
+              "intervalMinutes": 30,
+              "enabled": true,
+              "activeForQuestions": true,
+              "notificationSound": "default",
+              "customPrompt": "",
+              "openaiModel": "gpt-5.4",
+              "maxHistoryCount": 100,
+              "nextDueAt": null,
+              "lastSentAt": null,
+              "lastError": null,
+              "pendingQuestion": null,
+              "latestQuestion": null,
+              "createdAt": "2026-08-01T00:00:00Z",
+              "updatedAt": "2026-08-12T00:00:00Z"
+            }
+          ],
+          "totalCount": 3,
+          "limit": 500,
+          "offset": 0,
+          "serverTime": "2026-08-12T00:00:00Z"
+        }
+        """
+
     private static let nestedChildStudyDetailResponse = """
         {
           "id": 12,
@@ -2152,6 +2435,107 @@ final class QuestionGenerationFlowTests: XCTestCase {
           "updatedAt": "2026-08-12T00:02:00Z"
         }
         """
+
+    private static let secondNestedChildStudyDetailResponse = """
+        {
+          "id": 13,
+          "topic": "지속성 설정: RDB와 AOF",
+          "parentStudyId": 11,
+          "sortOrder": 1,
+          "difficultyLevel": 3,
+          "intervalMinutes": 30,
+          "enabled": true,
+          "activeForQuestions": true,
+          "notificationSound": "default",
+          "customPrompt": "",
+          "openaiModel": "gpt-5.4",
+          "maxHistoryCount": 100,
+          "nextDueAt": null,
+          "lastSentAt": null,
+          "lastError": null,
+          "pendingQuestion": null,
+          "latestQuestion": {
+            "id": "latest-child-13",
+            "studyId": 13,
+            "question": {
+              "question": "Redis의 RDB와 AOF 차이를 설명하세요.",
+              "expectedAnswerHint": null,
+              "createdAt": "2026-08-12T00:01:00Z"
+            },
+            "answer": "RDB는 스냅샷이고 AOF는 명령 로그입니다.",
+            "gradingResult": {
+              "score": 84,
+              "correct": true,
+              "feedback": "차이를 정확히 설명했습니다.",
+              "explanation": "두 지속성 방식의 절충점을 이해했습니다."
+            },
+            "topic": "지속성 설정: RDB와 AOF",
+            "difficulty": 3,
+            "answeredAt": "2026-08-12T00:02:00Z",
+            "isPublic": false,
+            "gradingRequestId": "grading-child-13",
+            "gradingStatus": "COMPLETED",
+            "gradingError": null
+          },
+          "createdAt": "2026-08-01T00:00:00Z",
+          "updatedAt": "2026-08-12T00:02:00Z"
+        }
+        """
+
+    private static let questionQuotaResponse = """
+        {
+          "usedCount": 2,
+          "monthlyLimit": 30,
+          "remainingCount": 28,
+          "resetAt": "2026-09-12T00:00:00Z",
+          "tierCode": "TIER1",
+          "periodStartedAt": "2026-08-12T00:00:00Z",
+          "reservedCount": 0,
+          "baseLimit": 30,
+          "bonusLimit": 0,
+          "anchorType": "ACCOUNT_CREATED",
+          "policyVersion": 2
+        }
+        """
+
+    private func makeNestedStudyStore(
+        defaults: UserDefaults,
+        databaseURL: URL
+    ) -> SettingsStore {
+        let root = StudyCategory(id: "11", title: "Redis", difficulty: .level10)
+        let store = SettingsStore(
+            defaults: defaults,
+            recordDatabaseURL: databaseURL,
+            usesSecureBackendIdentityStorage: false
+        )
+        store.saveSettings(
+            StudySettings(
+                topic: root.title,
+                difficulty: root.difficulty,
+                customPrompt: StudySettings.defaultCustomPrompt,
+                intervalMinutes: 30,
+                studyCategories: [root],
+                selectedStudyCategoryID: root.id
+            )
+        )
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        store.saveIsCommunitySignedIn(true)
+        return store
+    }
+
+    private func waitUntil(
+        maxAttempts: Int = 100,
+        intervalNanoseconds: UInt64 = 20_000_000,
+        condition: @MainActor () -> Bool
+    ) async -> Bool {
+        for _ in 0..<maxAttempts {
+            if condition() {
+                return true
+            }
+            try? await Task.sleep(nanoseconds: intervalNanoseconds)
+        }
+        return condition()
+    }
 
     private func makeClient(
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
@@ -2250,6 +2634,7 @@ private final class QuestionGenerationURLProtocol: URLProtocol, @unchecked Senda
     nonisolated(unsafe) static var requestHandler:
         ((URLRequest) throws -> (HTTPURLResponse, Data))?
     nonisolated(unsafe) static var responseDelayNanoseconds: UInt64 = 0
+    nonisolated(unsafe) static var responseDelayHandler: ((URLRequest) -> UInt64)?
 
     override class func canInit(with request: URLRequest) -> Bool {
         true
@@ -2263,8 +2648,10 @@ private final class QuestionGenerationURLProtocol: URLProtocol, @unchecked Senda
         let protocolReference = UncheckedSendableBox(self)
         Task { @MainActor in
             let protocolInstance = protocolReference.value
-            if Self.responseDelayNanoseconds > 0 {
-                try? await Task.sleep(nanoseconds: Self.responseDelayNanoseconds)
+            let responseDelay = Self.responseDelayHandler?(protocolInstance.request)
+                ?? Self.responseDelayNanoseconds
+            if responseDelay > 0 {
+                try? await Task.sleep(nanoseconds: responseDelay)
             }
             guard let requestHandler = Self.requestHandler else {
                 protocolInstance.client?.urlProtocol(

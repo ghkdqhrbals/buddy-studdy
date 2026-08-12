@@ -28,7 +28,10 @@ struct MobileRootView: View {
                                    let studyID = Int(categoryID) {
                                     MobileStudyTreeView(rootStudyID: studyID)
                                 } else {
-                                    StudyView(preferredCategoryID: route.categoryID)
+                                    StudyView(
+                                        preferredCategoryID: route.categoryID,
+                                        isContentPrepared: route.isContentPrepared
+                                    )
                                         .padding(.horizontal, 16)
                                         .mobileTabTitle(studyScreenTitle(for: route))
                                 }
@@ -1663,6 +1666,12 @@ private struct MobileHomeView: View {
                 pendingCommunityQuestionReport = nil
             }
         }
+        .modifier(
+            MobileStudyOpeningErrorAlertModifier(
+                appState: appState,
+                strings: strings
+            )
+        )
         .navigationDestination(item: $selectedCommunityQuestionRoute) { route in
             NotificationCommunityQuestionDestination(questionID: route.id)
         }
@@ -2022,6 +2031,7 @@ private struct MobileHomeView: View {
                 MobileHomeStudyOutlineRow(
                     snapshot: snapshot,
                     strings: strings,
+                    openingStudyID: appState.openingStudyCategoryID.flatMap(Int.init),
                     pendingQuestionCount: { room in
                         appState.pendingQuestionCount(categoryID: String(room.id))
                     },
@@ -2509,6 +2519,35 @@ private struct MobileHomeView: View {
             Task {
                 await appState.searchBackendStudies(query: query)
             }
+        }
+    }
+}
+
+private struct MobileStudyOpeningErrorAlertModifier: ViewModifier {
+    @ObservedObject var appState: AppState
+    let strings: AppStrings
+
+    private var isPresented: Binding<Bool> {
+        Binding(
+            get: { appState.studyOpeningErrorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    appState.dismissStudyOpeningError()
+                }
+            }
+        )
+    }
+
+    func body(content: Content) -> some View {
+        content.alert(
+            strings.unableToOpenStudy,
+            isPresented: isPresented
+        ) {
+            Button(strings.done, role: .cancel) {
+                appState.dismissStudyOpeningError()
+            }
+        } message: {
+            Text(appState.studyOpeningErrorMessage ?? strings.unableToOpenStudyDescription)
         }
     }
 }
@@ -8643,6 +8682,7 @@ private struct MobileHomeStudyOutlineRow: View {
 
     var snapshot: MobileHomeStudyOutlineSnapshot
     var strings: AppStrings
+    var openingStudyID: Int?
     var pendingQuestionCount: (BackendStudyRoom) -> Int
     var onAction: (MobileHomeStudyOutlineAction) -> Void
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
@@ -8874,6 +8914,7 @@ private struct MobileHomeStudyOutlineRow: View {
                         .padding(.vertical, 8)
                     }
                     .buttonStyle(.plain)
+                    .disabled(isOpening(room))
                     .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .contextMenu {
                         topicActions(for: room)
@@ -8994,6 +9035,7 @@ private struct MobileHomeStudyOutlineRow: View {
             )
         }
         .buttonStyle(.plain)
+        .disabled(isOpening(room))
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
 
@@ -9040,6 +9082,7 @@ private struct MobileHomeStudyOutlineRow: View {
     ) -> some View {
         let pendingCount = pendingQuestionCount(room)
         let levelText = StudyTreeNodeStylePolicy.levelText(room.difficultyLevel)
+        let isOpening = isOpening(room)
 
         return HStack(spacing: 12) {
             MobileStudyHierarchyMarker(
@@ -9092,11 +9135,6 @@ private struct MobileHomeStudyOutlineRow: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityValue(
-                childCount > 0
-                    ? "\(isRoot ? "" : "\(levelText), ")\(strings.childTopicCount(childCount))"
-                    : "\(isRoot ? "" : "\(levelText), ")\(strings.openStudyPage)"
-            )
 
             if pendingCount > 0 {
                 Text("\(pendingCount)")
@@ -9107,16 +9145,33 @@ private struct MobileHomeStudyOutlineRow: View {
                     .accessibilityLabel(strings.pendingQuestionCount(pendingCount))
             }
 
-            if showsDisclosure {
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+            Group {
+                if isOpening {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.secondary)
+                } else if showsDisclosure {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                } else {
+                    Color.clear
+                }
             }
+            .frame(width: 16, height: 16)
+            .accessibilityHidden(true)
         }
         .frame(minHeight: isRoot ? 70 : 64)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(room.topic), \(strings.openStudyPage)")
+        .accessibilityLabel(room.topic)
+        .accessibilityValue(
+            isOpening
+                ? strings.loading
+                : childCount > 0
+                    ? "\(isRoot ? "" : "\(levelText), ")\(strings.childTopicCount(childCount))"
+                    : "\(isRoot ? "" : "\(levelText), ")\(strings.openStudyPage)"
+        )
     }
 
     private func replaceBranch(with roomID: Int?, direction: Double) {
@@ -9156,6 +9211,10 @@ private struct MobileHomeStudyOutlineRow: View {
 
             isChangingBranch = false
         }
+    }
+
+    private func isOpening(_ room: BackendStudyRoom) -> Bool {
+        openingStudyID == room.id
     }
 
     private func childTopicActionLabel(

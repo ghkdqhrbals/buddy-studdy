@@ -6,7 +6,8 @@ import MarkdownUI
 struct StudyView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
-    var preferredCategoryID: String? = nil
+    let preferredCategoryID: String?
+    let isContentPrepared: Bool
     @State private var showsHint = false
     @State private var draftAnswer = ""
     @State private var showsPendingLimitHelp = false
@@ -14,10 +15,19 @@ struct StudyView: View {
     @State private var selectedTreeRootID: Int?
     @State private var answerSubmissionTask: Task<Void, Never>?
     @State private var answerGradingOwnerID: String?
-    @State private var isResolvingInitialAnswerState = true
+    @State private var isResolvingInitialAnswerState: Bool
     #if os(iOS)
     @FocusState private var isAnswerEditorFocused: Bool
     #endif
+
+    init(
+        preferredCategoryID: String? = nil,
+        isContentPrepared: Bool = false
+    ) {
+        self.preferredCategoryID = preferredCategoryID
+        self.isContentPrepared = isContentPrepared
+        _isResolvingInitialAnswerState = State(initialValue: !isContentPrepared)
+    }
 
     var body: some View {
         let strings = appState.strings
@@ -135,18 +145,30 @@ struct StudyView: View {
             presentPendingLimitNoticeIfNeeded()
         }
         .task(id: preferredCategoryID) {
-            isResolvingInitialAnswerState = true
             let ownerID = UUID().uuidString
             answerGradingOwnerID = ownerID
-            async let roomPreparation: Void = appState.prepareStudyRoom(
-                categoryID: preferredCategoryID,
-                gradingPollingOwnerID: ownerID,
-                onInitialStateResolved: {
-                    isResolvingInitialAnswerState = false
-                }
-            )
-            async let quotaRefresh: Void = appState.refreshQuestionQuota()
-            _ = await (roomPreparation, quotaRefresh)
+            if isContentPrepared {
+                isResolvingInitialAnswerState = false
+                await appState.prepareStudyRoom(
+                    categoryID: preferredCategoryID,
+                    gradingPollingOwnerID: ownerID,
+                    onInitialStateResolved: {
+                        isResolvingInitialAnswerState = false
+                    },
+                    shouldRefreshDetail: false
+                )
+            } else {
+                isResolvingInitialAnswerState = true
+                async let roomPreparation: Void = appState.prepareStudyRoom(
+                    categoryID: preferredCategoryID,
+                    gradingPollingOwnerID: ownerID,
+                    onInitialStateResolved: {
+                        isResolvingInitialAnswerState = false
+                    }
+                )
+                async let quotaRefresh: Void = appState.refreshQuestionQuota()
+                _ = await (roomPreparation, quotaRefresh)
+            }
             isResolvingInitialAnswerState = false
             if answerGradingOwnerID == ownerID {
                 answerGradingOwnerID = nil

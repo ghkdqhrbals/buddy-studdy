@@ -844,6 +844,7 @@ struct HomeStudyRoute: Identifiable, Hashable {
     let id = UUID()
     var categoryID: String?
     var showsTree = false
+    var isContentPrepared = false
 }
 
 struct HomeAnnouncement: Identifiable, Equatable {
@@ -4065,6 +4066,20 @@ struct AppStrings {
             "잠시 후 다시 시도하거나 화면을 아래로 당겨 새로고침해 주세요.",
             "Try again shortly or pull down to refresh.",
             "しばらくしてから再試行するか、画面を下に引いて更新してください。"
+        )
+    }
+    var unableToOpenStudy: String {
+        text(
+            "학습을 열지 못했습니다",
+            "Couldn’t open this study",
+            "学習を開けませんでした"
+        )
+    }
+    var unableToOpenStudyDescription: String {
+        text(
+            "네트워크 상태를 확인한 뒤 다시 선택해 주세요.",
+            "Check your connection, then select the study again.",
+            "通信状態を確認し、もう一度学習を選択してください。"
         )
     }
     var previousPage: String { text("이전 페이지", "Previous Page") }
