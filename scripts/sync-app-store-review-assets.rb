@@ -169,6 +169,7 @@ module AppStoreReviewAssets
       @sleeper = sleeper
       @created_screenshots = {}
       @target_items = []
+      @subscription_version_cache = {}
     end
 
     def run
@@ -354,18 +355,12 @@ module AppStoreReviewAssets
     end
 
     def subscription_items(document)
-      versions = document.fetch("included", []).select do |resource|
-        resource.fetch("type") == "subscriptionVersions"
-      end.to_h { |resource| [resource.fetch("id"), resource] }
-
       document.fetch("data").filter_map do |item|
         version_linkage = item.dig("relationships", "subscriptionVersion", "data")
         next unless version_linkage&.fetch("type") == "subscriptionVersions"
 
         version_id = version_linkage.fetch("id")
-        version = versions.fetch(version_id) do
-          raise "Subscription version #{version_id} was not included in the submission response"
-        end
+        version = read_subscription_version(version_id)
         subscription_id = version.dig("relationships", "subscription", "data", "id")
         raise "Subscription version #{version_id} has no subscription relationship" unless subscription_id
 
@@ -375,6 +370,34 @@ module AppStoreReviewAssets
           subscription_id: subscription_id,
           state: item.dig("attributes", "state")
         }
+      end
+    end
+
+    def read_subscription_version(version_id)
+      @subscription_version_cache[version_id] ||= begin
+        response = @client.request(
+          :get,
+          "/v1/subscriptionVersions/#{version_id}",
+          query: {
+            "fields[subscriptionVersions]" => "version,state,subscription",
+            "fields[subscriptions]" => "name,productId,state",
+            "include" => "subscription"
+          }
+        )
+        version = response.fetch("data")
+        raise "Subscription version resource ID mismatch" unless version.fetch("id") == version_id
+
+        subscription_linkage = version.dig("relationships", "subscription", "data")
+        raise "Subscription version #{version_id} has no included subscription" unless
+          subscription_linkage&.fetch("type") == "subscriptions"
+        included_subscription = response.fetch("included", []).find do |resource|
+          resource.fetch("type") == "subscriptions" &&
+            resource.fetch("id") == subscription_linkage.fetch("id")
+        end
+        raise "Subscription version #{version_id} parent subscription was not included" unless
+          included_subscription
+
+        version
       end
     end
 
