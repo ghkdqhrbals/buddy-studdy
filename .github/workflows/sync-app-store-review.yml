@@ -1,0 +1,221 @@
+name: Sync App Store Review Content
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Full 40-character commit SHA containing the review metadata and assets."
+        required: true
+        type: string
+      apply:
+        description: "Write the planned changes to App Store Connect. Leave disabled for a read-only dry run."
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-store-review-content
+  cancel-in-progress: false
+
+jobs:
+  sync_app_store_review_content:
+    name: Sync App Store Review Content
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      APPSTORE_CONNECT_KEY_ID: ${{ secrets.APPSTORE_CONNECT_KEY_ID }}
+      APPSTORE_CONNECT_ISSUER_ID: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID }}
+      APPSTORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APPSTORE_CONNECT_PRIVATE_KEY_BASE64 }}
+      APP_STORE_APPLY: ${{ inputs.apply && '1' || '0' }}
+      APP_STORE_VERSION_STRING: "1.1.0"
+      APP_STORE_REVIEW_SUBMISSION_ID: "0d6aa057-848e-4b3a-b064-e55e89665328"
+      APP_STORE_METADATA_PATH: "review-source/app-store/metadata/version-localizations.json"
+      APP_STORE_APP_INFO_PATH: "review-source/app-store/metadata/app-info-localizations.json"
+      APP_STORE_AGE_RATING_PATH: "review-source/app-store/metadata/age-rating.json"
+      APP_STORE_REVIEW_NOTES_PATH: "review-source/app-store/metadata/review-notes.txt"
+      APP_STORE_SUBSCRIPTIONS_PATH: "review-source/app-store/billing/subscriptions.json"
+      APP_STORE_REVIEW_SCREENSHOT_PATH: "review-source/app-store/review-assets/membership-review-2026-08-14-1242x2688.png"
+
+    steps:
+      - name: Checkout trusted automation
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Validate requested source ref
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          set -euo pipefail
+
+          if ! [[ "${SOURCE_REF}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "source_ref must be a full 40-character commit SHA." >&2
+            exit 1
+          fi
+
+      - name: Checkout requested review source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          path: review-source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Validate requested source and automation
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          set -euo pipefail
+
+          source_commit="$(git -C review-source rev-parse HEAD)"
+          if [ "${source_commit}" != "${SOURCE_REF,,}" ]; then
+            echo "Checked-out source commit does not match source_ref." >&2
+            exit 1
+          fi
+
+          ruby -c scripts/update-app-store-metadata.rb
+          ruby -c scripts/update-app-store-app-info.rb
+          ruby -c scripts/update-app-store-review-notes.rb
+          ruby -c scripts/upload-app-store-screenshots.rb
+          ruby -c scripts/sync-app-store-review-assets.rb
+
+          required_files=(
+            review-source/app-store/metadata/version-localizations.json
+            review-source/app-store/metadata/app-info-localizations.json
+            review-source/app-store/metadata/age-rating.json
+            review-source/app-store/metadata/review-notes.txt
+            review-source/app-store/billing/subscriptions.json
+            review-source/app-store/review-assets/membership-review-2026-08-14-1242x2688.png
+            review-source/screenshots/appstore-ipad-13-en/01-study-tree-ipad13-en.png
+            review-source/screenshots/appstore-ipad-13-en/02-study-list-ipad13-en.png
+            review-source/screenshots/appstore-ipad-13-en/03-public-questions-ipad13-en.png
+            review-source/screenshots/appstore-ipad-13-en/04-statistics-ipad13-en.png
+            review-source/screenshots/appstore-ipad-13-en/05-records-ipad13-en.png
+            review-source/screenshots/appstore-ipad-13-ko/01-study-tree-ipad13-ko.png
+            review-source/screenshots/appstore-ipad-13-ko/02-study-list-ipad13-ko.png
+            review-source/screenshots/appstore-ipad-13-ko/03-public-questions-ipad13-ko.png
+            review-source/screenshots/appstore-ipad-13-ko/04-statistics-ipad13-ko.png
+            review-source/screenshots/appstore-ipad-13-ko/05-records-ipad13-ko.png
+            review-source/screenshots/appstore-ipad-13-ja/01-study-tree-ipad13-ja.png
+            review-source/screenshots/appstore-ipad-13-ja/02-study-list-ipad13-ja.png
+            review-source/screenshots/appstore-ipad-13-ja/03-public-questions-ipad13-ja.png
+            review-source/screenshots/appstore-ipad-13-ja/04-statistics-ipad13-ja.png
+            review-source/screenshots/appstore-ipad-13-ja/05-records-ipad13-ja.png
+          )
+          source_root="$(realpath review-source)"
+          for path in "${required_files[@]}"; do
+            if [ ! -f "${path}" ] || [ -L "${path}" ] || [ ! -s "${path}" ]; then
+              echo "Required review source is missing or empty: ${path}" >&2
+              exit 1
+            fi
+            resolved_path="$(realpath "${path}")"
+            if [[ "${resolved_path}" != "${source_root}/"* ]]; then
+              echo "Required review source resolves outside review-source: ${path}" >&2
+              exit 1
+            fi
+          done
+
+          {
+            echo "## App Store Review Sync"
+            echo ""
+            echo "- Source ref: \`${SOURCE_REF}\`"
+            echo "- Source commit: \`${source_commit}\`"
+            echo "- Mode: \`$([ "${APP_STORE_APPLY}" = "1" ] && echo apply || echo dry-run)\`"
+            echo "- Scope: metadata, App Info, review notes, iPad screenshots, subscription review screenshots"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Validate App Store Connect secrets
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for name in \
+            APPSTORE_CONNECT_KEY_ID \
+            APPSTORE_CONNECT_ISSUER_ID \
+            APPSTORE_CONNECT_PRIVATE_KEY_BASE64; do
+            if [ -z "${!name}" ]; then
+              echo "Missing GitHub Actions secret: ${name}" >&2
+              missing=1
+            fi
+          done
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Prepare temporary App Store Connect API key
+        run: |
+          set -euo pipefail
+
+          private_key_path="${RUNNER_TEMP}/app-store-connect-review-sync.p8"
+          printf '%s' "${APPSTORE_CONNECT_PRIVATE_KEY_BASE64}" | base64 --decode > "${private_key_path}"
+          chmod 600 "${private_key_path}"
+          echo "APPSTORE_CONNECT_PRIVATE_KEY_PATH=${private_key_path}" >> "${GITHUB_ENV}"
+
+      - name: Sync version metadata
+        run: ruby scripts/update-app-store-metadata.rb
+
+      - name: Sync App Info and age rating
+        run: ruby scripts/update-app-store-app-info.rb
+
+      - name: Sync App Review notes
+        run: ruby scripts/update-app-store-review-notes.rb
+
+      - name: Sync English iPad 13-inch screenshots
+        env:
+          APP_STORE_LOCALE: en-US
+          APP_SCREENSHOT_DISPLAY_TYPE: APP_IPAD_PRO_3GEN_129
+          APP_STORE_REPLACE_ALL: "1"
+          APP_STORE_EXPECTED_FILE_COUNT: "5"
+        run: |
+          ruby scripts/upload-app-store-screenshots.rb \
+            review-source/screenshots/appstore-ipad-13-en/01-study-tree-ipad13-en.png \
+            review-source/screenshots/appstore-ipad-13-en/02-study-list-ipad13-en.png \
+            review-source/screenshots/appstore-ipad-13-en/03-public-questions-ipad13-en.png \
+            review-source/screenshots/appstore-ipad-13-en/04-statistics-ipad13-en.png \
+            review-source/screenshots/appstore-ipad-13-en/05-records-ipad13-en.png
+
+      - name: Sync Korean iPad 13-inch screenshots
+        env:
+          APP_STORE_LOCALE: ko
+          APP_SCREENSHOT_DISPLAY_TYPE: APP_IPAD_PRO_3GEN_129
+          APP_STORE_REPLACE_ALL: "1"
+          APP_STORE_EXPECTED_FILE_COUNT: "5"
+        run: |
+          ruby scripts/upload-app-store-screenshots.rb \
+            review-source/screenshots/appstore-ipad-13-ko/01-study-tree-ipad13-ko.png \
+            review-source/screenshots/appstore-ipad-13-ko/02-study-list-ipad13-ko.png \
+            review-source/screenshots/appstore-ipad-13-ko/03-public-questions-ipad13-ko.png \
+            review-source/screenshots/appstore-ipad-13-ko/04-statistics-ipad13-ko.png \
+            review-source/screenshots/appstore-ipad-13-ko/05-records-ipad13-ko.png
+
+      - name: Sync Japanese iPad 13-inch screenshots
+        env:
+          APP_STORE_LOCALE: ja
+          APP_SCREENSHOT_DISPLAY_TYPE: APP_IPAD_PRO_3GEN_129
+          APP_STORE_REPLACE_ALL: "1"
+          APP_STORE_EXPECTED_FILE_COUNT: "5"
+        run: |
+          ruby scripts/upload-app-store-screenshots.rb \
+            review-source/screenshots/appstore-ipad-13-ja/01-study-tree-ipad13-ja.png \
+            review-source/screenshots/appstore-ipad-13-ja/02-study-list-ipad13-ja.png \
+            review-source/screenshots/appstore-ipad-13-ja/03-public-questions-ipad13-ja.png \
+            review-source/screenshots/appstore-ipad-13-ja/04-statistics-ipad13-ja.png \
+            review-source/screenshots/appstore-ipad-13-ja/05-records-ipad13-ja.png
+
+      - name: Sync subscription App Review screenshots
+        run: ruby scripts/sync-app-store-review-assets.rb
+
+      - name: Remove temporary App Store Connect API key
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+
+          private_key_path="${RUNNER_TEMP}/app-store-connect-review-sync.p8"
+          if [ -f "${private_key_path}" ]; then
+            rm -f -- "${private_key_path}"
+          fi
