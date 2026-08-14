@@ -344,7 +344,7 @@ module AppStoreReviewAssets
           "fields[reviewSubmissionItems]" =>
             "state,appStoreVersion,subscriptionVersion,subscriptionGroupVersion",
           "fields[subscriptionVersions]" => "version,state,subscription",
-          "include" => "subscriptionVersion",
+          "include" => "appStoreVersion,subscriptionVersion,subscriptionGroupVersion",
           "limit" => "200"
         }
       )
