@@ -108,8 +108,9 @@ export function formatMilliseconds(value) {
 }
 
 export function formatDurationSeconds(value) {
+  if (value == null || (typeof value === "string" && value.trim() === "")) return "-";
   const total = Number(value);
-  if (!Number.isFinite(total)) return "-";
+  if (!Number.isFinite(total) || total < 0) return "-";
   const days = Math.floor(total / 86_400);
   const hours = Math.floor((total % 86_400) / 3_600);
   const minutes = Math.floor((total % 3_600) / 60);

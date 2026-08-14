@@ -9,6 +9,7 @@ import {
   counterRatePoints,
   customMetricRange,
   formatBytes,
+  formatDurationSeconds,
   formatMilliseconds,
   hasUnrecoveredRuntimeFailure,
   parseLokiMetricValues,
@@ -19,6 +20,18 @@ import {
   ratioPoints,
   toDateTimeLocalValue,
 } from "../public/metrics.js";
+
+test("formatDurationSeconds distinguishes unavailable values from a measured zero", () => {
+  assert.equal(formatDurationSeconds(null), "-");
+  assert.equal(formatDurationSeconds(undefined), "-");
+  assert.equal(formatDurationSeconds(""), "-");
+  assert.equal(formatDurationSeconds("   "), "-");
+  assert.equal(formatDurationSeconds(Number.NaN), "-");
+  assert.equal(formatDurationSeconds(-1), "-");
+  assert.equal(formatDurationSeconds(0), "0m");
+  assert.equal(formatDurationSeconds(60), "1m");
+  assert.equal(formatDurationSeconds(3_660), "1h 1m");
+});
 
 test("parseRuntimeMetrics extracts the flat runtime payload", () => {
   const value = [
