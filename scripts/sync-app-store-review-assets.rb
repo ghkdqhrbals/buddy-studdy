@@ -201,8 +201,6 @@ module AppStoreReviewAssets
       end
 
       begin
-        detach_items
-        verify_items_absent!(submission_id)
         products.each do |product|
           replace_subscription_screenshot(
             product,
@@ -210,7 +208,6 @@ module AppStoreReviewAssets
             screenshot_path
           )
         end
-        readd_missing_items(submission_id)
         verify_final_state!(submission_id, products, screenshot_path)
       rescue StandardError, Interrupt => original_error
         recovery_errors = recover_after_failure(submission_id)
@@ -445,22 +442,7 @@ module AppStoreReviewAssets
                      "[#{item.fetch(:state)}], subscriptionVersion #{item.fetch(:version_id)}, " \
                      "current screenshot #{current}"
       end
-      @output.puts "Plan: detach 2 items, replace 2 screenshots sequentially, then re-add and verify 2 items."
-    end
-
-    def detach_items
-      @target_items.each do |item|
-        @client.request(:delete, "/v1/reviewSubmissionItems/#{item.fetch(:item_id)}")
-        @output.puts "Detached review item: #{item.fetch(:item_id)}"
-      end
-    end
-
-    def verify_items_absent!(submission_id)
-      current_version_ids = subscription_items(list_submission_items(submission_id)).map do |item|
-        item.fetch(:version_id)
-      end
-      still_attached = @target_items.map { |item| item.fetch(:version_id) } & current_version_ids
-      raise "Review items were not detached: #{still_attached.join(", ")}" unless still_attached.empty?
+      @output.puts "Plan: replace 2 subscription screenshots in place, then verify 4 unchanged review items."
     end
 
     def replace_subscription_screenshot(product, existing, screenshot_path)
@@ -550,37 +532,6 @@ module AppStoreReviewAssets
       document&.fetch("data")
     end
 
-    def create_review_item(submission_id, version_id)
-      @client.request(
-        :post,
-        "/v1/reviewSubmissionItems",
-        body: {
-          data: {
-            type: "reviewSubmissionItems",
-            relationships: {
-              reviewSubmission: {
-                data: { type: "reviewSubmissions", id: submission_id }
-              },
-              subscriptionVersion: {
-                data: { type: "subscriptionVersions", id: version_id }
-              }
-            }
-          }
-        }
-      ).fetch("data")
-    end
-
-    def readd_missing_items(submission_id)
-      current = subscription_items(list_submission_items(submission_id))
-      current_version_ids = current.map { |item| item.fetch(:version_id) }
-      @target_items.each do |target|
-        next if current_version_ids.include?(target.fetch(:version_id))
-
-        created = create_review_item(submission_id, target.fetch(:version_id))
-        @output.puts "Re-added subscriptionVersion #{target.fetch(:version_id)} as item #{created.fetch("id")}"
-      end
-    end
-
     def verify_final_state!(submission_id, products, screenshot_path)
       checksum = Digest::MD5.file(screenshot_path).hexdigest
       products.each do |product|
@@ -660,18 +611,6 @@ module AppStoreReviewAssets
         end
       end
 
-      begin
-        readd_missing_items(submission_id)
-        current_versions = subscription_items(list_submission_items(submission_id)).map do |item|
-          item.fetch(:version_id)
-        end
-        missing = @target_items.map { |item| item.fetch(:version_id) } - current_versions
-        raise "missing subscriptionVersions #{missing.join(", ")}" unless missing.empty?
-
-        @error_output.puts "Recovery restored both subscriptionVersion relationships."
-      rescue StandardError => error
-        errors << "restore review items: #{error.message}"
-      end
       errors
     end
   end
