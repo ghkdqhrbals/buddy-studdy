@@ -8,7 +8,9 @@ struct CommunityFeedStateStore {
     var isLoading = false
     var errorMessage: String?
     var requestID = UUID()
+    private var pageSize = 0
     private var hiddenQuestionIDs = Set<String>()
+    private var hiddenAuthorIDs = Set<Int>()
 
     mutating func reset() {
         questions = []
@@ -16,7 +18,9 @@ struct CommunityFeedStateStore {
         offset = 0
         errorMessage = nil
         requestID = UUID()
+        pageSize = 0
         hiddenQuestionIDs = []
+        hiddenAuthorIDs = []
     }
 
     mutating func beginLoading() -> UUID {
@@ -39,9 +43,13 @@ struct CommunityFeedStateStore {
     }
 
     mutating func applyPage(_ response: CommunityQuestionsResponse, offset normalizedOffset: Int, reset: Bool) {
+        if response.limit > 0 {
+            pageSize = response.limit
+        }
         let visibleQuestions = response.questions.filter {
             $0.status.caseInsensitiveCompare("graded") == .orderedSame &&
-                !hiddenQuestionIDs.contains($0.id)
+                !hiddenQuestionIDs.contains($0.id) &&
+                !isAuthorHidden($0.author?.id)
         }
         let hiddenResponseCount = response.questions.count - visibleQuestions.count
         if reset {
@@ -83,6 +91,34 @@ struct CommunityFeedStateStore {
 
     mutating func restoreQuestions(ids: Set<String>) {
         hiddenQuestionIDs.subtract(ids)
+    }
+
+    mutating func hideAuthor(userID: Int) {
+        hiddenAuthorIDs.insert(userID)
+        requestID = UUID()
+        isLoading = false
+        let removedCount = questions.count { $0.author?.id == userID }
+        questions.removeAll { $0.author?.id == userID }
+        totalCount = max(0, totalCount - removedCount)
+        let adjustedOffset = max(0, offset - removedCount)
+        if removedCount > 0, pageSize > 0 {
+            // The backend converts offset to a page index with offset / limit.
+            // Rewind to that page boundary so shifted rows are fetched without skipping them.
+            offset = (adjustedOffset / pageSize) * pageSize
+        } else {
+            offset = adjustedOffset
+        }
+    }
+
+    mutating func clearHiddenAuthors() {
+        hiddenAuthorIDs.removeAll()
+    }
+
+    func isAuthorHidden(_ userID: Int?) -> Bool {
+        guard let userID else {
+            return false
+        }
+        return hiddenAuthorIDs.contains(userID)
     }
 
     func canLoadMore(currentCount: Int) -> Bool {

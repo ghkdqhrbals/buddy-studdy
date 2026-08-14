@@ -720,6 +720,52 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
+    fun `latest privacy policy matches the published 2026 08 14 fixed copy`(): Unit = runBlocking {
+        data class PrivacyDocument(
+            val version: String,
+            val locale: String,
+            val url: String,
+            val contentHash: String,
+            val required: Boolean,
+            val mutable: Boolean,
+        )
+
+        val document = databaseClient.sql(
+            """
+            select version, locale, url, content_hash, required, mutable
+            from terms
+            where code = 'PRIVACY_POLICY'
+              and retired_at is null
+            order by effective_at desc, id desc
+            limit 1
+            """.trimIndent(),
+        )
+            .map { row, _ ->
+                PrivacyDocument(
+                    version = row.get("version", String::class.java)!!,
+                    locale = row.get("locale", String::class.java)!!,
+                    url = row.get("url", String::class.java)!!,
+                    contentHash = row.get("content_hash", String::class.java)!!,
+                    required = row.get("required", java.lang.Boolean::class.java)!!.booleanValue(),
+                    mutable = row.get("mutable", java.lang.Boolean::class.java)!!.booleanValue(),
+                )
+            }
+            .one()
+            .awaitSingle()
+
+        assertThat(document).isEqualTo(
+            PrivacyDocument(
+                version = "2026-08-14",
+                locale = "ko",
+                url = "https://ghkdqhrbals.github.io/buddy-studdy/privacy-2026-08-14.html",
+                contentHash = "f9df55f63edb0e2e439f7cb6ab05ce57efbfecfcbbbdd809beb1168191c56dfa",
+                required = true,
+                mutable = false,
+            ),
+        )
+    }
+
+    @Test
     fun `final localization schema keeps originals separate from translations`(): Unit = runBlocking {
         val columns = databaseClient.sql(
             """

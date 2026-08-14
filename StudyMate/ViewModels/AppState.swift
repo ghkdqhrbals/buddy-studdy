@@ -3321,6 +3321,34 @@ final class AppState: ObservableObject {
         communityFeedState = nextState
     }
 
+    private func hideCommunityContent(authoredBy userID: Int) {
+        var nextFeedState = communityFeedState
+        nextFeedState.hideAuthor(userID: userID)
+        communityFeedState = nextFeedState
+
+        for questionID in Array(communityCommentsCache.keys) {
+            guard let response = communityCommentsCache[questionID] else {
+                continue
+            }
+            communityCommentsCache[questionID] = visibleCommunityComments(in: response)
+        }
+    }
+
+    private func visibleCommunityComments(
+        in response: CommunityCommentsResponse
+    ) -> CommunityCommentsResponse {
+        let comments = response.comments.filter {
+            !communityFeedState.isAuthorHidden($0.author.id)
+        }
+        let removedCount = response.comments.count - comments.count
+        return CommunityCommentsResponse(
+            comments: comments,
+            totalCount: max(0, response.totalCount - removedCount),
+            limit: response.limit,
+            offset: response.offset
+        )
+    }
+
     private func beginBackendStatsRequest() -> UUID {
         var nextState = statsState
         let requestID = nextState.beginRequest()
@@ -3628,7 +3656,11 @@ final class AppState: ObservableObject {
         )
     }
 
-    func loadCommunityQuestions(reset: Bool = true, userInitiated: Bool = false) async {
+    func loadCommunityQuestions(
+        reset: Bool = true,
+        userInitiated: Bool = false,
+        preserveExistingOnFailure: Bool = false
+    ) async {
         #if DEBUG
         if isAppStoreScreenshotFixtureEnabled {
             return
@@ -3675,7 +3707,7 @@ final class AppState: ObservableObject {
                 guard isCurrentCommunityFeedLoad(requestID) else {
                     return
                 }
-                if reset {
+                if reset, !preserveExistingOnFailure {
                     clearCommunityFeedPage()
                 }
                 _ = handleCommunityError(error)
@@ -4395,6 +4427,9 @@ final class AppState: ObservableObject {
         activeTerms = []
         notificationPreferences = []
         communityCommentsCache.removeAll()
+        var nextFeedState = communityFeedState
+        nextFeedState.clearHiddenAuthors()
+        communityFeedState = nextFeedState
         let revenueCatAppAccountToken = billingCatalog?.appAccountToken
         billingCatalog = nil
         billingStatus = nil
@@ -4942,6 +4977,49 @@ final class AppState: ObservableObject {
         )
     }
 
+    func blockCommunityUser(_ user: CommunityUserProfile) async -> Bool {
+        guard !isCurrentCommunityUser(id: user.id) else {
+            return false
+        }
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-block-user") else {
+            clearCommunityErrorForMissingRegistration(reason: "community-block-user")
+            return false
+        }
+
+        var didBlock = false
+        await actionRunner.run(
+            operation: {
+                try await communityUseCase.setUserBlocked(
+                    registration: registration,
+                    userID: user.id,
+                    blocked: true
+                )
+            },
+            onSuccess: { state in
+                guard state.blocked, state.userID == user.id else {
+                    return
+                }
+                didBlock = true
+                hideCommunityContent(authoredBy: state.userID)
+                statusMessage = strings.userBlocked
+            },
+            onFailure: { error in
+                handleCommunityError(error)
+                log(.warning, "커뮤니티 사용자 차단 실패: \(error.localizedDescription)")
+            }
+        )
+        if didBlock {
+            Task { [weak self] in
+                await self?.loadCommunityQuestions(
+                    reset: true,
+                    userInitiated: false,
+                    preserveExistingOnFailure: true
+                )
+            }
+        }
+        return didBlock
+    }
+
     func submitAppFeedback(content: String) async -> Bool {
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "app-feedback") else {
             clearCommunityErrorForMissingRegistration(reason: "app-feedback")
@@ -5024,7 +5102,7 @@ final class AppState: ObservableObject {
 
         return await actionRunner.run(
             operation: {
-                try await communityUseCase.fetchComments(
+                let response = try await communityUseCase.fetchComments(
                     registration: registration,
                     questionID: questionID,
                     limit: limit,
@@ -5032,6 +5110,7 @@ final class AppState: ObservableObject {
                     language: settings.appLanguage,
                     view: view
                 )
+                return visibleCommunityComments(in: response)
             },
             onSuccess: { response in
                 if view == .localized, offset == 0 {
@@ -5054,7 +5133,7 @@ final class AppState: ObservableObject {
             return nil
         }
 
-        return await actionRunner.run(
+        let question = await actionRunner.run(
             operation: {
                 try await communityUseCase.fetchPublicQuestion(
                     registration: registration,
@@ -5063,17 +5142,21 @@ final class AppState: ObservableObject {
                     view: view
                 )
             },
-            onSuccess: { question in
-                if view == .localized,
-                   let index = communityQuestions.firstIndex(where: { $0.id == questionID }) {
-                    communityQuestions[index] = question
-                }
-            },
+            onSuccess: { _ in },
             onFailure: { error in
                 handleCommunityError(error)
                 log(.warning, "공개 질문 상세 로드 실패: \(error.localizedDescription)")
             }
         )
+        guard let question,
+              !communityFeedState.isAuthorHidden(question.author?.id) else {
+            return nil
+        }
+        if view == .localized,
+           let index = communityQuestions.firstIndex(where: { $0.id == questionID }) {
+            communityQuestions[index] = question
+        }
+        return question
     }
 
     func loadStudyRecordDetail(

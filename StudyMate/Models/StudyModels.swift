@@ -2570,11 +2570,11 @@ enum AppLegalLinks {
     static func privacyPolicyURL(language: AppLanguage) -> URL {
         switch language {
         case .korean:
-            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/privacy-2026-08-05.html")!
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/privacy-2026-08-14.html")!
         case .english:
-            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/privacy-2026-08-05.html")!
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/en/privacy-2026-08-14.html")!
         case .japanese:
-            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/ja/privacy-2026-08-05.html")!
+            return URL(string: "https://ghkdqhrbals.github.io/buddy-studdy/ja/privacy-2026-08-14.html")!
         }
     }
 
@@ -2891,6 +2891,13 @@ struct AppStrings {
         )
     }
     var perMonth: String { text("/월", "/month", "/月") }
+    var membershipAutoRenewalDisclosure: String {
+        text(
+            "구매 확인 시 Apple ID로 결제됩니다. 현재 구독 기간이 끝나기 최소 24시간 전에 취소하지 않으면 매월 자동 갱신되며, 갱신 요금은 기간 종료 전 24시간 이내에 청구됩니다. App Store 계정 설정에서 구독을 관리하거나 취소할 수 있습니다.",
+            "Payment is charged to your Apple ID at confirmation. The subscription renews monthly unless canceled at least 24 hours before the end of the current period. Your Apple ID is charged within 24 hours before renewal. Manage or cancel in your App Store account settings.",
+            "購入の確認時にApple IDへ請求されます。現在の期間が終了する24時間以上前に解約しない限り、サブスクリプションは毎月自動更新されます。更新料金は期間終了前の24時間以内にApple IDへ請求されます。App Storeのアカウント設定で管理または解約できます。"
+        )
+    }
     var remainingQuestions: String { text("개 남음", "left", "問残り") }
     var noBillingHistory: String { text("아직 결제 내역이 없습니다.", "No billing history yet.", "支払い履歴はまだありません。") }
     var billingPending: String { text("결제가 승인 대기 중입니다.", "The purchase is pending approval.", "購入は承認待ちです。") }
@@ -4024,6 +4031,28 @@ struct AppStrings {
     }
     var reportSubmitted: String { text("신고를 접수했습니다.", "Report submitted.") }
     var reportReasonInappropriate: String { text("부적절한 질문", "Inappropriate question") }
+    var blockUser: String { text("사용자 차단", "Block User", "ユーザーをブロック") }
+    var blockUserTitle: String {
+        text(
+            "이 사용자를 차단할까요?",
+            "Block this user?",
+            "このユーザーをブロックしますか？"
+        )
+    }
+    func blockUserMessage(_ name: String) -> String {
+        text(
+            "\(name)의 질문과 댓글이 더 이상 표시되지 않습니다.",
+            "Questions and comments from \(name) will no longer appear.",
+            "\(name)さんの質問とコメントは今後表示されません。"
+        )
+    }
+    var userBlocked: String {
+        text(
+            "사용자를 차단했습니다.",
+            "User blocked.",
+            "ユーザーをブロックしました。"
+        )
+    }
     var googleLoginSetupRequired: String {
         text(
             "Google Login은 OAuth 클라이언트 설정 후 활성화됩니다.",

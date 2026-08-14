@@ -73,6 +73,12 @@ protocol CommunityRepository {
         message: String
     ) async throws
 
+    func setUserBlocked(
+        registration: RemotePushRegistration,
+        userID: Int,
+        blocked: Bool
+    ) async throws -> CommunityUserBlockState
+
     func submitFeedback(
         registration: RemotePushRegistration,
         content: String

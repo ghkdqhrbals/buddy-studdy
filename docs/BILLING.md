@@ -57,6 +57,12 @@ can still be reconciled without exposing those products for a new checkout.
 The mapping is server-owned. A client-supplied product that is absent, disabled,
 or has a different product type is rejected before an invoice is written.
 
+Before the iOS app offers the purchase action, the membership screen shows the
+selected tier name, StoreKit-localized monthly price, one-month duration, exact
+monthly question allowance, automatic-renewal disclosure, and localized links
+to the Terms of Use and Privacy Policy. Purchase, restore, and management remain
+separate user actions on the same screen.
+
 ## Ledger and state
 
 - `invoices` is the current invoice projection.

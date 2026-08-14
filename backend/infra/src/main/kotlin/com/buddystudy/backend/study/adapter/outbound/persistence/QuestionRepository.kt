@@ -378,6 +378,11 @@ class QuestionRepository(
 
     override suspend fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity> = publicPage(null, pageable)
 
+    override suspend fun findPublicAnsweredVisibleTo(
+        viewerUserId: Long?,
+        pageable: Pageable,
+    ): Page<QuestionEntity> = publicPage(null, pageable, viewerUserId = viewerUserId)
+
     override suspend fun findPublicAnsweredByLanguage(
         language: String,
         pageable: Pageable,
@@ -394,6 +399,18 @@ class QuestionRepository(
         query: String,
         pageable: Pageable,
     ): Page<QuestionEntity> = publicPage(query to true, pageable, QuestionLanguage.normalize(language))
+
+    override suspend fun findPublicAnsweredByLanguageAndQueryVisibleTo(
+        viewerUserId: Long?,
+        language: String,
+        query: String,
+        pageable: Pageable,
+    ): Page<QuestionEntity> = publicPage(
+        filter = query to true,
+        pageable = pageable,
+        language = QuestionLanguage.normalize(language),
+        viewerUserId = viewerUserId,
+    )
 
     override suspend fun findPublicAnsweredById(id: Long): QuestionEntity? =
         publicIds("q.id = :value", id, 1, 0).firstOrNull()?.let { findQuestionById(it) }
@@ -506,6 +523,7 @@ class QuestionRepository(
         filter: Pair<String, Boolean>?,
         pageable: Pageable,
         language: String? = null,
+        viewerUserId: Long? = null,
     ): Page<QuestionEntity> {
         val condition = when {
             filter == null -> "true"
@@ -536,9 +554,13 @@ class QuestionRepository(
             else -> "lower(q.topic) like :pattern"
         }
         val searchLanguage = language?.takeIf { filter?.second == true }
-        var idsSpec = template.databaseClient.sql(publicSelectSql(condition, searchLanguage))
+        var idsSpec = template.databaseClient.sql(publicSelectSql(condition, searchLanguage, viewerUserId != null))
             .bind("limit", pageable.pageSize).bind("offset", pageable.offset)
-        var countSpec = template.databaseClient.sql(publicCountSql(condition, searchLanguage))
+        var countSpec = template.databaseClient.sql(publicCountSql(condition, searchLanguage, viewerUserId != null))
+        if (viewerUserId != null) {
+            idsSpec = idsSpec.bind("viewerUserId", viewerUserId)
+            countSpec = countSpec.bind("viewerUserId", viewerUserId)
+        }
         if (searchLanguage != null) {
             idsSpec = idsSpec.bind("language", searchLanguage)
             countSpec = countSpec.bind("language", searchLanguage)
@@ -645,26 +667,38 @@ class QuestionRepository(
             .all().collectList().awaitSingle()
     }
 
-    private fun publicSelectSql(condition: String, searchLanguage: String? = null): String {
+    private fun publicSelectSql(
+        condition: String,
+        searchLanguage: String? = null,
+        filterBlockedAuthors: Boolean = false,
+    ): String {
         val searchJoin = if (searchLanguage == null) "" else {
             "join question_search qs on qs.question_id = q.id and qs.language = :language"
         }
+        val blockCondition = if (filterBlockedAuthors) BLOCKED_AUTHOR_EXCLUSION else ""
         return """
         select q.id from questions q join users u on u.id = q.user_id $searchJoin
         where q.is_public = true and q.deleted_at is null and $PUBLIC_ANSWER_CONDITION
           and u.allow_public_questions = true and ($condition)
+          $blockCondition
         order by q.created_at desc, q.id desc limit :limit offset :offset
         """.trimIndent()
     }
 
-    private fun publicCountSql(condition: String, searchLanguage: String? = null): String {
+    private fun publicCountSql(
+        condition: String,
+        searchLanguage: String? = null,
+        filterBlockedAuthors: Boolean = false,
+    ): String {
         val searchJoin = if (searchLanguage == null) "" else {
             "join question_search qs on qs.question_id = q.id and qs.language = :language"
         }
+        val blockCondition = if (filterBlockedAuthors) BLOCKED_AUTHOR_EXCLUSION else ""
         return """
         select count(*) as total from questions q join users u on u.id = q.user_id $searchJoin
         where q.is_public = true and q.deleted_at is null and $PUBLIC_ANSWER_CONDITION
           and u.allow_public_questions = true and ($condition)
+          $blockCondition
         """.trimIndent()
     }
 
@@ -684,6 +718,13 @@ class QuestionRepository(
     private companion object {
         const val PUBLIC_ANSWER_CONDITION =
             "q.status = 'graded' and q.answer is not null and length(trim(q.answer)) > 0"
+
+        const val BLOCKED_AUTHOR_EXCLUSION =
+            "and not exists (" +
+                "select 1 from user_blocks user_block " +
+                "where user_block.blocker_user_id = :viewerUserId " +
+                "and user_block.blocked_user_id = q.user_id" +
+                ")"
 
         val NON_TERMINAL_GRADING_STATUSES = listOf(
             "QUEUED",

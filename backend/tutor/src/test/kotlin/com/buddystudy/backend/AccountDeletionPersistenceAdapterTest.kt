@@ -32,11 +32,14 @@ class AccountDeletionPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         val deviceId = "withdrawal-device-$suffix"
         val withdrawnAt = Instant.parse("2032-07-27T00:00:00Z")
         val userId = insertUser(suffix, withdrawnAt.minusSeconds(60))
+        val peerUserId = insertUser("$suffix-peer", withdrawnAt.minusSeconds(60))
         val appAccountToken = UUID.randomUUID().toString().lowercase()
         insertBillingAccount(userId, appAccountToken, withdrawnAt.minusSeconds(60))
         insertDevice(deviceId, userId, withdrawnAt.minusSeconds(60))
         insertSession(deviceId, userId, withdrawnAt.minusSeconds(60))
         insertNotification("old-$suffix", deviceId, withdrawnAt.minusSeconds(1))
+        insertUserBlock(userId, peerUserId, withdrawnAt.minusSeconds(30))
+        insertUserBlock(peerUserId, userId, withdrawnAt.minusSeconds(20))
 
         val snapshot = accountDeletion.beginWithdrawal(userId, withdrawnAt)
 
@@ -50,6 +53,8 @@ class AccountDeletionPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         accountDeletion.deleteAccountData(userId, snapshot.deviceIds, withdrawnAt)
 
         assertThat(longValue("select count(*) from users where id = $userId")).isZero()
+        assertThat(longValue("select count(*) from users where id = $peerUserId")).isEqualTo(1)
+        assertThat(longValue("select count(*) from user_blocks where blocker_user_id = $userId or blocked_user_id = $userId")).isZero()
         assertThat(longValue("select count(*) from billing_accounts where app_account_token = '$appAccountToken' and user_id is null and status = 'ANONYMIZED'")).isEqualTo(1)
         assertThat(longValue("select count(*) from user_devices where user_id = $userId")).isZero()
         assertThat(longValue("select count(*) from app_notifications where event_id = 'old-$suffix'")).isZero()
@@ -137,6 +142,21 @@ class AccountDeletionPersistenceAdapterTest : MySqlIntegrationTestSupport() {
         )
             .bind("eventId", eventId)
             .bind("deviceId", deviceId)
+            .bind("createdAt", createdAt)
+            .fetch()
+            .rowsUpdated()
+            .awaitSingle()
+    }
+
+    private suspend fun insertUserBlock(blockerUserId: Long, blockedUserId: Long, createdAt: Instant) {
+        client.sql(
+            """
+            insert into user_blocks (blocker_user_id, blocked_user_id, created_at)
+            values (:blockerUserId, :blockedUserId, :createdAt)
+            """.trimIndent(),
+        )
+            .bind("blockerUserId", blockerUserId)
+            .bind("blockedUserId", blockedUserId)
             .bind("createdAt", createdAt)
             .fetch()
             .rowsUpdated()

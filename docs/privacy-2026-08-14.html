@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ko"><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="BuddyStudy 개인정보 처리방침"><meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://ghkdqhrbals.github.io/buddy-studdy/privacy-2026-08-14.html">
+  <link rel="icon" href="assets/buddystudy-icon.png"><link rel="stylesheet" href="assets/legal.css">
+  <title>개인정보 처리방침 - BuddyStudy</title>
+</head><body><main>
+  <nav><a href="./">BuddyStudy</a><span class="languages"><strong>한국어</strong><a href="en/privacy-2026-08-14.html" lang="en">English</a><a href="ja/privacy-2026-08-14.html" lang="ja">日本語</a></span></nav>
+  <header>
+    <div class="brand">BuddyStudy</div><h1>개인정보 처리방침</h1>
+    <p class="updated">공고일 및 시행일: 2026년 8월 14일</p>
+    <p class="summary">BuddyStudy는 학습과 계정 기능에 필요한 데이터만 처리하고 개인정보를 판매하지 않습니다. 학습 데이터의 원본 저장소는 대한민국 리전의 MySQL이며, 기기에는 설정, 초안, 캐시와 진단 로그가 저장될 수 있습니다.</p>
+  </header>
+  <div class="toc">
+    <a href="#controller">1. 처리자와 적용 범위</a><a href="#purpose">2. 처리 목적</a>
+    <a href="#items">3. 처리 항목과 수집 방법</a><a href="#public">4. 공개 콘텐츠</a>
+    <a href="#retention">5. 보유 기간</a><a href="#processors">6. 처리위탁 및 국외 이전</a>
+    <a href="#analytics">7. 분석 및 오류 진단</a><a href="#automated">8. AI와 자동화된 처리</a>
+    <a href="#rights">9. 이용자 권리</a><a href="#destruction">10. 파기 절차</a>
+    <a href="#security">11. 안전성 확보 조치</a><a href="#children">12. 아동의 개인정보</a>
+    <a href="#remedy">13. 문의 및 구제</a><a href="#changes">14. 방침 변경</a>
+  </div>
+  <section id="controller"><h2>1. 처리자와 적용 범위</h2>
+    <p>BuddyStudy 운영자(이하 “운영자”)는 BuddyStudy iOS 앱, API, 알림, 공개 질문과 관련 웹페이지에서 처리되는 개인정보의 처리자입니다.</p>
+    <p>공개 질문은 로그인 없이 읽을 수 있습니다. 학습 기록, 통계, 댓글, 좋아요, 프로필, 알림 동기화 등 사용자별 기능에는 계정과 기기 등록이 필요합니다.</p>
+  </section>
+  <section id="purpose"><h2>2. 처리 목적</h2><ul>
+    <li>이메일, Google 또는 Apple 로그인, 기기 등록, 세션과 계정 보안</li>
+    <li>학습 트리, 질문 생성, 답변 초안, AI 채점·피드백·해설, 번역, 기록과 통계 제공</li>
+    <li>질문·댓글 알림 및 이용자가 선택한 마케팅 알림 전송</li>
+    <li>공개 질문, 댓글, 좋아요, 신고, 사용자 차단, 피드백과 프로필 기능 제공 및 악성 콘텐츠 노출 제한</li>
+    <li>사용량 한도, 약관 동의 및 알림 선호 관리</li>
+    <li>App Store 구독 구매·복원·변경·취소·환불 안내, 멤버십 권한 부여와 결제 이력 관리</li>
+    <li>장애 대응, 보안, 부정 이용 방지, 품질 및 성능 개선</li>
+  </ul></section>
+  <section id="items"><h2>3. 처리 항목과 수집 방법</h2>
+    <div class="table-wrap"><table><thead><tr><th>구분</th><th>처리 항목</th><th>필수 여부 및 위치</th></tr></thead><tbody>
+      <tr><td>계정·인증</td><td>사용자 ID, 이메일, 비밀번호 해시, 로그인 제공자와 제공자 식별자(Apple·Google 포함), 계정 상태, 이메일 인증 코드와 만료 시각, 세션 만료 시각</td><td>로그인 기능 이용 시 필수 · MySQL/Redis</td></tr>
+      <tr><td>기기·알림</td><td>기기 ID, 클라이언트 자격 증명 해시, APNs 토큰, APNs 환경, 플랫폼, 앱 버전, 언어, 시간대, 알림 선호</td><td>기기 등록 및 알림 이용 시 필수 · MySQL</td></tr>
+      <tr><td>프로필</td><td>표시 이름, 소개, 픽셀 캐릭터 식별자와 색상, 질문 공개 설정</td><td>표시 이름은 계정 기능에 필요, 나머지는 선택 · MySQL</td></tr>
+      <tr><td>학습</td><td>학습·하위 주제, 계층, 난이도, 활성 주제, 질문 일정, 질문·힌트, 답변 초안과 제출 답변, 점수, 루브릭 판정, 피드백, 해설, 번역, 기록, 주제별 통계, 월간 사용량</td><td>학습 기능 이용 시 필수 · MySQL, 기기 내 초안·캐시</td></tr>
+      <tr><td>커뮤니티</td><td>공개 질문 여부, 댓글, 좋아요, 조회 수, 신고 사유와 내용, 차단한 사용자 ID·차단된 사용자 ID·차단 시각, 피드백 내용 및 생성 시각</td><td>해당 기능 이용 시 필수 · MySQL</td></tr>
+      <tr><td>약관</td><td>동의 문서와 버전, 동의·철회 동작, 경로, 시각, IP 주소, 사용자 에이전트, 앱 버전</td><td>필수 약관 및 선택 동의 관리 · MySQL</td></tr>
+      <tr><td>구독·구매</td><td>멤버십과 상품 ID, App Account Token, App Store 거래·원거래 ID, 구매 환경, 구매·갱신·만료·취소·환불 상태와 시각, 결제 금액·통화, RevenueCat App User ID와 이벤트 식별자</td><td>구독 구매·복원 및 멤버십 제공 시 필수 · MySQL, Apple, RevenueCat</td></tr>
+      <tr><td>운영·보안 로그</td><td>요청 ID, 사용자 ID, IP 주소, 요청 시각, HTTP 메서드·경로·쿼리, 상태 코드, 처리 시간, 오류 코드, 제한된 헤더와 요청·응답 본문</td><td>서비스 안정성과 보안 · Loki</td></tr>
+      <tr><td>앱 분석</td><td>앱 인스턴스 및 기기·OS·앱 메타데이터, 언어, 로그인 상태, 화면 조회, 로그인 결과, 학습 생성, 질문·채점 상태, 알림 열기와 같은 거친 사용 이벤트</td><td>릴리스 앱 품질 분석 · Google Analytics for Firebase</td></tr>
+      <tr><td>오류 진단</td><td>오류·치명적 충돌, 스택 추적, 앱·OS·기기 정보, 오류 발생 세션의 마스킹된 화면 재현 정보</td><td>장애 진단 · Sentry</td></tr>
+    </tbody></table></div>
+    <p class="muted">주민등록번호 등 고유식별정보와 건강·생체정보 등 민감정보는 의도적으로 수집하지 않습니다. 사용자가 학습 답변이나 댓글에 이러한 정보를 직접 입력하지 않도록 권장합니다.</p>
+    <p>결제 카드 번호, 은행 계좌 또는 Apple ID 결제 자격 증명은 Apple이 처리하며 BuddyStudy와 RevenueCat은 이를 직접 수집하거나 저장하지 않습니다.</p>
+    <p>정보는 앱 입력, 로그인 제공자, API 호출, APNs 등록 및 SDK의 자동 수집을 통해 수집됩니다. 비밀번호, 이메일 인증 코드, 액세스 토큰, Google ID 토큰, APNs 인증 키와 클라이언트 secret은 로그에서 마스킹합니다.</p>
+  </section>
+  <section id="public"><h2>4. 공개 콘텐츠</h2>
+    <p>질문 공개를 켠 경우 질문, 주제, 난이도, 생성·답변 시각, 점수, 조회·좋아요·댓글 수와 공개 프로필이 다른 이용자에게 표시될 수 있습니다. 공개 댓글과 작성자의 공개 프로필도 표시됩니다.</p>
+    <p>로그인한 이용자가 다른 사용자를 차단하면 차단된 작성자의 공개 질문과 댓글은 해당 이용자에게 표시되지 않고, 차단된 작성자의 공개 질문 상세 화면도 열 수 없습니다. 차단 관계 자체는 공개 콘텐츠로 표시되지 않습니다.</p>
+    <p>답변 초안, 비공개 답변, 이메일, 인증 정보, APNs 토큰, 기기 ID와 내부 로그는 공개하지 않습니다. 이용자는 앱에서 공개 설정을 변경하고 자신의 댓글이나 기록을 삭제할 수 있습니다.</p>
+  </section>
+  <section id="retention"><h2>5. 보유 기간</h2>
+    <div class="table-wrap"><table><thead><tr><th>정보</th><th>보유 기간</th></tr></thead><tbody>
+      <tr><td>계정, 프로필, 학습, 기록, 통계, 커뮤니티 활동</td><td>이용자가 개별 항목을 삭제하거나 계정을 탈퇴할 때까지</td></tr>
+      <tr><td>사용자 간 차단 관계</td><td>차단 해제 요청이 처리되거나 차단 관계 양쪽 계정 중 하나가 탈퇴할 때까지</td></tr>
+      <tr><td>이메일 인증 코드</td><td>발급 후 3분 또는 검증 완료 시까지</td></tr>
+      <tr><td>기기·APNs 토큰과 알림 선호</td><td>기기 등록 해제, 계정 탈퇴 또는 해당 정보가 더 이상 유효하지 않을 때까지</td></tr>
+      <tr><td>약관 동의·철회 이력</td><td>계정 탈퇴 시까지. 분쟁 또는 법적 의무가 있으면 해당 목적에 필요한 기간</td></tr>
+      <tr><td>구독·구매 및 멤버십 이력</td><td>계정 탈퇴 또는 멤버십 종료 시까지. 다만 결제·환불·분쟁 처리 및 관계 법령상 보존 의무가 있는 기록은 해당 기간</td></tr>
+      <tr><td>운영·보안 로그</td><td>7일</td></tr>
+      <tr><td>데이터베이스 백업</td><td>최대 14일. 재해 복구에만 사용하고 만료 시 순환 삭제</td></tr>
+      <tr><td>Google Analytics 및 Sentry</td><td>각 서비스에서 운영자가 설정한 기간 및 각 제공업체 정책에 따름</td></tr>
+    </tbody></table></div>
+  </section>
+  <section id="processors"><h2>6. 처리위탁 및 국외 이전</h2>
+    <p>운영자는 개인정보를 판매하지 않습니다. 서비스 제공을 위해 다음 업체와 시스템을 사용합니다.</p>
+    <div class="table-wrap"><table><thead><tr><th>수탁자·서비스</th><th>목적과 항목</th><th>위치·이전 방식</th></tr></thead><tbody>
+      <tr><td>Amazon Web Services</td><td>API, MySQL, Redis, 비밀정보와 백업 운영 · 서비스 데이터 및 운영 메타데이터</td><td>대한민국 서울 리전 · 암호화 통신</td></tr>
+      <tr><td>Cloudflare</td><td>DNS, 프록시, TLS, 네트워크 보안 · IP, 요청 메타데이터</td><td>글로벌 네트워크 · 요청 시 암호화 통신</td></tr>
+      <tr><td>OpenAI</td><td>질문 생성, AI 채점·피드백, 추천 및 LibreTranslate 실패 시 번역 · 학습 주제, 질문, 답변과 필요한 프롬프트</td><td>미국 등 서비스 운영 국가 · 기능 사용 시 암호화 통신</td></tr>
+      <tr><td>Apple</td><td>Apple 로그인, App Store 구독·결제·복원·취소·환불 처리 · 제공자 식별자, 이용자가 허용한 이메일·이름, App Account Token, 상품·거래·구독 상태</td><td>미국 등 서비스 운영 국가 · 기능 사용 시 암호화 통신</td></tr>
+      <tr><td>Apple APNs</td><td>푸시 알림 · APNs 토큰과 알림 payload</td><td>미국 등 서비스 운영 국가 · 알림 전송 시 암호화 통신</td></tr>
+      <tr><td>RevenueCat, Inc.</td><td>구독 상품 조회, 구매·복원, Customer Center, 구독 상태와 웹훅 동기화 · App User ID, 상품 ID, 영수증·거래·구독·환불 상태 및 SDK의 앱·기기 메타데이터</td><td>미국 등 서비스 운영 국가 · 구독 기능 사용 또는 결제 이벤트 발생 시 암호화 통신</td></tr>
+      <tr><td>Google</td><td>Google 로그인, 이메일 인증 SMTP, Firebase Analytics·Remote Config · 이메일·로그인 토큰 검증 정보, 수신 이메일과 인증 코드, 앱 사용 이벤트 및 기기·앱 메타데이터, 앱 제어 설정 요청 정보</td><td>미국 등 서비스 운영 국가 · 기능 사용 또는 이벤트 발생 시 암호화 통신</td></tr>
+      <tr><td>Functional Software, Inc. (Sentry)</td><td>오류와 충돌 진단 · 오류, 스택, 앱·기기 정보와 마스킹된 오류 세션 재현 정보</td><td>미국 등 서비스 운영 국가 · 오류 발생 시 암호화 통신</td></tr>
+    </tbody></table></div>
+    <p>LibreTranslate는 운영자가 대한민국 리전에서 직접 운영하며 번역 입력을 별도 외부 LibreTranslate 사업자에게 전송하지 않습니다. 위 수탁자는 각자의 개인정보 보호정책과 계약에 따라 적절한 보호조치를 적용합니다. 외부 서비스 이용을 거부하면 Apple·Google 로그인, 이메일 인증, AI, 푸시, 구독, 분석 또는 오류 진단의 일부가 제한될 수 있으나 가능한 경우 대체 기능을 제공합니다.</p>
+  </section>
+  <section id="analytics"><h2>7. 분석 및 오류 진단</h2>
+    <p>릴리스 앱은 Google Analytics for Firebase로 화면과 기능 단위의 사용 이벤트를 측정하고, Firebase Remote Config로 점검·업데이트 등 앱 제어 설정을 조회합니다. BuddyStudy 사용자 ID, 이메일, 학습 주제, 질문, 답변, 댓글, 토큰 또는 요청 ID를 분석 이벤트에 넣지 않으며 광고 식별자를 이용한 맞춤 광고를 제공하지 않습니다.</p>
+    <p>Sentry는 오류 및 치명적 충돌만 전송합니다. 일반 세션 재현 수집률은 0%이고 오류가 발생한 세션만 수집 대상으로 하며, 화면의 모든 텍스트와 이미지를 마스킹하고 네트워크 본문·헤더·스크린샷·뷰 계층 전송을 끕니다.</p>
+  </section>
+  <section id="automated"><h2>8. AI와 자동화된 처리</h2>
+    <p>질문 생성, 번역, 점수와 피드백은 자동화된 시스템으로 처리됩니다. AI 채점은 학습 지원을 위한 참고 정보이며 법적 효과 또는 이에 준하는 중대한 결정을 내리지 않습니다. 결과가 부정확할 수 있으므로 중요한 판단에는 사용하지 않아야 합니다.</p>
+  </section>
+  <section id="rights"><h2>9. 이용자 권리</h2>
+    <p>이용자는 앱에서 프로필, 질문 공개, 알림 선호, 선택 약관, 학습 기록과 계정을 확인·정정·삭제할 수 있습니다. 다른 커뮤니티 사용자를 앱에서 차단할 수 있으며, 차단 해제는 아래 이메일로 요청할 수 있습니다. 본인 확인 후 해당 차단 관계를 삭제합니다. 마케팅 동의는 언제든 철회할 수 있습니다. 구독 변경·취소·환불 요청과 구매 복원은 앱의 멤버십·결제 화면에서 Apple 또는 RevenueCat이 제공하는 관리 화면으로 진행할 수 있습니다.</p>
+    <p>개인정보의 열람, 정정, 삭제, 처리정지 또는 동의 철회는 앱 기능이나 아래 이메일로 요청할 수 있습니다. 본인 확인이 필요한 경우 계정 또는 기기 정보를 확인할 수 있으며, 법령이 정한 사유가 없으면 지체 없이 처리합니다.</p>
+  </section>
+  <section id="destruction"><h2>10. 파기 절차</h2>
+    <p>계정 탈퇴 요청을 받으면 계정과 세션을 즉시 비활성화하고, 복구 가능한 비동기 작업으로 프로필, 학습, 질문, 답변, 기록, 통계, 댓글, 좋아요, 신고, 사용자 간 차단 관계, 알림, 약관 이력과 기기 연결을 활성 데이터베이스에서 삭제합니다. 이용자가 차단한 경우와 다른 이용자가 해당 이용자를 차단한 경우의 관계를 모두 삭제합니다. 결제·환불·분쟁 처리 또는 법적 의무에 필요한 거래 기록은 분리 보관한 뒤 보존 기간이 끝나면 삭제합니다. 실패한 작업은 재시도 및 운영 점검 대상으로 기록됩니다.</p>
+    <p>전자 파일은 복구하기 어려운 방식으로 삭제합니다. 백업 사본은 별도로 복원해 이용하지 않으며 최대 14일의 순환 주기가 끝나면 제거됩니다.</p>
+  </section>
+  <section id="security"><h2>11. 안전성 확보 조치</h2><ul>
+    <li>TLS 통신, 비밀번호 해시, 서버 내 원문 client secret 미보관</li>
+    <li>AWS Secrets Manager를 통한 운영 자격 증명 관리와 최소 권한 접근</li>
+    <li>Cloudflare 네트워크 보호, 운영자 인증, VPN 기반 관리 경로</li>
+    <li>로그의 인증정보 마스킹, 7일 보존, 접근 및 감사 기록</li>
+    <li>MySQL 무결성 제약, Redis AOF/RDB, 이벤트 outbox·inbox와 멱등 처리</li>
+    <li>오류 세션 재현의 텍스트·이미지 마스킹 및 네트워크 내용 수집 차단</li>
+  </ul></section>
+  <section id="children"><h2>12. 아동의 개인정보</h2>
+    <p>BuddyStudy는 만 14세 미만 아동을 대상으로 하지 않습니다. 만 14세 미만 아동의 정보가 처리되었다고 판단되면 아래 연락처로 삭제를 요청해 주세요.</p>
+  </section>
+  <section id="remedy"><h2>13. 문의 및 구제</h2>
+    <p>개인정보 보호책임자: BuddyStudy 운영자 · <a href="mailto:ghkdqhrbals@gmail.com">ghkdqhrbals@gmail.com</a></p>
+    <ul><li>개인정보침해신고센터: <a href="https://privacy.kisa.or.kr">privacy.kisa.or.kr</a> / 118</li>
+      <li>개인정보 분쟁조정위원회: <a href="https://www.kopico.go.kr">www.kopico.go.kr</a> / 1833-6972</li>
+      <li>개인정보보호위원회: <a href="https://www.pipc.go.kr">www.pipc.go.kr</a></li></ul>
+  </section>
+  <section id="changes"><h2>14. 방침 변경</h2>
+    <p>이 버전은 커뮤니티 사용자 차단 관계의 처리 목적, 항목, 노출 제한, 보유 기간과 삭제 방법을 명확히 설명합니다.</p>
+    <p>법령 또는 서비스가 변경되면 이 방침을 업데이트하고 공고일과 시행일을 표시합니다. 권리에 중대한 영향을 주는 변경은 앱 또는 웹페이지에서 별도로 알리고 필요한 경우 다시 동의를 받습니다.</p>
+  </section>
+  <footer>이 문서는 2026년 8월 14일 버전의 고정 사본입니다. <a href="privacy.html">현재 개인정보 처리방침</a> · <a href="terms.html">서비스 이용약관</a></footer>
+</main></body></html>

@@ -555,6 +555,7 @@ final class CommunityQuestionActionPolicyTests: XCTestCase {
 
         XCTAssertTrue(policy.canManage)
         XCTAssertFalse(policy.canReport)
+        XCTAssertFalse(policy.canBlock)
     }
 
     func testSignedInViewerCanReportAnotherUsersQuestion() {
@@ -562,6 +563,7 @@ final class CommunityQuestionActionPolicyTests: XCTestCase {
 
         XCTAssertFalse(policy.canManage)
         XCTAssertTrue(policy.canReport)
+        XCTAssertTrue(policy.canBlock)
     }
 
     func testGuestOnlyGetsTheOpenAction() {
@@ -569,6 +571,141 @@ final class CommunityQuestionActionPolicyTests: XCTestCase {
 
         XCTAssertFalse(policy.canManage)
         XCTAssertFalse(policy.canReport)
+        XCTAssertFalse(policy.canBlock)
+    }
+}
+
+@MainActor
+final class CommunityFeedBlockingTests: XCTestCase {
+    func testHiddenAuthorIsRemovedAndCannotReturnFromAnotherPage() {
+        let blockedAuthor = CommunityUserProfile(
+            id: 42,
+            displayName: "Blocked",
+            bio: "",
+            avatarURL: nil
+        )
+        let visibleAuthor = CommunityUserProfile(
+            id: 77,
+            displayName: "Visible",
+            bio: "",
+            avatarURL: nil
+        )
+        var state = CommunityFeedStateStore()
+        let blockedQuestion = question(id: "blocked-1", author: blockedAuthor)
+        let visibleQuestion = question(id: "visible-1", author: visibleAuthor)
+
+        state.applyPage(
+            CommunityQuestionsResponse(
+                questions: [blockedQuestion, visibleQuestion],
+                totalCount: 2,
+                limit: 20,
+                offset: 0
+            ),
+            offset: 0,
+            reset: true
+        )
+        state.hideAuthor(userID: blockedAuthor.id)
+
+        XCTAssertEqual(state.questions.map(\.id), [visibleQuestion.id])
+        XCTAssertEqual(state.totalCount, 1)
+        XCTAssertEqual(state.offset, 0)
+        XCTAssertTrue(state.isAuthorHidden(blockedAuthor.id))
+
+        state.applyPage(
+            CommunityQuestionsResponse(
+                questions: [blockedQuestion, visibleQuestion],
+                totalCount: 2,
+                limit: 20,
+                offset: 0
+            ),
+            offset: 0,
+            reset: true
+        )
+
+        XCTAssertEqual(state.questions.map(\.id), [visibleQuestion.id])
+        XCTAssertEqual(state.totalCount, 1)
+    }
+
+    func testHiddenAuthorRewindsToPageBoundaryWithoutSkippingShiftedQuestion() {
+        let blockedAuthor = CommunityUserProfile(
+            id: 42,
+            displayName: "Blocked",
+            bio: "",
+            avatarURL: nil
+        )
+        let visibleAuthor = CommunityUserProfile(
+            id: 77,
+            displayName: "Visible",
+            bio: "",
+            avatarURL: nil
+        )
+        let originalQuestions = (0..<60).map { index in
+            question(
+                id: "question-\(index)",
+                author: index == 5 ? blockedAuthor : visibleAuthor
+            )
+        }
+        var state = CommunityFeedStateStore()
+
+        state.applyPage(
+            CommunityQuestionsResponse(
+                questions: Array(originalQuestions[0..<20]),
+                totalCount: originalQuestions.count,
+                limit: 20,
+                offset: 0
+            ),
+            offset: 0,
+            reset: true
+        )
+        state.applyPage(
+            CommunityQuestionsResponse(
+                questions: Array(originalQuestions[20..<40]),
+                totalCount: originalQuestions.count,
+                limit: 20,
+                offset: 20
+            ),
+            offset: 20,
+            reset: false
+        )
+
+        state.hideAuthor(userID: blockedAuthor.id)
+
+        XCTAssertEqual(state.offset, 20)
+        XCTAssertEqual(state.offset % 20, 0)
+
+        let serverVisibleQuestions = originalQuestions.filter { $0.author?.id != blockedAuthor.id }
+        state.applyPage(
+            CommunityQuestionsResponse(
+                questions: Array(serverVisibleQuestions[20..<40]),
+                totalCount: serverVisibleQuestions.count,
+                limit: 20,
+                offset: 20
+            ),
+            offset: state.offset,
+            reset: false
+        )
+
+        let expectedIDs = serverVisibleQuestions.prefix(40).map(\.id)
+        let actualIDs = state.questions.map(\.id)
+        XCTAssertEqual(actualIDs, expectedIDs)
+        XCTAssertEqual(Set(actualIDs).count, actualIDs.count)
+        XCTAssertEqual(state.offset, 40)
+    }
+
+    private func question(id: String, author: CommunityUserProfile) -> CommunityQuestion {
+        CommunityQuestion(
+            id: id,
+            question: "Question",
+            answer: "Answer",
+            gradingResult: nil,
+            topic: "Topic",
+            difficultyLevel: 5,
+            status: "graded",
+            source: "study",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            answeredAt: Date(timeIntervalSince1970: 1_700_000_060),
+            author: author
+        )
     }
 }
 

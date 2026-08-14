@@ -1,5 +1,9 @@
 package com.buddystudy.backend
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.single
 import kotlinx.coroutines.flow.toList
@@ -13,6 +17,7 @@ import com.buddystudy.backend.community.adapter.outbound.persistence.QuestionCom
 import com.buddystudy.backend.community.adapter.outbound.persistence.FeedbackRepository
 import com.buddystudy.backend.community.adapter.outbound.persistence.QuestionLikeRepository
 import com.buddystudy.backend.community.adapter.outbound.persistence.ReportRepository
+import com.buddystudy.backend.community.adapter.outbound.persistence.UserBlockRepository
 import com.buddystudy.backend.community.application.port.inbound.ReportQuestionCommand
 import com.buddystudy.backend.community.application.port.inbound.SubmitFeedbackCommand
 import com.buddystudy.backend.community.application.service.CommunityService
@@ -64,6 +69,7 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var comments: QuestionCommentRepository
     @Autowired lateinit var reports: ReportRepository
     @Autowired lateinit var feedbacks: FeedbackRepository
+    @Autowired lateinit var userBlocks: UserBlockRepository
 
     private lateinit var author: UserEntity
     private lateinit var viewer: UserEntity
@@ -76,6 +82,7 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
         listOf(
             "feedbacks",
             "reports",
+            "user_blocks",
             "question_comments",
             "question_likes",
             "question_stats",
@@ -308,6 +315,92 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
         assertThat(result.reporterUserId).isEqualTo(viewer.id)
         assertThat(result.reason).isEqualTo("spam")
         assertThat(result.message).isEqualTo("bad")
+    }
+
+    @Test
+    fun `blocked users disappear from public questions details and comments until unblocked`(): Unit = runBlocking {
+        val blockedQuestion = answeredPublicQuestion(author, topic = "Blocked author", createdAt = now.plusSeconds(2))
+        hiddenAuthor.allowPublicQuestions = true
+        users.save(hiddenAuthor)
+        val visibleQuestion = answeredPublicQuestion(hiddenAuthor, topic = "Visible author", createdAt = now.plusSeconds(1))
+        comments.save(
+            QuestionCommentEntity(
+                questionId = visibleQuestion.id,
+                userId = author.id,
+                body = "blocked comment",
+                createdAt = now,
+                updatedAt = now,
+            ),
+        )
+        comments.save(
+            QuestionCommentEntity(
+                questionId = visibleQuestion.id,
+                userId = hiddenAuthor.id,
+                body = "visible comment",
+                createdAt = now.plusSeconds(1),
+                updatedAt = now.plusSeconds(1),
+            ),
+        )
+
+        community.setUserBlocked(principal, author.id, blocked = true)
+
+        val page = community.getPublicQuestions(
+            principal = principal,
+            query = null,
+            language = "ko",
+            limit = 1,
+            offset = 0,
+        )
+        val commentPage = community.getComments(
+            id = visibleQuestion.id,
+            limit = 1,
+            offset = 0,
+            principal = principal,
+        )
+
+        assertThat(page.questions.map { it.id }).containsExactly(visibleQuestion.id.toString())
+        assertThat(page.totalCount).isEqualTo(1)
+        assertThat(commentPage.comments.map { it.body }).containsExactly("visible comment")
+        assertThat(commentPage.totalCount).isEqualTo(1)
+        assertRecordNotFound { community.getPublicQuestion(principal, blockedQuestion.id, language = "ko") }
+        assertRecordNotFound {
+            community.getComments(
+                id = blockedQuestion.id,
+                language = "ko",
+                limit = 1,
+                offset = 0,
+                principal = principal,
+            )
+        }
+        assertThat(userBlocks.existsByBlockerUserIdAndBlockedUserId(viewer.id, author.id)).isTrue()
+
+        community.setUserBlocked(principal, author.id, blocked = false)
+
+        assertThat(community.getPublicQuestion(principal, blockedQuestion.id, language = "ko").id)
+            .isEqualTo(blockedQuestion.id.toString())
+        assertThat(
+            community.getComments(
+                id = visibleQuestion.id,
+                limit = 20,
+                offset = 0,
+                principal = principal,
+            ).comments.map { it.body },
+        ).containsExactly("blocked comment", "visible comment")
+        assertThat(userBlocks.existsByBlockerUserIdAndBlockedUserId(viewer.id, author.id)).isFalse()
+    }
+
+    @Test
+    fun `concurrent duplicate block requests create one relationship`(): Unit = runBlocking {
+        val responses = coroutineScope {
+            List(8) {
+                async(Dispatchers.Default) {
+                    community.setUserBlocked(principal, author.id, blocked = true)
+                }
+            }.awaitAll()
+        }
+
+        assertThat(responses).allMatch { it.blocked && it.userId == author.id }
+        assertThat(userBlocks.count()).isEqualTo(1)
     }
 
     @Test

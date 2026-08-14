@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ja"><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="BuddyStudy プライバシーポリシー"><meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://ghkdqhrbals.github.io/buddy-studdy/ja/privacy-2026-08-14.html">
+  <link rel="icon" href="../assets/buddystudy-icon.png"><link rel="stylesheet" href="../assets/legal.css">
+  <title>プライバシーポリシー - BuddyStudy</title>
+</head><body><main>
+  <nav><a href="../">BuddyStudy</a><span class="languages"><a href="../privacy-2026-08-14.html" lang="ko">한국어</a><a href="../en/privacy-2026-08-14.html" lang="en">English</a><strong>日本語</strong></span></nav>
+  <header><div class="brand">BuddyStudy</div><h1>プライバシーポリシー</h1><p class="updated">公示日・施行日：2026年8月14日</p><p class="summary">BuddyStudyは学習・アカウント機能に必要なデータのみを処理し、個人データを販売しません。学習データの正本はAWSソウルリージョンのMySQLです。端末には設定、下書き、キャッシュ、診断ログが保存される場合があります。</p></header>
+  <div class="toc"><a href="#controller">1. 管理者</a><a href="#purpose">2. 利用目的</a><a href="#items">3. 処理するデータ</a><a href="#public">4. 公開コンテンツ</a><a href="#retention">5. 保存期間</a><a href="#processors">6. 委託・国外移転</a><a href="#analytics">7. 分析・障害診断</a><a href="#automated">8. 自動処理</a><a href="#rights">9. ユーザーの権利</a><a href="#destruction">10. 削除</a><a href="#security">11. セキュリティ</a><a href="#children">12. 児童</a><a href="#contact">13. お問い合わせ</a><a href="#changes">14. 変更</a></div>
+  <section id="controller"><h2>1. 管理者</h2><p>BuddyStudy運営者（以下「運営者」）は、BuddyStudy iOSアプリ、API、通知、公開質問、関連ウェブページで処理される個人データの管理者です。</p><p>公開質問はログインせず閲覧できます。個人の学習記録、統計、コメント、いいね、プロフィール、通知同期にはアカウントと端末登録が必要です。</p></section>
+  <section id="purpose"><h2>2. 利用目的</h2><ul><li>メール・Google・Appleログイン、端末登録、セッション、アカウント保護</li><li>学習ツリー、質問生成、下書き、AI採点・フィードバック、翻訳、記録、統計</li><li>質問・コメント通知および任意のマーケティング通知</li><li>公開質問、コメント、いいね、通報、ユーザーブロック、フィードバック、プロフィール、および迷惑コンテンツへの露出制限</li><li>利用上限、規約同意、通知設定の管理</li><li>App Storeサブスクリプションの購入・復元・変更・解約・返金案内、メンバーシップ付与、決済履歴管理</li><li>障害対応、セキュリティ、不正利用防止、品質・性能改善</li></ul></section>
+  <section id="items"><h2>3. 処理するデータと収集方法</h2>
+    <div class="table-wrap"><table><thead><tr><th>区分</th><th>データ</th><th>時点・保存先</th></tr></thead><tbody>
+      <tr><td>アカウント・認証</td><td>ユーザーID、メール、パスワードハッシュ、ログイン事業者と識別子（Apple・Googleを含む）、状態、短期メール認証コード、セッション期限</td><td>ログイン機能利用時 · MySQL/Redis</td></tr>
+      <tr><td>端末・通知</td><td>端末ID、ハッシュ化したクライアント認証情報、APNsトークン・環境、プラットフォーム、アプリ版、言語、タイムゾーン、通知設定</td><td>端末登録・通知利用時 · MySQL</td></tr>
+      <tr><td>プロフィール</td><td>表示名、紹介、ピクセルキャラクターID・色、質問公開設定</td><td>表示名はアカウント機能に必要、その他は任意 · MySQL</td></tr>
+      <tr><td>学習</td><td>学習ツリー、階層、難易度、有効トピック、予定、質問、ヒント、下書き・提出回答、スコア、ルーブリック判定、フィードバック、解説、翻訳、記録、トピック統計、利用量</td><td>学習機能利用時 · MySQL、端末内下書き・キャッシュ</td></tr>
+      <tr><td>コミュニティ</td><td>公開設定、コメント、いいね、閲覧数、通報理由・内容、ブロックしたユーザーID、ブロックされたユーザーID、ブロック時刻、フィードバック、時刻</td><td>該当機能利用時 · MySQL</td></tr>
+      <tr><td>規約履歴</td><td>文書・版、同意・撤回、経路、時刻、IP、ユーザーエージェント、アプリ版</td><td>必須・任意同意の管理 · MySQL</td></tr>
+      <tr><td>サブスクリプション・購入</td><td>メンバーシップ・商品ID、App Account Token、App Store取引・元取引ID、購入環境、購入・更新・満了・解約・返金の状態と時刻、金額・通貨、RevenueCat App User ID・イベントID</td><td>購入・復元・メンバーシップ提供時 · MySQL、Apple、RevenueCat</td></tr>
+      <tr><td>運用ログ</td><td>リクエストID、ユーザーID、IP、時刻、HTTPメソッド・パス・クエリ、状態、所要時間、エラー、限定的なヘッダーと本文</td><td>安定性・セキュリティ · Loki</td></tr>
+      <tr><td>アプリ分析</td><td>アプリインスタンス、端末・OS・アプリ情報、言語、ログイン状態、画面、ログイン結果、学習作成、質問・採点状態、通知開封</td><td>リリース版の測定 · Google Analytics for Firebase</td></tr>
+      <tr><td>障害診断</td><td>エラー・致命的クラッシュ、スタック、アプリ・OS・端末情報、エラーセッションのマスキング済み再現情報</td><td>障害診断 · Sentry</td></tr>
+    </tbody></table></div>
+    <p>公的識別番号、健康・生体情報などの機微情報は意図的に収集しません。学習回答やコメントにも入力しないでください。</p><p>カード番号、銀行口座、Apple IDの支払い認証情報はAppleが処理し、BuddyStudyとRevenueCatは直接収集・保存しません。</p><p>アプリ入力、ログイン事業者、API、APNs登録、SDK自動収集により取得します。パスワード、認証コード、アクセストークン、Google IDトークン、APNs認証キー、クライアントsecretはログでマスキングします。</p>
+  </section>
+  <section id="public"><h2>4. 公開コンテンツ</h2><p>公開を有効にすると、質問、トピック、難易度、作成・回答時刻、スコア、閲覧・いいね・コメント数、公開プロフィールが他のユーザーに表示される場合があります。公開コメントと投稿者の公開プロフィールも表示されます。</p><p>ログインしたユーザーが別のユーザーをブロックすると、その投稿者の公開質問とコメントはブロックしたユーザーに表示されず、その投稿者の公開質問詳細も開けなくなります。ブロック関係自体は公開コンテンツとして表示されません。</p><p>下書き、非公開回答、メール、認証情報、APNsトークン、端末ID、内部ログは公開されません。</p></section>
+  <section id="retention"><h2>5. 保存期間</h2><div class="table-wrap"><table><thead><tr><th>データ</th><th>期間</th></tr></thead><tbody>
+    <tr><td>アカウント、プロフィール、学習、記録、統計、コミュニティ活動</td><td>個別削除または退会まで</td></tr>
+    <tr><td>ユーザー間のブロック関係</td><td>ブロック解除の依頼が処理されるまで、または関係するいずれかのアカウントが削除されるまで</td></tr>
+    <tr><td>メール認証コード</td><td>発行後3分または認証完了まで</td></tr>
+    <tr><td>端末・APNsトークン、通知設定</td><td>登録解除、退会、無効化まで</td></tr>
+    <tr><td>規約同意・撤回履歴</td><td>退会まで。紛争・法的義務に必要な場合は必要期間</td></tr>
+    <tr><td>サブスクリプション・購入・メンバーシップ履歴</td><td>退会またはメンバーシップ終了まで。決済・返金・紛争・法令上必要な取引記録は該当期間</td></tr>
+    <tr><td>運用・セキュリティログ</td><td>7日</td></tr>
+    <tr><td>データベースバックアップ</td><td>最大14日。災害復旧専用</td></tr>
+    <tr><td>Google Analytics・Sentry</td><td>運営者設定および各社ポリシーによる</td></tr>
+  </tbody></table></div></section>
+  <section id="processors"><h2>6. 委託・国外移転</h2><p>個人データを販売しません。以下を利用します。</p><div class="table-wrap"><table><thead><tr><th>事業者</th><th>目的・データ</th><th>場所・方法</th></tr></thead><tbody>
+    <tr><td>Amazon Web Services</td><td>API、MySQL、Redis、secret、バックアップ · サービスデータと運用情報</td><td>韓国ソウル · 暗号化通信</td></tr>
+    <tr><td>Cloudflare</td><td>DNS、プロキシ、TLS、ネットワーク保護 · IP、リクエスト情報</td><td>グローバルネットワーク · 暗号化通信</td></tr>
+    <tr><td>OpenAI</td><td>質問、採点、フィードバック、推薦、翻訳フォールバック · トピック、質問、回答、必要なプロンプト</td><td>米国等 · 利用時に暗号化通信</td></tr>
+    <tr><td>Apple</td><td>Appleログイン、App Storeの購入・復元・解約・返金 · 事業者識別子、ユーザーが許可したメール・氏名、App Account Token、商品・取引・サブスクリプション状態</td><td>米国等 · 利用時に暗号化通信</td></tr>
+    <tr><td>Apple APNs</td><td>プッシュ通知 · APNsトークン、通知payload</td><td>米国等 · 送信時に暗号化通信</td></tr>
+    <tr><td>RevenueCat, Inc.</td><td>商品取得、購入・復元、Customer Center、サブスクリプション状態とWebhook同期 · App User ID、商品ID、レシート・取引・サブスクリプション・返金状態、SDKのアプリ・端末情報</td><td>米国等 · サブスクリプション機能または決済イベント時に暗号化通信</td></tr>
+    <tr><td>Google</td><td>Googleログイン、SMTPメール認証、Firebase Analytics・Remote Config · ログイン情報、宛先・コード、利用イベント、端末・アプリ情報、アプリ制御設定の要求情報</td><td>米国等 · 暗号化通信</td></tr>
+    <tr><td>Functional Software, Inc. (Sentry)</td><td>障害診断 · エラー、スタック、アプリ・端末情報、マスキング済みエラーセッション</td><td>米国等 · エラー時に暗号化通信</td></tr>
+  </tbody></table></div><p>LibreTranslateは運営者がソウルリージョンで自己運用し、別のLibreTranslate事業者へ入力を送信しません。各委託先はプライバシーポリシーと契約に基づく保護措置を適用します。外部処理を拒否すると、関連するApple・Googleログイン、メール、AI、通知、サブスクリプション、分析、診断機能が制限される場合があります。</p></section>
+  <section id="analytics"><h2>7. 分析・障害診断</h2><p>リリース版ではGoogle Analytics for Firebaseで大まかな画面・機能イベントを測定し、Firebase Remote Configでメンテナンス・アップデート等のアプリ制御設定を取得します。BuddyStudyユーザーID、メール、学習トピック、質問、回答、コメント、トークン、リクエストIDを分析イベントへ入れず、広告識別子による個別広告を提供しません。</p><p>Sentryはエラー・致命的イベントのみ送信します。通常セッション再現率は0%で、エラーセッションのみ対象です。全テキスト・画像をマスキングし、ネットワーク本文・ヘッダー、スクリーンショット、ビュー階層を無効にしています。</p></section>
+  <section id="automated"><h2>8. 自動処理</h2><p>質問、翻訳、スコア、フィードバックは自動生成されます。学習補助であり、法的または同等に重大な決定を行いません。</p></section>
+  <section id="rights"><h2>9. ユーザーの権利</h2><p>アプリでプロフィール、公開設定、通知設定、任意同意、学習記録、アカウントを確認・修正・削除できます。アプリで別のコミュニティユーザーをブロックできます。ブロック解除は下記メールで依頼でき、本人確認後にブロック関係を削除します。マーケティング同意はいつでも撤回できます。サブスクリプションの変更・解約・返金申請・購入復元は、メンバーシップ・決済画面からAppleまたはRevenueCatの管理画面を通じて開始できます。</p><p>開示、訂正、削除、処理停止、同意撤回は下記メールでも請求できます。本人確認を求める場合があります。</p></section>
+  <section id="destruction"><h2>10. 削除</h2><p>退会時はアクセスとセッションを直ちに無効化し、復旧可能な非同期処理でプロフィール、学習、質問、回答、記録、統計、コメント、いいね、通報、ユーザー間のブロック関係、通知、規約履歴、端末リンクを稼働DBから削除します。退会するユーザーがブロックした関係と、別のユーザーが退会するユーザーをブロックした関係の両方を削除します。決済・返金・紛争・法的義務に必要な取引記録は分離保管し、期間終了後に削除します。失敗した処理は再試行し運用確認用に記録します。</p><p>バックアップは通常利用のため復元せず、14日以内の循環期間後に削除されます。</p></section>
+  <section id="security"><h2>11. セキュリティ</h2><ul><li>TLS、パスワードハッシュ、クライアントsecret原文の非保存</li><li>AWS Secrets Managerと最小権限アクセス</li><li>Cloudflare保護、管理者認証、VPN管理経路</li><li>認証情報マスキング、7日ログ、アクセス・監査記録</li><li>MySQL制約、Redis AOF/RDB、outbox・inbox、冪等イベント処理</li><li>エラーセッションのテキスト・画像マスキング</li></ul></section>
+  <section id="children"><h2>12. 児童</h2><p>14歳未満の児童を対象としていません。児童のデータが処理された可能性がある場合は削除をご依頼ください。</p></section>
+  <section id="contact"><h2>13. お問い合わせ</h2><p>プライバシー担当：BuddyStudy運営者 · <a href="mailto:ghkdqhrbals@gmail.com">ghkdqhrbals@gmail.com</a></p></section>
+  <section id="changes"><h2>14. 変更</h2><p>この版では、コミュニティユーザーのブロック関係について、利用目的、データ項目、表示制御、保存期間、削除方法を明確にしています。</p><p>更新時は公示日・施行日を表示します。権利に重大な影響を与える変更は別途告知し、必要な場合は再同意を求めます。</p></section>
+  <footer>2026年8月14日版の固定文書です。<a href="privacy.html">現行ポリシー</a> · <a href="terms.html">利用規約</a></footer>
+</main></body></html>

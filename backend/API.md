@@ -392,7 +392,7 @@ Patch request:
 }
 ```
 
-`DELETE /api/v1/profile` immediately withdraws the active member, revokes its sessions, scrubs login/profile secrets, reconnects the current device to an anonymous user, and returns a fresh anonymous `accessToken`. In the same transaction it writes an `ACCOUNT_WITHDRAWN` outbox event. An at-least-once Redis Stream consumer then idempotently removes profile assets, public questions, studies, records, reactions, notifications, and related data.
+`DELETE /api/v1/profile` immediately withdraws the active member, revokes its sessions, scrubs login/profile secrets, reconnects the current device to an anonymous user, and returns a fresh anonymous `accessToken`. In the same transaction it writes an `ACCOUNT_WITHDRAWN` outbox event. An at-least-once Redis Stream consumer then idempotently removes profile assets, public questions, studies, records, reactions, user-block relationships, notifications, and related data.
 
 ### Permission Policy, Terms, And Notifications
 
@@ -446,6 +446,24 @@ Request:
 ```
 
 Reports are always stored in MySQL. If `REPORT_EMAIL_TO` and SMTP settings are configured, the backend also forwards the report by email.
+
+### Block A Community User
+
+```http
+PUT /api/v1/community/users/{userId}/block
+DELETE /api/v1/community/users/{userId}/block
+Authorization: Bearer <accessToken>
+```
+
+Both operations require the `public-user:block` permission and are idempotent.
+The `PUT` response is `{ "userId": 42, "blocked": true }`; `DELETE` returns
+the same shape with `blocked: false`. A member cannot block their own account.
+
+For an authenticated requester, blocking an author removes that author's
+questions from public-question lists, returns not found for direct public-detail
+reads, and removes that author's comments from comment lists. The relationship
+is stored by the backend, so it applies on every signed-in device until the user
+unblocks the author or either account is deleted.
 
 ### Upsert Study Settings
 

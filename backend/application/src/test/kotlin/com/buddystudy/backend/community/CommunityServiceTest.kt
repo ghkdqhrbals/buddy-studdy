@@ -6,6 +6,8 @@ import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
+import com.buddystudy.backend.common.application.error.ApiErrorCode
+import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.common.application.outbox.AfterCommitPort
 import com.buddystudy.backend.common.application.outbox.OutboxPublishSummary
 import com.buddystudy.backend.common.application.outbox.OutboxReference
@@ -14,6 +16,7 @@ import com.buddystudy.backend.community.application.port.outbound.QuestionCommen
 import com.buddystudy.backend.community.application.port.outbound.FeedbackPort
 import com.buddystudy.backend.community.application.port.outbound.QuestionLikePort
 import com.buddystudy.backend.community.application.port.outbound.ReportPort
+import com.buddystudy.backend.community.application.port.outbound.UserBlockPort
 import com.buddystudy.backend.community.application.service.CommunityService
 import com.buddystudy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
 import com.buddystudy.backend.community.application.port.outbound.PublicQuestionViewLocalization
@@ -25,6 +28,7 @@ import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.community.domain.entity.FeedbackEntity
 import com.buddystudy.community.domain.entity.QuestionLikeEntity
 import com.buddystudy.community.domain.entity.ReportEntity
+import com.buddystudy.community.domain.entity.UserBlockEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
@@ -35,6 +39,7 @@ import com.buddystudy.backend.test.RecordingContentTranslationEventPort
 import com.buddystudy.backend.localization.application.service.ContentTranslationRequestManager
 import com.buddystudy.backend.localization.application.model.LocalizableContentType
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageImpl
@@ -44,10 +49,11 @@ import java.util.Optional
 
 class CommunityServiceTest {
     private val users = FakeUserPort()
-    private val questions = FakeQuestionPort()
+    private val userBlocks = FakeUserBlockPort()
+    private val questions = FakeQuestionPort(userBlocks)
     private val questionStats = FakeQuestionStatsPort()
     private val likes = FakeQuestionLikePort()
-    private val comments = FakeQuestionCommentPort()
+    private val comments = FakeQuestionCommentPort(userBlocks)
     private val notificationPublisher = FakeNotificationPublisher()
     private val reactionPublisher = FakeReactionPublisher()
     private val translationEvents = RecordingContentTranslationEventPort()
@@ -59,6 +65,7 @@ class CommunityServiceTest {
         likes = likes,
         comments = comments,
         reports = FakeReportPort(),
+        userBlocks = userBlocks,
         feedbacks = FakeFeedbackPort(),
         reactions = reactionPublisher,
         notifications = notificationPublisher,
@@ -115,6 +122,72 @@ class CommunityServiceTest {
         assertThat(question.answer).isEqualTo("Answer")
         assertThat(question.gradingResult?.feedback).isEqualTo("Good")
         assertThat(question.gradingResult?.explanation).isEqualTo("Because")
+    }
+
+    @Test
+    fun `blocked authors are hidden from public question lists details and comments`(): Unit = runBlocking {
+        users.rows += UserEntity(id = 10, providerId = "blocked", displayName = "Blocked")
+        users.rows += UserEntity(id = 11, providerId = "visible", displayName = "Visible")
+        questions.rows += publicQuestion(id = 102, userId = 10, topic = "Blocked topic")
+        questions.rows += publicQuestion(id = 101, userId = 11, topic = "Visible topic")
+        comments.rows += QuestionCommentEntity(id = 1, questionId = 101, userId = 10, body = "hidden")
+        comments.rows += QuestionCommentEntity(id = 2, questionId = 101, userId = 11, body = "visible")
+        userBlocks.rows += UserBlockEntity(blockerUserId = principal.userId, blockedUserId = 10)
+
+        val questionsResponse = service.getPublicQuestions(
+            principal,
+            query = null,
+            language = "ko",
+            limit = 1,
+            offset = 0,
+        )
+        val commentsResponse = service.getComments(
+            id = 101,
+            limit = 1,
+            offset = 0,
+            principal = principal,
+        )
+
+        assertThat(questionsResponse.questions.map { it.author?.id }).containsExactly(11)
+        assertThat(questionsResponse.totalCount).isEqualTo(1)
+        assertThat(commentsResponse.comments.map { it.author.id }).containsExactly(11)
+        assertThat(commentsResponse.totalCount).isEqualTo(1)
+        assertThatThrownBy {
+            runBlocking { service.getPublicQuestion(principal, 102) }
+        }
+            .isInstanceOf(ApiException::class.java)
+            .extracting("code")
+            .isEqualTo(ApiErrorCode.RECORD_NOT_FOUND)
+        assertThatThrownBy {
+            runBlocking { service.getComments(id = 102, limit = 1, offset = 0, principal = principal) }
+        }
+            .isInstanceOf(ApiException::class.java)
+            .extracting("code")
+            .isEqualTo(ApiErrorCode.RECORD_NOT_FOUND)
+    }
+
+    @Test
+    fun `blocking a user is idempotent and can be reversed`(): Unit = runBlocking {
+        users.rows += UserEntity(id = 10, providerId = "author", displayName = "Author")
+
+        assertThat(service.setUserBlocked(principal, userId = 10, blocked = true).blocked).isTrue()
+        assertThat(service.setUserBlocked(principal, userId = 10, blocked = true).blocked).isTrue()
+        assertThat(userBlocks.rows).hasSize(1)
+
+        assertThat(service.setUserBlocked(principal, userId = 10, blocked = false).blocked).isFalse()
+        assertThat(service.setUserBlocked(principal, userId = 10, blocked = false).blocked).isFalse()
+        assertThat(userBlocks.rows).isEmpty()
+    }
+
+    @Test
+    fun `blocking my own account is rejected`(): Unit = runBlocking {
+        assertThatThrownBy {
+            runBlocking { service.setUserBlocked(principal, userId = principal.userId, blocked = true) }
+        }
+            .isInstanceOf(ApiException::class.java)
+            .extracting("code")
+            .isEqualTo(ApiErrorCode.VALIDATION_ERROR)
+        assertThat(userBlocks.rows).isEmpty()
     }
 
     @Test
@@ -243,7 +316,9 @@ class CommunityServiceTest {
         override suspend fun findByEmailAndProvider(email: String, provider: String): UserEntity? = null
     }
 
-    private class FakeQuestionPort : QuestionPort {
+    private class FakeQuestionPort(
+        private val userBlocks: FakeUserBlockPort,
+    ) : QuestionPort {
         val rows = mutableListOf<QuestionEntity>()
         override suspend fun save(entity: QuestionEntity): QuestionEntity = entity
         override suspend fun findQuestionById(id: Long): QuestionEntity? = null
@@ -262,14 +337,45 @@ class CommunityServiceTest {
         override suspend fun findRecentQuestionTextsByUserIdAndTopic(userId: Long, topic: String, pageable: Pageable): List<String> = emptyList()
         override suspend fun countPendingForStudy(studyId: Long): Long = 0
         override suspend fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long> = emptyMap()
-        override suspend fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity> = PageImpl(rows.sortedByDescending { it.createdAt })
+        override suspend fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity> = publicPage(null, pageable)
+        override suspend fun findPublicAnsweredVisibleTo(
+            viewerUserId: Long?,
+            pageable: Pageable,
+        ): Page<QuestionEntity> = publicPage(viewerUserId, pageable)
         override suspend fun findPublicAnsweredByTopic(topic: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override suspend fun findPublicAnsweredByQuery(query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
+        override suspend fun findPublicAnsweredByLanguageAndQueryVisibleTo(
+            viewerUserId: Long?,
+            language: String,
+            query: String,
+            pageable: Pageable,
+        ): Page<QuestionEntity> = publicPage(viewerUserId, pageable, query)
         override suspend fun findPublicAnsweredById(id: Long): QuestionEntity? = rows.firstOrNull { it.id == id }
         override suspend fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = rows.filter { it.id in ids }
         override suspend fun softDelete(id: Long, userId: Long, now: Instant): Int = 0
         override suspend fun softDeleteByUserId(userId: Long, now: Instant): Int = 0
         override suspend fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int = 0
+
+        private suspend fun publicPage(
+            viewerUserId: Long?,
+            pageable: Pageable,
+            query: String? = null,
+        ): Page<QuestionEntity> {
+            val blockedUserIds = viewerUserId?.let { userBlocks.findBlockedUserIds(it) }.orEmpty()
+            val normalizedQuery = query?.lowercase()
+            val visible = rows
+                .asSequence()
+                .filterNot { it.userId in blockedUserIds }
+                .filter { row ->
+                    normalizedQuery == null || listOf(row.topic, row.question, row.answer.orEmpty())
+                        .any { normalizedQuery in it.lowercase() }
+                }
+                .sortedWith(compareByDescending<QuestionEntity> { it.createdAt }.thenByDescending { it.id })
+                .toList()
+            val start = pageable.offset.toInt().coerceAtMost(visible.size)
+            val end = (start + pageable.pageSize).coerceAtMost(visible.size)
+            return PageImpl(visible.subList(start, end), pageable, visible.size.toLong())
+        }
     }
 
     private class FakeQuestionStatsPort : QuestionStatsPort {
@@ -326,7 +432,9 @@ class CommunityServiceTest {
         }
     }
 
-    private class FakeQuestionCommentPort : QuestionCommentPort {
+    private class FakeQuestionCommentPort(
+        private val userBlocks: FakeUserBlockPort,
+    ) : QuestionCommentPort {
         val rows = mutableListOf<QuestionCommentEntity>()
         private var nextId = 1L
         override suspend fun save(entity: QuestionCommentEntity): QuestionCommentEntity {
@@ -345,7 +453,27 @@ class CommunityServiceTest {
         override suspend fun findByQuestionIdAndDeletedAtIsNullOrderByCreatedAtAsc(
             questionId: Long,
             pageable: Pageable,
-        ): Page<QuestionCommentEntity> = PageImpl(rows.filter { it.questionId == questionId && it.deletedAt == null })
+        ): Page<QuestionCommentEntity> = commentPage(questionId, null, pageable)
+
+        override suspend fun findVisibleByQuestionIdOrderByCreatedAtAsc(
+            questionId: Long,
+            viewerUserId: Long?,
+            pageable: Pageable,
+        ): Page<QuestionCommentEntity> = commentPage(questionId, viewerUserId, pageable)
+
+        private suspend fun commentPage(
+            questionId: Long,
+            viewerUserId: Long?,
+            pageable: Pageable,
+        ): Page<QuestionCommentEntity> {
+            val blockedUserIds = viewerUserId?.let { userBlocks.findBlockedUserIds(it) }.orEmpty()
+            val visible = rows
+                .filter { it.questionId == questionId && it.deletedAt == null && it.userId !in blockedUserIds }
+                .sortedWith(compareBy<QuestionCommentEntity> { it.createdAt }.thenBy { it.id })
+            val start = pageable.offset.toInt().coerceAtMost(visible.size)
+            val end = (start + pageable.pageSize).coerceAtMost(visible.size)
+            return PageImpl(visible.subList(start, end), pageable, visible.size.toLong())
+        }
     }
 
     private class FakeReportPort : ReportPort {
@@ -354,6 +482,36 @@ class CommunityServiceTest {
 
     private class FakeFeedbackPort : FeedbackPort {
         override suspend fun save(entity: FeedbackEntity): FeedbackEntity = entity
+    }
+
+    private class FakeUserBlockPort : UserBlockPort {
+        val rows = mutableListOf<UserBlockEntity>()
+
+        override suspend fun insertIfAbsent(entity: UserBlockEntity): Boolean = synchronized(rows) {
+            if (rows.any {
+                    it.blockerUserId == entity.blockerUserId && it.blockedUserId == entity.blockedUserId
+                }
+            ) {
+                false
+            } else {
+                if (entity.id == 0L) entity.id = (rows.maxOfOrNull { it.id } ?: 0L) + 1L
+                rows += entity
+                true
+            }
+        }
+
+        override suspend fun exists(blockerUserId: Long, blockedUserId: Long): Boolean =
+            rows.any { it.blockerUserId == blockerUserId && it.blockedUserId == blockedUserId }
+
+        override suspend fun findBlockedUserIds(blockerUserId: Long): Set<Long> =
+            rows.filter { it.blockerUserId == blockerUserId }.map { it.blockedUserId }.toSet()
+
+        override suspend fun delete(blockerUserId: Long, blockedUserId: Long): Long {
+            val removed = rows.removeIf {
+                it.blockerUserId == blockerUserId && it.blockedUserId == blockedUserId
+            }
+            return if (removed) 1 else 0
+        }
     }
 
     private class FakeReactionPublisher : PublicQuestionReactionPublishPort {

@@ -1192,6 +1192,7 @@ private struct MobileHomeView: View {
     @State private var isShowingEmailSignIn = false
     @State private var pendingCommunityQuestionDeletion: CommunityQuestion?
     @State private var pendingCommunityQuestionReport: CommunityQuestion?
+    @State private var pendingCommunityUserBlock: CommunityUserProfile?
     @State private var isSearchVisible = false
     @State private var homeStudySearchText = ""
     @State private var submittedHomeStudySearchText = ""
@@ -1666,6 +1667,13 @@ private struct MobileHomeView: View {
                 pendingCommunityQuestionReport = nil
             }
         }
+        .modifier(
+            MobileCommunityUserBlockAlertModifier(
+                appState: appState,
+                user: $pendingCommunityUserBlock,
+                strings: strings
+            )
+        )
         .modifier(
             MobileStudyOpeningErrorAlertModifier(
                 appState: appState,
@@ -2172,6 +2180,14 @@ private struct MobileHomeView: View {
                 Label(strings.deleteQuestion, systemImage: "trash")
             }
         } else if policy.canReport {
+            if let author = question.author, policy.canBlock {
+                Button(role: .destructive) {
+                    pendingCommunityUserBlock = author
+                } label: {
+                    Label(strings.blockUser, systemImage: "person.crop.circle.badge.xmark")
+                }
+            }
+
             Button(role: .destructive) {
                 pendingCommunityQuestionReport = question
             } label: {
@@ -2519,6 +2535,39 @@ private struct MobileHomeView: View {
             Task {
                 await appState.searchBackendStudies(query: query)
             }
+        }
+    }
+}
+
+private struct MobileCommunityUserBlockAlertModifier: ViewModifier {
+    @ObservedObject var appState: AppState
+    @Binding var user: CommunityUserProfile?
+    let strings: AppStrings
+
+    private var isPresented: Binding<Bool> {
+        Binding(
+            get: { user != nil },
+            set: { if !$0 { user = nil } }
+        )
+    }
+
+    func body(content: Content) -> some View {
+        content.alert(
+            strings.blockUserTitle,
+            isPresented: isPresented,
+            presenting: user
+        ) { selectedUser in
+            Button(strings.cancel, role: .cancel) {
+                user = nil
+            }
+            Button(strings.blockUser, role: .destructive) {
+                user = nil
+                Task {
+                    await appState.blockCommunityUser(selectedUser)
+                }
+            }
+        } message: { selectedUser in
+            Text(strings.blockUserMessage(selectedUser.displayName))
         }
     }
 }
@@ -6331,6 +6380,10 @@ private struct MobileMembershipManagementView: View {
                             .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
                     }
 
+                    if selectedProduct != nil {
+                        subscriptionDisclosure
+                    }
+
                     if let message = billingStore.errorMessage {
                         Text(message)
                             .font(.footnote)
@@ -6635,6 +6688,27 @@ private struct MobileMembershipManagementView: View {
         }
     }
 
+    private var subscriptionDisclosure: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(strings.membershipAutoRenewalDisclosure)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 16) {
+                Link(
+                    strings.termsOfService,
+                    destination: AppLegalLinks.termsOfServiceURL(language: appState.settings.appLanguage)
+                )
+                Link(
+                    strings.privacyPolicy,
+                    destination: AppLegalLinks.privacyPolicyURL(language: appState.settings.appLanguage)
+                )
+            }
+            .font(.caption.weight(.semibold))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private func membershipRow(_ group: MembershipProductGroup) -> some View {
         HStack(spacing: 12) {
             ZStack {
@@ -6653,7 +6727,7 @@ private struct MobileMembershipManagementView: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 7) {
-                    Text(strings.membershipTierName(group.tierCode))
+                    Text(group.products.first?.displayName ?? strings.membershipTierName(group.tierCode))
                         .font(.body.weight(.semibold))
                     if activeTierCode == group.tierCode,
                        appState.billingStatus?.isEntitlementActive == true {
@@ -9526,6 +9600,7 @@ struct CommunityQuestionDetailView: View {
     @State private var isShowingOriginal = false
     @State private var isShowingDeleteConfirmation = false
     @State private var isShowingReportConfirmation = false
+    @State private var userToBlock: CommunityUserProfile?
     @State private var originalAvailable: Bool
     @FocusState private var isCommentInputFocused: Bool
 
@@ -9628,6 +9703,14 @@ struct CommunityQuestionDetailView: View {
                                 Label(strings.deleteQuestion, systemImage: "trash")
                             }
                         } else if policy.canReport {
+                            if let author = displayQuestion.author, policy.canBlock {
+                                Button(role: .destructive) {
+                                    userToBlock = author
+                                } label: {
+                                    Label(strings.blockUser, systemImage: "person.crop.circle.badge.xmark")
+                                }
+                            }
+
                             Button(role: .destructive) {
                                 isShowingReportConfirmation = true
                             } label: {
@@ -9672,6 +9755,24 @@ struct CommunityQuestionDetailView: View {
                 }
             }
             Button(strings.cancel, role: .cancel) {}
+        }
+        .alert(
+            strings.blockUserTitle,
+            isPresented: Binding(
+                get: { userToBlock != nil },
+                set: { if !$0 { userToBlock = nil } }
+            ),
+            presenting: userToBlock
+        ) { user in
+            Button(strings.cancel, role: .cancel) {
+                userToBlock = nil
+            }
+            Button(strings.blockUser, role: .destructive) {
+                userToBlock = nil
+                blockUser(user)
+            }
+        } message: { user in
+            Text(strings.blockUserMessage(user.displayName))
         }
         .task(id: displayQuestion.id) {
             if contentSource.showsCommunityInteractions {
@@ -9825,6 +9926,16 @@ struct CommunityQuestionDetailView: View {
                     ) {
                         deleteComment(comment)
                     }
+                    .contextMenu {
+                        if canWriteCommunityReaction,
+                           !appState.isCurrentCommunityUser(id: comment.author.id) {
+                            Button(role: .destructive) {
+                                userToBlock = comment.author
+                            } label: {
+                                Label(strings.blockUser, systemImage: "person.crop.circle.badge.xmark")
+                            }
+                        }
+                    }
                 }
             }
 
@@ -9876,6 +9987,24 @@ struct CommunityQuestionDetailView: View {
         }
 
         return true
+    }
+
+    private func blockUser(_ user: CommunityUserProfile) {
+        Task {
+            guard await appState.blockCommunityUser(user) else {
+                return
+            }
+
+            let previousCount = comments.count
+            comments.removeAll { $0.author.id == user.id }
+            let removedCount = previousCount - comments.count
+            commentsTotalCount = max(0, commentsTotalCount - removedCount)
+            displayQuestion.commentCount = commentsTotalCount
+
+            if displayQuestion.author?.id == user.id {
+                dismiss()
+            }
+        }
     }
 
     private func toggleLike() {

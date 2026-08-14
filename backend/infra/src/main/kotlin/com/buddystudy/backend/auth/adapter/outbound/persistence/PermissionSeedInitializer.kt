@@ -93,6 +93,7 @@ class PermissionSeedInitializer(
             PermissionDefinition(Permissions.PUBLIC_QUESTION_LIKE, "Like public questions", true),
             PermissionDefinition(Permissions.PUBLIC_QUESTION_COMMENT, "Comment on public questions", true),
             PermissionDefinition(Permissions.PUBLIC_QUESTION_REPORT, "Report public questions", true),
+            PermissionDefinition(Permissions.PUBLIC_USER_BLOCK, "Block community users", true),
             PermissionDefinition(Permissions.COMMENT_DELETE, "Delete comments", true),
             PermissionDefinition(Permissions.DEBUG_READ, "Read debug logs", false),
             PermissionDefinition(Permissions.TEST_PUSH_SEND, "Send test push", true),
@@ -121,6 +122,7 @@ class PermissionSeedInitializer(
             Permissions.PUBLIC_QUESTION_LIKE,
             Permissions.PUBLIC_QUESTION_COMMENT,
             Permissions.PUBLIC_QUESTION_REPORT,
+            Permissions.PUBLIC_USER_BLOCK,
             Permissions.COMMENT_DELETE,
         )
 

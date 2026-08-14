@@ -556,6 +556,12 @@ protocol RemotePushBackendClientProtocol {
         message: String
     ) async throws
 
+    func setCommunityUserBlocked(
+        registration: RemotePushRegistration,
+        userID: Int,
+        blocked: Bool
+    ) async throws -> CommunityUserBlockState
+
     func submitAppFeedback(
         registration: RemotePushRegistration,
         content: String
@@ -1935,6 +1941,20 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(ReportQuestionRequest(reason: reason, message: message))
         _ = try await perform(request)
+    }
+
+    func setCommunityUserBlocked(
+        registration: RemotePushRegistration,
+        userID: Int,
+        blocked: Bool
+    ) async throws -> CommunityUserBlockState {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "community", "users", String(userID), "block")
+        )
+        request.httpMethod = blocked ? "PUT" : "DELETE"
+        let data = try await perform(request)
+        return try decoder.decode(CommunityUserBlockState.self, from: data)
     }
 
     func submitAppFeedback(
@@ -3394,6 +3414,21 @@ struct CommunityLikeState: Decodable, Equatable {
         likeCount = try container.decode(Int.self, forKey: .likeCount)
         isLikedByMe = try container.decodeIfPresent(Bool.self, forKey: .isLikedByMe)
             ?? container.decode(Bool.self, forKey: .likedByMe)
+    }
+}
+
+struct CommunityUserBlockState: Decodable, Equatable {
+    var userID: Int
+    var blocked: Bool
+
+    init(userID: Int, blocked: Bool) {
+        self.userID = userID
+        self.blocked = blocked
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case userID = "userId"
+        case blocked
     }
 }
 

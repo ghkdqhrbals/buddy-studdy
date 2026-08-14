@@ -73,6 +73,27 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testCommunityUserBlockingCopyIsLocalizedInEveryLanguage() {
+        let korean = AppStrings(language: .korean)
+        let english = AppStrings(language: .english)
+        let japanese = AppStrings(language: .japanese)
+
+        XCTAssertEqual(korean.blockUser, "사용자 차단")
+        XCTAssertEqual(korean.blockUserTitle, "이 사용자를 차단할까요?")
+        XCTAssertEqual(korean.blockUserMessage("메이트"), "메이트의 질문과 댓글이 더 이상 표시되지 않습니다.")
+        XCTAssertEqual(korean.userBlocked, "사용자를 차단했습니다.")
+
+        XCTAssertEqual(english.blockUser, "Block User")
+        XCTAssertEqual(english.blockUserTitle, "Block this user?")
+        XCTAssertEqual(english.blockUserMessage("Buddy"), "Questions and comments from Buddy will no longer appear.")
+        XCTAssertEqual(english.userBlocked, "User blocked.")
+
+        XCTAssertEqual(japanese.blockUser, "ユーザーをブロック")
+        XCTAssertEqual(japanese.blockUserTitle, "このユーザーをブロックしますか？")
+        XCTAssertEqual(japanese.blockUserMessage("メイト"), "メイトさんの質問とコメントは今後表示されません。")
+        XCTAssertEqual(japanese.userBlocked, "ユーザーをブロックしました。")
+    }
+
     func testIOSBundleDeclaresEverySupportedAppLanguage() throws {
         let root = try repositoryRoot()
         let infoPlistURL = root.appendingPathComponent("StudyMate/iOSInfo.plist")
@@ -486,6 +507,40 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertFalse(mobileRoot.contains("import RevenueCatUI"))
         XCTAssertFalse(mobileRoot.contains("CustomerCenterView"))
         XCTAssertFalse(project.contains("RevenueCatUI"))
+    }
+
+    func testMembershipPurchaseShowsLocalizedRenewalAndLegalDisclosureBeforeAction() throws {
+        let korean = AppStrings(language: .korean).membershipAutoRenewalDisclosure
+        let english = AppStrings(language: .english).membershipAutoRenewalDisclosure
+        let japanese = AppStrings(language: .japanese).membershipAutoRenewalDisclosure
+
+        XCTAssertTrue(korean.contains("24시간"))
+        XCTAssertTrue(korean.contains("매월 자동 갱신"))
+        XCTAssertTrue(english.contains("renews monthly"))
+        XCTAssertTrue(english.contains("24 hours"))
+        XCTAssertTrue(japanese.contains("毎月自動更新"))
+        XCTAssertTrue(japanese.contains("24時間"))
+
+        let root = try repositoryRoot()
+        let source = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Views/MobileRootView.swift"),
+            encoding: .utf8
+        )
+        let start = try XCTUnwrap(source.range(of: "private struct MobileMembershipManagementView")?.lowerBound)
+        let end = try XCTUnwrap(
+            source.range(of: "private struct MembershipProductGroup", range: start..<source.endIndex)?.lowerBound
+        )
+        let membershipSource = source[start..<end]
+        let disclosurePosition = try XCTUnwrap(membershipSource.range(of: "if selectedProduct != nil")?.lowerBound)
+        let purchasePosition = try XCTUnwrap(membershipSource.range(of: "if primaryAction != .current")?.lowerBound)
+
+        XCTAssertLessThan(disclosurePosition, purchasePosition)
+        XCTAssertTrue(membershipSource.contains("Text(strings.membershipAutoRenewalDisclosure)"))
+        XCTAssertTrue(membershipSource.contains("AppLegalLinks.termsOfServiceURL"))
+        XCTAssertTrue(membershipSource.contains("AppLegalLinks.privacyPolicyURL"))
+        XCTAssertTrue(membershipSource.contains("group.products.first?.displayName"))
+        XCTAssertTrue(membershipSource.contains("Text(strings.perMonth)"))
+        XCTAssertTrue(membershipSource.contains("strings.monthlyQuestionAllowanceText"))
     }
 
     func testPurchaseRestorationStillReconcilesHistoricalEntitlements() throws {
@@ -2489,6 +2544,15 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertEqual(state.questionID, "25")
         XCTAssertEqual(state.likeCount, 3)
         XCTAssertTrue(state.isLikedByMe)
+    }
+
+    func testCommunityUserBlockStateDecodesBackendFieldNames() throws {
+        let payload = Data(#"{"userId":42,"blocked":true}"#.utf8)
+
+        let state = try JSONDecoder().decode(CommunityUserBlockState.self, from: payload)
+
+        XCTAssertEqual(state.userID, 42)
+        XCTAssertTrue(state.blocked)
     }
 
     func testNotificationPageDecodesBackendReadFieldName() throws {

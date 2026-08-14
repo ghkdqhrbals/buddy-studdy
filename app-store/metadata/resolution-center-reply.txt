@@ -1,0 +1,31 @@
+Hello App Review,
+
+Thank you for reviewing BuddyStudy 1.1.0. Here is the requested information.
+
+1. COMPLETE PHYSICAL-DEVICE VIDEO
+Attached video: {{ATTACHED_VIDEO_FILENAME}}
+This one continuous, unedited physical-iPhone video starts by tapping the BuddyStudy app icon and shows disposable-account registration and deletion, review-account sign-in, the AI question/answer/grading flow, Records and Statistics, public-content report/block controls, subscription information, and notification permission.
+
+2. TESTED DEVICES AND OS VERSIONS
+{{ACTUALLY_TESTED_DEVICE_MODELS_AND_IOS_VERSIONS}}
+The selected build and walkthrough were verified on physical hardware.
+
+3. PURPOSE, AUDIENCE, PROBLEM, AND VALUE
+BuddyStudy is an educational AI study companion for students and self-directed learners age 14 or older. It turns a chosen topic and difficulty into short recall questions, grades answers, saves study records, and shows topic-level progress. It replaces passive rereading with active-recall practice and identifies topics needing attention.
+
+4. ACCESS TO FEATURES
+The active email demo credentials are in App Review Information; no invitation, OTP, external membership, or special hardware is required. If the updated Privacy Policy acceptance screen appears after sign-in, accept it to continue. Then: Home > My Studies opens AI study; Records and Statistics show results; Home > All Studies opens public questions, comments, Report Question, and Block User; Home > Profile button > Membership & Billing opens subscriptions; Settings > Account Settings > Delete Account opens deletion. Apple, Google, and email sign-in options are visible.
+
+5. EXTERNAL SERVICES
+Services used: AWS (Seoul API/data hosting); Cloudflare (DNS, proxy, TLS, security); OpenAI (questions, grading, feedback, suggestions, translation fallback); Apple (sign-in, App Store subscriptions, APNs); RevenueCat (products, purchase, restore, Customer Center, subscription sync); Google (sign-in, verification email, Firebase Analytics/Remote Config); and Sentry (masked error diagnostics). An operator-hosted LibreTranslate instance in AWS Seoul handles other localization without an outside LibreTranslate provider.
+
+6. REGIONAL DIFFERENCES
+Features and subscription benefits are identical wherever BuddyStudy is offered. UI/content display is localized in Korean, English, and Japanese. Only App Store price, currency, and tax presentation varies by storefront.
+
+7. REGULATED INDUSTRIES OR PROTECTED THIRD-PARTY CONTENT
+Not applicable. BuddyStudy is a general study aid, not a medical, financial, gambling, legal, or other regulated professional service; AI results make no legally significant decisions. It has no licensed media catalog or protected third-party service access. Public questions/comments are user-generated. The Terms prohibit infringing submissions. Reports are stored for operator review, and blocking hides the selected author's content.
+
+8. IN-APP PURCHASE BENEFITS AND ACCESS PATH
+Tier 2 is a one-month auto-renewable subscription providing 300 AI-generated study questions per monthly quota period; Tier 3 provides 1,000. One generated question uses one allowance; study/topic creation does not. Path: Home > Profile button (top-left avatar) > Membership & Billing > Manage membership > select Tier 2 or Tier 3 > Get Tier/Switch to Tier. Before purchase, the screen shows localized price, one-month duration, allowance, auto-renewal disclosure, Terms, Privacy Policy, Restore Purchases, and the purchase/change control. Manage Subscription appears only for an active subscription; the free review account instead shows purchase and restore. Apple handles payment, renewal, cancellation, and refund decisions.
+
+Please let us know if any additional information would be helpful.

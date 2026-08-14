@@ -138,12 +138,28 @@ interface QuestionPort {
     suspend fun countPendingByStudyIdsAndLanguage(studyIds: Collection<Long>, language: String): Map<Long, Long> =
         countPendingByStudyIds(studyIds)
     suspend fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity>
+    suspend fun findPublicAnsweredVisibleTo(viewerUserId: Long?, pageable: Pageable): Page<QuestionEntity> =
+        if (viewerUserId == null) {
+            findPublicAnswered(pageable)
+        } else {
+            error("The question persistence adapter must implement blocked-author visibility filtering.")
+        }
     suspend fun findPublicAnsweredByLanguage(language: String, pageable: Pageable): Page<QuestionEntity> =
         findPublicAnswered(pageable)
     suspend fun findPublicAnsweredByTopic(topic: String, pageable: Pageable): Page<QuestionEntity>
     suspend fun findPublicAnsweredByQuery(query: String, pageable: Pageable): Page<QuestionEntity>
     suspend fun findPublicAnsweredByLanguageAndQuery(language: String, query: String, pageable: Pageable): Page<QuestionEntity> =
         findPublicAnsweredByQuery(query, pageable)
+    suspend fun findPublicAnsweredByLanguageAndQueryVisibleTo(
+        viewerUserId: Long?,
+        language: String,
+        query: String,
+        pageable: Pageable,
+    ): Page<QuestionEntity> = if (viewerUserId == null) {
+        findPublicAnsweredByLanguageAndQuery(language, query, pageable)
+    } else {
+        error("The question persistence adapter must implement blocked-author visibility filtering.")
+    }
     suspend fun findPublicAnsweredById(id: Long): QuestionEntity?
     suspend fun findPublicAnsweredByIdAndLanguage(id: Long, language: String): QuestionEntity? =
         findPublicAnsweredById(id)

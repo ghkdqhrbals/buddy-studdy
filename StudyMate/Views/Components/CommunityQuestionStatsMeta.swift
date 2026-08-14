@@ -187,9 +187,11 @@ struct CommunityQuestionResultPresentation: Equatable {
 struct CommunityQuestionActionPolicy: Equatable {
     let canManage: Bool
     let canReport: Bool
+    let canBlock: Bool
 
     init(isSignedIn: Bool, isOwner: Bool) {
         canManage = isSignedIn && isOwner
         canReport = isSignedIn && !isOwner
+        canBlock = isSignedIn && !isOwner
     }
 }

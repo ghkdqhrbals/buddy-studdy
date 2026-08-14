@@ -44,6 +44,7 @@ class OpenApiDocumentationTest : MySqlIntegrationTestSupport() {
             .contains("\"/api/v1/records\"")
             .contains("\"/api/v1/stats\"")
             .contains("\"/api/v1/studies/{studyId}/settings\"")
+            .contains("\"/api/v1/community/users/{userId}/block\"")
             .contains("\"securitySchemes\"")
             .contains("\"accessToken\"")
             .contains("\"scheme\":\"bearer\"")
@@ -54,6 +55,8 @@ class OpenApiDocumentationTest : MySqlIntegrationTestSupport() {
             .contains("Maximum number of studies to include")
             .contains("scheduler freshness for observability diagnostics")
             .contains("Runtime alerting belongs to Grafana")
+            .contains("Block a community user")
+            .contains("Unblock a community user")
             .doesNotContain("deployment smoke tests")
     }
 

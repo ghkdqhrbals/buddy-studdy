@@ -3,14 +3,14 @@
 This document is the engineering source of truth used when updating BuddyStudy's
 Terms of Service, Privacy Policy, and Marketing Information Consent.
 
-Last reviewed: 2026-08-05
+Last reviewed: 2026-08-14
 
 ## Published Documents
 
 | Document | Required | User can withdraw | Current fixed copy |
 | --- | --- | --- | --- |
 | Terms of Service | Yes | No, while using the service | `terms-2026-07-30.html` |
-| Privacy Policy | Yes | No, while using the service | `privacy-2026-08-05.html` |
+| Privacy Policy | Yes | No, while using the service | `privacy-2026-08-14.html` |
 | Marketing Information Consent | No | Yes | `marketing-consent-2026-07-30.html` |
 
 The Korean fixed copies are the documents registered in the `terms` table. The
@@ -26,7 +26,7 @@ so localized copies must remain equivalent translations of that version.
 | Authentication | MySQL and signed access tokens; device credential and session state | Revoked on logout, device reset, or account deletion |
 | Email verification | Google SMTP; destination email and short-lived verification code | Code expires after 3 minutes |
 | Studies and questions | MySQL: study tree, scheduled/generated questions, answers, grading, feedback, statistics | Until item or account deletion |
-| Public community data | MySQL: public questions, public profile fields, likes, comments, views and reports | Until item or account deletion, moderation, or account deletion |
+| Public community data | MySQL: public questions, public profile fields, likes, comments, views, reports, and user-to-user block relationships | Until item deletion, moderation, unblock, or account deletion |
 | AI processing | Server-managed OpenAI account for question generation, grading, feedback, recommendations, and fallback translation | Provider processing applies when the function is used |
 | Translation | Self-hosted LibreTranslate first; OpenAI fallback | Translation results are stored with content localizations |
 | Notifications | APNs device token, notification preferences, notification and read state | Until device unregister, invalidation, or account deletion |
@@ -70,6 +70,10 @@ personalized advertising.
   Google ID tokens, APNs credentials, client secrets, and API keys.
 - Public-question responses must not expose email, authentication data, device
   identifiers, push tokens, private answers, or drafts.
+- Authenticated public-question and comment responses must omit content authored
+  by users the requester has blocked. Direct access to a blocked author's public
+  question must be rejected, and both sides of every block relationship must be
+  removed when either account is deleted.
 - Marketing messages require an active `MARKETING_NOTIFICATION` agreement and
   remain separate from operational question, comment, security, and maintenance
   notifications.

@@ -1,10 +1,11 @@
 BuddyStudy 1.1.0 review guide
 
-Sign-in
+Review access
 - Test ID: {{DEMO_ACCOUNT_NAME}}
 - Test password: {{DEMO_ACCOUNT_PASSWORD}}
 - The review account is already active and does not require creating a new account.
 - Sign in with Apple, Google login, and email login are available from the login screen.
+- If the updated Privacy Policy acceptance screen appears after sign-in, review and accept it to continue.
 
 Primary study flow
 1. Open Home and select My Studies.
@@ -15,12 +16,13 @@ Primary study flow
 
 Public community and moderation
 - Open Home > All Studies to browse public answered questions.
-- A signed-in reviewer can like, comment, or report a public question.
+- A signed-in reviewer can like or comment on a public question.
+- From a public-question row or detail, open the ... menu to choose Report Question or Block User. Reports are stored for operator review. Blocking hides that author's public questions and comments for the signed-in user. A comment author can also be blocked by long-pressing the comment.
 
 Account and privacy
 - Account deletion is available in Settings > Account Settings > Delete Account.
-- Privacy policy: https://ghkdqhrbals.github.io/buddy-studdy/en/privacy-2026-08-05.html
-- Terms: https://ghkdqhrbals.github.io/buddy-studdy/en/terms.html
+- Privacy policy: https://ghkdqhrbals.github.io/buddy-studdy/en/privacy-2026-08-14.html
+- Terms: https://ghkdqhrbals.github.io/buddy-studdy/en/terms-2026-07-30.html
 - Standard Apple EULA: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/
 
 Localization and notifications
@@ -28,4 +30,18 @@ Localization and notifications
 - Translated content provides a Show original / View translation control.
 - Notification taps open the related question or announcement. Push delivery itself is not required to exercise the core review flow.
 
-BuddyStudy offers auto-renewable App Store subscriptions. Purchase, restore, change-plan, cancellation, and refund entry points are available under Profile > Membership and Billing. The app contains no advertisements and does not use IDFA tracking.
+Subscriptions and benefits
+- From Home, tap the top-left Profile button, then open Membership & Billing > Manage membership.
+- Tier 2 is a one-month auto-renewable subscription with an allowance of 300 AI-generated study questions per monthly quota period.
+- Tier 3 is a one-month auto-renewable subscription with an allowance of 1,000 AI-generated study questions per monthly quota period.
+- Creating a study or topic does not use the allowance. The screen shows the localized price, duration, benefit, auto-renewal disclosure, Terms of Service, Privacy Policy, restore, and purchase/change controls. The free review account shows purchase and restore; Manage Subscription appears only when an account has an active subscription.
+
+External services
+- AWS hosts the API and data in Seoul; Cloudflare provides DNS, proxy, TLS, and network security; OpenAI provides question generation, grading, feedback, suggestions, and translation fallback.
+- Apple provides Sign in with Apple, App Store billing, and APNs; RevenueCat supports product lookup, purchase, restore, Customer Center, and subscription synchronization.
+- Google provides Google Sign-In, verification-email delivery, Firebase Analytics, and Remote Config; Sentry provides masked error diagnostics.
+
+Region and content
+- Features and subscription benefits are the same in every region where BuddyStudy is offered. Only App Store price, currency, and tax display can vary by storefront. The interface and supported content display are localized in Korean, English, and Japanese.
+- BuddyStudy is a general educational study aid, not a regulated medical, financial, gambling, or professional service. It has no licensed media catalog or protected third-party service access. Public questions and comments are user-generated, and the Terms prohibit infringing submissions. Reports are stored for operator review, and user blocking hides the selected author's content.
+- The app contains no advertisements and does not use IDFA tracking.
