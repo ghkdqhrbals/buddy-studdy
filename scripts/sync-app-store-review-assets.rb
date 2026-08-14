@@ -186,8 +186,9 @@ module AppStoreReviewAssets
       validate_products!(products)
 
       item_document = list_submission_items(submission_id)
-      @target_items = find_target_items(item_document, products)
       validate_submission_composition!(item_document, require_ready_subscriptions: false)
+      validate_submission_app!(item_document)
+      @target_items = find_target_items(item_document, products)
       current_screenshots = products.to_h do |product|
         [product.fetch("appStoreConnectId"), read_subscription_screenshot(product.fetch("appStoreConnectId"))]
       end
@@ -268,7 +269,7 @@ module AppStoreReviewAssets
         :get,
         "/v1/reviewSubmissions/#{submission_id}",
         query: {
-          "fields[reviewSubmissions]" => "platform,state,app,items"
+          "fields[reviewSubmissions]" => "platform,state"
         }
       ).fetch("data")
     end
@@ -280,13 +281,44 @@ module AppStoreReviewAssets
           DEFAULT_REVIEW_SUBMISSION_ID
         )
       raise "Review submission is not for iOS" unless submission.dig("attributes", "platform") == "IOS"
-      raise "Review submission does not belong to BuddyStudy" unless
-        submission.dig("relationships", "app", "data", "id") == EXPECTED_APP_ID
 
       state = submission.dig("attributes", "state")
       return unless @apply && !MUTABLE_SUBMISSION_STATES.include?(state)
 
       raise "Review submission state #{state.inspect} is not safe to mutate"
+    end
+
+    def validate_submission_app!(document)
+      version_linkages = document.fetch("data").filter_map do |item|
+        item.dig("relationships", "appStoreVersion", "data")
+      end
+      raise "Review submission must contain exactly one App Store version" unless
+        version_linkages.length == 1 && version_linkages.first.fetch("type") == "appStoreVersions"
+
+      version_id = version_linkages.first.fetch("id")
+      response = @client.request(
+        :get,
+        "/v1/appStoreVersions/#{version_id}",
+        query: {
+          "fields[appStoreVersions]" => "platform,versionString,appStoreState,app",
+          "fields[apps]" => "bundleId,name",
+          "include" => "app"
+        }
+      )
+      version = response.fetch("data")
+      expected_version = @env.fetch("APP_STORE_VERSION_STRING", "1.1.0")
+      raise "Review submission App Store version is not iOS #{expected_version}" unless
+        version.dig("attributes", "platform") == "IOS" &&
+        version.dig("attributes", "versionString") == expected_version
+      raise "Review submission App Store version does not belong to BuddyStudy" unless
+        version.dig("relationships", "app", "data", "id") == EXPECTED_APP_ID
+
+      included_app = response.fetch("included", []).find do |resource|
+        resource.fetch("type") == "apps" && resource.fetch("id") == EXPECTED_APP_ID
+      end
+      raise "BuddyStudy app was not included with the review version" unless included_app
+      raise "Review submission bundle ID does not match BuddyStudy" unless
+        included_app.dig("attributes", "bundleId") == @env.fetch("APP_BUNDLE_ID", DEFAULT_BUNDLE_ID)
     end
 
     def validate_products!(products)
