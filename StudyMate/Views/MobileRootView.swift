@@ -15,7 +15,11 @@ struct MobileRootView: View {
         let strings = appState.strings
 
         Group {
-            if !appState.hasCompletedOnboarding {
+            if appState.isMembershipScreenshotFixtureEnabled {
+                NavigationStack {
+                    MobileMembershipManagementView()
+                }
+            } else if !appState.hasCompletedOnboarding {
                 MobileOnboardingView()
             } else {
                 TabView(selection: selectedMobileTab) {

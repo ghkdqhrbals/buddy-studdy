@@ -4,6 +4,36 @@ import XCTest
 final class AppControlPolicyTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
+    #if DEBUG
+    func testMembershipScreenshotFixtureUsesCurrentMonthlyProductCopy() throws {
+        let tier2 = try XCTUnwrap(
+            AppleBillingStore.screenshotFixtureProductCopy(
+                tierCode: "TIER2",
+                language: .korean
+            )
+        )
+        let tier3 = try XCTUnwrap(
+            AppleBillingStore.screenshotFixtureProductCopy(
+                tierCode: "TIER3",
+                language: .korean
+            )
+        )
+
+        XCTAssertEqual(tier2.displayName, "티어 2 월간")
+        XCTAssertEqual(tier2.description, "월 300회 질문")
+        XCTAssertEqual(tier2.displayPrice, "₩7,900")
+        XCTAssertEqual(tier3.displayName, "티어 3 월간")
+        XCTAssertEqual(tier3.description, "월 1,000회 질문")
+        XCTAssertEqual(tier3.displayPrice, "₩17,900")
+        XCTAssertNil(
+            AppleBillingStore.screenshotFixtureProductCopy(
+                tierCode: "TIER1",
+                language: .korean
+            )
+        )
+    }
+    #endif
+
     func testRevenueCatAcceptsOnlyAppStorePublicSDKKey() {
         XCTAssertTrue(RevenueCatBillingBridge.isValidPublicSDKKey("appl_public-key"))
         XCTAssertFalse(RevenueCatBillingBridge.isValidPublicSDKKey("test_public-key"))

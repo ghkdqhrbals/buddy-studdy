@@ -79,6 +79,14 @@ versions = api_request(
 ).fetch("data")
 version = if ENV["APP_STORE_VERSION_ID"]
             versions.find { |item| item.fetch("id") == ENV["APP_STORE_VERSION_ID"] }
+          elsif ENV["APP_STORE_VERSION_STRING"]
+            candidates = versions.select do |item|
+              item.dig("attributes", "versionString") == ENV["APP_STORE_VERSION_STRING"] &&
+                EDITABLE_STATES.include?(item.dig("attributes", "appStoreState"))
+            end
+            abort "Multiple editable iOS App Store versions #{ENV["APP_STORE_VERSION_STRING"]} found" if
+              candidates.length > 1
+            candidates.first
           else
             versions.find { |item| EDITABLE_STATES.include?(item.dig("attributes", "appStoreState")) }
           end

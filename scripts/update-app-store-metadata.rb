@@ -110,6 +110,18 @@ def find_editable_version(token, app_id)
   return versions.find { |item| item.fetch("id") == explicit_id } ||
     abort("App Store version not found: #{explicit_id}") if explicit_id
 
+  explicit_version = ENV["APP_STORE_VERSION_STRING"]
+  if explicit_version
+    candidates = versions.select do |item|
+      item.dig("attributes", "versionString") == explicit_version &&
+        EDITABLE_STATES.include?(item.dig("attributes", "appStoreState"))
+    end
+    abort "No editable iOS App Store version #{explicit_version} found" if candidates.empty?
+    abort "Multiple editable iOS App Store versions #{explicit_version} found" if candidates.length > 1
+
+    return candidates.first
+  end
+
   versions.find { |item| EDITABLE_STATES.include?(item.dig("attributes", "appStoreState")) } ||
     abort("No editable iOS App Store version found")
 end

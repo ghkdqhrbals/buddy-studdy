@@ -246,10 +246,65 @@ final class AppleBillingStore: ObservableObject {
         var willRenew: Bool?
     }
 
+    #if DEBUG
+    struct ScreenshotFixtureProductCopy: Equatable {
+        var displayName: String
+        var description: String
+        var displayPrice: String
+    }
+
+    nonisolated static func screenshotFixtureProductCopy(
+        tierCode: String,
+        language: AppLanguage
+    ) -> ScreenshotFixtureProductCopy? {
+        let displayName: String
+        let description: String
+        let displayPrice: String
+        switch tierCode {
+        case "TIER2":
+            displayPrice = "₩7,900"
+            switch language {
+            case .korean:
+                displayName = "티어 2 월간"
+                description = "월 300회 질문"
+            case .english:
+                displayName = "Tier 2 Monthly"
+                description = "300 questions per month"
+            case .japanese:
+                displayName = "ティア2 月間"
+                description = "月300回の質問"
+            }
+        case "TIER3":
+            displayPrice = "₩17,900"
+            switch language {
+            case .korean:
+                displayName = "티어 3 월간"
+                description = "월 1,000회 질문"
+            case .english:
+                displayName = "Tier 3 Monthly"
+                description = "1,000 questions per month"
+            case .japanese:
+                displayName = "ティア3 月間"
+                description = "月1,000回の質問"
+            }
+        default:
+            return nil
+        }
+        return ScreenshotFixtureProductCopy(
+            displayName: displayName,
+            description: description,
+            displayPrice: displayPrice
+        )
+    }
+    #endif
+
     struct TierProduct: Identifiable {
         enum StoreProductSource {
             case appStore(Product)
             case revenueCat(StoreProduct)
+            #if DEBUG
+            case screenshotFixture(ScreenshotFixtureProductCopy)
+            #endif
         }
 
         var tier: BackendBillingTierProduct
@@ -260,18 +315,27 @@ final class AppleBillingStore: ObservableObject {
             switch source {
             case .appStore(let product): product.displayName
             case .revenueCat(let product): product.localizedTitle
+            #if DEBUG
+            case .screenshotFixture(let product): product.displayName
+            #endif
             }
         }
         var description: String {
             switch source {
             case .appStore(let product): product.description
             case .revenueCat(let product): product.localizedDescription
+            #if DEBUG
+            case .screenshotFixture(let product): product.description
+            #endif
             }
         }
         var displayPrice: String {
             switch source {
             case .appStore(let product): product.displayPrice
             case .revenueCat(let product): product.localizedPriceString
+            #if DEBUG
+            case .screenshotFixture(let product): product.displayPrice
+            #endif
             }
         }
     }
@@ -313,6 +377,33 @@ final class AppleBillingStore: ObservableObject {
         // Annual subscriptions are retained only as historical billing records on the backend.
         // The storefront is monthly-only, so an older or stale catalog must never surface them.
         let availableProducts = MembershipProductPolicy.monthlyProducts(catalog.products)
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_FIXTURE"]?
+            .lowercased() == "membership" {
+            let language: AppLanguage
+            switch ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_LANGUAGE"]?
+                .lowercased() {
+            case "ja", "jp", "japanese":
+                language = .japanese
+            case "en", "english":
+                language = .english
+            default:
+                language = .korean
+            }
+            let sourcesByProductID = Dictionary(
+                uniqueKeysWithValues: availableProducts.compactMap { tier in
+                    Self.screenshotFixtureProductCopy(
+                        tierCode: tier.tierCode,
+                        language: language
+                    ).map { copy in
+                        (tier.productId, TierProduct.StoreProductSource.screenshotFixture(copy))
+                    }
+                }
+            )
+            applyProducts(availableProducts, sourcesByProductID: sourcesByProductID)
+            return
+        }
+        #endif
         let identifiers = availableProducts.map(\.productId)
         RevenueCatBillingBridge.shared.start()
         let usesRevenueCat = RevenueCatBillingBridge.shared.isEnabled
@@ -433,6 +524,10 @@ final class AppleBillingStore: ObservableObject {
             ? try await prepareCheckout(tierProduct.id)
             : nil
         switch tierProduct.source {
+        #if DEBUG
+        case .screenshotFixture:
+            throw AppleBillingStoreError.unsupportedProduct
+        #endif
         case .revenueCat(let product):
             let (revenueCatTransaction, _, userCancelled) = try await Purchases.shared.purchase(product: product)
             if userCancelled {

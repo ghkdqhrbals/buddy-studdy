@@ -677,6 +677,15 @@ final class AppState: ObservableObject {
     }
     #endif
 
+    var isMembershipScreenshotFixtureEnabled: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.environment["BUDDYSTUDY_SCREENSHOT_FIXTURE"]?
+            .lowercased() == "membership"
+        #else
+        false
+        #endif
+    }
+
     var settingsEditorStrings: AppStrings {
         AppStrings(language: draftSettings.appLanguage)
     }
@@ -1949,6 +1958,52 @@ final class AppState: ObservableObject {
         nextStatsState.finishStudyGrowthRequest(growthRequestID)
         statsState = nextStatsState
 
+        if fixture == "membership" {
+            let calendar = Calendar(identifier: .gregorian)
+            let currentMonth = calendar.dateInterval(of: .month, for: now)?.start ?? now
+            let nextResetAt = calendar.date(byAdding: .month, value: 1, to: currentMonth)
+                ?? now.addingTimeInterval(2_592_000)
+            questionQuota = BackendQuestionQuota(
+                usedCount: 7,
+                monthlyLimit: 30,
+                remainingCount: 23,
+                resetAt: nextResetAt,
+                tierCode: "TIER1",
+                periodStartedAt: currentMonth,
+                reservedCount: 0,
+                baseLimit: 30,
+                bonusLimit: 0,
+                anchorType: "ACCOUNT_CREATED",
+                policyVersion: 5
+            )
+            billingCatalog = BackendBillingCatalog(
+                appAccountToken: UUID(uuidString: "b48d432b-0068-4b5e-a921-cd630321a712")!,
+                products: [
+                    BackendBillingTierProduct(
+                        tierCode: "TIER2",
+                        description: "300 monthly AI study questions",
+                        monthlyQuestionLimit: 300,
+                        productId: "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+                        productType: "AUTO_RENEWABLE_SUBSCRIPTION",
+                        billingPeriod: "P1M",
+                        sortOrder: 1
+                    ),
+                    BackendBillingTierProduct(
+                        tierCode: "TIER3",
+                        description: "1,000 monthly AI study questions",
+                        monthlyQuestionLimit: 1_000,
+                        productId: "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                        productType: "AUTO_RENEWABLE_SUBSCRIPTION",
+                        billingPeriod: "P1M",
+                        sortOrder: 2
+                    ),
+                ]
+            )
+            billingStatus = nil
+            billingInvoices = []
+            billingErrorMessage = nil
+        }
+
         homeStudyRoute = nil
         switch fixture {
         case "study-tree", "tree":
@@ -1961,6 +2016,8 @@ final class AppState: ObservableObject {
             selectedTab = .statistics
         case "records":
             selectedTab = .records
+        case "membership":
+            selectedTab = .home
         default:
             selectedTab = .home
             appRouteRequest = AppRouteRequest(route: .publicQuestions)
@@ -6236,6 +6293,11 @@ final class AppState: ObservableObject {
     }
 
     func refreshBilling() async {
+        #if DEBUG
+        if isAppStoreScreenshotFixtureEnabled {
+            return
+        }
+        #endif
         if let billingRefreshTask {
             await billingRefreshTask.value
             return
