@@ -1,47 +1,39 @@
-BuddyStudy 1.1.0 review guide
+BuddyStudy 1.1.0 App Review Information
 
-Review access
+Video and devices
+- Video: {{ATTACHED_VIDEO_FILENAME}}
+- Physical models, exact OS versions, selected build: {{ACTUALLY_TESTED_DEVICE_MODELS_AND_IOS_VERSIONS}}
+- The unedited physical-iPhone video uses the latest public iOS available that date. It starts on the Home Screen, launches BuddyStudy, opens Apple's purchase sheet, and cancels.
+
+Access and setup
 - Test ID: {{DEMO_ACCOUNT_NAME}}
-- Test password: {{DEMO_ACCOUNT_PASSWORD}}
-- The review account is already active and does not require creating a new account.
-- Sign in with Apple, Google login, and email login are available from the login screen.
-- If the updated Privacy Policy acceptance screen appears after sign-in, review and accept it to continue.
+- Password: {{DEMO_ACCOUNT_PASSWORD}}
+- This active free account needs no OTP, invitation, membership, sample file, or special hardware. New email registration separately needs its delivered code.
+- Apple, Google, and email login are visible. Accept the updated Privacy Policy if prompted.
 
-Primary study flow
-1. Open Home and select My Studies.
-2. Open an existing study or add a topic.
-3. Create a question, enter an answer, and submit it.
-4. AI grading is processed asynchronously. The page updates without replacing the active answer draft.
-5. Open Records or Statistics to review the saved result and topic-level progress.
+Purpose and main flow
+- For students and self-directed learners age 14+, BuddyStudy creates active-recall questions, grades answers, saves records, and shows topic progress to identify weak areas.
+1. Home > My Studies > open/create a study or topic > generate a question > answer > submit.
+2. Grading completes asynchronously without replacing an active answer draft.
+3. Records and Statistics show the saved answer, AI feedback, and topic progress.
 
-Public community and moderation
-- Open Home > All Studies to browse public answered questions.
-- A signed-in reviewer can like or comment on a public question.
-- From a public-question row or detail, open the ... menu to choose Report Question or Block User. Reports are stored for operator review. Blocking hides that author's public questions and comments for the signed-in user. A comment author can also be blocked by long-pressing the comment.
+Accounts, UGC, and permissions
+- Delete account: Settings > Account Settings > Delete Account. Use a disposable account, not this permanent review account.
+- Home > All Studies shows public questions/comments. A signed-in user can like/comment, choose ... > Report Question, or Block User. Blocking hides that author's questions/comments; long-press a comment to block its author.
+- Profile > Notification Settings requests notification permission contextually. No location, contacts, camera, photos, or ATT permission is requested.
 
-Account and privacy
-- Account deletion is available in Settings > Account Settings > Delete Account.
-- Privacy policy: https://ghkdqhrbals.github.io/buddy-studdy/en/privacy-2026-08-14.html
-- Terms: https://ghkdqhrbals.github.io/buddy-studdy/en/terms-2026-07-30.html
-- Standard Apple EULA: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/
-
-Localization and notifications
-- App UI and content display support Korean, English, and Japanese.
-- Translated content provides a Show original / View translation control.
-- Notification taps open the related question or announcement. Push delivery itself is not required to exercise the core review flow.
-
-Subscriptions and benefits
-- From Home, tap the top-left Profile button, then open Membership & Billing > Manage membership.
-- Tier 2 is a one-month auto-renewable subscription with an allowance of 300 AI-generated study questions per monthly quota period.
-- Tier 3 is a one-month auto-renewable subscription with an allowance of 1,000 AI-generated study questions per monthly quota period.
-- Creating a study or topic does not use the allowance. The screen shows the localized price, duration, benefit, auto-renewal disclosure, Terms of Service, Privacy Policy, restore, and purchase/change controls. The free review account shows purchase and restore; Manage Subscription appears only when an account has an active subscription.
+In-App Purchase
+- Path: Home > top-left Profile > Membership & Billing > Manage membership.
+- Tier 2: one-month auto-renewable, 300 AI questions/monthly quota period. Tier 3: one-month auto-renewable, 1,000. Each generated question uses one allowance; study/topic creation does not.
+- Offers show title, localized price, one-month duration, allowance, renewal disclosure, Terms, Privacy, Restore, and purchase/change control. Get Tier/Switch to Tier opens Apple's purchase sheet; cancel before purchase. This free account shows purchase/restore; Manage Subscription requires an active subscription.
 
 External services
-- AWS hosts the API and data in Seoul; Cloudflare provides DNS, proxy, TLS, and network security; OpenAI provides question generation, grading, feedback, suggestions, and translation fallback.
-- Apple provides Sign in with Apple, App Store billing, and APNs; RevenueCat supports product lookup, purchase, restore, Customer Center, and subscription synchronization.
-- Google provides Google Sign-In, verification-email delivery, Firebase Analytics, and Remote Config; Sentry provides masked error diagnostics.
+- AWS Seoul: API, data, operator-managed LibreTranslate. Cloudflare: DNS, proxy, TLS, security. OpenAI: questions, grading, feedback, suggestions, translation fallback.
+- Apple: sign-in, billing, APNs. RevenueCat: products, purchase/restore, Customer Center, subscription sync. Google: sign-in, registration email verification, Firebase Analytics/Remote Config. Sentry: masked diagnostics.
 
-Region and content
-- Features and subscription benefits are the same in every region where BuddyStudy is offered. Only App Store price, currency, and tax display can vary by storefront. The interface and supported content display are localized in Korean, English, and Japanese.
-- BuddyStudy is a general educational study aid, not a regulated medical, financial, gambling, or professional service. It has no licensed media catalog or protected third-party service access. Public questions and comments are user-generated, and the Terms prohibit infringing submissions. Reports are stored for operator review, and user blocking hides the selected author's content.
-- The app contains no advertisements and does not use IDFA tracking.
+Regions and status
+- Features/benefits are consistent in all offered regions. Korean, English, and Japanese are localized; only storefront price, currency, and tax vary.
+- Not regulated and no protected third-party material: this is a general educational aid, not a medical, financial, gambling, legal, or other regulated service. It has no licensed media catalog. Questions/comments are UGC; Terms prohibit infringement, and reporting/blocking are available. No ads or IDFA tracking.
+- Privacy: https://ghkdqhrbals.github.io/buddy-studdy/en/privacy-2026-08-14.html
+- Terms: https://ghkdqhrbals.github.io/buddy-studdy/en/terms-2026-07-30.html
+- Apple EULA: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/

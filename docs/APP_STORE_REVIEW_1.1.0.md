@@ -28,7 +28,7 @@
 
 1. Deploy the backend changes and required database migration through the backend deployment workflow.
 2. Create and upload a new signed iOS build containing public-author blocking and complete subscription purchase information.
-3. Verify the uploaded build on a physical iPhone:
+3. Install and verify that exact uploaded TestFlight build on a physical iPhone running the latest publicly released iOS available on the test date. Do not test with build 88 or a local developer build:
    - create and delete a disposable account without affecting the permanent review account;
    - sign in with the permanent review account;
    - accept required terms;
@@ -41,12 +41,13 @@
    - open a push notification;
    - verify Korean, English, and Japanese UI and content switching;
    - verify recommended update, forced update, and maintenance overlays.
-4. Record the requested walkthrough as one continuous, unedited video on that physical device. Start on the iOS Home Screen and tap the BuddyStudy app icon as the first interaction. Do not expose App Review, Apple, Google, or Sandbox credentials, a device serial number, or a UDID.
-5. Add the exact tested device model and OS version and attached video filename to `app-store/metadata/resolution-center-reply.txt`.
-6. Select only that verified build for version 1.1.0.
-7. Confirm App Privacy answers, review contact, permanent demo account, export compliance, content rights, and advertising identifier answers in App Store Connect.
-8. Confirm the uploaded archive contains the Sign in with Apple entitlement.
-9. Attach the video, paste the eight-item English response, and submit the replacement build for review.
+4. Because the submitted binary supports iPad, verify the same selected build on a physical iPad running the latest publicly released iPadOS before resubmission. If physical-iPad verification cannot be completed, do not resubmit until suitable hardware is available or iPad support is intentionally removed in a later replacement build.
+5. Record the requested walkthrough as one continuous, unedited video on the verified physical iPhone. Start on the iOS Home Screen and tap the BuddyStudy app icon as the first interaction. Do not expose App Review, Apple, Google, or Sandbox credentials, a device serial number, or a UDID.
+6. Add the attached video filename and every actually tested physical device model, exact OS version, and selected build number in explicit `build N` form to `app-store/metadata/resolution-center-reply.txt`, `app-store/metadata/review-notes.txt`, and the mirrored reply block in `docs/APP_STORE_REVIEW_RESUBMISSION_1.1.0.md`.
+7. Select only that verified build for version 1.1.0.
+8. Confirm App Privacy answers, review contact, permanent demo account, export compliance, content rights, and advertising identifier answers in App Store Connect.
+9. Confirm the uploaded archive contains the Sign in with Apple entitlement.
+10. Attach the video, paste the eight-item English response, sync the completed Review Notes, and submit the replacement build for review.
 
 ## Manual App Store Connect checks
 

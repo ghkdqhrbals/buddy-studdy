@@ -39,23 +39,30 @@ ruby -rjson -e '
 ' "$version_metadata" "$app_info_metadata" "$age_rating_metadata"
 
 test -s "$review_notes"
-test "$(wc -m < "$review_notes" | tr -d " ")" -le 4000
+test "$(wc -c < "$review_notes" | tr -d " ")" -le 4000
 test -s "$resolution_reply"
-test "$(wc -m < "$resolution_reply" | tr -d " ")" -le 4000
+test "$(wc -c < "$resolution_reply" | tr -d " ")" -le 4000
 
-ruby -e '
+ruby -I "$project_root/scripts/lib" -r app_store_review_notes -e '
   notes = File.read(ARGV.fetch(0))
   reply = File.read(ARGV.fetch(1))
   guide = File.read(ARGV.fetch(2))
-  expected_notes = %w[DEMO_ACCOUNT_NAME DEMO_ACCOUNT_PASSWORD]
-  expected_reply = %w[ATTACHED_VIDEO_FILENAME ACTUALLY_TESTED_DEVICE_MODELS_AND_IOS_VERSIONS]
-  placeholders = ->(text) { text.scan(/\{\{([A-Z0-9_]+)\}\}/).flatten.uniq.sort }
-  abort "Unexpected review-note placeholders" unless placeholders.call(notes) == expected_notes.sort
-  abort "Unexpected Resolution Center placeholders" unless placeholders.call(reply) == expected_reply.sort
-  sections = reply.scan(/^([1-8])\. /).flatten
-  abort "Resolution Center reply must contain exactly sections 1 through 8" unless sections == %w[1 2 3 4 5 6 7 8]
-  embedded = guide.match(/```text\n(.*?)\n```/m)&.captures&.first.to_s.strip
-  abort "Resolution Center reply and resubmission guide differ" unless embedded == reply.strip
+  begin
+    result = AppStoreReviewNotes.validate_review_package!(
+      notes: notes,
+      reply: reply,
+      guide: guide,
+      allow_recording_placeholders: true
+    )
+  rescue AppStoreReviewNotes::ValidationError => error
+    abort error.message
+  end
+  if result.fetch(:status) == :pre_recording
+    puts "App Review readiness: PRE-RECORDING TEMPLATE (video filename and tested physical device/OS/build list are pending)."
+    puts "App Store Connect sync is intentionally blocked until both placeholders are replaced."
+  else
+    puts "App Review readiness: COMPLETE CANDIDATE (recording/device placeholders are resolved)."
+  end
 ' "$review_notes" "$resolution_reply" "$resubmission_guide"
 
 for policy in "$privacy_ko" "$privacy_en" "$privacy_ja"; do
@@ -86,6 +93,6 @@ rg -q "terms-2026-07-30\.html" "$review_notes"
 rg -q "300" "$review_notes"
 rg -q "1,000" "$review_notes"
 rg -q "1\. COMPLETE PHYSICAL-DEVICE VIDEO" "$resolution_reply"
-rg -q "8\. IN-APP PURCHASE BENEFITS AND ACCESS PATH" "$resolution_reply"
+rg -q "8\. IN-APP PURCHASES AND PURCHASE LOCATION" "$resolution_reply"
 
 echo "App Store review source checks passed."

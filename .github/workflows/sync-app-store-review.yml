@@ -36,6 +36,8 @@ jobs:
       APP_STORE_APP_INFO_PATH: "review-source/app-store/metadata/app-info-localizations.json"
       APP_STORE_AGE_RATING_PATH: "review-source/app-store/metadata/age-rating.json"
       APP_STORE_REVIEW_NOTES_PATH: "review-source/app-store/metadata/review-notes.txt"
+      APP_STORE_RESOLUTION_REPLY_PATH: "review-source/app-store/metadata/resolution-center-reply.txt"
+      APP_STORE_RESUBMISSION_GUIDE_PATH: "review-source/docs/APP_STORE_REVIEW_RESUBMISSION_1.1.0.md"
       APP_STORE_SUBSCRIPTIONS_PATH: "review-source/app-store/billing/subscriptions.json"
       APP_STORE_REVIEW_SCREENSHOT_PATH: "review-source/app-store/review-assets/membership-review-2026-08-14-1242x2688.png"
 
@@ -77,10 +79,18 @@ jobs:
             echo "Checked-out source commit does not match source_ref." >&2
             exit 1
           fi
+          if [ "${APP_STORE_REVIEW_NOTES_PATH}" != "review-source/app-store/metadata/review-notes.txt" ] || \
+             [ "${APP_STORE_RESOLUTION_REPLY_PATH}" != "review-source/app-store/metadata/resolution-center-reply.txt" ] || \
+             [ "${APP_STORE_RESUBMISSION_GUIDE_PATH}" != "review-source/docs/APP_STORE_REVIEW_RESUBMISSION_1.1.0.md" ]; then
+            echo "Review-content preflight must use the requested review source." >&2
+            exit 1
+          fi
 
           ruby -c scripts/update-app-store-metadata.rb
           ruby -c scripts/update-app-store-app-info.rb
           ruby -c scripts/update-app-store-review-notes.rb
+          ruby -c scripts/lib/app_store_review_notes.rb
+          ruby scripts/test/app_store_review_notes_test.rb
           ruby -c scripts/upload-app-store-screenshots.rb
           ruby -c scripts/sync-app-store-review-assets.rb
 
@@ -89,6 +99,8 @@ jobs:
             review-source/app-store/metadata/app-info-localizations.json
             review-source/app-store/metadata/age-rating.json
             review-source/app-store/metadata/review-notes.txt
+            review-source/app-store/metadata/resolution-center-reply.txt
+            review-source/docs/APP_STORE_REVIEW_RESUBMISSION_1.1.0.md
             review-source/app-store/billing/subscriptions.json
             review-source/app-store/review-assets/membership-review-2026-08-14-1242x2688.png
             review-source/screenshots/appstore-ipad-13-en/01-study-tree-ipad13-en.png
@@ -119,6 +131,9 @@ jobs:
               exit 1
             fi
           done
+
+          APP_STORE_REVIEW_NOTES_VALIDATE_ONLY=1 \
+            ruby scripts/update-app-store-review-notes.rb
 
           {
             echo "## App Store Review Sync"

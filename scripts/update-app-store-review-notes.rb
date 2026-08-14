@@ -6,10 +6,13 @@ require "json"
 require "net/http"
 require "openssl"
 require "uri"
+require_relative "lib/app_store_review_notes"
 
 API_HOST = "api.appstoreconnect.apple.com"
 DEFAULT_BUNDLE_ID = "io.github.ghkdqhrbals.StudyMate"
 DEFAULT_NOTES_PATH = File.expand_path("../app-store/metadata/review-notes.txt", __dir__)
+DEFAULT_REPLY_PATH = File.expand_path("../app-store/metadata/resolution-center-reply.txt", __dir__)
+DEFAULT_GUIDE_PATH = File.expand_path("../docs/APP_STORE_REVIEW_RESUBMISSION_1.1.0.md", __dir__)
 EDITABLE_STATES = %w[
   PREPARE_FOR_SUBMISSION
   READY_FOR_REVIEW
@@ -61,6 +64,28 @@ def api_request(method, path, token, query: nil, body: nil)
   abort "App Store Connect API request failed: #{method.to_s.upcase} #{uri} returned #{response.code}"
 end
 
+notes_path = File.expand_path(ENV.fetch("APP_STORE_REVIEW_NOTES_PATH", DEFAULT_NOTES_PATH))
+reply_path = File.expand_path(ENV.fetch("APP_STORE_RESOLUTION_REPLY_PATH", DEFAULT_REPLY_PATH))
+guide_path = File.expand_path(ENV.fetch("APP_STORE_RESUBMISSION_GUIDE_PATH", DEFAULT_GUIDE_PATH))
+notes_template = File.read(notes_path)
+resolution_reply = File.read(reply_path)
+resubmission_guide = File.read(guide_path)
+begin
+  AppStoreReviewNotes.validate_review_package!(
+    notes: notes_template,
+    reply: resolution_reply,
+    guide: resubmission_guide,
+    allow_recording_placeholders: false
+  )
+rescue AppStoreReviewNotes::ValidationError => error
+  abort error.message
+end
+
+if ENV["APP_STORE_REVIEW_NOTES_VALIDATE_ONLY"] == "1"
+  puts "App Store review notes are complete for sync; only server-side demo credentials remain to be resolved."
+  exit
+end
+
 token = app_store_token
 bundle_id = ENV.fetch("APP_BUNDLE_ID", DEFAULT_BUNDLE_ID)
 app = api_request(
@@ -102,25 +127,28 @@ detail = api_request(
   }
 ).fetch("data")
 
-notes_path = File.expand_path(ENV.fetch("APP_STORE_REVIEW_NOTES_PATH", DEFAULT_NOTES_PATH))
 demo_account_name = detail.dig("attributes", "demoAccountName").to_s
 demo_account_password = detail.dig("attributes", "demoAccountPassword").to_s
 abort "App Review demo account name is empty" if demo_account_name.empty?
 abort "App Review demo account password is empty" if demo_account_password.empty?
 
-notes = File.read(notes_path)
+notes = notes_template
   .gsub("{{DEMO_ACCOUNT_NAME}}", demo_account_name)
   .gsub("{{DEMO_ACCOUNT_PASSWORD}}", demo_account_password)
   .strip
-abort "Review notes are empty" if notes.empty?
-abort "Review notes exceed 4,000 characters" if notes.length > 4_000
+begin
+  AppStoreReviewNotes.validate_rendered!(notes)
+  review_notes_bytes = AppStoreReviewNotes.validate_byte_limit!(notes)
+rescue AppStoreReviewNotes::ValidationError => error
+  abort error.message
+end
 
 puts "App: #{app.dig("attributes", "name")} (#{bundle_id})"
 puts "Version: #{version.dig("attributes", "versionString")} [#{version.dig("attributes", "appStoreState")}]"
 puts "Demo account required: #{detail.dig("attributes", "demoAccountRequired")}"
 puts "Demo account configured: #{!detail.dig("attributes", "demoAccountName").to_s.empty?}"
 puts "Review contact configured: #{!detail.dig("attributes", "contactEmail").to_s.empty?}"
-puts "Review notes: #{notes.length}/4000 characters"
+puts "Review notes: #{review_notes_bytes}/4,000 UTF-8 bytes"
 
 if detail.dig("attributes", "notes") == notes
   puts "Review notes are already current."
