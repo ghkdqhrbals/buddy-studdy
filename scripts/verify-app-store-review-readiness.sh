@@ -9,6 +9,7 @@ age_rating_metadata="$project_root/app-store/metadata/age-rating.json"
 review_notes="$project_root/app-store/metadata/review-notes.txt"
 resolution_reply="$project_root/app-store/metadata/resolution-center-reply.txt"
 resubmission_guide="$project_root/docs/APP_STORE_REVIEW_RESUBMISSION_1.1.0.md"
+testflight_notes="$project_root/app-store/metadata/testflight-build-localizations.json"
 privacy_ko="$project_root/docs/privacy-2026-08-14.html"
 privacy_en="$project_root/docs/en/privacy-2026-08-14.html"
 privacy_ja="$project_root/docs/ja/privacy-2026-08-14.html"
@@ -65,6 +66,9 @@ ruby -I "$project_root/scripts/lib" -r app_store_review_notes -e '
   end
 ' "$review_notes" "$resolution_reply" "$resubmission_guide"
 
+TESTFLIGHT_BUILD_NOTES_VALIDATE_ONLY=1 \
+  ruby "$project_root/scripts/update-testflight-build-notes.rb"
+
 for policy in "$privacy_ko" "$privacy_en" "$privacy_ja"; do
   test -s "$policy"
   rg -qi "block|차단|ブロック" "$policy"
@@ -87,6 +91,14 @@ rg -q "AppLegalLinks.privacyPolicyURL" "$project_root/StudyMate/Views/MobileRoot
 rg -q 'buddy-studdy/privacy-2026-08-14\.html' "$project_root/StudyMate/Models/StudyModels.swift"
 rg -q 'buddy-studdy/en/privacy-2026-08-14\.html' "$project_root/StudyMate/Models/StudyModels.swift"
 rg -q 'buddy-studdy/ja/privacy-2026-08-14\.html' "$project_root/StudyMate/Models/StudyModels.swift"
+rg -q '<key>BuddyStudyBackendBaseURL</key>' "$project_root/StudyMate/iOSInfo.plist"
+rg -q 'BUDDYSTUDY_BACKEND_BASE_URL = "https://lowfidev\.cloud";' "$project_root/StudyMate.xcodeproj/project.pbxproj"
+rg -q 'BUDDYSTUDY_BACKEND_BASE_URL = "https://api\.ghkdqhrbals\.org";' "$project_root/StudyMate.xcodeproj/project.pbxproj"
+rg -q 'PRODUCTION_BACKEND_BASE_URL: https://api\.ghkdqhrbals\.org' "$project_root/.github/workflows/release.yml"
+rg -q 'App Review candidate build' "$testflight_notes"
+rg -q 'App Store 심사용 후보 빌드' "$testflight_notes"
+rg -q 'App Store審査用の候補ビルド' "$testflight_notes"
+rg -q 'production BuddyStudy API at https://api\.ghkdqhrbals\.org' "$review_notes"
 rg -qi "block" "$review_notes"
 rg -q "privacy-2026-08-14\.html" "$review_notes"
 rg -q "terms-2026-07-30\.html" "$review_notes"
@@ -96,3 +108,4 @@ rg -q "1\. COMPLETE PHYSICAL-DEVICE VIDEO" "$resolution_reply"
 rg -q "8\. IN-APP PURCHASES AND PURCHASE LOCATION" "$resolution_reply"
 
 echo "App Store review source checks passed."
+echo "Manual gate: verify the production RevenueCat webhook delivers both Production and Sandbox events without a duplicate development integration."

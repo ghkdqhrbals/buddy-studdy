@@ -1218,7 +1218,7 @@ final class DeveloperAccessPolicyTests: XCTestCase {
     }
 
     @MainActor
-    func testTestFlightAutomaticallyEnablesDeveloperModeForEveryBuild() async {
+    func testTestFlightStartsNewBuildWithDeveloperModeDisabled() {
         let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer {
@@ -1226,6 +1226,9 @@ final class DeveloperAccessPolicyTests: XCTestCase {
         }
 
         let store = SettingsStore(defaults: defaults)
+        store.saveDeveloperAccessUnlocked(true)
+        store.saveIsDebuggingEnabled(true)
+        store.saveDeveloperAccessBuildIdentifier("1.0.9(56)")
         let currentBuild = AppDistributionContext(
             isTestFlight: true,
             buildIdentifier: "1.1.0(57)",
@@ -1236,13 +1239,23 @@ final class DeveloperAccessPolicyTests: XCTestCase {
             appDistributionContext: currentBuild
         )
 
-        XCTAssertTrue(appState.canAccessDeveloperOptions)
-        XCTAssertTrue(appState.canShowDebugPopup)
+        XCTAssertFalse(appState.canAccessDeveloperOptions)
+        XCTAssertFalse(appState.canShowDebugPopup)
         XCTAssertFalse(appState.isAPIDebugPanelPresented)
-        XCTAssertTrue(appState.isDebuggingEnabled)
-        XCTAssertTrue(store.loadIsDeveloperAccessUnlocked())
-        XCTAssertTrue(store.loadIsDebuggingEnabled())
+        XCTAssertFalse(appState.isDebuggingEnabled)
+        XCTAssertFalse(store.loadIsDeveloperAccessUnlocked())
+        XCTAssertFalse(store.loadIsDebuggingEnabled())
         XCTAssertEqual(store.loadDeveloperAccessBuildIdentifier(), "1.1.0(57)")
+
+        XCTAssertTrue(appState.unlockDeveloperAccessFromVersionGesture())
+        store.saveIsDebuggingEnabled(true)
+        let sameBuild = AppState(
+            settingsStore: store,
+            appDistributionContext: currentBuild
+        )
+        XCTAssertTrue(sameBuild.canAccessDeveloperOptions)
+        XCTAssertTrue(sameBuild.canShowDebugPopup)
+        XCTAssertTrue(sameBuild.isDebuggingEnabled)
 
         let nextBuild = AppState(
             settingsStore: store,
@@ -1252,11 +1265,11 @@ final class DeveloperAccessPolicyTests: XCTestCase {
                 isDebugBuild: false
             )
         )
-        XCTAssertTrue(nextBuild.canAccessDeveloperOptions)
-        XCTAssertTrue(nextBuild.canShowDebugPopup)
-        XCTAssertTrue(nextBuild.isDebuggingEnabled)
-        XCTAssertTrue(store.loadIsDeveloperAccessUnlocked())
-        XCTAssertTrue(store.loadIsDebuggingEnabled())
+        XCTAssertFalse(nextBuild.canAccessDeveloperOptions)
+        XCTAssertFalse(nextBuild.canShowDebugPopup)
+        XCTAssertFalse(nextBuild.isDebuggingEnabled)
+        XCTAssertFalse(store.loadIsDeveloperAccessUnlocked())
+        XCTAssertFalse(store.loadIsDebuggingEnabled())
         XCTAssertEqual(store.loadDeveloperAccessBuildIdentifier(), "1.1.1(58)")
     }
 

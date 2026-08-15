@@ -3,6 +3,7 @@ BuddyStudy 1.1.0 App Review Information
 Video and devices
 - Video: {{ATTACHED_VIDEO_FILENAME}}
 - Physical models, exact OS versions, selected build: {{ACTUALLY_TESTED_DEVICE_MODELS_AND_IOS_VERSIONS}}
+- The selected build is the App Review resubmission candidate and connects to the production BuddyStudy API at https://api.ghkdqhrbals.org. TestFlight purchase confirmation uses Apple's sandbox environment.
 - The unedited physical-iPhone video uses the latest public iOS available that date. It starts on the Home Screen, launches BuddyStudy, opens Apple's purchase sheet, and cancels.
 
 Access and setup

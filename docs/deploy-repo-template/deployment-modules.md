@@ -138,10 +138,14 @@ deployment.
   unknown products or account tokens. The webhook is the primary new-purchase and lifecycle input and uses
   the same provider transaction idempotency key as the backward-compatible
   direct JWS synchronization path. The iOS app always uses the App Store
-  `appl_` public SDK key. Production and development use separate HMAC webhook
-  configurations and signing secrets. The development webhook accepts App
-  Store Sandbox events so TestFlight purchases reach the development ledger.
-  The production webhook accepts App Store Production events only.
+  `appl_` public SDK key. App Review candidate and ordinary TestFlight Release
+  builds default to the production API, and a new version/build clears stale
+  developer routing before its first request. The production RevenueCat webhook
+  integration must therefore deliver both App Store Production and Sandbox
+  events to the production endpoint with its existing HMAC secret. Do not leave
+  a second Sandbox-only development integration delivering those same events,
+  because duplicate delivery would split one purchase lifecycle across two
+  ledgers. The development endpoint remains scoped to Xcode-local billing.
 - Runtime health checks are not GitHub Actions deploy gates. GitHub Actions
   validates image/config submission and Nginx syntax only. Docker Swarm owns
   task health, replacement ordering, and rollback; Grafana owns continuous

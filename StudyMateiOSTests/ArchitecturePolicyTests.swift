@@ -3015,12 +3015,24 @@ final class ArchitecturePolicyTests: XCTestCase {
     }
 
     @MainActor
-    func testTestFlightAlwaysUsesDevelopmentBackend() {
+    func testReleaseConfigurationUsesBundledProductionBackend() {
         let configuration = BackendBaseURLConfiguration(
             isDebuggingEnabled: false,
-            debugBackendBaseURL: "https://api.ghkdqhrbals.org",
-            isTestFlight: true,
-            launchBackendBaseURL: "https://api.ghkdqhrbals.org"
+            debugBackendBaseURL: "https://lowfidev.cloud",
+            bundledBackendBaseURL: "https://api.ghkdqhrbals.org",
+            launchBackendBaseURL: nil
+        )
+
+        XCTAssertEqual(configuration.effectiveBaseURL.absoluteString, "https://api.ghkdqhrbals.org")
+    }
+
+    @MainActor
+    func testUnlockedDebugSelectionOverridesBundledProductionBackend() {
+        let configuration = BackendBaseURLConfiguration(
+            isDebuggingEnabled: true,
+            debugBackendBaseURL: "https://lowfidev.cloud",
+            bundledBackendBaseURL: "https://api.ghkdqhrbals.org",
+            launchBackendBaseURL: nil
         )
 
         XCTAssertEqual(configuration.effectiveBaseURL.absoluteString, "https://lowfidev.cloud")

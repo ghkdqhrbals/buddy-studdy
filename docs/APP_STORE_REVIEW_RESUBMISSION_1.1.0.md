@@ -66,7 +66,8 @@ Because BuddyStudy supports iPad, physical-iPad verification on the latest publi
 ## Resubmission checklist
 
 - [ ] Backend block migration and API are deployed through the approved GitHub Actions workflow.
-- [ ] The replacement iOS build is uploaded, processed, and selected; build 88 is not reused.
+- [ ] The replacement iOS build is uploaded, processed, and selected; build 88 is not reused. Its archive and exported IPA both identify `https://api.ghkdqhrbals.org`, and the exact build's TestFlight What to Test text labels it as the App Review candidate.
+- [ ] The existing production RevenueCat webhook delivers both Production and Sandbox events to `https://api.ghkdqhrbals.org/api/v1/billing/revenuecat/webhooks`, and no second Sandbox-only integration delivers the same events to development.
 - [ ] The selected build passes the generic iOS build and physical-iPhone verification on the latest public iOS available on the test date.
 - [ ] The exact selected build passes physical-iPad verification on the latest public iPadOS; the tested iPad model, iPadOS version, and build are included in the device list.
 - [ ] Report Question and Block User work from public-question list/detail; comment-author blocking works; blocked content is hidden after refresh and relaunch.

@@ -1383,8 +1383,7 @@ final class AppState: ObservableObject {
             cloudSyncStateUseCase: cloudSyncStateUseCase,
             localStudyRecordRepository: localStudyRecordRepository,
             localStudyRecordUseCase: localStudyRecordUseCase,
-            appErrorHandlingUseCase: appErrorHandlingUseCase,
-            appDistributionContext: appDistributionContext
+            appErrorHandlingUseCase: appErrorHandlingUseCase
         )
         let localUseCases = useCaseDependencies.localUseCases
         let appUseCasesProvider = useCaseDependencies.appUseCasesProvider

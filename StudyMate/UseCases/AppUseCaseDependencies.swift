@@ -36,8 +36,7 @@ struct AppUseCaseDependencies {
         cloudSyncStateUseCase: CloudSyncStateUseCase?,
         localStudyRecordRepository: LocalStudyRecordRepository?,
         localStudyRecordUseCase: LocalStudyRecordUseCase?,
-        appErrorHandlingUseCase: AppErrorHandlingUseCase,
-        appDistributionContext: AppDistributionContext
+        appErrorHandlingUseCase: AppErrorHandlingUseCase
     ) -> AppUseCaseDependencies {
         AppUseCaseDependencies(
             localUseCases: AppLocalUseCases(
@@ -64,10 +63,7 @@ struct AppUseCaseDependencies {
                 localStudyRecordUseCase: localStudyRecordUseCase,
                 appErrorHandlingUseCase: appErrorHandlingUseCase
             ),
-            appUseCasesProvider: AppUseCasesProvider(
-                backendClient: remotePushBackendClient,
-                appDistributionContext: appDistributionContext
-            )
+            appUseCasesProvider: AppUseCasesProvider(backendClient: remotePushBackendClient)
         )
     }
 }

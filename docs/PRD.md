@@ -129,6 +129,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 14. Notification loading failures show a short retry action without exposing HTTP status codes, gateway names, request IDs, or backend diagnostics.
 15. Signed-out Settings exposes only installation-level preferences such as app language and developer promotion-code entry. Account-backed learning rhythm, notification permission, and notification sound controls appear only after sign-in.
 16. The signed-out Profile hub presents Login as its primary account destination instead of Avatar. After authentication succeeds, the same destination becomes Avatar and exposes profile editing.
+17. Local Debug builds default to the development API. Every signed App Store Connect Release archive, including TestFlight and App Review candidates, embeds the production API URL; TestFlight receipt detection controls distribution-only behavior and never changes backend routing. An explicit Xcode launch override takes precedence for developer testing, while a newly installed TestFlight build clears stale developer access and debugging state before its first request.
 
 ### Identity
 

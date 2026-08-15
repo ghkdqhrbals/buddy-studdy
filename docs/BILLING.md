@@ -697,26 +697,36 @@ monitoring administrator session. The monitoring UI exposes the flow at
    `REVENUECAT_SERVER_API_KEY`; `REVENUECAT_PROJECT_ID` is required for the
    six-hour/15-minute/daily server reconciliation schedule. Configure bounded
    connect/read timeouts and at most three attempts. `REVENUECAT_APP_ID` remains
-   optional scoping metadata. The production-only App Store webhook targets
-   `https://api.ghkdqhrbals.org/api/v1/billing/revenuecat/webhooks`; the Sandbox
-   webhook accepts Sandbox events for the App Store app and
-   targets `https://lowfidev.cloud/api/v1/billing/revenuecat/webhooks`.
+   optional scoping metadata. The production App Store webhook targets
+   `https://api.ghkdqhrbals.org/api/v1/billing/revenuecat/webhooks`. Before an
+   App Review candidate is submitted, configure that existing production
+   RevenueCat webhook integration to deliver both Production and Sandbox events.
+   Do not leave a second Sandbox-only integration delivering the same App Store
+   events to the development endpoint, because duplicate delivery would split
+   one purchase lifecycle across two ledgers. The development endpoint remains
+   only for Xcode-local development billing.
 7. RevenueCat must own transaction completion and use the same two monthly App
    Store product IDs. Retired annual products remain available only for historical
    transaction, entitlement, and refund processing; they must not appear in an
-   Offering or remain available for sale in App Store Connect. Debug, ordinary
-   TestFlight, and App Store builds use the `appl_`
-   Apple public key so StoreKit determines Apple Sandbox versus Production from
-   the transaction environment. TestFlight always uses the `appl_` key,
-   including when developer access points API traffic at the development
-   backend. The app does not embed or select a RevenueCat Test Store key.
+   Offering or remain available for sale in App Store Connect. Debug, TestFlight,
+   and App Store builds use the `appl_` Apple public key so StoreKit determines
+   Apple Sandbox versus Production from the transaction environment. TestFlight
+   billing tests must retain the production backend selection; Xcode-local
+   development uses the development endpoint. The app does not embed or select
+   a RevenueCat Test Store key.
    RevenueCat remains configured once per process with the `appl_` key. Release
    validates that the public key starts with `appl_`.
-8. TestFlight is detected from its `sandboxReceipt` and always uses
-   `https://lowfidev.cloud`, regardless of persisted developer settings or the
-   launch environment override. App Store builds use the production API. This
-   keeps TestFlight checkouts and the Sandbox-only RevenueCat webhook on the
-   same development billing ledger.
+8. TestFlight receipt detection identifies the distribution context only for
+   developer-access/reset behavior; it neither selects the backend nor decides
+   the transaction environment. StoreKit and RevenueCat transaction metadata
+   determine Sandbox versus Production. Every signed Release archive embeds
+   `https://api.ghkdqhrbals.org`; release CI verifies that exact value in both
+   the archive and exported IPA before upload. A new TestFlight version/build
+   clears stale developer access and debugging state, so its normal first-run
+   route is production. Local Debug builds embed `https://lowfidev.cloud`, and
+   the shared Xcode launch action explicitly overrides the URL for StoreKit
+   development. TestFlight Sandbox transactions are verified and fulfilled by
+   the production backend.
 
 The committed App Store Connect source of truth is
 `app-store/billing/subscriptions.json`. Product metadata can take up to one hour

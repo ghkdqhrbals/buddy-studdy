@@ -17,18 +17,16 @@ struct DeveloperSettingsUseCase {
             return settings
         }
 
-        if !settings.isDeveloperAccessUnlocked {
-            repository.saveDeveloperAccessUnlocked(true)
-            settings.isDeveloperAccessUnlocked = true
+        guard settings.developerAccessBuildIdentifier != distribution.buildIdentifier else {
+            return settings
         }
-        if settings.developerAccessBuildIdentifier != distribution.buildIdentifier {
-            repository.saveDeveloperAccessBuildIdentifier(distribution.buildIdentifier)
-            settings.developerAccessBuildIdentifier = distribution.buildIdentifier
-        }
-        if !settings.isDebuggingEnabled {
-            repository.saveIsDebuggingEnabled(true)
-            settings.isDebuggingEnabled = true
-        }
+
+        repository.saveDeveloperAccessUnlocked(false)
+        repository.saveIsDebuggingEnabled(false)
+        repository.saveDeveloperAccessBuildIdentifier(distribution.buildIdentifier)
+        settings.developerAccessBuildIdentifier = distribution.buildIdentifier
+        settings.isDeveloperAccessUnlocked = false
+        settings.isDebuggingEnabled = false
         return settings
     }
 

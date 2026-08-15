@@ -170,11 +170,14 @@ struct EmailVerificationCodeResult: Equatable {
 
 @MainActor
 struct BackendBaseURLConfiguration: Equatable {
+    static let bundledBaseURLInfoKey = "BuddyStudyBackendBaseURL"
     static let defaultDebugBaseURL = URL(string: "https://lowfidev.cloud")!
 
     var isDebuggingEnabled: Bool
     var debugBackendBaseURL: String
-    var isTestFlight: Bool = AppDistributionContext.live.isTestFlight
+    var bundledBackendBaseURL: String? = Bundle.main.object(
+        forInfoDictionaryKey: BackendBaseURLConfiguration.bundledBaseURLInfoKey
+    ) as? String
     var launchBackendBaseURL: String? = ProcessInfo.processInfo.environment["BUDDYSTUDY_BACKEND_BASE_URL"]
 
     var normalizedDebugBackendBaseURL: String {
@@ -186,19 +189,19 @@ struct BackendBaseURLConfiguration: Equatable {
     }
 
     var effectiveBaseURL: URL {
-        // TestFlight purchases and the sandbox-only webhook must share one ledger.
-        if isTestFlight {
-            return Self.defaultDebugBaseURL
-        }
         if let launchBackendBaseURL,
            let launchURL = Self.resolvedDebugBackendURL(from: launchBackendBaseURL) {
             return launchURL
         }
-        guard isDebuggingEnabled else {
-            return RemotePushBackendClient.defaultBaseURL
+        if isDebuggingEnabled {
+            return debugBackendURL ?? Self.defaultDebugBaseURL
+        }
+        if let bundledBackendBaseURL,
+           let bundledURL = Self.resolvedDebugBackendURL(from: bundledBackendBaseURL) {
+            return bundledURL
         }
 
-        return debugBackendURL ?? Self.defaultDebugBaseURL
+        return RemotePushBackendClient.defaultBaseURL
     }
 
     var displayBaseURL: String {

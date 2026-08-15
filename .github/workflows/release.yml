@@ -15,6 +15,11 @@ on:
         required: true
         default: true
         type: boolean
+      app_review_candidate:
+        description: "Label this TestFlight upload as the App Review resubmission candidate."
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -27,6 +32,7 @@ jobs:
       release_version: ${{ steps.release.outputs.release_version }}
       release_build_number: ${{ steps.release.outputs.release_build_number }}
       upload_enabled: ${{ steps.release.outputs.upload_enabled }}
+      review_candidate: ${{ steps.release.outputs.review_candidate }}
       artifact_name: ${{ steps.release.outputs.artifact_name }}
       deployment_targets: ${{ steps.release.outputs.deployment_targets }}
 
@@ -39,6 +45,7 @@ jobs:
         env:
           INPUT_VERSION: ${{ inputs.version || '' }}
           INPUT_UPLOAD_ENABLED: ${{ inputs.upload_to_app_store_connect }}
+          INPUT_REVIEW_CANDIDATE: ${{ inputs.app_review_candidate }}
         run: |
           set -euo pipefail
 
@@ -68,17 +75,34 @@ jobs:
               ;;
           esac
 
+          review_candidate="${INPUT_REVIEW_CANDIDATE:-false}"
+          case "${review_candidate}" in
+            true|false) ;;
+            *)
+              echo "Invalid App Review candidate setting: ${review_candidate}" >&2
+              exit 1
+              ;;
+          esac
+          if [ "${review_candidate}" = "true" ] && [ "${upload_enabled}" != "true" ]; then
+            echo "App Review candidate releases must be uploaded to App Store Connect." >&2
+            exit 1
+          fi
+
           build_number="${GITHUB_RUN_NUMBER}"
           artifact_name="BuddyStudy-iOS-${version}-${build_number}"
           deployment_targets="iOS 서명 IPA"
           if [ "${upload_enabled}" = "true" ]; then
             deployment_targets="${deployment_targets}, TestFlight"
           fi
+          if [ "${review_candidate}" = "true" ]; then
+            deployment_targets="${deployment_targets}, App Review 재심사 후보"
+          fi
 
           {
             echo "release_version=${version}"
             echo "release_build_number=${build_number}"
             echo "upload_enabled=${upload_enabled}"
+            echo "review_candidate=${review_candidate}"
             echo "artifact_name=${artifact_name}"
             echo "deployment_targets=${deployment_targets}"
           } >> "${GITHUB_OUTPUT}"
@@ -89,8 +113,14 @@ jobs:
             echo "- Version: \`${version}\`"
             echo "- Build: \`${build_number}\`"
             echo "- Targets: ${deployment_targets}"
+            echo "- App Review candidate: \`${review_candidate}\`"
+            echo "- Backend: \`https://api.ghkdqhrbals.org\`"
             echo "- Source: \`${GITHUB_SHA}\`"
           } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Validate TestFlight review-candidate notes
+        if: ${{ steps.release.outputs.review_candidate == 'true' }}
+        run: TESTFLIGHT_BUILD_NOTES_VALIDATE_ONLY=1 ruby scripts/update-testflight-build-notes.rb
 
   notify_ios_planned:
     name: Notify iOS Release Planned
@@ -128,6 +158,8 @@ jobs:
       REVENUECAT_PUBLIC_SDK_KEY: ${{ secrets.REVENUECAT_PUBLIC_SDK_KEY }}
       RELEASE_VERSION: ${{ needs.plan_ios_release.outputs.release_version }}
       RELEASE_BUILD_NUMBER: ${{ needs.plan_ios_release.outputs.release_build_number }}
+      APP_REVIEW_CANDIDATE: ${{ needs.plan_ios_release.outputs.review_candidate }}
+      PRODUCTION_BACKEND_BASE_URL: https://api.ghkdqhrbals.org
       ARTIFACT_NAME: ${{ needs.plan_ios_release.outputs.artifact_name }}
 
     steps:
@@ -278,15 +310,22 @@ jobs:
             IOS_PROVISIONING_PROFILE_NAME="${IOS_PROVISIONING_PROFILE_NAME}" \
             DEVELOPMENT_TEAM="${APPLE_TEAM_ID}" \
             REVENUECAT_PUBLIC_SDK_KEY="${REVENUECAT_PUBLIC_SDK_KEY}" \
+            BUDDYSTUDY_BACKEND_BASE_URL="${PRODUCTION_BACKEND_BASE_URL}" \
             MARKETING_VERSION="${RELEASE_VERSION}" \
             CURRENT_PROJECT_VERSION="${RELEASE_BUILD_NUMBER}"
 
-      - name: Verify archive entitlements
+      - name: Verify archive release configuration and entitlements
         run: |
           set -euo pipefail
 
           app_path="build/StudyMateiOS.xcarchive/Products/Applications/StudyMate.app"
           test -d "${app_path}"
+
+          backend_base_url="$(/usr/libexec/PlistBuddy -c 'Print :BuddyStudyBackendBaseURL' "${app_path}/Info.plist")"
+          if [ "${backend_base_url}" != "${PRODUCTION_BACKEND_BASE_URL}" ]; then
+            echo "Archive backend URL must be ${PRODUCTION_BACKEND_BASE_URL}; found ${backend_base_url:-<missing>}." >&2
+            exit 1
+          fi
 
           codesign --verify --deep --strict --verbose=2 "${app_path}"
           codesign -d --entitlements - "${app_path}" > "${RUNNER_TEMP}/ios-archive-entitlements.plist"
@@ -344,7 +383,7 @@ jobs:
 
           echo "IPA_PATH=${ipa_path}" >> "${GITHUB_ENV}"
 
-      - name: Verify exported IPA entitlements
+      - name: Verify exported IPA release configuration and entitlements
         run: |
           set -euo pipefail
 
@@ -354,6 +393,12 @@ jobs:
           app_path="$(find build/ipa-check/Payload -maxdepth 1 -name '*.app' -print -quit)"
           if [ -z "${app_path}" ]; then
             echo "Exported IPA does not contain an app bundle." >&2
+            exit 1
+          fi
+
+          backend_base_url="$(/usr/libexec/PlistBuddy -c 'Print :BuddyStudyBackendBaseURL' "${app_path}/Info.plist")"
+          if [ "${backend_base_url}" != "${PRODUCTION_BACKEND_BASE_URL}" ]; then
+            echo "Exported IPA backend URL must be ${PRODUCTION_BACKEND_BASE_URL}; found ${backend_base_url:-<missing>}." >&2
             exit 1
           fi
 
@@ -372,11 +417,15 @@ jobs:
             --arg build "${RELEASE_BUILD_NUMBER}" \
             --arg source_sha "${GITHUB_SHA}" \
             --arg run_id "${GITHUB_RUN_ID}" \
+            --arg backend_base_url "${PRODUCTION_BACKEND_BASE_URL}" \
+            --argjson app_review_candidate "${APP_REVIEW_CANDIDATE}" \
             '{
               version: $version,
               build: $build,
               sourceSha: $source_sha,
-              runId: $run_id
+              runId: $run_id,
+              backendBaseURL: $backend_base_url,
+              appReviewCandidate: $app_review_candidate
             }' > dist/release-metadata.json
 
       - name: Upload signed IPA artifact
@@ -401,6 +450,10 @@ jobs:
       APPSTORE_CONNECT_KEY_ID: ${{ secrets.APPSTORE_CONNECT_KEY_ID }}
       APPSTORE_CONNECT_ISSUER_ID: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID }}
       APPSTORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APPSTORE_CONNECT_PRIVATE_KEY_BASE64 }}
+      RELEASE_VERSION: ${{ needs.plan_ios_release.outputs.release_version }}
+      RELEASE_BUILD_NUMBER: ${{ needs.plan_ios_release.outputs.release_build_number }}
+      APP_REVIEW_CANDIDATE: ${{ needs.plan_ios_release.outputs.review_candidate }}
+      PRODUCTION_BACKEND_BASE_URL: https://api.ghkdqhrbals.org
       ARTIFACT_NAME: ${{ needs.plan_ios_release.outputs.artifact_name }}
 
     steps:
@@ -426,9 +479,10 @@ jobs:
 
           private_keys_dir="${RUNNER_TEMP}/app-store-connect-private-keys"
           mkdir -p "${private_keys_dir}"
+          private_key_path="${private_keys_dir}/AuthKey_${APPSTORE_CONNECT_KEY_ID}.p8"
           echo "${APPSTORE_CONNECT_PRIVATE_KEY_BASE64}" |
-            base64 --decode > "${private_keys_dir}/AuthKey_${APPSTORE_CONNECT_KEY_ID}.p8"
-          chmod 600 "${private_keys_dir}/AuthKey_${APPSTORE_CONNECT_KEY_ID}.p8"
+            base64 --decode > "${private_key_path}"
+          chmod 600 "${private_key_path}"
           echo "API_PRIVATE_KEYS_DIR=${private_keys_dir}" >> "${GITHUB_ENV}"
 
       - name: Upload to App Store Connect for TestFlight
@@ -452,6 +506,74 @@ jobs:
             echo "## TestFlight Upload"
             echo ""
             echo "- IPA: \`$(basename "${ipa_path}")\`"
+            echo "- Version/build: \`${RELEASE_VERSION} (${RELEASE_BUILD_NUMBER})\`"
+            echo "- App Review resubmission candidate: \`${APP_REVIEW_CANDIDATE}\`"
+            echo "- Backend: \`${PRODUCTION_BACKEND_BASE_URL}\`"
             echo "- Result: App Store Connect accepted the upload."
-            echo "- Next: Apple processing continues asynchronously."
+            if [ "${APP_REVIEW_CANDIDATE}" = "true" ]; then
+              echo "- Next: The review-note job will wait for processing and label this exact build."
+            else
+              echo "- Next: Apple processing continues asynchronously."
+            fi
           } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Remove App Store Connect API key
+        if: ${{ always() }}
+        run: rm -f "${RUNNER_TEMP}/app-store-connect-private-keys/AuthKey_${APPSTORE_CONNECT_KEY_ID}.p8"
+
+  sync_testflight_review_notes:
+    name: Label TestFlight App Review Candidate
+    runs-on: macos-26
+    timeout-minutes: 40
+    needs:
+      - plan_ios_release
+      - upload_testflight
+    if: ${{ needs.plan_ios_release.outputs.review_candidate == 'true' }}
+    env:
+      APPSTORE_CONNECT_KEY_ID: ${{ secrets.APPSTORE_CONNECT_KEY_ID }}
+      APPSTORE_CONNECT_ISSUER_ID: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID }}
+      APPSTORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APPSTORE_CONNECT_PRIVATE_KEY_BASE64 }}
+      APP_STORE_VERSION_STRING: ${{ needs.plan_ios_release.outputs.release_version }}
+      APP_STORE_BUILD_NUMBER: ${{ needs.plan_ios_release.outputs.release_build_number }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare App Store Connect API key
+        run: |
+          set -euo pipefail
+
+          for name in \
+            APPSTORE_CONNECT_KEY_ID \
+            APPSTORE_CONNECT_ISSUER_ID \
+            APPSTORE_CONNECT_PRIVATE_KEY_BASE64; do
+            if [ -z "${!name}" ]; then
+              echo "Missing GitHub Actions secret: ${name}" >&2
+              exit 1
+            fi
+          done
+
+          private_key_path="${RUNNER_TEMP}/AuthKey_${APPSTORE_CONNECT_KEY_ID}.p8"
+          echo "${APPSTORE_CONNECT_PRIVATE_KEY_BASE64}" |
+            base64 --decode > "${private_key_path}"
+          chmod 600 "${private_key_path}"
+          echo "APPSTORE_CONNECT_PRIVATE_KEY_PATH=${private_key_path}" >> "${GITHUB_ENV}"
+
+      - name: Update and verify What to Test
+        run: |
+          set -euo pipefail
+
+          APP_STORE_APPLY=1 ruby scripts/update-testflight-build-notes.rb
+          {
+            echo "## TestFlight App Review Candidate"
+            echo ""
+            echo "- Version/build: \`${APP_STORE_VERSION_STRING} (${APP_STORE_BUILD_NUMBER})\`"
+            echo "- Backend: \`https://api.ghkdqhrbals.org\`"
+            echo "- What to Test: en-US, ko, and ja updated and verified."
+            echo "- Next: Select this exact build in the App Store version's Build section."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Remove App Store Connect API key
+        if: ${{ always() }}
+        run: rm -f "${RUNNER_TEMP}/AuthKey_${APPSTORE_CONNECT_KEY_ID}.p8"
