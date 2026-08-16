@@ -1379,6 +1379,24 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testMobileRootDoesNotContainLegacyOnboardingUI() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+        let forbiddenSymbols = [
+            "MobileOnboardingStep",
+            "MobileOnboardingView",
+            "MobileOnboardingPrimaryButtonStyle",
+            "MobileOnboardingSecondaryButtonStyle",
+        ]
+        let violations = forbiddenSymbols.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "The iOS root must enter the app directly without retaining legacy onboarding types or references: \(violations)"
+        )
+    }
+
     func testHomePullToRefreshDoesNotHoldSystemRefreshControlForNetworkLoad() throws {
         let root = try repositoryRoot()
         let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")

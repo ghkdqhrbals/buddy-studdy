@@ -891,7 +891,7 @@ final class PageAccessPolicyTests: XCTestCase {
         XCTAssertEqual(AppLanguage.preferred(from: ["zh-Hans"]), .english)
     }
 
-    func testFreshInstallUsesSystemPreferredLanguageWithoutCompletingOnboarding() {
+    func testFreshSettingsUseCurrentSystemLanguageBeforeFirstAppStateLaunch() {
         let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer {
@@ -931,7 +931,7 @@ final class PageAccessPolicyTests: XCTestCase {
     }
 
     @MainActor
-    func testFreshAppStateStillRequiresOnboardingAfterInitialization() {
+    func testFreshAppStateEntersHomeWithoutCreatingAnInitialStudy() {
         let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer {
@@ -944,9 +944,13 @@ final class PageAccessPolicyTests: XCTestCase {
         )
         let appState = AppState(settingsStore: store)
 
-        XCTAssertFalse(appState.hasCompletedOnboarding)
+        XCTAssertTrue(appState.hasCompletedOnboarding)
         XCTAssertEqual(appState.settings.appLanguage, .japanese)
-        XCTAssertFalse(store.loadHasCompletedOnboarding())
+        XCTAssertTrue(appState.settings.studyCategories.isEmpty)
+        XCTAssertEqual(appState.mobileVisibleTab, .home)
+        XCTAssertTrue(store.loadHasCompletedOnboarding())
+        XCTAssertEqual(store.loadSettings().appLanguage, .japanese)
+        XCTAssertTrue(store.loadSettings().studyCategories.isEmpty)
     }
 
     func testSavedAppLanguageOverridesCurrentSystemPreference() {

@@ -1963,7 +1963,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertTrue(AppErrorHandlingUseCase().isPermanentBackendOperationError(error))
     }
 
-    func testSettingsRequestOmitsClientDefaultPrompt() async throws {
+    func testSettingsRequestOmitsClientDefaultsWithoutRootStudies() async throws {
         let client = makeClient { request in
             XCTAssertEqual(request.httpMethod, "PUT")
             XCTAssertEqual(request.url?.path, "/api/v1/settings")
@@ -1972,6 +1972,7 @@ final class QuestionGenerationFlowTests: XCTestCase {
                 JSONSerialization.jsonObject(with: bodyData) as? [String: Any]
             )
             XCTAssertNil(body["customPrompt"])
+            XCTAssertEqual(body["topic"] as? String, "")
             let schedules = try XCTUnwrap(body["schedules"] as? [[String: Any]])
             XCTAssertTrue(schedules.isEmpty)
             return Self.response(for: request, statusCode: 200, body: "{}")
@@ -1988,6 +1989,73 @@ final class QuestionGenerationFlowTests: XCTestCase {
             apiKey: nil,
             enabled: true
         )
+    }
+
+    func testSettingsRequestUsesFirstRootTopicWhenStudiesExist() async throws {
+        let first = StudyCategory(id: "11", title: "Redis", difficulty: .level6)
+        let second = StudyCategory(id: "12", title: "Kafka", difficulty: .level7)
+        let client = makeClient { request in
+            XCTAssertEqual(request.httpMethod, "PUT")
+            XCTAssertEqual(request.url?.path, "/api/v1/settings")
+            let body = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: Self.bodyData(from: request)) as? [String: Any]
+            )
+            XCTAssertEqual(body["topic"] as? String, first.title)
+            let schedules = try XCTUnwrap(body["schedules"] as? [[String: Any]])
+            XCTAssertEqual(schedules.compactMap { $0["topic"] as? String }, [first.title, second.title])
+            return Self.response(for: request, statusCode: 200, body: "{}")
+        }
+
+        try await client.updateSchedule(
+            registration: Self.registration,
+            settings: StudySettings(
+                topic: second.title,
+                difficulty: second.difficulty,
+                customPrompt: StudySettings.defaultCustomPrompt,
+                intervalMinutes: 15,
+                studyCategories: [first, second],
+                selectedStudyCategoryID: second.id
+            ),
+            apiKey: nil,
+            enabled: true
+        )
+    }
+
+    func testServerRefreshDoesNotPromoteLocalizedFallbackRootsIntoMyStudies() async throws {
+        let suiteName = "LocalizedFallbackStudyTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+
+        let store = SettingsStore(
+            defaults: defaults,
+            recordDatabaseURL: databaseURL,
+            usesSecureBackendIdentityStorage: false,
+            preferredAppLanguageProvider: { .english }
+        )
+        store.saveHasCompletedOnboarding(true)
+        store.saveSettings(.initial(for: .english))
+        store.saveRemotePushRegistration(Self.signedInRegistration)
+        let client = makeClient { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/v1/studies")
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: Self.localizedFallbackStudyPageResponse
+            )
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+
+        await appState.refreshVisibleData()
+
+        XCTAssertEqual(appState.rootStudyCategoriesForDisplay.map(\.title), ["English"])
+        XCTAssertEqual(appState.settings.studyCategories.map(\.title), ["English"])
+        XCTAssertEqual(store.loadSettings().studyCategories.map(\.title), ["English"])
     }
 
     func testAppUpdateCheckSendsInstalledVersionAndDecodesForcedCampaign() async throws {
@@ -2267,6 +2335,65 @@ final class QuestionGenerationFlowTests: XCTestCase {
           "limit": 500,
           "offset": 0,
           "serverTime": "2026-08-12T00:00:00Z"
+        }
+        """
+
+    private static let localizedFallbackStudyPageResponse = """
+        {
+          "studies": [
+            {
+              "id": 31,
+              "topic": "내 학습",
+              "difficultyLevel": 2,
+              "intervalMinutes": 15,
+              "enabled": true,
+              "customPrompt": "",
+              "openaiModel": "gpt-5.4",
+              "maxHistoryCount": 100,
+              "createdAt": "2026-08-01T00:00:00Z",
+              "updatedAt": "2026-08-01T00:00:00Z"
+            },
+            {
+              "id": 32,
+              "topic": "My Study",
+              "difficultyLevel": 2,
+              "intervalMinutes": 15,
+              "enabled": true,
+              "customPrompt": "",
+              "openaiModel": "gpt-5.4",
+              "maxHistoryCount": 100,
+              "createdAt": "2026-08-01T00:00:00Z",
+              "updatedAt": "2026-08-01T00:00:00Z"
+            },
+            {
+              "id": 33,
+              "topic": "マイ学習",
+              "difficultyLevel": 2,
+              "intervalMinutes": 15,
+              "enabled": true,
+              "customPrompt": "",
+              "openaiModel": "gpt-5.4",
+              "maxHistoryCount": 100,
+              "createdAt": "2026-08-01T00:00:00Z",
+              "updatedAt": "2026-08-01T00:00:00Z"
+            },
+            {
+              "id": 34,
+              "topic": "English",
+              "difficultyLevel": 4,
+              "intervalMinutes": 30,
+              "enabled": true,
+              "customPrompt": "",
+              "openaiModel": "gpt-5.4",
+              "maxHistoryCount": 100,
+              "createdAt": "2026-08-10T00:00:00Z",
+              "updatedAt": "2026-08-10T00:00:00Z"
+            }
+          ],
+          "totalCount": 4,
+          "limit": 500,
+          "offset": 0,
+          "serverTime": "2026-08-16T00:00:00Z"
         }
         """
 

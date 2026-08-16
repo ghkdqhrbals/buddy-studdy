@@ -1318,7 +1318,10 @@ struct StudySettings: Codable, Equatable {
         let fallback = normalizedString(fallbackTopic, fallback: fallbackTitle)
         var result: [StudyCategory] = []
         var seen: Set<String> = []
-        let fallbackKey = normalizedCategoryKey(fallback)
+        let fallbackKeys = Set(
+            ([fallback] + AppLanguage.allCases.map(Self.fallbackTopic(for:)))
+                .map(Self.normalizedCategoryKey)
+        )
 
         for category in categories {
             let title = normalizedString(category.title, fallback: "")
@@ -1327,7 +1330,7 @@ struct StudySettings: Codable, Equatable {
             }
 
             let key = Self.normalizedCategoryKey(title)
-            guard key != fallbackKey else {
+            guard !fallbackKeys.contains(key) else {
                 continue
             }
 

@@ -1390,7 +1390,12 @@ final class AppState: ObservableObject {
         let loadedLocalStudySettings = localUseCases.localStudySettings.loadSettings()
         let loadedCloudSyncState = localUseCases.cloudSyncState.loadState()
         let loadedSettings = loadedLocalStudySettings.settings
-        let loadedHasCompletedOnboarding = localUseCases.onboardingState.hasCompletedOnboarding()
+        let storedHasCompletedOnboarding = localUseCases.onboardingState.hasCompletedOnboarding()
+        #if os(iOS)
+        let loadedHasCompletedOnboarding = true
+        #else
+        let loadedHasCompletedOnboarding = storedHasCompletedOnboarding
+        #endif
         let synchronizedLoadedSettings = Self.synchronizedTopicCategories(
             for: loadedSettings,
             fallbackTopicResolver: Self.defaultFallbackTopic
@@ -1399,9 +1404,18 @@ final class AppState: ObservableObject {
         let effectiveLoadedSettings = loadedIsCommunitySignedIn
             ? synchronizedLoadedSettings
             : synchronizedLoadedSettings.withQuestionPrivacy(false)
+        #if os(iOS)
+        if !storedHasCompletedOnboarding {
+            localUseCases.onboardingState.setHasCompletedOnboarding(true)
+            localUseCases.localStudySettings.saveSettings(effectiveLoadedSettings)
+        } else if effectiveLoadedSettings != loadedSettings {
+            localUseCases.localStudySettings.saveSettings(effectiveLoadedSettings)
+        }
+        #else
         if loadedHasCompletedOnboarding, effectiveLoadedSettings != loadedSettings {
             localUseCases.localStudySettings.saveSettings(effectiveLoadedSettings)
         }
+        #endif
         let loadedAPIKey = loadedLocalStudySettings.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let loadedAPIKeyUpdatedAt = loadedLocalStudySettings.openAIAPIKeyUpdatedAt
         let effectiveAPIKeyUpdatedAt = loadedAPIKeyUpdatedAt ?? (loadedAPIKey.isEmpty ? nil : appClock.now)

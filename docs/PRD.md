@@ -26,12 +26,11 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 
 ## Core User Flows
 
-### Onboarding
+### First Launch
 
-1. On a fresh installation, the app starts in the first supported iOS preferred language (`ko`, `en`, or `ja`) and falls back to English. The user can change it during onboarding or later in Profile settings; an explicit saved choice is never overwritten by later device-language changes.
-2. User sets the first study topic and starting difficulty.
-3. User sets the default question interval. AI requests use the backend-managed system key, so iOS onboarding does not request a personal API key.
-4. User can skip setup and finish later in Profile settings.
+1. On a fresh installation, the app enters Home immediately in the first supported iOS preferred language (`ko`, `en`, or `ja`) and falls back to English.
+2. First launch starts with an empty study list. The first root study is created only when the user explicitly uses the add-study action; settings or device registration must never materialize a fallback study.
+3. The user can change the app language later in Profile settings. An explicit saved choice is never overwritten by later device-language changes.
 
 ### Study
 

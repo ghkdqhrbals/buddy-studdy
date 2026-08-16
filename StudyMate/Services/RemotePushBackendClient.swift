@@ -1028,7 +1028,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             )
         }
         let requestBody = ScheduleRequest(
-            topic: settings.effectiveTopic,
+            topic: scheduleItems.first?.topic ?? "",
             difficultyLevel: settings.difficulty.level,
             intervalMinutes: settings.sanitizedIntervalMinutes,
             enabled: enabled,
