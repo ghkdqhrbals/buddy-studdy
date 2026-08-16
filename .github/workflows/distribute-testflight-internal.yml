@@ -1,0 +1,126 @@
+name: Distribute Existing TestFlight Build Internally
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Exact marketing version, for example 1.1.0."
+        required: true
+        type: string
+      build_number:
+        description: "Exact processed TestFlight build number, for example 89."
+        required: true
+        type: string
+      mode:
+        description: "Dry-run verifies only; apply adds the exact build to one internal group."
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - apply
+      testflight_internal_group_id:
+        description: "Exact internal group ID; blank auto-selects only when the app has one internal group."
+        required: false
+        type: string
+      testflight_internal_group_name:
+        description: "Exact internal group name; blank auto-selects only when the app has one internal group."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: testflight-internal-${{ inputs.version }}-${{ inputs.build_number }}
+  cancel-in-progress: false
+
+jobs:
+  validate_dispatch:
+    name: Validate Trusted Existing-Build Dispatch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the default branch and exact build coordinates
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          TARGET_VERSION: ${{ inputs.version }}
+          TARGET_BUILD_NUMBER: ${{ inputs.build_number }}
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]; then
+            echo "Dispatch this workflow only from the default branch (${DEFAULT_BRANCH})." >&2
+            exit 1
+          fi
+          if ! [[ "${TARGET_VERSION}" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+            echo "Invalid marketing version: ${TARGET_VERSION}" >&2
+            exit 1
+          fi
+          if ! [[ "${TARGET_BUILD_NUMBER}" =~ ^[0-9]+$ ]]; then
+            echo "Build number must contain digits only." >&2
+            exit 1
+          fi
+
+  distribute_existing_build:
+    name: Verify and Distribute Existing Internal Build
+    runs-on: macos-26
+    timeout-minutes: 40
+    needs: validate_dispatch
+    env:
+      APPSTORE_CONNECT_KEY_ID: ${{ secrets.APPSTORE_CONNECT_KEY_ID }}
+      APPSTORE_CONNECT_ISSUER_ID: ${{ secrets.APPSTORE_CONNECT_ISSUER_ID }}
+      APPSTORE_CONNECT_PRIVATE_KEY_BASE64: ${{ secrets.APPSTORE_CONNECT_PRIVATE_KEY_BASE64 }}
+      APP_STORE_APP_ID: "6774108938"
+      APP_BUNDLE_ID: io.github.ghkdqhrbals.StudyMate
+      APP_STORE_VERSION_STRING: ${{ inputs.version }}
+      APP_STORE_BUILD_NUMBER: ${{ inputs.build_number }}
+      APP_STORE_APPLY: ${{ inputs.mode == 'apply' && '1' || '0' }}
+      TESTFLIGHT_INTERNAL_GROUP_ID: >-
+        ${{ inputs.testflight_internal_group_id || secrets.TESTFLIGHT_INTERNAL_GROUP_ID }}
+      TESTFLIGHT_INTERNAL_GROUP_NAME: >-
+        ${{ inputs.testflight_internal_group_name || secrets.TESTFLIGHT_INTERNAL_GROUP_NAME }}
+
+    steps:
+      - name: Checkout trusted default-branch automation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Prepare App Store Connect API key
+        run: |
+          set -euo pipefail
+
+          for name in \
+            APPSTORE_CONNECT_KEY_ID \
+            APPSTORE_CONNECT_ISSUER_ID \
+            APPSTORE_CONNECT_PRIVATE_KEY_BASE64; do
+            if [ -z "${!name}" ]; then
+              echo "Missing GitHub Actions secret: ${name}" >&2
+              exit 1
+            fi
+          done
+
+          private_key_path="${RUNNER_TEMP}/AuthKey_${APPSTORE_CONNECT_KEY_ID}.p8"
+          echo "${APPSTORE_CONNECT_PRIVATE_KEY_BASE64}" |
+            base64 --decode > "${private_key_path}"
+          chmod 600 "${private_key_path}"
+          echo "APPSTORE_CONNECT_PRIVATE_KEY_PATH=${private_key_path}" >> "${GITHUB_ENV}"
+
+      - name: Verify and distribute exact internal build
+        run: |
+          set -euo pipefail
+
+          ruby scripts/distribute-testflight-internal.rb
+          {
+            echo "## Existing Internal TestFlight Build"
+            echo ""
+            echo "- App: \`${APP_STORE_APP_ID}\` / \`${APP_BUNDLE_ID}\`"
+            echo "- Version/build: \`${APP_STORE_VERSION_STRING} (${APP_STORE_BUILD_NUMBER})\`"
+            echo "- Mode: \`${{ inputs.mode }}\`"
+            echo "- Scope: one verified internal group; no upload, external testers, or Beta App Review mutation."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Remove App Store Connect API key
+        if: ${{ always() }}
+        run: rm -f "${RUNNER_TEMP}/AuthKey_${APPSTORE_CONNECT_KEY_ID}.p8"
