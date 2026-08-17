@@ -347,10 +347,19 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
   assert.match(alert, /requestId=\(\?P<request_id>/);
   assert.match(alert, /rootCauseType=\(\?P<error_type>/);
   assert.match(alert, /rootCauseMessage=\(\?P<error_message>/);
+  assert.ok(
+    alert.includes("(\\\\[[^]]+\\\\]\\\\s+)?"),
+    "Spring worker-thread bracket must be optional",
+  );
+  assert.match(
+    alert,
+    /\| occurred_at!="" \| request_id!="" \| error_type!="" \| error_message!=""/,
+  );
   assert.doesNotMatch(alert, /\(\?P<method>|\(\?P<path>|\(\?P<origin>/);
   assert.match(alert, /uid: buddystudy-backend-operational-error-log/);
   assert.match(alert, /!~ "api_\(error\|exchange\|response\)"/);
   assert.match(alert, /sum by \(occurred_at, logger, error_message\)/);
+  assert.match(alert, /\| occurred_at!="" \| logger!="" \| error_message!=""/);
   assert.match(alert, /receiver: BuddyStudy Slack/);
   assert.match(alert, /type: webhook/);
   assert.match(
@@ -375,6 +384,11 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
     alert,
     /<\{\{ \.Annotations\.logs_url \}\}\|오류 로그 보기>/,
   );
+  assert.match(alert, /\{\{ \$requestID := index \.Labels "request_id" \}\}/);
+  assert.match(alert, /\{\{ \$logger := index \.Labels "logger" \}\}/);
+  assert.match(alert, /\{\{ if or \$requestID \$logger \}\}/);
+  assert.match(alert, /<\{\{ \.GeneratorURL \}\}\|알림 규칙 진단 보기>/);
+  assert.match(alert, /백엔드 오류 로그를 식별하지 못했습니다/);
   assert.match(alert, /title: Backend 오류/);
   assert.match(alert, /\*\{\{ \.Annotations\.error \}\}\*/);
   assert.doesNotMatch(alert, /발생 시각|요청 위치|코드 위치|로그 식별자/);

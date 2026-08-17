@@ -36,6 +36,8 @@ function payload() {
         alertname: "BuddyStudy backend ERROR log",
         service: "buddystudy-backend",
         severity: "error",
+        occurred_at: "2026-07-31T10:00:00.000Z",
+        request_id: "request-exact-error",
       },
       annotations: {
         summary: "Backend ERROR detected",
@@ -194,4 +196,37 @@ test("resolved alerts and firing alerts without Loki context do not start Codex"
   const noContext = await processor({ rawBody: firingBody, headers: signed(firingBody) });
   assert.equal(noContext.body.reason, "NO_ERROR_CONTEXT");
   assert.equal(githubCalls, 0);
+});
+
+test("firing alerts without an extracted log identity do not query Loki or start Codex", async () => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "incident-receiver-"));
+  let fetchCalls = 0;
+  const processor = await createIncidentProcessor({
+    config: {
+      port: 3030,
+      dataDir,
+      hmacSecret: secret,
+      githubToken: "github-token",
+      githubRepository: "ghkdqhrbals/buddy-studdy",
+      githubEventType: "codex-incident-autofix",
+      lokiBaseUrl: "http://loki",
+      deploymentHistoryUrl: "http://deployments",
+      signatureHeader: "x-grafana-alerting-signature",
+      timestampHeader: "x-grafana-alerting-timestamp",
+    },
+    fetchImpl: async () => {
+      fetchCalls += 1;
+      return Response.json({ data: { result: [] } });
+    },
+  });
+  const unidentified = payload();
+  delete unidentified.alerts[0].labels.occurred_at;
+  delete unidentified.alerts[0].labels.request_id;
+  const rawBody = Buffer.from(JSON.stringify(unidentified));
+
+  const result = await processor({ rawBody, headers: signed(rawBody) });
+
+  assert.equal(result.status, 202);
+  assert.equal(result.body.reason, "UNIDENTIFIED_ALERT");
+  assert.equal(fetchCalls, 0);
 });

@@ -194,6 +194,12 @@ jobs:
             "${monitoring_root}/promtail/config/promtail.yml"
           grep -Fq '<{{ .Annotations.logs_url }}|오류 로그 보기>' \
             "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
+          grep -Fq '{{ $requestID := index .Labels "request_id" }}' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
+          grep -Fq '<{{ .GeneratorURL }}|알림 규칙 진단 보기>' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
+          grep -Fq '| occurred_at!="" | logger!="" | error_message!=""' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
           grep -Fq 'http://buddystudy-incident-receiver:3030/internal/incidents/grafana' \
             "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
           grep -Fq 'timestampHeader: X-Grafana-Alerting-Timestamp' \

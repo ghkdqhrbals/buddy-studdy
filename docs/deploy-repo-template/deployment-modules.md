@@ -283,6 +283,13 @@ deployment.
   alert links query the original millisecond timestamp and logger. Their Explore
   range starts at the captured event timestamp rather than a moving relative
   window, so reopening a Slack notification still targets the same Loki event.
+  The parser accepts both the application and worker-thread brackets in Spring
+  log prefixes and excludes entries unless the timestamp plus request ID or
+  logger were extracted. A malformed log line therefore cannot collapse into
+  an unlabeled alert that builds an Explore query from `[no value]`. If Grafana
+  itself emits an evaluation alert without a concrete log identity, Slack links
+  to the alert-rule diagnostic page and the Codex incident receiver rejects it
+  instead of searching or dispatching unrelated ERROR logs.
   A compact `오류 로그 보기` hyperlink targets the Loki ERROR
   event without printing the raw Explore URL in the message. API and background
   failures are separate alert rules so request metadata is never fabricated for

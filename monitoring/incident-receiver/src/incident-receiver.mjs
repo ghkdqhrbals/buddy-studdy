@@ -127,6 +127,14 @@ function incidentIdentity(payload) {
   return { incidentId, fingerprint, startsAt, alert };
 }
 
+function hasConcreteLogIdentity(alert) {
+  const labels = alert?.labels || {};
+  const occurredAt = boundedText(labels.occurred_at);
+  const requestId = boundedText(labels.request_id);
+  const logger = boundedText(labels.logger);
+  return Boolean(occurredAt && (requestId || logger));
+}
+
 function validDate(value) {
   const timestamp = Date.parse(String(value ?? ""));
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
@@ -350,6 +358,9 @@ export async function createIncidentProcessor({
     const identity = incidentIdentity(payload);
     if (!identity) {
       return { status: 202, body: { accepted: false, reason: "NOT_FIRING" } };
+    }
+    if (!hasConcreteLogIdentity(identity.alert)) {
+      return { status: 202, body: { accepted: false, reason: "UNIDENTIFIED_ALERT" } };
     }
     const reservedAt = now().toISOString();
     const reserved = await store.reserve(identity.incidentId, {

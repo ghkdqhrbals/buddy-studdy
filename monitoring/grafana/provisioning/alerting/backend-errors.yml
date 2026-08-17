@@ -14,8 +14,15 @@ contactPoints:
           title: Backend 오류
           text: |-
             {{ range .Alerts }}
+            {{ $requestID := index .Labels "request_id" }}
+            {{ $logger := index .Labels "logger" }}
+            {{ if or $requestID $logger }}
             *{{ .Annotations.error }}*
             <{{ .Annotations.logs_url }}|오류 로그 보기>
+            {{ else }}
+            *백엔드 오류 로그를 식별하지 못했습니다.*
+            {{ if .GeneratorURL }}<{{ .GeneratorURL }}|알림 규칙 진단 보기>{{ else }}<https://grafana.lowfidev.cloud/alerting/list|알림 규칙 보기>{{ end }}
+            {{ end }}
             {{ end }}
       - uid: buddystudy-codex-incident-autofix
         type: webhook
@@ -46,7 +53,7 @@ groups:
             datasourceUid: buddystudy-loki
             model:
               editorMode: code
-              expr: 'sum by (occurred_at, request_id, error_type, error_message) (count_over_time({app="buddystudy", level="ERROR"} |= "api_error" | regexp "^(?P<occurred_at>\\S+)\\s+ERROR\\s+.*---\\s+\\[[^]]+\\]\\s+\\S+\\s+:\\s+" | regexp "requestId=(?P<request_id>\\S+).*rootCauseType=(?P<error_type>\\S+)\\s+rootCauseMessage=(?P<error_message>.*?)\\s+origin=" | __error__="" [1m]))'
+              expr: 'sum by (occurred_at, request_id, error_type, error_message) (count_over_time({app="buddystudy", level="ERROR"} |= "api_error" | regexp "^(?P<occurred_at>\\S+)\\s+ERROR\\s+.*---\\s+\\[[^]]+\\]\\s+(\\[[^]]+\\]\\s+)?\\S+\\s+:\\s+" | regexp "requestId=(?P<request_id>\\S+).*rootCauseType=(?P<error_type>\\S+)\\s+rootCauseMessage=(?P<error_message>.*?)\\s+origin=" | __error__="" | occurred_at!="" | request_id!="" | error_type!="" | error_message!="" [1m]))'
               intervalMs: 1000
               maxDataPoints: 43200
               queryType: range
@@ -128,7 +135,7 @@ groups:
             datasourceUid: buddystudy-loki
             model:
               editorMode: code
-              expr: 'sum by (occurred_at, logger, error_message) (count_over_time({app="buddystudy", level="ERROR"} !~ "api_(error|exchange|response)" | regexp "^(?P<occurred_at>\\S+)\\s+ERROR\\s+.*---\\s+\\[[^]]+\\]\\s+(?P<logger>\\S+)\\s+:\\s+(?P<error_message>[^\\n]{1,300})" | __error__="" [1m]))'
+              expr: 'sum by (occurred_at, logger, error_message) (count_over_time({app="buddystudy", level="ERROR"} !~ "api_(error|exchange|response)" | regexp "^(?P<occurred_at>\\S+)\\s+ERROR\\s+.*---\\s+\\[[^]]+\\]\\s+(\\[[^]]+\\]\\s+)?(?P<logger>\\S+)\\s+:\\s+(?P<error_message>[^\\n]{1,300})" | __error__="" | occurred_at!="" | logger!="" | error_message!="" [1m]))'
               intervalMs: 1000
               maxDataPoints: 43200
               queryType: range
