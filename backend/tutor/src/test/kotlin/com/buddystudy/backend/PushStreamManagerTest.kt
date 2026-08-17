@@ -16,6 +16,7 @@ import com.buddystudy.backend.notification.application.port.outbound.Notificatio
 import com.buddystudy.backend.study.application.port.outbound.PushNotificationPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.mockito.Answers
 import org.mockito.Mockito.mock
@@ -64,10 +65,12 @@ class PushStreamManagerTest {
     }
 
     @Test
-    fun `publish methods return false when publisher throws`(): Unit = runBlocking {
+    fun `publisher failure is propagated for stream retry`(): Unit {
         val service = service(enabled = true, publisher = RecordingPublisher(fail = true))
 
-        assertThat(service.publishPush(pushEvent())).isNull()
+        assertThatThrownBy { runBlocking { service.publishPush(pushEvent()) } }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessage("publish failed")
     }
 
     @Test

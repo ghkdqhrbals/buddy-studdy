@@ -56,6 +56,7 @@ class AccountSessionManager(
     }
 
     suspend fun saveSession(userId: Long, deviceId: String, now: Instant, expiresAt: Instant?): UserDeviceEntity {
+        userDevices.revokeOtherActiveSessionsForDevice(deviceId, userId, now)
         val session = userDevices.findByUserIdAndDeviceId(userId, deviceId)
             ?: UserDeviceEntity(userId = userId, deviceId = deviceId, createdAt = now)
         session.lastLoginAt = now

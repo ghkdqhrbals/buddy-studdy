@@ -151,6 +151,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 8. If APNs registration is not available yet, the app can still register a backend device and use backend questions/grading manually. Scheduled push delivery starts after the APNs token is attached to that backend device.
 9. Persisted message content keeps Markdown source, while notification previews use a parser-derived plain-text projection so formatting markers are not exposed in APNs alerts. Rehydrating a queued push must rebuild this projection instead of falling back to the Markdown source.
 10. Logging out immediately unregisters the iOS app from APNs, clears pending and delivered notifications on that device, and removes the current device from the user's active backend push targets. A push already queued before logout must revalidate the active session, current user-device attachment, and current APNs token immediately before APNs delivery and must be discarded when any check fails. A later successful login re-registers with APNs using the existing system notification authorization.
+11. One physical installation may sign in and out of multiple BuddyStudy accounts. Activating an account session on a device revokes every still-active session for other account IDs on that device. Inbox notifications remain owned by their intended account, while APNs delivery selects only devices whose current owner matches that account; stale cross-account sessions are a normal non-delivery condition and must not fail the notification consumer.
 
 ### Internal Operations
 

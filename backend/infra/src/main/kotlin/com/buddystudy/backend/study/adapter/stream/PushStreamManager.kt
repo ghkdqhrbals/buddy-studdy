@@ -104,7 +104,7 @@ class PushStreamManager(
                 event.userId,
                 error.message,
             )
-            null
+            throw error
         }
     }
 

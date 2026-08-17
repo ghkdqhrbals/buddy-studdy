@@ -328,6 +328,21 @@ class ProfileServiceAccountDeletionTest {
         override suspend fun hasActiveSession(userId: Long, deviceId: String): Boolean =
             sessions.values.any { it.userId == userId && it.deviceId == deviceId && it.isActive() }
 
+        override suspend fun revokeOtherActiveSessionsForDevice(
+            deviceId: String,
+            userId: Long,
+            revokedAt: Instant,
+        ): Int {
+            val conflicting = sessions.values.filter {
+                it.deviceId == deviceId && it.userId != userId && it.isActive(revokedAt)
+            }
+            conflicting.forEach {
+                it.revokedAt = revokedAt
+                it.updatedAt = revokedAt
+            }
+            return conflicting.size
+        }
+
         fun revokeAllForUser(userId: Long, now: Instant) {
             sessions.values.filter { it.userId == userId }.forEach {
                 it.revokedAt = now

@@ -2,9 +2,11 @@ package com.buddystudy.backend.auth.adapter.outbound.persistence
 
 import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystudy.auth.domain.entity.UserDeviceEntity
+import org.springframework.data.r2dbc.repository.Modifying
 import org.springframework.data.r2dbc.repository.Query
 import org.springframework.data.repository.kotlin.CoroutineCrudRepository
 import org.springframework.stereotype.Component
+import java.time.Instant
 
 interface UserDeviceRepository : CoroutineCrudRepository<UserDeviceEntity, Long> {
     suspend fun findByUserIdAndDeviceId(userId: Long, deviceId: String): UserDeviceEntity?
@@ -34,6 +36,21 @@ interface UserDeviceRepository : CoroutineCrudRepository<UserDeviceEntity, Long>
         """
     )
     suspend fun countActiveSessions(userId: Long, deviceId: String): Long
+
+    @Modifying
+    @Query(
+        """
+        update user_devices
+        set revoked_at = :revokedAt,
+            updated_at = :revokedAt
+        where device_id = :deviceId
+          and user_id <> :userId
+          and logged_out_at is null
+          and revoked_at is null
+          and (session_expires_at is null or session_expires_at > current_timestamp)
+        """
+    )
+    suspend fun revokeOtherActiveSessionsForDevice(deviceId: String, userId: Long, revokedAt: Instant): Int
 }
 
 @Component
@@ -46,4 +63,6 @@ class UserDevicePersistenceAdapter(
     override suspend fun findActiveByUserId(userId: Long) = repository.findActiveByUserId(userId)
     override suspend fun hasActiveSession(userId: Long, deviceId: String) =
         repository.countActiveSessions(userId, deviceId) > 0
+    override suspend fun revokeOtherActiveSessionsForDevice(deviceId: String, userId: Long, revokedAt: Instant) =
+        repository.revokeOtherActiveSessionsForDevice(deviceId, userId, revokedAt)
 }

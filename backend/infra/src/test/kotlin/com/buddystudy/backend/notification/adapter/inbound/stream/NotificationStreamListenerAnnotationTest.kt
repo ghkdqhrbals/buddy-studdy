@@ -28,6 +28,7 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.mock
+import org.mockito.Mockito.mockingDetails
 import kotlin.reflect.full.declaredFunctions
 import kotlin.reflect.full.findAnnotation
 
@@ -171,6 +172,112 @@ class NotificationStreamListenerAnnotationTest {
         assertThat(pushes.single().deviceId).isEqualTo("device-1")
     }
 
+    @Test
+    fun `stale session from another account is skipped without publishing or throwing`(): Unit = runBlocking {
+        val notifications = mock(NotificationPersistencePort::class.java)
+        var publishCalls = 0
+        val listener = NotificationStreamListener(
+            processor = object : ProcessNotificationEventUseCase {
+                override suspend fun process(command: NotificationRequestCommand): Long = 123
+            },
+            notifications = notifications,
+            devices = devicePort(
+                DeviceEntity(
+                    deviceId = "shared-device",
+                    userId = 22,
+                    apnsToken = "token",
+                    apnsEnvironment = ApnsEnvironment.SANDBOX,
+                ),
+            ),
+            userDevices = userDevicePort(
+                UserDeviceEntity(userId = 11, deviceId = "shared-device"),
+            ),
+            pushPublisher = object : QuestionPushPublishPort {
+                override suspend fun publishPush(request: QuestionPushRequest): PublishedStreamRecord? {
+                    publishCalls += 1
+                    return PublishedStreamRecord("notification.question-push.requested.v1", "2-0")
+                }
+            },
+            notificationRecovery = object : RecoverNotificationCommandUseCase {
+                override suspend fun recover(eventId: String): NotificationRequestCommand? = null
+            },
+            notificationSendPolicy = grantedNotificationSendPolicy(),
+        )
+        val payload = NotificationRequestedPayload(
+            eventId = "question-comment-2",
+            userId = 11,
+            title = "Comment",
+            body = "New comment",
+            threadType = "question",
+            threadId = "47",
+            shouldPush = true,
+        )
+
+        listener.deliver(payload, streamContext(payload.eventId!!))
+
+        assertThat(publishCalls).isZero()
+        val failure = mockingDetails(notifications).invocations
+            .single { it.method.name == "markPushFailed" }
+        assertThat(failure.arguments[0]).isEqualTo(123L)
+        assertThat(failure.arguments[1]).isEqualTo("No active APNs target.")
+    }
+
+    @Test
+    fun `controlled push rejection is acknowledged without listener exception`(): Unit = runBlocking {
+        val notifications = mock(NotificationPersistencePort::class.java)
+        val listener = NotificationStreamListener(
+            processor = object : ProcessNotificationEventUseCase {
+                override suspend fun process(command: NotificationRequestCommand): Long = 124
+            },
+            notifications = notifications,
+            devices = devicePort(
+                DeviceEntity(
+                    deviceId = "device-1",
+                    userId = 11,
+                    apnsToken = "token",
+                    apnsEnvironment = ApnsEnvironment.SANDBOX,
+                ),
+            ),
+            userDevices = userDevicePort(UserDeviceEntity(userId = 11, deviceId = "device-1")),
+            pushPublisher = object : QuestionPushPublishPort {
+                override suspend fun publishPush(request: QuestionPushRequest): PublishedStreamRecord? = null
+            },
+            notificationRecovery = object : RecoverNotificationCommandUseCase {
+                override suspend fun recover(eventId: String): NotificationRequestCommand? = null
+            },
+            notificationSendPolicy = grantedNotificationSendPolicy(),
+        )
+        val payload = NotificationRequestedPayload(
+            eventId = "question-comment-3",
+            userId = 11,
+            title = "Comment",
+            body = "New comment",
+            threadType = "question",
+            threadId = "48",
+            shouldPush = true,
+        )
+
+        listener.deliver(payload, streamContext(payload.eventId!!))
+    }
+
+    private fun grantedNotificationSendPolicy() = NotificationSendPolicy(
+        object : PermissionEvaluator {
+            override suspend fun evaluate(
+                principal: Principal,
+                permissionCode: String,
+            ): PermissionEvaluationResult = PermissionEvaluationResult.granted(permissionCode)
+        },
+    )
+
+    private fun streamContext(eventId: String) = StreamMessageContext(
+        streamKey = "notification.message.requested.v1",
+        recordId = "1-0",
+        eventId = eventId,
+        eventType = "NOTIFICATION_REQUESTED",
+        fields = emptyMap(),
+        claimed = false,
+    )
+
     private fun devicePort(device: DeviceEntity) = object : DevicePort {
         override suspend fun save(entity: DeviceEntity): DeviceEntity = entity
         override suspend fun findByDeviceId(deviceId: String): DeviceEntity? =
@@ -189,5 +296,10 @@ class NotificationStreamListenerAnnotationTest {
             listOf(session).filter { it.userId == userId }
         override suspend fun hasActiveSession(userId: Long, deviceId: String): Boolean =
             session.userId == userId && session.deviceId == deviceId
+        override suspend fun revokeOtherActiveSessionsForDevice(
+            deviceId: String,
+            userId: Long,
+            revokedAt: java.time.Instant,
+        ): Int = 0
     }
 }

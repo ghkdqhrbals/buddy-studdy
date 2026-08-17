@@ -92,6 +92,38 @@ class LoginServiceEmailVerificationTest {
     }
 
     @Test
+    fun `switching accounts on one device revokes every previous account session`(): Unit = runBlocking {
+        val device = login.register(RegisterDeviceCommand(apnsToken = "token", language = "ko"))
+        val anonymousPrincipal = login.authenticateDevice(device.deviceId, device.clientSecret)
+
+        login.googleLogin(anonymousPrincipal, "google-token")
+        val googleUser = users.findByProviderAndProviderId("GOOGLE", "google-provider-id")!!
+        val googleSession = userDevices.findByUserIdAndDeviceId(googleUser.id, device.deviceId)!!
+
+        assertThat(userDevices.findActiveByUserId(anonymousPrincipal.userId)).isEmpty()
+        assertThat(userDevices.findActiveByUserId(googleUser.id).map { it.deviceId })
+            .containsExactly(device.deviceId)
+
+        login.appleLogin(
+            Principal(
+                userId = googleUser.id,
+                deviceId = device.deviceId,
+                sessionId = googleSession.id,
+                anonymous = false,
+                status = googleUser.status.name,
+            ),
+            "apple-token",
+        )
+        val appleUser = users.findByProviderAndProviderId("APPLE", "apple-provider-id")!!
+
+        assertThat(userDevices.findActiveByUserId(anonymousPrincipal.userId)).isEmpty()
+        assertThat(userDevices.findActiveByUserId(googleUser.id)).isEmpty()
+        assertThat(userDevices.findActiveByUserId(appleUser.id).map { it.deviceId })
+            .containsExactly(device.deviceId)
+        assertThat(devices.findByDeviceId(device.deviceId)?.userId).isEqualTo(appleUser.id)
+    }
+
+    @Test
     fun `email code is generated stored and sent`(): Unit = runBlocking {
         val response = login.emailCode(" Tester@Example.COM ")
 
@@ -460,6 +492,21 @@ class LoginServiceEmailVerificationTest {
 
         override suspend fun hasActiveSession(userId: Long, deviceId: String): Boolean =
             sessions.values.any { it.userId == userId && it.deviceId == deviceId && it.isActive() }
+
+        override suspend fun revokeOtherActiveSessionsForDevice(
+            deviceId: String,
+            userId: Long,
+            revokedAt: Instant,
+        ): Int {
+            val conflicting = sessions.values.filter {
+                it.deviceId == deviceId && it.userId != userId && it.isActive(revokedAt)
+            }
+            conflicting.forEach {
+                it.revokedAt = revokedAt
+                it.updatedAt = revokedAt
+            }
+            return conflicting.size
+        }
     }
 
     private class InMemoryRoleAssignmentPort : RoleAssignmentPort {

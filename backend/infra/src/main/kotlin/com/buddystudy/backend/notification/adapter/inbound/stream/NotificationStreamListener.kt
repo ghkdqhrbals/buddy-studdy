@@ -145,7 +145,10 @@ class NotificationStreamListener(
             command.deviceId?.let(::add)
         }.distinct()
         val targetDevice = candidateDeviceIds.firstNotNullOfOrNull { deviceId ->
-            devices.findByDeviceId(deviceId)?.takeIf { it.apnsToken.isNotBlank() }
+            devices.findByDeviceId(deviceId)?.takeIf { device ->
+                device.apnsToken.isNotBlank() &&
+                    (command.userId == null || device.userId == command.userId)
+            }
         }
         if (targetDevice == null) {
             notifications.markPushFailed(notificationId, "No active APNs target.", Instant.now())
@@ -171,27 +174,35 @@ class NotificationStreamListener(
 
         try {
             val metadata = NotificationPushMetadata.from(command.metadataJson)
-            checkNotNull(
-                pushPublisher.publishPush(
-                    QuestionPushRequest(
-                        recordId = metadata.recordId ?: command.threadId?.toLongOrNull() ?: notificationId,
-                        notificationId = notificationId,
-                        studyId = metadata.studyId,
-                        deviceId = targetDevice.deviceId,
-                        userId = command.userId ?: targetDevice.userId ?: 0,
-                        question = command.body,
-                        expectedAnswerHint = null,
-                        topic = metadata.topic ?: command.threadType ?: "notification",
-                        difficultyLevel = metadata.difficultyLevel ?: 1,
-                        language = metadata.language ?: "ko",
-                        sound = metadata.sound ?: "default",
-                        intervalMinutes = metadata.intervalMinutes ?: 0,
-                        title = command.title,
-                        body = MarkdownContentPolicy.plainText(command.body),
-                        deepLink = command.deepLink ?: "buddystudy://notifications/$notificationId",
-                    ),
+            val published = pushPublisher.publishPush(
+                QuestionPushRequest(
+                    recordId = metadata.recordId ?: command.threadId?.toLongOrNull() ?: notificationId,
+                    notificationId = notificationId,
+                    studyId = metadata.studyId,
+                    deviceId = targetDevice.deviceId,
+                    userId = command.userId ?: targetDevice.userId ?: 0,
+                    question = command.body,
+                    expectedAnswerHint = null,
+                    topic = metadata.topic ?: command.threadType ?: "notification",
+                    difficultyLevel = metadata.difficultyLevel ?: 1,
+                    language = metadata.language ?: "ko",
+                    sound = metadata.sound ?: "default",
+                    intervalMinutes = metadata.intervalMinutes ?: 0,
+                    title = command.title,
+                    body = MarkdownContentPolicy.plainText(command.body),
+                    deepLink = command.deepLink ?: "buddystudy://notifications/$notificationId",
                 ),
-            ) { "Push stream publish failed for device: ${targetDevice.deviceId}" }
+            )
+            if (published == null) {
+                logger.info(
+                    "notification_push_skipped reason=push_not_publishable notificationId={} eventId={} userId={} deviceId={}",
+                    notificationId,
+                    command.eventId,
+                    command.userId,
+                    targetDevice.deviceId,
+                )
+                return
+            }
             logger.info(
                 "notification_push_published notificationId={} eventId={} userId={} deviceId={}",
                 notificationId,

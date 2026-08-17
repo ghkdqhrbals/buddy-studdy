@@ -40,6 +40,7 @@ interface UserDevicePort {
     suspend fun findByIdAndUserId(id: Long, userId: Long): UserDeviceEntity?
     suspend fun findActiveByUserId(userId: Long): List<UserDeviceEntity>
     suspend fun hasActiveSession(userId: Long, deviceId: String): Boolean
+    suspend fun revokeOtherActiveSessionsForDevice(deviceId: String, userId: Long, revokedAt: Instant): Int
 }
 
 interface EmailVerificationCodePort {
