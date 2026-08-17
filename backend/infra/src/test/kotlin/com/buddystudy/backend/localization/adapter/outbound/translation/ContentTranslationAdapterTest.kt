@@ -36,9 +36,11 @@ class ContentTranslationAdapterTest {
             "좋아요" to TranslationValidationMode.SHORT_TEXT,
             "동의" to TranslationValidationMode.SHORT_TEXT,
         )
+        assertThat(translations.topics).containsOnly("CONTENT")
     }
 
     private class RecordingQuestionTranslationPort : QuestionTranslationPort {
+        val topics = Collections.synchronizedList(mutableListOf<String>())
         val validationModes = Collections.synchronizedList(
             mutableListOf<Pair<String, TranslationValidationMode>>(),
         )
@@ -51,6 +53,7 @@ class ContentTranslationAdapterTest {
             targetLanguage: String,
             validationMode: TranslationValidationMode,
         ): TranslatedQuestionContent {
+            topics += topic
             validationModes += question to validationMode
             return TranslatedQuestionContent(
                 topic = "Content",

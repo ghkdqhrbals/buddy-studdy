@@ -28,6 +28,11 @@ class ResilientQuestionTranslationAdapter(
         validationMode: TranslationValidationMode,
     ): TranslatedQuestionContent {
         val request = QuestionTranslationRequest(topic, question, hint, sourceLanguage, targetLanguage)
+        val preserved = TranslatedQuestionContent(topic, question, hint)
+        if (isValidTranslation(request, preserved, validationMode)) {
+            count("identity", "success")
+            return preserved
+        }
         val providerOrder = properties.translation.providerOrder
             .map(String::trim)
             .filter(String::isNotEmpty)
@@ -46,7 +51,7 @@ class ResilientQuestionTranslationAdapter(
         configuredProviders.forEach { provider ->
             try {
                 val translated = provider.translate(request)
-                validate(translated, targetLanguage, validationMode)
+                validate(request, translated, validationMode)
                 count(provider.providerId, "success")
                 return translated
             } catch (error: CancellationException) {
@@ -71,20 +76,51 @@ class ResilientQuestionTranslationAdapter(
     }
 
     private fun validate(
+        request: QuestionTranslationRequest,
         content: TranslatedQuestionContent,
-        targetLanguage: String,
         validationMode: TranslationValidationMode,
     ) {
-        require(QuestionLanguage.matchesShortLabel(content.topic, targetLanguage)) {
-            "Translation provider did not return a topic in $targetLanguage."
+        require(topicMatches(request, content)) {
+            "Translation provider did not return a topic in ${request.targetLanguage}."
         }
-        val questionMatches = when (validationMode) {
-            TranslationValidationMode.QUESTION -> QuestionLanguage.matches(content.question, targetLanguage)
-            TranslationValidationMode.SHORT_TEXT -> QuestionLanguage.matchesShortLabel(content.question, targetLanguage)
+        require(questionMatches(request, content, validationMode)) {
+            "Translation provider did not return a question in ${request.targetLanguage}."
         }
-        require(questionMatches) {
-            "Translation provider did not return a question in $targetLanguage."
-        }
+    }
+
+    private fun isValidTranslation(
+        request: QuestionTranslationRequest,
+        content: TranslatedQuestionContent,
+        validationMode: TranslationValidationMode,
+    ): Boolean = topicMatches(request, content) && questionMatches(request, content, validationMode)
+
+    private fun topicMatches(
+        request: QuestionTranslationRequest,
+        content: TranslatedQuestionContent,
+    ): Boolean = QuestionLanguage.matchesTranslation(
+        source = request.topic,
+        translated = content.topic,
+        targetLanguage = request.targetLanguage,
+        shortLabel = true,
+    )
+
+    private fun questionMatches(
+        request: QuestionTranslationRequest,
+        content: TranslatedQuestionContent,
+        validationMode: TranslationValidationMode,
+    ): Boolean = when (validationMode) {
+        TranslationValidationMode.QUESTION -> QuestionLanguage.matchesTranslation(
+            source = request.question,
+            translated = content.question,
+            targetLanguage = request.targetLanguage,
+        )
+
+        TranslationValidationMode.SHORT_TEXT -> QuestionLanguage.matchesTranslation(
+            source = request.question,
+            translated = content.question,
+            targetLanguage = request.targetLanguage,
+            shortLabel = true,
+        )
     }
 
     private fun count(provider: String, outcome: String) {

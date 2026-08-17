@@ -167,6 +167,58 @@ class ResilientQuestionTranslationAdapterTest {
         assertThat(openAI.calls).hasSize(1)
     }
 
+    @Test
+    fun `returns preserved technical content without calling translation providers`() = runBlocking {
+        val libre = RecordingProvider(providerId = "libretranslate")
+        val openAI = RecordingProvider(providerId = "openai")
+        val adapter = adapter(listOf(libre, openAI), listOf("libretranslate", "openai"))
+
+        val translated = adapter.translate(
+            topic = "HTTP API",
+            question = "GET /api/v1/health/dependencies",
+            hint = null,
+            sourceLanguage = "en",
+            targetLanguage = "ja",
+        )
+
+        assertThat(translated.question).isEqualTo("GET /api/v1/health/dependencies")
+        assertThat(libre.calls).isEmpty()
+        assertThat(openAI.calls).isEmpty()
+    }
+
+    @Test
+    fun `rejects unchanged natural language before using the fallback provider`() = runBlocking {
+        val libre = RecordingProvider(
+            providerId = "libretranslate",
+            result = TranslatedQuestionContent(
+                topic = "Distributed systems",
+                question = "Explain how Redis consumer groups work.",
+                hint = null,
+            ),
+        )
+        val openAI = RecordingProvider(
+            providerId = "openai",
+            result = TranslatedQuestionContent(
+                topic = "分散システム",
+                question = "Redisのコンシューマーグループの仕組みを説明してください。",
+                hint = null,
+            ),
+        )
+        val adapter = adapter(listOf(libre, openAI), listOf("libretranslate", "openai"))
+
+        val translated = adapter.translate(
+            topic = "Distributed systems",
+            question = "Explain how Redis consumer groups work.",
+            hint = null,
+            sourceLanguage = "en",
+            targetLanguage = "ja",
+        )
+
+        assertThat(translated.question).contains("説明してください")
+        assertThat(libre.calls).hasSize(1)
+        assertThat(openAI.calls).hasSize(1)
+    }
+
     private fun adapter(
         providers: List<QuestionTranslationProvider>,
         order: List<String>,

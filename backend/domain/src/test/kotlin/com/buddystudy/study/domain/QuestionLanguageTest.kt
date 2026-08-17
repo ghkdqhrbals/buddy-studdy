@@ -28,4 +28,49 @@ class QuestionLanguageTest {
         assertFalse(QuestionLanguage.matchesShortLabel("프록시 생성 방식", "en"))
         assertTrue(QuestionLanguage.matchesShortLabel("Spring 4.x", "en"))
     }
+
+    @Test
+    fun `accepts unchanged code and identifiers for Korean and Japanese translations`() {
+        assertTrue(
+            QuestionLanguage.matchesTranslation(
+                source = "GET /api/v1/health/dependencies",
+                translated = "GET /api/v1/health/dependencies",
+                targetLanguage = "ja",
+            ),
+        )
+        assertTrue(
+            QuestionLanguage.matchesTranslation(
+                source = "IllegalStateException",
+                translated = "IllegalStateException",
+                targetLanguage = "ko",
+                shortLabel = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `still rejects unchanged natural language and altered identifiers`() {
+        assertFalse(
+            QuestionLanguage.matchesTranslation(
+                source = "Explain how Redis consumer groups work.",
+                translated = "Explain how Redis consumer groups work.",
+                targetLanguage = "ja",
+            ),
+        )
+        assertFalse(
+            QuestionLanguage.matchesTranslation(
+                source = "GET /api/v1/health/dependencies",
+                translated = "POST /api/v1/health/dependencies",
+                targetLanguage = "ko",
+            ),
+        )
+        assertFalse(
+            QuestionLanguage.matchesTranslation(
+                source = "Hello.",
+                translated = "Hello.",
+                targetLanguage = "ja",
+                shortLabel = true,
+            ),
+        )
+    }
 }

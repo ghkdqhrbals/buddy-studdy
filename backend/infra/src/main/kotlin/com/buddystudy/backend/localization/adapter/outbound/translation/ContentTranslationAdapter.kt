@@ -27,7 +27,7 @@ class ContentTranslationAdapter(
                     name to value
                 } else {
                     val result = questions.translate(
-                        topic = "Content",
+                        topic = "CONTENT",
                         question = value,
                         hint = null,
                         sourceLanguage = sourceLanguages[name] ?: "ko",

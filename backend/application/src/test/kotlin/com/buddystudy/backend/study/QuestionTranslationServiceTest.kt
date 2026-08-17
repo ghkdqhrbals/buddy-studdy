@@ -140,6 +140,57 @@ class QuestionTranslationServiceTest {
         )
     }
 
+    @Test
+    fun `accepts preserved technical content for localized delivery`(): Unit = runBlocking {
+        val question = QuestionEntity(
+            id = 33,
+            userId = 7,
+            studyId = 12,
+            question = "GET /api/v1/health/dependencies",
+            hint = null,
+            topic = "HTTP API",
+            sourceLanguage = SupportedLanguage.ENGLISH,
+        )
+        val rootStudy = StudyEntity(id = 11, userId = 7, topic = "Backend")
+        val topicStudy = StudyEntity(id = 12, userId = 7, parentStudyId = 11, topic = "HTTP API")
+        val writer = RecordingTranslationWriter(question)
+        val event = QuestionGeneratedEvent(
+            eventId = "question-generated-33",
+            correlationId = "correlation-33",
+            questionId = 33,
+            userId = 7,
+            studyId = 11,
+            topicId = 12,
+            sourceLanguage = "en",
+            generatedAt = Instant.parse("2026-08-17T00:00:00Z"),
+        )
+
+        QuestionTranslationService(
+            questions = TranslationQuestionPort(question),
+            translations = RecordingTranslationPort(
+                TranslatedQuestionContent(
+                    topic = "HTTP API",
+                    question = "GET /api/v1/health/dependencies",
+                    hint = null,
+                ),
+            ),
+            users = TranslationUserPort(
+                UserEntity(
+                    id = 7,
+                    providerId = "user-7",
+                    status = UserStatus.ACTIVE,
+                    appLanguage = SupportedLanguage.JAPANESE,
+                ),
+            ),
+            studies = TranslationStudyPort(listOf(rootStudy, topicStudy)),
+            writer = writer,
+            publisher = RecordingPublisher(),
+        ).process(event)
+
+        assertThat(writer.translation?.question).isEqualTo("GET /api/v1/health/dependencies")
+        assertThat(writer.steps).containsExactly("complete", "succeed")
+    }
+
     private class TranslationQuestionPort(
         private val original: QuestionEntity,
     ) : QuestionPort by unsupportedPort() {
@@ -159,7 +210,13 @@ class QuestionTranslationServiceTest {
             studies.filter { it.userId == userId }
     }
 
-    private class RecordingTranslationPort : QuestionTranslationPort {
+    private class RecordingTranslationPort(
+        private val result: TranslatedQuestionContent = TranslatedQuestionContent(
+            topic = "Message queues",
+            question = "Explain how Redis Stream consumer groups work.",
+            hint = "Include pending entries.",
+        ),
+    ) : QuestionTranslationPort {
         val calls = mutableListOf<String>()
 
         override suspend fun translate(
@@ -171,11 +228,7 @@ class QuestionTranslationServiceTest {
             validationMode: TranslationValidationMode,
         ): TranslatedQuestionContent {
             calls += topic
-            return TranslatedQuestionContent(
-                topic = "Message queues",
-                question = "Explain how Redis Stream consumer groups work.",
-                hint = "Include pending entries.",
-            )
+            return result
         }
     }
 

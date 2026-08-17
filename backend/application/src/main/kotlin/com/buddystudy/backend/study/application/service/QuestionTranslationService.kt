@@ -120,10 +120,23 @@ class QuestionTranslationService(
             sourceLanguage = normalizedSource,
             targetLanguage = normalizedTarget,
         )
-        check(QuestionLanguage.matchesShortLabel(translated.topic, normalizedTarget)) {
+        check(
+            QuestionLanguage.matchesTranslation(
+                source = topic,
+                translated = translated.topic,
+                targetLanguage = normalizedTarget,
+                shortLabel = true,
+            ),
+        ) {
             "Question translation did not produce the requested topic language."
         }
-        check(QuestionLanguage.matches(translated.question, normalizedTarget)) {
+        check(
+            QuestionLanguage.matchesTranslation(
+                source = question,
+                translated = translated.question,
+                targetLanguage = normalizedTarget,
+            ),
+        ) {
             "Question translation did not produce the requested content language."
         }
         return translated
