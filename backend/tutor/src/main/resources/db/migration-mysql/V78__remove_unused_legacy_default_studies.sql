@@ -62,11 +62,6 @@ where s.parent_study_id is null
   )
   and not exists (
       select 1
-      from question_push_outbox outbox
-      where outbox.study_id = s.id
-  )
-  and not exists (
-      select 1
       from question_embeddings embedding
       where embedding.study_id = s.id
   )
