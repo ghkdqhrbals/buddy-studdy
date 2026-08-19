@@ -180,6 +180,8 @@ and is loaded by the authorized worker, avoiding answer text in Redis payloads.
 Track outbox counts by status, oldest pending age, attempts, `last_error`,
 consumer pending counts, and stream length. The existing monitoring Event
 Streams view exposes both durable outbox tables and Redis consumer groups.
+Inbox and outbox error cells stay compact by default, expose the complete error
+on hover, and expand inline on click without disabling bounded pagination.
 
 ## Verification
 

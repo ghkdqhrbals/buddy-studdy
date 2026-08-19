@@ -27,6 +27,7 @@ test("all monitoring pages load the shared React application", async () => {
     "orders.html",
     "streams.html",
     "deployments.html",
+    "service-status.html",
     "login.html",
   ]) {
     const html = await text(page);
@@ -51,7 +52,7 @@ test("all monitoring pages load the shared React application", async () => {
   assert.match(navigation, /Deployments/);
   assert.match(navigation, /GitPullRequest/);
   assert.doesNotMatch(navigation, /Layers3/);
-  assert.match(navigation, /App Control/);
+  assert.match(navigation, /Service Status/);
 });
 
 test("order administration exposes the invoice ledger and audited Apple actions", async () => {
@@ -150,6 +151,9 @@ test("app control administration publishes update campaigns and manages maintena
   assert.match(app, /service-status\.html/);
   assert.match(page, /App updates/);
   assert.match(page, /Maintenance/);
+  assert.match(page, /Translation providers/);
+  assert.match(page, /provider-health\/translation\/check/);
+  assert.match(page, /Check providers/);
   assert.doesNotMatch(page, /AdminGate/);
   assert.match(page, /Start maintenance/);
   assert.match(page, /Schedule maintenance/);
@@ -236,6 +240,8 @@ test("Redis Stream administration lives in monitoring Manage with bounded cursor
   assert.doesNotMatch(page, /outboxes\/pushes/);
   assert.match(page, /cursorStack/);
   assert.match(page, /ObjectInspector/);
+  assert.match(page, /Last error/);
+  assert.match(page, /ExpandableText/);
   assert.match(paths, /streamEntriesPath/);
   assert.match(paths, /streamEntryPath/);
   const delivery = await source("components/StreamDeliveryDashboard.jsx");
@@ -243,6 +249,11 @@ test("Redis Stream administration lives in monitoring Manage with bounded cursor
   assert.match(delivery, /streamInboxAttemptsPath/);
   assert.match(delivery, /RETRY_SCHEDULED/);
   assert.match(delivery, /LEASE_EXPIRED/);
+  assert.match(delivery, /ExpandableText/);
+  const ui = await source("components/AdminUI.jsx");
+  assert.match(ui, /aria-expanded/);
+  assert.match(ui, /title=\{value\}/);
+  assert.match(ui, /Show full/);
   assert.doesNotMatch(page, /innerHTML/);
 });
 

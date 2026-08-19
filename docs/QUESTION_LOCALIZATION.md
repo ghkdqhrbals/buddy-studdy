@@ -198,3 +198,9 @@ Translated into English · Show original
 `http://buddystudy-libretranslate:5000`을 사용하며, 번역 컨테이너의
 포트는 호스트나 인터넷에 공개하지 않는다. 모델 캐시는 전용 Docker
 volume에 유지하고 `ko`, `en`, `ja`만 로드한다.
+
+운영 관리 화면의 `Service Status`에서는 관리자가 요청할 때만
+LibreTranslate의 `/languages`와 OpenAI의 인증된 `/v1/models`를 병렬로
+호출한다. 이 확인은 번역이나 토큰 생성을 수행하지 않으며 공급자별 상태,
+응답 시간, 안전하게 정규화한 실패 사유를 독립적으로 보여준다. 한 공급자의
+장애가 다른 공급자의 확인 결과를 가리지 않는다.

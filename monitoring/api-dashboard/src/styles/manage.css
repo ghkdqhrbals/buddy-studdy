@@ -701,14 +701,56 @@ button, a { -webkit-tap-highlight-color: transparent; }
   max-width: 360px;
   gap: 2px;
 }
-.stream-inbox-error strong,
-.stream-inbox-error small {
+.stream-inbox-error strong { color: #9f241f; font-size: 11px; }
+.expandable-text {
+  display: grid;
+  min-width: 0;
+  max-width: 360px;
+  gap: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.expandable-text > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 10px;
 }
-.stream-inbox-error strong { color: #9f241f; font-size: 11px; }
-.stream-inbox-error small { color: var(--muted); font-size: 10px; }
+.expandable-text > small { color: #3d6da8; font-size: 9px; font-weight: 700; }
+.expandable-text[data-expanded="true"] > span {
+  overflow: visible;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.expandable-text:focus-visible { outline: 2px solid #5d8bc5; outline-offset: 3px; }
+.stream-error-details { width: min(360px, 32vw); }
+.provider-health-section { padding-bottom: 14px; }
+.provider-health-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0 16px 10px;
+}
+.provider-health-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fbfcfe;
+  padding: 13px 14px;
+}
+.provider-health-card > div:first-child { display: grid; gap: 3px; }
+.provider-health-card strong { color: #1f2d3d; font-size: 13px; }
+.provider-health-card span, .provider-health-card p { color: var(--muted); font-size: 10px; }
+.provider-health-card p { grid-column: 1 / -1; margin: 0; }
+.provider-health-result { display: flex; align-items: center; gap: 8px; }
+.provider-health-empty { color: var(--muted); padding: 8px 16px 16px; font-size: 11px; }
+.provider-health-checked { display: block; color: var(--muted); padding: 0 16px; text-align: right; }
 .stream-empty-pending {
   border-top: 1px solid var(--border);
   background: #fbfcfd;
@@ -1014,6 +1056,10 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .app-update-form-actions, .app-update-user-filters { align-items: stretch; flex-direction: column; }
   .app-update-form-actions .button, .app-update-user-filters .compact-field { width: 100%; }
   .maintenance-window-row, .maintenance-window-row > div { align-items: stretch; grid-template-columns: 1fr; flex-direction: column; }
+  .provider-health-grid { grid-template-columns: 1fr; }
+  .provider-health-card { grid-template-columns: 1fr; }
+  .provider-health-result { justify-content: space-between; }
+  .stream-error-details { width: min(360px, 70vw); }
 }
 
 @media (prefers-reduced-motion: reduce) {

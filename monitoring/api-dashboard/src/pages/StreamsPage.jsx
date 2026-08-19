@@ -5,6 +5,7 @@ import { adminFetch } from "../admin/adminApi.js";
 import {
   DataTable,
   DetailDrawer,
+  ExpandableText,
   PageHeader,
   Pagination,
   SearchField,
@@ -126,6 +127,17 @@ function StreamsWorkspace() {
       { key: "eventId", label: "Event ID", className: "mono" },
       { key: "status", label: "Status", render: (row) => <StatusBadge tone={statusTone(row.status)}>{row.status}</StatusBadge> },
       { key: "attempts", label: "Attempts" },
+      {
+        key: "lastError",
+        label: "Last error",
+        render: (row) => (
+          <ExpandableText
+            value={row.lastError}
+            label={`Outbox error for ${row.eventId}`}
+            className="stream-error-details"
+          />
+        ),
+      },
       { key: "nextAttemptAt", label: "Next attempt", render: (row) => formatDateTime(row.nextAttemptAt) },
       { key: "updatedAt", label: "Updated", render: (row) => formatDateTime(row.updatedAt) },
     ],

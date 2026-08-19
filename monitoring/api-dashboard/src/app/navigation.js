@@ -17,7 +17,7 @@ import {
   Users,
 } from "lucide-react";
 
-export const UI_VERSION = "2026.07.31.2";
+export const UI_VERSION = "2026.08.19.1";
 export const NAV_COLLAPSED_KEY = "buddystudy.monitoring.nav.collapsed";
 export const NAV_GROUP_KEY = "buddystudy.monitoring.nav.groups";
 export const NAV_MODE_KEY = "buddystudy.monitoring.nav.mode";
@@ -46,7 +46,7 @@ export const navigationGroups = [
       { href: "/jobs.html", label: "Batch Jobs", icon: CalendarClock },
       { href: "/streams.html", label: "Redis Streams", icon: GitPullRequest },
       { href: "/deployments.html", label: "Deployments", icon: Rocket },
-      { href: "/service-status.html", label: "App Control", icon: Wrench },
+      { href: "/service-status.html", label: "Service Status", icon: Wrench },
     ],
   },
   {

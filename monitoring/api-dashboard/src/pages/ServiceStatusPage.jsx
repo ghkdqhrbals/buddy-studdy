@@ -4,7 +4,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { CalendarClock, Power, RefreshCw, XCircle } from "lucide-react";
+import { CalendarClock, Languages, Power, RefreshCw, XCircle } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { adminFetch } from "../admin/adminApi.js";
 import {
@@ -20,6 +20,65 @@ import { InlineNotice } from "../components/InlineNotice.jsx";
 import { formatDateTime } from "../lib/format.js";
 
 const PAGE_SIZE = 20;
+
+function providerName(provider) {
+  if (provider === "libretranslate") return "LibreTranslate";
+  if (provider === "openai") return "OpenAI";
+  return provider;
+}
+
+function providerTone(status) {
+  if (status === "UP") return "success";
+  if (status === "DOWN") return "danger";
+  return "warning";
+}
+
+function TranslationProviderStatus() {
+  const mutation = useMutation({
+    mutationFn: () => adminFetch("/provider-health/translation/check", { method: "POST" }),
+  });
+  const providers = Array.isArray(mutation.data?.providers) ? mutation.data.providers : [];
+  return (
+    <section className="workspace-section provider-health-section">
+      <div className="section-heading">
+        <div>
+          <h2>Translation providers</h2>
+          <p>Run a lightweight authenticated check against the LibreTranslate and OpenAI APIs.</p>
+        </div>
+        <Button
+          variant="secondary"
+          icon={Languages}
+          busy={mutation.isPending}
+          onClick={() => mutation.mutate()}
+        >
+          Check providers
+        </Button>
+      </div>
+      {mutation.error ? <InlineNotice tone="danger">{mutation.error.message}</InlineNotice> : null}
+      {providers.length === 0 && !mutation.isPending ? (
+        <div className="provider-health-empty">No check has been run in this session.</div>
+      ) : null}
+      {providers.length > 0 ? (
+        <div className="provider-health-grid">
+          {providers.map((provider) => (
+            <article className="provider-health-card" key={provider.provider}>
+              <div>
+                <strong>{providerName(provider.provider)}</strong>
+                <span>{provider.enabled ? "Enabled for translation" : "Not in provider order"}</span>
+              </div>
+              <div className="provider-health-result">
+                <StatusBadge tone={providerTone(provider.status)}>{provider.status.replaceAll("_", " ")}</StatusBadge>
+                <span>{provider.latencyMs == null ? "Not contacted" : `${provider.latencyMs} ms`}</span>
+              </div>
+              <p>{provider.detail}</p>
+            </article>
+          ))}
+        </div>
+      ) : null}
+      {mutation.data?.checkedAt ? <small className="provider-health-checked">Checked {formatDateTime(mutation.data.checkedAt)}</small> : null}
+    </section>
+  );
+}
 
 function localInputValue(date) {
   const offset = date.getTimezoneOffset() * 60_000;
@@ -283,7 +342,7 @@ export function ServiceStatusPage() {
 
   useEffect(() => {
     const previousTitle = document.title;
-    document.title = "App Control · BuddyStudy Monitoring";
+    document.title = "Service Status · BuddyStudy Monitoring";
     return () => {
       document.title = previousTitle;
     };
@@ -293,8 +352,8 @@ export function ServiceStatusPage() {
     <>
       <PageHeader
         eyebrow="Manage"
-        title="App control"
-        description="Publish update guidance and full-screen maintenance through Firebase Remote Config."
+        title="Service status & app control"
+        description="Check translation providers and publish update or maintenance guidance through Firebase Remote Config."
         actions={
           <Button
             variant="secondary"
@@ -305,6 +364,7 @@ export function ServiceStatusPage() {
           </Button>
         }
       />
+      <TranslationProviderStatus />
       <section className="workspace-section app-control-workspace">
         <div className="app-control-surface-tabs">
           <SegmentedTabs

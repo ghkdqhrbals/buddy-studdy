@@ -6,6 +6,7 @@ import {
   Search,
   X,
 } from "lucide-react";
+import { useState } from "react";
 import { Button } from "./Button.jsx";
 
 export function PageHeader({ eyebrow, title, description, actions }) {
@@ -141,6 +142,29 @@ export function SegmentedTabs({ value, onChange, items, ariaLabel }) {
 
 export function StatusBadge({ children, tone = "neutral" }) {
   return <span className="status-badge" data-tone={tone}>{children ?? "-"}</span>;
+}
+
+export function ExpandableText({ value, label = "details", className = "" }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!value) return <span>-</span>;
+  return (
+    <button
+      type="button"
+      className={`expandable-text ${className}`.trim()}
+      data-expanded={expanded ? "true" : "false"}
+      aria-expanded={expanded}
+      aria-label={`${expanded ? "Collapse" : "Show full"} ${label}`}
+      title={value}
+      onClick={(event) => {
+        event.stopPropagation();
+        setExpanded((current) => !current);
+      }}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
+      <span>{value}</span>
+      <small>{expanded ? "Show less" : "Show full"}</small>
+    </button>
+  );
 }
 
 export function DetailDrawer({ open, title, subtitle, onClose, children, width = "wide" }) {

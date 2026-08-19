@@ -10,6 +10,7 @@ import { useMemo, useState } from "react";
 import { adminFetch } from "../admin/adminApi.js";
 import {
   DataTable,
+  ExpandableText,
   Pagination,
   StatusBadge,
   SearchField,
@@ -284,9 +285,15 @@ function InboxAttemptList({ group }) {
             key: "errorType",
             label: "Failure",
             render: (row) => (
-              <span className="stream-inbox-error" title={row.errorMessage || ""}>
+              <span className="stream-inbox-error">
                 <strong>{row.errorType?.split(".").at(-1) || "-"}</strong>
-                {row.errorMessage ? <small>{row.errorMessage}</small> : null}
+                {row.errorMessage ? (
+                  <ExpandableText
+                    value={row.errorMessage}
+                    label={`Inbox error for ${row.eventId}`}
+                    className="stream-error-details"
+                  />
+                ) : null}
               </span>
             ),
           },
