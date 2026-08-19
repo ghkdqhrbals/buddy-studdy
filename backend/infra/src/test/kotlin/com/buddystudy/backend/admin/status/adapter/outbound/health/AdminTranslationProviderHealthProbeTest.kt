@@ -1,5 +1,7 @@
 package com.buddystudy.backend.admin.status.adapter.outbound.health
 
+import com.buddystudy.backend.test.testExternalApiHistoryRecorder
+
 import com.buddystudy.backend.config.BuddyStudyProperties
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -86,6 +88,10 @@ class AdminTranslationProviderHealthProbeTest {
         response: (ClientRequest) -> ClientResponse,
     ): AdminTranslationProviderHealthProbe {
         val exchange = ExchangeFunction { request -> Mono.just(response(request)) }
-        return AdminTranslationProviderHealthProbe(WebClient.builder().exchangeFunction(exchange), properties)
+        return AdminTranslationProviderHealthProbe(
+            WebClient.builder().exchangeFunction(exchange),
+            properties,
+            testExternalApiHistoryRecorder(),
+        )
     }
 }

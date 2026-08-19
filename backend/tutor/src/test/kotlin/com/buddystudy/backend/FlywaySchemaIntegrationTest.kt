@@ -16,6 +16,10 @@ import com.buddystudy.backend.study.adapter.outbound.persistence.StudyQuestionCo
 import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionRepository
 import com.buddystudy.backend.study.adapter.outbound.persistence.StudyRepository
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoveragePort
+import com.buddystudy.backend.externalapi.application.model.ExternalApiHistoryQuery
+import com.buddystudy.backend.externalapi.application.model.FinishExternalApiCallCommand
+import com.buddystudy.backend.externalapi.application.model.StartExternalApiCallCommand
+import com.buddystudy.backend.externalapi.application.port.outbound.ExternalApiHistoryPort
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.GradingVerdict
 import com.buddystudy.study.domain.entity.QuestionSource
@@ -49,6 +53,80 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var questions: QuestionRepository
     @Autowired lateinit var questionCoverage: StudyQuestionCoveragePersistenceAdapter
     @Autowired lateinit var databaseClient: DatabaseClient
+    @Autowired lateinit var externalApiHistory: ExternalApiHistoryPort
+
+    @Test
+    fun `external API history keeps complete request and response columns`(): Unit = runBlocking {
+        val columns = databaseClient.sql(
+            """
+            select column_name
+            from information_schema.columns
+            where table_schema = database()
+              and table_name = 'external_api_call_history'
+            """.trimIndent(),
+        ).map { row, _ -> row.get("column_name", String::class.java)!! }
+            .all().collectList().awaitSingle()
+
+        assertThat(columns).contains(
+            "call_id",
+            "provider",
+            "operation",
+            "request_headers_json",
+            "request_body",
+            "response_status",
+            "response_headers_json",
+            "response_body",
+            "error_type",
+            "error_message",
+            "started_at",
+            "finished_at",
+            "duration_ms",
+        )
+    }
+
+    @Test
+    fun `external API history persists and cursor pages complete provider exchanges`(): Unit = runBlocking {
+        val callId = "00000000-0000-0000-0000-000000000080"
+        val startedAt = Instant.parse("2026-08-19T12:00:00Z")
+        databaseClient.sql("delete from external_api_call_history where call_id = :callId")
+            .bind("callId", callId).fetch().rowsUpdated().awaitSingle()
+        externalApiHistory.start(
+            StartExternalApiCallCommand(
+                callId = callId,
+                correlationId = "request-80",
+                provider = "openai",
+                operation = "test-exchange",
+                httpMethod = "POST",
+                requestUrl = "https://api.openai.com/v1/test",
+                requestHeadersJson = "{}",
+                requestBody = "{\"request\":\"full\"}",
+                startedAt = startedAt,
+            ),
+        )
+        assertThat(
+            externalApiHistory.finish(
+                FinishExternalApiCallCommand(
+                    callId = callId,
+                    status = "SUCCEEDED",
+                    responseStatus = 200,
+                    responseHeadersJson = "{}",
+                    responseBody = "{\"response\":\"full\"}",
+                    errorType = null,
+                    errorMessage = null,
+                    finishedAt = startedAt.plusMillis(125),
+                ),
+            ),
+        ).isTrue()
+
+        val page = externalApiHistory.page(
+            ExternalApiHistoryQuery(null, 20, "openai", "SUCCEEDED", "test-exchange"),
+        )
+        val summary = page.items.single { it.callId == callId }
+        assertThat(summary.durationMs).isEqualTo(125)
+        val detail = externalApiHistory.find(summary.id)
+        assertThat(detail?.requestBody).isEqualTo("{\"request\":\"full\"}")
+        assertThat(detail?.responseBody).isEqualTo("{\"response\":\"full\"}")
+    }
 
     @Test
     fun `billing fulfillment recovery job is registered for readiness monitoring`(): Unit = runBlocking {

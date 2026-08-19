@@ -8,6 +8,7 @@ import com.buddystudy.backend.study.application.port.outbound.ApnsAps
 import com.buddystudy.backend.study.application.port.outbound.ApnsQuestionMessage
 import com.buddystudy.backend.study.application.port.outbound.ApnsQuestionPayload
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
+import com.buddystudy.backend.test.testExternalApiHistoryRecorder
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -20,7 +21,7 @@ import java.util.Base64
 class ApnsPushNotificationAdapterTest {
     @Test
     fun `provider token is reused until its refresh interval expires`() {
-        val adapter = ApnsPushNotificationAdapter(apnsProperties())
+        val adapter = adapter(apnsProperties())
         val issuedAt = Instant.parse("2030-01-01T00:00:00Z")
 
         val first = adapter.providerToken(issuedAt)
@@ -33,7 +34,7 @@ class ApnsPushNotificationAdapterTest {
 
     @Test
     fun `apns request timeout is five seconds`(): Unit = runBlocking {
-        val adapter = ApnsPushNotificationAdapter(BuddyStudyProperties())
+        val adapter = adapter()
 
         val request = adapter.buildRequest(
             message = ApnsQuestionMessage(
@@ -57,7 +58,7 @@ class ApnsPushNotificationAdapterTest {
 
     @Test
     fun `apns payload includes unread badge when provided`(): Unit = runBlocking {
-        val adapter = ApnsPushNotificationAdapter(BuddyStudyProperties())
+        val adapter = adapter()
 
         val body = adapter.buildPayloadJson(
             ApnsQuestionMessage(
@@ -81,7 +82,7 @@ class ApnsPushNotificationAdapterTest {
 
     @Test
     fun `apns payload includes notification id when provided`(): Unit = runBlocking {
-        val adapter = ApnsPushNotificationAdapter(BuddyStudyProperties())
+        val adapter = adapter()
 
         val body = adapter.buildPayloadJson(
             ApnsQuestionMessage(
@@ -106,7 +107,7 @@ class ApnsPushNotificationAdapterTest {
 
     @Test
     fun `oversized APNs body is truncated by encoded byte size while navigation metadata is retained`() {
-        val adapter = ApnsPushNotificationAdapter(BuddyStudyProperties())
+        val adapter = adapter()
         val oversizedBody = """긴 질문 😀 "인용" \ 경로
             |""".trimMargin().repeat(1_000)
 
@@ -138,7 +139,7 @@ class ApnsPushNotificationAdapterTest {
 
     @Test
     fun `oversized APNs title is also truncated when body compaction is insufficient`() {
-        val adapter = ApnsPushNotificationAdapter(BuddyStudyProperties())
+        val adapter = adapter()
 
         val body = adapter.buildPayloadJson(
             ApnsQuestionMessage(
@@ -164,7 +165,7 @@ class ApnsPushNotificationAdapterTest {
 
     @Test
     fun `missing APNs token is a delivery failure`(): Unit = runBlocking {
-        val adapter = ApnsPushNotificationAdapter(BuddyStudyProperties())
+        val adapter = adapter()
         val message = ApnsQuestionMessage(
             recordId = "10",
             topic = "Swift",
@@ -196,4 +197,7 @@ class ApnsPushNotificationAdapterTest {
             apns.authKeyP8 = "-----BEGIN PRIVATE KEY-----\n$encodedPrivateKey\n-----END PRIVATE KEY-----"
         }
     }
+
+    private fun adapter(properties: BuddyStudyProperties = BuddyStudyProperties()) =
+        ApnsPushNotificationAdapter(properties, testExternalApiHistoryRecorder())
 }

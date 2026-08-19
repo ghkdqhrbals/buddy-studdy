@@ -1,6 +1,7 @@
 package com.buddystudy.backend.billing.adapter.outbound.revenuecat
 
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.test.testExternalApiHistoryRecorder
 import com.buddystudy.billing.domain.SubscriptionAccessStatus
 import com.buddystudy.billing.domain.SubscriptionRenewalStatus
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
@@ -34,6 +35,7 @@ class RevenueCatCustomerInfoAdapterTest {
             properties(),
             client,
             jacksonObjectMapper(),
+            testExternalApiHistoryRecorder(),
             Clock.fixed(now, ZoneOffset.UTC),
         )
 
@@ -66,6 +68,7 @@ class RevenueCatCustomerInfoAdapterTest {
             properties(),
             client,
             jacksonObjectMapper(),
+            testExternalApiHistoryRecorder(),
             Clock.fixed(now, ZoneOffset.UTC),
         )
 

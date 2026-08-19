@@ -4,6 +4,10 @@ The Apple StoreKit membership payment ledger, transaction boundaries, event
 sourcing rules, App Store notification authority, and operations setup are
 documented in [BILLING.md](BILLING.md).
 
+Outbound provider request/response retention, credential redaction, and
+administrator inspection are documented in
+[EXTERNAL_API_HISTORY.md](EXTERNAL_API_HISTORY.md).
+
 The canonical iOS screen routes, compatibility aliases, push landing behavior,
 and administrator-message destinations are documented in
 [DEEPLINKS.md](DEEPLINKS.md).

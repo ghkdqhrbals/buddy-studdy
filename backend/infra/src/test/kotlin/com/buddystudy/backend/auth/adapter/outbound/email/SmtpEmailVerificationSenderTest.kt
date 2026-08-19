@@ -1,5 +1,7 @@
 package com.buddystudy.backend.auth.adapter.outbound.email
 
+import com.buddystudy.backend.test.testExternalApiHistoryRecorder
+
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
@@ -19,7 +21,7 @@ class SmtpEmailVerificationSenderTest {
         val properties = BuddyStudyProperties().apply {
             email.from = "BuddyStudy <sender@example.com>"
         }
-        val sender = SmtpEmailVerificationSender(mailSender, properties)
+        val sender = SmtpEmailVerificationSender(mailSender, properties, testExternalApiHistoryRecorder())
 
         sender.send("tester@example.com", "123456", Duration.ofSeconds(180))
 
@@ -35,7 +37,9 @@ class SmtpEmailVerificationSenderTest {
         val properties = BuddyStudyProperties().apply {
             email.from = "BuddyStudy <sender@example.com>"
         }
-        val sender = SmtpEmailVerificationSender(AuthenticationFailingMailSender(), properties)
+        val sender = SmtpEmailVerificationSender(
+            AuthenticationFailingMailSender(), properties, testExternalApiHistoryRecorder(),
+        )
 
         val error = runCatching {
             runBlocking {

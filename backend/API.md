@@ -757,6 +757,22 @@ Response:
 
 This endpoint is intended for explicit operator-triggered scheduler checks. It must not be called from GitHub Actions health checks. The normal scheduler loop runs automatically when `SCHEDULER_ENABLED=true`.
 
+### External API History
+
+```http
+GET /api/v1/admin/external-api-history?limit=20&provider=openai&status=FAILED&query=translate
+Authorization: Bearer <adminToken>
+```
+
+Returns a descending cursor page of outbound provider call summaries. Request and response bodies are omitted from the page payload.
+
+```http
+GET /api/v1/admin/external-api-history/{id}
+Authorization: Bearer <adminToken>
+```
+
+Returns the selected call's complete request and response as observed by the backend. Authentication headers, cookies, API keys, tokens, verification codes, and APNs device tokens are redacted before persistence.
+
 ## Error Format
 
 Validation, auth, and server failures return one unified JSON shape:

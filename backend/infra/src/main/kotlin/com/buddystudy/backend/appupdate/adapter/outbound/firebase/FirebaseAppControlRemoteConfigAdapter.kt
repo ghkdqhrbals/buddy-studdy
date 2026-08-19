@@ -10,6 +10,9 @@ import com.google.firebase.remoteconfig.ParameterValue
 import com.buddystudy.backend.appupdate.application.model.AppControlRemotePolicy
 import com.buddystudy.backend.appupdate.application.model.RemoteConfigPublicationResult
 import com.buddystudy.backend.appupdate.application.port.outbound.AppControlRemoteConfigPort
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiHistoryRecorder
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiRequest
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
@@ -28,20 +31,46 @@ class FirebaseAppControlRemoteConfigAdapter(
     private val serviceAccountJsonBase64: String,
     @param:Value("\${buddystudy.firebase.remote-config.parameter-key:ios_app_control_v1}")
     private val parameterKey: String,
+    private val history: ExternalApiHistoryRecorder,
 ) : AppControlRemoteConfigPort {
     private val logger = LoggerFactory.getLogger(javaClass)
 
     override suspend fun publish(policy: AppControlRemotePolicy): RemoteConfigPublicationResult =
         try {
             withContext(Dispatchers.IO) {
+                val url = "https://firebaseremoteconfig.googleapis.com/v1/projects/${projectId.trim()}/remoteConfig"
                 val remoteConfig = FirebaseRemoteConfig.getInstance(firebaseApp())
-                val template = remoteConfig.getTemplateAsync().get()
+                val template = history.record(
+                    ExternalApiRequest(
+                        provider = "firebase",
+                        operation = "get-remote-config",
+                        method = "GET",
+                        url = url,
+                    ),
+                ) {
+                    val current = remoteConfig.getTemplateAsync().get()
+                    ExternalApiResponse(
+                        value = current,
+                        body = objectMapper.writeValueAsString(templateSnapshot(current)),
+                    )
+                }
                 val parameters = template.parameters.toMutableMap()
                 parameters[parameterKey] = Parameter()
                     .setDefaultValue(ParameterValue.of(objectMapper.writeValueAsString(policy)))
                 template.parameters = parameters
-                remoteConfig.validateTemplateAsync(template).get()
-                remoteConfig.publishTemplateAsync(template).get()
+                val requestBody = objectMapper.writeValueAsString(templateSnapshot(template))
+                val validated = history.record(
+                    ExternalApiRequest("firebase", "validate-remote-config", "POST", "$url:validate", body = requestBody),
+                ) {
+                    val result = remoteConfig.validateTemplateAsync(template).get()
+                    ExternalApiResponse(result, body = objectMapper.writeValueAsString(templateSnapshot(result)))
+                }
+                history.record(
+                    ExternalApiRequest("firebase", "publish-remote-config", "PUT", url, body = requestBody),
+                ) {
+                    val published = remoteConfig.publishTemplateAsync(validated).get()
+                    ExternalApiResponse(Unit, body = objectMapper.writeValueAsString(templateSnapshot(published)))
+                }
                 val publishedAt = Instant.now()
                 logger.info(
                     "firebase_remote_config_published parameterKey={} policyId={} revision={}",
@@ -87,6 +116,13 @@ class FirebaseAppControlRemoteConfigAdapter(
                 )
         }
     }
+
+    private fun templateSnapshot(template: com.google.firebase.remoteconfig.Template): Map<String, Any?> = mapOf(
+        "etag" to template.getETag(),
+        "parameters" to template.parameters,
+        "parameterGroups" to template.parameterGroups,
+        "version" to template.version,
+    )
 
     private companion object {
         const val FIREBASE_APP_NAME = "buddystudy-remote-config"

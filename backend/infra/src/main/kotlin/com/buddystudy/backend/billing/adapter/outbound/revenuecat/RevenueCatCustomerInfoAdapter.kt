@@ -5,6 +5,9 @@ import com.buddystudy.backend.billing.application.port.outbound.RevenueCatCustom
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiHistoryRecorder
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiRequest
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiResponse
 import com.buddystudy.billing.domain.SubscriptionAccessStatus
 import com.buddystudy.billing.domain.SubscriptionRenewalStatus
 import com.fasterxml.jackson.databind.JsonNode
@@ -29,6 +32,7 @@ class RevenueCatCustomerInfoAdapter(
     private val properties: BuddyStudyProperties,
     webClientBuilder: WebClient.Builder,
     private val objectMapper: ObjectMapper,
+    private val history: ExternalApiHistoryRecorder,
     private val clock: Clock = Clock.systemUTC(),
 ) : RevenueCatCustomerInfoPort {
     private val client = webClientBuilder.clientConnector(
@@ -99,15 +103,32 @@ class RevenueCatCustomerInfoAdapter(
         uri: String,
         key: String,
         config: BuddyStudyProperties.RevenueCat,
-    ): List<CustomerSubscription> = client.get().uri(uri).headers { it.setBearerAuth(key) }
-        .retrieve()
-        .bodyToMono(String::class.java)
-        .timeout(Duration.ofMillis(config.readTimeoutMs.coerceIn(500, 30_000)))
-        .retryWhen(
-            Retry.backoff((config.maxRetries.coerceIn(1, 3) - 1).toLong(), Duration.ofMillis(200))
-                .filter(::isRetryable),
+    ): List<CustomerSubscription> = history.record(
+        ExternalApiRequest(
+            provider = "revenuecat",
+            operation = "list-subscriptions",
+            method = "GET",
+            url = uri,
+            headers = mapOf("Authorization" to "Bearer $key"),
+        ),
+    ) {
+        val entity = client.get().uri(uri).headers { it.setBearerAuth(key) }
+            .retrieve()
+            .toEntity(String::class.java)
+            .timeout(Duration.ofMillis(config.readTimeoutMs.coerceIn(500, 30_000)))
+            .retryWhen(
+                Retry.backoff((config.maxRetries.coerceIn(1, 3) - 1).toLong(), Duration.ofMillis(200))
+                    .filter(::isRetryable),
+            )
+            .awaitSingle()
+        val payload = entity.body.orEmpty()
+        ExternalApiResponse(
+            value = payload,
+            statusCode = entity.statusCode.value(),
+            headers = entity.headers.toSingleValueMap(),
+            body = payload,
         )
-        .awaitSingle()
+    }
         .let(objectMapper::readTree)
         .items()
         .map(::subscription)

@@ -20,6 +20,18 @@ class SensitiveDataRedactor(
             objectMapper.writeValueAsString(redactNode(objectMapper.readTree(value)))
         }.getOrDefault(value)
 
+    fun text(value: String): String {
+        val trimmed = value.trim()
+        if (looksLikeJson(trimmed)) return json(value)
+        return SENSITIVE_ASSIGNMENT.replace(value) { match ->
+            "${match.groupValues[1]}[REDACTED]"
+        }
+    }
+
+    fun url(value: String): String = value
+        .replace(DEVICE_TOKEN_PATH, "/3/device/[REDACTED]")
+        .replace(SENSITIVE_QUERY) { match -> "${match.groupValues[1]}=[REDACTED]" }
+
     private fun redactNode(node: JsonNode): JsonNode {
         when (node) {
             is ObjectNode -> {
@@ -37,8 +49,10 @@ class SensitiveDataRedactor(
         return node
     }
 
-    private fun isSensitive(key: String): Boolean =
-        SENSITIVE_FIELD_PARTS.any { key.contains(it, ignoreCase = true) }
+    private fun isSensitive(key: String): Boolean {
+        val normalized = key.filter(Char::isLetterOrDigit).lowercase()
+        return SENSITIVE_FIELD_PARTS.any { normalized.contains(it.lowercase()) }
+    }
 
     private fun looksLikeJson(value: String): Boolean {
         val trimmed = value.trim()
@@ -54,6 +68,12 @@ class SensitiveDataRedactor(
             "token",
             "privateKey",
             "apiKey",
+            "idToken",
+            "verificationCode",
+            "cookie",
         )
+        val SENSITIVE_QUERY = Regex("""(?i)([?&](?:id_token|access_token|api_key|key|token|secret))=[^&]*""")
+        val DEVICE_TOKEN_PATH = Regex("""/3/device/[^/?]+""")
+        val SENSITIVE_ASSIGNMENT = Regex("""(?i)(\b(?:authorization|api[_-]?key|access[_-]?token|id[_-]?token|password|secret|verification[_-]?code)\s*[:=]\s*)\S+""")
     }
 }

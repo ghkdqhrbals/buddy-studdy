@@ -4,6 +4,9 @@ import com.buddystudy.backend.admin.status.application.model.AdminTranslationPro
 import com.buddystudy.backend.admin.status.application.model.AdminTranslationProviderHealthResponse
 import com.buddystudy.backend.admin.status.application.port.outbound.AdminProviderHealthPort
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiHistoryRecorder
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiRequest
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiResponse
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.reactive.awaitSingle
@@ -21,6 +24,7 @@ import java.util.concurrent.TimeoutException
 class AdminTranslationProviderHealthProbe(
     webClientBuilder: WebClient.Builder,
     private val properties: BuddyStudyProperties,
+    private val history: ExternalApiHistoryRecorder,
 ) : AdminProviderHealthPort {
     private val client = webClientBuilder.clone().build()
 
@@ -40,12 +44,18 @@ class AdminTranslationProviderHealthProbe(
             return notConfigured(PROVIDER_LIBRETRANSLATE, enabled, "LibreTranslate base URL is not configured.")
         }
         return probe(PROVIDER_LIBRETRANSLATE, enabled) {
-            client.get()
-                .uri("$baseUrl/languages")
-                .retrieve()
-                .toBodilessEntity()
-                .timeout(timeout())
-                .awaitSingle()
+            history.record(
+                ExternalApiRequest(PROVIDER_LIBRETRANSLATE, "health-check", "GET", "$baseUrl/languages"),
+            ) {
+                val entity = client.get().uri("$baseUrl/languages").retrieve()
+                    .toEntity(String::class.java).timeout(timeout()).awaitSingle()
+                ExternalApiResponse(
+                    Unit,
+                    entity.statusCode.value(),
+                    entity.headers.toSingleValueMap(),
+                    entity.body,
+                )
+            }
         }
     }
 
@@ -55,13 +65,25 @@ class AdminTranslationProviderHealthProbe(
             return notConfigured(PROVIDER_OPENAI, enabled, "OpenAI API key is not configured.")
         }
         return probe(PROVIDER_OPENAI, enabled) {
-            client.get()
-                .uri(OPENAI_MODELS_URL)
-                .header(HttpHeaders.AUTHORIZATION, "Bearer $apiKey")
-                .retrieve()
-                .toBodilessEntity()
-                .timeout(timeout())
-                .awaitSingle()
+            history.record(
+                ExternalApiRequest(
+                    PROVIDER_OPENAI,
+                    "health-check",
+                    "GET",
+                    OPENAI_MODELS_URL,
+                    mapOf(HttpHeaders.AUTHORIZATION to "Bearer $apiKey"),
+                ),
+            ) {
+                val entity = client.get().uri(OPENAI_MODELS_URL)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer $apiKey")
+                    .retrieve().toEntity(String::class.java).timeout(timeout()).awaitSingle()
+                ExternalApiResponse(
+                    Unit,
+                    entity.statusCode.value(),
+                    entity.headers.toSingleValueMap(),
+                    entity.body,
+                )
+            }
         }
     }
 

@@ -1,5 +1,7 @@
 package com.buddystudy.backend.auth.adapter.outbound.google
 
+import com.buddystudy.backend.test.testExternalApiHistoryRecorder
+
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import kotlinx.coroutines.reactor.mono
 import org.assertj.core.api.Assertions.assertThat
@@ -40,6 +42,7 @@ class GoogleIdentityWebClientAdapterTest {
             webClientBuilder = WebClient.builder(),
             objectMapper = jacksonObjectMapper(),
             baseUrl = "http://127.0.0.1:${server!!.port()}",
+            history = testExternalApiHistoryRecorder(),
         )
 
         val identity = mono { verifier.verify("id-token") }

@@ -1,6 +1,7 @@
 package com.buddystudy.backend.billing.adapter.outbound.revenuecat
 
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.test.testExternalApiHistoryRecorder
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiRuntimeException
 import com.buddystudy.billing.domain.BillingEnvironment
@@ -133,6 +134,7 @@ class RevenueCatTransactionVerificationAdapterTest {
         return RevenueCatTransactionVerificationAdapter(
             properties,
             client,
+            testExternalApiHistoryRecorder(),
             jacksonObjectMapper(),
             Clock.fixed(Instant.parse("2026-08-08T14:00:00Z"), ZoneOffset.UTC),
         )

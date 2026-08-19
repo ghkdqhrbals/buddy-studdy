@@ -2,6 +2,7 @@ import {
   Activity,
   BookOpenText,
   CalendarClock,
+  Cable,
   ExternalLink,
   Gauge,
   GitPullRequest,
@@ -17,7 +18,7 @@ import {
   Users,
 } from "lucide-react";
 
-export const UI_VERSION = "2026.08.19.1";
+export const UI_VERSION = "2026.08.19.2";
 export const NAV_COLLAPSED_KEY = "buddystudy.monitoring.nav.collapsed";
 export const NAV_GROUP_KEY = "buddystudy.monitoring.nav.groups";
 export const NAV_MODE_KEY = "buddystudy.monitoring.nav.mode";
@@ -47,6 +48,7 @@ export const navigationGroups = [
       { href: "/streams.html", label: "Redis Streams", icon: GitPullRequest },
       { href: "/deployments.html", label: "Deployments", icon: Rocket },
       { href: "/service-status.html", label: "Service Status", icon: Wrench },
+      { href: "/external-api-history.html", label: "External APIs", icon: Cable },
     ],
   },
   {

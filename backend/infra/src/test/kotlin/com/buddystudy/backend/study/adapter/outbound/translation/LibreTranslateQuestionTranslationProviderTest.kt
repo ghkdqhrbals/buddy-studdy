@@ -1,5 +1,7 @@
 package com.buddystudy.backend.study.adapter.outbound.translation
 
+import com.buddystudy.backend.test.testExternalApiHistoryRecorder
+
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.runBlocking
@@ -28,7 +30,9 @@ class LibreTranslateQuestionTranslationProviderTest {
                 translation.baseUrl = "http://127.0.0.1:${server.address.port}"
                 translation.timeoutMs = 2_000
             }
-            val provider = LibreTranslateQuestionTranslationProvider(WebClient.builder(), properties)
+            val provider = LibreTranslateQuestionTranslationProvider(
+                WebClient.builder(), properties, testExternalApiHistoryRecorder(),
+            )
 
             val failure = runCatching {
                 runBlocking {

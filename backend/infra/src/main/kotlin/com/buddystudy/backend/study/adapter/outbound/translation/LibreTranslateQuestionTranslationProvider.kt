@@ -1,6 +1,9 @@
 package com.buddystudy.backend.study.adapter.outbound.translation
 
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiHistoryRecorder
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiRequest
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiResponse
 import com.buddystudy.backend.study.application.model.TranslatedQuestionContent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -8,13 +11,13 @@ import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.supervisorScope
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.WebClient
-import org.springframework.web.reactive.function.client.bodyToMono
 import java.time.Duration
 
 @Component
 class LibreTranslateQuestionTranslationProvider(
     webClientBuilder: WebClient.Builder,
     private val properties: BuddyStudyProperties,
+    private val history: ExternalApiHistoryRecorder,
 ) : QuestionTranslationProvider {
     override val providerId: String = "libretranslate"
     private val client = webClientBuilder.clone()
@@ -59,13 +62,32 @@ class LibreTranslateQuestionTranslationProvider(
             "format" to "text",
         )
         properties.translation.apiKey.takeIf(String::isNotBlank)?.let { body["api_key"] = it }
-        val response = client.post()
-            .uri("/translate")
-            .bodyValue(body)
-            .retrieve()
-            .bodyToMono<LibreTranslateResponse>()
-            .timeout(Duration.ofMillis(properties.translation.timeoutMs.coerceAtLeast(100)))
-            .awaitSingle()
+        val url = "${properties.translation.baseUrl.trimEnd('/')}/translate"
+        val response = history.record(
+            ExternalApiRequest(
+                provider = providerId,
+                operation = "translate-text",
+                method = "POST",
+                url = url,
+                headers = mapOf("Content-Type" to "application/json"),
+                body = history.json(body),
+            ),
+        ) {
+            val entity = client.post()
+                .uri("/translate")
+                .bodyValue(body)
+                .retrieve()
+                .toEntity(LibreTranslateResponse::class.java)
+                .timeout(Duration.ofMillis(properties.translation.timeoutMs.coerceAtLeast(100)))
+                .awaitSingle()
+            val value = requireNotNull(entity.body) { "LibreTranslate returned an empty response body." }
+            ExternalApiResponse(
+                value = value,
+                statusCode = entity.statusCode.value(),
+                headers = entity.headers.toSingleValueMap(),
+                body = history.json(value),
+            )
+        }
         return response.translatedText.trim().also {
             require(it.isNotBlank()) { "LibreTranslate returned empty content." }
         }

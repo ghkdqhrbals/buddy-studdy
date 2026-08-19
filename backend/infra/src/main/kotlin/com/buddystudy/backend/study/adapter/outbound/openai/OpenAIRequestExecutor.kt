@@ -2,6 +2,9 @@ package com.buddystudy.backend.study.adapter.outbound.openai
 
 import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiHistoryRecorder
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiRequest
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiResponse
 import com.buddystudy.backend.study.application.content.MarkdownContentPolicy
 import com.buddystudy.backend.study.application.port.outbound.AiCriterionAssessment
 import com.buddystudy.backend.study.application.port.outbound.AiGradingAssessment
@@ -44,6 +47,7 @@ import kotlin.math.roundToInt
 @Component
 class OpenAIRequestExecutor(
     private val properties: BuddyStudyProperties,
+    private val history: ExternalApiHistoryRecorder,
 ) : DisposableBean {
     private val mapper = JsonMapperProvider.mapper
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -58,21 +62,25 @@ class OpenAIRequestExecutor(
         .build()
 
     fun validate(apiKey: String) {
-        val model = chatModel(apiKey, OpenAiChatOptions.DEFAULT_CHAT_MODEL, json = false)
-        model.call(Prompt("Reply with ok.", options(apiKey, OpenAiChatOptions.DEFAULT_CHAT_MODEL, json = false, maxCompletionTokens = 4)))
+        chatText(
+            operation = "validate-api-key",
+            apiKey = apiKey,
+            model = OpenAiChatOptions.DEFAULT_CHAT_MODEL,
+            json = false,
+            user = "Reply with ok.",
+            maxCompletionTokens = 4,
+        )
     }
 
     fun generateQuestion(apiKey: String, model: String, prompt: QuestionGenerationPrompt): GeneratedQuestion {
-        val response = chatModel(apiKey, model, json = true).call(
-            Prompt(
-                listOf(
-                    SystemMessage(prompt.systemPrompt),
-                    UserMessage(prompt.userPrompt),
-                ),
-                options(apiKey, model, json = true),
-            )
+        val text = chatText(
+            operation = "generate-question",
+            apiKey = apiKey,
+            model = model,
+            json = true,
+            system = prompt.systemPrompt,
+            user = prompt.userPrompt,
         )
-        val text = response.result?.output?.text ?: "{}"
         val parsed: Map<String, Any?> = mapper.readValue(text.ifBlank { "{}" })
         val question = parsed["question"]?.toString()?.takeIf { it.isNotBlank() }
             ?: "Explain one key idea about ${prompt.fallbackTopic}."
@@ -131,16 +139,14 @@ class OpenAIRequestExecutor(
               "hint": "translated hint or null"
             }
         """.trimIndent()
-        val response = chatModel(apiKey, model, json = true).call(
-            Prompt(
-                listOf(
-                    SystemMessage("You are a professional multilingual localization editor for a study application."),
-                    UserMessage(prompt),
-                ),
-                options(apiKey, model, json = true),
-            ),
+        val text = chatText(
+            operation = "translate-question",
+            apiKey = apiKey,
+            model = model,
+            json = true,
+            system = "You are a professional multilingual localization editor for a study application.",
+            user = prompt,
         )
-        val text = response.result?.output?.text ?: "{}"
         val parsed: Map<String, Any?> = mapper.readValue(text.ifBlank { "{}" })
         val translatedTopic = parsed["topic"]?.toString()?.trim().orEmpty()
         val translatedQuestion = parsed["question"]?.toString()?.trim().orEmpty()
@@ -153,17 +159,28 @@ class OpenAIRequestExecutor(
         )
     }
 
-    fun embedText(apiKey: String, text: String): List<Float> =
-        OpenAiEmbeddingModel.builder()
+    fun embedText(apiKey: String, text: String): List<Float> = history.recordBlocking(
+        ExternalApiRequest(
+            provider = "openai",
+            operation = "create-embedding",
+            method = "POST",
+            url = OPENAI_EMBEDDINGS_URL,
+            headers = mapOf("Authorization" to "Bearer $apiKey"),
+            body = history.json(mapOf("model" to properties.openai.embeddingModel, "input" to text)),
+        ),
+    ) {
+        val embedding = OpenAiEmbeddingModel.builder()
             .options(
                 OpenAiEmbeddingOptions.builder()
                     .apiKey(apiKey)
                     .model(properties.openai.embeddingModel)
-                    .build()
+                    .build(),
             )
             .build()
             .embed(text)
             .toList()
+        ExternalApiResponse(embedding, body = history.json(mapOf("embedding" to embedding)))
+    }
 
     fun generateQuestionCoverageBlueprint(
         apiKey: String,
@@ -194,10 +211,13 @@ class OpenAIRequestExecutor(
               ]
             }
         """.trimIndent()
-        val response = chatModel(apiKey, model, json = true).call(
-            Prompt(UserMessage(prompt), options(apiKey, model, json = true))
+        val text = chatText(
+            operation = "generate-coverage-blueprint",
+            apiKey = apiKey,
+            model = model,
+            json = true,
+            user = prompt,
         )
-        val text = response.result?.output?.text ?: "{}"
         return parseQuestionCoverageConcepts(text)
     }
 
@@ -222,10 +242,13 @@ class OpenAIRequestExecutor(
             Return JSON only:
             {"topics":["topic 1","topic 2"]}
         """.trimIndent()
-        val response = chatModel(apiKey, model, json = true).call(
-            Prompt(UserMessage(prompt), options(apiKey, model, json = true)),
+        val text = chatText(
+            operation = "suggest-study-topics",
+            apiKey = apiKey,
+            model = model,
+            json = true,
+            user = prompt,
         )
-        val text = response.result?.output?.text ?: "{}"
         val parsed: Map<String, Any?> = mapper.readValue(text.ifBlank { "{}" })
         return (parsed["topics"] as? List<*>)
             .orEmpty()
@@ -585,14 +608,57 @@ class OpenAIRequestExecutor(
     }
 
     private fun jsonCall(apiKey: String, model: String, system: String, user: String): Map<String, Any?> {
-        val response = chatModel(apiKey, model, json = true).call(
-            Prompt(
-                listOf(SystemMessage(system), UserMessage(user)),
-                options(apiKey, model, json = true),
-            )
+        val text = chatText(
+            operation = "grade-answer",
+            apiKey = apiKey,
+            model = model,
+            json = true,
+            system = system,
+            user = user,
         )
-        val text = response.result?.output?.text ?: "{}"
         return mapper.readValue(text.ifBlank { "{}" })
+    }
+
+    private fun chatText(
+        operation: String,
+        apiKey: String,
+        model: String,
+        json: Boolean,
+        user: String,
+        system: String? = null,
+        maxCompletionTokens: Int? = null,
+    ): String {
+        val messages = buildList {
+            system?.let { add(SystemMessage(it)) }
+            add(UserMessage(user))
+        }
+        val requestBody = linkedMapOf<String, Any?>(
+            "model" to model,
+            "responseFormat" to if (json) "json_object" else "text",
+            "messages" to buildList {
+                system?.let { add(mapOf("role" to "system", "content" to it)) }
+                add(mapOf("role" to "user", "content" to user))
+            },
+            "maxCompletionTokens" to maxCompletionTokens,
+        )
+        return history.recordBlocking(
+            ExternalApiRequest(
+                provider = "openai",
+                operation = operation,
+                method = "POST",
+                url = OPENAI_CHAT_COMPLETIONS_URL,
+                headers = mapOf("Authorization" to "Bearer $apiKey", "Content-Type" to "application/json"),
+                body = history.json(requestBody),
+            ),
+        ) {
+            val response = chatModel(apiKey, model, json).call(
+                Prompt(messages, options(apiKey, model, json, maxCompletionTokens)),
+            )
+            val text = response.result?.output?.text ?: "{}"
+            val responseBody = runCatching { history.json(response) }.getOrNull()
+                ?: history.json(mapOf("output" to text, "metadata" to response.metadata.toString()))
+            ExternalApiResponse(value = text, body = responseBody)
+        }
     }
 
     private suspend fun gradingJsonCall(
@@ -666,6 +732,8 @@ class OpenAIRequestExecutor(
     companion object {
         private const val MAX_CONCURRENT_GRADINGS = 4
         internal const val MAX_GRADING_TIMEOUT_SECONDS = 270L
+        private const val OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
+        private const val OPENAI_EMBEDDINGS_URL = "https://api.openai.com/v1/embeddings"
         private val VALID_VERDICTS = setOf("CORRECT", "PARTIALLY_CORRECT", "INCORRECT")
 
         private val RUBRIC_SYSTEM_PROMPT = """

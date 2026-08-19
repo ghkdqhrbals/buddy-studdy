@@ -2,6 +2,9 @@ package com.buddystudy.backend.study.adapter.outbound.apns
 
 import com.buddystudy.backend.common.application.security.JwtSupport
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiHistoryRecorder
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiRequest
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiResponse
 import com.buddystudy.backend.study.application.port.outbound.ApnsQuestionMessage
 import com.buddystudy.backend.study.application.port.outbound.ApnsQuestionPayload
 import com.buddystudy.backend.study.application.port.outbound.PushMessageType
@@ -30,6 +33,7 @@ import kotlin.coroutines.resumeWithException
 @Component
 class ApnsPushNotificationAdapter(
     private val properties: BuddyStudyProperties,
+    private val history: ExternalApiHistoryRecorder,
 ) : PushQuestionSender {
     override val type: PushMessageType = PushMessageType.APNS
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -84,7 +88,24 @@ class ApnsPushNotificationAdapter(
         try {
             val jwt = providerToken()
             val request = buildRequest(message, jwt)
-            val response = client.sendAsync(request, HttpResponse.BodyHandlers.ofString()).await()
+            val response = history.record(
+                ExternalApiRequest(
+                    provider = "apns",
+                    operation = "send-push",
+                    method = "POST",
+                    url = request.uri().toString(),
+                    headers = request.headers().map().mapValues { it.value.joinToString(", ") },
+                    body = buildPayloadJson(message),
+                ),
+            ) {
+                val result = client.sendAsync(request, HttpResponse.BodyHandlers.ofString()).await()
+                ExternalApiResponse(
+                    value = result,
+                    statusCode = result.statusCode(),
+                    headers = result.headers().map().mapValues { it.value.joinToString(", ") },
+                    body = result.body(),
+                )
+            }
             val completedAt = Instant.now()
             val durationMs = Duration.between(startedAt, completedAt).toMillis()
             val apnsId = response.headers().firstValue("apns-id").orElse(null)

@@ -5,6 +5,9 @@ import com.buddystudy.backend.billing.application.port.outbound.RevenueCatTransa
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiHistoryRecorder
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiRequest
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiResponse
 import com.buddystudy.billing.domain.BillingEnvironment
 import com.buddystudy.billing.domain.BillingProductType
 import com.fasterxml.jackson.databind.JsonNode
@@ -30,6 +33,7 @@ import java.util.UUID
 class RevenueCatTransactionVerificationAdapter(
     private val properties: BuddyStudyProperties,
     webClientBuilder: WebClient.Builder,
+    private val history: ExternalApiHistoryRecorder,
     private val objectMapper: ObjectMapper,
     private val clock: Clock = Clock.systemUTC(),
 ) : RevenueCatTransactionVerificationPort {
@@ -239,15 +243,32 @@ class RevenueCatTransactionVerificationAdapter(
     private suspend fun requestJson(uri: String, apiKey: String): JsonNode {
         val config = properties.billing.revenueCat
         return try {
-            client.get().uri(uri).headers { it.setBearerAuth(apiKey.trim()) }
-                .retrieve()
-                .bodyToMono(String::class.java)
-                .timeout(Duration.ofMillis(config.readTimeoutMs.coerceIn(500, 30_000)))
-                .retryWhen(
-                    Retry.backoff((config.maxRetries.coerceIn(1, 3) - 1).toLong(), Duration.ofMillis(200))
-                        .filter(::isRetryable),
+            history.record(
+                ExternalApiRequest(
+                    provider = "revenuecat",
+                    operation = "verify-transaction",
+                    method = "GET",
+                    url = uri,
+                    headers = mapOf("Authorization" to "Bearer ${apiKey.trim()}"),
+                ),
+            ) {
+                val entity = client.get().uri(uri).headers { it.setBearerAuth(apiKey.trim()) }
+                    .retrieve()
+                    .toEntity(String::class.java)
+                    .timeout(Duration.ofMillis(config.readTimeoutMs.coerceIn(500, 30_000)))
+                    .retryWhen(
+                        Retry.backoff((config.maxRetries.coerceIn(1, 3) - 1).toLong(), Duration.ofMillis(200))
+                            .filter(::isRetryable),
+                    )
+                    .awaitSingle()
+                val payload = entity.body.orEmpty()
+                ExternalApiResponse(
+                    value = payload,
+                    statusCode = entity.statusCode.value(),
+                    headers = entity.headers.toSingleValueMap(),
+                    body = payload,
                 )
-                .awaitSingle()
+            }
                 .let(objectMapper::readTree)
         } catch (error: WebClientResponseException.Unauthorized) {
             throw configurationError("RevenueCat server API key was rejected.")

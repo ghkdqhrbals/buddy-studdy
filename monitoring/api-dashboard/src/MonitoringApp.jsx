@@ -10,6 +10,7 @@ import { FeedbackPage } from "./pages/FeedbackPage.jsx";
 import { DeploymentsPage } from "./pages/DeploymentsPage.jsx";
 import { AdministratorsPage } from "./pages/AdministratorsPage.jsx";
 import { OrdersPage } from "./pages/OrdersPage.jsx";
+import { ExternalApiHistoryPage } from "./pages/ExternalApiHistoryPage.jsx";
 
 export function MonitoringApp() {
   const route = {
@@ -27,6 +28,7 @@ export function MonitoringApp() {
     "/deployments.html": DeploymentsPage,
     "/administrators.html": AdministratorsPage,
     "/orders.html": OrdersPage,
+    "/external-api-history.html": ExternalApiHistoryPage,
   }[window.location.pathname];
   const normalizedRoute = typeof route === "function" ? { Page: route } : route;
   const { Page, contentClassName = "" } = normalizedRoute || { Page: ApiLogsPage };

@@ -1,5 +1,7 @@
 package com.buddystudy.backend.study.adapter.outbound.openai
 
+import com.buddystudy.backend.test.testExternalApiHistoryRecorder
+
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.model.GradingResponseStyle
 import kotlinx.coroutines.NonCancellable
@@ -108,7 +110,7 @@ class OpenAIRequestExecutorTest {
 
     @Test
     fun `judge prompt requests concise reusable response parts`() {
-        val executor = OpenAIRequestExecutor(BuddyStudyProperties())
+        val executor = OpenAIRequestExecutor(BuddyStudyProperties(), testExternalApiHistoryRecorder())
 
         val prompt = executor.buildJudgeSystemPrompt(false)
 
@@ -128,7 +130,7 @@ class OpenAIRequestExecutorTest {
             openai.requestTimeoutSeconds = 45
             openai.requestMaxRetries = 1
         }
-        val executor = OpenAIRequestExecutor(properties)
+        val executor = OpenAIRequestExecutor(properties, testExternalApiHistoryRecorder())
 
         val options = executor.options("test-key", "gpt-test", json = true)
 
@@ -141,7 +143,7 @@ class OpenAIRequestExecutorTest {
         val properties = BuddyStudyProperties().apply {
             openai.gradingTimeoutSeconds = 600
         }
-        val executor = OpenAIRequestExecutor(properties)
+        val executor = OpenAIRequestExecutor(properties, testExternalApiHistoryRecorder())
 
         assertThat(executor.gradingTimeoutMillis()).isEqualTo(270_000)
         assertThat(executor.gradingTimeoutMillis()).isLessThan(300_000)
@@ -149,7 +151,7 @@ class OpenAIRequestExecutorTest {
 
     @Test
     fun `grading deadline returns without waiting for a non cooperative call`() {
-        val executor = OpenAIRequestExecutor(BuddyStudyProperties())
+        val executor = OpenAIRequestExecutor(BuddyStudyProperties(), testExternalApiHistoryRecorder())
         var elapsedMillis = 0L
 
         assertThatThrownBy {

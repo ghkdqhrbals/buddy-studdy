@@ -28,6 +28,7 @@ test("all monitoring pages load the shared React application", async () => {
     "streams.html",
     "deployments.html",
     "service-status.html",
+    "external-api-history.html",
     "login.html",
   ]) {
     const html = await text(page);
@@ -53,6 +54,20 @@ test("all monitoring pages load the shared React application", async () => {
   assert.match(navigation, /GitPullRequest/);
   assert.doesNotMatch(navigation, /Layers3/);
   assert.match(navigation, /Service Status/);
+  assert.match(navigation, /External APIs/);
+});
+
+test("external API history is cursor paginated and loads full request and response on demand", async () => {
+  const app = await source("MonitoringApp.jsx");
+  const page = await source("pages/ExternalApiHistoryPage.jsx");
+  assert.match(app, /external-api-history\.html/);
+  assert.match(page, /\/external-api-history\?/);
+  assert.match(page, /\/external-api-history\/\$\{selectedId\}/);
+  assert.match(page, /cursorStack/);
+  assert.match(page, /Pagination/);
+  assert.match(page, /DetailDrawer/);
+  assert.match(page, /ObjectInspector/);
+  assert.match(page, /Authentication headers and secret fields are redacted/);
 });
 
 test("order administration exposes the invoice ledger and audited Apple actions", async () => {
@@ -226,6 +241,7 @@ test("monitoring uses one full-page administrator session and manages database a
     "pages/StreamsPage.jsx",
     "pages/DeploymentsPage.jsx",
     "pages/ServiceStatusPage.jsx",
+    "pages/ExternalApiHistoryPage.jsx",
   ]) {
     assert.doesNotMatch(await source(page), /AdminGate/);
   }

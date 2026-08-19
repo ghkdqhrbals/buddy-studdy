@@ -10,6 +10,9 @@ import com.buddystudy.backend.billing.application.port.outbound.AppleBillingVeri
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiHistoryRecorder
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiRequest
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiResponse
 import com.buddystudy.billing.domain.BillingEnvironment
 import com.buddystudy.billing.domain.BillingProductType
 import kotlinx.coroutines.Dispatchers
@@ -26,13 +29,26 @@ import java.util.Base64
 class AppleStoreSignedDataAdapter(
     private val properties: BuddyStudyProperties,
     private val resourceLoader: ResourceLoader,
+    private val history: ExternalApiHistoryRecorder,
 ) : AppleBillingVerificationPort {
     override suspend fun verifyTransaction(
         signedTransaction: String,
         environment: BillingEnvironment,
     ): VerifiedAppleTransaction = withContext(Dispatchers.IO) {
         try {
-            verifier(environment).verifyAndDecodeTransaction(signedTransaction).toVerified(signedTransaction)
+            history.record(
+                ExternalApiRequest(
+                    provider = "apple-storekit",
+                    operation = "verify-transaction",
+                    method = "VERIFY",
+                    url = "apple-storekit://signed-data/transaction",
+                    body = history.json(mapOf("signedTransaction" to signedTransaction, "environment" to environment.name)),
+                ),
+            ) {
+                val verified = verifier(environment).verifyAndDecodeTransaction(signedTransaction)
+                    .toVerified(signedTransaction)
+                ExternalApiResponse(verified, body = history.json(verified))
+            }
         } catch (error: VerificationException) {
             throw invalidPayload("Apple transaction signature verification failed: ${error.status}", error)
         } catch (error: IllegalArgumentException) {
@@ -49,25 +65,36 @@ class AppleStoreSignedDataAdapter(
         var lastError: Exception? = null
         for (environment in environments) {
             try {
-                val verifier = verifier(environment)
-                val decoded = verifier.verifyAndDecodeNotification(signedPayload)
-                val data = decoded.data
-                val signedTransaction = data?.signedTransactionInfo
-                val transaction = signedTransaction?.let {
-                    verifier.verifyAndDecodeTransaction(it).toVerified(it)
+                return@withContext history.record(
+                    ExternalApiRequest(
+                        provider = "apple-storekit",
+                        operation = "verify-notification",
+                        method = "VERIFY",
+                        url = "apple-storekit://signed-data/notification",
+                        body = history.json(mapOf("signedPayload" to signedPayload, "environment" to environment.name)),
+                    ),
+                ) {
+                    val verifier = verifier(environment)
+                    val decoded = verifier.verifyAndDecodeNotification(signedPayload)
+                    val data = decoded.data
+                    val signedTransaction = data?.signedTransactionInfo
+                    val transaction = signedTransaction?.let {
+                        verifier.verifyAndDecodeTransaction(it).toVerified(it)
+                    }
+                    val verified = VerifiedAppleNotification(
+                        notificationUUID = decoded.notificationUUID
+                            ?: throw invalidPayload("Apple notification UUID is missing."),
+                        notificationType = decoded.rawNotificationType
+                            ?: throw invalidPayload("Apple notification type is missing."),
+                        subtype = decoded.rawSubtype,
+                        environment = environment,
+                        signedAt = decoded.signedDate?.let(Instant::ofEpochMilli)
+                            ?: throw invalidPayload("Apple notification signedDate is missing."),
+                        signedPayloadSha256 = signedPayload.sha256(),
+                        transaction = transaction,
+                    )
+                    ExternalApiResponse(verified, body = history.json(verified))
                 }
-                return@withContext VerifiedAppleNotification(
-                    notificationUUID = decoded.notificationUUID
-                        ?: throw invalidPayload("Apple notification UUID is missing."),
-                    notificationType = decoded.rawNotificationType
-                        ?: throw invalidPayload("Apple notification type is missing."),
-                    subtype = decoded.rawSubtype,
-                    environment = environment,
-                    signedAt = decoded.signedDate?.let(Instant::ofEpochMilli)
-                        ?: throw invalidPayload("Apple notification signedDate is missing."),
-                    signedPayloadSha256 = signedPayload.sha256(),
-                    transaction = transaction,
-                )
             } catch (error: VerificationException) {
                 lastError = error
             } catch (error: IllegalArgumentException) {

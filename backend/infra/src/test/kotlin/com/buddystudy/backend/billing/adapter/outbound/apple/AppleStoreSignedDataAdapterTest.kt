@@ -1,5 +1,7 @@
 package com.buddystudy.backend.billing.adapter.outbound.apple
 
+import com.buddystudy.backend.test.testExternalApiHistoryRecorder
+
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
@@ -49,7 +51,9 @@ class AppleStoreSignedDataAdapterTest {
         val properties = BuddyStudyProperties().apply {
             billing.apple.allowXcodeEnvironment = allowXcodeEnvironment
         }
-        return AppleStoreSignedDataAdapter(properties, DefaultResourceLoader())
+        return AppleStoreSignedDataAdapter(
+            properties, DefaultResourceLoader(), testExternalApiHistoryRecorder(),
+        )
     }
 
     private fun xcodeJws(appAccountToken: UUID): String {

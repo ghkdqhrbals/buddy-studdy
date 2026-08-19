@@ -4,6 +4,9 @@ import com.buddystudy.backend.auth.application.port.outbound.EmailVerificationSe
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiHistoryRecorder
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiRequest
+import com.buddystudy.backend.externalapi.adapter.outbound.history.ExternalApiResponse
 import jakarta.mail.internet.InternetAddress
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -19,6 +22,7 @@ import java.time.Duration
 class SmtpEmailVerificationSender(
     private val mailSender: JavaMailSender,
     private val properties: BuddyStudyProperties,
+    private val history: ExternalApiHistoryRecorder,
 ) : EmailVerificationSenderPort {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -30,7 +34,23 @@ class SmtpEmailVerificationSender(
             helper.setFrom(fromAddress())
             helper.setSubject("BuddyStudy verification code")
             helper.setText(body(code, ttl), false)
-            mailSender.send(message)
+            history.record(
+                ExternalApiRequest(
+                    provider = "smtp",
+                    operation = "send-verification-email",
+                    method = "SEND",
+                    url = "smtp://${properties.email.host}",
+                    headers = mapOf(
+                        "From" to fromAddress().toString(),
+                        "To" to email,
+                        "Subject" to "BuddyStudy verification code",
+                    ),
+                    body = body(code, ttl).replace(code, "[REDACTED]"),
+                ),
+            ) {
+                mailSender.send(message)
+                ExternalApiResponse(Unit, statusCode = 250, body = "Message accepted by SMTP transport.")
+            }
             logger.info("email_verification_sent email={} ttlSeconds={}", email, ttl.seconds)
         } catch (error: MailException) {
             logger.warn("email_verification_send_failed email={} error={}", email, error.message)
