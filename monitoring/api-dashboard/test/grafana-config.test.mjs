@@ -107,6 +107,22 @@ test("monitoring deploy keeps unchanged Grafana and Loki containers running", as
   );
 });
 
+test("monitoring deploy recovers Docker and commits the active Nginx revision", async () => {
+  const deployTemplate = await fs.readFile(deployTemplatePath, "utf8");
+
+  assert.match(deployTemplate, /run_with_timeout\(\)/);
+  assert.match(deployTemplate, /run_with_timeout 10 docker info/);
+  assert.match(deployTemplate, /open -ga Docker/);
+  assert.match(deployTemplate, /run_with_timeout 300 docker pull nginx:1\.27-alpine/);
+  assert.match(deployTemplate, /api_dashboard_config_hash=/);
+  assert.match(deployTemplate, /\.nginx-config\.sha256/);
+  assert.match(deployTemplate, /nginx -t/);
+  assert.match(
+    deployTemplate,
+    /mv -f "\$\{api_dashboard_revision_temp\}" "\$\{api_dashboard_revision_file\}"/,
+  );
+});
+
 test("server runtime dashboard emits bounded Loki metric series", async () => {
   const dashboard = JSON.parse(
     await fs.readFile(serverRuntimeDashboardPath, "utf8"),

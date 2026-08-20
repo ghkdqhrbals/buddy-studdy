@@ -333,6 +333,9 @@ deployment.
   The gateway resolves the public backend origin through Docker DNS on each
   request cache interval so a backend address change does not leave the
   long-running monitoring container pinned to a stale upstream IP.
+  The deploy starts Docker Desktop when its daemon is unavailable, bounds
+  Docker calls, validates Nginx configuration before replacement, and records
+  the applied gateway-config hash only after the replacement succeeds.
   Monitoring Nginx validates that same bearer session before forwarding Loki
   and TestZone requests, so dashboard Basic Auth and `.htpasswd` deployment
   secrets are not used. Deployments auto-refreshes every ten seconds and keeps

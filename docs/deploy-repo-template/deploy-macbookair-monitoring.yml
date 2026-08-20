@@ -67,6 +67,30 @@ jobs:
           fi
           TESTZONE_INFLUX_TOKEN="$(cat "${testzone_root}/.influx_token")"
 
+          run_with_timeout() {
+            local seconds="$1"
+            shift
+            /usr/bin/perl -e 'alarm shift; exec @ARGV' "${seconds}" "$@"
+          }
+
+          docker_ready=false
+          if run_with_timeout 10 docker info >/dev/null 2>&1; then
+            docker_ready=true
+          else
+            open -ga Docker || true
+            for _ in $(seq 1 24); do
+              if run_with_timeout 10 docker info >/dev/null 2>&1; then
+                docker_ready=true
+                break
+              fi
+              sleep 5
+            done
+          fi
+          if [ "${docker_ready}" != true ]; then
+            echo "Docker Desktop did not become ready within the deployment window." >&2
+            exit 1
+          fi
+
           mkdir -p \
             "${monitoring_root}/api-dashboard/public" \
             "${monitoring_root}/api-dashboard/logs" \
@@ -94,6 +118,8 @@ jobs:
           api_dashboard_config_changed=false
           incident_receiver_config_changed=false
           promtail_config_changed=false
+          api_dashboard_config_hash="$(shasum -a 256 "${MONITORING_SOURCE_DIR}/api-dashboard/nginx.conf" | awk '{print $1}')"
+          api_dashboard_revision_file="${monitoring_root}/api-dashboard/.nginx-config.sha256"
 
           if file_differs \
             "${MONITORING_SOURCE_DIR}/loki/config/loki.yml" \
@@ -121,7 +147,9 @@ jobs:
           fi
           if file_differs \
             "${MONITORING_SOURCE_DIR}/api-dashboard/nginx.conf" \
-            "${monitoring_root}/api-dashboard/nginx.conf"; then
+            "${monitoring_root}/api-dashboard/nginx.conf" \
+            || ! grep -Fxq "${api_dashboard_config_hash}" \
+              "${api_dashboard_revision_file}" 2>/dev/null; then
             api_dashboard_config_changed=true
           fi
           if ! diff -qr \
@@ -205,7 +233,7 @@ jobs:
           grep -Fq 'timestampHeader: X-Grafana-Alerting-Timestamp' \
             "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
 
-          docker network create buddystudy-monitoring >/dev/null 2>&1 || true
+          run_with_timeout 30 docker network create buddystudy-monitoring >/dev/null 2>&1 || true
 
           docker_config_backup=""
           if [ -f "${HOME}/.docker/config.json" ] && grep -q '"credsStore"[[:space:]]*:' "${HOME}/.docker/config.json"; then
@@ -220,11 +248,11 @@ jobs:
           path.write_text(json.dumps(data, indent=2))
           PY
           fi
-          docker pull nginx:1.27-alpine
-          docker pull node:22-alpine
-          docker pull grafana/loki:3.3.2
-          docker pull grafana/promtail:3.3.2
-          docker pull grafana/grafana:12.3.0
+          run_with_timeout 300 docker pull nginx:1.27-alpine
+          run_with_timeout 300 docker pull node:22-alpine
+          run_with_timeout 300 docker pull grafana/loki:3.3.2
+          run_with_timeout 300 docker pull grafana/promtail:3.3.2
+          run_with_timeout 300 docker pull grafana/grafana:12.3.0
           if [ -n "${docker_config_backup}" ]; then
             cp "${docker_config_backup}" "${HOME}/.docker/config.json"
           fi
@@ -356,6 +384,10 @@ jobs:
 
           if ! container_running buddystudy-api-dashboard \
             || [ "${api_dashboard_config_changed}" = "true" ]; then
+            run_with_timeout 30 docker run --rm \
+              -v "${monitoring_root}/api-dashboard/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+              nginx:1.27-alpine \
+              nginx -t
             docker rm -f buddystudy-api-dashboard >/dev/null 2>&1 || true
             docker run -d \
               --name buddystudy-api-dashboard \
@@ -368,6 +400,9 @@ jobs:
               -v "${monitoring_root}/api-dashboard/logs:/var/log/nginx" \
               nginx:1.27-alpine
           fi
+          api_dashboard_revision_temp="${api_dashboard_revision_file}.tmp"
+          printf '%s\n' "${api_dashboard_config_hash}" > "${api_dashboard_revision_temp}"
+          mv -f "${api_dashboard_revision_temp}" "${api_dashboard_revision_file}"
 
           if ! container_running buddystudy-monitoring-promtail \
             || [ "${promtail_config_changed}" = "true" ]; then
