@@ -37,7 +37,9 @@ test("monitoring gateway records a bounded access audit without request bodies",
 test("monitoring proxies admin APIs through the same authenticated origin", () => {
   const backendLocation = config.match(/location \^~ \/backend\/api\/v1\/admin\/ \{([\s\S]*?)\n  \}/)?.[1];
   assert.ok(backendLocation, "Backend admin proxy location must exist");
-  assert.match(backendLocation, /proxy_pass https:\/\/api\.ghkdqhrbals\.org\/api\/v1\/admin\//);
+  assert.match(config, /set \$backend_origin https:\/\/api\.ghkdqhrbals\.org;/);
+  assert.match(backendLocation, /rewrite \^\/backend\(\/api\/v1\/admin\/\.\*\)\$ \$1 break;/);
+  assert.match(backendLocation, /proxy_pass \$backend_origin;/);
   assert.match(backendLocation, /proxy_ssl_server_name on/);
   assert.match(backendLocation, /proxy_set_header Authorization \$http_authorization;/);
   assert.doesNotMatch(config, /location \/backend\/api\/ \{/);
@@ -48,7 +50,7 @@ test("monitoring uses the backend admin session instead of browser Basic Auth", 
   const testzoneLocation = config.match(/location \/testzone\/api\/ \{([\s\S]*?)\n  \}/)?.[1];
   const lokiLocation = config.match(/location \/loki\/ \{([\s\S]*?)\n  \}/)?.[1];
   assert.ok(sessionLocation, "Admin session validation location must exist");
-  assert.match(sessionLocation, /\/api\/v1\/admin\/session/);
+  assert.match(sessionLocation, /proxy_pass \$backend_origin\/api\/v1\/admin\/session/);
   assert.match(sessionLocation, /proxy_pass_request_body off/);
   assert.match(sessionLocation, /proxy_set_header Authorization \$http_authorization/);
   assert.match(testzoneLocation, /auth_request \/_admin_session/);

@@ -330,6 +330,9 @@ deployment.
   an unauthenticated visit back to its original destination after login. The
   backend database stores administrator accounts as BCrypt hashes; the legacy
   environment administrator is imported on its first successful login.
+  The gateway resolves the public backend origin through Docker DNS on each
+  request cache interval so a backend address change does not leave the
+  long-running monitoring container pinned to a stale upstream IP.
   Monitoring Nginx validates that same bearer session before forwarding Loki
   and TestZone requests, so dashboard Basic Auth and `.htpasswd` deployment
   secrets are not used. Deployments auto-refreshes every ten seconds and keeps
