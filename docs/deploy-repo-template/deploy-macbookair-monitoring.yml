@@ -253,14 +253,19 @@ jobs:
             "${monitoring_root}/api-dashboard/nginx.conf"
           grep -q 'job: monitoring-access' \
             "${monitoring_root}/promtail/config/promtail.yml"
-          grep -Fq '<{{ .Annotations.logs_url }}|오류 로그 보기>' \
+          grep -Fq '<%s|해당 오류 로그 보기>' \
             "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
-          grep -Fq '{{ $requestID := index .Labels "request_id" }}' \
+          grep -Fq 'coll.Dict "text" $fallback "blocks" $blocks | data.ToJSON' \
             "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
-          grep -Fq '<{{ .GeneratorURL }}|알림 규칙 진단 보기>' \
+          grep -Fq 'log_from=`{{ sub (unixEpochMillis (__timestamp__)) 120000 }}`' \
             "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
-          grep -Fq '| occurred_at!="" | logger!="" | error_message!=""' \
+          grep -Fq '| occurred_at!="" | log_from!="" | log_to!="" | logger!="" | error_message!=""' \
             "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
+          if grep -Fq '.GeneratorURL' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"; then
+            echo "Grafana Slack payload must not link to the static alert-rule GeneratorURL." >&2
+            exit 1
+          fi
           grep -Fq 'http://buddystudy-incident-receiver:3030/internal/incidents/grafana' \
             "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
           grep -Fq 'timestampHeader: X-Grafana-Alerting-Timestamp' \

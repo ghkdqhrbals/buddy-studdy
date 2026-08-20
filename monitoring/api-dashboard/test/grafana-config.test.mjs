@@ -421,6 +421,17 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
   assert.match(monitoringDeploy, /incident_receiver_config_changed=false/);
   assert.match(monitoringDeploy, /--name buddystudy-incident-receiver/);
   assert.match(monitoringDeploy, /--security-opt no-new-privileges/);
+  assert.match(monitoringDeploy, /<%s\|해당 오류 로그 보기>/);
+  assert.match(
+    monitoringDeploy,
+    /coll\.Dict "text" \$fallback "blocks" \$blocks \| data\.ToJSON/,
+  );
+  assert.match(
+    monitoringDeploy,
+    /log_from=`\{\{ sub \(unixEpochMillis \(__timestamp__\)\) 120000 \}\}`/,
+  );
+  assert.match(monitoringDeploy, /must not link to the static alert-rule GeneratorURL/);
+  assert.doesNotMatch(monitoringDeploy, /\.Annotations\.logs_url.*오류 로그 보기/);
   assert.doesNotMatch(alert, /발생 시각|요청 위치|코드 위치|로그 식별자/);
   assert.match(alert, /occurred_at: '\{\{ \$labels\.occurred_at \}\}'/);
   assert.match(alert, /error: '\{\{ \$labels\.error_type \}\}: \{\{ \$labels\.error_message \}\}'/);
