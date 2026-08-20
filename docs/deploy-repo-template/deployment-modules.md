@@ -338,7 +338,8 @@ deployment.
   replacement, and records the applied gateway-config hash only after the
   replacement succeeds. If a normal restart cannot stop orphaned Docker
   helpers, the workflow uses Docker Desktop's scoped force-stop before starting
-  the daemon again.
+  the daemon again. Docker Desktop starts without the Actions runner tracking
+  identifier so job cleanup cannot terminate the recovered daemon.
   Monitoring Nginx validates that same bearer session before forwarding Loki
   and TestZone requests, so dashboard Basic Auth and `.htpasswd` deployment
   secrets are not used. Deployments auto-refreshes every ten seconds and keeps

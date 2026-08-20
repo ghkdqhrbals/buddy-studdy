@@ -114,9 +114,19 @@ test("monitoring deploy recovers Docker and commits the active Nginx revision", 
   assert.match(deployTemplate, /start_new_session=True/);
   assert.match(deployTemplate, /os\.killpg\(process\.pid, signal\.SIGKILL\)/);
   assert.match(deployTemplate, /run_with_timeout 10 docker info/);
-  assert.match(deployTemplate, /docker desktop restart --timeout 75/);
+  assert.match(
+    deployTemplate,
+    /env -u RUNNER_TRACKING_ID \\\s+docker desktop restart/,
+  );
+  assert.match(
+    deployTemplate,
+    /env -u RUNNER_TRACKING_ID \\\s+docker desktop stop/,
+  );
+  assert.match(
+    deployTemplate,
+    /env -u RUNNER_TRACKING_ID \\\s+docker desktop start/,
+  );
   assert.match(deployTemplate, /docker desktop stop --force --timeout 30/);
-  assert.match(deployTemplate, /docker desktop start --timeout 105/);
   assert.match(deployTemplate, /DOCKER_CLI_HINTS=false/);
   assert.match(deployTemplate, /run_with_timeout 300 docker pull nginx:1\.27-alpine/);
   assert.match(deployTemplate, /api_dashboard_config_hash=/);
