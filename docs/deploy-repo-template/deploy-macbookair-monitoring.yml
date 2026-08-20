@@ -153,6 +153,17 @@ jobs:
           promtail_config_changed=false
           api_dashboard_config_hash="$(shasum -a 256 "${MONITORING_SOURCE_DIR}/api-dashboard/nginx.conf" | awk '{print $1}')"
           api_dashboard_revision_file="${monitoring_root}/api-dashboard/.nginx-config.sha256"
+          grafana_config_hash="$(
+            (
+              cd "${MONITORING_SOURCE_DIR}"
+              find grafana/provisioning grafana/dashboards -type f -print \
+                | LC_ALL=C sort \
+                | while IFS= read -r source_file; do
+                    shasum -a 256 "${source_file}"
+                  done
+            ) | shasum -a 256 | awk '{print $1}'
+          )"
+          grafana_revision_file="${monitoring_root}/grafana/.config.sha256"
 
           if file_differs \
             "${MONITORING_SOURCE_DIR}/loki/config/loki.yml" \
@@ -170,7 +181,9 @@ jobs:
               "${monitoring_root}/grafana/provisioning/dashboards/dashboards.yml" \
             || ! diff -qr \
               "${MONITORING_SOURCE_DIR}/grafana/provisioning/alerting" \
-              "${monitoring_root}/grafana/provisioning/alerting" >/dev/null 2>&1; then
+              "${monitoring_root}/grafana/provisioning/alerting" >/dev/null 2>&1 \
+            || ! grep -Fxq "${grafana_config_hash}" \
+              "${grafana_revision_file}" 2>/dev/null; then
             grafana_config_changed=true
           fi
           if file_differs \
@@ -402,6 +415,9 @@ jobs:
             echo "Failed to synchronize the Grafana admin password." >&2
             exit 1
           fi
+          grafana_revision_temp="${grafana_revision_file}.tmp"
+          printf '%s\n' "${grafana_config_hash}" > "${grafana_revision_temp}"
+          mv -f "${grafana_revision_temp}" "${grafana_revision_file}"
 
           if ! container_running buddystudy-grafana-gateway \
             || [ "${grafana_gateway_config_changed}" = "true" ]; then

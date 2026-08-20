@@ -131,10 +131,20 @@ test("monitoring deploy recovers Docker and commits the active Nginx revision", 
   assert.match(deployTemplate, /run_with_timeout 300 docker pull nginx:1\.27-alpine/);
   assert.match(deployTemplate, /api_dashboard_config_hash=/);
   assert.match(deployTemplate, /\.nginx-config\.sha256/);
+  assert.match(deployTemplate, /grafana_config_hash=/);
+  assert.match(deployTemplate, /grafana_revision_file=/);
+  assert.match(
+    deployTemplate,
+    /grep -Fxq "\$\{grafana_config_hash\}" \\\s+"\$\{grafana_revision_file\}"/,
+  );
   assert.match(deployTemplate, /nginx -t/);
   assert.match(
     deployTemplate,
     /mv -f "\$\{api_dashboard_revision_temp\}" "\$\{api_dashboard_revision_file\}"/,
+  );
+  assert.match(
+    deployTemplate,
+    /mv -f "\$\{grafana_revision_temp\}" "\$\{grafana_revision_file\}"/,
   );
 });
 
