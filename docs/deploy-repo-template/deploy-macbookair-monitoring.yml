@@ -98,9 +98,11 @@ jobs:
             docker_ready=true
           else
             echo "Docker daemon is unavailable; restarting Docker Desktop."
-            if ! run_with_timeout 90 docker desktop restart; then
-              run_with_timeout 30 docker desktop stop || true
-              run_with_timeout 90 docker desktop start || open -ga Docker || true
+            if ! run_with_timeout 90 docker desktop restart --timeout 75; then
+              run_with_timeout 45 docker desktop stop --force --timeout 30 || true
+              run_with_timeout 120 docker desktop start --timeout 105 \
+                || open -ga Docker \
+                || true
             fi
             for _ in $(seq 1 24); do
               if run_with_timeout 10 docker info >/dev/null 2>&1; then

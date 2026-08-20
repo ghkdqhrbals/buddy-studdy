@@ -336,7 +336,9 @@ deployment.
   The deploy restarts Docker Desktop when its daemon is unavailable, bounds
   Docker calls and their child processes, validates Nginx configuration before
   replacement, and records the applied gateway-config hash only after the
-  replacement succeeds.
+  replacement succeeds. If a normal restart cannot stop orphaned Docker
+  helpers, the workflow uses Docker Desktop's scoped force-stop before starting
+  the daemon again.
   Monitoring Nginx validates that same bearer session before forwarding Loki
   and TestZone requests, so dashboard Basic Auth and `.htpasswd` deployment
   secrets are not used. Deployments auto-refreshes every ten seconds and keeps
