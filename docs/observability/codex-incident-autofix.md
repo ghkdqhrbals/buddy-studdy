@@ -29,7 +29,7 @@ backend ERROR
   -> Promtail multiline event
   -> Loki
   -> Grafana alert contact point
-       -> Slack integration
+       -> custom Slack webhook payload with an exact Loki event link
        -> HMAC-signed internal webhook
             -> buddystudy-incident-receiver
                  -> Loki context lookup
@@ -48,6 +48,8 @@ backend ERROR
 
 - Evaluates the existing backend ERROR alert once per minute.
 - Sends the same firing/resolved notification group to Slack and the internal receiver.
+- Uses a custom Slack webhook payload so the visible link targets the alert's
+  absolute event window instead of Grafana's static alert-rule `GeneratorURL`.
 - Signs the exact webhook body with HMAC-SHA256 using `timestamp + ":" + body`.
 - Includes `X-Grafana-Alerting-Timestamp` so requests older than five minutes are rejected.
 

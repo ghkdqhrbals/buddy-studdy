@@ -368,12 +368,17 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
     compose,
     /GRAFANA_SLACK_WEBHOOK_URL: \$\{GRAFANA_SLACK_WEBHOOK_URL:-\$\{SLACK_WEBHOOK_URL:-\}\}/,
   );
-  assert.match(alert, /type: slack/);
+  assert.doesNotMatch(alert, /type: slack/);
   assert.match(alert, /url: \$GRAFANA_SLACK_WEBHOOK_URL/);
-  assert.match(alert, /username: Grafana/);
-  assert.match(alert, /icon_url: https:\/\/avatars\.githubusercontent\.com\/u\/7195757/);
+  assert.match(alert, /payload:/);
+  assert.match(alert, /coll\.Dict "text" \$fallback "blocks" \$blocks \| data\.ToJSON/);
+  assert.match(alert, /<%s\|해당 오류 로그 보기>/);
+  assert.doesNotMatch(alert, /\.GeneratorURL|알림 규칙 진단 보기/);
   assert.match(alert, /level="ERROR"/);
-  assert.match(alert, /sum by \(occurred_at, request_id, error_type, error_message\)/);
+  assert.match(
+    alert,
+    /sum by \(occurred_at, log_from, log_to, request_id, error_type, error_message\)/,
+  );
   assert.match(alert, /\|= "api_error"/);
   assert.match(alert, /requestId=\(\?P<request_id>/);
   assert.match(alert, /rootCauseType=\(\?P<error_type>/);
@@ -384,13 +389,18 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
   );
   assert.match(
     alert,
-    /\| occurred_at!="" \| request_id!="" \| error_type!="" \| error_message!=""/,
+    /\| occurred_at!="" \| log_from!="" \| log_to!="" \| request_id!="" \| error_type!="" \| error_message!=""/,
   );
+  assert.match(alert, /log_from=`\{\{ sub \(unixEpochMillis \(__timestamp__\)\) 120000 \}\}`/);
+  assert.match(alert, /log_to=`\{\{ add \(unixEpochMillis \(__timestamp__\)\) 120000 \}\}`/);
   assert.doesNotMatch(alert, /\(\?P<method>|\(\?P<path>|\(\?P<origin>/);
   assert.match(alert, /uid: buddystudy-backend-operational-error-log/);
   assert.match(alert, /!~ "api_\(error\|exchange\|response\)"/);
-  assert.match(alert, /sum by \(occurred_at, logger, error_message\)/);
-  assert.match(alert, /\| occurred_at!="" \| logger!="" \| error_message!=""/);
+  assert.match(alert, /sum by \(occurred_at, log_from, log_to, logger, error_message\)/);
+  assert.match(
+    alert,
+    /\| occurred_at!="" \| log_from!="" \| log_to!="" \| logger!="" \| error_message!=""/,
+  );
   assert.match(alert, /receiver: BuddyStudy Slack/);
   assert.match(alert, /type: webhook/);
   assert.match(
@@ -411,17 +421,6 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
   assert.match(monitoringDeploy, /incident_receiver_config_changed=false/);
   assert.match(monitoringDeploy, /--name buddystudy-incident-receiver/);
   assert.match(monitoringDeploy, /--security-opt no-new-privileges/);
-  assert.match(
-    alert,
-    /<\{\{ \.Annotations\.logs_url \}\}\|오류 로그 보기>/,
-  );
-  assert.match(alert, /\{\{ \$requestID := index \.Labels "request_id" \}\}/);
-  assert.match(alert, /\{\{ \$logger := index \.Labels "logger" \}\}/);
-  assert.match(alert, /\{\{ if or \$requestID \$logger \}\}/);
-  assert.match(alert, /<\{\{ \.GeneratorURL \}\}\|알림 규칙 진단 보기>/);
-  assert.match(alert, /백엔드 오류 로그를 식별하지 못했습니다/);
-  assert.match(alert, /title: Backend 오류/);
-  assert.match(alert, /\*\{\{ \.Annotations\.error \}\}\*/);
   assert.doesNotMatch(alert, /발생 시각|요청 위치|코드 위치|로그 식별자/);
   assert.match(alert, /occurred_at: '\{\{ \$labels\.occurred_at \}\}'/);
   assert.match(alert, /error: '\{\{ \$labels\.error_type \}\}: \{\{ \$labels\.error_message \}\}'/);
@@ -430,15 +429,20 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
   const logsUrlValues = [...alert.matchAll(/^\s+logs_url: (.+)$/gm)].map((match) => match[1]);
   assert.equal(logsUrlValues.length, 2, "Both Slack alerts must include a Grafana logs URL");
   const occurredAt = "2026-08-03T09:09:23.029Z";
+  const logFrom = "1785748043029";
+  const logTo = "1785748283029";
   const apiLogsUrl = new URL(
     logsUrlValues[0]
       .replaceAll("{{ $labels.request_id }}", "req-exact-error")
-      .replaceAll("{{ $labels.occurred_at }}", occurredAt),
+      .replaceAll("{{ $labels.log_from }}", logFrom)
+      .replaceAll("{{ $labels.log_to }}", logTo),
   );
   const operationalLogsUrl = new URL(
     logsUrlValues[1]
       .replaceAll("{{ $labels.occurred_at }}", occurredAt)
-      .replaceAll("{{ $labels.logger }}", "c.b.StreamConsumer"),
+      .replaceAll("{{ $labels.logger }}", "c.b.StreamConsumer")
+      .replaceAll("{{ $labels.log_from }}", logFrom)
+      .replaceAll("{{ $labels.log_to }}", logTo),
   );
   for (const logsUrl of [apiLogsUrl, operationalLogsUrl]) {
     assert.equal(logsUrl.origin, "https://grafana.lowfidev.cloud");
@@ -448,14 +452,14 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
     assert.doesNotMatch(logsUrl.pathname, /grafana-lokiexplore-app/);
   }
   const apiPanes = JSON.parse(apiLogsUrl.searchParams.get("panes"));
-  assert.deepEqual(apiPanes.backendErrors.range, { from: occurredAt, to: "now" });
+  assert.deepEqual(apiPanes.backendErrors.range, { from: logFrom, to: logTo });
   assert.equal(apiPanes.backendErrors.datasource, "buddystudy-loki");
   assert.equal(
     apiPanes.backendErrors.queries[0].expr,
     '{app="buddystudy"} |= "api_error" |= "requestId=req-exact-error"',
   );
   const operationalPanes = JSON.parse(operationalLogsUrl.searchParams.get("panes"));
-  assert.deepEqual(operationalPanes.backendErrors.range, { from: occurredAt, to: "now" });
+  assert.deepEqual(operationalPanes.backendErrors.range, { from: logFrom, to: logTo });
   assert.equal(
     operationalPanes.backendErrors.queries[0].expr,
     '{app="buddystudy", level="ERROR"} |= "2026-08-03T09:09:23.029Z" |= "c.b.StreamConsumer"',

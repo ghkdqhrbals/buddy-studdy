@@ -281,22 +281,22 @@ deployment.
   Grafana Live origin checks aligned with its public HTTPS `root_url`.
   Grafana also provisions a Loki alert for backend `level=ERROR` events and
   sends it to the `BuddyStudy Slack` contact point through the dedicated
-  `GRAFANA_SLACK_WEBHOOK_URL` app identity. Slack contains the incident
-  summary, the millisecond-precision timestamp parsed from the original log,
-  and the error location. API incidents show the HTTP method, full production
-  request URL, and root stack-frame location; background incidents show the
-  logger component. API alert links query the exact `requestId`; background
-  alert links query the original millisecond timestamp and logger. Their Explore
-  range starts at the captured event timestamp rather than a moving relative
-  window, so reopening a Slack notification still targets the same Loki event.
+  `GRAFANA_SLACK_WEBHOOK_URL`. Grafana's built-in Slack receiver is not used
+  because it forces the clickable message title to the static alert-rule
+  `GeneratorURL`. A custom webhook payload instead renders only the concise
+  incident summary and `해당 오류 로그 보기` link. API alert links query the
+  exact `requestId`; background alert links query the original
+  millisecond-precision timestamp and logger. Both links carry an absolute Loki
+  range from two minutes before to two minutes after the event, so reopening a
+  Slack notification does not move the search window to the current time.
   The parser accepts both the application and worker-thread brackets in Spring
   log prefixes and excludes entries unless the timestamp plus request ID or
   logger were extracted. A malformed log line therefore cannot collapse into
   an unlabeled alert that builds an Explore query from `[no value]`. If Grafana
-  itself emits an evaluation alert without a concrete log identity, Slack links
-  to the alert-rule diagnostic page and the Codex incident receiver rejects it
-  instead of searching or dispatching unrelated ERROR logs.
-  A compact `오류 로그 보기` hyperlink targets the Loki ERROR
+  itself emits an evaluation alert without a concrete log identity, Slack does
+  not fabricate a log or alert-rule link and the Codex incident receiver rejects
+  it instead of searching or dispatching unrelated ERROR logs.
+  A compact `해당 오류 로그 보기` hyperlink targets the Loki ERROR
   event without printing the raw Explore URL in the message. API and background
   failures are separate alert rules so request metadata is never fabricated for
   scheduler, stream-consumer, or application-startup failures.

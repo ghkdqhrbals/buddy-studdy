@@ -5,25 +5,34 @@ contactPoints:
     name: BuddyStudy Slack
     receivers:
       - uid: buddystudy-slack-errors
-        type: slack
+        type: webhook
         disableResolveMessage: false
         settings:
           url: $GRAFANA_SLACK_WEBHOOK_URL
-          username: Grafana
-          icon_url: https://avatars.githubusercontent.com/u/7195757?s=200&v=4
-          title: Backend 오류
-          text: |-
-            {{ range .Alerts }}
-            {{ $requestID := index .Labels "request_id" }}
-            {{ $logger := index .Labels "logger" }}
-            {{ if or $requestID $logger }}
-            *{{ .Annotations.error }}*
-            <{{ .Annotations.logs_url }}|오류 로그 보기>
-            {{ else }}
-            *백엔드 오류 로그를 식별하지 못했습니다.*
-            {{ if .GeneratorURL }}<{{ .GeneratorURL }}|알림 규칙 진단 보기>{{ else }}<https://grafana.lowfidev.cloud/alerting/list|알림 규칙 보기>{{ end }}
-            {{ end }}
-            {{ end }}
+          httpMethod: POST
+          maxAlerts: '10'
+          payload:
+            template: |-
+              {{- $blocks := coll.Slice -}}
+              {{- $fallback := "Backend 오류" -}}
+              {{- range .Alerts -}}
+                {{- $error := index .Annotations "error" -}}
+                {{- $logsURL := index .Annotations "logs_url" -}}
+                {{- if not $error -}}
+                  {{- $error = "개별 오류 로그를 식별하지 못했습니다" -}}
+                {{- end -}}
+                {{- $status := "발생" -}}
+                {{- if eq .Status "resolved" -}}
+                  {{- $status = "해결" -}}
+                {{- end -}}
+                {{- $message := printf "*[%s] %s*" $status $error -}}
+                {{- if $logsURL -}}
+                  {{- $message = printf "%s\n<%s|해당 오류 로그 보기>" $message $logsURL -}}
+                {{- end -}}
+                {{- $fallback = printf "[%s] %s" $status $error -}}
+                {{- $blocks = coll.Append (coll.Dict "type" "section" "text" (coll.Dict "type" "mrkdwn" "text" $message)) $blocks -}}
+              {{- end -}}
+              {{ coll.Dict "text" $fallback "blocks" $blocks | data.ToJSON }}
       - uid: buddystudy-codex-incident-autofix
         type: webhook
         disableResolveMessage: false
@@ -53,7 +62,7 @@ groups:
             datasourceUid: buddystudy-loki
             model:
               editorMode: code
-              expr: 'sum by (occurred_at, request_id, error_type, error_message) (count_over_time({app="buddystudy", level="ERROR"} |= "api_error" | regexp "^(?P<occurred_at>\\S+)\\s+ERROR\\s+.*---\\s+\\[[^]]+\\]\\s+(\\[[^]]+\\]\\s+)?\\S+\\s+:\\s+" | regexp "requestId=(?P<request_id>\\S+).*rootCauseType=(?P<error_type>\\S+)\\s+rootCauseMessage=(?P<error_message>.*?)\\s+origin=" | __error__="" | occurred_at!="" | request_id!="" | error_type!="" | error_message!="" [1m]))'
+              expr: 'sum by (occurred_at, log_from, log_to, request_id, error_type, error_message) (count_over_time({app="buddystudy", level="ERROR"} |= "api_error" | regexp "^(?P<occurred_at>\\S+)\\s+ERROR\\s+.*---\\s+\\[[^]]+\\]\\s+(\\[[^]]+\\]\\s+)?\\S+\\s+:\\s+" | regexp "requestId=(?P<request_id>\\S+).*rootCauseType=(?P<error_type>\\S+)\\s+rootCauseMessage=(?P<error_message>.*?)\\s+origin=" | label_format log_from=`{{ sub (unixEpochMillis (__timestamp__)) 120000 }}`, log_to=`{{ add (unixEpochMillis (__timestamp__)) 120000 }}` | __error__="" | occurred_at!="" | log_from!="" | log_to!="" | request_id!="" | error_type!="" | error_message!="" [1m]))'
               intervalMs: 1000
               maxDataPoints: 43200
               queryType: range
@@ -112,7 +121,7 @@ groups:
         annotations:
           error: '{{ $labels.error_type }}: {{ $labels.error_message }}'
           occurred_at: '{{ $labels.occurred_at }}'
-          logs_url: https://grafana.lowfidev.cloud/explore?panes=%7B%22backendErrors%22%3A%7B%22datasource%22%3A%22buddystudy-loki%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22uid%22%3A%22buddystudy-loki%22%2C%22type%22%3A%22loki%22%7D%2C%22editorMode%22%3A%22code%22%2C%22expr%22%3A%22%7Bapp%3D%5C%22buddystudy%5C%22%7D%20%7C%3D%20%5C%22api_error%5C%22%20%7C%3D%20%5C%22requestId%3D{{ $labels.request_id }}%5C%22%22%2C%22queryType%22%3A%22range%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22{{ $labels.occurred_at }}%22%2C%22to%22%3A%22now%22%7D%7D%7D&schemaVersion=1&orgId=1
+          logs_url: https://grafana.lowfidev.cloud/explore?panes=%7B%22backendErrors%22%3A%7B%22datasource%22%3A%22buddystudy-loki%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22uid%22%3A%22buddystudy-loki%22%2C%22type%22%3A%22loki%22%7D%2C%22editorMode%22%3A%22code%22%2C%22expr%22%3A%22%7Bapp%3D%5C%22buddystudy%5C%22%7D%20%7C%3D%20%5C%22api_error%5C%22%20%7C%3D%20%5C%22requestId%3D{{ $labels.request_id }}%5C%22%22%2C%22queryType%22%3A%22range%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22{{ $labels.log_from }}%22%2C%22to%22%3A%22{{ $labels.log_to }}%22%7D%7D%7D&schemaVersion=1&orgId=1
         labels:
           service: buddystudy-backend
           severity: error
@@ -135,7 +144,7 @@ groups:
             datasourceUid: buddystudy-loki
             model:
               editorMode: code
-              expr: 'sum by (occurred_at, logger, error_message) (count_over_time({app="buddystudy", level="ERROR"} !~ "api_(error|exchange|response)" | regexp "^(?P<occurred_at>\\S+)\\s+ERROR\\s+.*---\\s+\\[[^]]+\\]\\s+(\\[[^]]+\\]\\s+)?(?P<logger>\\S+)\\s+:\\s+(?P<error_message>[^\\n]{1,300})" | __error__="" | occurred_at!="" | logger!="" | error_message!="" [1m]))'
+              expr: 'sum by (occurred_at, log_from, log_to, logger, error_message) (count_over_time({app="buddystudy", level="ERROR"} !~ "api_(error|exchange|response)" | regexp "^(?P<occurred_at>\\S+)\\s+ERROR\\s+.*---\\s+\\[[^]]+\\]\\s+(\\[[^]]+\\]\\s+)?(?P<logger>\\S+)\\s+:\\s+(?P<error_message>[^\\n]{1,300})" | label_format log_from=`{{ sub (unixEpochMillis (__timestamp__)) 120000 }}`, log_to=`{{ add (unixEpochMillis (__timestamp__)) 120000 }}` | __error__="" | occurred_at!="" | log_from!="" | log_to!="" | logger!="" | error_message!="" [1m]))'
               intervalMs: 1000
               maxDataPoints: 43200
               queryType: range
@@ -194,7 +203,7 @@ groups:
         annotations:
           error: '{{ $labels.error_message }}'
           occurred_at: '{{ $labels.occurred_at }}'
-          logs_url: https://grafana.lowfidev.cloud/explore?panes=%7B%22backendErrors%22%3A%7B%22datasource%22%3A%22buddystudy-loki%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22uid%22%3A%22buddystudy-loki%22%2C%22type%22%3A%22loki%22%7D%2C%22editorMode%22%3A%22code%22%2C%22expr%22%3A%22%7Bapp%3D%5C%22buddystudy%5C%22%2C%20level%3D%5C%22ERROR%5C%22%7D%20%7C%3D%20%5C%22{{ $labels.occurred_at }}%5C%22%20%7C%3D%20%5C%22{{ $labels.logger }}%5C%22%22%2C%22queryType%22%3A%22range%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22{{ $labels.occurred_at }}%22%2C%22to%22%3A%22now%22%7D%7D%7D&schemaVersion=1&orgId=1
+          logs_url: https://grafana.lowfidev.cloud/explore?panes=%7B%22backendErrors%22%3A%7B%22datasource%22%3A%22buddystudy-loki%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22uid%22%3A%22buddystudy-loki%22%2C%22type%22%3A%22loki%22%7D%2C%22editorMode%22%3A%22code%22%2C%22expr%22%3A%22%7Bapp%3D%5C%22buddystudy%5C%22%2C%20level%3D%5C%22ERROR%5C%22%7D%20%7C%3D%20%5C%22{{ $labels.occurred_at }}%5C%22%20%7C%3D%20%5C%22{{ $labels.logger }}%5C%22%22%2C%22queryType%22%3A%22range%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22{{ $labels.log_from }}%22%2C%22to%22%3A%22{{ $labels.log_to }}%22%7D%7D%7D&schemaVersion=1&orgId=1
         labels:
           service: buddystudy-backend
           severity: error
