@@ -4,6 +4,8 @@ import com.buddystudy.backend.common.application.outbox.OutboxPublishSummary
 import com.buddystudy.backend.common.application.outbox.OutboxReference
 import com.buddystudy.backend.common.application.outbox.OutboxType
 import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
+import com.buddystudy.backend.common.application.error.ApiErrorCode
+import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.scheduler.application.model.JobTriggerType
 import com.buddystudy.backend.scheduler.application.model.JobRunStatus
@@ -20,6 +22,7 @@ import com.buddystudy.backend.study.application.port.inbound.ScheduledQuestionWr
 import com.buddystudy.backend.study.application.port.inbound.QuestionWriteResult
 import com.buddystudy.backend.study.application.model.GeneratedQuestionWithEmbedding
 import com.buddystudy.backend.study.application.port.outbound.QuestionCoverageSelection
+import com.buddystudy.backend.study.application.port.outbound.QuestionGenerationSagaPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.study.application.service.ScheduledQuestionService
@@ -30,6 +33,8 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
+import org.springframework.http.HttpStatus
+import java.time.Duration
 import java.time.Instant
 
 class QuestionSchedulerTest {
@@ -84,6 +89,76 @@ class QuestionSchedulerTest {
         assertThat(requests.topics.map(StudyEntity::id)).containsExactly(23)
     }
 
+    @Test
+    fun `scheduled run rotates past a topic whose generation is active before persistence`(): Unit = runBlocking {
+        val now = Instant.parse("2026-08-20T12:41:03Z")
+        val root = study(41, 10, "Spring", null, now).apply { activeForQuestions = false }
+        val generating = study(42, 10, "Transactions", 41, now).apply { activeForQuestions = true }
+        val available = study(43, 10, "Spring MVC", 41, now).apply { activeForQuestions = true }
+        val studies = RecordingStudies(listOf(root, generating, available))
+        val requests = RecordingGenerationRequests()
+        val scheduler = service(
+            studies = studies,
+            requests = requests,
+            publisher = RecordingPublisher(),
+            sagas = ActiveGenerationSagaPort(setOf(generating.id)),
+        )
+
+        scheduler.runDueQuestions()
+
+        assertThat(requests.topics.map(StudyEntity::id)).containsExactly(available.id)
+    }
+
+    @Test
+    fun `scheduled run treats an active generation as pending when no other topic is available`(): Unit = runBlocking {
+        val now = Instant.parse("2026-08-20T12:41:03Z")
+        val root = study(51, 11, "Spring", null, now).apply { activeForQuestions = false }
+        val generating = study(52, 11, "Transactions", 51, now).apply { activeForQuestions = true }
+        val studies = RecordingStudies(listOf(root, generating))
+        val requests = RecordingGenerationRequests()
+        val scheduleWriter = RecordingScheduleWriter()
+        val scheduler = service(
+            studies = studies,
+            requests = requests,
+            publisher = RecordingPublisher(),
+            sagas = ActiveGenerationSagaPort(setOf(generating.id)),
+            scheduleWriter = scheduleWriter,
+        )
+
+        scheduler.runDueQuestions()
+
+        assertThat(requests.topics).isEmpty()
+        assertThat(scheduleWriter.retryDelays).containsExactly(Duration.ofMinutes(5))
+        assertThat(root.lastError).isEqualTo("Pending question limit reached for all active topics.")
+    }
+
+    @Test
+    fun `scheduled race conflict uses pending retry instead of failure retry`(): Unit = runBlocking {
+        val now = Instant.parse("2026-08-20T12:41:03Z")
+        val root = study(61, 12, "Spring", null, now).apply { activeForQuestions = false }
+        val topic = study(62, 12, "Transactions", 61, now).apply { activeForQuestions = true }
+        val studies = RecordingStudies(listOf(root, topic))
+        val requests = RecordingGenerationRequests(
+            ApiException(
+                HttpStatus.CONFLICT,
+                ApiErrorCode.STUDY_PENDING_QUESTION_EXISTS,
+                "A question is already being generated for this study.",
+            ),
+        )
+        val scheduleWriter = RecordingScheduleWriter()
+        val scheduler = service(
+            studies = studies,
+            requests = requests,
+            publisher = RecordingPublisher(),
+            scheduleWriter = scheduleWriter,
+        )
+
+        scheduler.runDueQuestions()
+
+        assertThat(scheduleWriter.retryDelays).containsExactly(Duration.ofMinutes(5))
+        assertThat(root.lastError).isEqualTo("A question is already being generated for this study.")
+    }
+
     @ParameterizedTest
     @EnumSource(value = QuestionStatus::class, names = ["FAILED", "GRADED", "SKIPPED"])
     fun `scheduled run can reuse a topic whose latest question is terminal`(
@@ -111,14 +186,17 @@ class QuestionSchedulerTest {
         requests: RecordingGenerationRequests,
         publisher: RecordingPublisher,
         questions: QuestionPort = LatestQuestionStatusPort(emptyMap()),
+        sagas: QuestionGenerationSagaPort = ActiveGenerationSagaPort(emptySet()),
+        scheduleWriter: RecordingScheduleWriter = RecordingScheduleWriter(),
     ) = ScheduledQuestionService(
         properties = BuddyStudyProperties(
             scheduler = BuddyStudyProperties.Scheduler(enabled = true, maxPendingPerStudy = 1, batchSize = 10),
         ),
         studies = studies,
         questions = questions,
+        sagas = sagas,
         requestWriter = requests,
-        scheduleWriter = RecordingScheduleWriter(),
+        scheduleWriter = scheduleWriter,
         publisher = publisher,
     )
 
@@ -163,7 +241,18 @@ class QuestionSchedulerTest {
         ): Map<Long, QuestionStatus> = statuses.filterKeys(studyIds::contains)
     }
 
-    private class RecordingGenerationRequests : QuestionGenerationRequestWriteUseCase {
+    private class ActiveGenerationSagaPort(
+        private val activeTopicIds: Set<Long>,
+    ) : QuestionGenerationSagaPort by unsupportedPort() {
+        override suspend fun findActiveTopicIdsByUserId(
+            userId: Long,
+            topicIds: Collection<Long>,
+        ): Set<Long> = activeTopicIds.intersect(topicIds.toSet())
+    }
+
+    private class RecordingGenerationRequests(
+        private val scheduledError: Exception? = null,
+    ) : QuestionGenerationRequestWriteUseCase {
         val topics = mutableListOf<StudyEntity>()
         val idempotencyKeys = mutableListOf<String>()
 
@@ -181,6 +270,7 @@ class QuestionSchedulerTest {
             idempotencyKey: String,
             now: Instant,
         ): QueuedQuestionGeneration {
+            scheduledError?.let { throw it }
             topics += topicStudy
             idempotencyKeys += idempotencyKey
             return QueuedQuestionGeneration(
@@ -197,6 +287,8 @@ class QuestionSchedulerTest {
     }
 
     private class RecordingScheduleWriter : ScheduledQuestionWriteUseCase {
+        val retryDelays = mutableListOf<Duration>()
+
         override suspend fun complete(
             scheduleStudy: StudyEntity,
             topicStudy: StudyEntity,
@@ -220,6 +312,7 @@ class QuestionSchedulerTest {
         ) {
             study.nextDueAt = retryAt
             study.lastError = error
+            retryDelays += Duration.between(now, retryAt)
         }
     }
 

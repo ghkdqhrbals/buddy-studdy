@@ -1,5 +1,7 @@
 package com.buddystudy.backend.study.adapter.outbound.persistence
 
+import com.buddystudy.backend.common.adapter.outbound.persistence.bindIndexed
+import com.buddystudy.backend.common.adapter.outbound.persistence.indexedBindMarkers
 import com.buddystudy.backend.study.application.model.QuestionGenerationSaga
 import com.buddystudy.backend.study.application.model.QuestionGenerationSource
 import com.buddystudy.backend.study.application.model.QuestionGenerationStatus
@@ -93,6 +95,31 @@ class QuestionGenerationSagaRepository(
             .map { row, _ -> row.toSaga() }
             .one()
             .awaitSingleOrNull()
+
+    override suspend fun findActiveTopicIdsByUserId(userId: Long, topicIds: Collection<Long>): Set<Long> {
+        if (topicIds.isEmpty()) return emptySet()
+        val distinctTopicIds = topicIds.distinct()
+        val topicMarkers = indexedBindMarkers("topicId", distinctTopicIds.size)
+        return databaseClient.sql(
+            """
+            select distinct topic_id
+            from question_generation_sagas
+            where user_id = :userId
+              and topic_id in ($topicMarkers)
+              and (
+                  status in ('QUEUED', 'GENERATING', 'TRANSLATING')
+                  or (status = 'FAILED' and rollback_completed_at is null)
+              )
+            """.trimIndent(),
+        )
+            .bind("userId", userId)
+            .bindIndexed("topicId", distinctTopicIds)
+            .map { row, _ -> row.get("topic_id", java.lang.Long::class.java)!!.toLong() }
+            .all()
+            .collectList()
+            .awaitSingle()
+            .toSet()
+    }
 
     override suspend fun markGenerating(correlationId: String, now: Instant): Boolean =
         updateState(

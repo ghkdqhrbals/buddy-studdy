@@ -1,6 +1,7 @@
 package com.buddystudy.backend.common.adapter.stream
 
 import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
+import com.buddystudy.backend.community.adapter.inbound.stream.NativeAdvertisementViewStreamListener
 import com.buddystudy.backend.community.adapter.inbound.stream.QuestionStatsStreamListener
 import com.buddystudy.backend.localization.adapter.inbound.stream.ContentTranslationStreamListener
 import com.buddystudy.backend.notification.adapter.inbound.stream.NotificationStreamListener
@@ -17,6 +18,7 @@ class RedisStreamRecoveryCoverageTest {
     @Test
     fun `every active stream listener has a matching recovery consumer in the same group`() {
         val listenerClasses = listOf(
+            NativeAdvertisementViewStreamListener::class.java,
             QuestionStatsStreamListener::class.java,
             ContentTranslationStreamListener::class.java,
             NotificationStreamListener::class.java,

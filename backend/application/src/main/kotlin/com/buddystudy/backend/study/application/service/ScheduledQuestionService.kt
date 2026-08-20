@@ -1,10 +1,13 @@
 package com.buddystudy.backend.study.application.service
 
+import com.buddystudy.backend.common.application.error.ApiErrorCode
+import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.port.inbound.QuestionGenerationRequestWriteUseCase
 import com.buddystudy.backend.study.application.port.inbound.RunQuestionScheduleUseCase
 import com.buddystudy.backend.study.application.port.inbound.ScheduledQuestionWriteUseCase
+import com.buddystudy.backend.study.application.port.outbound.QuestionGenerationSagaPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.study.domain.entity.QuestionStatus
@@ -18,6 +21,7 @@ class ScheduledQuestionService(
     private val properties: BuddyStudyProperties,
     private val studies: StudyPort,
     private val questions: QuestionPort,
+    private val sagas: QuestionGenerationSagaPort,
     private val requestWriter: QuestionGenerationRequestWriteUseCase,
     private val scheduleWriter: ScheduledQuestionWriteUseCase,
     private val publisher: PublishOutboxUseCase,
@@ -38,8 +42,9 @@ class ScheduledQuestionService(
                 ScheduledStudyContext(root, allStudies, StudyTreeSelector.activeTopics(root, allStudies))
             }
             val latestStatuses = latestStatuses(contexts)
+            val activeGenerationTopicIds = activeGenerationTopicIds(contexts)
             contexts.forEach { context ->
-                enqueueOne(context, latestStatuses, now)
+                enqueueOne(context, latestStatuses, activeGenerationTopicIds, now)
             }
             processed += dueStudies.size
         }
@@ -51,6 +56,7 @@ class ScheduledQuestionService(
     private suspend fun enqueueOne(
         context: ScheduledStudyContext,
         latestStatuses: Map<Long, QuestionStatus>,
+        activeGenerationTopicIds: Set<Long>,
         now: Instant,
     ) {
         val root = context.root
@@ -60,7 +66,9 @@ class ScheduledQuestionService(
             return
         }
         val blockedTopicIds = context.activeTopics
-            .filter { latestStatuses[it.id]?.allowsNextQuestion == false }
+            .filter {
+                latestStatuses[it.id]?.allowsNextQuestion == false || it.id in activeGenerationTopicIds
+            }
             .mapTo(mutableSetOf(), StudyEntity::id)
         val topic = StudyTreeSelector.nextActiveTopic(root, context.allStudies, blockedTopicIds)
         if (topic == null) {
@@ -99,22 +107,44 @@ class ScheduledQuestionService(
                 root.id,
                 topic.id,
             )
+        } catch (error: ApiException) {
+            if (error.code == ApiErrorCode.STUDY_PENDING_QUESTION_EXISTS) {
+                scheduleWriter.fail(
+                    study = root,
+                    questionKey = null,
+                    error = error.message,
+                    retryAt = backoffPolicy.pendingLimitNextDueAt(now),
+                    now = now,
+                )
+                log.info(
+                    "scheduled_question_deferred_concurrent_generation userId={} rootStudyId={} topicStudyId={}",
+                    root.userId,
+                    root.id,
+                    topic.id,
+                )
+                return
+            }
+            failSchedule(root, topic, error, now)
         } catch (error: Exception) {
-            scheduleWriter.fail(
-                study = root,
-                questionKey = null,
-                error = error.message ?: error.javaClass.simpleName,
-                retryAt = backoffPolicy.failureNextDueAt(now),
-                now = now,
-            )
-            log.warn(
-                "scheduled_question_saga_queue_failed userId={} rootStudyId={} topicStudyId={} error={}",
-                root.userId,
-                root.id,
-                topic.id,
-                error.message,
-            )
+            failSchedule(root, topic, error, now)
         }
+    }
+
+    private suspend fun failSchedule(root: StudyEntity, topic: StudyEntity, error: Exception, now: Instant) {
+        scheduleWriter.fail(
+            study = root,
+            questionKey = null,
+            error = error.message ?: error.javaClass.simpleName,
+            retryAt = backoffPolicy.failureNextDueAt(now),
+            now = now,
+        )
+        log.warn(
+            "scheduled_question_saga_queue_failed userId={} rootStudyId={} topicStudyId={} error={}",
+            root.userId,
+            root.id,
+            topic.id,
+            error.message,
+        )
     }
 
     private suspend fun latestStatuses(
@@ -124,6 +154,17 @@ class ScheduledQuestionService(
         return buildMap {
             studyIds.chunked(PENDING_COUNT_BATCH_SIZE).forEach { chunk ->
                 putAll(questions.findLatestStatusesByStudyIds(chunk))
+            }
+        }
+    }
+
+    private suspend fun activeGenerationTopicIds(
+        contexts: List<ScheduledStudyContext>,
+    ): Set<Long> = buildSet {
+        contexts.groupBy { it.root.userId }.forEach { (userId, userContexts) ->
+            val topicIds = userContexts.flatMap { it.activeTopics.map(StudyEntity::id) }.distinct()
+            topicIds.chunked(PENDING_COUNT_BATCH_SIZE).forEach { chunk ->
+                addAll(sagas.findActiveTopicIdsByUserId(userId, chunk))
             }
         }
     }

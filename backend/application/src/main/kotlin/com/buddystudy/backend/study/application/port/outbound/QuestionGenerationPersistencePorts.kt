@@ -11,6 +11,10 @@ interface QuestionGenerationSagaPort {
     suspend fun findByCorrelationId(correlationId: String): QuestionGenerationSaga?
     suspend fun findByUserIdAndIdempotencyKey(userId: Long, idempotencyKey: String): QuestionGenerationSaga?
     suspend fun findActiveByUserIdAndTopicId(userId: Long, topicId: Long): QuestionGenerationSaga?
+    suspend fun findActiveTopicIdsByUserId(userId: Long, topicIds: Collection<Long>): Set<Long> =
+        topicIds.filterTo(mutableSetOf()) { topicId ->
+            findActiveByUserIdAndTopicId(userId, topicId) != null
+        }
     suspend fun markGenerating(correlationId: String, now: Instant): Boolean
     suspend fun markTranslating(correlationId: String, questionId: Long, now: Instant): Boolean
     suspend fun markCompleted(correlationId: String, now: Instant): Boolean
