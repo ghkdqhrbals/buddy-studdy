@@ -5,6 +5,7 @@ import com.buddystudy.backend.common.application.outbox.RedisEventOutboxPort
 import com.buddystudy.backend.common.application.outbox.RedisOutboxEventType
 import com.buddystudy.backend.common.application.outbox.PublishedStreamRecord
 import com.buddystudy.backend.community.application.model.CommunityQuestionEvent
+import com.buddystudy.backend.community.application.model.NativeAdvertisementViewedEvent
 import com.buddystudy.backend.jooq.tables.RedisEventOutbox.REDIS_EVENT_OUTBOX
 import com.buddystudy.backend.localization.application.model.ContentTranslationRequestedEvent
 import com.buddystudy.backend.localization.application.port.ContentTranslationEventPort
@@ -112,6 +113,16 @@ class RedisEventOutboxRepository(
             createdAt = createdAt,
         )
     }
+
+    override suspend fun appendNativeAdvertisementViewed(
+        event: NativeAdvertisementViewedEvent,
+        createdAt: Instant,
+    ): Long = append(
+        eventId = event.eventId,
+        eventType = RedisOutboxEventType.NATIVE_AD_VIEWED,
+        payloadJson = objectMapper.writeValueAsString(event),
+        createdAt = createdAt,
+    )
 
     @Transactional
     override suspend fun claim(

@@ -1127,20 +1127,6 @@ private struct NotificationForwardRoute: Identifiable, Hashable {
     }
 }
 
-private enum MobileHomeFeedItem: Identifiable {
-    case question(CommunityQuestion)
-    case feedbackPrompt
-
-    var id: String {
-        switch self {
-        case .question(let question):
-            return "question-\(question.id)"
-        case .feedbackPrompt:
-            return "feedback-prompt"
-        }
-    }
-}
-
 enum MobileHomeRefreshPresentationPolicy {
     static func showsInitialLoading(hasContent: Bool, isRefreshing: Bool) -> Bool {
         !hasContent && isRefreshing
@@ -1344,13 +1330,8 @@ private struct MobileHomeView: View {
         return result
     }
 
-    private var communityFeedItems: [MobileHomeFeedItem] {
-        var items = appState.communityQuestions.map(MobileHomeFeedItem.question)
-        guard items.count >= 4 else {
-            return items
-        }
-        items.insert(.feedbackPrompt, at: 4)
-        return items
+    private var communityFeedItems: [CommunityFeedItem] {
+        appState.communityFeedItems
     }
 
     private var isRefreshingSelectedHomeScope: Bool {
@@ -1730,6 +1711,8 @@ private struct MobileHomeView: View {
                 await loadCommunityQuestionsIfNeeded(userInitiated: false)
                 selectedCommunityQuestionRoute = CommunityQuestionRoute(id: id)
             }
+        case .feedback:
+            isShowingFeedback = true
         default:
             break
         }
@@ -2107,20 +2090,31 @@ private struct MobileHomeView: View {
     }
 
     @ViewBuilder
-    private func communityFeedRow(_ item: MobileHomeFeedItem) -> some View {
+    private func communityFeedRow(_ item: CommunityFeedItem) -> some View {
         switch item {
-        case .question(let question):
+        case .publicQuestion(let question):
             communityQuestionRow(question)
-        case .feedbackPrompt:
+        case .advertisement(let advertisement):
             Button {
-                isShowingFeedback = true
+                openCommunityAdvertisement(advertisement)
             } label: {
-                MobileFeedbackPromptRow(strings: strings)
+                MobileNativeAdvertisementRow(advertisement: advertisement)
             }
             .buttonStyle(.plain)
             .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
             .listRowBackground(Color.clear)
         }
+    }
+
+    private func openCommunityAdvertisement(_ advertisement: CommunityNativeAdvertisement) {
+        guard let url = URL(string: advertisement.deepLink),
+              let route = AppRoute(url: url) else {
+            return
+        }
+        Task {
+            await appState.recordNativeAdvertisementView(selectionID: advertisement.selectionID)
+        }
+        _ = appState.openRoute(route)
     }
 
     private func communityQuestionRow(_ question: CommunityQuestion) -> some View {
@@ -2872,6 +2866,8 @@ private struct NotificationRouteDestination: View {
                 .navigationBarTitleDisplayMode(.inline)
         case .profile:
             MobileProfilePage()
+        case .feedback:
+            MobileFeedbackView()
         case .home:
             EmptyView()
         }
@@ -9451,37 +9447,41 @@ private struct MobileHomeCategoryRow: View {
 
 }
 
-private struct MobileFeedbackPromptRow: View {
-    var strings: AppStrings
+private struct MobileNativeAdvertisementRow: View {
+    var advertisement: CommunityNativeAdvertisement
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 7) {
                 Text("BuddyStudy")
-                Text(strings.feedback)
                 Spacer(minLength: 0)
             }
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
             .lineLimit(1)
 
-            Text(strings.feedbackPromptTitle)
+            (Text(advertisement.disclosureLabel)
+                .foregroundColor(.secondary)
+                + Text(" \(advertisement.title)")
+                .foregroundColor(.primary))
                 .font(.body.weight(.medium))
-                .foregroundStyle(.primary)
                 .lineLimit(2)
                 .truncationMode(.tail)
 
-            HStack(spacing: 5) {
-                Image(systemName: "text.bubble")
-                Text(strings.feedbackPromptBody)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+            if let body = advertisement.body,
+               !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.up.right")
+                    Text(body)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
 
-                Spacer(minLength: 0)
+                    Spacer(minLength: 0)
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
             }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
         }
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -36,10 +36,43 @@ data class CommunityQuestionResponse(
 
 data class CommunityQuestionsResponse(
     val questions: List<CommunityQuestionResponse>,
+    val items: List<CommunityFeedItemResponse> = questions.map(CommunityFeedItemResponse::publicQuestion),
     override val totalCount: Long,
     override val limit: Int,
     override val offset: Int,
 ) : PageResponse
+
+enum class CommunityFeedItemType {
+    PUBLIC_QUESTION,
+    ADVERTISEMENT,
+}
+
+data class CommunityFeedItemResponse(
+    val type: CommunityFeedItemType,
+    val question: CommunityQuestionResponse? = null,
+    val advertisement: NativeAdvertisementResponse? = null,
+) {
+    companion object {
+        fun publicQuestion(question: CommunityQuestionResponse) = CommunityFeedItemResponse(
+            type = CommunityFeedItemType.PUBLIC_QUESTION,
+            question = question,
+        )
+
+        fun advertisement(advertisement: NativeAdvertisementResponse) = CommunityFeedItemResponse(
+            type = CommunityFeedItemType.ADVERTISEMENT,
+            advertisement = advertisement,
+        )
+    }
+}
+
+data class NativeAdvertisementResponse(
+    val selectionId: String,
+    val campaignId: String,
+    val disclosureLabel: String,
+    val title: String,
+    val body: String?,
+    val deepLink: String,
+)
 data class CommunityLikeResponse(val questionId: String, val likeCount: Int, val isLikedByMe: Boolean)
 data class CommunityCommentResponse(
     val id: String,

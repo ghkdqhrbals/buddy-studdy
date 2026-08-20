@@ -289,9 +289,17 @@ Public community feed
 -> READY question/answer/AI snapshots are projected into question_search by language
 -> comment translations remain isolated in question_comment_localizations
 -> only READY translation snapshots are exposed for the requested language
--> app maps server questions into typed MobileHomeFeedItem values
--> locally scheduled placement may insert non-question items such as feedback prompts
--> feedback prompt opens a dedicated form
+-> on the first unfiltered page, the backend reads active native_ad_campaigns and applies audience, schedule, daily-cap, minimum-gap, and post-view cooldown gates
+-> eligible campaigns are ranked by priority, authenticated/anonymous relevance, Bayesian-smoothed 30-day deep-link view rate, freshness, and exploration bonus
+-> 85% of selections use the top-ranked campaign; 15% explore one of the remaining top-three candidates
+-> the backend chooses a bounded position after the first two question rows and before the page tail, then persists native_ad_selection_history
+-> the response contains one final ordered items[] list with type PUBLIC_QUESTION or ADVERTISEMENT; questions[] remains a compatibility field for older clients
+-> ADVERTISEMENT carries selectionId, campaignId, localized disclosure/title/body, and an allowlisted buddystudy:// deepLink
+-> iOS renders items[] unchanged and routes only through the shared AppRoute parser; it performs no ranking or placement
+-> selecting an advertisement calls POST /api/v1/native-ad-selections/{selectionId}/view
+-> the request validates selection ownership and appends one stable native-ad-view-{selectionId} Outbox event
+-> community.native-ad.view.v1 delivers NATIVE_AD_VIEWED at least once; the Inbox consumer idempotently records viewed_at
+-> server-side selection/view history is the sole ranking evidence and is safe across reinstallations and multiple devices
 -> POST /api/v1/feedback accepts only content and stores it in the dedicated feedbacks table
 -> authenticated user and registered-device identifiers are captured as server-side metadata
 -> Monitoring GET /api/v1/admin/feedback provides paginated operator review

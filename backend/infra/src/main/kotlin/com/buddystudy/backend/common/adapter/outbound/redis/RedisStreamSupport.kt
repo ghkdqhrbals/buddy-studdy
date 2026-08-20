@@ -55,6 +55,7 @@ enum class RedisStreamTopic(val apiName: String) {
     COMMUNITY_QUESTION_UNLIKED("community.question.unliked.v1"),
     COMMUNITY_QUESTION_COMMENTED("community.question.commented.v1"),
     COMMUNITY_QUESTION_COMMENT_DELETED("community.question.comment-deleted.v1"),
+    COMMUNITY_NATIVE_AD_VIEW("community.native-ad.view.v1"),
 }
 
 data class RedisStreamTopicDefinition(
@@ -190,6 +191,11 @@ class RedisStreamTopicManager(
             topic = RedisStreamTopic.COMMUNITY_QUESTION_COMMENT_DELETED,
             streamKey = properties.streams.questionCommentDeletedKey,
             maxLength = properties.streams.questionCommentDeletedMaxLen.coerceAtLeast(1),
+        ),
+        RedisStreamTopicDefinition(
+            topic = RedisStreamTopic.COMMUNITY_NATIVE_AD_VIEW,
+            streamKey = properties.streams.nativeAdViewKey,
+            maxLength = properties.streams.nativeAdViewMaxLen.coerceAtLeast(1),
         ),
     )
 

@@ -3,6 +3,7 @@ import Foundation
 @MainActor
 struct CommunityFeedStateStore {
     var questions: [CommunityQuestion] = []
+    var items: [CommunityFeedItem] = []
     var totalCount = 0
     var offset = 0
     var isLoading = false
@@ -14,6 +15,7 @@ struct CommunityFeedStateStore {
 
     mutating func reset() {
         questions = []
+        items = []
         totalCount = 0
         offset = 0
         errorMessage = nil
@@ -52,11 +54,23 @@ struct CommunityFeedStateStore {
                 !isAuthorHidden($0.author?.id)
         }
         let hiddenResponseCount = response.questions.count - visibleQuestions.count
+        let visibleQuestionIDs = Set(visibleQuestions.map(\.id))
+        let visibleItems = response.items.filter { item in
+            switch item {
+            case .publicQuestion(let question):
+                return visibleQuestionIDs.contains(question.id)
+            case .advertisement:
+                return true
+            }
+        }
         if reset {
             questions = visibleQuestions
+            items = visibleItems
         } else {
             let existing = Set(questions.map(\.id))
             questions.append(contentsOf: visibleQuestions.filter { !existing.contains($0.id) })
+            let existingItemIDs = Set(items.map(\.id))
+            items.append(contentsOf: visibleItems.filter { !existingItemIDs.contains($0.id) })
         }
         totalCount = max(0, response.totalCount - hiddenResponseCount)
         offset = normalizedOffset + response.questions.count
@@ -64,6 +78,7 @@ struct CommunityFeedStateStore {
 
     mutating func clearPage() {
         questions = []
+        items = []
         offset = 0
         totalCount = 0
     }
@@ -81,6 +96,12 @@ struct CommunityFeedStateStore {
         isLoading = false
         let removedCount = questions.count { ids.contains($0.id) }
         questions.removeAll { ids.contains($0.id) }
+        items.removeAll { item in
+            if case .publicQuestion(let question) = item {
+                return ids.contains(question.id)
+            }
+            return false
+        }
         totalCount = max(0, totalCount - removedCount)
         offset = max(0, offset - removedCount)
     }
@@ -99,6 +120,12 @@ struct CommunityFeedStateStore {
         isLoading = false
         let removedCount = questions.count { $0.author?.id == userID }
         questions.removeAll { $0.author?.id == userID }
+        items.removeAll { item in
+            if case .publicQuestion(let question) = item {
+                return question.author?.id == userID
+            }
+            return false
+        }
         totalCount = max(0, totalCount - removedCount)
         let adjustedOffset = max(0, offset - removedCount)
         if removedCount > 0, pageSize > 0 {

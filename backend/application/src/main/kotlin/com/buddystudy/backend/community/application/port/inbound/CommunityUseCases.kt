@@ -52,4 +52,8 @@ interface CommunityUseCase {
     suspend fun reportQuestion(principal: Principal, id: Long, command: ReportQuestionCommand)
     suspend fun setUserBlocked(principal: Principal, userId: Long, blocked: Boolean): UserBlockResponse
     suspend fun submitFeedback(principal: Principal?, deviceId: String?, command: SubmitFeedbackCommand): FeedbackResponse
+    suspend fun recordNativeAdvertisementView(
+        principal: Principal,
+        selectionId: String,
+    )
 }

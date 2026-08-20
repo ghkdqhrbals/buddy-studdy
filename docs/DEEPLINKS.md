@@ -43,6 +43,7 @@
 | 통계 | `buddystudy://statistics` | 없음 | 통계 탭을 연다. | 로그아웃 상태에서는 통계 로그인 안내가 표시된다. |
 | 설정 | `buddystudy://settings` | 없음 | 홈에서 설정 화면을 연다. | 로그아웃 상태에서는 설치 단위 설정만 노출된다. |
 | 프로필 허브 | `buddystudy://profile` | 없음 | 홈에서 프로필 허브 시트를 연다. | 로그아웃 상태에서는 로그인 진입점을 보여준다. |
+| 피드백 작성 | `buddystudy://feedback` | 없음 | 홈에서 피드백 작성 화면을 연다. | 네이티브 광고 캠페인의 표준 목적지로 사용할 수 있다. |
 | 공개 질문 목록 | `buddystudy://public/questions` | 없음 | 홈의 **모든 학습들** 범위를 연다. | 실제 데이터 접근 권한은 현재 세션과 백엔드 정책을 따른다. |
 | 공개 질문 상세 | `buddystudy://public/questions/{questionId}` | `questionId`: 공개 질문 ID | 홈에서 공개 질문 상세를 연다. | 상세를 먼저 지정하고 필요한 목록 데이터를 불러온다. |
 
@@ -55,6 +56,7 @@ buddystudy://records/record-123
 buddystudy://statistics
 buddystudy://settings
 buddystudy://profile
+buddystudy://feedback
 buddystudy://public/questions/987
 ```
 
@@ -172,6 +174,7 @@ stats, statistics, settings, profile, public
 | 설정 | `settings` | 없음 |
 | 설정 호환 별칭 | `settings.openai`, `settings.api-key` | 없음 |
 | 프로필 | `profile` | 없음 |
+| 피드백 작성 | `feedback` | 없음 |
 | 공개 질문 목록 | `public.questions`, `community.questions` | 없음 |
 | 공개 질문 상세 | `public.question`, `community.question` | `questionId`, `questionID` 또는 `id` |
 
@@ -189,7 +192,6 @@ stats, statistics, settings, profile, public
 - 약관
 - 계정 설정
 - 아바타 편집
-- 피드백 작성
 - 로그인, 온보딩, 업데이트, 점검 화면
 
 특히 `buddystudy://notifications`와 `buddystudy://notifications/{id}`는 현재

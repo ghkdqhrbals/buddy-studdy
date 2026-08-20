@@ -902,6 +902,7 @@ enum AppRoute: Equatable, Hashable {
     case profile
     case publicQuestions
     case publicQuestion(id: String)
+    case feedback
 
     init?(url: URL) {
         guard url.scheme?.lowercased() == "buddystudy" else {
@@ -958,6 +959,8 @@ enum AppRoute: Equatable, Hashable {
             self = .settingsOpenAI
         } else if normalized == ["profile"] {
             self = .profile
+        } else if normalized == ["feedback"] {
+            self = .feedback
         } else if normalized == ["public"] || normalized == ["public", "questions"] {
             if let questionID = queryValue("questionId", "questionID", "id") {
                 self = .publicQuestion(id: questionID)
@@ -998,6 +1001,8 @@ enum AppRoute: Equatable, Hashable {
             self = .settingsOpenAI
         case "profile":
             self = .profile
+        case "feedback":
+            self = .feedback
         case "public.questions", "community.questions":
             self = .publicQuestions
         case "public.question", "community.question":
@@ -4139,20 +4144,6 @@ struct AppStrings {
     var hint: String { text("힌트", "Hint") }
     var feedback: String { text("피드백", "Feedback") }
     var feedbackLink: String { text("피드백 보내기", "Send feedback") }
-    var feedbackPromptTitle: String {
-        text(
-            "의견을 남겨주시면 무료 크레딧을 드려요!",
-            "Share your feedback and receive free credits!",
-            "ご意見をいただいた方に無料クレジットをプレゼント！"
-        )
-    }
-    var feedbackPromptBody: String {
-        text(
-            "여러분의 아이디어를 기다리고 있어요.",
-            "We're looking forward to your ideas.",
-            "皆さんのアイデアをお待ちしています。"
-        )
-    }
     var feedbackMessage: String { text("내용", "Message") }
     var feedbackMessagePlaceholder: String {
         text("어떤 점을 개선하면 좋을지 알려주세요.", "Describe what we can improve.")

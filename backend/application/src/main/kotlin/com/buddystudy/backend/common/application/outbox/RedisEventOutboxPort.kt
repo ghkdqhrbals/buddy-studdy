@@ -1,6 +1,7 @@
 package com.buddystudy.backend.common.application.outbox
 
 import com.buddystudy.backend.community.application.model.CommunityQuestionEvent
+import com.buddystudy.backend.community.application.model.NativeAdvertisementViewedEvent
 import com.buddystudy.backend.localization.application.model.ContentTranslationRequestedEvent
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
@@ -58,6 +59,7 @@ enum class RedisOutboxEventType {
     QUESTION_UNLIKED,
     QUESTION_COMMENTED,
     QUESTION_COMMENT_DELETED,
+    NATIVE_AD_VIEWED,
 }
 
 data class ClaimedRedisOutboxEvent(
@@ -94,6 +96,10 @@ interface RedisEventOutboxAppendPort {
         event: CommunityQuestionEvent,
         createdAt: Instant = Instant.now(),
     ): Long = error("Community question event outbox is not configured.")
+    suspend fun appendNativeAdvertisementViewed(
+        event: NativeAdvertisementViewedEvent,
+        createdAt: Instant = Instant.now(),
+    ): Long = error("Native advertisement view outbox is not configured.")
 }
 
 interface RedisEventOutboxPort : RedisEventOutboxAppendPort {

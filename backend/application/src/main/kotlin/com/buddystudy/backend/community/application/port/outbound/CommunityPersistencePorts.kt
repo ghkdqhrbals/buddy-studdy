@@ -5,8 +5,11 @@ import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.community.domain.entity.QuestionLikeEntity
 import com.buddystudy.community.domain.entity.ReportEntity
 import com.buddystudy.community.domain.entity.UserBlockEntity
+import com.buddystudy.community.domain.entity.NativeAdvertisementCampaignEntity
+import com.buddystudy.community.domain.entity.NativeAdvertisementSelectionEntity
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
+import java.time.Instant
 
 interface QuestionLikePort {
     suspend fun save(entity: QuestionLikeEntity): QuestionLikeEntity
@@ -44,4 +47,16 @@ interface UserBlockPort {
 
 interface FeedbackPort {
     suspend fun save(entity: FeedbackEntity): FeedbackEntity
+}
+
+interface NativeAdvertisementPort {
+    suspend fun findEligibleCampaigns(placement: String, now: Instant): List<NativeAdvertisementCampaignEntity>
+    suspend fun countUserSelectionsSince(campaignId: Long, userId: Long, since: Instant): Long
+    suspend fun latestUserSelectionAt(campaignId: Long, userId: Long): Instant?
+    suspend fun latestUserViewAt(campaignId: Long, userId: Long): Instant?
+    suspend fun countCampaignSelectionsSince(campaignId: Long, since: Instant): Long
+    suspend fun countCampaignViewsSince(campaignId: Long, since: Instant): Long
+    suspend fun saveSelection(entity: NativeAdvertisementSelectionEntity): NativeAdvertisementSelectionEntity
+    suspend fun findSelection(selectionId: String): NativeAdvertisementSelectionEntity?
+    suspend fun markView(selectionId: String, userId: Long, deviceId: String, at: Instant)
 }

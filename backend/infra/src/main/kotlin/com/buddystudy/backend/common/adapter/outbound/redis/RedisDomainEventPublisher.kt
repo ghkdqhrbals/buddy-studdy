@@ -38,5 +38,6 @@ class RedisDomainEventPublisher(
             RedisOutboxEventType.QUESTION_COMMENTED -> RedisStreamTopic.COMMUNITY_QUESTION_COMMENTED
             RedisOutboxEventType.QUESTION_COMMENT_DELETED ->
                 RedisStreamTopic.COMMUNITY_QUESTION_COMMENT_DELETED
+            RedisOutboxEventType.NATIVE_AD_VIEWED -> RedisStreamTopic.COMMUNITY_NATIVE_AD_VIEW
         }
 }

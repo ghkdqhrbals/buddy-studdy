@@ -17,6 +17,8 @@ import com.buddystudy.backend.notification.application.port.inbound.Notification
 import com.buddystudy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystudy.backend.community.application.port.outbound.ReportPort
 import com.buddystudy.backend.community.application.port.outbound.UserBlockPort
+import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementPort
+import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementViewPublishPort
 import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.QuestionLanguage
@@ -39,6 +41,9 @@ import com.buddystudy.backend.community.application.model.CommunityCommentsRespo
 import com.buddystudy.backend.community.application.model.CommunityLikeResponse
 import com.buddystudy.backend.community.application.model.CommunityQuestionResponse
 import com.buddystudy.backend.community.application.model.CommunityQuestionsResponse
+import com.buddystudy.backend.community.application.model.CommunityFeedItemResponse
+import com.buddystudy.backend.community.application.model.NativeAdvertisementResponse
+import com.buddystudy.backend.community.application.model.NativeAdvertisementViewedEvent
 import com.buddystudy.backend.community.application.model.UserBlockResponse
 import com.buddystudy.backend.community.application.model.toCommunityQuestionResponse
 import com.buddystudy.community.domain.PublicQuestion
@@ -47,6 +52,8 @@ import com.buddystudy.community.domain.PublicQuestionState
 import com.buddystudy.community.domain.PublicQuestionStats
 import com.buddystudy.backend.community.application.port.inbound.ReportQuestionCommand
 import com.buddystudy.backend.community.application.port.inbound.SubmitFeedbackCommand
+import com.buddystudy.backend.community.application.policy.NativeAdvertisementCandidate
+import com.buddystudy.backend.community.application.policy.NativeAdvertisementRankingPolicy
 import com.buddystudy.backend.profile.application.model.UserProfileResponse
 import com.buddystudy.backend.profile.application.model.toProfile
 import com.buddystudy.backend.community.application.model.toResponse
@@ -58,7 +65,11 @@ import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
+import java.time.temporal.ChronoUnit
+import java.math.BigDecimal
+import java.util.concurrent.ThreadLocalRandom
 import java.util.UUID
+import com.buddystudy.community.domain.entity.NativeAdvertisementSelectionEntity
 
 @Service
 class CommunityService(
@@ -70,6 +81,8 @@ class CommunityService(
     private val reports: ReportPort,
     private val userBlocks: UserBlockPort,
     private val feedbacks: FeedbackPort,
+    private val nativeAdvertisements: NativeAdvertisementPort,
+    private val nativeAdvertisementViews: NativeAdvertisementViewPublishPort,
     private val reactions: PublicQuestionReactionPublishPort,
     private val notifications: PublishNotificationUseCase,
     private val languageDetector: ContentLanguageDetectionPort,
@@ -79,7 +92,7 @@ class CommunityService(
     private val afterCommit: AfterCommitPort,
     private val outboxPublisher: PublishOutboxUseCase,
 ) : CommunityUseCase {
-    @Transactional(readOnly = true)
+    @Transactional
     override suspend fun getPublicQuestions(
         principal: Principal?,
         query: String?,
@@ -88,7 +101,16 @@ class CommunityService(
         limit: Int,
         offset: Int,
     ): CommunityQuestionsResponse {
-        return getPublicQuestionsV2(principal, query, language, view, limit, offset)
+        val normalizedQuery = query?.trim()?.takeIf { it.isNotEmpty() }
+        return publicQuestionsFromOrigin(
+            principal = principal,
+            query = normalizedQuery,
+            language = QuestionLanguage.normalize(language),
+            view = view,
+            limit = limit,
+            offset = offset,
+            includeNativeAdvertisement = normalizedQuery == null && offset == 0,
+        )
     }
 
     @Transactional(readOnly = true)
@@ -108,6 +130,7 @@ class CommunityService(
             view = view,
             limit = limit,
             offset = offset,
+            includeNativeAdvertisement = false,
         )
     }
 
@@ -118,6 +141,7 @@ class CommunityService(
         view: String,
         limit: Int,
         offset: Int,
+        includeNativeAdvertisement: Boolean,
     ): CommunityQuestionsResponse {
         val pageable = PageRequest.of(offset / limit, limit)
         val page = if (query == null) {
@@ -133,7 +157,119 @@ class CommunityService(
         val context = communityContext(page.content, principal)
         val viewMode = translationViewMode(view)
         val rows = page.content.map { community(it, context, language, viewMode) }
-        return CommunityQuestionsResponse(rows, page.totalElements, limit, offset)
+        val items = rows.map(CommunityFeedItemResponse::publicQuestion).toMutableList()
+        if (includeNativeAdvertisement && principal != null) {
+            selectNativeAdvertisement(
+                principal = principal,
+                language = language,
+                questionCount = rows.size,
+            )?.let { (position, advertisement) ->
+                items.add(position, CommunityFeedItemResponse.advertisement(advertisement))
+            }
+        }
+        return CommunityQuestionsResponse(
+            questions = rows,
+            items = items,
+            totalCount = page.totalElements,
+            limit = limit,
+            offset = offset,
+        )
+    }
+
+    private suspend fun selectNativeAdvertisement(
+        principal: Principal,
+        language: String,
+        questionCount: Int,
+    ): Pair<Int, NativeAdvertisementResponse>? {
+        val now = Instant.now()
+        val campaigns = nativeAdvertisements.findEligibleCampaigns(NativeAdvertisementRankingPolicy.placement, now)
+        if (campaigns.isEmpty()) {
+            return null
+        }
+        val today = now.truncatedTo(ChronoUnit.DAYS)
+        val performanceWindow = NativeAdvertisementRankingPolicy.performanceWindowStart(now)
+        val candidates = campaigns.map { campaign ->
+            NativeAdvertisementCandidate(
+                campaign = campaign,
+                userSelectionsToday = nativeAdvertisements.countUserSelectionsSince(campaign.id, principal.userId, today),
+                latestUserSelectionAt = nativeAdvertisements.latestUserSelectionAt(campaign.id, principal.userId),
+                latestUserViewAt = nativeAdvertisements.latestUserViewAt(campaign.id, principal.userId),
+                campaignSelections = nativeAdvertisements.countCampaignSelectionsSince(campaign.id, performanceWindow),
+                campaignViews = nativeAdvertisements.countCampaignViewsSince(campaign.id, performanceWindow),
+            )
+        }
+        val entropy = ThreadLocalRandom.current().nextLong()
+        val selected = NativeAdvertisementRankingPolicy.select(
+            NativeAdvertisementRankingPolicy.rank(
+                candidates = candidates,
+                authenticated = !principal.anonymous,
+                feedItemCount = questionCount,
+                now = now,
+            ),
+            entropy,
+        ) ?: return null
+        val campaign = selected.candidate.campaign
+        val position = NativeAdvertisementRankingPolicy.position(
+            campaign,
+            questionCount,
+            entropy xor 0x5DEECE66DL,
+        ) ?: return null
+        val selectionId = UUID.randomUUID().toString()
+        nativeAdvertisements.saveSelection(
+            NativeAdvertisementSelectionEntity(
+                selectionId = selectionId,
+                campaignId = campaign.id,
+                userId = principal.userId,
+                deviceId = principal.deviceId,
+                placement = campaign.placement,
+                language = language,
+                position = position,
+                rankScore = BigDecimal.valueOf(selected.score),
+                selectedAt = now,
+            )
+        )
+        return position to localizedNativeAdvertisement(campaign, selectionId, language)
+    }
+
+    private fun localizedNativeAdvertisement(
+        campaign: com.buddystudy.community.domain.entity.NativeAdvertisementCampaignEntity,
+        selectionId: String,
+        language: String,
+    ): NativeAdvertisementResponse {
+        val localized = when (language) {
+            "ko" -> Triple(campaign.disclosureKo, campaign.titleKo, campaign.bodyKo)
+            "ja" -> Triple(campaign.disclosureJa, campaign.titleJa, campaign.bodyJa)
+            else -> Triple(campaign.disclosureEn, campaign.titleEn, campaign.bodyEn)
+        }
+        return NativeAdvertisementResponse(
+            selectionId = selectionId,
+            campaignId = campaign.campaignKey,
+            disclosureLabel = localized.first,
+            title = localized.second,
+            body = localized.third,
+            deepLink = campaign.deepLink,
+        )
+    }
+
+    @Transactional
+    override suspend fun recordNativeAdvertisementView(
+        principal: Principal,
+        selectionId: String,
+    ) {
+        val selection = nativeAdvertisements.findSelection(selectionId)
+        if (selection == null || selection.userId != principal.userId || selection.deviceId != principal.deviceId) {
+            throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Advertisement selection not found.")
+        }
+        val now = Instant.now()
+        nativeAdvertisementViews.publish(
+            NativeAdvertisementViewedEvent(
+                eventId = "native-ad-view-$selectionId",
+                selectionId = selectionId,
+                userId = principal.userId,
+                deviceId = principal.deviceId,
+                occurredAt = now,
+            )
+        )
     }
 
     override suspend fun getPublicQuestion(

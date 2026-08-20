@@ -146,6 +146,7 @@ buddystudy:
     content-translation-requested-key: ${BUDDYSTUDY_CONTENT_TRANSLATION_REQUESTED_STREAM_KEY:localization.content-translation.requested.v1}
     question-push-requested-key: ${BUDDYSTUDY_QUESTION_PUSH_REQUESTED_STREAM_KEY:notification.question-push.requested.v1}
     question-viewed-key: ${BUDDYSTUDY_QUESTION_VIEWED_STREAM_KEY:community.question.viewed.v1}
+    native-ad-view-key: ${BUDDYSTUDY_NATIVE_AD_VIEW_STREAM_KEY:community.native-ad.view.v1}
     question-liked-key: ${BUDDYSTUDY_QUESTION_LIKED_STREAM_KEY:community.question.liked.v1}
     question-unliked-key: ${BUDDYSTUDY_QUESTION_UNLIKED_STREAM_KEY:community.question.unliked.v1}
     question-commented-key: ${BUDDYSTUDY_QUESTION_COMMENTED_STREAM_KEY:community.question.commented.v1}
@@ -159,6 +160,7 @@ buddystudy:
     content-translation-requested-max-len: ${BUDDYSTUDY_CONTENT_TRANSLATION_REQUESTED_STREAM_MAX_LEN:1000}
     question-push-requested-max-len: ${BUDDYSTUDY_QUESTION_PUSH_REQUESTED_STREAM_MAX_LEN:1000}
     question-viewed-max-len: ${BUDDYSTUDY_QUESTION_VIEWED_STREAM_MAX_LEN:1000}
+    native-ad-view-max-len: ${BUDDYSTUDY_NATIVE_AD_VIEW_STREAM_MAX_LEN:1000}
     question-liked-max-len: ${BUDDYSTUDY_QUESTION_LIKED_STREAM_MAX_LEN:1000}
     question-unliked-max-len: ${BUDDYSTUDY_QUESTION_UNLIKED_STREAM_MAX_LEN:1000}
     question-commented-max-len: ${BUDDYSTUDY_QUESTION_COMMENTED_STREAM_MAX_LEN:1000}

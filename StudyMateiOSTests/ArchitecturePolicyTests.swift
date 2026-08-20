@@ -58,18 +58,40 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertEqual(japanese.rootTopic, "ルート")
     }
 
-    func testFeedbackPromptLeadsWithCreditRewardInEveryLanguage() {
-        XCTAssertEqual(
-            AppStrings(language: .korean).feedbackPromptTitle,
-            "의견을 남겨주시면 무료 크레딧을 드려요!"
+    func testCommunityFeedDecodesServerOrderedAdvertisementWithDeepLink() throws {
+        let data = Data(
+            """
+            {
+              "questions": [],
+              "items": [
+                {
+                  "type": "ADVERTISEMENT",
+                  "advertisement": {
+                    "selectionId": "selection-1",
+                    "campaignId": "feedback-credit",
+                    "disclosureLabel": "(광고)",
+                    "title": "의견을 남겨주세요",
+                    "body": "더 나은 공부 경험을 함께 만들어요",
+                    "deepLink": "buddystudy://feedback"
+                  }
+                }
+              ],
+              "totalCount": 0,
+              "limit": 20,
+              "offset": 0
+            }
+            """.utf8
         )
+
+        let response = try JSONDecoder().decode(CommunityQuestionsResponse.self, from: data)
+        guard case .advertisement(let advertisement) = try XCTUnwrap(response.items.first) else {
+            return XCTFail("Expected an advertisement item.")
+        }
+        XCTAssertEqual(advertisement.selectionID, "selection-1")
+        XCTAssertEqual(advertisement.deepLink, "buddystudy://feedback")
         XCTAssertEqual(
-            AppStrings(language: .english).feedbackPromptTitle,
-            "Share your feedback and receive free credits!"
-        )
-        XCTAssertEqual(
-            AppStrings(language: .japanese).feedbackPromptTitle,
-            "ご意見をいただいた方に無料クレジットをプレゼント！"
+            AppRoute(url: try XCTUnwrap(URL(string: advertisement.deepLink))),
+            .feedback
         )
     }
 

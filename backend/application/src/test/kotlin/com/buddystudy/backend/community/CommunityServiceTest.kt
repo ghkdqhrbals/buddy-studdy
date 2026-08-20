@@ -17,6 +17,9 @@ import com.buddystudy.backend.community.application.port.outbound.FeedbackPort
 import com.buddystudy.backend.community.application.port.outbound.QuestionLikePort
 import com.buddystudy.backend.community.application.port.outbound.ReportPort
 import com.buddystudy.backend.community.application.port.outbound.UserBlockPort
+import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementPort
+import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementViewPublishPort
+import com.buddystudy.backend.community.application.model.NativeAdvertisementViewedEvent
 import com.buddystudy.backend.community.application.service.CommunityService
 import com.buddystudy.backend.community.application.port.outbound.PublicQuestionReactionPublishPort
 import com.buddystudy.backend.community.application.port.outbound.PublicQuestionViewLocalization
@@ -29,6 +32,8 @@ import com.buddystudy.community.domain.entity.FeedbackEntity
 import com.buddystudy.community.domain.entity.QuestionLikeEntity
 import com.buddystudy.community.domain.entity.ReportEntity
 import com.buddystudy.community.domain.entity.UserBlockEntity
+import com.buddystudy.community.domain.entity.NativeAdvertisementCampaignEntity
+import com.buddystudy.community.domain.entity.NativeAdvertisementSelectionEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
@@ -57,6 +62,8 @@ class CommunityServiceTest {
     private val questionStats = FakeQuestionStatsPort()
     private val likes = FakeQuestionLikePort()
     private val comments = FakeQuestionCommentPort(userBlocks)
+    private val nativeAdvertisements = FakeNativeAdvertisementPort()
+    private val nativeAdvertisementViews = FakeNativeAdvertisementViewPublisher()
     private val notificationPublisher = FakeNotificationPublisher()
     private val reactionPublisher = FakeReactionPublisher()
     private val translationEvents = RecordingContentTranslationEventPort()
@@ -70,6 +77,8 @@ class CommunityServiceTest {
         reports = FakeReportPort(),
         userBlocks = userBlocks,
         feedbacks = FakeFeedbackPort(),
+        nativeAdvertisements = nativeAdvertisements,
+        nativeAdvertisementViews = nativeAdvertisementViews,
         reactions = reactionPublisher,
         notifications = notificationPublisher,
         languageDetector = PassthroughLanguageDetector(),
@@ -83,6 +92,66 @@ class CommunityServiceTest {
         outboxPublisher = translationPublisher,
     )
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
+
+    @Test
+    fun `public feed returns backend ordered typed items with advertisement deep link`(): Unit = runBlocking {
+        users.rows += UserEntity(id = 10, providerId = "author", displayName = "Author")
+        (100L..103L).forEach { questions.rows += publicQuestion(it, 10, "Topic $it") }
+        nativeAdvertisements.campaigns += NativeAdvertisementCampaignEntity(
+            id = 1,
+            campaignKey = "feedback-credit",
+            titleKo = "의견을 남겨주세요",
+            titleEn = "Share feedback",
+            titleJa = "ご意見をください",
+            deepLink = "buddystudy://feedback",
+            minimumSecondsBetweenSelections = 0,
+        )
+
+        val response = service.getPublicQuestions(principal, query = null, language = "ko", limit = 20, offset = 0)
+
+        assertThat(response.items).hasSize(5)
+        assertThat(response.items.count { it.type.name == "ADVERTISEMENT" }).isEqualTo(1)
+        val advertisement = response.items.single { it.advertisement != null }.advertisement!!
+        assertThat(advertisement.deepLink).isEqualTo("buddystudy://feedback")
+        assertThat(advertisement.selectionId).isNotBlank()
+        assertThat(response.questions).hasSize(4)
+        assertThat(nativeAdvertisements.selections).hasSize(1)
+    }
+
+    @Test
+    fun `opening a selected advertisement publishes one stable view event`(): Unit = runBlocking {
+        nativeAdvertisements.selections += NativeAdvertisementSelectionEntity(
+            selectionId = "selection-1",
+            campaignId = 1,
+            userId = principal.userId,
+            deviceId = principal.deviceId,
+        )
+
+        service.recordNativeAdvertisementView(principal, "selection-1")
+
+        assertThat(nativeAdvertisementViews.events).hasSize(1)
+        val event = nativeAdvertisementViews.events.single()
+        assertThat(event.eventId).isEqualTo("native-ad-view-selection-1")
+        assertThat(event.selectionId).isEqualTo("selection-1")
+        assertThat(event.userId).isEqualTo(principal.userId)
+        assertThat(event.deviceId).isEqualTo(principal.deviceId)
+    }
+
+    @Test
+    fun `advertisement view rejects a selection owned by another device`(): Unit = runBlocking {
+        nativeAdvertisements.selections += NativeAdvertisementSelectionEntity(
+            selectionId = "selection-1",
+            campaignId = 1,
+            userId = principal.userId,
+            deviceId = "another-device",
+        )
+
+        assertThatThrownBy {
+            runBlocking { service.recordNativeAdvertisementView(principal, "selection-1") }
+        }.isInstanceOf(ApiException::class.java)
+
+        assertThat(nativeAdvertisementViews.events).isEmpty()
+    }
 
     @Test
     fun `public question list loads authors stats and liked flags in batches`(): Unit = runBlocking {
@@ -146,6 +215,8 @@ class CommunityServiceTest {
             reports = FakeReportPort(),
             userBlocks = userBlocks,
             feedbacks = FakeFeedbackPort(),
+            nativeAdvertisements = FakeNativeAdvertisementPort(),
+            nativeAdvertisementViews = FakeNativeAdvertisementViewPublisher(),
             reactions = reactionPublisher,
             notifications = notificationPublisher,
             languageDetector = PassthroughLanguageDetector(),
@@ -543,6 +614,36 @@ class CommunityServiceTest {
 
     private class FakeFeedbackPort : FeedbackPort {
         override suspend fun save(entity: FeedbackEntity): FeedbackEntity = entity
+    }
+
+    private class FakeNativeAdvertisementPort : NativeAdvertisementPort {
+        val campaigns = mutableListOf<NativeAdvertisementCampaignEntity>()
+        val selections = mutableListOf<NativeAdvertisementSelectionEntity>()
+
+        override suspend fun findEligibleCampaigns(placement: String, now: Instant) =
+            campaigns.filter { it.placement == placement && it.active }
+        override suspend fun countUserSelectionsSince(campaignId: Long, userId: Long, since: Instant) = 0L
+        override suspend fun latestUserSelectionAt(campaignId: Long, userId: Long): Instant? = null
+        override suspend fun latestUserViewAt(campaignId: Long, userId: Long): Instant? = null
+        override suspend fun countCampaignSelectionsSince(campaignId: Long, since: Instant) = 0L
+        override suspend fun countCampaignViewsSince(campaignId: Long, since: Instant) = 0L
+        override suspend fun saveSelection(entity: NativeAdvertisementSelectionEntity): NativeAdvertisementSelectionEntity {
+            selections += entity
+            return entity
+        }
+        override suspend fun findSelection(selectionId: String) = selections.firstOrNull { it.selectionId == selectionId }
+        override suspend fun markView(selectionId: String, userId: Long, deviceId: String, at: Instant) {
+            selections.firstOrNull { it.selectionId == selectionId && it.userId == userId && it.deviceId == deviceId }
+                ?.let { if (it.viewedAt == null) it.viewedAt = at }
+        }
+    }
+
+    private class FakeNativeAdvertisementViewPublisher : NativeAdvertisementViewPublishPort {
+        val events = mutableListOf<NativeAdvertisementViewedEvent>()
+        override suspend fun publish(event: NativeAdvertisementViewedEvent): Boolean {
+            events += event
+            return true
+        }
     }
 
     private class FakeUserBlockPort : UserBlockPort {

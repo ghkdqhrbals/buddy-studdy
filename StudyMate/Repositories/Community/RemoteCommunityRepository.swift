@@ -172,6 +172,16 @@ struct RemoteCommunityRepository: CommunityRepository {
         )
     }
 
+    func recordNativeAdvertisementView(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws {
+        try await backendClient.recordNativeAdvertisementView(
+            registration: registration,
+            selectionID: selectionID
+        )
+    }
+
     func setQuestionLike(
         registration: RemotePushRegistration,
         questionID: String,

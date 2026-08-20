@@ -67,6 +67,7 @@ data class BuddyStudyProperties(
         var questionUnlikedKey: String = "community.question.unliked.v1",
         var questionCommentedKey: String = "community.question.commented.v1",
         var questionCommentDeletedKey: String = "community.question.comment-deleted.v1",
+        var nativeAdViewKey: String = "community.native-ad.view.v1",
         var notificationRequestedMaxLen: Long = 1_000,
         var accountWithdrawnMaxLen: Long = 1_000,
         var answerGradingRequestedMaxLen: Long = 1_000,
@@ -80,6 +81,7 @@ data class BuddyStudyProperties(
         var questionUnlikedMaxLen: Long = 1_000,
         var questionCommentedMaxLen: Long = 1_000,
         var questionCommentDeletedMaxLen: Long = 1_000,
+        var nativeAdViewMaxLen: Long = 1_000,
         var pushConsumerConcurrency: Int = 10,
     )
     data class Email(

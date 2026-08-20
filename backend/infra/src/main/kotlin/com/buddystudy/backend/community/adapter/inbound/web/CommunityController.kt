@@ -163,6 +163,14 @@ class CommunityController(
         @RequestHeader("X-Device-Id", required = false) deviceId: String?,
         authentication: Authentication?,
     ): FeedbackResponse = community.submitFeedback(body, deviceId, authentication)
+
+    @Operation(summary = "Record native-ad view", description = "Queues an idempotent view event when the authenticated device opens a server-selected advertisement deep link.")
+    @PostMapping("/native-ad-selections/{selectionId}/view")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    suspend fun recordNativeAdvertisementView(
+        @PathVariable selectionId: String,
+        authentication: Authentication,
+    ) = community.recordNativeAdvertisementView(selectionId, authentication)
 }
 
 @RestController
@@ -217,6 +225,10 @@ interface CommunityWebPort {
     suspend fun reportQuestion(id: Long, body: ReportQuestionRequest, authentication: Authentication): ReportQuestionResponse
     suspend fun setUserBlocked(userId: Long, blocked: Boolean, authentication: Authentication): UserBlockResponse
     suspend fun submitFeedback(body: SubmitFeedbackRequest, deviceId: String?, authentication: Authentication?): FeedbackResponse
+    suspend fun recordNativeAdvertisementView(
+        selectionId: String,
+        authentication: Authentication,
+    )
 }
 
 @Component
@@ -280,6 +292,14 @@ class CommunityWebAdapter(
             deviceId,
             SubmitFeedbackCommand(body.content),
         )
+
+    override suspend fun recordNativeAdvertisementView(
+        selectionId: String,
+        authentication: Authentication,
+    ) = community.recordNativeAdvertisementView(
+        authentication.principalOrThrow(),
+        selectionId,
+    )
 
     private fun safeLimit(value: Int, max: Int) = min(max(1, value), max)
 }

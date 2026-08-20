@@ -350,8 +350,27 @@ final class AppState: ObservableObject {
         set {
             var nextState = communityFeedState
             nextState.questions = newValue
+            let questionsByID = Dictionary(uniqueKeysWithValues: newValue.map { ($0.id, $0) })
+            nextState.items = nextState.items.compactMap { item in
+                switch item {
+                case .publicQuestion(let question):
+                    return questionsByID[question.id].map(CommunityFeedItem.publicQuestion)
+                case .advertisement:
+                    return item
+                }
+            }
+            if nextState.items.isEmpty, !newValue.isEmpty {
+                nextState.items = newValue.map(CommunityFeedItem.publicQuestion)
+            }
             communityFeedState = nextState
         }
+    }
+
+    var communityFeedItems: [CommunityFeedItem] {
+        if communityFeedState.items.isEmpty, !communityFeedState.questions.isEmpty {
+            return communityFeedState.questions.map(CommunityFeedItem.publicQuestion)
+        }
+        return communityFeedState.items
     }
 
     var communityTotalCount: Int {
@@ -902,7 +921,7 @@ final class AppState: ObservableObject {
             homeStudyRoute = nil
             appRouteRequest = AppRouteRequest(route: route)
             return true
-        case .profile, .publicQuestion:
+        case .profile, .publicQuestion, .feedback:
             selectedTab = .home
             homeStudyRoute = nil
             appRouteRequest = AppRouteRequest(route: route)
@@ -5114,6 +5133,23 @@ final class AppState: ObservableObject {
             }
         )
         return submitted
+    }
+
+    func recordNativeAdvertisementView(selectionID: String) async {
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "native-ad-view") else {
+            return
+        }
+        do {
+            try await communityUseCase.recordNativeAdvertisementView(
+                registration: registration,
+                selectionID: selectionID
+            )
+        } catch {
+            log(
+                .warning,
+                "광고 조회 이벤트 전송 실패: \(appErrorHandlingUseCase.diagnosticDescription(for: error))"
+            )
+        }
     }
 
     func setCommunityQuestionLike(_ question: CommunityQuestion, isLiked: Bool) async -> CommunityLikeState? {

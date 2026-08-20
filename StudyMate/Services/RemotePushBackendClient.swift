@@ -570,6 +570,11 @@ protocol RemotePushBackendClientProtocol {
         content: String
     ) async throws
 
+    func recordNativeAdvertisementView(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws
+
     func setCommunityQuestionLike(
         registration: RemotePushRegistration,
         questionID: String,
@@ -1971,6 +1976,18 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(SubmitFeedbackRequest(content: content))
+        _ = try await perform(request)
+    }
+
+    func recordNativeAdvertisementView(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "native-ad-selections", selectionID, "view")
+        )
+        request.httpMethod = "POST"
         _ = try await perform(request)
     }
 
@@ -3556,12 +3573,20 @@ struct CommunityPageAccess: Codable, Equatable {
 
 struct CommunityQuestionsResponse: Decodable, Equatable {
     var questions: [CommunityQuestion]
+    var items: [CommunityFeedItem]
     var totalCount: Int
     var limit: Int
     var offset: Int
 
-    init(questions: [CommunityQuestion] = [], totalCount: Int = 0, limit: Int = 0, offset: Int = 0) {
+    init(
+        questions: [CommunityQuestion] = [],
+        items: [CommunityFeedItem]? = nil,
+        totalCount: Int = 0,
+        limit: Int = 0,
+        offset: Int = 0
+    ) {
         self.questions = questions
+        self.items = items ?? questions.map(CommunityFeedItem.publicQuestion)
         self.totalCount = totalCount
         self.limit = limit
         self.offset = offset
@@ -3569,6 +3594,7 @@ struct CommunityQuestionsResponse: Decodable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case questions
+        case items
         case totalCount
         case limit
         case offset
@@ -3582,9 +3608,68 @@ struct CommunityQuestionsResponse: Decodable, Equatable {
             forKey: .questions,
             expectedCount: totalCount
         )
+        items = try container.decodeIfPresent([CommunityFeedItem].self, forKey: .items)
+            ?? questions.map(CommunityFeedItem.publicQuestion)
         totalCount = max(totalCount, questions.count)
         limit = try container.decodeIfPresent(Int.self, forKey: .limit) ?? questions.count
         offset = try container.decodeIfPresent(Int.self, forKey: .offset) ?? 0
+    }
+}
+
+enum CommunityFeedItem: Decodable, Equatable, Identifiable {
+    case publicQuestion(CommunityQuestion)
+    case advertisement(CommunityNativeAdvertisement)
+
+    var id: String {
+        switch self {
+        case .publicQuestion(let question):
+            return "question-\(question.id)"
+        case .advertisement(let advertisement):
+            return "advertisement-\(advertisement.selectionID)"
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case question
+        case advertisement
+    }
+
+    private enum ItemType: String, Decodable {
+        case publicQuestion = "PUBLIC_QUESTION"
+        case advertisement = "ADVERTISEMENT"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(ItemType.self, forKey: .type) {
+        case .publicQuestion:
+            self = .publicQuestion(try container.decode(CommunityQuestion.self, forKey: .question))
+        case .advertisement:
+            self = .advertisement(
+                try container.decode(CommunityNativeAdvertisement.self, forKey: .advertisement)
+            )
+        }
+    }
+}
+
+struct CommunityNativeAdvertisement: Decodable, Equatable, Identifiable {
+    var selectionID: String
+    var campaignID: String
+    var disclosureLabel: String
+    var title: String
+    var body: String?
+    var deepLink: String
+
+    var id: String { selectionID }
+
+    enum CodingKeys: String, CodingKey {
+        case selectionID = "selectionId"
+        case campaignID = "campaignId"
+        case disclosureLabel
+        case title
+        case body
+        case deepLink
     }
 }
 

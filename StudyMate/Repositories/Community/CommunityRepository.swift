@@ -84,6 +84,11 @@ protocol CommunityRepository {
         content: String
     ) async throws
 
+    func recordNativeAdvertisementView(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws
+
     func setQuestionLike(
         registration: RemotePushRegistration,
         questionID: String,
