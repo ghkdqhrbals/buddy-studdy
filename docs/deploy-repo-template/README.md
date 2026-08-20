@@ -17,6 +17,8 @@ Current workflow templates:
 
 - `deploy-backend.yml`: backend API runtime on EC2 with one compact,
   emoji-free Slack result attachment.
+- `reset-backend-admin.yml`: guarded one-time recovery of the persisted backend
+  monitoring administrator credential.
 - `backend-swarm-stack.yml`: backend Swarm service update, health, and rollback
   policy consumed by `deploy-backend.yml`.
 - `repair-backend-flyway-v32.yml`: guarded one-time cleanup for a failed,
@@ -47,6 +49,8 @@ Backend deploy:
 - `BACKEND_API_TOKEN`
 - `OPENAPI_ACCESS_TOKEN` (optional, only if docs API endpoint is enabled)
 - `GOOGLE_IOS_CLIENT_ID`
+- `ADMIN_RECOVERY_PASSWORD_BCRYPT_HASH` (temporary; only for the guarded
+  backend administrator recovery workflow, then delete it)
 
 Backend application values are stored in AWS Secrets Manager secret
 `buddystudy/prod`. Required APNs keys are `APNS_AUTH_KEY_BASE64`,

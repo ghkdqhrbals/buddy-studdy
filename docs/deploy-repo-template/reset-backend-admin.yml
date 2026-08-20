@@ -1,0 +1,112 @@
+name: Reset BuddyStudy Backend Administrator
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type RESET admin to activate admin and replace its password hash."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+jobs:
+  reset_backend_admin:
+    name: Reset Backend Administrator
+    runs-on: [self-hosted, Linux, ARM64, ec2]
+    timeout-minutes: 5
+    env:
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD_BCRYPT_HASH: ${{ secrets.ADMIN_RECOVERY_PASSWORD_BCRYPT_HASH }}
+      MYSQL_SECRET_ID: buddystudy/prod/mysql
+      AWS_REGION: ap-northeast-2
+
+    steps:
+      - name: Validate recovery request
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+
+          if [ "${CONFIRM}" != "RESET ${ADMIN_USERNAME}" ]; then
+            echo "Confirmation must be exactly: RESET ${ADMIN_USERNAME}" >&2
+            exit 1
+          fi
+          if [ -z "${ADMIN_PASSWORD_BCRYPT_HASH}" ]; then
+            echo "Missing GitHub Actions secret: ADMIN_RECOVERY_PASSWORD_BCRYPT_HASH" >&2
+            exit 1
+          fi
+          if ! [[ "${ADMIN_PASSWORD_BCRYPT_HASH}" =~ ^\$2[aby]\$12\$[./A-Za-z0-9]{53}$ ]]; then
+            echo "ADMIN_RECOVERY_PASSWORD_BCRYPT_HASH must be one BCrypt cost-12 hash." >&2
+            exit 1
+          fi
+
+      - name: Reset persisted administrator credential
+        run: |
+          set -euo pipefail
+
+          if ! docker inspect buddystudy-db >/dev/null 2>&1; then
+            echo "MySQL container buddystudy-db was not found." >&2
+            exit 1
+          fi
+          if [ "$(docker inspect -f '{{.State.Running}}' buddystudy-db)" != "true" ]; then
+            echo "MySQL container buddystudy-db is not running." >&2
+            exit 1
+          fi
+
+          mysql_secret_json="$(
+            aws secretsmanager get-secret-value               --region "${AWS_REGION}"               --secret-id "${MYSQL_SECRET_ID}"               --query SecretString               --output text
+          )"
+          mysql_database="$(
+            SECRET_JSON="${mysql_secret_json}" python3 -c               'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("dbname") or "buddystudy")'
+          )"
+          mysql_user="$(
+            SECRET_JSON="${mysql_secret_json}" python3 -c               'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("username") or "buddystudy")'
+          )"
+          mysql_password="$(
+            SECRET_JSON="${mysql_secret_json}" python3 -c               'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("password") or "")'
+          )"
+          if [ -z "${mysql_password}" ]; then
+            echo "MySQL password is missing from AWS Secrets Manager." >&2
+            exit 1
+          fi
+
+          reset_sql="
+          insert into admin_accounts
+              (username, display_name, password_hash, status, last_login_at,
+               created_by, updated_by, created_at, updated_at)
+          values
+              ('admin', 'Primary administrator', '${ADMIN_PASSWORD_BCRYPT_HASH}',
+               'ACTIVE', null, 'github-actions-recovery',
+               'github-actions-recovery', utc_timestamp(6), utc_timestamp(6))
+          on duplicate key update
+              password_hash = '${ADMIN_PASSWORD_BCRYPT_HASH}',
+              status = 'ACTIVE',
+              updated_by = 'github-actions-recovery',
+              updated_at = utc_timestamp(6);
+          "
+          printf '%s\n' "${reset_sql}" |
+            docker exec -i               -e MYSQL_PWD="${mysql_password}"               buddystudy-db               mysql --protocol=tcp -h 127.0.0.1                 -u "${mysql_user}" "${mysql_database}"                 --batch --skip-column-names
+
+          verified="$(
+            printf '%s\n'               "select count(*) from admin_accounts where username = 'admin' and status = 'ACTIVE' and password_hash = '${ADMIN_PASSWORD_BCRYPT_HASH}';" |
+              docker exec -i                 -e MYSQL_PWD="${mysql_password}"                 buddystudy-db                 mysql --protocol=tcp -h 127.0.0.1                   -u "${mysql_user}" "${mysql_database}"                   --batch --skip-column-names
+          )"
+          if [ "${verified}" != "1" ]; then
+            echo "Administrator credential verification failed." >&2
+            exit 1
+          fi
+
+          {
+            echo "## Backend administrator recovery"
+            echo ""
+            echo "- Username: `admin`"
+            echo "- Status: `ACTIVE`"
+            echo "- Password hash: replaced and verified"
+            echo "- Plaintext password: never stored or printed"
+          } >> "${GITHUB_STEP_SUMMARY}"

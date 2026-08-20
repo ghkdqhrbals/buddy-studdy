@@ -12,6 +12,7 @@ one workflow run just because they share a host.
 | Backend network | `Configure BuddyStudy Backend Network` | manual | EC2 self-hosted | Redis administrator ingress on the backend security group |
 | Database cutover | `Migrate BuddyStudy PostgreSQL To MySQL` | manual, one-time | EC2 self-hosted | PostgreSQL backup, MySQL import, row-count and reference validation, automatic pre-cutover rollback |
 | Flyway V32 recovery | `Repair BuddyStudy Backend Flyway V32` | manual, one-time | EC2 self-hosted | Guarded removal of only the failed V32 history row and V32 partial check constraints |
+| Backend administrator recovery | `Reset BuddyStudy Backend Administrator` | manual, one-time | EC2 self-hosted | Activate only the fixed `admin` monitoring operator and replace its BCrypt password hash |
 | Admin frontend | `Deploy BuddyStudy Admin Frontend` | `admin-frontend-image-published`, manual | EC2 self-hosted | Admin frontend container only |
 | iOS TestFlight | `Release iOS App` | `v*`, manual | GitHub-hosted macOS | Release planning, signed IPA build, artifact retention, and TestFlight upload as separate jobs |
 | Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, TestZone UI, deployment history, Grafana, Loki, ERROR-log Slack alerting, monitoring auth and access audit, and the backend/FRC maintenance operator UI |
@@ -71,6 +72,11 @@ deployment.
   replacing the container.
 - EC2 self-hosted runners are deploy-only. They pull images and restart
   containers, but must not compile backend code or build Docker images.
+- Backend administrator recovery requires the exact `RESET admin` confirmation
+  and a temporary cost-12 BCrypt hash in
+  `ADMIN_RECOVERY_PASSWORD_BCRYPT_HASH`. It must never accept or print a
+  plaintext password, and the temporary secret must be deleted after a
+  successful reset.
 - The backend application is a single-replica Docker Swarm service named
   `buddystudy_backend`. Updates use `start-first`, the image dependency health
   check, a five-second post-readiness monitor window, and automatic rollback.
