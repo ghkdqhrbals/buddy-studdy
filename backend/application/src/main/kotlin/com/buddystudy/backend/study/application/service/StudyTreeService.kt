@@ -12,6 +12,8 @@ import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.study.application.port.outbound.StudyTopicSuggestionPort
 import com.buddystudy.backend.study.application.port.outbound.SystemTopicCatalogPort
 import com.buddystudy.study.domain.entity.StudyEntity
+import kotlinx.coroutines.CancellationException
+import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -24,6 +26,8 @@ class StudyTreeService(
     private val suggestions: StudyTopicSuggestionPort,
     private val topicCatalog: SystemTopicCatalogPort,
 ) : StudyTreeUseCase {
+    private val logger = LoggerFactory.getLogger(javaClass)
+
     override suspend fun suggestTopics(
         principal: Principal,
         parentStudyId: Long,
@@ -62,16 +66,36 @@ class StudyTreeService(
             .map { it.topic }
             .filter { it.normalizedStudyTopicKey() !in existingKeys }
         val missingCount = (requestedCount - reusable.size).coerceAtLeast(0)
-        val generated = if (missingCount > 0) {
-            suggestions.suggestTopics(
-                rootTopic = root.topic,
+        val generatedResult = if (missingCount > 0) {
+            runCatching {
+                suggestions.suggestTopics(
+                    rootTopic = root.topic,
+                    parentTopic = parent.topic,
+                    existingTopics = allStudies.map { it.topic } + cached.map { it.topic },
+                    language = language,
+                    count = missingCount,
+                )
+            }
+        } else {
+            Result.success(emptyList())
+        }
+        generatedResult.exceptionOrNull()?.let { error ->
+            if (error is CancellationException) throw error
+        }
+        val generated = generatedResult.getOrElse { error ->
+            logger.warn(
+                "study_topic_suggestion_provider_failed userId={} parentStudyId={} language={}",
+                principal.userId,
+                parentStudyId,
+                language,
+                error,
+            )
+            fallbackSuggestions(
                 parentTopic = parent.topic,
-                existingTopics = allStudies.map { it.topic } + cached.map { it.topic },
                 language = language,
+                excludedKeys = existingKeys + reusable.map { it.normalizedStudyTopicKey() },
                 count = missingCount,
             )
-        } else {
-            emptyList()
         }
         val unique = linkedMapOf<String, String>()
         (reusable + generated).forEach { raw ->
@@ -81,7 +105,7 @@ class StudyTreeService(
                 unique.putIfAbsent(key, topic)
             }
         }
-        if (generated.isNotEmpty()) {
+        if (generated.isNotEmpty() && generatedResult.isSuccess) {
             topicCatalog.saveChildren(
                 rootTopicKey = rootTopicKey,
                 parentPathKey = parentPathKey,
@@ -94,7 +118,13 @@ class StudyTreeService(
         return StudyTopicSuggestionsResponse(
             parentStudyId = parentStudyId,
             suggestions = unique.values.take(requestedCount),
-            source = if (generated.isEmpty()) "CATALOG" else if (reusable.isEmpty()) "GENERATED" else "MIXED",
+            source = when {
+                generatedResult.isFailure && reusable.isEmpty() -> "FALLBACK"
+                generatedResult.isFailure -> "CATALOG_FALLBACK"
+                generated.isEmpty() -> "CATALOG"
+                reusable.isEmpty() -> "GENERATED"
+                else -> "MIXED"
+            },
             depth = childDepth,
             maxDepth = MAX_DEPTH,
             childLimit = MAX_CHILDREN,
@@ -143,6 +173,25 @@ class StudyTreeService(
     private companion object {
         const val MAX_DEPTH = 5
         const val MAX_CHILDREN = 10
+
+        fun fallbackSuggestions(
+            parentTopic: String,
+            language: String,
+            excludedKeys: Set<String>,
+            count: Int,
+        ): List<String> {
+            val labels = when (language.lowercase()) {
+                "ja" -> listOf("基礎", "核心概念", "実践", "問題解決", "性能", "テスト", "運用", "設計", "セキュリティ", "応用")
+                "en" -> listOf("Fundamentals", "Core Concepts", "Practice", "Troubleshooting", "Performance", "Testing", "Operations", "Design", "Security", "Advanced")
+                else -> listOf("기초", "핵심 개념", "실전", "문제 해결", "성능", "테스트", "운영", "설계", "보안", "심화")
+            }
+            val prefix = parentTopic.trim().take(180)
+            return labels.asSequence()
+                .map { "$prefix · $it" }
+                .filter { it.normalizedStudyTopicKey() !in excludedKeys }
+                .take(count.coerceAtLeast(0))
+                .toList()
+        }
     }
 }
 

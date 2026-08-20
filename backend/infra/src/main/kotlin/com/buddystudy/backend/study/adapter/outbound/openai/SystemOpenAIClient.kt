@@ -3,6 +3,8 @@ package com.buddystudy.backend.study.adapter.outbound.openai
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.study.application.openai.SystemOpenAIKeyProvider
 import com.buddystudy.backend.study.application.port.outbound.StudyTopicSuggestionPort
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.springframework.stereotype.Component
 
 @Component
@@ -17,7 +19,7 @@ class SystemOpenAIClient(
         existingTopics: Collection<String>,
         language: String,
         count: Int,
-    ): List<String> =
+    ): List<String> = withContext(Dispatchers.IO) {
         executor.suggestStudyTopics(
             apiKey = keys.requireApiKey(),
             model = properties.openai.systemModel,
@@ -27,4 +29,5 @@ class SystemOpenAIClient(
             language = language,
             count = count,
         )
+    }
 }

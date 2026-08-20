@@ -11,6 +11,7 @@ import com.buddystudy.backend.study.application.port.outbound.SystemTopicCatalog
 import com.buddystudy.backend.study.application.port.outbound.SystemTopicCatalogPort
 import com.buddystudy.backend.study.application.service.StudyTreeService
 import com.buddystudy.study.domain.entity.StudyEntity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -109,6 +110,50 @@ class StudyTreeServiceTest {
     }
 
     @Test
+    fun `topic suggestions return a localized fallback when the provider fails`(): Unit = runBlocking {
+        studies.rows += study(1, null, "Database")
+        suggestions.failure = IllegalStateException("OpenAI unavailable")
+
+        val response = service.suggestTopics(principal, parentStudyId = 1, count = 3)
+
+        assertThat(response.suggestions).containsExactly(
+            "Database · 기초",
+            "Database · 핵심 개념",
+            "Database · 실전",
+        )
+        assertThat(response.source).isEqualTo("FALLBACK")
+        assertThat(suggestions.calls).isEqualTo(1)
+        assertThat(catalog.savedTopics).isEmpty()
+    }
+
+    @Test
+    fun `provider failure keeps cached topics and fills only the missing suggestions`(): Unit = runBlocking {
+        studies.rows += study(1, null, "Database")
+        catalog.rows += SystemTopicCatalogCandidate("Indexes", 0)
+        suggestions.failure = IllegalStateException("OpenAI unavailable")
+
+        val response = service.suggestTopics(principal, parentStudyId = 1, count = 3)
+
+        assertThat(response.suggestions).containsExactly(
+            "Indexes",
+            "Database · 기초",
+            "Database · 핵심 개념",
+        )
+        assertThat(response.source).isEqualTo("CATALOG_FALLBACK")
+        assertThat(catalog.savedTopics).isEmpty()
+    }
+
+    @Test
+    fun `topic suggestion cancellation is not converted into a fallback response`() {
+        studies.rows += study(1, null, "Database")
+        suggestions.failure = CancellationException("request cancelled")
+
+        assertThatThrownBy {
+            runBlocking { service.suggestTopics(principal, parentStudyId = 1, count = 3) }
+        }.isInstanceOf(CancellationException::class.java)
+    }
+
+    @Test
     fun `topic suggestions stop after five descendant levels`(): Unit = runBlocking {
         studies.rows += study(1, null, "Root")
         studies.rows += study(2, 1, "One")
@@ -179,6 +224,7 @@ class StudyTreeServiceTest {
 
     private class FakeSuggestionPort : StudyTopicSuggestionPort {
         var next: List<String> = emptyList()
+        var failure: RuntimeException? = null
         var calls = 0
 
         override suspend fun suggestTopics(
@@ -189,6 +235,7 @@ class StudyTreeServiceTest {
             count: Int,
         ): List<String> {
             calls += 1
+            failure?.let { throw it }
             return next.take(count)
         }
     }

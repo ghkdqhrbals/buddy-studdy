@@ -152,8 +152,12 @@ class StudySyncService(
         val now = Instant.now()
         val duplicate = studies.findAllByUserId(principal.userId)
             .firstOrNull { it.topic.normalizedStudyTopicKey() == topic.normalizedStudyTopicKey() }
-        if (duplicate != null && (parentStudy != null || duplicate.parentStudyId != null)) {
+        val duplicateBelongsToRequestedParent = duplicate != null && duplicate.parentStudyId == parentStudy?.id
+        if (duplicate != null && !duplicateBelongsToRequestedParent && (parentStudy != null || duplicate.parentStudyId != null)) {
             throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR, "A study topic with the same name already exists.")
+        }
+        if (duplicate != null && parentStudy != null && duplicateBelongsToRequestedParent) {
+            return duplicate.toStudyRoomResponse()
         }
         val study = duplicate ?: StudyEntity(
                 deviceId = principal.deviceId,

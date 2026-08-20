@@ -525,6 +525,23 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(child["activeForQuestions"].asBoolean()).isTrue()
         assertThat(questions.countPendingForStudy(created["id"].asLong())).isZero()
 
+        val retriedChild = postJson(
+            "/api/v1/studies/${created["id"].asLong()}/topics",
+            """
+            {
+              "topic": "  kotlin   coroutines ",
+              "difficultyLevel": 6,
+              "sortOrder": 1,
+              "activeForQuestions": true
+            }
+            """.trimIndent(),
+            accessToken,
+            deviceId,
+            clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+
+        assertThat(retriedChild["id"].asLong()).isEqualTo(child["id"].asLong())
+
         val studyPage = getJson("/api/v1/studies?limit=100&offset=0", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()

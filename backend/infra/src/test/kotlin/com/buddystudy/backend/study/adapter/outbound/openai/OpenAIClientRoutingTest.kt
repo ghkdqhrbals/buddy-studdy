@@ -11,12 +11,15 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito
+import java.util.concurrent.atomic.AtomicReference
 
 class OpenAIClientRoutingTest {
     @Test
     fun `post study suggestions use only the system OpenAI key and model`() = runBlocking {
         val properties = workloadProperties()
         val executor = Mockito.mock(OpenAIRequestExecutor::class.java)
+        val callerThread = Thread.currentThread().name
+        val executorThread = AtomicReference<String>()
         Mockito.`when`(
             executor.suggestStudyTopics(
                 apiKey = "system-key",
@@ -27,7 +30,10 @@ class OpenAIClientRoutingTest {
                 language = "ko",
                 count = 3,
             ),
-        ).thenReturn(listOf("Transactions", "Replication", "Query optimizer"))
+        ).thenAnswer {
+            executorThread.set(Thread.currentThread().name)
+            listOf("Transactions", "Replication", "Query optimizer")
+        }
         val client = SystemOpenAIClient(
             executor = executor,
             keys = SystemOpenAIKeyProvider(properties),
@@ -43,6 +49,7 @@ class OpenAIClientRoutingTest {
         )
 
         assertThat(result).containsExactly("Transactions", "Replication", "Query optimizer")
+        assertThat(executorThread.get()).isNotEqualTo(callerThread)
         Mockito.verify(executor).suggestStudyTopics(
             apiKey = "system-key",
             model = "system-model",

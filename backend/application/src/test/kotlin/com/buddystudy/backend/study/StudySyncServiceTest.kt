@@ -189,6 +189,27 @@ class StudySyncServiceTest {
     }
 
     @Test
+    fun `retrying the same child topic under the same parent is idempotent`(): Unit = runBlocking {
+        studies.rows += study(id = 11, topic = "Redis")
+
+        val first = service.createStudyTopic(
+            principal,
+            parentStudyId = 11,
+            CreateStudyTopicCommand(topic = "Redis Streams", sortOrder = 1, difficultyLevel = 6),
+        )
+        val retried = service.createStudyTopic(
+            principal,
+            parentStudyId = 11,
+            CreateStudyTopicCommand(topic = "  redis   streams ", sortOrder = 1, difficultyLevel = 6),
+        )
+
+        assertThat(retried.id).isEqualTo(first.id)
+        assertThat(retried.parentStudyId).isEqualTo(11)
+        assertThat(retried.topic).isEqualTo("Redis Streams")
+        assertThat(studies.rows.count { it.parentStudyId == 11L }).isEqualTo(1)
+    }
+
+    @Test
     fun `same normalized topic is rejected across the study tree`() {
         studies.rows += study(id = 11, topic = "Redis")
         studies.rows += study(id = 12, topic = "Kafka")
