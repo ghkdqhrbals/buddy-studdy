@@ -38,6 +38,9 @@ import com.buddystudy.backend.test.RecordingLocalizationRequests
 import com.buddystudy.backend.test.RecordingContentTranslationEventPort
 import com.buddystudy.backend.localization.application.service.ContentTranslationRequestManager
 import com.buddystudy.backend.localization.application.model.LocalizableContentType
+import com.buddystudy.backend.localization.application.model.RecordLocalizationSnapshot
+import com.buddystudy.backend.localization.application.model.TextLocalizationSnapshot
+import com.buddystudy.backend.localization.application.policy.ContentSourceHashPolicy
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -122,6 +125,64 @@ class CommunityServiceTest {
         assertThat(question.answer).isEqualTo("Answer")
         assertThat(question.gradingResult?.feedback).isEqualTo("Good")
         assertThat(question.gradingResult?.explanation).isEqualTo("Because")
+    }
+
+    @Test
+    fun `public question returns translated answer to its author`(): Unit = runBlocking {
+        users.rows += UserEntity(id = principal.userId, providerId = "author", displayName = "Author")
+        val question = publicQuestion(id = 103, userId = principal.userId, topic = "Redis").apply {
+            sourceLanguage = SupportedLanguage.KOREAN
+            answer = "Use AOF for stronger durability."
+            answerSourceLanguage = SupportedLanguage.ENGLISH
+        }
+        questions.rows += question
+        val answerHash = requireNotNull(ContentSourceHashPolicy.recordHashes(question).answer)
+        val localizedService = CommunityService(
+            users = users,
+            questions = questions,
+            questionStats = questionStats,
+            likes = likes,
+            comments = comments,
+            reports = FakeReportPort(),
+            userBlocks = userBlocks,
+            feedbacks = FakeFeedbackPort(),
+            reactions = reactionPublisher,
+            notifications = notificationPublisher,
+            languageDetector = PassthroughLanguageDetector(),
+            contentLocalizations = object : EmptyContentLocalizationPort() {
+                override suspend fun record(questionId: Long, targetLanguage: String) =
+                    RecordLocalizationSnapshot(
+                        question = null,
+                        answer = TextLocalizationSnapshot(
+                            sourceLanguage = "en",
+                            targetLanguage = "ko",
+                            sourceHash = answerHash,
+                            status = "READY",
+                            fields = mapOf("answer" to "더 강한 내구성을 위해 AOF를 사용합니다."),
+                            provider = "test",
+                        ),
+                        aiResponse = null,
+                    )
+            },
+            localizationRequests = RecordingLocalizationRequests(),
+            translationRequestManager = ContentTranslationRequestManager(
+                EmptyContentLocalizationPort(),
+                translationEvents,
+            ),
+            afterCommit = ImmediateAfterCommit(),
+            outboxPublisher = translationPublisher,
+        )
+
+        val response = localizedService.getPublicQuestion(
+            principal = principal,
+            id = question.id,
+            language = "ko",
+            view = "localized",
+        )
+
+        assertThat(response.answer).isEqualTo("더 강한 내구성을 위해 AOF를 사용합니다.")
+        assertThat(response.localization?.answer?.isTranslated).isTrue()
+        assertThat(response.localization?.answer?.displayLanguage).isEqualTo("ko")
     }
 
     @Test

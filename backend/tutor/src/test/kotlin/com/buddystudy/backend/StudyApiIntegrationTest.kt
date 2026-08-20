@@ -832,9 +832,9 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
             owner.clientSecret,
         ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
         assertThat(ownerDetail["question"].asText()).isEqualTo("Translated public boundary question")
-        assertThat(ownerDetail["answer"].asText()).isEqualTo("Answer for Public Boundary")
-        assertThat(ownerDetail["localization"]["answer"]["translationState"].asText()).isEqualTo("ORIGINAL")
-        assertThat(ownerDetail["localization"]["answer"]["translationReason"].asText()).isEqualTo("AUTHOR_ORIGINAL")
+        assertThat(ownerDetail["answer"].asText()).isEqualTo("Translated public boundary answer")
+        assertThat(ownerDetail["localization"]["answer"]["translationState"].asText()).isEqualTo("TRANSLATED")
+        assertThat(ownerDetail["localization"]["answer"]["translationReason"].asText()).isEqualTo("EXPLICIT_TL")
 
         val ownerRecord = getJson(
             "/api/v1/records/${publicQuestion.id}?tl=en",
@@ -843,8 +843,9 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
             owner.clientSecret,
         ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
         assertThat(ownerRecord["question"]["question"].asText()).isEqualTo("Translated public boundary question")
-        assertThat(ownerRecord["answer"].asText()).isEqualTo("Answer for Public Boundary")
-        assertThat(ownerRecord["localization"]["answer"]["translationReason"].asText()).isEqualTo("AUTHOR_ORIGINAL")
+        assertThat(ownerRecord["answer"].asText()).isEqualTo("Translated public boundary answer")
+        assertThat(ownerRecord["localization"]["answer"]["translationState"].asText()).isEqualTo("TRANSLATED")
+        assertThat(ownerRecord["localization"]["answer"]["translationReason"].asText()).isEqualTo("EXPLICIT_TL")
 
         val legacyDetail = get("/api/v1/public/questions/${publicQuestion.id}?language=en")
             .also { assertThat(it.statusCode()).isEqualTo(200) }

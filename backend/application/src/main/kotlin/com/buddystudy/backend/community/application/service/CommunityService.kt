@@ -405,7 +405,6 @@ class CommunityService(
             q,
             requestedLanguage,
             viewMode,
-            preserveAnswerOriginal = q.userId != null && q.userId == context.viewerUserId,
         )
         val displayQuestion = projected.question
         val author = displayQuestion.userId?.let { context.authorsById[it]?.toAuthorProjection() }
@@ -430,7 +429,6 @@ class CommunityService(
         question: QuestionEntity,
         requestedLanguage: String,
         viewMode: TranslationViewMode,
-        preserveAnswerOriginal: Boolean,
     ): ProjectedRecord {
         val target = QuestionLanguage.normalize(requestedLanguage)
         val questionSource = QuestionLanguage.normalize(question.sourceLanguage.databaseValue)
@@ -449,7 +447,7 @@ class CommunityService(
                 false,
                 false,
                 false,
-                preserveAnswerOriginal && !question.answer.isNullOrBlank(),
+                false,
             )
         }
 
@@ -460,8 +458,7 @@ class CommunityService(
         val aiReady = snapshot.aiResponse.readyFor(hashes.aiResponse)
         val needsTranslation =
             (questionSource != target && questionReady == null) ||
-                (!preserveAnswerOriginal && !question.answer.isNullOrBlank() &&
-                    answerSource != target && answerReady == null) ||
+                (!question.answer.isNullOrBlank() && answerSource != target && answerReady == null) ||
                 ((!question.feedback.isNullOrBlank() || !question.explanation.isNullOrBlank()) &&
                     aiSource != target && aiReady == null)
         if (needsTranslation) {
@@ -479,7 +476,7 @@ class CommunityService(
                 questionDisplay = target
             }
         }
-        if (!preserveAnswerOriginal && !question.answer.isNullOrBlank() && answerSource != target) {
+        if (!question.answer.isNullOrBlank() && answerSource != target) {
             answerReady?.let {
                 question.answer = it.fields["answer"] ?: question.answer
                 answerDisplay = target
@@ -498,11 +495,11 @@ class CommunityService(
             answerDisplay,
             aiDisplay,
             questionSource != target && questionDisplay != target && snapshot.question?.status != "FAILED",
-            !preserveAnswerOriginal && !question.answer.isNullOrBlank() && answerSource != target &&
+            !question.answer.isNullOrBlank() && answerSource != target &&
                 answerDisplay != target && snapshot.answer?.status != "FAILED",
             (!question.feedback.isNullOrBlank() || !question.explanation.isNullOrBlank()) &&
                 aiSource != target && aiDisplay != target && snapshot.aiResponse?.status != "FAILED",
-            preserveAnswerOriginal && !question.answer.isNullOrBlank(),
+            false,
         )
     }
 

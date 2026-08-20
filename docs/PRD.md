@@ -180,7 +180,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 7. Feedback opens a dedicated compact form and is stored independently from question reports.
 8. Record, pending-question, public-question, and comment requests use `tl=ko|en|ja` with `view=localized|original`. Question, answer, AI response, and comment source languages are tracked independently. Manual and scheduled question creation, answer submission, grading completion, and comment creation enqueue missing supported-locale translations through the transactional Outbox; localized reads also repair missing or stale work while returning the original immediately. The legacy `language` query remains a temporary compatibility alias.
 9. Canonical question and comment rows contain original text only. Translations are stored exclusively in per-content localization tables, and localized search uses the `(content ID, display language)` search read model rather than language-specific columns on the canonical row.
-10. Authenticated authors always see their own answers and comments in the original language. Other viewers continue to receive the selected display-language translation when it is ready.
+10. Answers use the selected display-language translation for every viewer, including the authenticated author; `view=original` is the explicit way to see the submitted text. Authenticated comment authors continue to see their own comments in the original language.
 
 ## Non-Goals
 
