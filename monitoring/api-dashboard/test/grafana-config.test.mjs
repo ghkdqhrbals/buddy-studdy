@@ -111,8 +111,11 @@ test("monitoring deploy recovers Docker and commits the active Nginx revision", 
   const deployTemplate = await fs.readFile(deployTemplatePath, "utf8");
 
   assert.match(deployTemplate, /run_with_timeout\(\)/);
+  assert.match(deployTemplate, /start_new_session=True/);
+  assert.match(deployTemplate, /os\.killpg\(process\.pid, signal\.SIGKILL\)/);
   assert.match(deployTemplate, /run_with_timeout 10 docker info/);
-  assert.match(deployTemplate, /open -ga Docker/);
+  assert.match(deployTemplate, /run_with_timeout 90 docker desktop restart/);
+  assert.match(deployTemplate, /DOCKER_CLI_HINTS=false/);
   assert.match(deployTemplate, /run_with_timeout 300 docker pull nginx:1\.27-alpine/);
   assert.match(deployTemplate, /api_dashboard_config_hash=/);
   assert.match(deployTemplate, /\.nginx-config\.sha256/);

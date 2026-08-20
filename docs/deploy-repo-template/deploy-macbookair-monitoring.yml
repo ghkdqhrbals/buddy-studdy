@@ -13,7 +13,7 @@ jobs:
   deploy_monitoring:
     name: Deploy Monitoring Module
     runs-on: [self-hosted, macOS, ARM64, macbook-air, buddystudy]
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       MONITORING_ROOT: ${{ vars.MACBOOKAIR_MONITORING_ROOT || '$HOME/buddystudy/monitoring' }}
       MONITORING_SOURCE_DIR: ${{ github.workspace }}/buddy-studdy-source/monitoring
@@ -70,14 +70,38 @@ jobs:
           run_with_timeout() {
             local seconds="$1"
             shift
-            /usr/bin/perl -e 'alarm shift; exec @ARGV' "${seconds}" "$@"
+            python3 - "${seconds}" "$@" <<'PY'
+          import os
+          import signal
+          import subprocess
+          import sys
+
+          timeout_seconds = float(sys.argv[1])
+          process = subprocess.Popen(sys.argv[2:], start_new_session=True)
+          try:
+              return_code = process.wait(timeout=timeout_seconds)
+          except subprocess.TimeoutExpired:
+              os.killpg(process.pid, signal.SIGTERM)
+              try:
+                  process.wait(timeout=3)
+              except subprocess.TimeoutExpired:
+                  os.killpg(process.pid, signal.SIGKILL)
+                  process.wait()
+              raise SystemExit(124)
+          raise SystemExit(return_code if return_code >= 0 else 128 - return_code)
+          PY
           }
 
+          export DOCKER_CLI_HINTS=false
           docker_ready=false
           if run_with_timeout 10 docker info >/dev/null 2>&1; then
             docker_ready=true
           else
-            open -ga Docker || true
+            echo "Docker daemon is unavailable; restarting Docker Desktop."
+            if ! run_with_timeout 90 docker desktop restart; then
+              run_with_timeout 30 docker desktop stop || true
+              run_with_timeout 90 docker desktop start || open -ga Docker || true
+            fi
             for _ in $(seq 1 24); do
               if run_with_timeout 10 docker info >/dev/null 2>&1; then
                 docker_ready=true
