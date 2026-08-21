@@ -9,6 +9,9 @@ import type {
   ScheduledJobRun,
   ScheduledJobRunsResponse,
   ScheduledJobStatusResponse,
+  NativeAdvertisementCampaignInput,
+  NativeAdvertisementCampaignPage,
+  NativeAdvertisementCampaignSummary,
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_ADMIN_API_BASE_URL ?? "";
@@ -183,4 +186,36 @@ export function fetchAppUpdateUsers(
   if (query.trim()) params.set("query", query.trim());
   if (status) params.set("status", status);
   return request(`/api/v1/admin/app-updates/${campaignId}/users?${params}`, { method: "GET" }, onUnauthorized);
+}
+
+export function fetchNativeAdvertisementCampaigns(
+  onUnauthorized: UnauthorizedHandler,
+  limit = 20,
+  offset = 0,
+): Promise<NativeAdvertisementCampaignPage> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  return request(`/api/v1/admin/native-ad-campaigns?${params}`, { method: "GET" }, onUnauthorized);
+}
+
+export function createNativeAdvertisementCampaign(
+  input: NativeAdvertisementCampaignInput,
+  onUnauthorized: UnauthorizedHandler,
+): Promise<NativeAdvertisementCampaignSummary> {
+  return request("/api/v1/admin/native-ad-campaigns", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }, onUnauthorized);
+}
+
+export function updateNativeAdvertisementCampaign(
+  campaignId: number,
+  input: NativeAdvertisementCampaignInput,
+  onUnauthorized: UnauthorizedHandler,
+): Promise<NativeAdvertisementCampaignSummary> {
+  return request(`/api/v1/admin/native-ad-campaigns/${campaignId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }, onUnauthorized);
 }

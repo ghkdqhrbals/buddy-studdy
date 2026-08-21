@@ -45,6 +45,7 @@ export const sections: Array<{ key: SectionKey; label: string; metrics: string[]
   { key: "learning", label: "Learning", metrics: ["question_created_count", "answer_submitted_count", "answer_rate", "question_to_answer_latency"] },
   { key: "notifications", label: "Notifications", metrics: ["push_open_rate"] },
   { key: "quota", label: "Quota", metrics: ["quota_used_count"] },
+  { key: "advertising", label: "Advertising", metrics: [] },
   { key: "app_updates", label: "App updates", metrics: [] },
   { key: "operations", label: "Operations", metrics: [] },
 ];
@@ -57,6 +58,7 @@ export const sectionPaths: Record<SectionKey, string> = {
   learning: "/analytics/learning",
   notifications: "/analytics/notifications",
   quota: "/analytics/quota",
+  advertising: "/advertising/campaigns",
   app_updates: "/app-updates",
   operations: "/operations/scheduler-runs",
 };

@@ -38,19 +38,35 @@ object NativeAdvertisementDeepLinkPolicy {
         "feedback",
     )
 
+    private val supportedCoupangHosts = setOf(
+        "coupang.com",
+        "www.coupang.com",
+        "link.coupang.com",
+    )
+
     fun isSupported(value: String): Boolean = runCatching {
         val uri = URI(value)
-        uri.scheme.equals("buddystudy", ignoreCase = true) &&
-            uri.host?.lowercase() in supportedHosts &&
-            uri.userInfo == null &&
-            uri.fragment == null
+        val scheme = uri.scheme?.lowercase()
+        val host = uri.host?.lowercase()
+        uri.userInfo == null && uri.fragment == null && when (scheme) {
+            "buddystudy" -> host in supportedHosts && uri.port == -1
+            "https" -> host in supportedCoupangHosts && uri.port in setOf(-1, 443) && !uri.path.isNullOrBlank()
+            else -> false
+        }
     }.getOrDefault(false)
 }
 
 object NativeAdvertisementRankingPolicy {
     const val placement = "COMMUNITY_FEED"
-    private const val explorationPercent = 15L
-    private const val performanceWindowDays = 30L
+    const val explorationPercent = 15L
+    const val performanceWindowDays = 30L
+    const val selectionPoolSize = 3
+    const val basePriorityWeight = 40.0
+    const val relevanceWeight = 35.0
+    const val viewRateWeight = 20.0
+    const val explorationWeight = 8.0
+    const val freshnessWeight = 8.0
+    const val dailySelectionPenalty = 12.0
 
     fun rank(
         candidates: List<NativeAdvertisementCandidate>,
@@ -78,12 +94,12 @@ object NativeAdvertisementRankingPolicy {
             } else {
                 campaign.anonymousRelevance.toDouble()
             }
-            val score = campaign.basePriority.toDouble() * 40.0 +
-                relevance * 35.0 +
-                smoothedViewRate * 20.0 +
-                explorationBonus * 8.0 +
-                freshness * 8.0 -
-                candidate.userSelectionsToday * 12.0
+            val score = campaign.basePriority.toDouble() * basePriorityWeight +
+                relevance * relevanceWeight +
+                smoothedViewRate * viewRateWeight +
+                explorationBonus * explorationWeight +
+                freshness * freshnessWeight -
+                candidate.userSelectionsToday * dailySelectionPenalty
             RankedNativeAdvertisement(candidate, score)
         }.sortedWith(
             compareByDescending<RankedNativeAdvertisement> { it.score }
@@ -95,7 +111,7 @@ object NativeAdvertisementRankingPolicy {
         if (ranked.isEmpty()) {
             return null
         }
-        val pool = ranked.take(3)
+        val pool = ranked.take(selectionPoolSize)
         val bucket = Math.floorMod(entropy, 100L)
         val index = if (bucket < explorationPercent && pool.size > 1) {
             1 + Math.floorMod(entropy / 100L, pool.size - 1L).toInt()

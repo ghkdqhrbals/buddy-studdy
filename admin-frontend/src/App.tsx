@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { clearToken, fetchJobRuns, fetchJobStatuses, fetchMetrics, getStoredToken, refreshMetrics, retryJob } from "./api";
 import { AdminShell } from "./AdminShell";
 import { AppUpdatesPanel } from "./AppUpdatesPanel";
+import { AdvertisingPanel } from "./AdvertisingPanel";
 import { JOB_PAGE_SIZE, sectionPaths, sections } from "./adminConfig";
 import { LoginScreen } from "./LoginScreen";
 import { MetricsDashboard } from "./MetricsDashboard";
@@ -124,7 +125,7 @@ function sectionHref(
 }
 
 function sectionUsesDateRange(section: SectionKey): boolean {
-  return section !== "operations" && section !== "app_updates";
+  return section !== "operations" && section !== "app_updates" && section !== "advertising";
 }
 
 export function App() {
@@ -142,6 +143,7 @@ export function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [appUpdatesRefreshKey, setAppUpdatesRefreshKey] = useState(0);
+  const [advertisingRefreshKey, setAdvertisingRefreshKey] = useState(0);
 
   const active = sections.find((section) => section.key === activeSection) ?? sections[0];
   const isAuthenticated = Boolean(token);
@@ -206,7 +208,7 @@ export function App() {
     setLoading(true);
     setError(null);
     try {
-      if (activeSection === "app_updates") {
+      if (activeSection === "app_updates" || activeSection === "advertising") {
         setSeries([]);
         setJobPage(emptyJobPage);
       } else if (activeSection === "operations") {
@@ -240,6 +242,8 @@ export function App() {
     try {
       if (activeSection === "app_updates") {
         setAppUpdatesRefreshKey((value) => value + 1);
+      } else if (activeSection === "advertising") {
+        setAdvertisingRefreshKey((value) => value + 1);
       } else if (activeSection === "operations") {
         const [runs, statuses] = await Promise.all([
           fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset, jobNameFilter, highlightRunId),
@@ -357,6 +361,8 @@ export function App() {
     >
       {activeSection === "app_updates" ? (
         <AppUpdatesPanel onUnauthorized={handleUnauthorized} refreshKey={appUpdatesRefreshKey} />
+      ) : activeSection === "advertising" ? (
+        <AdvertisingPanel onUnauthorized={handleUnauthorized} refreshKey={advertisingRefreshKey} />
       ) : activeSection === "operations" ? (
         <OperationsPanel
           page={jobPage}

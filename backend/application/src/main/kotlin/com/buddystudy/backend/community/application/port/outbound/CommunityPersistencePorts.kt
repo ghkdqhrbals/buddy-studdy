@@ -60,3 +60,13 @@ interface NativeAdvertisementPort {
     suspend fun findSelection(selectionId: String): NativeAdvertisementSelectionEntity?
     suspend fun markView(selectionId: String, userId: Long, deviceId: String, at: Instant)
 }
+
+interface AdminNativeAdvertisementPort {
+    suspend fun countCampaigns(): Long
+    suspend fun findCampaigns(limit: Int, offset: Int): List<NativeAdvertisementCampaignEntity>
+    suspend fun findCampaign(id: Long): NativeAdvertisementCampaignEntity?
+    suspend fun findCampaignByKey(campaignKey: String): NativeAdvertisementCampaignEntity?
+    suspend fun saveCampaign(entity: NativeAdvertisementCampaignEntity): NativeAdvertisementCampaignEntity
+    suspend fun countSelectionsSince(campaignId: Long, since: Instant): Long
+    suspend fun countViewsSince(campaignId: Long, since: Instant): Long
+}

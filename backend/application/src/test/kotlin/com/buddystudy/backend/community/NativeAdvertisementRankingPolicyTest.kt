@@ -64,9 +64,14 @@ class NativeAdvertisementRankingPolicyTest {
     }
 
     @Test
-    fun `campaign deep links allow only supported app destinations`() {
+    fun `campaign destinations allow supported app routes and Coupang HTTPS URLs only`() {
         assertThat(NativeAdvertisementDeepLinkPolicy.isSupported("buddystudy://feedback")).isTrue()
+        assertThat(NativeAdvertisementDeepLinkPolicy.isSupported("https://link.coupang.com/a/example?lptag=affiliate")).isTrue()
+        assertThat(NativeAdvertisementDeepLinkPolicy.isSupported("https://www.coupang.com/vp/products/123?itemId=456")).isTrue()
         assertThat(NativeAdvertisementDeepLinkPolicy.isSupported("https://example.com")).isFalse()
+        assertThat(NativeAdvertisementDeepLinkPolicy.isSupported("http://link.coupang.com/a/example")).isFalse()
+        assertThat(NativeAdvertisementDeepLinkPolicy.isSupported("https://link.coupang.com.evil.example/a/example")).isFalse()
+        assertThat(NativeAdvertisementDeepLinkPolicy.isSupported("https://user@link.coupang.com/a/example")).isFalse()
         assertThat(NativeAdvertisementDeepLinkPolicy.isSupported("buddystudy://unknown")).isFalse()
     }
 

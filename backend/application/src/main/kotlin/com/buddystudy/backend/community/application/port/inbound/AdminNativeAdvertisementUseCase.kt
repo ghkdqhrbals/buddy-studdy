@@ -1,0 +1,11 @@
+package com.buddystudy.backend.community.application.port.inbound
+
+import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignCommand
+import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignPage
+import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignSummary
+
+interface AdminNativeAdvertisementUseCase {
+    suspend fun campaigns(limit: Int, offset: Int): AdminNativeAdvertisementCampaignPage
+    suspend fun create(command: AdminNativeAdvertisementCampaignCommand): AdminNativeAdvertisementCampaignSummary
+    suspend fun update(id: Long, command: AdminNativeAdvertisementCampaignCommand): AdminNativeAdvertisementCampaignSummary
+}

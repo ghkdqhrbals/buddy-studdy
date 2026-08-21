@@ -1,6 +1,7 @@
 package com.buddystudy.backend.community.adapter.outbound.persistence
 
 import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementPort
+import com.buddystudy.backend.community.application.port.outbound.AdminNativeAdvertisementPort
 import com.buddystudy.community.domain.entity.NativeAdvertisementCampaignEntity
 import com.buddystudy.community.domain.entity.NativeAdvertisementSelectionEntity
 import kotlinx.coroutines.flow.Flow
@@ -24,6 +25,18 @@ interface NativeAdvertisementCampaignRepository : CoroutineCrudRepository<Native
         """
     )
     fun findEligible(placement: String, now: Instant): Flow<NativeAdvertisementCampaignEntity>
+
+    @Query(
+        """
+        select *
+        from native_ad_campaigns
+        order by created_at desc, id desc
+        limit :limit offset :offset
+        """
+    )
+    fun findAdminPage(limit: Int, offset: Int): Flow<NativeAdvertisementCampaignEntity>
+
+    suspend fun findByCampaignKey(campaignKey: String): NativeAdvertisementCampaignEntity?
 }
 
 interface NativeAdvertisementSelectionRepository : CoroutineCrudRepository<NativeAdvertisementSelectionEntity, Long> {
@@ -96,7 +109,7 @@ interface NativeAdvertisementSelectionRepository : CoroutineCrudRepository<Nativ
 class NativeAdvertisementPersistenceAdapter(
     private val campaigns: NativeAdvertisementCampaignRepository,
     private val selections: NativeAdvertisementSelectionRepository,
-) : NativeAdvertisementPort {
+) : NativeAdvertisementPort, AdminNativeAdvertisementPort {
     override suspend fun findEligibleCampaigns(placement: String, now: Instant) =
         campaigns.findEligible(placement, now).toList()
 
@@ -122,4 +135,20 @@ class NativeAdvertisementPersistenceAdapter(
     override suspend fun markView(selectionId: String, userId: Long, deviceId: String, at: Instant) {
         selections.markView(selectionId, userId, deviceId, at)
     }
+
+    override suspend fun countCampaigns(): Long = campaigns.count()
+
+    override suspend fun findCampaigns(limit: Int, offset: Int) = campaigns.findAdminPage(limit, offset).toList()
+
+    override suspend fun findCampaign(id: Long) = campaigns.findById(id)
+
+    override suspend fun findCampaignByKey(campaignKey: String) = campaigns.findByCampaignKey(campaignKey)
+
+    override suspend fun saveCampaign(entity: NativeAdvertisementCampaignEntity) = campaigns.save(entity)
+
+    override suspend fun countSelectionsSince(campaignId: Long, since: Instant) =
+        selections.countCampaignSelectionsSince(campaignId, since)
+
+    override suspend fun countViewsSince(campaignId: Long, since: Instant) =
+        selections.countCampaignViewsSince(campaignId, since)
 }

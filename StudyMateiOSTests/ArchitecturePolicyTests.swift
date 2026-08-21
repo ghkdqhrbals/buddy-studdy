@@ -95,6 +95,19 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testCommunityAdvertisementOpeningSupportsValidatedExternalDestinations() throws {
+        let root = try repositoryRoot()
+        let source = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Views/MobileRootView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("@Environment(\\.openURL) private var openURL"))
+        XCTAssertTrue(source.contains("if let route = AppRoute(url: url)"))
+        XCTAssertTrue(source.contains("url.scheme?.caseInsensitiveCompare(\"https\") == .orderedSame"))
+        XCTAssertTrue(source.contains("openURL(url)"))
+    }
+
     func testCommunityUserBlockingCopyIsLocalizedInEveryLanguage() {
         let korean = AppStrings(language: .korean)
         let english = AppStrings(language: .english)

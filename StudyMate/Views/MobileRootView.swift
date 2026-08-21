@@ -1162,6 +1162,7 @@ enum MobileHomeStudyPresentationPolicy {
 
 private struct MobileHomeView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.openURL) private var openURL
     @State private var selectedHomeScope: HomeFeedScope = .all
     @State private var isSelectingStudies = false
     @State private var selectedStudyCategoryIDs = Set<String>()
@@ -2107,14 +2108,17 @@ private struct MobileHomeView: View {
     }
 
     private func openCommunityAdvertisement(_ advertisement: CommunityNativeAdvertisement) {
-        guard let url = URL(string: advertisement.deepLink),
-              let route = AppRoute(url: url) else {
+        guard let url = URL(string: advertisement.deepLink) else {
             return
         }
         Task {
             await appState.recordNativeAdvertisementView(selectionID: advertisement.selectionID)
         }
-        _ = appState.openRoute(route)
+        if let route = AppRoute(url: url) {
+            _ = appState.openRoute(route)
+        } else if url.scheme?.caseInsensitiveCompare("https") == .orderedSame {
+            openURL(url)
+        }
     }
 
     private func communityQuestionRow(_ question: CommunityQuestion) -> some View {

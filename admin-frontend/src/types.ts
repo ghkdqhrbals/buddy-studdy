@@ -1,4 +1,4 @@
-export type SectionKey = "overview" | "users" | "learning" | "notifications" | "quota" | "app_updates" | "operations";
+export type SectionKey = "overview" | "users" | "learning" | "notifications" | "quota" | "advertising" | "app_updates" | "operations";
 export type Theme = "light" | "dark";
 export type MetricKind = "count" | "rate" | "duration" | "days";
 
@@ -145,4 +145,64 @@ export type CreateAppUpdateCampaignInput = {
   messageEn: string;
   messageJa: string;
   appStoreUrl: string;
+};
+
+export type NativeAdvertisementAudience = "ALL" | "AUTHENTICATED" | "ANONYMOUS";
+
+export type NativeAdvertisementCampaignInput = {
+  campaignKey: string;
+  audience: NativeAdvertisementAudience;
+  disclosureKo: string;
+  disclosureEn: string;
+  disclosureJa: string;
+  titleKo: string;
+  titleEn: string;
+  titleJa: string;
+  bodyKo: string | null;
+  bodyEn: string | null;
+  bodyJa: string | null;
+  destinationUrl: string;
+  basePriority: number;
+  authenticatedRelevance: number;
+  anonymousRelevance: number;
+  dailySelectionCap: number;
+  minimumSecondsBetweenSelections: number;
+  postViewCooldownSeconds: number;
+  minimumFeedItemCount: number;
+  earliestPosition: number;
+  latestPosition: number;
+  active: boolean;
+  startsAt: string | null;
+  endsAt: string | null;
+};
+
+export type NativeAdvertisementCampaignSummary = NativeAdvertisementCampaignInput & {
+  id: number;
+  placement: string;
+  performanceSelections: number;
+  performanceViews: number;
+  performanceViewRate: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type NativeAdvertisementRankingPolicy = {
+  performanceWindowDays: number;
+  exploitationPercent: number;
+  explorationPercent: number;
+  selectionPoolSize: number;
+  basePriorityWeight: number;
+  relevanceWeight: number;
+  smoothedViewRateWeight: number;
+  explorationWeight: number;
+  freshnessWeight: number;
+  dailySelectionPenalty: number;
+};
+
+export type NativeAdvertisementCampaignPage = {
+  campaigns: NativeAdvertisementCampaignSummary[];
+  totalCount: number;
+  limit: number;
+  offset: number;
+  rankingPolicy: NativeAdvertisementRankingPolicy;
 };
