@@ -30,7 +30,7 @@ jobs:
   retire_macbookair_kubernetes:
     name: Retire MacBook Air Docker Desktop Kubernetes
     runs-on: [self-hosted, macOS, ARM64, macbook-air, buddystudy]
-    timeout-minutes: 360
+    timeout-minutes: ${{ inputs.apply && 360 || 15 }}
     steps:
       - name: Checkout audited retirement helper
         uses: actions/checkout@v4
@@ -57,7 +57,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          python3 scripts/retire_macbookair_kubernetes.py preflight \
+          exec python3 scripts/retire_macbookair_kubernetes.py preflight \
             --report "${PREFLIGHT_REPORT}"
 
       - name: Back up and retire Docker Desktop Kubernetes
@@ -72,7 +72,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          python3 scripts/retire_macbookair_kubernetes.py retire \
+          exec python3 scripts/retire_macbookair_kubernetes.py retire \
             --report "${RETIREMENT_REPORT}" \
             --expected-report "${PREFLIGHT_REPORT}" \
             --expected-digest "${EXPECTED_INVENTORY_DIGEST}" \
@@ -85,7 +85,7 @@ jobs:
           PREFLIGHT_REPORT: ${{ runner.temp }}/macbookair-kubernetes-preflight-${{ github.run_id }}-${{ github.run_attempt }}.json
         run: |
           set -euo pipefail
-          python3 scripts/retire_macbookair_kubernetes.py render-summary \
+          exec python3 scripts/retire_macbookair_kubernetes.py render-summary \
             --report "${PREFLIGHT_REPORT}" \
             --status '${{ job.status }}' >> "${GITHUB_STEP_SUMMARY}"
 
@@ -95,6 +95,6 @@ jobs:
           RETIREMENT_REPORT: ${{ runner.temp }}/macbookair-kubernetes-retirement-${{ github.run_id }}-${{ github.run_attempt }}.json
         run: |
           set -euo pipefail
-          python3 scripts/retire_macbookair_kubernetes.py render-summary \
+          exec python3 scripts/retire_macbookair_kubernetes.py render-summary \
             --report "${RETIREMENT_REPORT}" \
             --status '${{ job.status }}' >> "${GITHUB_STEP_SUMMARY}"

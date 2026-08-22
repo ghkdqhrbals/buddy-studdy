@@ -1,13 +1,16 @@
+import ast
 import copy
 import importlib.util
 import io
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
+from contextlib import nullcontext, redirect_stderr
 from pathlib import Path
 from unittest import mock
 
@@ -76,7 +79,8 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
         self.assertIn("^[0-9a-f]{64}$", self.workflow)
         self.assertIn(retirement.CONFIRMATION, self.workflow)
         self.assertIn("MACBOOKAIR_K8S_RETIREMENT_BACKUP_KEY", self.workflow)
-        self.assertIn("timeout-minutes: 360", self.workflow)
+        self.assertIn("timeout-minutes: ${{ inputs.apply && 360 || 15 }}", self.workflow)
+        self.assertGreaterEqual(self.workflow.count("exec python3 "), 4)
         self.assertLess(
             self.workflow.index("Read-only preflight"),
             self.workflow.index("Back up and retire"),
@@ -329,6 +333,96 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
                 )
             self.assertLess(time.monotonic() - started, 5)
 
+    @unittest.skipUnless(hasattr(os, "killpg"), "requires POSIX process groups")
+    def test_streaming_helpers_kill_background_descendant_groups(self):
+        parent_code = (
+            "import pathlib,subprocess,sys; "
+            "child=subprocess.Popen([sys.executable,'-c',"
+            "'import time; time.sleep(30)']); "
+            "pathlib.Path(sys.argv[1]).write_text(str(child.pid))"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            gzip_pid_path = root / "gzip.pid"
+            with self.assertRaisesRegex(retirement.RetirementError, "timed out"):
+                retirement.CommandRunner().stream_to_gzip(
+                    (sys.executable, "-c", parent_code, str(gzip_pid_path)),
+                    root / "descendant.gz",
+                    timeout=1,
+                )
+            raw_pid_path = root / "raw.pid"
+            retirement.CommandRunner().stream_raw(
+                (sys.executable, "-c", parent_code, str(raw_pid_path)),
+                root / "descendant.raw",
+                timeout=5,
+            )
+            for pid_path in (gzip_pid_path, raw_pid_path):
+                descendant_pid = int(pid_path.read_text(encoding="utf-8"))
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    try:
+                        os.kill(descendant_pid, 0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(0.05)
+                else:
+                    try:
+                        os.kill(descendant_pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    self.fail("stream helper left a background descendant")
+
+    @unittest.skipUnless(hasattr(os, "killpg"), "requires POSIX process groups")
+    def test_seal_timeout_kills_tar_background_descendant_group(self):
+        real_popen = subprocess.Popen
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            payload = root / "private-staging"
+            payload.mkdir(mode=0o700)
+            (payload / "manifest.json").write_text("{}", encoding="utf-8")
+            pid_path = root / "tar-descendant.pid"
+            parent_code = (
+                "import pathlib,subprocess,sys; "
+                "child=subprocess.Popen([sys.executable,'-c',"
+                "'import time; time.sleep(30)']); "
+                "pathlib.Path(sys.argv[1]).write_text(str(child.pid))"
+            )
+
+            def replace_tar(arguments, **kwargs):
+                if arguments[0] == "tar" and "-C" in arguments:
+                    arguments = (
+                        sys.executable,
+                        "-c",
+                        parent_code,
+                        str(pid_path),
+                    )
+                return real_popen(arguments, **kwargs)
+
+            with mock.patch.object(
+                retirement.subprocess, "Popen", side_effect=replace_tar
+            ):
+                with self.assertRaisesRegex(retirement.RetirementError, "timed out"):
+                    retirement._seal_payload(
+                        payload,
+                        root / "backup.tar.enc",
+                        secret="s" * 64,
+                        timeout=1,
+                    )
+            descendant_pid = int(pid_path.read_text(encoding="utf-8"))
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(descendant_pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
+            else:
+                try:
+                    os.kill(descendant_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                self.fail("seal pipeline left a background descendant")
+
     def test_streaming_interrupt_kills_and_reaps_child(self):
         runner = retirement.CommandRunner()
         real_popen = subprocess.Popen
@@ -514,6 +608,59 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
             self.assertTrue(encrypted.with_suffix(".enc.hmac").is_file())
             self.assertNotIn(b"must-not-remain-plaintext", encrypted.read_bytes())
 
+    def test_failed_bundle_seal_and_cleanup_are_separately_bounded(self):
+        self.assertEqual(retirement.FAILURE_BUNDLE_DEADLINE_SECONDS, 3 * 60)
+        self.assertEqual(retirement.FAILURE_CLEANUP_DEADLINE_SECONDS, 30)
+
+        for cleanup_fails, expected in (
+            (False, "failure-bundle-unavailable"),
+            (True, "private-staging-cleanup-incomplete"),
+        ):
+            with self.subTest(cleanup_fails=cleanup_fails), tempfile.TemporaryDirectory() as directory:
+                destination = Path(directory)
+                payload = destination / "private-staging"
+                payload.mkdir(mode=0o700)
+                deadlines = []
+
+                def bounded(seconds):
+                    deadlines.append(seconds)
+                    return nullcontext()
+
+                cleanup = mock.Mock()
+                if cleanup_fails:
+                    cleanup.side_effect = retirement.RetirementError(
+                        "synthetic cleanup failure"
+                    )
+                with mock.patch.object(
+                    retirement, "_failure_backup_deadline", side_effect=bounded
+                ), mock.patch.object(
+                    retirement, "_write_checksum_manifest"
+                ), mock.patch.object(
+                    retirement,
+                    "_seal_payload",
+                    side_effect=retirement.RetirementError(
+                        "synthetic failure-bundle seal failure"
+                    ),
+                ) as seal, mock.patch.object(
+                    retirement, "_remove_private_staging", cleanup
+                ):
+                    result = retirement._finalize_failed_private_staging(
+                        payload,
+                        destination,
+                        secret="s" * 64,
+                    )
+
+                self.assertEqual(result, expected)
+                self.assertEqual(
+                    deadlines,
+                    [
+                        retirement.FAILURE_BUNDLE_DEADLINE_SECONDS,
+                        retirement.FAILURE_CLEANUP_DEADLINE_SECONDS,
+                    ],
+                )
+                self.assertEqual(seal.call_args.kwargs["timeout"], 120)
+                cleanup.assert_called_once_with(payload, destination)
+
     def test_settings_replace_failure_is_treated_as_possible_mutation(self):
         source = self.helper
         assignment = source.index("settings_may_have_changed = True")
@@ -544,6 +691,168 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
         )
         positions = [body.index(value) for value in ordered]
         self.assertEqual(positions, sorted(positions))
+
+    def test_post_settings_failure_rolls_back_runtime_and_cluster_before_failed_bundle_seal(self):
+        inventory = empty_inventory()
+        state = {
+            "cronjobs": {},
+            "writerDeployments": {},
+            "dataDeployments": {},
+            "writerStatefulsets": {},
+            "dataStatefulsets": {},
+            "auxiliaryDeployments": [],
+            "writerPods": [],
+            "dataPods": [],
+        }
+        baseline = {
+            "kubernetesTotal": 1,
+            "kubernetesRunning": 1,
+            "nonKubernetes": {},
+            "volumes": [],
+            "networks": {},
+        }
+        order = []
+
+        class Cluster:
+            def ensure_exact_target(self):
+                return inventory["namespaceManifest"]
+
+        class Desktop:
+            def __init__(self):
+                self.starts = 0
+
+            def ensure_ready(self):
+                return None
+
+            def inventory(self):
+                return baseline
+
+            def stop(self):
+                return "test-stop"
+
+            def start(self):
+                self.starts += 1
+                if self.starts == 2:
+                    order.append("docker-start")
+
+            def stop_if_running(self):
+                order.append("docker-stop")
+
+            def wait_for_no_running_kubernetes(self):
+                raise retirement.RetirementError("synthetic post-settings failure")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings_path = root / "settings-store.json"
+            settings_path.write_text(
+                json.dumps({"KubernetesEnabled": True}), encoding="utf-8"
+            )
+            docker_raw = root / "Docker.raw"
+            docker_raw.write_bytes(b"raw")
+            destination = root / "retirement-test"
+            destination.mkdir(mode=0o700)
+            settings = retirement.SettingsTarget(
+                settings_path, "KubernetesEnabled", True
+            )
+            disabled_settings = retirement.SettingsTarget(
+                settings_path, "KubernetesEnabled", False
+            )
+
+            def create_staging(*_args, **_kwargs):
+                payload = destination / "private-staging"
+                payload.mkdir(mode=0o700)
+                return payload
+
+            def restore_cluster(*_args, **_kwargs):
+                order.append("cluster-restore")
+
+            seal_calls = 0
+
+            def seal_then_fail_failure_bundle(*_args, **_kwargs):
+                nonlocal seal_calls
+                seal_calls += 1
+                if seal_calls == 2:
+                    order.append("failure-bundle")
+                    raise retirement.RetirementError("synthetic failure-bundle seal failure")
+
+            def restore_raw(*_args, **_kwargs):
+                order.append("raw-restore")
+
+            def restore_settings(*_args, **_kwargs):
+                order.append("settings-restore")
+
+            cluster = Cluster()
+            original_ensure_exact_target = cluster.ensure_exact_target
+
+            def ensure_exact_target_during_rollback():
+                order.append("cluster-target")
+                return original_ensure_exact_target()
+
+            cluster.ensure_exact_target = ensure_exact_target_during_rollback
+
+            with mock.patch.multiple(
+                retirement,
+                collect_inventory=mock.Mock(return_value=inventory),
+                _verify_expected_report=mock.Mock(),
+                discover_settings=mock.Mock(side_effect=[settings, disabled_settings]),
+                _docker_raw_path=mock.Mock(return_value=docker_raw),
+                _require_filevault=mock.Mock(),
+                pvc_sources=mock.Mock(return_value=[]),
+                _validate_external_host_paths=mock.Mock(return_value=[]),
+                _validate_backup_preconditions=mock.Mock(return_value={}),
+                build_preflight_report=mock.Mock(return_value={"ready": True}),
+                _ensure_keychain_recovery_key=mock.Mock(),
+                _prepare_backup_directory=mock.Mock(return_value=destination),
+                workload_state=mock.Mock(return_value=state),
+                _create_private_staging=mock.Mock(side_effect=create_staging),
+                _revalidate_before_mutation=mock.Mock(return_value=inventory),
+                database_targets=mock.Mock(return_value=[]),
+                _suspend_cronjobs=mock.Mock(),
+                _require_no_active_jobs_after_cron_suspend=mock.Mock(),
+                _scale_writers=mock.Mock(),
+                _wait_for_writers_scaled_down=mock.Mock(),
+                _backup_databases=mock.Mock(return_value=[]),
+                _scale_data_workloads=mock.Mock(),
+                _wait_for_all_scaled_down=mock.Mock(),
+                _archive_quiesced_host_paths=mock.Mock(return_value=[]),
+                _write_checksum_manifest=mock.Mock(),
+                _clone_docker_raw=mock.Mock(
+                    return_value={"bytes": 3, "hmacSha256": "hmac"}
+                ),
+                atomically_set_kubernetes_enabled=mock.Mock(),
+                _restore_docker_raw_clone=mock.Mock(side_effect=restore_raw),
+                atomically_restore_bytes=mock.Mock(side_effect=restore_settings),
+                _restore_cluster_state=mock.Mock(side_effect=restore_cluster),
+                _seal_payload=mock.Mock(side_effect=seal_then_fail_failure_bundle),
+                _protect_rollback_from_additional_signals=mock.Mock(),
+            ):
+                with self.assertRaisesRegex(
+                    retirement.RetirementError, "rollback completed"
+                ):
+                    retirement.retire(
+                        cluster,
+                        Desktop(),
+                        retirement.CommandRunner(),
+                        home=root,
+                        backup_root=root / "backups",
+                        run_key="test",
+                        confirmation=retirement.CONFIRMATION,
+                        expected_report=root / "expected.json",
+                        expected_digest="a" * 64,
+                        encryption_secret="s" * 64,
+                    )
+        self.assertEqual(
+            order,
+            [
+                "docker-stop",
+                "raw-restore",
+                "settings-restore",
+                "docker-start",
+                "cluster-target",
+                "cluster-restore",
+                "failure-bundle",
+            ],
+        )
 
     def test_active_job_after_cron_suspend_blocks_writer_scaling(self):
         class Cluster:
@@ -711,6 +1020,417 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
         self.assertIn(
             "A Kubernetes command targeted an unapproved namespace", self.helper
         )
+        self.assertIn('"--request-timeout=20s"', self.helper)
+
+    def test_every_popen_uses_a_new_session_and_no_subprocess_run_remains(self):
+        tree = ast.parse(self.helper)
+        popen_calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "subprocess"
+            and node.func.attr == "Popen"
+        ]
+        self.assertGreaterEqual(len(popen_calls), 7)
+        for call in popen_calls:
+            with self.subTest(line=call.lineno):
+                keyword = next(
+                    (item for item in call.keywords if item.arg == "start_new_session"),
+                    None,
+                )
+                self.assertIsNotNone(keyword)
+                self.assertIsInstance(keyword.value, ast.Constant)
+                self.assertIs(keyword.value.value, True)
+        self.assertNotIn("subprocess.run(", self.helper)
+        self.assertIn("os.killpg(process_id, signal.SIGKILL)", self.helper)
+
+    @unittest.skipUnless(hasattr(os, "killpg"), "requires POSIX process groups")
+    def test_command_timeout_kills_descendant_that_holds_output_pipe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pid_path = Path(directory) / "descendant.pid"
+            parent_code = (
+                "import pathlib,subprocess,sys; "
+                "child=subprocess.Popen([sys.executable,'-c',"
+                "'import time; time.sleep(30)']); "
+                "pathlib.Path(sys.argv[1]).write_text(str(child.pid))"
+            )
+            started = time.monotonic()
+            with self.assertRaisesRegex(retirement.RetirementError, "timed out"):
+                retirement.CommandRunner().run(
+                    (sys.executable, "-c", parent_code, str(pid_path)), timeout=1
+                )
+            self.assertLess(time.monotonic() - started, 5)
+            descendant_pid = int(pid_path.read_text(encoding="utf-8"))
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(descendant_pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
+            else:
+                try:
+                    os.kill(descendant_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                self.fail("descendant survived guarded command timeout")
+
+    @unittest.skipUnless(hasattr(os, "killpg"), "requires POSIX process groups")
+    def test_check_false_nonzero_still_kills_background_descendant(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pid_path = Path(directory) / "descendant.pid"
+            parent_code = (
+                "import pathlib,subprocess,sys; "
+                "child=subprocess.Popen([sys.executable,'-c',"
+                "'import time; time.sleep(30)'],stdin=subprocess.DEVNULL,"
+                "stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); "
+                "pathlib.Path(sys.argv[1]).write_text(str(child.pid)); "
+                "raise SystemExit(7)"
+            )
+            result = retirement.CommandRunner().run(
+                (sys.executable, "-c", parent_code, str(pid_path)),
+                timeout=5,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 7)
+            descendant_pid = int(pid_path.read_text(encoding="utf-8"))
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(descendant_pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
+            else:
+                try:
+                    os.kill(descendant_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                self.fail("nonzero command left a background descendant")
+
+    @unittest.skipUnless(hasattr(os, "killpg"), "requires POSIX process groups")
+    def test_successful_command_kills_pipe_detached_background_descendant(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pid_path = Path(directory) / "descendant.pid"
+            parent_code = (
+                "import pathlib,subprocess,sys; "
+                "child=subprocess.Popen([sys.executable,'-c',"
+                "'import time; time.sleep(30)'],stdin=subprocess.DEVNULL,"
+                "stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); "
+                "pathlib.Path(sys.argv[1]).write_text(str(child.pid))"
+            )
+            result = retirement.CommandRunner().run(
+                (sys.executable, "-c", parent_code, str(pid_path)), timeout=5
+            )
+            self.assertEqual(result.returncode, 0)
+            descendant_pid = int(pid_path.read_text(encoding="utf-8"))
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(descendant_pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
+            else:
+                try:
+                    os.kill(descendant_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                self.fail("successful command left a background descendant")
+
+    def test_command_base_exception_kills_and_reaps_child_group(self):
+        real_popen = subprocess.Popen
+        children = []
+
+        def interrupted_popen(*arguments, **kwargs):
+            child = real_popen(*arguments, **kwargs)
+            children.append(child)
+
+            def interrupt(*_args, **_kwargs):
+                raise retirement.RetirementError("synthetic command interruption")
+
+            child.communicate = interrupt
+            return child
+
+        with mock.patch.object(
+            retirement.subprocess, "Popen", side_effect=interrupted_popen
+        ):
+            with self.assertRaisesRegex(
+                retirement.RetirementError, "synthetic command interruption"
+            ):
+                retirement.CommandRunner().run(
+                    (sys.executable, "-c", "import time; time.sleep(30)"),
+                    timeout=30,
+                )
+        self.assertEqual(len(children), 1)
+        self.assertIsNotNone(children[0].returncode)
+
+    def test_preflight_deadline_progress_and_cli_scope_are_secret_free(self):
+        self.assertEqual(retirement.PREFLIGHT_DEADLINE_SECONDS, 12 * 60)
+        alarms = []
+        handlers = []
+        prior = object()
+        with mock.patch.object(
+            retirement.signal, "getsignal", return_value=prior
+        ), mock.patch.object(
+            retirement.signal,
+            "signal",
+            side_effect=lambda signum, handler: handlers.append((signum, handler)),
+        ), mock.patch.object(
+            retirement.signal,
+            "alarm",
+            side_effect=lambda seconds: alarms.append(seconds),
+        ):
+            with retirement._preflight_deadline():
+                pass
+        self.assertEqual(alarms, [12 * 60, 0])
+        self.assertEqual(handlers[0], (signal.SIGALRM, retirement._handle_preflight_deadline))
+        self.assertEqual(handlers[-1], (signal.SIGALRM, prior))
+
+        progress_output = io.StringIO()
+        with mock.patch.object(retirement.time, "monotonic", return_value=125.9), redirect_stderr(
+            progress_output
+        ):
+            retirement._report_preflight_progress("kubernetes-audit", 100.0)
+        self.assertEqual(
+            progress_output.getvalue(),
+            "preflight stage=kubernetes-audit elapsed_seconds=25\n",
+        )
+        for forbidden in ("kubectl", "/Users/", "security", "secret", "stdout", "stderr"):
+            self.assertNotIn(forbidden, progress_output.getvalue())
+
+        main = self.helper[self.helper.index("def main(") :]
+        preflight_branch = main[
+            main.index('if arguments.command == "preflight":') : main.index(
+                "        else:", main.index('if arguments.command == "preflight":')
+            )
+        ]
+        retire_branch = main[main.index("        else:") :]
+        self.assertLess(
+            preflight_branch.index("_install_termination_guard()"),
+            preflight_branch.index("with _preflight_deadline():"),
+        )
+        self.assertNotIn("_preflight_deadline", retire_branch)
+
+    @unittest.skipUnless(hasattr(os, "killpg"), "requires POSIX process groups")
+    def test_preflight_alarm_kills_active_command_group(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pid_path = Path(directory) / "descendant.pid"
+            parent_code = (
+                "import pathlib,subprocess,sys; "
+                "child=subprocess.Popen([sys.executable,'-c',"
+                "'import time; time.sleep(30)']); "
+                "pathlib.Path(sys.argv[1]).write_text(str(child.pid))"
+            )
+            with self.assertRaisesRegex(retirement.RetirementError, "deadline"):
+                with retirement._preflight_deadline(1):
+                    retirement.CommandRunner().run(
+                        (sys.executable, "-c", parent_code, str(pid_path)),
+                        timeout=30,
+                    )
+            descendant_pid = int(pid_path.read_text(encoding="utf-8"))
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(descendant_pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
+            else:
+                try:
+                    os.kill(descendant_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                self.fail("preflight alarm left a background descendant")
+
+    def test_preflight_deadline_failure_writes_secret_free_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "report.json"
+            with mock.patch.object(retirement, "_ensure_host"), mock.patch.object(
+                retirement, "_install_termination_guard"
+            ), mock.patch.object(
+                retirement, "_preflight_deadline", return_value=nullcontext()
+            ), mock.patch.object(
+                retirement,
+                "preflight",
+                side_effect=retirement.RetirementError(
+                    "Read-only preflight exceeded its guarded deadline."
+                ),
+            ), redirect_stderr(io.StringIO()):
+                status = retirement.main(
+                    ["preflight", "--report", str(report)]
+                )
+            self.assertEqual(status, 1)
+            document = json.loads(report.read_text(encoding="utf-8"))
+            self.assertEqual(document["mode"], "preflight")
+            self.assertEqual(document["status"], "failed")
+            self.assertIn("deadline", document["error"])
+            self.assertNotIn("secret", report.read_text(encoding="utf-8").lower())
+
+    def test_inventory_uses_fixed_batches_independent_of_pvc_count(self):
+        class BatchCluster:
+            def __init__(self):
+                self.calls = []
+
+            def ensure_exact_target(self):
+                return item("Namespace", "buddystudy", namespace=None)
+
+            def list_resource_batch(self, resource_kinds, **kwargs):
+                self.calls.append((dict(resource_kinds), dict(kwargs)))
+                documents = {
+                    resource: {"apiVersion": "v1", "kind": "List", "items": []}
+                    for resource in resource_kinds
+                }
+                if resource_kinds == retirement.NAMESPACED_RESOURCE_KINDS:
+                    documents["persistentvolumeclaims"]["items"] = [
+                        item(
+                            "PersistentVolumeClaim",
+                            f"claim-{index}",
+                            spec_value={"volumeName": f"pv-{index}"},
+                        )
+                        for index in range(6)
+                    ]
+                elif resource_kinds == {"persistentvolumes": "PersistentVolume"}:
+                    documents["persistentvolumes"]["items"] = [
+                        item("PersistentVolume", f"pv-{index}", namespace=None)
+                        for index in range(6)
+                    ]
+                return documents
+
+        cluster = BatchCluster()
+        progress = []
+        inventory = retirement.collect_inventory(cluster, progress=progress.append)
+        self.assertEqual(len(inventory["pvs"]), 6)
+        self.assertEqual(len(cluster.calls), 3)
+        self.assertEqual(
+            progress,
+            [
+                "kubernetes-target",
+                "kubernetes-resources",
+                "kubernetes-storage",
+                "kubernetes-audit",
+            ],
+        )
+        self.assertEqual(cluster.calls[1][1], {"cluster_scoped": True})
+        self.assertEqual(cluster.calls[2][1], {"all_namespaces": True})
+
+    def test_batched_mixed_kinds_are_grouped_and_sorted(self):
+        class Runner:
+            def run(self, arguments, **_kwargs):
+                document = {
+                    "apiVersion": "v1",
+                    "kind": "List",
+                    "items": [
+                        item("Service", "zeta"),
+                        item("ConfigMap", "alpha"),
+                        item("Service", "alpha"),
+                    ],
+                }
+                return subprocess.CompletedProcess(
+                    arguments, 0, json.dumps(document).encode("utf-8"), b""
+                )
+
+        runtime = retirement.KubernetesRuntime(Runner())
+        grouped = runtime.list_resource_batch(
+            {"services": "Service", "configmaps": "ConfigMap"}
+        )
+        self.assertEqual(
+            [entry["metadata"]["name"] for entry in grouped["services"]["items"]],
+            ["alpha", "zeta"],
+        )
+        self.assertEqual(
+            [entry["metadata"]["name"] for entry in grouped["configmaps"]["items"]],
+            ["alpha"],
+        )
+
+    def test_missing_or_duplicate_batched_pv_fails_closed(self):
+        class PvCluster:
+            def __init__(self, pvs):
+                self.pvs = pvs
+
+            def ensure_exact_target(self):
+                return item("Namespace", "buddystudy", namespace=None)
+
+            def list_resource_batch(self, resource_kinds, **_kwargs):
+                documents = {
+                    resource: {"apiVersion": "v1", "kind": "List", "items": []}
+                    for resource in resource_kinds
+                }
+                if resource_kinds == retirement.NAMESPACED_RESOURCE_KINDS:
+                    documents["persistentvolumeclaims"]["items"] = [
+                        item(
+                            "PersistentVolumeClaim",
+                            "claim",
+                            spec_value={"volumeName": "pv-one"},
+                        )
+                    ]
+                elif resource_kinds == {"persistentvolumes": "PersistentVolume"}:
+                    documents["persistentvolumes"]["items"] = self.pvs
+                return documents
+
+        with self.assertRaisesRegex(retirement.RetirementError, "unavailable"):
+            retirement.collect_inventory(PvCluster([]))
+        duplicate = item("PersistentVolume", "pv-one", namespace=None)
+        with self.assertRaisesRegex(retirement.RetirementError, "ambiguous"):
+            retirement.collect_inventory(PvCluster([duplicate, copy.deepcopy(duplicate)]))
+
+    def test_external_hostpath_capacity_is_measured_in_one_bounded_batch(self):
+        class Runner:
+            def __init__(self):
+                self.calls = []
+
+            def run(self, arguments, **kwargs):
+                self.calls.append((tuple(arguments), dict(kwargs)))
+                if arguments[0] == "diskutil":
+                    return subprocess.CompletedProcess(
+                        arguments, 0, b"File System Personality: APFS\n", b""
+                    )
+                if arguments[0] == "du":
+                    return subprocess.CompletedProcess(
+                        arguments,
+                        0,
+                        b"4\tfirst\n8\tsecond\n",
+                        b"",
+                    )
+                raise AssertionError("unexpected command")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "Docker.raw"
+            source.write_bytes(b"raw")
+            external_paths = [root / "first", root / "second"]
+            for path in external_paths:
+                path.mkdir()
+            runner = Runner()
+            with mock.patch.object(
+                retirement, "_reject_symlink_components"
+            ), mock.patch.object(
+                retirement.shutil,
+                "disk_usage",
+                return_value=mock.Mock(free=100 * 1024**3),
+            ):
+                result = retirement._validate_backup_preconditions(
+                    runner,
+                    source,
+                    root / "backups",
+                    home=root / "home",
+                    external_paths=external_paths,
+                )
+
+        du_calls = [call for call in runner.calls if call[0][0] == "du"]
+        self.assertEqual(len(du_calls), 1)
+        self.assertEqual(
+            du_calls[0][0],
+            ("du", "-sk", *(str(path) for path in external_paths)),
+        )
+        self.assertEqual(du_calls[0][1]["timeout"], 600)
+        self.assertEqual(result["externalHostPathBytes"], 12 * 1024)
+        self.assertEqual(
+            result["requiredFreeBytes"],
+            retirement.MINIMUM_BACKUP_FREE_BYTES + 24 * 1024,
+        )
 
     def test_partial_private_staging_is_removed_if_manifest_backup_fails(self):
         inventory = empty_inventory()
@@ -830,9 +1550,17 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
             "inventoryDigest": "a" * 64,
             "workloadIdentities": [],
             "pvcIdentities": [],
+            "backupCapacity": {
+                "availableFreeBytes": 30,
+                "requiredFreeBytes": 20,
+                "externalHostPathBytes": 10,
+            },
+            "preflightDeadlineSeconds": 720,
         }
         summary = retirement._render_summary(report, "success")
         self.assertIn("Desired-state digest", summary)
+        self.assertIn("`30` available / `20` required", summary)
+        self.assertIn("Hard preflight deadline: `720` seconds", summary)
         self.assertNotIn("data:", summary)
         self.assertNotIn("stringData:", summary)
 

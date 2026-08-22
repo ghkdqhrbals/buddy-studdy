@@ -330,7 +330,7 @@ stops Desktop, preserves that failed-current Docker.raw, restores the verified
 APFS clone to the exact original Docker.raw path, restores the byte-for-byte
 settings file, restarts Desktop, and restores recorded replicas and CronJob
 suspend values. A failed rollback keeps every recovery copy and reports only
-safe paths/status. Forced process termination is not used.
+safe paths/status. Docker Desktop itself is never force-killed.
 
 Keep `MACBOOKAIR_K8S_RETIREMENT_BACKUP_KEY` available for recovery. Before any
 workload is changed, apply stores the same value in the Air login Keychain under
@@ -352,11 +352,27 @@ PV, Docker volume, container, or network, or runs a prune. It performs no HTTP,
 database-health, or container-health gate. The logical dump and RDB commands
 are backup operations after writers stop, not readiness checks.
 
-The Actions job allows six hours while each logical dump, hostPath archive,
+The read-only run has a 12-minute helper deadline inside a 15-minute Actions
+watchdog. Kubernetes inventory uses three bounded bulk-list calls, every
+`kubectl` request has a 20-second API timeout, and all external hostPaths are
+measured by one bounded `du` process. Progress output contains only a fixed
+non-sensitive stage label and elapsed seconds—never resource names, paths,
+arguments, environment values, command output, or counts. Workflow steps use
+`exec` so cancellation reaches the helper directly; each child command or
+pipeline runs in its own process group, which is killed and reaped on timeout
+or interruption so descendants cannot keep an output pipe open. The 12-minute
+deadline is installed only for the standalone preflight command and is removed
+before exit; it is never shared with apply or rollback.
+
+The apply job allows six hours while each logical dump, hostPath archive,
 bundle seal, and APFS clone has a shorter bounded timeout, leaving rollback
-time. SIGTERM and SIGINT request the same guarded rollback path; once rollback
-begins, additional termination signals are ignored so the verified raw image,
-settings, and workload state can be restored.
+time. SIGTERM and SIGINT request the guarded rollback path. Runtime image,
+settings, and workload restoration always run before any failed plaintext
+staging is processed. Only after rollback does the helper make a best-effort
+failed-bundle seal under a three-minute outer bound and 120-second seal bound;
+an unsuccessful seal gets a separately bounded 30-second private-staging
+cleanup attempt. These backup-finalization results cannot mask or delay the
+reported rollback result.
 
 ### Legacy TestZone component log migration
 

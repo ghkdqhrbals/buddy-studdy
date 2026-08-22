@@ -164,9 +164,15 @@ deployment.
   read-back-verified copy in the Air login Keychain before any workload is
   changed. External hostPath disappearance/symlinks and insufficient space for
   a 12 GiB base reserve plus staging/ciphertext coexistence fail closed. The
-  six-hour Actions envelope leaves rollback room around shorter operation
-  timeouts, and termination signals enter the guarded rollback path. The module
-  never resets Desktop, force-kills it,
+  read-only command uses three Kubernetes inventory batches, one external-path
+  size batch, 20-second API request timeouts, a 12-minute internal deadline,
+  and a 15-minute Actions watchdog. Its fixed progress stages expose elapsed
+  seconds only. Workflow `exec` forwarding plus isolated child process groups
+  ensure timeout/cancellation kills and reaps pipe-holding descendants. That
+  deadline is preflight-only. The apply path retains a six-hour Actions
+  envelope; termination enters guarded rollback, and Docker/raw/settings plus
+  cluster-state restoration always precede the separately bounded best-effort
+  failure-bundle seal/cleanup. The module never resets Desktop, force-kills it,
   removes or prunes containers/networks/volumes, deletes Kubernetes storage or
   namespaces, uploads backup artifacts, prints secret payloads, or performs a
   runtime health gate.

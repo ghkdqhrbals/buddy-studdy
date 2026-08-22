@@ -24,9 +24,10 @@ import tarfile
 import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 
 KUBE_CONTEXT = "docker-desktop"
@@ -45,31 +46,59 @@ DOCKER_DATA_RELATIVE_PATH = Path("Library/Containers/com.docker.docker/Data")
 DEFAULT_BACKUP_RELATIVE_PATH = Path(
     "Library/Application Support/BuddyStudy/KubernetesRetirementBackups"
 )
-NAMESPACED_RESOURCES = (
-    "deployments.apps",
-    "statefulsets.apps",
-    "daemonsets.apps",
-    "cronjobs.batch",
-    "services",
-    "configmaps",
-    "secrets",
-    "serviceaccounts",
-    "roles.rbac.authorization.k8s.io",
-    "rolebindings.rbac.authorization.k8s.io",
-    "persistentvolumeclaims",
-)
+NAMESPACED_RESOURCE_KINDS = {
+    "deployments.apps": "Deployment",
+    "statefulsets.apps": "StatefulSet",
+    "daemonsets.apps": "DaemonSet",
+    "cronjobs.batch": "CronJob",
+    "services": "Service",
+    "configmaps": "ConfigMap",
+    "secrets": "Secret",
+    "serviceaccounts": "ServiceAccount",
+    "roles.rbac.authorization.k8s.io": "Role",
+    "rolebindings.rbac.authorization.k8s.io": "RoleBinding",
+    "persistentvolumeclaims": "PersistentVolumeClaim",
+}
+NAMESPACED_RESOURCES = tuple(NAMESPACED_RESOURCE_KINDS)
 WORKLOAD_RESOURCES = (
     "deployments.apps",
     "statefulsets.apps",
     "daemonsets.apps",
     "cronjobs.batch",
 )
+AUDIT_RESOURCE_KINDS = {
+    **{
+        resource: NAMESPACED_RESOURCE_KINDS[resource]
+        for resource in WORKLOAD_RESOURCES
+    },
+    "replicationcontrollers": "ReplicationController",
+    "jobs.batch": "Job",
+    "replicasets.apps": "ReplicaSet",
+    "pods": "Pod",
+}
 DATABASE_IMAGE_PATTERNS = {
     "postgresql": re.compile(r"(?:^|[/:-])postgres(?:$|[:@-])", re.IGNORECASE),
     "mysql": re.compile(r"(?:^|[/:-])(?:mysql|mariadb)(?:$|[:@-])", re.IGNORECASE),
     "redis": re.compile(r"(?:^|[/:-])redis(?:$|[:@-])", re.IGNORECASE),
 }
 MINIMUM_BACKUP_FREE_BYTES = 12 * 1024 * 1024 * 1024
+PREFLIGHT_DEADLINE_SECONDS = 12 * 60
+FAILURE_BUNDLE_DEADLINE_SECONDS = 3 * 60
+FAILURE_CLEANUP_DEADLINE_SECONDS = 30
+PREFLIGHT_PROGRESS_STAGES = frozenset(
+    (
+        "start",
+        "docker-runtime",
+        "kubernetes-target",
+        "kubernetes-resources",
+        "kubernetes-storage",
+        "kubernetes-audit",
+        "desktop-settings",
+        "backup-preconditions",
+        "docker-inventory",
+        "complete",
+    )
+)
 KEYCHAIN_SERVICE = "BuddyStudy MacBook Air Kubernetes Retirement Backup"
 KEYCHAIN_ACCOUNT = "buddystudy-kubernetes-retirement"
 
@@ -96,6 +125,51 @@ def _protect_rollback_from_additional_signals() -> None:
     if _SIGNAL_GUARD_ACTIVE:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+
+def _handle_preflight_deadline(_signum: int, _frame: Any) -> None:
+    raise RetirementError("Read-only preflight exceeded its guarded deadline.")
+
+
+@contextmanager
+def _preflight_deadline(
+    seconds: int = PREFLIGHT_DEADLINE_SECONDS,
+) -> Iterator[None]:
+    previous = signal.getsignal(signal.SIGALRM)
+    signal.signal(signal.SIGALRM, _handle_preflight_deadline)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+def _report_preflight_progress(stage: str, started_at: float) -> None:
+    if stage not in PREFLIGHT_PROGRESS_STAGES:
+        raise RetirementError("An invalid preflight progress stage was requested.")
+    elapsed_seconds = max(0, int(time.monotonic() - started_at))
+    print(
+        f"preflight stage={stage} elapsed_seconds={elapsed_seconds}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+def _handle_failure_backup_deadline(_signum: int, _frame: Any) -> None:
+    raise RetirementError("Failure-backup processing exceeded its guarded deadline.")
+
+
+@contextmanager
+def _failure_backup_deadline(seconds: int) -> Iterator[None]:
+    previous = signal.getsignal(signal.SIGALRM)
+    signal.signal(signal.SIGALRM, _handle_failure_backup_deadline)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
 
 
 def _safe_name(value: str) -> str:
@@ -130,25 +204,69 @@ def _write_json(path: Path, value: Any) -> None:
     )
 
 
-def _terminate_children(*processes: subprocess.Popen[Any] | None) -> None:
+def _close_process_pipes(*processes: subprocess.Popen[Any] | None) -> None:
     for process in processes:
         if process is None:
             continue
+        for attribute in ("stdin", "stdout", "stderr"):
+            stream = getattr(process, attribute, None)
+            if stream is not None:
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+
+
+def _terminate_process_groups(
+    *processes: subprocess.Popen[Any] | None,
+    close_pipes: bool = True,
+) -> None:
+    unique_processes = []
+    seen: set[int] = set()
+    for process in processes:
+        if process is None or id(process) in seen:
+            continue
+        seen.add(id(process))
+        unique_processes.append(process)
+
+    for process in unique_processes:
+        group_signalled = False
+        process_id = getattr(process, "pid", None)
+        if (
+            isinstance(process_id, int)
+            and process_id > 1
+            and process_id != os.getpgrp()
+        ):
+            try:
+                os.killpg(process_id, signal.SIGKILL)
+                group_signalled = True
+            except ProcessLookupError:
+                pass
+            except OSError:
+                pass
         try:
             running = process.poll() is None
         except (OSError, subprocess.SubprocessError):
             running = True
-        if running:
+        if running and not group_signalled:
             try:
                 process.kill()
             except OSError:
                 pass
-    for process in processes:
-        if process is not None:
+
+    for process in unique_processes:
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
             try:
-                process.wait(timeout=30)
+                process.kill()
+                process.wait(timeout=2)
             except (OSError, subprocess.SubprocessError):
                 pass
+        except (OSError, subprocess.SubprocessError):
+            pass
+    if close_pipes:
+        _close_process_pipes(*unique_processes)
 
 
 def _read_json(path: Path, description: str) -> Any:
@@ -177,17 +295,35 @@ class CommandRunner:
         check: bool = True,
         input_bytes: bytes | None = None,
     ) -> subprocess.CompletedProcess[bytes]:
+        process: subprocess.Popen[bytes] | None = None
         try:
-            result = subprocess.run(
+            process = subprocess.Popen(
                 list(arguments),
-                input=input_bytes,
+                stdin=subprocess.PIPE if input_bytes is not None else subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                timeout=timeout,
-                check=False,
+                start_new_session=True,
             )
+            try:
+                stdout, stderr = process.communicate(
+                    input=input_bytes, timeout=timeout
+                )
+            except subprocess.TimeoutExpired as error:
+                _terminate_process_groups(process)
+                raise RetirementError("A guarded local command timed out.") from error
+            result = subprocess.CompletedProcess(
+                list(arguments), process.returncode, stdout, stderr
+            )
+            # A command is synchronous by contract. Kill the isolated group even
+            # after a clean parent exit so an unexpected pipe-detached descendant
+            # cannot outlive the guarded operation.
+            _terminate_process_groups(process)
         except (OSError, subprocess.SubprocessError) as error:
+            _terminate_process_groups(process)
             raise RetirementError("A guarded local command could not be executed.") from error
+        except BaseException:
+            _terminate_process_groups(process)
+            raise
         if check and result.returncode != 0:
             raise RetirementError("A guarded local command failed; output was suppressed.")
         return result
@@ -208,14 +344,14 @@ class CommandRunner:
                 list(arguments),
                 stdout=subprocess.PIPE,
                 stderr=stderr_file,
+                start_new_session=True,
             )
             timed_out = threading.Event()
 
             def terminate_on_timeout() -> None:
                 timed_out.set()
                 try:
-                    if process is not None and process.poll() is None:
-                        process.kill()
+                    _terminate_process_groups(process, close_pipes=False)
                 except OSError:
                     pass
 
@@ -228,16 +364,17 @@ class CommandRunner:
             ) as compressed:
                 shutil.copyfileobj(process.stdout, compressed, length=1024 * 1024)
             return_code = process.wait()
+            _terminate_process_groups(process)
             if timed_out.is_set():
                 raise RetirementError("A guarded backup command timed out.")
             if return_code != 0:
                 raise RetirementError("A guarded backup command failed; output was suppressed.")
             os.chmod(destination, 0o600)
         except (OSError, subprocess.SubprocessError) as error:
-            _terminate_children(process)
+            _terminate_process_groups(process)
             raise RetirementError("A guarded backup command could not be executed.") from error
         except BaseException:
-            _terminate_children(process)
+            _terminate_process_groups(process)
             raise
         finally:
             if timer is not None:
@@ -257,14 +394,18 @@ class CommandRunner:
         try:
             with destination.open("wb") as output:
                 process = subprocess.Popen(
-                    list(arguments), stdout=output, stderr=stderr_file
+                    list(arguments),
+                    stdin=subprocess.DEVNULL,
+                    stdout=output,
+                    stderr=stderr_file,
+                    start_new_session=True,
                 )
                 try:
                     return_code = process.wait(timeout=timeout)
                 except subprocess.TimeoutExpired as error:
-                    process.kill()
-                    process.wait()
+                    _terminate_process_groups(process)
                     raise RetirementError("A guarded archive command timed out.") from error
+                _terminate_process_groups(process)
                 if return_code != 0:
                     raise RetirementError(
                         "A guarded archive command failed; output was suppressed."
@@ -273,10 +414,10 @@ class CommandRunner:
                 os.fsync(output.fileno())
             os.chmod(destination, 0o600)
         except (OSError, subprocess.SubprocessError) as error:
-            _terminate_children(process)
+            _terminate_process_groups(process)
             raise RetirementError("A guarded archive command could not be executed.") from error
         except BaseException:
-            _terminate_children(process)
+            _terminate_process_groups(process)
             raise
         finally:
             stderr_file.close()
@@ -293,7 +434,12 @@ class KubernetesRuntime:
         namespaced: bool = True,
         namespace: str = NAMESPACE,
     ) -> list[str]:
-        command = ["kubectl", "--context", KUBE_CONTEXT]
+        command = [
+            "kubectl",
+            "--context",
+            KUBE_CONTEXT,
+            "--request-timeout=20s",
+        ]
         if namespaced:
             if namespace not in (NAMESPACE, "default"):
                 raise RetirementError("A Kubernetes command targeted an unapproved namespace.")
@@ -393,6 +539,58 @@ class KubernetesRuntime:
         if not isinstance(document, dict) or not isinstance(document.get("items"), list):
             raise RetirementError(f"Kubernetes returned invalid {resource} inventory.")
         return document
+
+    def list_resource_batch(
+        self,
+        resource_kinds: Mapping[str, str],
+        *,
+        all_namespaces: bool = False,
+        cluster_scoped: bool = False,
+        namespace: str = NAMESPACE,
+    ) -> dict[str, dict[str, Any]]:
+        if not resource_kinds or (all_namespaces and cluster_scoped):
+            raise RetirementError("An invalid Kubernetes resource batch was requested.")
+        expected_kinds = set(resource_kinds.values())
+        if len(expected_kinds) != len(resource_kinds):
+            raise RetirementError("A Kubernetes resource batch has ambiguous kinds.")
+        arguments = ["get", ",".join(resource_kinds)]
+        namespaced = not cluster_scoped
+        if all_namespaces:
+            arguments.append("--all-namespaces")
+            namespaced = False
+        arguments.extend(("-o", "json"))
+        document = self.json(
+            arguments,
+            namespaced=namespaced,
+            namespace=namespace,
+        )
+        if not isinstance(document, Mapping) or not isinstance(
+            document.get("items"), list
+        ):
+            raise RetirementError("Kubernetes returned an invalid batched inventory.")
+        resource_by_kind = {kind: resource for resource, kind in resource_kinds.items()}
+        grouped: dict[str, list[dict[str, Any]]] = {
+            resource: [] for resource in resource_kinds
+        }
+        for item in document["items"]:
+            if not isinstance(item, dict) or item.get("kind") not in expected_kinds:
+                raise RetirementError("Kubernetes returned an unexpected batched resource.")
+            grouped[resource_by_kind[item["kind"]]].append(item)
+        result = {}
+        for resource, items in grouped.items():
+            items.sort(
+                key=lambda item: (
+                    str(item.get("metadata", {}).get("namespace")),
+                    str(item.get("metadata", {}).get("name")),
+                    str(item.get("metadata", {}).get("uid")),
+                )
+            )
+            result[resource] = {
+                "apiVersion": "v1",
+                "kind": "List",
+                "items": items,
+            }
+        return result
 
     def get_pv(self, name: str) -> dict[str, Any]:
         document = self.json(
@@ -588,11 +786,19 @@ def inventory_digest(
     return hashlib.sha256(encoded).hexdigest()
 
 
-def collect_inventory(cluster: KubernetesRuntime) -> dict[str, Any]:
+def collect_inventory(
+    cluster: KubernetesRuntime,
+    *,
+    progress: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    def advance(stage: str) -> None:
+        if progress is not None:
+            progress(stage)
+
+    advance("kubernetes-target")
     namespace_manifest = cluster.ensure_exact_target()
-    resources = {
-        resource: cluster.list_resource(resource) for resource in NAMESPACED_RESOURCES
-    }
+    advance("kubernetes-resources")
+    resources = cluster.list_resource_batch(NAMESPACED_RESOURCE_KINDS)
     pv_names: list[str] = []
     for pvc in resources["persistentvolumeclaims"]["items"]:
         volume_name = pvc.get("spec", {}).get("volumeName")
@@ -602,12 +808,35 @@ def collect_inventory(cluster: KubernetesRuntime) -> dict[str, Any]:
         pv_names.append(volume_name)
     if len(set(pv_names)) != len(pv_names):
         raise RetirementError("Multiple PVCs unexpectedly resolve to one persistent volume.")
-    pvs = [cluster.get_pv(name) for name in sorted(pv_names)]
+    advance("kubernetes-storage")
+    pvs = []
+    if pv_names:
+        pv_document = cluster.list_resource_batch(
+            {"persistentvolumes": "PersistentVolume"}, cluster_scoped=True
+        )["persistentvolumes"]
+        pv_by_name = {}
+        for pv in pv_document["items"]:
+            name = pv.get("metadata", {}).get("name")
+            if not isinstance(name, str) or not name or name in pv_by_name:
+                raise RetirementError("Kubernetes returned ambiguous persistent volumes.")
+            pv_by_name[name] = pv
+        if any(name not in pv_by_name for name in pv_names):
+            raise RetirementError("A bound persistent volume is unavailable.")
+        pvs = [pv_by_name[name] for name in sorted(pv_names)]
 
-    foreign = cluster.list_resource(
-        ",".join((*WORKLOAD_RESOURCES, "replicationcontrollers", "jobs.batch")),
-        all_namespaces=True,
-    )["items"]
+    advance("kubernetes-audit")
+    audit_resources = cluster.list_resource_batch(
+        AUDIT_RESOURCE_KINDS, all_namespaces=True
+    )
+    foreign = [
+        item
+        for resource in (
+            *WORKLOAD_RESOURCES,
+            "replicationcontrollers",
+            "jobs.batch",
+        )
+        for item in audit_resources[resource]["items"]
+    ]
     foreign_user_workloads = []
     auxiliary_workloads = []
     active_jobs = []
@@ -661,11 +890,26 @@ def collect_inventory(cluster: KubernetesRuntime) -> dict[str, Any]:
                 }
             )
 
-    pods = cluster.list_resource("pods")
-    auxiliary_pods = cluster.list_resource("pods", namespace="default")
-    replica_sets = cluster.list_resource("replicasets.apps", all_namespaces=True)[
-        "items"
-    ]
+    all_pods = audit_resources["pods"]["items"]
+    pods = {
+        "apiVersion": "v1",
+        "kind": "List",
+        "items": [
+            pod
+            for pod in all_pods
+            if pod.get("metadata", {}).get("namespace") == NAMESPACE
+        ],
+    }
+    auxiliary_pods = {
+        "apiVersion": "v1",
+        "kind": "List",
+        "items": [
+            pod
+            for pod in all_pods
+            if pod.get("metadata", {}).get("namespace") == "default"
+        ],
+    }
+    replica_sets = audit_resources["replicasets.apps"]["items"]
     allowed_deployments = {
         (
             NAMESPACE,
@@ -713,7 +957,6 @@ def collect_inventory(cluster: KubernetesRuntime) -> dict[str, Any]:
                 }
             )
 
-    all_pods = cluster.list_resource("pods", all_namespaces=True)["items"]
     standalone_pods = []
     target_statefulsets = {
         (
@@ -1168,8 +1411,10 @@ def _seal_payload(
         with encrypted.open("wb") as output:
             tar_process = subprocess.Popen(
                 ("tar", "-C", str(payload), "-cf", "-", "."),
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=tar_stderr,
+                start_new_session=True,
             )
             assert tar_process.stdout is not None
             openssl_process = subprocess.Popen(
@@ -1188,13 +1433,15 @@ def _seal_payload(
                 stdout=output,
                 stderr=openssl_stderr,
                 env=environment,
+                start_new_session=True,
             )
             tar_process.stdout.close()
             try:
                 openssl_status = openssl_process.wait(timeout=timeout)
                 tar_status = tar_process.wait(timeout=60)
+                _terminate_process_groups(tar_process, openssl_process)
             except subprocess.TimeoutExpired as error:
-                _terminate_children(tar_process, openssl_process)
+                _terminate_process_groups(tar_process, openssl_process)
                 raise RetirementError("Encrypted backup sealing timed out.") from error
             output.flush()
             os.fsync(output.fileno())
@@ -1228,6 +1475,7 @@ def _seal_payload(
                 stdout=subprocess.PIPE,
                 stderr=decrypt_stderr,
                 env=environment,
+                start_new_session=True,
             )
             assert decrypt_process.stdout is not None
             list_process = subprocess.Popen(
@@ -1235,13 +1483,15 @@ def _seal_payload(
                 stdin=decrypt_process.stdout,
                 stdout=subprocess.DEVNULL,
                 stderr=list_stderr,
+                start_new_session=True,
             )
             decrypt_process.stdout.close()
             try:
                 list_status = list_process.wait(timeout=timeout)
                 decrypt_status = decrypt_process.wait(timeout=60)
+                _terminate_process_groups(decrypt_process, list_process)
             except subprocess.TimeoutExpired as error:
-                _terminate_children(decrypt_process, list_process)
+                _terminate_process_groups(decrypt_process, list_process)
                 raise RetirementError("Encrypted backup verification timed out.") from error
             if list_status != 0 or decrypt_status != 0:
                 raise RetirementError("Encrypted backup could not be decrypted and listed.")
@@ -1249,12 +1499,12 @@ def _seal_payload(
             decrypt_stderr.close()
             list_stderr.close()
     except (OSError, subprocess.SubprocessError) as error:
-        _terminate_children(
+        _terminate_process_groups(
             tar_process, openssl_process, decrypt_process, list_process
         )
         raise RetirementError("Encrypted backup processing failed safely.") from error
     except BaseException:
-        _terminate_children(
+        _terminate_process_groups(
             tar_process, openssl_process, decrypt_process, list_process
         )
         raise
@@ -1383,13 +1633,19 @@ def _validate_backup_preconditions(
     ):
         raise RetirementError("Retirement backup root is not on APFS.")
     external_bytes = 0
-    for path in external_paths:
-        result = runner.run(("du", "-sk", str(path)), timeout=600)
+    if external_paths:
+        result = runner.run(
+            ("du", "-sk", *(str(path) for path in external_paths)), timeout=600
+        )
+        lines = result.stdout.splitlines()
+        if len(lines) != len(external_paths):
+            raise RetirementError("Could not measure every external hostPath backup.")
         try:
-            kibibytes = int(result.stdout.split(maxsplit=1)[0])
+            external_bytes = sum(
+                int(line.split(maxsplit=1)[0]) * 1024 for line in lines
+            )
         except (ValueError, IndexError) as error:
             raise RetirementError("Could not measure an external hostPath backup.") from error
-        external_bytes += kibibytes * 1024
     required_free = MINIMUM_BACKUP_FREE_BYTES + (2 * external_bytes)
     available_free = shutil.disk_usage(existing).free
     if available_free < required_free:
@@ -1517,6 +1773,33 @@ def _create_private_staging(
     except Exception:
         _remove_private_staging(payload, destination)
         raise
+
+
+def _finalize_failed_private_staging(
+    payload: Path,
+    destination: Path,
+    *,
+    secret: str,
+) -> str | None:
+    if not payload.exists():
+        return None
+    try:
+        with _failure_backup_deadline(FAILURE_BUNDLE_DEADLINE_SECONDS):
+            _write_checksum_manifest(payload)
+            _seal_payload(
+                payload,
+                destination / "failed-retirement-backup.tar.enc",
+                secret=secret,
+                timeout=120,
+            )
+        return None
+    except Exception:
+        try:
+            with _failure_backup_deadline(FAILURE_CLEANUP_DEADLINE_SECONDS):
+                _remove_private_staging(payload, destination)
+        except Exception:
+            return "private-staging-cleanup-incomplete"
+        return "failure-bundle-unavailable"
 
 
 def _backup_databases(
@@ -2119,8 +2402,16 @@ def preflight(
     *,
     home: Path,
 ) -> dict[str, Any]:
+    started_at = time.monotonic()
+
+    def progress(stage: str) -> None:
+        _report_preflight_progress(stage, started_at)
+
+    progress("start")
+    progress("docker-runtime")
     desktop.ensure_ready()
-    inventory = collect_inventory(cluster)
+    inventory = collect_inventory(cluster, progress=progress)
+    progress("desktop-settings")
     settings = discover_settings(home)
     docker_raw = _docker_raw_path(settings, home)
     _require_filevault(desktop.runner)
@@ -2130,6 +2421,7 @@ def preflight(
         home=home,
         backup_root=home / DEFAULT_BACKUP_RELATIVE_PATH,
     )
+    progress("backup-preconditions")
     capacity = _validate_backup_preconditions(
         desktop.runner,
         docker_raw,
@@ -2137,9 +2429,12 @@ def preflight(
         home=home,
         external_paths=external_paths,
     )
+    progress("docker-inventory")
     docker = desktop.inventory()
     report = build_preflight_report(inventory, settings, docker)
     report["backupCapacity"] = capacity
+    report["preflightDeadlineSeconds"] = PREFLIGHT_DEADLINE_SECONDS
+    progress("complete")
     return report
 
 
@@ -2214,6 +2509,7 @@ def retire(
     raw_clone: dict[str, Any] | None = None
     stop_method = "not-stopped"
     rollback_failures: list[str] = []
+    failure_backup_issue: str | None = None
     try:
         payload = _create_private_staging(
             destination,
@@ -2318,20 +2614,6 @@ def retire(
         }
     except Exception as original_error:
         _protect_rollback_from_additional_signals()
-        if payload.exists():
-            try:
-                _write_checksum_manifest(payload)
-                _seal_payload(
-                    payload,
-                    destination / "failed-retirement-backup.tar.enc",
-                    secret=encryption_secret,
-                )
-            except Exception:
-                try:
-                    _remove_private_staging(payload, destination)
-                except Exception:
-                    rollback_failures.append("private-staging-cleanup")
-
         if settings_may_have_changed:
             stopped_for_rollback = False
             raw_restored = False
@@ -2390,11 +2672,26 @@ def retire(
             except Exception:
                 rollback_failures.append("workload-state")
 
+        failure_backup_issue = _finalize_failed_private_staging(
+            payload,
+            destination,
+            secret=encryption_secret,
+        )
+
         if rollback_failures:
-            raise RetirementError(
+            message = (
                 "Retirement failed and best-effort rollback was incomplete: "
                 + ", ".join(rollback_failures)
                 + f". Host backup remains at {destination}."
+            )
+            if failure_backup_issue is not None:
+                message += f" Failure-backup status: {failure_backup_issue}."
+            raise RetirementError(message) from original_error
+        if failure_backup_issue is not None:
+            raise RetirementError(
+                "Retirement failed; runtime and workload rollback completed, but "
+                f"failure-backup status is {failure_backup_issue}. "
+                f"Host backup remains at {destination}."
             ) from original_error
         if isinstance(original_error, RetirementError):
             raise
@@ -2406,6 +2703,7 @@ def retire(
 def _render_summary(report: Mapping[str, Any], status: str) -> str:
     lines = ["## Docker Desktop Kubernetes retirement", ""]
     if report.get("mode") == "preflight":
+        capacity = report.get("backupCapacity") or {}
         workload_plan = ", ".join(
             f"{item.get('namespace')}/{item.get('kind')}/{item.get('name')}"
             for item in report.get("workloadIdentities", [])
@@ -2433,6 +2731,8 @@ def _render_summary(report: Mapping[str, Any], status: str) -> str:
                 f"- Running data containers: `{sum((report.get('databaseCounts') or {}).values())}`",
                 f"- Foreign user workloads: `{report.get('foreignUserWorkloadCount', 0)}`",
                 f"- Kubernetes containers: `{report.get('kubernetesContainerCount', 0)}` total / `{report.get('runningKubernetesContainerCount', 0)}` running",
+                f"- Backup capacity: `{capacity.get('availableFreeBytes', 'unavailable')}` available / `{capacity.get('requiredFreeBytes', 'unavailable')}` required / `{capacity.get('externalHostPathBytes', 'unavailable')}` external hostPath bytes",
+                f"- Hard preflight deadline: `{report.get('preflightDeadlineSeconds', PREFLIGHT_DEADLINE_SECONDS)}` seconds",
                 "- No Kubernetes or Docker runtime state was changed.",
             )
         )
@@ -2515,7 +2815,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     desktop = DockerDesktopRuntime(runner)
     try:
         if arguments.command == "preflight":
-            report = preflight(cluster, desktop, home=home)
+            _install_termination_guard()
+            with _preflight_deadline():
+                report = preflight(cluster, desktop, home=home)
         else:
             backup_root = arguments.backup_root or home / DEFAULT_BACKUP_RELATIVE_PATH
             encryption_secret = _backup_secret_from_environment(
