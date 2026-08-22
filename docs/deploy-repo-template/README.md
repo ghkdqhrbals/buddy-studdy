@@ -218,19 +218,19 @@ runs weekly and also supports a manual dispatch. The workflow reuses the scoped
 Docker Desktop restart recovery used by MacBook Air deploys, reports `df` and
 `docker system df --verbose` before and after maintenance, then runs only
 `docker image prune -a --filter until=168h` and
-`docker builder prune --filter until=168h --force`. Docker therefore removes
+`docker builder prune -a --filter until=168h --force`. Docker therefore removes
 images created more than seven days ago only when no running or stopped
-container references them, and removes build cache only after it is more than
-seven days old.
+container references them, and removes all unused build cache only after it is
+more than seven days old.
 
-This host-capacity workflow never prunes containers, volumes, networks,
-persisted module data, or host files. Images removed by the maintenance are
-recoverable by pulling them again from their registries, and removed build
-cache is recoverable by rebuilding. Monitoring, TestZone, and RedisStreamScope
-workflows remain responsible for their own log and data retention and must not
-duplicate host-wide Docker storage reclamation. Docker daemon readiness is the
-only runtime prerequisite; the workflow does not make HTTP or container-health
-checks.
+This host-capacity workflow never prunes active/in-use build cache, containers,
+volumes, networks, persisted module data, or host files. Images removed by the
+maintenance are recoverable by pulling them again from their registries, and
+removed build cache is recoverable by rebuilding. Monitoring, TestZone, and
+RedisStreamScope workflows remain responsible for their own log and data
+retention and must not duplicate host-wide Docker storage reclamation. Docker
+daemon readiness is the only runtime prerequisite; the workflow does not make
+HTTP or container-health checks.
 
 The separate TestZone workflow creates or replaces:
 

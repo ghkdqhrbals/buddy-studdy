@@ -320,7 +320,7 @@ test("host-wide Docker storage cleanup has one bounded owner", async () => {
   );
   assert.equal(
     capacityWorkflow.match(
-      /docker builder prune --filter until=168h --force/g,
+      /docker builder prune -a --filter until=168h --force/g,
     )?.length,
     1,
   );
@@ -359,4 +359,5 @@ test("host-wide Docker storage cleanup has one bounded owner", async () => {
     capacityWorkflow,
     /removed build cache can be recreated by rebuilding/,
   );
+  assert.match(capacityWorkflow, /active\/in-use build cache/);
 });

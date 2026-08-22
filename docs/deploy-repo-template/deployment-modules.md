@@ -19,7 +19,7 @@ one workflow run just because they share a host.
 | Redis Stream operations | `Deploy RedisStreamScope on MacBook Air` | manual | MacBook Air self-hosted | RedisStreamScope runtime, persisted SQLite/config volume, production Redis connection, and attachment to the existing monitoring gateway |
 | Monitoring routing | `Deploy BuddyStudy Monitoring Routes on MacBook Air` | manual | MacBook Air self-hosted | Routingflare routes for the monitoring UI, Grafana, and RedisStreamScope |
 | TestZone execution | `Deploy BuddyStudy TestZone on MacBook Air` | `testzone-image-published`, manual | MacBook Air self-hosted | k6 runner, script/project/run storage, InfluxDB, approved disposable test components |
-| MacBook Air Docker capacity | `Maintain MacBook Air Docker Capacity` | manual, weekly | MacBook Air self-hosted | Docker daemon readiness/recovery, host and Docker capacity diagnostics, and reclamation of old unreferenced images and build cache older than seven days |
+| MacBook Air Docker capacity | `Maintain MacBook Air Docker Capacity` | manual, weekly | MacBook Air self-hosted | Docker daemon readiness/recovery, host and Docker capacity diagnostics, and reclamation of old unreferenced images and all unused build cache older than seven days |
 | Health monitor | Cloudflare Worker workflow | manual or source workflow | GitHub-hosted | Explicit diagnostic endpoint only; production scheduled checks are disabled |
 
 Explicit release tags provide a CLI-independent deployment entry point:
@@ -133,12 +133,12 @@ deployment.
   recovers Docker Desktop when its daemon is unavailable, reports host and
   Docker storage before and after maintenance, prunes only images older than
   seven days that are unreferenced by every running or stopped container, and
-  prunes only build cache older than seven days. It never prunes containers,
-  volumes, networks, TestZone artifacts, Loki data, Grafana data, incident
-  records, or host files. Removed images are recoverable by pulling them again
-  from their registries, and removed build cache is recreated by rebuilding.
-  Any data retention policy change remains owned by its module's separate
-  workflow.
+  prunes all unused build cache only after it is older than seven days. It never
+  prunes active/in-use build cache, containers, volumes, networks, TestZone
+  artifacts, Loki data, Grafana data, incident records, or host files. Removed
+  images are recoverable by pulling them again from their registries, and
+  removed build cache is recreated by rebuilding. Any data retention policy
+  change remains owned by its module's separate workflow.
 - Maintenance windows are backend application state. The authenticated
   monitoring UI writes through the backend admin API, the backend persists the
   schedule and localized notices, and then publishes the current policy to

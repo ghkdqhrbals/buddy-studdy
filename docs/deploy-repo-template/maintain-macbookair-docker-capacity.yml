@@ -98,8 +98,9 @@ jobs:
           # `docker image prune -a` excludes every image referenced by a
           # running or stopped container. The age filter further limits this
           # host-wide maintenance to images created more than seven days ago.
-          # The separate builder prune removes only build cache older than
-          # seven days. Containers, volumes, networks, persisted module data,
+          # The separate builder prune includes all unused build cache, then
+          # limits deletion to entries older than seven days. Active/in-use
+          # build cache, containers, volumes, networks, persisted module data,
           # and host files are never cleanup targets in this workflow.
           image_prune_output="$({
             run_with_timeout 180 \
@@ -107,7 +108,7 @@ jobs:
           })"
           build_cache_prune_output="$({
             run_with_timeout 180 \
-              docker builder prune --filter until=168h --force
+              docker builder prune -a --filter until=168h --force
           })"
 
           echo "Docker image prune reclaimed output:"
@@ -133,8 +134,8 @@ jobs:
             echo
             echo "- Status: maintenance submitted"
             echo "- Image scope: images older than seven days and unreferenced by every running or stopped container"
-            echo "- Build-cache scope: build cache older than seven days"
-            echo "- Untouched: containers, volumes, networks, persisted module data, and host files"
+            echo "- Build-cache scope: all unused build cache older than seven days"
+            echo "- Untouched: active/in-use build cache, containers, volumes, networks, persisted module data, and host files"
             echo "- Filesystem available before: ${available_before_kb} KiB"
             echo "- Filesystem available after: ${available_after_kb} KiB"
             echo "- Filesystem available delta: ${available_delta_kb} KiB"
