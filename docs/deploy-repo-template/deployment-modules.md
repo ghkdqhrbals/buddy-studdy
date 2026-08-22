@@ -21,6 +21,7 @@ one workflow run just because they share a host.
 | TestZone execution | `Deploy BuddyStudy TestZone on MacBook Air` | `testzone-image-published`, manual | MacBook Air self-hosted | k6 runner, script/project/run storage, InfluxDB, approved disposable test components |
 | TestZone legacy component logging | `Migrate TestZone Component Logging` | manual, one-time | MacBook Air self-hosted | Read-only audit and guarded log-driver-only recreation of the exact legacy PostgreSQL and Redis TestZone components |
 | MacBook Air Docker capacity | `Maintain MacBook Air Docker Capacity` | manual, weekly | MacBook Air self-hosted | Docker daemon readiness/recovery, host and Docker capacity diagnostics, and reclamation of old unreferenced images and all unused build cache older than seven days |
+| MacBook Air Kubernetes retirement | `Retire MacBook Air Docker Desktop Kubernetes` | manual, two-run, one-time | MacBook Air self-hosted | Read-only exact-plan audit, encrypted rollback backup, quiesced legacy workload shutdown, and Docker Desktop Kubernetes disablement only |
 | Health monitor | Cloudflare Worker workflow | manual or source workflow | GitHub-hosted | Explicit diagnostic endpoint only; production scheduled checks are disabled |
 
 Explicit release tags provide a CLI-independent deployment entry point:
@@ -140,6 +141,35 @@ deployment.
   images are recoverable by pulling them again from their registries, and
   removed build cache is recreated by rebuilding. Any data retention policy
   change remains owned by its module's separate workflow.
+- Docker Desktop Kubernetes retirement belongs only to the manual
+  `Retire MacBook Air Docker Desktop Kubernetes` workflow. Its first run is
+  read-only; a second apply run requires both the exact confirmation and the
+  independent desired-state digest. It accepts only the local
+  `docker-desktop` context, the `buddystudy` namespace, and the explicitly
+  recorded `default/buddystudy-redis-stream-coordinator` Deployment. Unknown
+  user workloads, active Jobs, standalone Pods, ReplicationControllers, and
+  DaemonSets fail closed. Apply repeats inventory, digest, blocker, settings,
+  Docker.raw-path, and unrelated Docker identity checks immediately before
+  mutation. The apply order is CronJob suspend, an immediate active-Job race
+  check, writer scale down, logical PostgreSQL/MySQL backups and a Redis
+  `SAVE` RDB that passes remote `redis-check-rdb`, data-workload scale down,
+  quiesced external hostPath archives, encrypted/HMAC bundle sealing, graceful
+  Desktop stop, and a verified FileVault-protected APFS Docker.raw clone before
+  the one existing Kubernetes settings key is atomically disabled. Dynamic
+  PVCs, VM-local hostPaths, etcd, Secrets, and cluster metadata are covered by
+  that full rollback clone. A post-disable failure restores Docker.raw,
+  settings, replicas, and CronJob state. The Docker Desktop UI remains the
+  vendor-supported settings path; direct settings-store editing is an audited
+  deploy-runner fallback. The dedicated repository recovery key must match its
+  read-back-verified copy in the Air login Keychain before any workload is
+  changed. External hostPath disappearance/symlinks and insufficient space for
+  a 12 GiB base reserve plus staging/ciphertext coexistence fail closed. The
+  six-hour Actions envelope leaves rollback room around shorter operation
+  timeouts, and termination signals enter the guarded rollback path. The module
+  never resets Desktop, force-kills it,
+  removes or prunes containers/networks/volumes, deletes Kubernetes storage or
+  namespaces, uploads backup artifacts, prints secret payloads, or performs a
+  runtime health gate.
 - Legacy `buddystudy-testzone-postgres` and `buddystudy-testzone-redis`
   containers are migrated only through the workflow-dispatch-only TestZone
   component logging migration. Its default `apply=false` mode performs an

@@ -45,6 +45,8 @@ Current workflow templates:
 - `maintain-macbookair-docker-capacity.yml`: weekly or manual host-wide Docker
   daemon recovery, capacity diagnostics, and bounded unused-image and old
   build-cache reclamation on MacBook Air.
+- `retire-macbookair-kubernetes.yml`: guarded, two-run retirement of only the
+  legacy Docker Desktop Kubernetes runtime on the MacBook Air.
 
 ## Required Secrets
 
@@ -78,6 +80,12 @@ MacBook Air monitoring deploy:
 - `GRAFANA_ADMIN_PASSWORD`
 - `GRAFANA_INCIDENT_HMAC_SECRET`
 - `CODEX_AUTOFIX_GITHUB_TOKEN` (fine-grained token scoped to dispatch the BuddyStudy source repository workflow)
+
+MacBook Air Docker Desktop Kubernetes retirement:
+
+- `MACBOOKAIR_K8S_RETIREMENT_BACKUP_KEY` (dedicated random value of at least 32
+  characters; keep it after retirement because it decrypts the local recovery
+  bundle and authenticates the retained Docker.raw clone)
 
 BuddyStudy source repository incident auto-fix:
 
@@ -241,6 +249,114 @@ The separate TestZone workflow creates or replaces:
 - `buddystudy-testzone-influxdb`: 30-day TestZone time-series storage.
 - approved disposable MySQL, Redis, or Kafka containers only when a user
   deploys them from TestZone.
+
+## MacBook Air Docker Desktop Kubernetes Retirement
+
+Copy `retire-macbookair-kubernetes.yml` and
+`scripts/retire_macbookair_kubernetes.py` into the deploy repository. This is
+a one-time infrastructure module and is manual-only. It runs exclusively when
+GitHub Actions supplies the exact `macbook-air-buddystudy` ARM64 runner
+identity. Local laptops and every other runner fail closed before inspection or
+mutation.
+
+Retirement is deliberately a two-run operation:
+
+1. Dispatch **Retire MacBook Air Docker Desktop Kubernetes** with the default
+   `apply=false`. The read-only run prints a SHA-256 desired-state digest and
+   the exact non-secret workload/PVC plan.
+2. Review every identity and blocker. Dispatch a separate run with
+   `apply=true`, paste that 64-character digest into
+   `expected_inventory_digest`, and enter exactly
+   `RETIRE DOCKER DESKTOP KUBERNETES` as the confirmation. Any desired-state
+   change between runs invalidates the plan.
+
+Immediately before the first cluster mutation, apply repeats the full
+inventory, digest, blocker, settings, Docker.raw-path, and unrelated Docker
+identity checks. A change at that final boundary aborts without scaling a
+workload.
+
+The preflight accepts only kubectl context `docker-desktop`, its local
+`127.0.0.1:6443` or `localhost:6443` API server, namespace `buddystudy`, and
+the known auxiliary Deployment
+`default/buddystudy-redis-stream-coordinator`. Its replica state and manifest
+are included in the encrypted backup and automatic rollback. Any other user
+workload outside `buddystudy`, active Job, standalone Pod, ReplicationController,
+or BuddyStudy DaemonSet blocks apply. Pods, ReplicaSets, Jobs, Events, and
+status churn are excluded from the independent desired-state digest, while
+workload/PVC/PV/Secret/ConfigMap resource versions and desired specs are
+included.
+
+Apply first suspends the recorded CronJobs, immediately checks all non-system
+namespaces for an active Job, and only then stops writer Deployments, including
+the exact default-namespace coordinator. A Job that races with suspension
+causes rollback before writer scaling. After writer Pods have terminated, the
+helper creates verified gzip logical dumps for every running PostgreSQL/MySQL
+container. Redis backup requires `SAVE` and an in-container
+`redis-check-rdb` pass before the RDB is copied and signature-checked locally.
+It then scales data
+Deployments and StatefulSets to zero and waits for their Pods to terminate.
+Accessible external hostPath PV directories receive verified quiesced tar
+archives. Dynamic PVCs, Docker-VM-local hostPaths, etcd, Kubernetes Secrets,
+and the rest of Docker Desktop's VM state are protected together by the full
+Docker.raw rollback clone.
+
+The host-only backup directory defaults to
+`~/Library/Application Support/BuddyStudy/KubernetesRetirementBackups` and is
+created with mode `0700` outside Docker Desktop's Data directory. Symlinked
+settings, data, and backup paths are rejected; a declared external `/Users` or
+`/Volumes` hostPath that is missing or symlinked also blocks apply. FileVault
+must be on and the source and backup must be on the same APFS filesystem. The
+preflight requires a 12 GiB base reserve plus twice the measured external
+hostPath size so plaintext staging and ciphertext can safely coexist. The
+helper seals manifests, logical dumps, settings, workload state, and
+external hostPath archives as an OpenSSL AES-256-CBC/PBKDF2 bundle with a
+separate HMAC-SHA256. It then stops Docker Desktop gracefully and creates a
+byte/HMAC-verified APFS copy-on-write `Docker.raw.apfs-clone`. Backups are never
+uploaded as Actions artifacts and secret or data payloads are never written to
+the job log.
+
+Docker documents the Desktop UI as the supported place to enable or disable
+Kubernetes. Because the deploy-only runner has no reliable interactive UI,
+this workflow uses a narrowly audited fallback: while Desktop is stopped it
+backs up the entire settings store, changes only the one existing boolean
+`KubernetesEnabled`/`kubernetesEnabled` key to `false` with an atomic replace,
+then restarts Desktop. It verifies that setting and requires zero *running*
+Kubernetes-labelled/control-plane containers while preserving every
+non-Kubernetes container identity. It does not remove stopped Kubernetes
+metadata.
+
+If anything fails after the disabled Desktop has started, rollback gracefully
+stops Desktop, preserves that failed-current Docker.raw, restores the verified
+APFS clone to the exact original Docker.raw path, restores the byte-for-byte
+settings file, restarts Desktop, and restores recorded replicas and CronJob
+suspend values. A failed rollback keeps every recovery copy and reports only
+safe paths/status. Forced process termination is not used.
+
+Keep `MACBOOKAIR_K8S_RETIREMENT_BACKUP_KEY` available for recovery. Before any
+workload is changed, apply stores the same value in the Air login Keychain under
+service `BuddyStudy MacBook Air Kubernetes Retirement Backup` and account
+`buddystudy-kubernetes-retirement`, then reads it back and compares it without
+logging command output. A mismatch blocks apply. Retain both the repository
+secret and this host-local Keychain copy. To inspect the encrypted bundle on
+the Air without logging content, recover/export the key only in the local shell
+and run:
+
+```sh
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 300000 \
+  -pass env:MACBOOKAIR_K8S_RETIREMENT_BACKUP_KEY \
+  -in retirement-backup.tar.enc | tar -tf -
+```
+
+This workflow never resets or purges Docker Desktop, deletes a namespace, PVC,
+PV, Docker volume, container, or network, or runs a prune. It performs no HTTP,
+database-health, or container-health gate. The logical dump and RDB commands
+are backup operations after writers stop, not readiness checks.
+
+The Actions job allows six hours while each logical dump, hostPath archive,
+bundle seal, and APFS clone has a shorter bounded timeout, leaving rollback
+time. SIGTERM and SIGINT request the same guarded rollback path; once rollback
+begins, additional termination signals are ignored so the verified raw image,
+settings, and workload state can be restored.
 
 ### Legacy TestZone component log migration
 

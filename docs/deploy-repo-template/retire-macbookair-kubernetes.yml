@@ -1,0 +1,100 @@
+name: Retire MacBook Air Docker Desktop Kubernetes
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Disable the audited Docker Desktop Kubernetes runtime after verified local backups. Leave false for read-only preflight."
+        required: true
+        default: false
+        type: boolean
+      confirmation:
+        description: "For apply=true, enter exactly: RETIRE DOCKER DESKTOP KUBERNETES"
+        required: false
+        default: ""
+        type: string
+      expected_inventory_digest:
+        description: "For apply=true, paste the exact 64-character digest from a separate apply=false preflight run."
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: retire-macbookair-docker-desktop-kubernetes
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  retire_macbookair_kubernetes:
+    name: Retire MacBook Air Docker Desktop Kubernetes
+    runs-on: [self-hosted, macOS, ARM64, macbook-air, buddystudy]
+    timeout-minutes: 360
+    steps:
+      - name: Checkout audited retirement helper
+        uses: actions/checkout@v4
+
+      - name: Validate explicit apply confirmation
+        if: ${{ inputs.apply }}
+        env:
+          RETIREMENT_CONFIRMATION: ${{ inputs.confirmation }}
+          EXPECTED_INVENTORY_DIGEST: ${{ inputs.expected_inventory_digest }}
+        run: |
+          set -euo pipefail
+          if [ "${RETIREMENT_CONFIRMATION}" != "RETIRE DOCKER DESKTOP KUBERNETES" ]; then
+            echo "apply=true requires the exact Docker Desktop Kubernetes retirement confirmation." >&2
+            exit 1
+          fi
+          if [[ ! "${EXPECTED_INVENTORY_DIGEST}" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "apply=true requires the exact digest from a separate read-only preflight run." >&2
+            exit 1
+          fi
+
+      - name: Read-only preflight of exact Docker Desktop target
+        env:
+          PREFLIGHT_REPORT: ${{ runner.temp }}/macbookair-kubernetes-preflight-${{ github.run_id }}-${{ github.run_attempt }}.json
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 scripts/retire_macbookair_kubernetes.py preflight \
+            --report "${PREFLIGHT_REPORT}"
+
+      - name: Back up and retire Docker Desktop Kubernetes
+        if: ${{ inputs.apply }}
+        env:
+          PREFLIGHT_REPORT: ${{ runner.temp }}/macbookair-kubernetes-preflight-${{ github.run_id }}-${{ github.run_attempt }}.json
+          RETIREMENT_REPORT: ${{ runner.temp }}/macbookair-kubernetes-retirement-${{ github.run_id }}-${{ github.run_attempt }}.json
+          RETIREMENT_CONFIRMATION: ${{ inputs.confirmation }}
+          EXPECTED_INVENTORY_DIGEST: ${{ inputs.expected_inventory_digest }}
+          RETIREMENT_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+          MACBOOKAIR_K8S_RETIREMENT_BACKUP_KEY: ${{ secrets.MACBOOKAIR_K8S_RETIREMENT_BACKUP_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 scripts/retire_macbookair_kubernetes.py retire \
+            --report "${RETIREMENT_REPORT}" \
+            --expected-report "${PREFLIGHT_REPORT}" \
+            --expected-digest "${EXPECTED_INVENTORY_DIGEST}" \
+            --confirmation "${RETIREMENT_CONFIRMATION}" \
+            --run-key "${RETIREMENT_RUN_KEY}"
+
+      - name: Read-only preflight summary
+        if: ${{ always() && !inputs.apply }}
+        env:
+          PREFLIGHT_REPORT: ${{ runner.temp }}/macbookair-kubernetes-preflight-${{ github.run_id }}-${{ github.run_attempt }}.json
+        run: |
+          set -euo pipefail
+          python3 scripts/retire_macbookair_kubernetes.py render-summary \
+            --report "${PREFLIGHT_REPORT}" \
+            --status '${{ job.status }}' >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Retirement summary
+        if: ${{ always() && inputs.apply }}
+        env:
+          RETIREMENT_REPORT: ${{ runner.temp }}/macbookair-kubernetes-retirement-${{ github.run_id }}-${{ github.run_attempt }}.json
+        run: |
+          set -euo pipefail
+          python3 scripts/retire_macbookair_kubernetes.py render-summary \
+            --report "${RETIREMENT_REPORT}" \
+            --status '${{ job.status }}' >> "${GITHUB_STEP_SUMMARY}"
