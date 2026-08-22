@@ -59,7 +59,37 @@ jobs:
             export KUBECONFIG="${HOME}/.kube/config"
           fi
           kubectl config current-context
-          kubectl get namespace "${NAMESPACE}" >/dev/null
+
+          control_plane_ready=false
+          if kubectl --request-timeout=5s get namespace "${NAMESPACE}" >/dev/null 2>&1; then
+            control_plane_ready=true
+          else
+            echo "Docker Desktop Kubernetes API is unavailable; restarting Docker Desktop to restore the deployment control plane."
+            if ! /usr/bin/env -u RUNNER_TRACKING_ID \
+              docker desktop restart --timeout 75; then
+              /usr/bin/env -u RUNNER_TRACKING_ID \
+                docker desktop stop --force --timeout 30 \
+                || true
+              /usr/bin/env -u RUNNER_TRACKING_ID \
+                docker desktop start --timeout 105 \
+                || /usr/bin/env -u RUNNER_TRACKING_ID open -ga Docker \
+                || true
+            fi
+
+            for attempt in $(seq 1 24); do
+              if kubectl --request-timeout=5s get namespace "${NAMESPACE}" >/dev/null 2>&1; then
+                control_plane_ready=true
+                break
+              fi
+              echo "Waiting for the Kubernetes API. attempt=${attempt}/24"
+              sleep 5
+            done
+          fi
+
+          if [ "${control_plane_ready}" != true ]; then
+            echo "Kubernetes control plane did not become available within the deployment window." >&2
+            exit 1
+          fi
 
       - name: Submit admin frontend image
         run: |

@@ -167,7 +167,9 @@ Frontend** on the MacBook Air runner.
 The admin deploy workflow owns only the `buddystudy-admin-frontend` Kubernetes
 Deployment image. It submits the immutable image and verifies the stored
 Deployment spec, but does not wait for rollout, pod readiness, or an HTTP health
-check. Grafana owns runtime outage monitoring. The workflow must not rebuild the
+check. If the Docker Desktop Kubernetes API is unavailable, it may restart
+Docker Desktop and wait only for the namespace API required to submit the image.
+Grafana owns runtime outage monitoring. The workflow must not rebuild the
 backend or recreate MySQL, Loki, or Grafana.
 
 ## Monitoring Deploy

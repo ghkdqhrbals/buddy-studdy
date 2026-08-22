@@ -266,7 +266,10 @@ deployment.
 - Admin frontend UI changes: build the immutable admin frontend image, then run
   the MacBook Air Kubernetes admin frontend deploy. The deploy updates only the
   `buddystudy-admin-frontend` Deployment image and verifies the submitted spec;
-  Grafana, rather than GitHub Actions, observes runtime readiness.
+  Grafana, rather than GitHub Actions, observes runtime readiness. If the local
+  Docker Desktop Kubernetes API is unavailable, the workflow may restart Docker
+  Desktop and wait only for the namespace API needed to submit the desired
+  image. That control-plane prerequisite is not an application readiness gate.
 - Grafana/Loki/API Logs/TestZone UI changes: run the monitoring deploy.
   The app repository dispatches this module through
   `monitoring-source-published` when an explicit `deploy/monitoring-*` tag is
