@@ -79,7 +79,10 @@ test("helper explicitly reuses the inspected anonymous volume and bounded logs",
   assert.match(helper, /runtime\.stop\(plan\.spec\.name\)/);
   assert.match(helper, /"docker", "stop", "--time", "60"/);
   assert.match(helper, /runtime\.remove\(plan\.backup_name\)/);
-  assert.match(helper, /if plan\.was_running:\s+runtime\.start\(plan\.spec\.name\)/);
+  assert.match(
+    helper,
+    /if plan\.was_running:[\s\S]{0,180}runtime\.start\(plan\.spec\.name\)/,
+  );
   assert.doesNotMatch(helper, /docker\s+(?:volume|system|image|builder)\s+(?:rm|prune)/);
   assert.doesNotMatch(helper, /curl|wget|pg_isready|redis-cli|\.State\.Health/);
 });

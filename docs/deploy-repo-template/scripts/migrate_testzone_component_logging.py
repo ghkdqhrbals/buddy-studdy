@@ -543,23 +543,34 @@ def migrate(runtime: Any, *, run_id: str | None = None) -> dict[str, Any]:
             if plan.already_compliant:
                 continue
             changed.append(plan)
+            print(f"{plan.spec.name}: stopping the original container.")
             runtime.stop(plan.spec.name)
+            print(f"{plan.spec.name}: reserving a rollback backup name.")
             runtime.rename(plan.spec.name, plan.backup_name)
+            print(f"{plan.spec.name}: submitting the bounded-log replacement.")
             runtime.create(plan.spec.name, plan.payload)
             replacement = runtime.inspect(plan.spec.name)
             if replacement is None:
                 raise MigrationError(f"Replacement container was not created: {plan.spec.name}")
+            print(f"{plan.spec.name}: verifying submitted configuration and volume identity.")
             _verify_replacement(plan, replacement)
             if plan.was_running:
+                print(f"{plan.spec.name}: submitting container start.")
                 runtime.start(plan.spec.name)
     except Exception as error:
+        safe_detail = (
+            str(error)
+            if isinstance(error, MigrationError)
+            else "an unexpected migration operation failed"
+        )
         try:
             _rollback(runtime, changed)
         except MigrationError:
             raise
-        if isinstance(error, MigrationError):
-            raise MigrationError("TestZone logging migration failed; original containers were restored.") from error
-        raise MigrationError("TestZone logging migration failed; original containers were restored.") from error
+        raise MigrationError(
+            "TestZone logging migration failed; original containers were restored. "
+            f"Safe failure detail: {safe_detail}"
+        ) from error
 
     for plan in changed:
         runtime.remove(plan.backup_name)
