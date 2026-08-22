@@ -225,11 +225,11 @@ from pathlib import Path
 
 PHASES = {
     ("none", "request"),
-    ("primary-settings", "candidate-open"),
+    ("primary-settings", "root-open"),
     ("primary-settings", "canonical-check"),
     ("primary-settings", "file-read"),
     ("primary-settings", "json-validate"),
-    ("legacy-settings", "candidate-open"),
+    ("legacy-settings", "root-open"),
     ("legacy-settings", "canonical-check"),
     ("legacy-settings", "file-read"),
     ("legacy-settings", "json-validate"),
@@ -246,6 +246,10 @@ PHASES = {
     ("docker-raw", "candidate-select"),
     ("none", "response"),
 }
+for candidate in ("primary-settings", "legacy-settings"):
+    for ordinal in range(1, 17):
+        for action in ("stat", "open", "verify"):
+            PHASES.add((candidate, "component-{}-{}".format(ordinal, action)))
 CURRENT_CANDIDATE = "none"
 CURRENT_SUBSTEP = "request"
 
@@ -272,6 +276,13 @@ def mark(candidate, substep):
     CURRENT_SUBSTEP = substep
     sys.stderr.write(candidate + "/" + substep + "\n")
     sys.stderr.flush()
+
+
+def mark_component(candidate, ordinal, action):
+    if candidate not in ("primary-settings", "legacy-settings"):
+        mark(candidate, "candidate-open")
+        return
+    mark(candidate, "component-{}-{}".format(ordinal, action))
 
 
 def deadline(_signum, _frame):
@@ -309,10 +320,17 @@ def canonical_path(descriptor):
 
 def open_nofollow(path, want_directory, candidate):
     path = lexical_absolute(str(path))
-    mark(candidate, "candidate-open")
+    if candidate in ("primary-settings", "legacy-settings"):
+        if len(path.parts) - 1 > 16:
+            raise ProbeFailure("invalid")
+        mark(candidate, "root-open")
+    else:
+        mark(candidate, "candidate-open")
     descriptor = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY)
     try:
         for index, component in enumerate(path.parts[1:]):
+            ordinal = index + 1
+            mark_component(candidate, ordinal, "stat")
             try:
                 before = os.stat(
                     component,
@@ -334,10 +352,12 @@ def open_nofollow(path, want_directory, candidate):
                 flags |= os.O_DIRECTORY
             else:
                 flags |= os.O_NONBLOCK
+            mark_component(candidate, ordinal, "open")
             try:
                 next_descriptor = os.open(component, flags, dir_fd=descriptor)
             except FileNotFoundError:
                 raise ProbeFailure("missing")
+            mark_component(candidate, ordinal, "verify")
             after = os.fstat(next_descriptor)
             if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
                 os.close(next_descriptor)
@@ -1118,15 +1138,21 @@ DOCKER_STORAGE_PROBE_PHASES = {
     "settings": frozenset(
         {
             ("none", "request"),
-            ("primary-settings", "candidate-open"),
+            ("primary-settings", "root-open"),
             ("primary-settings", "canonical-check"),
             ("primary-settings", "file-read"),
             ("primary-settings", "json-validate"),
-            ("legacy-settings", "candidate-open"),
+            ("legacy-settings", "root-open"),
             ("legacy-settings", "canonical-check"),
             ("legacy-settings", "file-read"),
             ("legacy-settings", "json-validate"),
             ("settings", "candidate-select"),
+        }
+        | {
+            (candidate, f"component-{ordinal}-{action}")
+            for candidate in ("primary-settings", "legacy-settings")
+            for ordinal in range(1, 17)
+            for action in ("stat", "open", "verify")
         }
     ),
     "docker-raw": frozenset(

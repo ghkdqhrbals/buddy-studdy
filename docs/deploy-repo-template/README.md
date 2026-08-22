@@ -333,7 +333,9 @@ Darwin `F_GETPATH` to verify the exact component spelling. Its eight-second
 inner deadline is backed by the unchanged ten-second parent process-group
 deadline. Failures expose only an allowlisted operation/candidate/substep
 reason; unknown child text collapses to `storage-probe/protocol-invalid` and
-is never echoed.
+is never echoed. While traversing either settings candidate, the substep is a
+fixed component ordinal plus `stat`, `open`, or `verify`; the ordinal reveals
+neither the user name nor any path component and pinpoints a stalled syscall.
 
 FileVault must be on and the source and backup must be on the same APFS
 filesystem. The preflight requires a 12 GiB base reserve plus twice the measured external

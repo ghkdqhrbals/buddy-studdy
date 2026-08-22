@@ -1149,13 +1149,25 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
         request = {"operation": "settings", "home": sensitive}
         with self.assertRaises(retirement.RetirementError) as marked:
             retirement._run_docker_storage_probe(
-                TimeoutRunner(b"primary-settings/candidate-open\n"), request
+                TimeoutRunner(b"primary-settings/root-open\n"), request
             )
         self.assertIn(
-            "storage-probe/settings/timeout/primary-settings/candidate-open",
+            "storage-probe/settings/timeout/primary-settings/root-open",
             str(marked.exception),
         )
         self.assertNotIn(sensitive, str(marked.exception))
+
+        for action in ("stat", "open", "verify"):
+            marker = f"primary-settings/component-2-{action}"
+            with self.subTest(marker=marker):
+                with self.assertRaises(retirement.RetirementError) as component:
+                    retirement._run_docker_storage_probe(
+                        TimeoutRunner((marker + "\n").encode()), request
+                    )
+                self.assertIn(
+                    f"storage-probe/settings/timeout/{marker}",
+                    str(component.exception),
+                )
 
         with self.assertRaises(retirement.RetirementError) as untrusted:
             retirement._run_docker_storage_probe(
@@ -1164,6 +1176,14 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
         self.assertIn("storage-probe/settings/timeout", str(untrusted.exception))
         self.assertNotIn(sensitive, str(untrusted.exception))
         self.assertNotIn("secret-step", str(untrusted.exception))
+
+        with self.assertRaises(retirement.RetirementError) as out_of_range:
+            retirement._run_docker_storage_probe(
+                TimeoutRunner(b"primary-settings/component-17-stat\n"), request
+            )
+        self.assertEqual(
+            str(out_of_range.exception).count("component-17-stat"), 0
+        )
 
         fixed_response = json.dumps(
             {
@@ -1228,6 +1248,35 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
             self.assertLess(time.monotonic() - started, 4)
             self.assertIn(
                 "storage-probe/settings/timeout/primary-settings/file-read",
+                str(raised.exception),
+            )
+            self.assertNotIn(str(home), str(raised.exception))
+
+    def test_storage_probe_inner_deadline_reports_component_and_syscall(self):
+        probe = retirement.DOCKER_STORAGE_PROBE_SCRIPT.replace(
+            "signal.alarm(8)", "signal.alarm(1)", 1
+        ).replace(
+            "            try:\n                before = os.stat(",
+            "            try:\n"
+            "                __import__('time').sleep(30)\n"
+            "                before = os.stat(",
+            1,
+        )
+        self.assertNotEqual(probe, retirement.DOCKER_STORAGE_PROBE_SCRIPT)
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            home = Path(directory)
+            settings_path = home / retirement.SETTINGS_RELATIVE_PATHS[0]
+            settings_path.parent.mkdir(parents=True)
+            settings_path.write_text(
+                json.dumps({"KubernetesEnabled": True}), encoding="utf-8"
+            )
+            started = time.monotonic()
+            with mock.patch.object(retirement, "DOCKER_STORAGE_PROBE_SCRIPT", probe):
+                with self.assertRaises(retirement.RetirementError) as raised:
+                    retirement.discover_settings(retirement.CommandRunner(), home)
+            self.assertLess(time.monotonic() - started, 4)
+            self.assertIn(
+                "storage-probe/settings/timeout/primary-settings/component-1-stat",
                 str(raised.exception),
             )
             self.assertNotIn(str(home), str(raised.exception))

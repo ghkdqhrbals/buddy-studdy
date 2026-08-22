@@ -183,8 +183,10 @@ deployment.
   `F_GETPATH`; it no longer enumerates every ancestor or repeats an absolute
   `lstat`. Fixed settings/raw probe start-complete stages and allowlisted
   candidate/substep reason codes localize a failure without logging a path;
-  unknown child data becomes `storage-probe/protocol-invalid`. Its inner
-  deadline remains eight seconds inside the existing ten-second parent bound.
+  settings traversal substeps use only a bounded component ordinal and the
+  fixed action `stat`, `open`, or `verify`. Unknown child data becomes
+  `storage-probe/protocol-invalid`. Its inner deadline remains eight seconds
+  inside the existing ten-second parent bound.
   The 12-minute overall deadline is preflight-only. The apply path retains a
   six-hour Actions envelope; termination enters guarded rollback, and
   Docker/raw/settings plus cluster-state restoration always precede the
