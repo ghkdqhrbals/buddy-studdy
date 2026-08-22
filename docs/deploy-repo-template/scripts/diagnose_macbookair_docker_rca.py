@@ -110,6 +110,13 @@ DOCKER_COMPONENT_PATTERN = re.compile(
     r"com\.apple\.Virtualization\.VirtualMachine|vpnkit|vfkit|virtiofsd|"
     r"qemu-system-aarch64)\b"
 )
+LOG_UNIT_PATTERN = re.compile(
+    r"(?i)\b(?:unit|component|subsystem|logger)\b\s*(?:=|:)\s*[\"']?"
+    r"([A-Za-z][A-Za-z0-9._+-]{0,63})"
+)
+LOG_FINGERPRINT_UUID_PATTERN = re.compile(
+    r"(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"
+)
 DOCKER_PROCESS_MARKERS = (
     "docker",
     "com.docker",
@@ -124,9 +131,46 @@ LOG_SIGNAL_PATTERNS = {
     "memory-pressure": re.compile(r"(?i)memory pressure|application memory|low memory|highwater|memory limit"),
     "memory-leak-signal": re.compile(r"(?i)memory leak|leak suspected|unbounded memory"),
     "allocation-failure": re.compile(r"(?i)cannot allocate|allocation failed|mmap failed|resource exhausted"),
-    "vm-crash": re.compile(r"(?i)(virtual machine|\bvm\b).{0,40}(crash|exit|terminated|stopped)|panic|segmentation fault"),
+    "error-fatal": re.compile(r"(?i)\b(?:error|fatal)\b"),
+    "no-space": re.compile(r"(?i)no space left on device|\benospc\b|\bdisk\s+full\b"),
+    "io-error": re.compile(r"(?i)\b(?:i/o|io)\s+error\b|\beio\b"),
+    "read-only-fs": re.compile(r"(?i)read-only file system|\berofs\b"),
+    "config-invalid": re.compile(
+        r"(?i)(?:invalid|malformed|failed to (?:load|parse|read)|cannot parse).{0,40}"
+        r"(?:config|configuration)|(?:config|configuration).{0,40}"
+        r"(?:invalid|malformed|parse error|failed)"
+    ),
+    "lifecycle": re.compile(
+        r"(?i)\b(?:starting|started|stopping|stopped|shutting down|shutdown|"
+        r"restarting|restarted|booting|booted)\b"
+    ),
+    "startup-failure": re.compile(
+        r"(?i)\b(?:failed|unable|cannot|could not)\s+to\s+"
+        r"(?:start|initialize|launch|boot)\b|\b(?:startup|initialization|launch|boot)\s+"
+        r"(?:failed|failure)\b"
+    ),
+    "daemon-unavailable": re.compile(
+        r"(?i)cannot connect to (?:the )?docker daemon|docker daemon is not running|"
+        r"\b(?:daemon|docker engine)\b.{0,40}\b(?:unavailable|not running|failed|stopped)\b"
+    ),
+    "socket-error": re.compile(
+        r"(?i)\b(?:socket|dial unix)\b.{0,60}\b(?:error|failed|failure|refused|closed|"
+        r"unavailable|no such file)\b|\b(?:error|failed|refused)\b.{0,60}\bsocket\b"
+    ),
+    "timeout-deadline": re.compile(
+        r"(?i)\b(?:timeout|timed out|deadline exceeded|context deadline)\b"
+    ),
+    "vm-crash": re.compile(
+        r"(?i)(?:virtual machine|\bvm\b|vfkit|Virtualization\.VirtualMachine).{0,80}"
+        r"(?:crash|exit|exited|terminated|stopped|panic|fault)|"
+        r"(?:crash|exit|exited|terminated|stopped|panic|fault).{0,80}"
+        r"(?:virtual machine|\bvm\b|vfkit|Virtualization\.VirtualMachine)"
+    ),
     "forced-exit": re.compile(r"(?i)killed process|signal 9|exit status 137|unexpected exit"),
     "watchdog-termination": re.compile(r"(?i)watchdog|watchdogd"),
+    "kubernetes-etcd": re.compile(
+        r"(?i)\b(?:kubernetes|kubelet|kube-apiserver|kube-controller-manager|etcd)\b"
+    ),
 }
 LOGINWINDOW_SIZE_KINDS = (
     ("setting-rsize", re.compile(r"(?i)\bsetting\s+rsize\b")),
@@ -687,9 +731,19 @@ def _parse_elapsed_seconds(raw: str) -> int | None:
     return days * 86400 + hours * 3600 + minutes * 60 + seconds
 
 
+def _log_fingerprint(message: str) -> str:
+    normalized = TIMESTAMP_PATTERN.sub("<time>", message).casefold()
+    normalized = LOG_FINGERPRINT_UUID_PATTERN.sub("<uuid>", normalized)
+    normalized = LONG_IDENTIFIER.sub("<id>", normalized)
+    normalized = re.sub(r"(?<![A-Za-z])\d+(?:\.\d+)*(?![A-Za-z])", "<n>", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return hashlib.sha256(normalized.encode("utf-8", "replace")).hexdigest()[:16]
+
+
 def _log_signals(lines: Sequence[tuple[str | None, str, str]]) -> dict[str, Any]:
     categories: Counter[str] = Counter()
     components: dict[str, dict[str, Any]] = {}
+    classified_signals: dict[tuple[str, str, str, tuple[str, ...]], dict[str, Any]] = {}
     latest: str | None = None
     matched_lines = 0
     max_reported = 0
@@ -710,11 +764,37 @@ def _log_signals(lines: Sequence[tuple[str | None, str, str]]) -> dict[str, Any]
         names = {_safe_name(match.group(1)) for match in DOCKER_COMPONENT_PATTERN.finditer(message)}
         if any(marker in source.casefold() for marker in DOCKER_PROCESS_MARKERS):
             names.add(_safe_name(source))
+        units = sorted({_safe_name(match.group(1)) for match in LOG_UNIT_PATTERN.finditer(message)})
+        unit = units[0] if units else "unknown"
+        component = sorted(names)[0] if names else (unit if unit != "unknown" else "unknown")
+        fingerprint = _log_fingerprint(message)
+        signal_key = (fingerprint, unit, component, tuple(sorted(matched_categories)))
+        signal = classified_signals.setdefault(
+            signal_key,
+            {
+                "categories": sorted(matched_categories),
+                "unit": unit,
+                "component": component,
+                "firstTime": timestamp,
+                "latestTime": timestamp,
+                "fingerprint": fingerprint,
+                "count": 0,
+            },
+        )
+        signal["count"] += 1
+        if timestamp and (signal["firstTime"] is None or timestamp < signal["firstTime"]):
+            signal["firstTime"] = timestamp
+        if timestamp and (signal["latestTime"] is None or timestamp > signal["latestTime"]):
+            signal["latestTime"] = timestamp
         for name in names:
             component = components.setdefault(name, {"component": name, "signalCount": 0, "maxReportedBytes": 0})
             component["signalCount"] += 1
             component["maxReportedBytes"] = max(component["maxReportedBytes"], line_peak)
     ordered = sorted(components.values(), key=lambda item: (-item["maxReportedBytes"], -item["signalCount"], item["component"]))
+    ordered_signals = sorted(
+        classified_signals.values(),
+        key=lambda item: (-item["count"], item["latestTime"] or "", item["fingerprint"]),
+    )
     return {
         "matchedLineCount": matched_lines,
         "categoryCounts": dict(sorted(categories.items())),
@@ -722,6 +802,7 @@ def _log_signals(lines: Sequence[tuple[str | None, str, str]]) -> dict[str, Any]
         "signalTimes": sorted(signal_times)[-64:],
         "maxReportedBytes": max_reported,
         "components": ordered[:TOP_RECORDS],
+        "classifiedSignals": ordered_signals[:TOP_RECORDS],
         "applicationSizeEvidence": [],
     }
 
@@ -1304,6 +1385,7 @@ def render_summary(report: Mapping[str, Any], workflow_status: str) -> str:
             f"- {label}: matched `{value.get('matchedLineCount', 'unavailable')}`; categories `{json.dumps(value.get('categoryCounts', {}), sort_keys=True)}`; max reported `{_format_bytes(value.get('maxReportedBytes'))}`; latest `{value.get('latestSignalTime', 'unavailable')}`"
         )
         lines.extend(_summary_records("  - implicated components:", value.get("components"), (("component", "component"), ("signalCount", "signals"), ("maxReportedBytes", "max bytes"))))
+        lines.extend(_summary_records("  - classified log signatures (raw discarded):", value.get("classifiedSignals"), (("categories", "categories"), ("unit", "unit"), ("component", "component"), ("firstTime", "first"), ("latestTime", "latest"), ("fingerprint", "hash"), ("count", "count"))))
         lines.extend(_summary_records("  - correlated Docker application-size evidence:", value.get("applicationSizeEvidence"), (("component", "component"), ("kind", "kind"), ("reportedBytes", "reported bytes"), ("samplingTime", "sampled"), ("measurementTime", "measured"), ("deltaSeconds", "delta seconds"))))
     lines.extend(("- Docker stats are container-level: service child processes such as k6 are included in their parent container and do not appear as separate container rows; absence of a row is not evidence that no child ran.", "- Raw logs, IDs, paths, environment values, mounts, arbitrary labels, and device data were discarded.", "- No restart, stop, force-quit, reset, prune, delete, rollout, or runtime health success gate was performed.", ""))
     return "\n".join(lines)

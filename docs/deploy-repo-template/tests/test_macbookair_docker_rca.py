@@ -157,6 +157,50 @@ class MacBookAirDockerRCATests(unittest.TestCase):
         for forbidden in ("/Users/private", "secret-value", "footprint"):
             self.assertNotIn(forbidden, encoded)
 
+    def test_desktop_log_classifier_covers_restart_cause_families(self):
+        cases = {
+            "error-fatal": "fatal error in backend",
+            "no-space": "write failed: no space left on device",
+            "io-error": "disk I/O error while syncing",
+            "read-only-fs": "open failed: read-only file system",
+            "config-invalid": "invalid configuration for engine",
+            "lifecycle": "Docker Desktop shutting down",
+            "startup-failure": "backend failed to start",
+            "daemon-unavailable": "cannot connect to the Docker daemon",
+            "socket-error": "socket connection refused",
+            "timeout-deadline": "context deadline exceeded",
+            "vm-crash": "vfkit virtual machine exited unexpectedly",
+            "kubernetes-etcd": "etcd server unavailable for kubernetes",
+        }
+        for expected, message in cases.items():
+            with self.subTest(expected=expected):
+                parsed = rca.parse_desktop_logs(f"2026-08-23T01:02:03Z {message}\n")
+                self.assertIn(expected, parsed["categoryCounts"])
+
+    def test_desktop_log_signatures_are_sanitized_and_aggregate_volatiles(self):
+        raw = (
+            '2026-08-23T01:02:03Z component=com.docker.backend fatal timeout id='
+            '123e4567-e89b-12d3-a456-426614174000 path=/Users/private token=alpha\n'
+            '2026-08-23T01:02:04Z component=com.docker.backend fatal timeout id='
+            '223e4567-e89b-12d3-a456-426614174999 path=/Users/private token=alpha\n'
+        )
+        parsed = rca.parse_desktop_logs(raw)
+        self.assertEqual(len(parsed["classifiedSignals"]), 1)
+        signal = parsed["classifiedSignals"][0]
+        self.assertEqual(
+            set(signal),
+            {"categories", "unit", "component", "firstTime", "latestTime", "fingerprint", "count"},
+        )
+        self.assertEqual(signal["unit"], "com.docker.backend")
+        self.assertEqual(signal["component"], "com.docker.backend")
+        self.assertEqual(signal["count"], 2)
+        self.assertEqual(signal["firstTime"], "2026-08-23T01:02:03Z")
+        self.assertEqual(signal["latestTime"], "2026-08-23T01:02:04Z")
+        self.assertRegex(signal["fingerprint"], r"^[0-9a-f]{16}$")
+        encoded = json.dumps(parsed)
+        for forbidden in ("/Users/private", "token=alpha", "123e4567", "fatal timeout"):
+            self.assertNotIn(forbidden, encoded)
+
     def test_unified_log_parser_keeps_safe_process_time_and_aggregate_only(self):
         output = json.dumps(
             {

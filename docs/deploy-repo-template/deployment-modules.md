@@ -172,6 +172,12 @@ deployment.
   kernel/memorystatusd/runningboardd/watchdogd memory probe; and current/previous Desktop
   boot logs limited to that same six-hour window. Unified logs have a
   20-second/32-MiB live bound and Desktop logs a 15-second/16-MiB live bound.
+  Desktop boot logs classify memory/OOM, error/fatal, no-space, I/O,
+  read-only-filesystem, invalid-configuration, lifecycle/startup-failure,
+  daemon/socket, timeout/deadline, VM exit/crash, and Kubernetes/etcd signals.
+  Only allowlisted categories plus sanitized unit/component, first/latest time,
+  a normalized 16-hex fingerprint, and count are retained; the raw message is
+  discarded.
   The four user/system `DiagnosticReports` and `Retired` roots are inspected in
   a separate 20-second child so a protected-path consent stall cannot block the
   job. Directory entries are streamed with a 4,096-entry limit per root and a

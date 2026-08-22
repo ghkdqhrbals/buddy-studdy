@@ -49,7 +49,9 @@ Current workflow templates:
   disk, and process RSS snapshot on the normal MacBook Air runner labels.
 - `diagnose-macbookair-docker-rca.yml`: manual, bounded, read-only Docker
   Desktop/Kubernetes RCA snapshot with sanitized macOS memory logs and recent
-  DiagnosticReports evidence on the normal MacBook Air runner labels.
+  DiagnosticReports evidence on the normal MacBook Air runner labels. Desktop
+  boot-log failures are retained only as classified unit/component/time/hash
+  aggregates; raw messages are discarded.
 - `retire-macbookair-kubernetes.yml`: guarded, two-run retirement of only the
   legacy Docker Desktop Kubernetes runtime on the MacBook Air.
 
