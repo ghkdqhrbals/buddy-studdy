@@ -39,6 +39,9 @@ Current workflow templates:
   monitoring, Grafana, and RedisStreamScope.
 - `deploy-testzone.yml`: TestZone k6 execution service and InfluxDB on MacBook
   Air.
+- `migrate-testzone-component-logging.yml`: guarded, one-time conversion of
+  the two legacy TestZone PostgreSQL/Redis component containers from
+  `json-file` to bounded Docker `local` logging.
 - `maintain-macbookair-docker-capacity.yml`: weekly or manual host-wide Docker
   daemon recovery, capacity diagnostics, and bounded unused-image and old
   build-cache reclamation on MacBook Air.
@@ -238,6 +241,36 @@ The separate TestZone workflow creates or replaces:
 - `buddystudy-testzone-influxdb`: 30-day TestZone time-series storage.
 - approved disposable MySQL, Redis, or Kafka containers only when a user
   deploys them from TestZone.
+
+### Legacy TestZone component log migration
+
+Copy `migrate-testzone-component-logging.yml` and
+`scripts/migrate_testzone_component_logging.py` into the deploy repository.
+Run **Migrate TestZone Component Logging** first with its default
+`apply=false`. This is a read-only preflight over exactly
+`buddystudy-testzone-postgres` and `buddystudy-testzone-redis`; it keeps each
+inspect document in memory, validates the TestZone-managed label, an approved
+legacy image tag, `json-file` or an already-compliant `local` driver, and the
+single Docker volume at the component's exact data destination. The safe
+summary reports the actual named or anonymous Docker volume identities without
+environment variables, commands, entrypoints, or other potentially secret
+configuration. Auto-removing containers and any run-ID-suffixed backup left by
+an earlier attempt are rejected before mutation.
+
+After reviewing that preflight, explicitly run with `apply=true`. The workflow
+shares the `deploy-macbookair-testzone` concurrency group, stops each affected
+container with a 60-second grace period, and reuses its immutable inspected
+image ID, actual volume identity, container configuration, networks, ports,
+resources, restart policy, labels, environment, command, and entrypoint. Only
+the logging policy changes to Docker `local` at 10 MiB times three compressed
+files. Both replacements must accept their submitted configuration before
+run-ID-suffixed backups are removed without `-v`; a create, configuration, or
+start failure restores the original containers. The accepted migration causes
+a brief component restart when the original was running and preserves a stopped
+original as stopped. Removing a retired backup also removes its old
+`json-file` history, which Docker cannot recover unless it was copied or
+forwarded beforehand. The database/Redis volumes are never copied, removed, or
+pruned. Actions performs no HTTP, database, or container-health gate.
 
 EC2 does not run Loki or Grafana. It runs only `buddystudy-promtail` when
 `REMOTE_LOKI_PUSH_URL` is configured. Grafana and Loki are owned exclusively

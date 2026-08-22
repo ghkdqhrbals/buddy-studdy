@@ -1,0 +1,50 @@
+name: Migrate TestZone Component Logging
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Recreate the audited containers after strict preflight. Leave false for read-only inspection."
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: deploy-macbookair-testzone
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  migrate_testzone_component_logging:
+    name: Migrate TestZone Component Logging
+    runs-on: [self-hosted, macOS, ARM64, macbook-air, buddystudy]
+    timeout-minutes: 15
+    env:
+      MIGRATION_REPORT: ${{ runner.temp }}/testzone-component-logging-migration-${{ github.run_id }}-${{ github.run_attempt }}.json
+
+    steps:
+      - name: Checkout audited migration helper
+        uses: actions/checkout@v4
+
+      - name: Strict read-only preflight of exact legacy containers
+        run: |
+          set -euo pipefail
+          python3 scripts/migrate_testzone_component_logging.py preflight \
+            --report "${MIGRATION_REPORT}"
+
+      - name: Recreate exact legacy component containers with bounded logs
+        if: ${{ inputs.apply }}
+        run: |
+          set -euo pipefail
+          python3 scripts/migrate_testzone_component_logging.py migrate \
+            --report "${MIGRATION_REPORT}"
+
+      - name: Summary
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 scripts/migrate_testzone_component_logging.py render-summary \
+            --report "${MIGRATION_REPORT}" \
+            --status '${{ job.status }}' >> "${GITHUB_STEP_SUMMARY}"

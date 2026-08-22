@@ -19,6 +19,7 @@ one workflow run just because they share a host.
 | Redis Stream operations | `Deploy RedisStreamScope on MacBook Air` | manual | MacBook Air self-hosted | RedisStreamScope runtime, persisted SQLite/config volume, production Redis connection, and attachment to the existing monitoring gateway |
 | Monitoring routing | `Deploy BuddyStudy Monitoring Routes on MacBook Air` | manual | MacBook Air self-hosted | Routingflare routes for the monitoring UI, Grafana, and RedisStreamScope |
 | TestZone execution | `Deploy BuddyStudy TestZone on MacBook Air` | `testzone-image-published`, manual | MacBook Air self-hosted | k6 runner, script/project/run storage, InfluxDB, approved disposable test components |
+| TestZone legacy component logging | `Migrate TestZone Component Logging` | manual, one-time | MacBook Air self-hosted | Read-only audit and guarded log-driver-only recreation of the exact legacy PostgreSQL and Redis TestZone components |
 | MacBook Air Docker capacity | `Maintain MacBook Air Docker Capacity` | manual, weekly | MacBook Air self-hosted | Docker daemon readiness/recovery, host and Docker capacity diagnostics, and reclamation of old unreferenced images and all unused build cache older than seven days |
 | Health monitor | Cloudflare Worker workflow | manual or source workflow | GitHub-hosted | Explicit diagnostic endpoint only; production scheduled checks are disabled |
 
@@ -139,6 +140,21 @@ deployment.
   images are recoverable by pulling them again from their registries, and
   removed build cache is recreated by rebuilding. Any data retention policy
   change remains owned by its module's separate workflow.
+- Legacy `buddystudy-testzone-postgres` and `buddystudy-testzone-redis`
+  containers are migrated only through the workflow-dispatch-only TestZone
+  component logging migration. Its default `apply=false` mode performs an
+  in-memory, secret-free preflight. The explicit apply mode serializes with the
+  normal TestZone deploy, preserves each inspected immutable image ID and
+  actual named or anonymous volume identity at `/var/lib/postgresql/data` or
+  `/data`, and changes only Docker logging to `local` with 10 MiB times three
+  compressed files. Auto-removing containers and stale backups from any prior
+  run fail preflight. It preserves the original running/stopped state, uses
+  60-second graceful stops and run-ID-suffixed
+  backups, rolls every changed container back on create/config/start failure,
+  and removes accepted backups without `-v`. No volume is copied, removed, or
+  pruned. The brief restart and unrecoverable removal of retired `json-file`
+  history are disclosed in the workflow summary; no runtime health, HTTP, or
+  database check gates the migration.
 - Maintenance windows are backend application state. The authenticated
   monitoring UI writes through the backend admin API, the backend persists the
   schedule and localized notices, and then publishes the current policy to
