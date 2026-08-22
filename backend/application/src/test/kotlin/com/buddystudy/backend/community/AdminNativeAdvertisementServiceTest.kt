@@ -17,7 +17,7 @@ import java.time.Instant
 
 class AdminNativeAdvertisementServiceTest {
     @Test
-    fun `administrator creates active Coupang campaign with normalized key`() = runBlocking {
+    fun `administrator creates active Coupang campaign with normalized key`(): Unit = runBlocking {
         val port = FakeAdminNativeAdvertisementPort()
         val service = AdminNativeAdvertisementService(port)
 
@@ -29,7 +29,7 @@ class AdminNativeAdvertisementServiceTest {
     }
 
     @Test
-    fun `campaign list includes durable thirty day selection performance and ranking settings`() = runBlocking {
+    fun `campaign list includes durable thirty day selection performance and ranking settings`(): Unit = runBlocking {
         val port = FakeAdminNativeAdvertisementPort().apply {
             saved += command().toEntity(id = 4)
             selections = 20
@@ -55,7 +55,7 @@ class AdminNativeAdvertisementServiceTest {
     }
 
     @Test
-    fun `campaign update preserves identity and performance history`() = runBlocking {
+    fun `campaign update preserves identity and performance history`(): Unit = runBlocking {
         val port = FakeAdminNativeAdvertisementPort().apply {
             saved += command().toEntity(id = 8)
             selections = 12
