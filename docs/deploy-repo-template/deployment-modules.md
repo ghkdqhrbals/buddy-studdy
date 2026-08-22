@@ -160,27 +160,36 @@ deployment.
   `macbook-air,buddystudy` runner labels. Each fixed command is independently
   bounded and a missing, unresponsive, TCC-protected, or failed probe is
   reported as unavailable rather than becoming a runtime health gate. The
-  snapshot records the allowlisted macOS product/build version and Docker
-  Desktop version/status; current Docker component RSS and virtual size;
+  snapshot records the allowlisted macOS product/build version, Docker
+  Desktop app/CLI versions and tolerant known-engine status; current Docker
+  component RSS, virtual size, and oldest/newest elapsed runtime, including
+  the exact `com.apple.Virtualization.VirtualMachine` component;
   `docker stats --no-stream` resource values; only fixed Compose/Kubernetes
   ownership labels from `docker ps`; Docker Desktop Kubernetes pod restart
   counts, last termination times, and Warning-event reason/count/time columns;
-  six hours of fixed-predicate
-  macOS unified memory/application-memory/low-memory/jetsam/watchdog events
-  from kernel, memorystatusd, runningboardd, watchdogd, loginwindow, and Docker
-  sources; and current/previous Desktop
+  six hours of macOS unified evidence split into an indexed exact
+  `loginwindow` application-size probe and a narrow system
+  kernel/memorystatusd/runningboardd/watchdogd memory probe; and current/previous Desktop
   boot logs limited to that same six-hour window. Unified logs have a
   20-second/32-MiB live bound and Desktop logs a 15-second/16-MiB live bound.
   The four user/system `DiagnosticReports` and `Retired` roots are inspected in
   a separate 20-second child so a protected-path consent stall cannot block the
-  job. Only recent bounded JetsamEvent, memory-resource, ResourceException,
+  job. Directory entries are streamed with a 4,096-entry limit per root and a
+  128-candidate newest-file heap; neither discovery list can grow without a
+  bound. Only recent bounded JetsamEvent, memory-resource, ResourceException,
   Docker, com.docker, or Virtualization `.ips`/`.diag` candidates are parsed.
   Jetsam resident pages are converted with that snapshot's page size;
-  coalition current bytes are summed only within the same snapshot.
+  each Docker-containing coalition's current bytes include all of that
+  coalition's members and are summed only within the same snapshot. A separate
+  `dockerNamedProcessCurrentBytes` value is explicitly not described as a
+  coalition total.
   `lifetimeMax` is retained per process and is never summed across processes
   because it can represent different instants. Docker component names remain
   recognizable; unrelated process and coalition identities are one-way
-  pseudonymized. Sanitized incident timestamps are correlated to the nearest
+  pseudonymized. Consecutive `loginwindow` `Sampling App: Docker Desktop`,
+  `setting rSize`, and `app size string` records are correlated within 60
+  seconds, retaining only allowlisted Docker identity, numeric bytes, time, and
+  delta—never the raw messages. Sanitized incident timestamps are correlated to the nearest
   Desktop boot signal, Kubernetes container termination, or Warning-event time
   with an absolute delta, making restart churn around a peak visible without
   retaining an event message. The report never retains raw log/report lines, PIDs, container
@@ -191,6 +200,9 @@ deployment.
   Docker stats remain container-level: child processes such as a TestZone k6
   run are attributed to the parent service and cannot appear as an independent
   container row.
+  Zero parsed DiagnosticReports means only that the bounded probe found no
+  readable matching artifact; it must never be interpreted as proof that no
+  OOM occurred.
 - Docker Desktop Kubernetes retirement belongs only to the manual
   `Retire MacBook Air Docker Desktop Kubernetes` workflow. Its first run is
   read-only; a second apply run requires both the exact confirmation and the

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import heapq
 import json
 import os
 import platform
@@ -43,6 +44,8 @@ DIAGNOSTIC_CHILD_CAPTURE_BYTES = 1024 * 1024
 DIAGNOSTIC_FILE_BYTES = 16 * 1024 * 1024
 DIAGNOSTIC_TOTAL_BYTES = 64 * 1024 * 1024
 DIAGNOSTIC_FILE_LIMIT = 32
+DIAGNOSTIC_CANDIDATE_POOL_LIMIT = 128
+DIAGNOSTIC_ENTRY_LIMIT_PER_ROOT = 4096
 LOOKBACK_HOURS = 6
 DIAGNOSTIC_LOOKBACK_SECONDS = LOOKBACK_HOURS * 60 * 60
 
@@ -70,11 +73,15 @@ EVENT_COLUMNS = (
     "custom-columns=NAMESPACE:.metadata.namespace,KIND:.involvedObject.kind,"
     "NAME:.involvedObject.name,REASON:.reason,COUNT:.count,LAST:.lastTimestamp"
 )
-UNIFIED_LOG_PREDICATE = (
-    '(process IN {"kernel", "memorystatusd", "runningboardd", "watchdogd", '
-    '"launchd", "loginwindow", "Docker Desktop", "com.docker.backend", '
-    '"com.docker.virtualization"} OR process CONTAINS[c] "docker" OR '
-    'senderImagePath CONTAINS[c] "Docker.app") AND '
+UNIFIED_LOGINWINDOW_PREDICATE = (
+    'process == "loginwindow" AND ('
+    'eventMessage CONTAINS[c] "Sampling App" OR '
+    'eventMessage CONTAINS[c] "setting rSize" OR '
+    'eventMessage CONTAINS[c] "app size string" OR '
+    'eventMessage CONTAINS[c] "application memory")'
+)
+UNIFIED_SYSTEM_MEMORY_PREDICATE = (
+    'process IN {"kernel", "memorystatusd", "runningboardd", "watchdogd"} AND '
     '(eventMessage CONTAINS[c] "memory pressure" OR '
     'eventMessage CONTAINS[c] "application memory" OR '
     'eventMessage CONTAINS[c] "low memory" OR '
@@ -100,7 +107,8 @@ TIMESTAMP_PATTERN = re.compile(
 )
 DOCKER_COMPONENT_PATTERN = re.compile(
     r"(?i)\b(Docker Desktop|com\.docker\.[A-Za-z0-9_.-]+|"
-    r"vpnkit|vfkit|virtiofsd|qemu-system-aarch64)\b"
+    r"com\.apple\.Virtualization\.VirtualMachine|vpnkit|vfkit|virtiofsd|"
+    r"qemu-system-aarch64)\b"
 )
 DOCKER_PROCESS_MARKERS = (
     "docker",
@@ -109,6 +117,7 @@ DOCKER_PROCESS_MARKERS = (
     "vfkit",
     "virtiofsd",
     "qemu-system",
+    "com.apple.virtualization.virtualmachine",
 )
 LOG_SIGNAL_PATTERNS = {
     "host-oom": re.compile(r"(?i)out of memory|\boom\b|oom-kill|jetsam|memorystatus"),
@@ -119,6 +128,17 @@ LOG_SIGNAL_PATTERNS = {
     "forced-exit": re.compile(r"(?i)killed process|signal 9|exit status 137|unexpected exit"),
     "watchdog-termination": re.compile(r"(?i)watchdog|watchdogd"),
 }
+LOGINWINDOW_SIZE_KINDS = (
+    ("setting-rsize", re.compile(r"(?i)\bsetting\s+rsize\b")),
+    ("app-size-string", re.compile(r"(?i)\bapp\s+size\s+string\b")),
+)
+LOGINWINDOW_SAMPLE_PATTERN = re.compile(
+    r"(?i)\bSampling\s+App\s*:\s*Docker\s+Desktop\b"
+)
+LOGINWINDOW_RSIZE_PATTERN = re.compile(
+    r"(?i)\bsetting\s+rsize\b\s*(?::|=|to)?\s*([0-9]{6,})\b"
+)
+LOGINWINDOW_CORRELATION_SECONDS = 60
 ALLOWED_STATES = {"created", "running", "paused", "restarting", "removing", "exited", "dead"}
 ALLOWED_PHASES = {"Pending", "Running", "Succeeded", "Failed", "Unknown"}
 ALLOWED_REASONS = {
@@ -424,17 +444,32 @@ def parse_desktop_status(output: str) -> dict[str, str] | None:
         return None
     if not isinstance(value, dict):
         return None
+    allowed = {"running", "stopped", "starting", "stopping", "unavailable"}
+    destinations = {
+        "desktop": "desktop",
+        "vm": "desktopVirtualMachine",
+        "virtualmachine": "desktopVirtualMachine",
+        "docker": "dockerEngine",
+        "engine": "dockerEngine",
+        "containerengine": "dockerEngine",
+        "kubernetes": "kubernetesEngine",
+    }
     result: dict[str, str] = {}
-    for source, destination in (
-        ("status", "desktop"),
-        ("docker", "dockerEngine"),
-        ("kubernetes", "kubernetesEngine"),
-    ):
-        state = value.get(source)
-        if isinstance(state, str) and state.casefold() in {
-            "running", "stopped", "starting", "stopping", "unavailable",
-        }:
-            result[destination] = state.casefold()
+    root_status = _mapping_value(value, ("status",))
+    if isinstance(root_status, str) and root_status.casefold() in allowed:
+        result["desktop"] = root_status.casefold()
+    for mapping in _walk_dicts(value):
+        for raw_key, raw_value in mapping.items():
+            destination = destinations.get(
+                re.sub(r"[^a-z]", "", str(raw_key).casefold())
+            )
+            if destination is None:
+                continue
+            state = raw_value
+            if isinstance(raw_value, dict):
+                state = _mapping_value(raw_value, ("status", "state"))
+            if isinstance(state, str) and state.casefold() in allowed:
+                result.setdefault(destination, state.casefold())
     return result or None
 
 
@@ -604,16 +639,31 @@ def parse_kubernetes_events(output: str) -> dict[str, Any] | None:
 def parse_docker_processes(output: str) -> dict[str, Any] | None:
     groups: dict[str, dict[str, Any]] = {}
     for line in output.splitlines():
-        fields = line.strip().split(None, 2)
-        if len(fields) != 3 or not fields[0].isdigit() or not fields[1].isdigit():
+        fields = line.strip().split(None, 3)
+        if len(fields) != 4 or not fields[0].isdigit() or not fields[1].isdigit():
             continue
-        name = _safe_name(fields[2])
+        elapsed = _parse_elapsed_seconds(fields[2])
+        if elapsed is None:
+            continue
+        name = _safe_name(fields[3])
         if not any(marker in name.casefold() for marker in DOCKER_PROCESS_MARKERS):
             continue
-        group = groups.setdefault(name, {"component": name, "count": 0, "rssBytes": 0, "virtualBytes": 0})
+        group = groups.setdefault(
+            name,
+            {
+                "component": name,
+                "count": 0,
+                "rssBytes": 0,
+                "virtualBytes": 0,
+                "oldestElapsedSeconds": 0,
+                "newestElapsedSeconds": elapsed,
+            },
+        )
         group["count"] += 1
         group["rssBytes"] += int(fields[0]) * 1024
         group["virtualBytes"] += int(fields[1]) * 1024
+        group["oldestElapsedSeconds"] = max(group["oldestElapsedSeconds"], elapsed)
+        group["newestElapsedSeconds"] = min(group["newestElapsedSeconds"], elapsed)
     if not groups:
         return {"processCount": 0, "totalRssBytes": 0, "components": []}
     ordered = sorted(groups.values(), key=lambda item: (-item["rssBytes"], item["component"]))
@@ -622,6 +672,19 @@ def parse_docker_processes(output: str) -> dict[str, Any] | None:
         "totalRssBytes": sum(item["rssBytes"] for item in ordered),
         "components": ordered[:TOP_RECORDS],
     }
+
+
+def _parse_elapsed_seconds(raw: str) -> int | None:
+    match = re.fullmatch(r"(?:(\d+)-)?(?:(\d{1,2}):)?(\d{1,2}):(\d{2})", raw)
+    if match is None:
+        return None
+    days = int(match.group(1) or 0)
+    hours = int(match.group(2) or 0)
+    minutes = int(match.group(3))
+    seconds = int(match.group(4))
+    if hours > 23 or minutes > 59 or seconds > 59:
+        return None
+    return days * 86400 + hours * 3600 + minutes * 60 + seconds
 
 
 def _log_signals(lines: Sequence[tuple[str | None, str, str]]) -> dict[str, Any]:
@@ -659,6 +722,7 @@ def _log_signals(lines: Sequence[tuple[str | None, str, str]]) -> dict[str, Any]
         "signalTimes": sorted(signal_times)[-64:],
         "maxReportedBytes": max_reported,
         "components": ordered[:TOP_RECORDS],
+        "applicationSizeEvidence": [],
     }
 
 
@@ -669,7 +733,7 @@ def parse_desktop_logs(output: str) -> dict[str, Any]:
     return _log_signals(lines)
 
 
-def parse_unified_logs(output: str) -> dict[str, Any] | None:
+def _unified_log_lines(output: str) -> list[tuple[str | None, str, str]] | None:
     lines = []
     for raw_line in output.splitlines():
         if not raw_line.strip():
@@ -687,7 +751,72 @@ def parse_unified_logs(output: str) -> dict[str, Any] | None:
             continue
         source = value.get("process") if isinstance(value.get("process"), str) else "macos"
         lines.append((_safe_timestamp(value.get("timestamp")), _safe_name(source), message))
-    return _log_signals(lines)
+    return lines
+
+
+def parse_unified_logs(output: str) -> dict[str, Any] | None:
+    lines = _unified_log_lines(output)
+    return _log_signals(lines) if lines is not None else None
+
+
+def parse_loginwindow_logs(output: str) -> dict[str, Any] | None:
+    lines = _unified_log_lines(output)
+    if lines is None:
+        return None
+    result = _log_signals(lines)
+    evidence = []
+    sample_timestamp: str | None = None
+    sample_epoch: float | None = None
+    for timestamp, _source, message in lines:
+        if re.search(r"(?i)\bSampling\s+App\s*:", message):
+            if LOGINWINDOW_SAMPLE_PATTERN.search(message):
+                sample_timestamp = timestamp
+                sample_epoch = _timestamp_epoch(timestamp)
+            else:
+                sample_timestamp = None
+                sample_epoch = None
+            continue
+        measurement_epoch = _timestamp_epoch(timestamp)
+        if sample_epoch is None or measurement_epoch is None:
+            continue
+        delta = measurement_epoch - sample_epoch
+        if delta < 0 or delta > LOGINWINDOW_CORRELATION_SECONDS:
+            continue
+        kind = None
+        reported_bytes = None
+        rsize_match = LOGINWINDOW_RSIZE_PATTERN.search(message)
+        if rsize_match:
+            kind = "setting-rsize"
+            reported_bytes = _nonnegative_integer(rsize_match.group(1))
+        elif re.search(r"(?i)\bapp\s+size\s+string\b", message):
+            sizes = [
+                _size_bytes(match.group(1), match.group(2)) or 0
+                for match in SIZE_PATTERN.finditer(message)
+            ]
+            if sizes:
+                kind = "app-size-string"
+                reported_bytes = max(sizes)
+        if kind and reported_bytes:
+            evidence.append(
+                {
+                    "kind": kind,
+                    "component": "Docker-Desktop",
+                    "reportedBytes": reported_bytes,
+                    "samplingTime": sample_timestamp,
+                    "measurementTime": timestamp,
+                    "deltaSeconds": int(delta),
+                }
+            )
+    result["applicationSizeEvidence"] = sorted(
+        evidence,
+        key=lambda item: (-item["reportedBytes"], item.get("measurementTime") or ""),
+    )[:32]
+    if evidence:
+        result["maxReportedBytes"] = max(
+            result.get("maxReportedBytes", 0),
+            max(item["reportedBytes"] for item in evidence),
+        )
+    return result
 
 
 def _json_documents(raw: str) -> list[Any]:
@@ -812,12 +941,17 @@ def _diagnostic_snapshot(raw: str, *, file_name: str, modified_at: float) -> dic
         processes.append(process)
         group = coalition_totals.setdefault(
             coalition,
-            {"coalition": coalition, "currentBytes": 0, "dockerCurrentBytes": 0, "processCount": 0},
+            {
+                "coalition": coalition,
+                "currentBytes": 0,
+                "dockerNamedProcessCurrentBytes": 0,
+                "processCount": 0,
+            },
         )
         group["currentBytes"] += current_bytes
         group["processCount"] += 1
         if process["dockerComponent"]:
-            group["dockerCurrentBytes"] += current_bytes
+            group["dockerNamedProcessCurrentBytes"] += current_bytes
 
     if not processes:
         raw_name = _first_value(documents, ("procName", "processName", "app_name", "process"))
@@ -846,8 +980,15 @@ def _diagnostic_snapshot(raw: str, *, file_name: str, modified_at: float) -> dic
             selected.append(process)
     coalitions = sorted(
         coalition_totals.values(),
-        key=lambda item: (-item["dockerCurrentBytes"], -item["currentBytes"], item["coalition"]),
+        key=lambda item: (
+            -item["dockerNamedProcessCurrentBytes"],
+            -item["currentBytes"],
+            item["coalition"],
+        ),
     )[:TOP_RECORDS]
+    docker_containing_coalitions = [
+        item for item in coalitions if item["dockerNamedProcessCurrentBytes"] > 0
+    ]
     timestamp = _safe_timestamp(_first_value(documents, ("timestamp", "captureTime", "date")))
     if timestamp is None:
         timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(modified_at))
@@ -859,9 +1000,12 @@ def _diagnostic_snapshot(raw: str, *, file_name: str, modified_at: float) -> dic
         "pageSizeBytes": page_size,
         "largestProcess": largest,
         "largestProcessCurrentBytes": largest_current,
-        "dockerCurrentBytes": sum(item.get("currentBytes") or 0 for item in docker_processes),
+        "dockerNamedProcessCurrentBytes": sum(
+            item.get("currentBytes") or 0 for item in docker_processes
+        ),
         "processes": selected,
         "coalitions": coalitions,
+        "dockerContainingCoalitions": docker_containing_coalitions,
     }
 
 
@@ -874,31 +1018,42 @@ def collect_diagnostic_reports() -> dict[str, Any]:
         Path("/Library/Logs/DiagnosticReports/Retired"),
     )
     cutoff = time.time() - DIAGNOSTIC_LOOKBACK_SECONDS
-    candidates: list[tuple[float, Path, str]] = []
+    candidates: list[tuple[float, str, str]] = []
     accessible_roots = 0
+    eligible_candidate_count = 0
+    truncated_root_count = 0
     for root in roots:
         try:
-            entries = list(os.scandir(root))
-            accessible_roots += 1
+            entries = os.scandir(root)
         except OSError:
             continue
-        for entry in entries:
-            folded = entry.name.casefold()
-            if not folded.endswith(DIAGNOSTIC_EXTENSIONS) or not any(marker in folded for marker in DIAGNOSTIC_NAME_MARKERS):
-                continue
-            try:
-                metadata = entry.stat(follow_symlinks=False)
-            except OSError:
-                continue
-            if not stat.S_ISREG(metadata.st_mode) or metadata.st_mtime < cutoff or metadata.st_size > DIAGNOSTIC_FILE_BYTES:
-                continue
-            candidates.append((metadata.st_mtime, Path(entry.path), entry.name))
-    candidates.sort(key=lambda item: item[0], reverse=True)
+        accessible_roots += 1
+        with entries:
+            for entry_index, entry in enumerate(entries):
+                if entry_index >= DIAGNOSTIC_ENTRY_LIMIT_PER_ROOT:
+                    truncated_root_count += 1
+                    break
+                folded = entry.name.casefold()
+                if not folded.endswith(DIAGNOSTIC_EXTENSIONS) or not any(marker in folded for marker in DIAGNOSTIC_NAME_MARKERS):
+                    continue
+                try:
+                    metadata = entry.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                if not stat.S_ISREG(metadata.st_mode) or metadata.st_mtime < cutoff or metadata.st_size > DIAGNOSTIC_FILE_BYTES:
+                    continue
+                eligible_candidate_count += 1
+                candidate = (metadata.st_mtime, entry.path, entry.name)
+                if len(candidates) < DIAGNOSTIC_CANDIDATE_POOL_LIMIT:
+                    heapq.heappush(candidates, candidate)
+                elif candidate > candidates[0]:
+                    heapq.heapreplace(candidates, candidate)
+    candidates.sort(reverse=True)
     snapshots = []
     total_bytes = 0
-    for modified_at, path, name in candidates[:DIAGNOSTIC_FILE_LIMIT]:
+    for modified_at, raw_path, name in candidates[:DIAGNOSTIC_FILE_LIMIT]:
         try:
-            descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+            descriptor = os.open(raw_path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
         except OSError:
             continue
         try:
@@ -931,7 +1086,10 @@ def collect_diagnostic_reports() -> dict[str, Any]:
     snapshots.sort(key=lambda item: item["timestamp"], reverse=True)
     return {
         "accessibleRootCount": accessible_roots,
-        "candidateFileCount": min(len(candidates), DIAGNOSTIC_FILE_LIMIT),
+        "eligibleCandidateCount": eligible_candidate_count,
+        "retainedCandidateCount": len(candidates),
+        "inspectedCandidateCount": min(len(candidates), DIAGNOSTIC_FILE_LIMIT),
+        "truncatedRootCount": truncated_root_count,
         "parsedSnapshotCount": len(snapshots),
         "snapshots": snapshots[:TOP_RECORDS],
     }
@@ -1038,9 +1196,10 @@ def collect_report() -> dict[str, Any]:
     }
     _record_probe(report, "macos-version", ("/usr/bin/sw_vers", "-productVersion"), parse_os_version, "macosVersion", timeout=8)
     _record_probe(report, "macos-build", ("/usr/bin/sw_vers", "-buildVersion"), parse_os_build, "macosBuild", timeout=8)
-    _record_probe(report, "desktop-version", (DOCKER_CLI, "desktop", "version", "--short"), parse_desktop_version, "desktopVersion", timeout=8)
+    _record_probe(report, "desktop-app-version", ("/usr/libexec/PlistBuddy", "-c", "Print :CFBundleShortVersionString", "/Applications/Docker.app/Contents/Info.plist"), parse_desktop_version, "desktopVersion", timeout=8)
+    _record_probe(report, "desktop-cli-version", (DOCKER_CLI, "desktop", "version", "--short"), parse_desktop_version, "desktopCliVersion", timeout=8)
     _record_probe(report, "desktop-status", (DOCKER_CLI, "desktop", "status", "--format", "json"), parse_desktop_status, "desktopStatus", timeout=8)
-    _record_probe(report, "docker-processes", ("/bin/ps", "-axww", "-o", "rss=", "-o", "vsz=", "-o", "comm="), parse_docker_processes, "dockerProcesses", timeout=8)
+    _record_probe(report, "docker-processes", ("/bin/ps", "-axww", "-o", "rss=", "-o", "vsz=", "-o", "etime=", "-o", "comm="), parse_docker_processes, "dockerProcesses", timeout=8)
     _record_probe(report, "docker-stats", (DOCKER_CLI, "--context", "docker-desktop", "stats", "--no-stream", "--format", STATS_FORMAT), parse_docker_stats, "dockerStats")
     _record_probe(report, "docker-workloads", (DOCKER_CLI, "--context", "docker-desktop", "ps", "--all", "--format", PS_FORMAT), parse_docker_ps, "dockerWorkloads")
     _record_probe(report, "kubernetes-pods", (KUBECTL, "--context", "docker-desktop", "get", "pods", "--all-namespaces", "--request-timeout=10s", "-o", f"jsonpath={POD_JSONPATH}"), parse_kubernetes_pods, "kubernetesPods")
@@ -1048,7 +1207,8 @@ def collect_report() -> dict[str, Any]:
     lookback = f"-{LOOKBACK_HOURS}h"
     _record_probe(report, "desktop-logs-current-boot", (DOCKER_CLI, "desktop", "logs", "-S", lookback, "-p", "0"), parse_desktop_logs, "desktopLogsCurrentBoot", timeout=LOG_TIMEOUT_SECONDS, max_capture_bytes=LOG_CAPTURE_BYTES)
     _record_probe(report, "desktop-logs-previous-boot", (DOCKER_CLI, "desktop", "logs", "-b", "1", "-S", lookback, "-p", "0"), parse_desktop_logs, "desktopLogsPreviousBoot", timeout=LOG_TIMEOUT_SECONDS, max_capture_bytes=LOG_CAPTURE_BYTES)
-    _record_probe(report, "macos-memory-events", ("/usr/bin/log", "show", "--last", f"{LOOKBACK_HOURS}h", "--style", "ndjson", "--info", "--predicate", UNIFIED_LOG_PREDICATE), parse_unified_logs, "macosMemoryEvents", timeout=UNIFIED_LOG_TIMEOUT_SECONDS, max_capture_bytes=UNIFIED_LOG_CAPTURE_BYTES)
+    _record_probe(report, "macos-loginwindow-app-memory", ("/usr/bin/log", "show", "--last", f"{LOOKBACK_HOURS}h", "--style", "ndjson", "--info", "--predicate", UNIFIED_LOGINWINDOW_PREDICATE), parse_loginwindow_logs, "macosLoginwindowEvents", timeout=15, max_capture_bytes=LOG_CAPTURE_BYTES)
+    _record_probe(report, "macos-system-memory", ("/usr/bin/log", "show", "--last", f"{LOOKBACK_HOURS}h", "--style", "ndjson", "--info", "--predicate", UNIFIED_SYSTEM_MEMORY_PREDICATE), parse_unified_logs, "macosSystemMemoryEvents", timeout=UNIFIED_LOG_TIMEOUT_SECONDS, max_capture_bytes=UNIFIED_LOG_CAPTURE_BYTES)
     _record_probe(
         report,
         "diagnostic-reports",
@@ -1093,7 +1253,8 @@ def render_summary(report: Mapping[str, Any], workflow_status: str) -> str:
     diagnostics = report.get("diagnosticReports") if isinstance(report.get("diagnosticReports"), dict) else {}
     desktop_status = report.get("desktopStatus") if isinstance(report.get("desktopStatus"), dict) else {}
     log_sections = [
-        ("macOS memory events", report.get("macosMemoryEvents")),
+        ("macOS loginwindow application-memory evidence", report.get("macosLoginwindowEvents")),
+        ("macOS system memory events", report.get("macosSystemMemoryEvents")),
         ("Desktop current boot", report.get("desktopLogsCurrentBoot")),
         ("Desktop previous boot", report.get("desktopLogsPreviousBoot")),
     ]
@@ -1105,24 +1266,26 @@ def render_summary(report: Mapping[str, Any], workflow_status: str) -> str:
         f"- Read-only probes: `{sum(value == 'ok' for value in probes.values())}/{len(probes)}` completed",
         f"- macOS: `{report.get('macosVersion', 'unavailable')}` build `{report.get('macosBuild', 'unavailable')}`",
         f"- Docker Desktop version: `{report.get('desktopVersion', 'unavailable')}`",
+        f"- Docker Desktop CLI plugin version: `{report.get('desktopCliVersion', 'unavailable')}`",
         f"- Desktop status: `{desktop_status.get('desktop', 'unavailable')}`; Docker engine `{desktop_status.get('dockerEngine', 'unavailable')}`; Kubernetes `{desktop_status.get('kubernetesEngine', 'unavailable')}`",
         f"- Docker host processes: `{processes.get('processCount', 'unavailable')}`; resident total `{_format_bytes(processes.get('totalRssBytes'))}`",
         f"- Container memory total: `{_format_bytes(stats.get('totalMemoryUsageBytes'))}` across `{stats.get('containerCount', 'unavailable')}` running containers",
         f"- Kubernetes pods: `{pods.get('podCount', 'unavailable')}`; phases `{json.dumps(pods.get('phaseCounts', {}), sort_keys=True)}`",
         f"- Kubernetes warning reasons: `{json.dumps(events.get('reasonCounts', {}), sort_keys=True)}`",
-        f"- Diagnostic reports: `{diagnostics.get('parsedSnapshotCount', 'unavailable')}` parsed from `{diagnostics.get('candidateFileCount', 'unavailable')}` bounded recent candidates; roots accessible `{diagnostics.get('accessibleRootCount', 'unavailable')}/4`",
+        f"- Diagnostic reports: `{diagnostics.get('parsedSnapshotCount', 'unavailable')}` parsed from `{diagnostics.get('inspectedCandidateCount', 'unavailable')}` inspected / `{diagnostics.get('eligibleCandidateCount', 'unavailable')}` eligible bounded recent candidates; roots accessible `{diagnostics.get('accessibleRootCount', 'unavailable')}/4`; truncated roots `{diagnostics.get('truncatedRootCount', 'unavailable')}`",
+        "- A zero DiagnosticReports count means no matching readable artifact was captured by this bounded probe; it is not evidence that no OOM occurred.",
     ]
-    lines.extend(_summary_records("- Docker component RSS/virtual evidence:", processes.get("components"), (("component", "component"), ("rssBytes", "RSS bytes"), ("virtualBytes", "virtual bytes"))))
+    lines.extend(_summary_records("- Docker component RSS/virtual/lifetime evidence:", processes.get("components"), (("component", "component"), ("rssBytes", "RSS bytes"), ("virtualBytes", "virtual bytes"), ("oldestElapsedSeconds", "oldest elapsed seconds"), ("newestElapsedSeconds", "newest elapsed seconds"))))
     lines.extend(_summary_records("- Highest container memory:", stats.get("topMemoryWorkloads"), (("workload", "workload"), ("memoryUsageBytes", "memory bytes"), ("memoryLimitBytes", "limit bytes"), ("memoryPercent", "memory %"), ("cpuPercent", "CPU %"))))
     lines.extend(_summary_records("- Highest Kubernetes restart counts:", pods.get("topRestartedPods"), (("namespace", "namespace"), ("pod", "pod"), ("restartCount", "restarts"), ("phase", "phase"))))
     for snapshot in diagnostics.get("snapshots", [])[:TOP_RECORDS] if isinstance(diagnostics.get("snapshots"), list) else []:
         if not isinstance(snapshot, dict):
             continue
         lines.append(
-            f"- Diagnostic snapshot `{snapshot.get('timestamp', 'unavailable')}` kind `{snapshot.get('kind', 'unknown')}`: largest `{snapshot.get('largestProcess', 'unknown')}` current `{_format_bytes(snapshot.get('largestProcessCurrentBytes'))}`; Docker coalition current `{_format_bytes(snapshot.get('dockerCurrentBytes'))}`; page size `{snapshot.get('pageSizeBytes', 'unavailable')}` bytes"
+            f"- Diagnostic snapshot `{snapshot.get('timestamp', 'unavailable')}` kind `{snapshot.get('kind', 'unknown')}`: largest `{snapshot.get('largestProcess', 'unknown')}` current `{_format_bytes(snapshot.get('largestProcessCurrentBytes'))}`; Docker-named processes current `{_format_bytes(snapshot.get('dockerNamedProcessCurrentBytes'))}`; page size `{snapshot.get('pageSizeBytes', 'unavailable')}` bytes"
         )
         lines.extend(_summary_records("  - process evidence (lifetimeMax is per-process and is never summed):", snapshot.get("processes"), (("process", "process"), ("currentBytes", "current bytes"), ("lifetimeMaxBytes", "lifetime max bytes"), ("coalition", "coalition"), ("reason", "reason"))))
-        lines.extend(_summary_records("  - same-snapshot coalition sums:", snapshot.get("coalitions"), (("coalition", "coalition"), ("currentBytes", "current bytes"), ("dockerCurrentBytes", "Docker bytes"), ("processCount", "processes"))))
+        lines.extend(_summary_records("  - Docker-containing same-snapshot coalition totals (all member processes):", snapshot.get("dockerContainingCoalitions"), (("coalition", "coalition"), ("currentBytes", "all-member current bytes"), ("dockerNamedProcessCurrentBytes", "Docker-named current bytes"), ("processCount", "processes"))))
     lines.extend(
         _summary_records(
             "- Incident-to-Docker/Kubernetes churn timing:",
@@ -1141,6 +1304,7 @@ def render_summary(report: Mapping[str, Any], workflow_status: str) -> str:
             f"- {label}: matched `{value.get('matchedLineCount', 'unavailable')}`; categories `{json.dumps(value.get('categoryCounts', {}), sort_keys=True)}`; max reported `{_format_bytes(value.get('maxReportedBytes'))}`; latest `{value.get('latestSignalTime', 'unavailable')}`"
         )
         lines.extend(_summary_records("  - implicated components:", value.get("components"), (("component", "component"), ("signalCount", "signals"), ("maxReportedBytes", "max bytes"))))
+        lines.extend(_summary_records("  - correlated Docker application-size evidence:", value.get("applicationSizeEvidence"), (("component", "component"), ("kind", "kind"), ("reportedBytes", "reported bytes"), ("samplingTime", "sampled"), ("measurementTime", "measured"), ("deltaSeconds", "delta seconds"))))
     lines.extend(("- Docker stats are container-level: service child processes such as k6 are included in their parent container and do not appear as separate container rows; absence of a row is not evidence that no child ran.", "- Raw logs, IDs, paths, environment values, mounts, arbitrary labels, and device data were discarded.", "- No restart, stop, force-quit, reset, prune, delete, rollout, or runtime health success gate was performed.", ""))
     return "\n".join(lines)
 

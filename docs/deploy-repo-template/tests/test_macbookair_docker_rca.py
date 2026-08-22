@@ -60,6 +60,13 @@ class MacBookAirDockerRCATests(unittest.TestCase):
         self.assertTrue(any("/usr/bin/log show --last 6h" in value for value in flattened))
         self.assertIn("/usr/bin/sw_vers -productversion", flattened)
         self.assertIn("/usr/bin/sw_vers -buildversion", flattened)
+        self.assertTrue(
+            any(
+                "/usr/libexec/plistbuddy -c print :cfbundleshortversionstring /applications/docker.app/contents/info.plist"
+                in value
+                for value in flattened
+            )
+        )
         for command in commands:
             if command[0] == rca.DOCKER_CLI and len(command) > 1 and command[1] != "desktop":
                 self.assertIn("docker-desktop", command)
@@ -166,15 +173,14 @@ class MacBookAirDockerRCATests(unittest.TestCase):
         self.assertNotIn("device-secret", encoded)
 
     def test_unified_predicate_includes_generic_system_memory_sources(self):
-        predicate = rca.UNIFIED_LOG_PREDICATE
-        for source in ("kernel", "memorystatusd", "runningboardd", "watchdogd", "loginwindow"):
-            self.assertIn(source, predicate)
-        self.assertIn('eventMessage CONTAINS[c] "memory pressure"', predicate)
-        self.assertIn('eventMessage CONTAINS[c] "application memory"', predicate)
-        self.assertIn('eventMessage CONTAINS[c] "low memory"', predicate)
-        self.assertNotIn(
-            ') and (eventmessage contains[c] "docker"', predicate.casefold()
-        )
+        system_predicate = rca.UNIFIED_SYSTEM_MEMORY_PREDICATE
+        for source in ("kernel", "memorystatusd", "runningboardd", "watchdogd"):
+            self.assertIn(source, system_predicate)
+        self.assertIn('eventMessage CONTAINS[c] "memory pressure"', system_predicate)
+        login_predicate = rca.UNIFIED_LOGINWINDOW_PREDICATE
+        self.assertIn('process == "loginwindow"', login_predicate)
+        for phrase in ("Sampling App", "setting rSize", "app size string", "application memory"):
+            self.assertIn(phrase, login_predicate)
         generic = json.dumps(
             {
                 "timestamp": "2026-08-23 02:03:04.000+0900",
@@ -195,6 +201,85 @@ class MacBookAirDockerRCATests(unittest.TestCase):
             rca.parse_unified_logs(low_memory)["categoryCounts"],
             {"memory-pressure": 1},
         )
+
+    def test_loginwindow_size_requires_nearby_docker_sampling_record(self):
+        lines = (
+            json.dumps(
+                {
+                    "timestamp": "2026-08-23 02:00:00.000+0900",
+                    "process": "loginwindow",
+                    "eventMessage": "Sampling App: Docker Desktop",
+                }
+            )
+            + "\n"
+            + json.dumps(
+                {
+                    "timestamp": "2026-08-23 02:00:01.000+0900",
+                    "process": "loginwindow",
+                    "eventMessage": "setting rSize: 103444070400",
+                }
+            )
+            + "\n"
+            + json.dumps(
+                {
+                    "timestamp": "2026-08-23 02:00:02.000+0900",
+                    "process": "loginwindow",
+                    "eventMessage": "app size string: 96.34 GB",
+                }
+            )
+        )
+        parsed = rca.parse_loginwindow_logs(lines)
+        evidence = parsed["applicationSizeEvidence"]
+        self.assertEqual(len(evidence), 2)
+        self.assertEqual(evidence[0]["reportedBytes"], 103_444_070_400)
+        self.assertEqual(evidence[0]["component"], "Docker-Desktop")
+        self.assertNotIn("setting rSize", json.dumps(parsed))
+        unpaired = json.dumps(
+            {
+                "timestamp": "2026-08-23 02:00:02.000+0900",
+                "process": "loginwindow",
+                "eventMessage": "app size string: 96.34 GB",
+            }
+        )
+        self.assertEqual(
+            rca.parse_loginwindow_logs(unpaired)["applicationSizeEvidence"], []
+        )
+
+    def test_nested_desktop_status_shape_keeps_only_known_states(self):
+        parsed = rca.parse_desktop_status(
+            json.dumps(
+                {
+                    "vm": {"status": "running", "path": "/private/raw"},
+                    "containerEngine": {"state": "stopped", "id": "secret"},
+                    "kubernetes": {"status": "starting"},
+                }
+            )
+        )
+        self.assertEqual(
+            parsed,
+            {
+                "desktopVirtualMachine": "running",
+                "dockerEngine": "stopped",
+                "kubernetesEngine": "starting",
+            },
+        )
+
+    def test_virtualization_vm_process_is_included_with_elapsed_bounds(self):
+        parsed = rca.parse_docker_processes(
+            "1153433 90000000 01:02:03 /Applications/Docker.app/Contents/MacOS/com.apple.Virtualization.VirtualMachine\n"
+            "1000 2000 00:00:30 /Applications/Docker.app/Contents/MacOS/com.docker.backend\n"
+        )
+        components = {item["component"]: item for item in parsed["components"]}
+        vm = components["com.apple.Virtualization.VirtualMachine"]
+        self.assertEqual(vm["rssBytes"], 1_153_433 * 1024)
+        self.assertEqual(vm["oldestElapsedSeconds"], 3723)
+        self.assertEqual(vm["newestElapsedSeconds"], 3723)
+
+    def test_diagnostic_candidate_discovery_is_streamed_and_bounded(self):
+        self.assertNotIn("list(os.scandir", self.helper)
+        self.assertEqual(rca.DIAGNOSTIC_ENTRY_LIMIT_PER_ROOT, 4096)
+        self.assertEqual(rca.DIAGNOSTIC_CANDIDATE_POOL_LIMIT, 128)
+        self.assertIn("heapq.heapreplace", self.helper)
 
     def test_jetsam_snapshot_uses_same_snapshot_pages_and_never_sums_lifetime_max(self):
         raw = (
@@ -224,11 +309,19 @@ class MacBookAirDockerRCATests(unittest.TestCase):
         snapshot = rca._diagnostic_snapshot(raw, file_name="JetsamEvent-test.ips", modified_at=0)
         self.assertEqual(snapshot["largestProcessCurrentBytes"], 6_000_000 * 16384)
         self.assertEqual(snapshot["coalitions"][0]["currentBytes"], 6_000_100 * 16384)
+        self.assertEqual(
+            snapshot["dockerNamedProcessCurrentBytes"], 6_000_000 * 16384
+        )
+        self.assertEqual(
+            snapshot["dockerContainingCoalitions"][0]["currentBytes"],
+            6_000_100 * 16384,
+        )
         self.assertEqual(snapshot["processes"][0]["lifetimeMaxBytes"], 7_000_000 * 16384)
         encoded = json.dumps(snapshot)
         self.assertNotIn("private-user-process", encoded)
         self.assertIn("other-", encoded)
         self.assertNotIn('"coalition": 77', encoded)
+        self.assertNotIn("dockerCurrentBytes", encoded)
 
     def test_diagnostic_report_child_protocol_rejects_raw_or_unknown_payload(self):
         self.assertIsNone(rca.parse_diagnostic_reports_child('{"raw":"secret"}'))
@@ -295,6 +388,7 @@ class MacBookAirDockerRCATests(unittest.TestCase):
         self.assertNotIn("/Users/private", summary)
         self.assertIn("No restart, stop, force-quit", summary)
         self.assertIn("service child processes such as k6", summary)
+        self.assertIn("not evidence that no OOM occurred", summary)
 
 
 if __name__ == "__main__":
