@@ -1,0 +1,40 @@
+name: Diagnose MacBook Air Host Pressure
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diagnose-macbookair-host-pressure
+  cancel-in-progress: false
+
+jobs:
+  submit_host_pressure_snapshot:
+    name: Submit Read-Only Host Pressure Snapshot
+    runs-on: [self-hosted, macOS, ARM64, macbook-air, buddystudy]
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout audited host diagnostic helper
+        uses: actions/checkout@v4
+
+      - name: Submit bounded read-only host pressure snapshot
+        env:
+          PRESSURE_REPORT: ${{ runner.temp }}/macbookair-pressure-${{ github.run_id }}-${{ github.run_attempt }}.json
+        run: |
+          set -euo pipefail
+          umask 077
+          exec python3 scripts/diagnose_macbookair_docker_pressure.py collect \
+            --report "${PRESSURE_REPORT}"
+
+      - name: Render read-only host pressure snapshot
+        if: ${{ always() }}
+        env:
+          PRESSURE_REPORT: ${{ runner.temp }}/macbookair-pressure-${{ github.run_id }}-${{ github.run_attempt }}.json
+        run: |
+          set -euo pipefail
+          exec python3 scripts/diagnose_macbookair_docker_pressure.py render-summary \
+            --report "${PRESSURE_REPORT}" \
+            --status '${{ job.status }}' >> "${GITHUB_STEP_SUMMARY}"

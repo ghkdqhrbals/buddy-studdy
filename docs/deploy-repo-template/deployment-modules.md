@@ -21,6 +21,7 @@ one workflow run just because they share a host.
 | TestZone execution | `Deploy BuddyStudy TestZone on MacBook Air` | `testzone-image-published`, manual | MacBook Air self-hosted | k6 runner, script/project/run storage, InfluxDB, approved disposable test components |
 | TestZone legacy component logging | `Migrate TestZone Component Logging` | manual, one-time | MacBook Air self-hosted | Read-only audit and guarded log-driver-only recreation of the exact legacy PostgreSQL and Redis TestZone components |
 | MacBook Air Docker capacity | `Maintain MacBook Air Docker Capacity` | manual, weekly | MacBook Air self-hosted | Docker daemon readiness/recovery, host and Docker capacity diagnostics, and reclamation of old unreferenced images and all unused build cache older than seven days |
+| MacBook Air host pressure diagnostics | `Diagnose MacBook Air Host Pressure` | manual, incident-only | MacBook Air self-hosted, normal labels | Read-only physical-memory, VM-page, memory-pressure, swap, data-volume, and process RSS/virtual-size snapshot only |
 | MacBook Air Kubernetes retirement | `Retire MacBook Air Docker Desktop Kubernetes` | manual, two-run, one-time | MacBook Air self-hosted, temporarily isolated retirement label | Read-only exact-plan audit, encrypted rollback backup, quiesced legacy workload shutdown, and Docker Desktop Kubernetes disablement only |
 | Health monitor | Cloudflare Worker workflow | manual or source workflow | GitHub-hosted | Explicit diagnostic endpoint only; production scheduled checks are disabled |
 
@@ -141,6 +142,18 @@ deployment.
   images are recoverable by pulling them again from their registries, and
   removed build cache is recreated by rebuilding. Any data retention policy
   change remains owned by its module's separate workflow.
+- Attended application-memory incident diagnosis belongs only to the manual
+  `Diagnose MacBook Air Host Pressure` workflow on the normal
+  `macbook-air,buddystudy` labels. It does not enter the retirement-label or
+  Full Disk Access procedure. It reads only fixed, individually bounded macOS
+  physical-memory, VM-page, memory-pressure, swap, data-volume, and
+  process-table counters. Each utility has an eight-second deadline and a
+  one-MiB live stdout cap; exceeding either terminates and reaps only that new
+  isolated diagnostic child group. Reports retain aggregate byte counts and
+  bounded executable basenames—never paths, environment values, or command
+  lines. The workflow performs no Docker API/CLI call, daemon wakeup, health
+  check, Docker/runtime restart, stop, force-quit, prune, or data mutation, and
+  can submit its snapshot after Docker Desktop exits.
 - Docker Desktop Kubernetes retirement belongs only to the manual
   `Retire MacBook Air Docker Desktop Kubernetes` workflow. Its first run is
   read-only; a second apply run requires both the exact confirmation and the

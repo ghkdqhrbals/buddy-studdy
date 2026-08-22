@@ -45,6 +45,8 @@ Current workflow templates:
 - `maintain-macbookair-docker-capacity.yml`: weekly or manual host-wide Docker
   daemon recovery, capacity diagnostics, and bounded unused-image and old
   build-cache reclamation on MacBook Air.
+- `diagnose-macbookair-host-pressure.yml`: manual, host-only memory, swap,
+  disk, and process RSS snapshot on the normal MacBook Air runner labels.
 - `retire-macbookair-kubernetes.yml`: guarded, two-run retirement of only the
   legacy Docker Desktop Kubernetes runtime on the MacBook Air.
 
@@ -249,6 +251,27 @@ The separate TestZone workflow creates or replaces:
 - `buddystudy-testzone-influxdb`: 30-day TestZone time-series storage.
 - approved disposable MySQL, Redis, or Kafka containers only when a user
   deploys them from TestZone.
+
+## MacBook Air Host Pressure Diagnostics
+
+Copy `diagnose-macbookair-host-pressure.yml` and
+`scripts/diagnose_macbookair_docker_pressure.py` into the deploy repository.
+Run **Diagnose MacBook Air Host Pressure** manually during an attended memory
+incident. It uses the normal `macbook-air,buddystudy` runner labels and does not
+enter the Kubernetes retirement-label or Full Disk Access procedure.
+
+The workflow submits one bounded, host-only snapshot. Its seven fixed probes
+read physical memory, VM page counters, memory-pressure level/free percentage,
+swap usage, data-volume capacity, and process RSS/virtual-size aggregation.
+Each utility has an eight-second deadline and a one-MiB live stdout cap;
+exceeding either limit terminates and reaps only that newly isolated diagnostic
+child group. Raw stdout/stderr is never printed. Process paths are reduced to
+display-safe executable basenames; environment values and command lines are not
+included in the report. This workflow never calls Docker, touches protected
+Docker data, performs a runtime health check, restarts/stops/force-quits Docker
+or another pre-existing process, prunes storage, or mutates persisted data. It
+therefore remains usable after Docker Desktop exits. A successful run is a
+submitted point-in-time snapshot, not a runtime readiness assertion.
 
 ## MacBook Air Docker Desktop Kubernetes Retirement
 
