@@ -176,11 +176,20 @@ deployment.
   exact runner home, `/Volumes` mount roots, and either-direction overlap with
   the retirement backup root before backup. Workflow `exec`
   forwarding plus isolated child process groups
-  ensure timeout/cancellation kills and reaps pipe-holding descendants. That
-  deadline is preflight-only. The apply path retains a six-hour Actions
-  envelope; termination enters guarded rollback, and Docker/raw/settings plus
-  cluster-state restoration always precede the separately bounded best-effort
-  failure-bundle seal/cleanup. The module never resets Desktop, force-kills it,
+  ensure timeout/cancellation kills and reaps pipe-holding descendants. The
+  Docker-storage probe uses fd-relative no-follow metadata/open operations,
+  rejects non-regular settings files before nonblocking open, verifies
+  pre/post-open inode identity, and checks exact Darwin path spelling with
+  `F_GETPATH`; it no longer enumerates every ancestor or repeats an absolute
+  `lstat`. Fixed settings/raw probe start-complete stages and allowlisted
+  candidate/substep reason codes localize a failure without logging a path;
+  unknown child data becomes `storage-probe/protocol-invalid`. Its inner
+  deadline remains eight seconds inside the existing ten-second parent bound.
+  The 12-minute overall deadline is preflight-only. The apply path retains a
+  six-hour Actions envelope; termination enters guarded rollback, and
+  Docker/raw/settings plus cluster-state restoration always precede the
+  separately bounded best-effort failure-bundle seal/cleanup. The module never
+  resets Desktop, force-kills it,
   removes or prunes containers/networks/volumes, deletes Kubernetes storage or
   namespaces, uploads backup artifacts, prints secret payloads, or performs a
   runtime health gate.

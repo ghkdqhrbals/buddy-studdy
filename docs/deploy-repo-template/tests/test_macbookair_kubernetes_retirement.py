@@ -1131,9 +1131,190 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
                     retirement.CommandRunner(), Path(sensitive_home)
                 )
         self.assertLess(time.monotonic() - started, 5)
+        self.assertIn("storage-probe/settings/timeout", str(raised.exception))
         self.assertNotIn(sensitive_home, str(raised.exception))
         self.assertEqual(stdout.getvalue(), "")
         self.assertEqual(stderr.getvalue(), "")
+
+    def test_storage_probe_timeout_markers_are_fixed_and_untrusted_values_hidden(self):
+        sensitive = "/Users/example/private-marker"
+
+        class TimeoutRunner:
+            def __init__(self, marker):
+                self.marker = marker
+
+            def run(self, _arguments, **_kwargs):
+                raise retirement.GuardedCommandTimeout(self.marker)
+
+        request = {"operation": "settings", "home": sensitive}
+        with self.assertRaises(retirement.RetirementError) as marked:
+            retirement._run_docker_storage_probe(
+                TimeoutRunner(b"primary-settings/candidate-open\n"), request
+            )
+        self.assertIn(
+            "storage-probe/settings/timeout/primary-settings/candidate-open",
+            str(marked.exception),
+        )
+        self.assertNotIn(sensitive, str(marked.exception))
+
+        with self.assertRaises(retirement.RetirementError) as untrusted:
+            retirement._run_docker_storage_probe(
+                TimeoutRunner((sensitive + "/secret-step\n").encode()), request
+            )
+        self.assertIn("storage-probe/settings/timeout", str(untrusted.exception))
+        self.assertNotIn(sensitive, str(untrusted.exception))
+        self.assertNotIn("secret-step", str(untrusted.exception))
+
+        fixed_response = json.dumps(
+            {
+                "status": "timeout",
+                "candidate": "legacy-settings",
+                "substep": "file-read",
+            }
+        ).encode()
+        malicious_response = json.dumps(
+            {
+                "status": "timeout",
+                "candidate": sensitive,
+                "substep": "secret-step",
+            }
+        ).encode()
+
+        class ResponseRunner:
+            def __init__(self, response):
+                self.response = response
+
+            def run(self, arguments, **_kwargs):
+                return subprocess.CompletedProcess(arguments, 0, self.response, b"")
+
+        with self.assertRaises(retirement.RetirementError) as fixed:
+            retirement._run_docker_storage_probe(
+                ResponseRunner(fixed_response), request
+            )
+        self.assertIn(
+            "storage-probe/settings/timeout/legacy-settings/file-read",
+            str(fixed.exception),
+        )
+
+        with self.assertRaises(retirement.RetirementError) as malformed:
+            retirement._run_docker_storage_probe(
+                ResponseRunner(malicious_response), request
+            )
+        self.assertIn("storage-probe/settings/protocol-invalid", str(malformed.exception))
+        self.assertNotIn(sensitive, str(malformed.exception))
+        self.assertNotIn("secret-step", str(malformed.exception))
+
+    def test_storage_probe_inner_deadline_reports_fixed_substep(self):
+        probe = retirement.DOCKER_STORAGE_PROBE_SCRIPT.replace(
+            "signal.alarm(8)", "signal.alarm(1)", 1
+        ).replace(
+            "            block = os.read(descriptor, min(1024 * 1024, remaining))",
+            "            __import__('time').sleep(30)\n"
+            "            block = os.read(descriptor, min(1024 * 1024, remaining))",
+            1,
+        )
+        self.assertNotEqual(probe, retirement.DOCKER_STORAGE_PROBE_SCRIPT)
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            home = Path(directory)
+            settings_path = home / retirement.SETTINGS_RELATIVE_PATHS[0]
+            settings_path.parent.mkdir(parents=True)
+            settings_path.write_text(
+                json.dumps({"KubernetesEnabled": True}), encoding="utf-8"
+            )
+            started = time.monotonic()
+            with mock.patch.object(retirement, "DOCKER_STORAGE_PROBE_SCRIPT", probe):
+                with self.assertRaises(retirement.RetirementError) as raised:
+                    retirement.discover_settings(retirement.CommandRunner(), home)
+            self.assertLess(time.monotonic() - started, 4)
+            self.assertIn(
+                "storage-probe/settings/timeout/primary-settings/file-read",
+                str(raised.exception),
+            )
+            self.assertNotIn(str(home), str(raised.exception))
+
+    def test_storage_probe_does_not_mask_deadline_or_termination(self):
+        class Runner:
+            def __init__(self, error):
+                self.error = error
+
+            def run(self, _arguments, **_kwargs):
+                raise self.error
+
+        for message in (
+            "Read-only preflight exceeded its guarded deadline.",
+            "Retirement interrupted by signal 15; rollback requested.",
+        ):
+            injected = retirement.RetirementError(message)
+            with self.subTest(message=message):
+                with self.assertRaises(retirement.RetirementError) as raised:
+                    retirement._run_docker_storage_probe(
+                        Runner(injected),
+                        {"operation": "settings", "home": "/Users/example"},
+                    )
+                self.assertIs(raised.exception, injected)
+
+        launch_error = retirement.GuardedCommandExecutionError(
+            "private launch failure text"
+        )
+        with self.assertRaises(retirement.RetirementError) as launch:
+            retirement._run_docker_storage_probe(
+                Runner(launch_error),
+                {"operation": "docker-raw", "home": "/Users/example"},
+            )
+        self.assertIn(
+            "storage-probe/docker-raw/launch-failed", str(launch.exception)
+        )
+        self.assertNotIn("private launch failure text", str(launch.exception))
+
+    def test_storage_probe_uses_openat_fgetpath_and_rejects_fifo_before_open(self):
+        tree = ast.parse(retirement.DOCKER_STORAGE_PROBE_SCRIPT)
+        open_nofollow = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "open_nofollow"
+        )
+        calls = [node for node in ast.walk(open_nofollow) if isinstance(node, ast.Call)]
+        self.assertFalse(
+            any(
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr in ("listdir", "lstat")
+                for node in calls
+            )
+        )
+        self.assertIn("dir_fd=descriptor", retirement.DOCKER_STORAGE_PROBE_SCRIPT)
+        self.assertIn("follow_symlinks=False", retirement.DOCKER_STORAGE_PROBE_SCRIPT)
+        self.assertIn("fcntl.F_GETPATH", retirement.DOCKER_STORAGE_PROBE_SCRIPT)
+        self.assertIn("os.O_NONBLOCK", retirement.DOCKER_STORAGE_PROBE_SCRIPT)
+        self.assertIn("before.st_dev, before.st_ino", retirement.DOCKER_STORAGE_PROBE_SCRIPT)
+
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            home = Path(directory)
+            settings_path = home / retirement.SETTINGS_RELATIVE_PATHS[0]
+            settings_path.parent.mkdir(parents=True)
+            os.mkfifo(settings_path)
+            started = time.monotonic()
+            with self.assertRaises(retirement.RetirementError) as raised:
+                retirement.discover_settings(retirement.CommandRunner(), home)
+            self.assertLess(time.monotonic() - started, 3)
+            self.assertIn("status-invalid", str(raised.exception))
+            self.assertNotIn(str(home), str(raised.exception))
+
+    @unittest.skipUnless(sys.platform == "darwin", "F_GETPATH is Darwin-specific")
+    def test_storage_probe_fgetpath_accepts_exact_users_case_and_rejects_alias(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            home = Path(directory)
+            settings_path = home / retirement.SETTINGS_RELATIVE_PATHS[0]
+            settings_path.parent.mkdir(parents=True)
+            settings_path.write_text(
+                json.dumps({"KubernetesEnabled": True}), encoding="utf-8"
+            )
+            snapshot = retirement.discover_settings(retirement.CommandRunner(), home)
+            self.assertEqual(snapshot.target.path, settings_path)
+
+            if str(home).startswith("/Users/"):
+                alias = Path("/users/" + str(home).removeprefix("/Users/"))
+                with self.assertRaisesRegex(retirement.RetirementError, "path alias"):
+                    retirement.discover_settings(retirement.CommandRunner(), alias)
 
     def test_context_is_local_docker_desktop_only(self):
         self.assertIn('"https://127.0.0.1:6443"', self.helper)
@@ -1411,8 +1592,10 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
                 "kubernetes-resources",
                 "kubernetes-storage",
                 "kubernetes-audit",
-                "desktop-settings",
-                "docker-storage",
+                "desktop-settings-probe-start",
+                "desktop-settings-probe-complete",
+                "docker-storage-probe-start",
+                "docker-storage-probe-complete",
                 "filevault",
                 "storage-source-plan",
                 "external-path-validation",

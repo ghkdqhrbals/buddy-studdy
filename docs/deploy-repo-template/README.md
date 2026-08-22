@@ -325,6 +325,16 @@ discovery use separate 10-second isolated probes as well; the parent helper
 does not stat, resolve, read, or glob those candidates. Probe requests travel
 only through stdin, their stdout is captured in memory, and argv, paths,
 stdout, stderr, settings contents, and errors are never copied into job logs.
+The Docker storage child does not enumerate every ancestor or repeat an
+absolute `lstat`. It uses fd-relative no-follow metadata checks, rejects a
+FIFO or any other non-regular settings candidate before open, opens a final
+file nonblocking, compares its pre/post-open device and inode, and uses
+Darwin `F_GETPATH` to verify the exact component spelling. Its eight-second
+inner deadline is backed by the unchanged ten-second parent process-group
+deadline. Failures expose only an allowlisted operation/candidate/substep
+reason; unknown child text collapses to `storage-probe/protocol-invalid` and
+is never echoed.
+
 FileVault must be on and the source and backup must be on the same APFS
 filesystem. The preflight requires a 12 GiB base reserve plus twice the measured external
 hostPath size so plaintext staging and ciphertext can safely coexist. The
@@ -383,10 +393,11 @@ pipeline runs in its own process group, which is killed and reaped on timeout
 or interruption so descendants cannot keep an output pipe open. The 12-minute
 deadline is installed only for the standalone preflight command and is removed
 before exit; it is never shared with apply or rollback.
-Storage progress is split into fixed `desktop-settings`, `docker-storage`,
-`filevault`, `storage-source-plan`, `external-path-validation`, and
-`backup-preconditions` stages so a filesystem failure is localized without
-revealing a candidate path.
+Storage progress is split into fixed settings-probe and Docker-storage-probe
+start/complete stages followed by `filevault`, `storage-source-plan`,
+`external-path-validation`, and `backup-preconditions`. A timeout therefore
+identifies the unfinished bounded probe, while its fixed reason identifies the
+last allowlisted candidate/substep without revealing a path.
 
 The apply job allows six hours while each logical dump, hostPath archive,
 bundle seal, and APFS clone has a shorter bounded timeout, leaving rollback

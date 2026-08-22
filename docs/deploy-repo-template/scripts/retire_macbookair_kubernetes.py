@@ -97,8 +97,10 @@ PREFLIGHT_PROGRESS_STAGES = frozenset(
         "kubernetes-resources",
         "kubernetes-storage",
         "kubernetes-audit",
-        "desktop-settings",
-        "docker-storage",
+        "desktop-settings-probe-start",
+        "desktop-settings-probe-complete",
+        "docker-storage-probe-start",
+        "docker-storage-probe-complete",
         "filevault",
         "storage-source-plan",
         "external-path-validation",
@@ -211,12 +213,41 @@ except (OSError, RuntimeError, TypeError, ValueError):
 """
 DOCKER_STORAGE_PROBE_SCRIPT = r"""
 import base64
+import fcntl
 import hashlib
 import json
 import os
+import signal
 import stat
 import sys
 from pathlib import Path
+
+
+PHASES = {
+    ("none", "request"),
+    ("primary-settings", "candidate-open"),
+    ("primary-settings", "canonical-check"),
+    ("primary-settings", "file-read"),
+    ("primary-settings", "json-validate"),
+    ("legacy-settings", "candidate-open"),
+    ("legacy-settings", "canonical-check"),
+    ("legacy-settings", "file-read"),
+    ("legacy-settings", "json-validate"),
+    ("settings", "candidate-select"),
+    ("configured-raw", "candidate-open"),
+    ("configured-raw", "canonical-check"),
+    ("configured-raw", "file-stat"),
+    ("standard-vm-scan", "candidate-open"),
+    ("standard-vm-scan", "canonical-check"),
+    ("standard-vm-scan", "directory-enumerate"),
+    ("standard-raw", "candidate-open"),
+    ("standard-raw", "canonical-check"),
+    ("standard-raw", "file-stat"),
+    ("docker-raw", "candidate-select"),
+    ("none", "response"),
+}
+CURRENT_CANDIDATE = "none"
+CURRENT_SUBSTEP = "request"
 
 
 class ProbeFailure(Exception):
@@ -225,11 +256,30 @@ class ProbeFailure(Exception):
 
 
 def emit(status, **values):
+    signal.alarm(0)
     document = {"status": status}
     document.update(values)
     sys.stdout.write(json.dumps(document, separators=(",", ":")))
     sys.stdout.flush()
     raise SystemExit(0)
+
+
+def mark(candidate, substep):
+    global CURRENT_CANDIDATE, CURRENT_SUBSTEP
+    if (candidate, substep) not in PHASES:
+        raise ProbeFailure("invalid")
+    CURRENT_CANDIDATE = candidate
+    CURRENT_SUBSTEP = substep
+    sys.stderr.write(candidate + "/" + substep + "\n")
+    sys.stderr.flush()
+
+
+def deadline(_signum, _frame):
+    emit(
+        "timeout",
+        candidate=CURRENT_CANDIDATE,
+        substep=CURRENT_SUBSTEP,
+    )
 
 
 def lexical_absolute(raw):
@@ -243,32 +293,55 @@ def lexical_absolute(raw):
     return path
 
 
-def open_nofollow(path, want_directory):
+def canonical_path(descriptor):
+    try:
+        encoded = fcntl.fcntl(descriptor, fcntl.F_GETPATH, bytes(1024))
+    except (AttributeError, OSError):
+        raise ProbeFailure("unavailable")
+    value = encoded.split(b"\0", 1)[0]
+    if not value:
+        raise ProbeFailure("unavailable")
+    try:
+        return Path(os.fsdecode(value))
+    except (TypeError, UnicodeError):
+        raise ProbeFailure("unavailable")
+
+
+def open_nofollow(path, want_directory, candidate):
     path = lexical_absolute(str(path))
+    mark(candidate, "candidate-open")
     descriptor = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY)
-    current = Path(path.anchor)
     try:
         for index, component in enumerate(path.parts[1:]):
-            current = current / component
-            entries = os.listdir(descriptor)
-            if component not in entries:
-                if any(entry.casefold() == component.casefold() for entry in entries):
-                    raise ProbeFailure("alias")
-                raise ProbeFailure("missing")
             try:
-                metadata = os.lstat(current)
+                before = os.stat(
+                    component,
+                    dir_fd=descriptor,
+                    follow_symlinks=False,
+                )
             except FileNotFoundError:
                 raise ProbeFailure("missing")
-            if stat.S_ISLNK(metadata.st_mode):
+            if stat.S_ISLNK(before.st_mode):
                 raise ProbeFailure("symlink")
             is_last = index == len(path.parts[1:]) - 1
+            expect_directory = not is_last or want_directory
+            if expect_directory and not stat.S_ISDIR(before.st_mode):
+                raise ProbeFailure("invalid")
+            if not expect_directory and not stat.S_ISREG(before.st_mode):
+                raise ProbeFailure("invalid")
             flags = os.O_RDONLY | os.O_NOFOLLOW
-            if not is_last or want_directory:
+            if expect_directory:
                 flags |= os.O_DIRECTORY
+            else:
+                flags |= os.O_NONBLOCK
             try:
                 next_descriptor = os.open(component, flags, dir_fd=descriptor)
             except FileNotFoundError:
                 raise ProbeFailure("missing")
+            after = os.fstat(next_descriptor)
+            if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+                os.close(next_descriptor)
+                raise ProbeFailure("unavailable")
             os.close(descriptor)
             descriptor = next_descriptor
         metadata = os.fstat(descriptor)
@@ -276,17 +349,21 @@ def open_nofollow(path, want_directory):
             raise ProbeFailure("invalid")
         if not want_directory and not stat.S_ISREG(metadata.st_mode):
             raise ProbeFailure("invalid")
+        mark(candidate, "canonical-check")
+        if canonical_path(descriptor) != path:
+            raise ProbeFailure("alias")
         return descriptor, metadata
     except BaseException:
         os.close(descriptor)
         raise
 
 
-def read_regular(path):
-    descriptor, metadata = open_nofollow(path, False)
+def read_regular(path, candidate):
+    descriptor, metadata = open_nofollow(path, False, candidate)
     try:
-        if metadata.st_size > 16 * 1024 * 1024:
+        if metadata.st_size > 2 * 1024 * 1024:
             raise ProbeFailure("invalid")
+        mark(candidate, "file-read")
         chunks = []
         remaining = metadata.st_size + 1
         while remaining > 0:
@@ -304,6 +381,8 @@ def read_regular(path):
 
 
 try:
+    signal.signal(signal.SIGALRM, deadline)
+    signal.alarm(8)
     request = json.load(sys.stdin)
     operation = request.get("operation")
     home = lexical_absolute(request.get("home"))
@@ -317,12 +396,16 @@ try:
             if not isinstance(relative, str):
                 raise ProbeFailure("invalid")
             candidate = home / Path(relative)
+            candidate_label = (
+                "primary-settings" if index == 0 else "legacy-settings"
+            )
             try:
-                contents, metadata = read_regular(candidate)
+                contents, metadata = read_regular(candidate, candidate_label)
             except ProbeFailure as error:
                 if error.status == "missing":
                     continue
                 raise
+            mark(candidate_label, "json-validate")
             try:
                 document = json.loads(contents)
             except (UnicodeDecodeError, json.JSONDecodeError):
@@ -349,6 +432,7 @@ try:
                         data_folder,
                     )
                 )
+        mark("settings", "candidate-select")
         if len(matches) != 1:
             raise ProbeFailure("ambiguous")
         index, key, enabled, contents, mode, data_folder = matches[0]
@@ -379,10 +463,12 @@ try:
             ):
                 raise ProbeFailure("unsafe")
             candidates = [folder / "Docker.raw"]
+            candidate_label = "configured-raw"
         elif data_folder is None:
             vms = docker_data / "vms"
-            directory_fd, _ = open_nofollow(vms, True)
+            directory_fd, _ = open_nofollow(vms, True, "standard-vm-scan")
             try:
+                mark("standard-vm-scan", "directory-enumerate")
                 names = os.listdir(directory_fd)
             finally:
                 os.close(directory_fd)
@@ -391,7 +477,9 @@ try:
                     raise ProbeFailure("invalid")
                 candidate = vms / name / "data" / "Docker.raw"
                 try:
-                    descriptor, _ = open_nofollow(candidate, False)
+                    descriptor, _ = open_nofollow(
+                        candidate, False, "standard-raw"
+                    )
                 except ProbeFailure as error:
                     if error.status == "missing":
                         continue
@@ -399,15 +487,18 @@ try:
                 else:
                     os.close(descriptor)
                     candidates.append(candidate)
+            candidate_label = "standard-raw"
         else:
             raise ProbeFailure("invalid")
+        mark("docker-raw", "candidate-select")
         if len(candidates) != 1:
             raise ProbeFailure("ambiguous")
         source = candidates[0]
         if source.parts[: len(docker_parts)] != docker_parts:
             raise ProbeFailure("unsafe")
-        descriptor, metadata = open_nofollow(source, False)
+        descriptor, metadata = open_nofollow(source, False, candidate_label)
         os.close(descriptor)
+        mark(candidate_label, "file-stat")
         emit(
             "ok",
             rawRelative=str(source.relative_to(docker_data)),
@@ -416,14 +507,34 @@ try:
         )
     raise ProbeFailure("invalid")
 except ProbeFailure as error:
-    emit(error.status)
+    emit(
+        error.status,
+        candidate=CURRENT_CANDIDATE,
+        substep=CURRENT_SUBSTEP,
+    )
 except (OSError, RuntimeError, TypeError, ValueError):
-    emit("unavailable")
+    emit(
+        "unavailable",
+        candidate=CURRENT_CANDIDATE,
+        substep=CURRENT_SUBSTEP,
+    )
 """
 
 
 class RetirementError(RuntimeError):
     """Secret-free retirement failure."""
+
+
+class GuardedCommandTimeout(RetirementError):
+    """A child command exceeded its bound; captured output remains private."""
+
+    def __init__(self, partial_stderr: bytes | str | None = None) -> None:
+        super().__init__("A guarded local command timed out.")
+        self.partial_stderr = partial_stderr
+
+
+class GuardedCommandExecutionError(RetirementError):
+    """A child command could not be launched or supervised safely."""
 
 
 _SIGNAL_GUARD_ACTIVE = False
@@ -629,7 +740,7 @@ class CommandRunner:
                 )
             except subprocess.TimeoutExpired as error:
                 _terminate_process_groups(process)
-                raise RetirementError("A guarded local command timed out.") from error
+                raise GuardedCommandTimeout(error.stderr) from error
             result = subprocess.CompletedProcess(
                 list(arguments), process.returncode, stdout, stderr
             )
@@ -639,7 +750,9 @@ class CommandRunner:
             _terminate_process_groups(process)
         except (OSError, subprocess.SubprocessError) as error:
             _terminate_process_groups(process)
-            raise RetirementError("A guarded local command could not be executed.") from error
+            raise GuardedCommandExecutionError(
+                "A guarded local command could not be executed."
+            ) from error
         except BaseException:
             _terminate_process_groups(process)
             raise
@@ -1001,9 +1114,115 @@ class PvcSource:
     raw_host_path: str | None = None
 
 
+DOCKER_STORAGE_PROBE_PHASES = {
+    "settings": frozenset(
+        {
+            ("none", "request"),
+            ("primary-settings", "candidate-open"),
+            ("primary-settings", "canonical-check"),
+            ("primary-settings", "file-read"),
+            ("primary-settings", "json-validate"),
+            ("legacy-settings", "candidate-open"),
+            ("legacy-settings", "canonical-check"),
+            ("legacy-settings", "file-read"),
+            ("legacy-settings", "json-validate"),
+            ("settings", "candidate-select"),
+        }
+    ),
+    "docker-raw": frozenset(
+        {
+            ("none", "request"),
+            ("configured-raw", "candidate-open"),
+            ("configured-raw", "canonical-check"),
+            ("configured-raw", "file-stat"),
+            ("standard-vm-scan", "candidate-open"),
+            ("standard-vm-scan", "canonical-check"),
+            ("standard-vm-scan", "directory-enumerate"),
+            ("standard-raw", "candidate-open"),
+            ("standard-raw", "canonical-check"),
+            ("standard-raw", "file-stat"),
+            ("docker-raw", "candidate-select"),
+        }
+    ),
+}
+
+
+def _safe_docker_storage_phase(
+    operation: str, candidate: Any, substep: Any
+) -> tuple[str, str] | None:
+    if not isinstance(candidate, str) or not isinstance(substep, str):
+        return None
+    phase = (candidate, substep)
+    if phase not in DOCKER_STORAGE_PROBE_PHASES.get(operation, frozenset()):
+        return None
+    return phase
+
+
+def _last_docker_storage_timeout_phase(
+    operation: str, error: GuardedCommandTimeout
+) -> tuple[str, str] | None:
+    captured = error.partial_stderr
+    if isinstance(captured, str):
+        captured_bytes = captured.encode("ascii", errors="ignore")
+    elif isinstance(captured, bytes):
+        captured_bytes = captured
+    else:
+        return None
+    for line in reversed(captured_bytes.splitlines()):
+        try:
+            marker = line.decode("ascii")
+        except UnicodeDecodeError:
+            continue
+        candidate, separator, substep = marker.partition("/")
+        if separator:
+            phase = _safe_docker_storage_phase(operation, candidate, substep)
+            if phase is not None:
+                return phase
+    return None
+
+
+def _docker_storage_reason(
+    operation: str,
+    outcome: str,
+    phase: tuple[str, str] | None = None,
+) -> str:
+    if operation not in DOCKER_STORAGE_PROBE_PHASES:
+        return "storage-probe/protocol-invalid"
+    if outcome not in {
+        "timeout",
+        "launch-failed",
+        "child-exit",
+        "protocol-invalid",
+        "status-symlink",
+        "status-alias",
+        "status-missing",
+        "status-unsafe",
+        "status-ambiguous",
+        "status-invalid",
+        "status-unavailable",
+    }:
+        return "storage-probe/protocol-invalid"
+    reason = f"storage-probe/{operation}/{outcome}"
+    if phase is not None:
+        reason += f"/{phase[0]}/{phase[1]}"
+    return reason
+
+
 def _run_docker_storage_probe(
     runner: CommandRunner, request: Mapping[str, Any]
 ) -> Mapping[str, Any]:
+    operation_value = request.get("operation")
+    operation = (
+        operation_value
+        if isinstance(operation_value, str)
+        and operation_value in DOCKER_STORAGE_PROBE_PHASES
+        else "invalid"
+    )
+    if operation == "invalid":
+        raise RetirementError(
+            "Docker Desktop storage validation received an invalid request "
+            "(storage-probe/protocol-invalid)."
+        )
     try:
         result = runner.run(
             (sys.executable, "-I", "-c", DOCKER_STORAGE_PROBE_SCRIPT),
@@ -1011,33 +1230,59 @@ def _run_docker_storage_probe(
             check=False,
             input_bytes=json.dumps(request, separators=(",", ":")).encode("utf-8"),
         )
-    except RetirementError as error:
+    except GuardedCommandTimeout as error:
+        phase = _last_docker_storage_timeout_phase(operation, error)
+        reason = _docker_storage_reason(operation, "timeout", phase)
         raise RetirementError(
-            "Docker Desktop storage did not complete its bounded validation probe."
+            f"Docker Desktop storage validation timed out safely ({reason})."
+        ) from error
+    except GuardedCommandExecutionError as error:
+        reason = _docker_storage_reason(operation, "launch-failed")
+        raise RetirementError(
+            f"Docker Desktop storage validation could not start safely ({reason})."
         ) from error
     if result.returncode != 0:
-        raise RetirementError("Docker Desktop storage validation failed safely.")
+        reason = _docker_storage_reason(operation, "child-exit")
+        raise RetirementError(
+            f"Docker Desktop storage validation child failed safely ({reason})."
+        )
     try:
         response = json.loads(result.stdout)
-    except json.JSONDecodeError as error:
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        reason = _docker_storage_reason(operation, "protocol-invalid")
         raise RetirementError(
-            "Docker Desktop storage validation returned invalid data."
+            f"Docker Desktop storage validation returned invalid data ({reason})."
         ) from error
     if not isinstance(response, Mapping):
-        raise RetirementError("Docker Desktop storage validation returned invalid data.")
+        reason = _docker_storage_reason(operation, "protocol-invalid")
+        raise RetirementError(
+            f"Docker Desktop storage validation returned invalid data ({reason})."
+        )
     status = response.get("status")
-    if status == "symlink":
-        raise RetirementError("Docker Desktop storage contains a symbolic link.")
-    if status == "alias":
-        raise RetirementError("Docker Desktop storage uses an unsafe path alias.")
-    if status == "missing":
-        raise RetirementError("Docker Desktop storage is missing.")
-    if status == "unsafe":
-        raise RetirementError("Docker Desktop storage is outside the safe data scope.")
-    if status == "ambiguous":
-        raise RetirementError("Docker Desktop storage validation is ambiguous.")
     if status != "ok":
-        raise RetirementError("Docker Desktop storage validation failed closed.")
+        phase = _safe_docker_storage_phase(
+            operation,
+            response.get("candidate"),
+            response.get("substep"),
+        )
+        messages = {
+            "timeout": "Docker Desktop storage validation timed out safely",
+            "symlink": "Docker Desktop storage contains a symbolic link",
+            "alias": "Docker Desktop storage uses an unsafe path alias",
+            "missing": "Docker Desktop storage is missing",
+            "unsafe": "Docker Desktop storage is outside the safe data scope",
+            "ambiguous": "Docker Desktop storage validation is ambiguous",
+            "invalid": "Docker Desktop storage validation failed closed",
+            "unavailable": "Docker Desktop storage validation is unavailable",
+        }
+        if not isinstance(status, str) or status not in messages or phase is None:
+            reason = _docker_storage_reason(operation, "protocol-invalid")
+            raise RetirementError(
+                f"Docker Desktop storage validation returned invalid data ({reason})."
+            )
+        outcome = "timeout" if status == "timeout" else f"status-{status}"
+        reason = _docker_storage_reason(operation, outcome, phase)
+        raise RetirementError(f"{messages[status]} ({reason}).")
     return response
 
 
@@ -1735,7 +1980,7 @@ def _probe_external_host_path(
             check=False,
             input_bytes=request,
         )
-    except RetirementError as error:
+    except (GuardedCommandTimeout, GuardedCommandExecutionError) as error:
         raise RetirementError(
             "An external hostPath did not complete its bounded validation probe."
         ) from error
@@ -2917,10 +3162,12 @@ def preflight(
     progress("docker-runtime")
     desktop.ensure_ready()
     inventory = collect_inventory(cluster, progress=progress)
-    progress("desktop-settings")
+    progress("desktop-settings-probe-start")
     settings = discover_settings(desktop.runner, home)
-    progress("docker-storage")
+    progress("desktop-settings-probe-complete")
+    progress("docker-storage-probe-start")
     docker_raw = discover_docker_raw(desktop.runner, home, settings)
+    progress("docker-storage-probe-complete")
     progress("filevault")
     _require_filevault(desktop.runner)
     progress("storage-source-plan")
