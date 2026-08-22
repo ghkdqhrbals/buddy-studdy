@@ -21,6 +21,8 @@ jobs:
       GRAFANA_PORT: ${{ vars.GRAFANA_PORT || '3001' }}
       LOKI_PORT: ${{ vars.LOKI_PORT || '3100' }}
       REDISSTREAMSCOPE_PORT: ${{ vars.REDISSTREAMSCOPE_PORT || '3002' }}
+      MONITORING_DOCKER_LOG_MAX_SIZE: ${{ vars.MONITORING_DOCKER_LOG_MAX_SIZE || '10m' }}
+      MONITORING_DOCKER_LOG_MAX_FILE: ${{ vars.MONITORING_DOCKER_LOG_MAX_FILE || '3' }}
 
     steps:
       - name: Checkout BuddyStudy monitoring config
@@ -124,9 +126,83 @@ jobs:
             exit 1
           fi
 
+          if [[ ! "${MONITORING_DOCKER_LOG_MAX_SIZE}" =~ ^([1-9][0-9]{0,2})m$ ]]; then
+            echo "MONITORING_DOCKER_LOG_MAX_SIZE must be between 1m and 100m." >&2
+            exit 1
+          fi
+          monitoring_docker_log_max_megabytes="${BASH_REMATCH[1]}"
+          if [ "${monitoring_docker_log_max_megabytes}" -gt 100 ]; then
+            echo "MONITORING_DOCKER_LOG_MAX_SIZE must be between 1m and 100m." >&2
+            exit 1
+          fi
+          if [[ ! "${MONITORING_DOCKER_LOG_MAX_FILE}" =~ ^[1-9][0-9]*$ ]] \
+            || [ "${MONITORING_DOCKER_LOG_MAX_FILE}" -gt 10 ]; then
+            echo "MONITORING_DOCKER_LOG_MAX_FILE must be between 1 and 10." >&2
+            exit 1
+          fi
+          capacity_probe="${monitoring_root}"
+          while [ ! -e "${capacity_probe}" ]; do
+            parent_probe="$(dirname "${capacity_probe}")"
+            if [ "${parent_probe}" = "${capacity_probe}" ]; then
+              break
+            fi
+            capacity_probe="${parent_probe}"
+          done
+          echo "MacBook Air capacity before bounded monitoring deployment:"
+          df -h "${capacity_probe}"
+          df -Pk "${capacity_probe}"
+          run_with_timeout 30 docker system df --verbose || true
+          for diagnostic_path in \
+            "${monitoring_root}/api-dashboard/logs" \
+            "${monitoring_root}/grafana/data" \
+            "${monitoring_root}/loki/data" \
+            "${monitoring_root}/promtail/data" \
+            "${testzone_root}/data" \
+            "${testzone_root}/influxdb"; do
+            if [ -e "${diagnostic_path}" ]; then
+              run_with_timeout 30 du -sh "${diagnostic_path}" \
+                || echo "Capacity scan timed out for ${diagnostic_path}."
+            fi
+          done
+          for managed_container in \
+            buddystudy-loki \
+            buddystudy-incident-receiver \
+            buddystudy-grafana \
+            buddystudy-grafana-gateway \
+            buddystudy-api-dashboard \
+            buddystudy-monitoring-log-rotator \
+            buddystudy-monitoring-promtail; do
+            if docker inspect "${managed_container}" >/dev/null 2>&1; then
+              docker inspect --size \
+                --format 'name={{.Name}} running={{.State.Running}} sizeRw={{.SizeRw}} logDriver={{.HostConfig.LogConfig.Type}} maxSize={{index .HostConfig.LogConfig.Config "max-size"}} maxFile={{index .HostConfig.LogConfig.Config "max-file"}} compress={{index .HostConfig.LogConfig.Config "compress"}}' \
+                "${managed_container}" \
+                || true
+            fi
+          done
+          echo "TestZone-managed dynamic container storage policies:"
+          testzone_dynamic_container_found=false
+          while IFS= read -r testzone_container_id; do
+            if [ -z "${testzone_container_id}" ]; then
+              continue
+            fi
+            testzone_dynamic_container_found=true
+            run_with_timeout 30 docker inspect --size \
+              --format 'name={{.Name}} running={{.State.Running}} sizeRw={{.SizeRw}} logDriver={{.HostConfig.LogConfig.Type}} maxSize={{index .HostConfig.LogConfig.Config "max-size"}} maxFile={{index .HostConfig.LogConfig.Config "max-file"}} compress={{index .HostConfig.LogConfig.Config "compress"}}' \
+              "${testzone_container_id}" \
+              || true
+          done < <(
+            docker ps -a \
+              --filter label=testzone.managed=true \
+              --format '{{.ID}}'
+          )
+          if [ "${testzone_dynamic_container_found}" != true ]; then
+            echo "No TestZone-managed dynamic containers found."
+          fi
+
           mkdir -p \
             "${monitoring_root}/api-dashboard/public" \
             "${monitoring_root}/api-dashboard/logs" \
+            "${monitoring_root}/log-retention" \
             "${monitoring_root}/incident-receiver/src" \
             "${monitoring_root}/incident-receiver/data" \
             "${monitoring_root}/grafana/provisioning/datasources" \
@@ -148,7 +224,6 @@ jobs:
           loki_config_changed=false
           grafana_config_changed=false
           grafana_gateway_config_changed=false
-          api_dashboard_config_changed=false
           incident_receiver_config_changed=false
           promtail_config_changed=false
           api_dashboard_config_hash="$(shasum -a 256 "${MONITORING_SOURCE_DIR}/api-dashboard/nginx.conf" | awk '{print $1}')"
@@ -190,13 +265,6 @@ jobs:
             "${MONITORING_SOURCE_DIR}/grafana-gateway/nginx.conf" \
             "${monitoring_root}/gateway/grafana-nginx.conf"; then
             grafana_gateway_config_changed=true
-          fi
-          if file_differs \
-            "${MONITORING_SOURCE_DIR}/api-dashboard/nginx.conf" \
-            "${monitoring_root}/api-dashboard/nginx.conf" \
-            || ! grep -Fxq "${api_dashboard_config_hash}" \
-              "${api_dashboard_revision_file}" 2>/dev/null; then
-            api_dashboard_config_changed=true
           fi
           if ! diff -qr \
             "${MONITORING_SOURCE_DIR}/incident-receiver/src" \
@@ -248,6 +316,8 @@ jobs:
             "${monitoring_root}/api-dashboard/public/"
           cp "${MONITORING_SOURCE_DIR}/api-dashboard/nginx.conf" \
             "${monitoring_root}/api-dashboard/nginx.conf"
+          cp "${MONITORING_SOURCE_DIR}/log-retention/rotate-gateway-logs.sh" \
+            "${monitoring_root}/log-retention/rotate-gateway-logs.sh"
           find "${monitoring_root}/incident-receiver/src" -mindepth 1 -delete
           cp -R "${MONITORING_SOURCE_DIR}/incident-receiver/src/." \
             "${monitoring_root}/incident-receiver/src/"
@@ -264,7 +334,16 @@ jobs:
             "${monitoring_root}/gateway/grafana-nginx.conf"
           grep -q 'monitoring_access' \
             "${monitoring_root}/api-dashboard/nginx.conf"
-          grep -q 'job: monitoring-access' \
+          grep -Fq 'error_log /var/log/nginx/monitoring-error.log warn;' \
+            "${monitoring_root}/api-dashboard/nginx.conf"
+          /bin/sh -n "${monitoring_root}/log-retention/rotate-gateway-logs.sh"
+          grep -Eq '^[[:space:]]+__path__:[[:space:]]+/var/log/monitoring/monitoring-access\.log[[:space:]]*$' \
+            "${monitoring_root}/promtail/config/promtail.yml"
+          grep -Eq '^[[:space:]]+__path__:[[:space:]]+/var/log/monitoring/monitoring-error\.log[[:space:]]*$' \
+            "${monitoring_root}/promtail/config/promtail.yml"
+          grep -Eq '^[[:space:]]+job:[[:space:]]+monitoring-access[[:space:]]*$' \
+            "${monitoring_root}/promtail/config/promtail.yml"
+          grep -Eq '^[[:space:]]+job:[[:space:]]+monitoring-gateway-error[[:space:]]*$' \
             "${monitoring_root}/promtail/config/promtail.yml"
           grep -Fq '<%s|해당 오류 로그 보기>' \
             "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
@@ -300,6 +379,7 @@ jobs:
           PY
           fi
           run_with_timeout 300 docker pull nginx:1.27-alpine
+          run_with_timeout 300 docker pull alpine:3.21
           run_with_timeout 300 docker pull node:22-alpine
           run_with_timeout 300 docker pull grafana/loki:3.3.2
           run_with_timeout 300 docker pull grafana/promtail:3.3.2
@@ -331,26 +411,70 @@ jobs:
             [ "$(docker inspect --format '{{.State.Running}}' "$1" 2>/dev/null || true)" = "true" ]
           }
 
+          container_has_bounded_local_logs() {
+            local container_name="$1"
+            local log_driver max_size max_file compress
+            log_driver="$(docker inspect --format '{{.HostConfig.LogConfig.Type}}' "${container_name}" 2>/dev/null || true)"
+            max_size="$(docker inspect --format '{{index .HostConfig.LogConfig.Config "max-size"}}' "${container_name}" 2>/dev/null || true)"
+            max_file="$(docker inspect --format '{{index .HostConfig.LogConfig.Config "max-file"}}' "${container_name}" 2>/dev/null || true)"
+            compress="$(docker inspect --format '{{index .HostConfig.LogConfig.Config "compress"}}' "${container_name}" 2>/dev/null || true)"
+            [ "${log_driver}" = "local" ] \
+              && [ "${max_size}" = "${MONITORING_DOCKER_LOG_MAX_SIZE}" ] \
+              && [ "${max_file}" = "${MONITORING_DOCKER_LOG_MAX_FILE}" ] \
+              && [ "${compress}" = "true" ]
+          }
+
+          loki_recreated=false
+          incident_receiver_recreated=false
+          grafana_recreated=false
+          grafana_gateway_recreated=false
+          api_dashboard_recreated=false
+          log_rotator_recreated=false
+          promtail_recreated=false
+
+          loki_recreate_required=false
           if ! container_running buddystudy-loki || [ "${loki_config_changed}" = "true" ]; then
+            loki_recreate_required=true
+          fi
+          if ! container_has_bounded_local_logs buddystudy-loki; then
+            loki_recreate_required=true
+          fi
+          if [ "${loki_recreate_required}" = "true" ]; then
             docker rm -f buddystudy-loki >/dev/null 2>&1 || true
             docker run -d \
               --name buddystudy-loki \
               --network buddystudy-monitoring \
               --restart unless-stopped \
+              --log-driver local \
+              --log-opt "max-size=${MONITORING_DOCKER_LOG_MAX_SIZE}" \
+              --log-opt "max-file=${MONITORING_DOCKER_LOG_MAX_FILE}" \
+              --log-opt compress=true \
               -p "127.0.0.1:${LOKI_PORT}:3100" \
               -v "${monitoring_root}/loki/data:/loki" \
               -v "${monitoring_root}/loki/config/loki.yml:/etc/loki/local-config.yaml:ro" \
               grafana/loki:3.3.2 \
               -config.file=/etc/loki/local-config.yaml
+            loki_recreated=true
           fi
 
+          incident_receiver_recreate_required=false
           if ! container_running buddystudy-incident-receiver \
             || [ "${incident_receiver_config_changed}" = "true" ]; then
+            incident_receiver_recreate_required=true
+          fi
+          if ! container_has_bounded_local_logs buddystudy-incident-receiver; then
+            incident_receiver_recreate_required=true
+          fi
+          if [ "${incident_receiver_recreate_required}" = "true" ]; then
             docker rm -f buddystudy-incident-receiver >/dev/null 2>&1 || true
             docker run -d \
               --name buddystudy-incident-receiver \
               --network buddystudy-monitoring \
               --restart unless-stopped \
+              --log-driver local \
+              --log-opt "max-size=${MONITORING_DOCKER_LOG_MAX_SIZE}" \
+              --log-opt "max-file=${MONITORING_DOCKER_LOG_MAX_FILE}" \
+              --log-opt compress=true \
               --read-only \
               --tmpfs /tmp \
               --cap-drop ALL \
@@ -367,6 +491,7 @@ jobs:
               -v "${monitoring_root}/incident-receiver/data:/data" \
               node:22-alpine \
               node /app/src/server.mjs
+            incident_receiver_recreated=true
           fi
           printf '%s' "${hmac_secret_hash}" \
             > "${monitoring_root}/incident-receiver/hmac-secret.sha256"
@@ -376,12 +501,23 @@ jobs:
             "${monitoring_root}/incident-receiver/hmac-secret.sha256" \
             "${monitoring_root}/incident-receiver/github-token.sha256"
 
+          grafana_recreate_required=false
           if ! container_running buddystudy-grafana || [ "${grafana_config_changed}" = "true" ]; then
+            grafana_recreate_required=true
+          fi
+          if ! container_has_bounded_local_logs buddystudy-grafana; then
+            grafana_recreate_required=true
+          fi
+          if [ "${grafana_recreate_required}" = "true" ]; then
             docker rm -f buddystudy-grafana >/dev/null 2>&1 || true
             docker run -d \
               --name buddystudy-grafana \
               --network buddystudy-monitoring \
               --restart unless-stopped \
+              --log-driver local \
+              --log-opt "max-size=${MONITORING_DOCKER_LOG_MAX_SIZE}" \
+              --log-opt "max-file=${MONITORING_DOCKER_LOG_MAX_FILE}" \
+              --log-opt compress=true \
               -e GF_SECURITY_ADMIN_USER=admin \
               -e GF_SECURITY_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD}" \
               -e GF_USERS_ALLOW_SIGN_UP=false \
@@ -398,6 +534,7 @@ jobs:
               -v "${monitoring_root}/grafana/provisioning:/etc/grafana/provisioning:ro" \
               -v "${monitoring_root}/grafana/dashboards:/var/lib/grafana/dashboards:ro" \
               grafana/grafana:12.3.0
+            grafana_recreated=true
           fi
 
           grafana_password_reset=false
@@ -419,16 +556,28 @@ jobs:
           printf '%s\n' "${grafana_config_hash}" > "${grafana_revision_temp}"
           mv -f "${grafana_revision_temp}" "${grafana_revision_file}"
 
+          grafana_gateway_recreate_required=false
           if ! container_running buddystudy-grafana-gateway \
             || [ "${grafana_gateway_config_changed}" = "true" ]; then
+            grafana_gateway_recreate_required=true
+          fi
+          if ! container_has_bounded_local_logs buddystudy-grafana-gateway; then
+            grafana_gateway_recreate_required=true
+          fi
+          if [ "${grafana_gateway_recreate_required}" = "true" ]; then
             docker rm -f buddystudy-grafana-gateway >/dev/null 2>&1 || true
             docker run -d \
               --name buddystudy-grafana-gateway \
               --network buddystudy-monitoring \
               --restart unless-stopped \
+              --log-driver local \
+              --log-opt "max-size=${MONITORING_DOCKER_LOG_MAX_SIZE}" \
+              --log-opt "max-file=${MONITORING_DOCKER_LOG_MAX_FILE}" \
+              --log-opt compress=true \
               -p "127.0.0.1:${GRAFANA_PORT}:80" \
               -v "${monitoring_root}/gateway/grafana-nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
               nginx:1.27-alpine
+            grafana_gateway_recreated=true
           fi
 
           # Maintenance is published exclusively through backend-managed
@@ -436,41 +585,89 @@ jobs:
           # while preserving its on-disk data for manual recovery.
           docker rm -f buddystudy-service-status >/dev/null 2>&1 || true
 
-          if ! container_running buddystudy-api-dashboard \
-            || [ "${api_dashboard_config_changed}" = "true" ]; then
-            run_with_timeout 30 docker run --rm \
-              -v "${monitoring_root}/api-dashboard/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
-              nginx:1.27-alpine \
-              nginx -t
-            docker rm -f buddystudy-api-dashboard >/dev/null 2>&1 || true
-            docker run -d \
-              --name buddystudy-api-dashboard \
-              --network buddystudy-monitoring \
-              --restart unless-stopped \
-              -p "127.0.0.1:${API_DASHBOARD_PORT}:80" \
-              -p "127.0.0.1:${REDISSTREAMSCOPE_PORT}:8082" \
-              -v "${monitoring_root}/api-dashboard/public:/usr/share/nginx/html:ro" \
-              -v "${monitoring_root}/api-dashboard/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
-              -v "${monitoring_root}/api-dashboard/logs:/var/log/nginx" \
-              nginx:1.27-alpine
-          fi
+          # Always replace the gateway after Docker is ready. Docker Desktop can
+          # restart and auto-start this container while leaving its bridge
+          # endpoint unable to reach the backend. A scoped replacement creates
+          # a fresh endpoint without touching the shared network or data stores.
+          run_with_timeout 30 docker run --rm \
+            -v "${monitoring_root}/api-dashboard/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+            nginx:1.27-alpine \
+            nginx -t
+          docker rm -f buddystudy-monitoring-log-rotator >/dev/null 2>&1 || true
+          docker rm -f buddystudy-api-dashboard >/dev/null 2>&1 || true
+          docker run -d \
+            --name buddystudy-api-dashboard \
+            --network buddystudy-monitoring \
+            --restart unless-stopped \
+            --log-driver local \
+            --log-opt "max-size=${MONITORING_DOCKER_LOG_MAX_SIZE}" \
+            --log-opt "max-file=${MONITORING_DOCKER_LOG_MAX_FILE}" \
+            --log-opt compress=true \
+            -p "127.0.0.1:${API_DASHBOARD_PORT}:80" \
+            -p "127.0.0.1:${REDISSTREAMSCOPE_PORT}:8082" \
+            -v "${monitoring_root}/api-dashboard/public:/usr/share/nginx/html:ro" \
+            -v "${monitoring_root}/api-dashboard/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+            -v "${monitoring_root}/api-dashboard/logs:/var/log/nginx" \
+            nginx:1.27-alpine
+          api_dashboard_recreated=true
           api_dashboard_revision_temp="${api_dashboard_revision_file}.tmp"
           printf '%s\n' "${api_dashboard_config_hash}" > "${api_dashboard_revision_temp}"
           mv -f "${api_dashboard_revision_temp}" "${api_dashboard_revision_file}"
 
+          promtail_recreate_required=false
           if ! container_running buddystudy-monitoring-promtail \
             || [ "${promtail_config_changed}" = "true" ]; then
+            promtail_recreate_required=true
+          fi
+          if ! container_has_bounded_local_logs buddystudy-monitoring-promtail; then
+            promtail_recreate_required=true
+          fi
+          if [ "${promtail_recreate_required}" = "true" ]; then
             docker rm -f buddystudy-monitoring-promtail >/dev/null 2>&1 || true
             docker run -d \
               --name buddystudy-monitoring-promtail \
               --network buddystudy-monitoring \
               --restart unless-stopped \
+              --log-driver local \
+              --log-opt "max-size=${MONITORING_DOCKER_LOG_MAX_SIZE}" \
+              --log-opt "max-file=${MONITORING_DOCKER_LOG_MAX_FILE}" \
+              --log-opt compress=true \
               -v "${monitoring_root}/api-dashboard/logs:/var/log/monitoring:ro" \
               -v "${monitoring_root}/promtail/config/promtail.yml:/etc/promtail/config.yml:ro" \
               -v "${monitoring_root}/promtail/data:/var/lib/promtail" \
               grafana/promtail:3.3.2 \
               -config.file=/etc/promtail/config.yml
+            promtail_recreated=true
           fi
+
+          # Start the collector before the rotator. The sidecar also waits one
+          # minute before its first rename so Promtail can attach to the active
+          # inodes after Docker Desktop or this scoped gateway restarts.
+          docker run -d \
+            --name buddystudy-monitoring-log-rotator \
+            --network none \
+            --pid container:buddystudy-api-dashboard \
+            --restart unless-stopped \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --log-driver local \
+            --log-opt "max-size=${MONITORING_DOCKER_LOG_MAX_SIZE}" \
+            --log-opt "max-file=${MONITORING_DOCKER_LOG_MAX_FILE}" \
+            --log-opt compress=true \
+            --entrypoint /bin/sh \
+            -e LOG_DIRECTORY=/var/log/nginx \
+            -e ACCESS_LOG_ROTATE_BYTES=8388608 \
+            -e ERROR_LOG_ROTATE_BYTES=2097152 \
+            -e ROTATED_LOG_COUNT=3 \
+            -e LOG_ROTATE_CHECK_INTERVAL_SECONDS=30 \
+            -e LOG_ROTATE_STARTUP_GRACE_SECONDS=60 \
+            -e NGINX_MASTER_PID=1 \
+            -v "${monitoring_root}/log-retention/rotate-gateway-logs.sh:/opt/monitoring/rotate-gateway-logs.sh:ro" \
+            -v "${monitoring_root}/api-dashboard/logs:/var/log/nginx" \
+            alpine:3.21 \
+            /opt/monitoring/rotate-gateway-logs.sh
+          log_rotator_recreated=true
 
           sleep 2
           echo "Grafana startup log:"
@@ -479,13 +676,15 @@ jobs:
           docker logs --tail 80 buddystudy-grafana-gateway || true
           echo "Monitoring gateway startup log:"
           docker logs --tail 80 buddystudy-api-dashboard || true
+          echo "Monitoring log rotator startup log:"
+          docker logs --tail 80 buddystudy-monitoring-log-rotator || true
           echo "Monitoring access collector startup log:"
           docker logs --tail 80 buddystudy-monitoring-promtail || true
           echo "Incident receiver startup log:"
           docker logs --tail 80 buddystudy-incident-receiver || true
 
-          echo "MacBook Air monitoring module is running."
-          echo "Restarted components: loki=${loki_config_changed}, grafana=${grafana_config_changed}, grafana_gateway=${grafana_gateway_config_changed}, api_dashboard=${api_dashboard_config_changed}, incident_receiver=${incident_receiver_config_changed}, promtail=${promtail_config_changed}"
+          echo "MacBook Air monitoring container configuration submitted."
+          echo "Recreated components: loki=${loki_recreated}, grafana=${grafana_recreated}, grafana_gateway=${grafana_gateway_recreated}, api_dashboard=${api_dashboard_recreated}, log_rotator=${log_rotator_recreated}, incident_receiver=${incident_receiver_recreated}, promtail=${promtail_recreated}"
           echo "API Logs: http://127.0.0.1:${API_DASHBOARD_PORT}"
           echo "TestZone: http://127.0.0.1:${API_DASHBOARD_PORT}/testzone.html"
           echo "Grafana: http://127.0.0.1:${GRAFANA_PORT}/"

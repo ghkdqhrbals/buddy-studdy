@@ -35,11 +35,16 @@ schema_config:
 
 limits_config:
   retention_period: 168h
+  max_query_lookback: 168h
   allow_structured_metadata: false
 
 compactor:
   working_directory: /loki/compactor
+  compaction_interval: 10m
+  apply_retention_interval: 10m
   retention_enabled: true
+  retention_delete_delay: 2h
+  retention_delete_worker_count: 20
   delete_request_store: filesystem
 
 ruler:

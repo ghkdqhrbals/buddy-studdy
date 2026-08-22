@@ -1,7 +1,7 @@
 # BuddyStudy Monitoring Dashboard
 
 The monitoring Nginx container serves the operational UI and proxies Loki,
-Grafana, and the private TestZone API behind one Basic Auth boundary.
+Grafana, and the private TestZone API behind the backend administrator session.
 
 ## Pages
 
@@ -31,12 +31,32 @@ without flattening the stored object. The migration and controller boundary are 
 
 ## Access Audit
 
-The monitoring Nginx gateway records page views, denied Basic Auth attempts,
-and mutating TestZone actions in a dedicated JSON access log. A local Promtail
-instance forwards that file to Loki with only stable `job`, `service`, and
-`event` labels. Client IP, authenticated username, path, user agent, status,
-duration, and request ID remain JSON fields. Passwords, authorization values,
-request bodies, and TestZone configuration values are not recorded.
+The monitoring Nginx gateway records page views, denied administrator-session
+requests, and mutating TestZone actions in a dedicated JSON access log. It also
+writes gateway warnings and errors to a separate file. A local Promtail
+instance tails the active files into Loki with only stable `job`, `service`,
+and `event` labels. Client IP, authenticated username, path, user agent,
+status, duration, and request ID remain JSON fields. Passwords, authorization
+values, request bodies, and TestZone configuration values are not recorded.
+
+The host files are delivery spools, not the long-term archive. The access log
+rotates at 8 MiB and the error log at 2 MiB, with three numeric archives for
+each. The isolated rotator shares only the Nginx PID namespace and log mount;
+after a rename it sends `USR1` so Nginx reopens the active path. Promtail stores
+its offsets on a persistent mount and keeps reading the renamed inode while it
+runs. The rotator waits 60 seconds after startup so Promtail can attach before
+the first rename. The scrape path intentionally does not match numeric archives,
+because doing so would ingest the same file again after each rename. Rotation
+is checked every 30 seconds after that grace period, so a write burst can
+temporarily exceed those sizes.
+If Promtail restarts while it still has unread data in a renamed file, or Loki
+is unavailable long enough for a fourth rotation, those unshipped audit/error
+lines can be lost. Loki retains successfully shipped logs for seven days.
+
+Container stdout/stderr uses Docker's bounded `local` log driver (10 MiB times
+three files, compressed) independently of these Nginx spools. See the main
+[monitoring storage policy](../README.md#disk-retention-and-data-loss-boundaries)
+for all limits and trade-offs.
 
 ## TestZone Behavior
 

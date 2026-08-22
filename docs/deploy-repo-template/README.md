@@ -39,6 +39,9 @@ Current workflow templates:
   monitoring, Grafana, and RedisStreamScope.
 - `deploy-testzone.yml`: TestZone k6 execution service and InfluxDB on MacBook
   Air.
+- `maintain-macbookair-docker-capacity.yml`: weekly or manual host-wide Docker
+  daemon recovery, capacity diagnostics, and bounded unused-image reclamation
+  on MacBook Air.
 
 ## Required Secrets
 
@@ -189,11 +192,42 @@ The MacBook Air workflow creates or replaces:
 
 - `buddystudy-api-dashboard`: API Logs dashboard reverse proxy using the
   backend administrator bearer session.
+- `buddystudy-monitoring-log-rotator`: isolated sidecar that bounds the
+  dashboard gateway access/error log files and signals Nginx to reopen them.
+- `buddystudy-monitoring-promtail`: module-local collector for the two exact
+  gateway log paths.
 - `buddystudy-loki`: Loki with persistent host data under
   `$HOME/data/buddystudy/monitoring/loki/data` by default.
 - `buddystudy-grafana`: Grafana with persistent host data under
   `$HOME/data/buddystudy/monitoring/grafana/data` by default.
 - `buddystudy-incident-receiver`: Grafana ERROR webhook receiver with persistent incident reservations under `$HOME/data/buddystudy/monitoring/incident-receiver/data` by default.
+
+Every MacBook Air module bounds its own container stdout/stderr with Docker's
+`local` driver at 10 MiB times three files. The monitoring deploy reports host,
+Docker, monitoring, and TestZone storage use but does not perform host-wide
+image reclamation. It always recreates only the API Dashboard gateway and its
+rotation sidecar after Docker is ready so a Docker Desktop restart cannot leave
+the long-running Nginx bridge endpoint stale. TestZone and RedisStreamScope
+policy changes still require their own module workflows; no runtime HTTP or
+container-health gate is added here.
+
+## MacBook Air Docker Capacity Maintenance
+
+Copy `maintain-macbookair-docker-capacity.yml` into the deploy repository. It
+runs weekly and also supports a manual dispatch. The workflow reuses the scoped
+Docker Desktop restart recovery used by MacBook Air deploys, reports `df` and
+`docker system df --verbose` before and after maintenance, and runs only
+`docker image prune -a --filter until=168h`. Docker therefore removes images
+created more than seven days ago only when no running or stopped container
+references them.
+
+This host-capacity workflow never prunes containers, volumes, networks, build
+cache, persisted module data, or host files. Images removed by the maintenance
+are recoverable by pulling them again from their registries. Monitoring,
+TestZone, and RedisStreamScope workflows remain responsible for their own log
+and data retention and must not duplicate host-wide image reclamation. Docker
+daemon readiness is the only runtime prerequisite; the workflow does not make
+HTTP or container-health checks.
 
 The separate TestZone workflow creates or replaces:
 

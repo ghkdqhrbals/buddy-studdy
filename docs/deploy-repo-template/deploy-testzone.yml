@@ -101,6 +101,10 @@ jobs:
             --name buddystudy-testzone-influxdb \
             --network buddystudy-monitoring \
             --restart unless-stopped \
+            --log-driver local \
+            --log-opt max-size=10m \
+            --log-opt max-file=3 \
+            --log-opt compress=true \
             -p "127.0.0.1:8086:8086" \
             -e DOCKER_INFLUXDB_INIT_MODE=setup \
             -e DOCKER_INFLUXDB_INIT_USERNAME=testzone \
@@ -116,6 +120,10 @@ jobs:
             --name buddystudy-testzone-service \
             --network buddystudy-monitoring \
             --restart unless-stopped \
+            --log-driver local \
+            --log-opt max-size=10m \
+            --log-opt max-file=3 \
+            --log-opt compress=true \
             -e TESTZONE_PORT=3020 \
             -e TESTZONE_DATA_DIR=/data \
             -e TESTZONE_MAX_VUS=1000 \

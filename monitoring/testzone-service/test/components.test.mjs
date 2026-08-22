@@ -36,6 +36,13 @@ test("ComponentManager deploys, recreates on restart, and removes an approved is
     && entry.includes("testzone.managed=true")
   )));
   const redisRun = commands.find((entry) => entry[0] === "docker" && entry[1] === "run");
+  const logDriverIndex = redisRun.indexOf("--log-driver");
+  assert.deepEqual(redisRun.slice(logDriverIndex, logDriverIndex + 8), [
+    "--log-driver", "local",
+    "--log-opt", "max-size=10m",
+    "--log-opt", "max-file=3",
+    "--log-opt", "compress=true",
+  ]);
   assert.ok(redisRun.includes("--appendonly"));
   assert.ok(redisRun.includes("--appendfsync"));
   assert.ok(redisRun.includes("--aof-use-rdb-preamble"));

@@ -62,6 +62,10 @@ jobs:
             --name buddystudy-redisstreamscope \
             --network buddystudy-monitoring \
             --restart unless-stopped \
+            --log-driver local \
+            --log-opt max-size=10m \
+            --log-opt max-file=3 \
+            --log-opt compress=true \
             --memory 256m \
             -e SECURE_COOKIES=true \
             -e SESSION_TTL=12h \

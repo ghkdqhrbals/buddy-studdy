@@ -19,6 +19,7 @@ one workflow run just because they share a host.
 | Redis Stream operations | `Deploy RedisStreamScope on MacBook Air` | manual | MacBook Air self-hosted | RedisStreamScope runtime, persisted SQLite/config volume, production Redis connection, and attachment to the existing monitoring gateway |
 | Monitoring routing | `Deploy BuddyStudy Monitoring Routes on MacBook Air` | manual | MacBook Air self-hosted | Routingflare routes for the monitoring UI, Grafana, and RedisStreamScope |
 | TestZone execution | `Deploy BuddyStudy TestZone on MacBook Air` | `testzone-image-published`, manual | MacBook Air self-hosted | k6 runner, script/project/run storage, InfluxDB, approved disposable test components |
+| MacBook Air Docker capacity | `Maintain MacBook Air Docker Capacity` | manual, weekly | MacBook Air self-hosted | Docker daemon readiness/recovery, host and Docker capacity diagnostics, and reclamation of old images unreferenced by every container |
 | Health monitor | Cloudflare Worker workflow | manual or source workflow | GitHub-hosted | Explicit diagnostic endpoint only; production scheduled checks are disabled |
 
 Explicit release tags provide a CLI-independent deployment entry point:
@@ -116,6 +117,26 @@ deployment.
   deployed by the monitoring workflow. TestZone's execution service and
   InfluxDB are deployed by the TestZone workflow. Backend deploys must not
   recreate any of them.
+- MacBook Air Docker storage remains module-owned even though monitoring,
+  TestZone, and Redis Stream Scope share one Docker Desktop VM. Each
+  module configures the Docker `local` log driver at 10 MiB times three files
+  for the containers it owns; the monitoring gateway additionally rotates its
+  structured access log at 8 MiB and error log at 2 MiB, retaining three
+  archives of each. Monitoring owns Loki's seven-day retention, TestZone owns
+  its 30-day InfluxDB retention and run artifacts, and Redis Stream Scope owns
+  its persistent application volume. One module may report the other
+  modules' directory/container sizes for capacity diagnosis, but it must not
+  delete or recreate their containers, volumes, or persisted data.
+- Host-wide Docker image reclamation belongs only to `Maintain MacBook Air
+  Docker Capacity`; monitoring, TestZone, and Redis Stream Scope deployments
+  must not perform it. The maintenance workflow runs weekly or manually,
+  recovers Docker Desktop when its daemon is unavailable, reports host and
+  Docker storage before and after maintenance, and prunes only images older
+  than seven days that are unreferenced by every running or stopped container.
+  It never prunes containers, volumes, networks, build cache, TestZone
+  artifacts, Loki data, Grafana data, incident records, or host files. Removed
+  images are recoverable by pulling them again from their registries. Any data
+  retention policy change remains owned by its module's separate workflow.
 - Maintenance windows are backend application state. The authenticated
   monitoring UI writes through the backend admin API, the backend persists the
   schedule and localized notices, and then publishes the current policy to
@@ -353,6 +374,14 @@ deployment.
   helpers, the workflow uses Docker Desktop's scoped force-stop before starting
   the daemon again. Docker Desktop starts without the Actions runner tracking
   identifier so job cleanup cannot terminate the recovered daemon.
+  Every monitoring deployment recreates only the API Dashboard gateway and its
+  log-rotation sidecar after Docker is ready. This gives Nginx a fresh private
+  bridge endpoint after a Docker Desktop restart while leaving Loki, Grafana,
+  Promtail, and the incident receiver untouched unless their config or bounded
+  logging policy changed. The workflow reports filesystem, Docker, monitoring,
+  and TestZone capacity before submission, leaves host-wide image reclamation
+  to `Maintain MacBook Air Docker Capacity`, and does not use HTTP or
+  container-health checks as an Actions gate.
   Monitoring Nginx validates that same bearer session before forwarding Loki
   and TestZone requests, so dashboard Basic Auth and `.htpasswd` deployment
   secrets are not used. Deployments auto-refreshes every ten seconds and keeps
