@@ -18,6 +18,8 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / "scripts" / "retire_macbookair_kubernetes.py"
 WORKFLOW = ROOT / "retire-macbookair-kubernetes.yml"
+WORKFLOW_DIRECTORY = WORKFLOW.parent
+GUIDE = ROOT / "README.md"
 
 spec = importlib.util.spec_from_file_location("kubernetes_retirement", HELPER)
 retirement = importlib.util.module_from_spec(spec)
@@ -69,6 +71,7 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
     def setUpClass(cls):
         cls.workflow = WORKFLOW.read_text(encoding="utf-8")
         cls.helper = HELPER.read_text(encoding="utf-8")
+        cls.guide = GUIDE.read_text(encoding="utf-8")
 
     def test_workflow_is_two_run_manual_only(self):
         self.assertIn("workflow_dispatch:", self.workflow)
@@ -88,11 +91,85 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
 
     def test_workflow_targets_only_the_exact_air_runner(self):
         self.assertIn(
-            "runs-on: [self-hosted, macOS, ARM64, macbook-air, buddystudy]",
+            "runs-on: [self-hosted, macOS, ARM64, macbook-air-k8s-retirement]",
             self.workflow,
         )
         self.assertIn('RUNNER_NAME") != "macbook-air-buddystudy"', self.helper)
         self.assertIn('os.environ.get("GITHUB_ACTIONS") != "true"', self.helper)
+
+    def test_retirement_runner_label_excludes_every_other_air_workflow(self):
+        dedicated = "macbook-air-k8s-retirement"
+        workflow_paths = sorted(
+            (*WORKFLOW_DIRECTORY.glob("*.yml"), *WORKFLOW_DIRECTORY.glob("*.yaml"))
+        )
+        all_workflows = {
+            path: path.read_text(encoding="utf-8")
+            for path in workflow_paths
+        }
+        self.assertEqual(
+            [path for path, contents in all_workflows.items() if dedicated in contents],
+            [WORKFLOW],
+        )
+        ordinary_air_lines = []
+        for path, contents in all_workflows.items():
+            if path == WORKFLOW:
+                continue
+            for line in contents.splitlines():
+                if "runs-on:" in line and "macOS" in line:
+                    ordinary_air_lines.append(line)
+                    self.assertIn("macbook-air", line)
+                    self.assertIn("buddystudy", line)
+                    self.assertNotIn(dedicated, line)
+        self.assertGreaterEqual(len(ordinary_air_lines), 6)
+
+    def test_tcc_access_uses_only_the_attended_foreground_runbook(self):
+        executable = self.workflow + "\n" + self.helper
+        guide = " ".join(self.guide.split())
+        for forbidden in (
+            "interactive_container_consent",
+            "--interactive-container-consent",
+            "prepare-ui-stop",
+            "tccutil",
+            "com.apple.TCC/TCC.db",
+            "csrutil",
+            "System Events",
+            "sudo ",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, executable)
+
+        for required in (
+            "intentionally has no interactive-consent mode",
+            "There is deliberately no `prepare-ui-stop` mode",
+            "no retirement job is queued or running",
+            "repository runner-label REST API",
+            "macbook-air-k8s-retirement",
+            "already queued ordinary jobs remain queued",
+            "confirm `busy=false`",
+            "./svc.sh stop",
+            "Full Disk Access",
+            "exec ./run.sh",
+            "Without restarting Terminal or the foreground listener",
+            "no privileged shell remains",
+            "./svc.sh start",
+            "empirical protected-path read/open/stat gate",
+            "does not prove that the later full clone, settings write, or rollback",
+            "leave apply blocked",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, guide)
+        self.assertLess(
+            guide.index("repository runner-label REST API"),
+            guide.index("run `./svc.sh stop`"),
+        )
+        self.assertLess(
+            guide.index("confirm `busy=false`"),
+            guide.index("run `./svc.sh stop`"),
+        )
+        self.assertLess(
+            guide.index("disable Terminal's Full Disk Access"),
+            guide.index("run `./svc.sh start`"),
+        )
 
     def test_no_destructive_cluster_or_docker_cleanup_commands(self):
         combined = self.workflow + "\n" + self.helper

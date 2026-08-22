@@ -21,7 +21,7 @@ one workflow run just because they share a host.
 | TestZone execution | `Deploy BuddyStudy TestZone on MacBook Air` | `testzone-image-published`, manual | MacBook Air self-hosted | k6 runner, script/project/run storage, InfluxDB, approved disposable test components |
 | TestZone legacy component logging | `Migrate TestZone Component Logging` | manual, one-time | MacBook Air self-hosted | Read-only audit and guarded log-driver-only recreation of the exact legacy PostgreSQL and Redis TestZone components |
 | MacBook Air Docker capacity | `Maintain MacBook Air Docker Capacity` | manual, weekly | MacBook Air self-hosted | Docker daemon readiness/recovery, host and Docker capacity diagnostics, and reclamation of old unreferenced images and all unused build cache older than seven days |
-| MacBook Air Kubernetes retirement | `Retire MacBook Air Docker Desktop Kubernetes` | manual, two-run, one-time | MacBook Air self-hosted | Read-only exact-plan audit, encrypted rollback backup, quiesced legacy workload shutdown, and Docker Desktop Kubernetes disablement only |
+| MacBook Air Kubernetes retirement | `Retire MacBook Air Docker Desktop Kubernetes` | manual, two-run, one-time | MacBook Air self-hosted, temporarily isolated retirement label | Read-only exact-plan audit, encrypted rollback backup, quiesced legacy workload shutdown, and Docker Desktop Kubernetes disablement only |
 | Health monitor | Cloudflare Worker workflow | manual or source workflow | GitHub-hosted | Explicit diagnostic endpoint only; production scheduled checks are disabled |
 
 Explicit release tags provide a CLI-independent deployment entry point:
@@ -157,10 +157,38 @@ deployment.
   Desktop stop, and a verified FileVault-protected APFS Docker.raw clone before
   the one existing Kubernetes settings key is atomically disabled. Dynamic
   PVCs, VM-local hostPaths, etcd, Secrets, and cluster metadata are covered by
-  that full rollback clone. A post-disable failure restores Docker.raw,
-  settings, replicas, and CronJob state. The Docker Desktop UI remains the
+  that verified clone. A post-disable failure enters guarded best-effort
+  restoration of Docker.raw, settings, replicas, and CronJob state; an
+  incomplete rollback retains recovery copies and keeps the runner isolated.
+  The Docker Desktop UI remains the
   vendor-supported settings path; direct settings-store editing is an audited
-  deploy-runner fallback. The dedicated repository recovery key must match its
+  deploy-runner fallback. macOS protects Docker's App Group data, so the
+  workflow does not offer or trust a per-process interactive-consent flag: the
+  headless launchd runner and isolated child process groups cannot prove one
+  responsible-app lifetime across the separate audit and apply processes.
+  There is no partial `prepare-ui-stop` mode because logical dumps without the
+  full Docker.raw clone would abandon dynamic-PVC/etcd/Secret recovery and
+  automatic workload restoration. The retirement job requires the dedicated
+  `macbook-air-k8s-retirement` runner label. Before an attended run or dispatch,
+  the deployment controller confirms that no retirement job is queued, uses
+  the repository runner-label REST API to replace only the custom
+  `macbook-air,buddystudy` labels with that unique label, and verifies it
+  server-side. This drains new ordinary assignments; any job assigned before
+  the swap finishes before the controller rechecks `busy=false`. Only then does
+  the operator stop the listener and verify it offline. Other Air workflows
+  keep requiring both normal labels, so their queued jobs cannot enter the FDA
+  window. The operator then manually gives Terminal temporary Full Disk Access,
+  runs the existing listener in that exact Terminal with foreground
+  `exec ./run.sh`, and completes the separate preflight and apply runs without
+  restarting that Terminal/listener. The read-only run is an empirical
+  protected-path open/stat/read gate, not proof that later clone, write, or
+  rollback will succeed. Cleanup is foreground-listener exit, FDA removal,
+  complete Terminal restart, remote restoration of normal labels, and only
+  then `svc.sh start`/`status` from an unprivileged Terminal. An incomplete
+  rollback leaves the normal listener offline. Never grant a generic
+  interpreter permanent access, edit labels manually, or use `tccutil`,
+  TCC-database edits, SIP changes, dialog automation, or a private Docker API.
+  The dedicated repository recovery key must match its
   read-back-verified copy in the Air login Keychain before any workload is
   changed. External hostPath disappearance/symlinks and insufficient space for
   a 12 GiB base reserve plus staging/ciphertext coexistence fail closed. The

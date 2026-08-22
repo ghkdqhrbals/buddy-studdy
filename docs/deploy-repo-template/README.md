@@ -259,6 +259,84 @@ GitHub Actions supplies the exact `macbook-air-buddystudy` ARM64 runner
 identity. Local laptops and every other runner fail closed before inspection or
 mutation.
 
+The workflow intentionally has no interactive-consent mode. On macOS 15 and
+later, Docker's App Group container is protected app data. Apple documents that
+an unrelated process can receive a user authorization prompt when it crosses
+that boundary, and that the access decision belongs to the responsible app
+instance. The headless launchd runner, the top-level Python helper, and its
+isolated process-group children do not provide a provable single
+responsible-app lifetime across the independent preflight and apply runs. A
+successful prompt in one helper process must never be treated as authorization
+for another. See Apple's
+[App Group container guidance](https://developer.apple.com/documentation/xcode/accessing-app-group-containers),
+[App Data usage description](https://developer.apple.com/documentation/bundleresources/information-property-list/nsappdatausagedescription),
+and Apple DTS's [responsible-code guidance](https://developer.apple.com/forums/thread/678819).
+
+There is deliberately no `prepare-ui-stop` mode. Such a mode could quiesce
+writers and create logical PostgreSQL/MySQL/Redis backups, but it could not
+create or verify the full Docker.raw rollback clone that protects dynamic PVCs,
+etcd, Secrets, and cluster metadata. Handing control to the Docker Desktop UI
+between those phases would also break automatic workload rollback and the
+fresh desired-state digest boundary. Do not substitute that partial sequence
+for the guarded retirement transaction.
+
+For the one-time guarded retirement, use this attended operator procedure:
+
+1. Before any retirement dispatch or FDA window, the deployment controller—not
+   the person at the Air—confirms that no retirement job is queued or running,
+   then uses GitHub's repository runner-label REST API to replace the runner's
+   custom `macbook-air,buddystudy` labels with only
+   `macbook-air-k8s-retirement` and verifies the server-side result. The
+   retirement workflow requires that unique label. Every other Air workflow
+   continues to require both normal labels, so no new ordinary job can be
+   assigned and already queued ordinary jobs remain queued. Do not edit runner
+   labels manually.
+2. If an ordinary job was assigned before the label swap, let it finish. The
+   controller must then re-read the runner and confirm `busy=false`. Only now
+   log in to and unlock the MacBook Air. In the existing runner installation
+   directory, run `./svc.sh stop`, then `./svc.sh status`, and do not continue
+   until the listener is offline and the controller has reverified both its
+   offline state and dedicated label.
+3. In **System Settings > Privacy & Security > Full Disk Access**, manually add
+   or enable Apple's Terminal app. Fully quit and reopen Terminal so the new
+   setting applies. Do not grant this broad permission to `python3` or another
+   general-purpose interpreter.
+4. In that exact Terminal window, enter the existing runner installation
+   directory and run `exec ./run.sh`. Keep this foreground listener and the
+   Terminal window open. Do not use launchd, `nohup`, `&`, tmux, screen, or a
+   detached wrapper for either retirement run.
+5. Dispatch `apply=false`. It must finish both the `desktop-settings` and
+   `docker-storage` probes, report `ready=true`, and produce the reviewed
+   desired-state digest. Any access failure blocks retirement; do not dispatch
+   apply.
+6. Without restarting Terminal or the foreground listener, dispatch the
+   separate `apply=true` run with that digest and the exact confirmation
+   `RETIRE DOCKER DESKTOP KUBERNETES`. Keep the Air attended until the guarded
+   rollback attempt or success is fully reported.
+7. Once the job has finished, press Control-C and wait for the foreground
+   listener to exit and appear offline. Because `exec` replaced the shell, no
+   privileged shell remains. Close that window, disable Terminal's Full Disk
+   Access in System Settings, fully quit Terminal, and only then reopen it.
+8. After FDA is revoked, the deployment controller restores exactly the normal
+   `macbook-air,buddystudy` custom labels through the REST API. In the newly
+   opened, unprivileged Terminal, run `./svc.sh start` and `./svc.sh status`,
+   then confirm the normal runner is online. If rollback was reported
+   incomplete, do not restore labels or start the normal listener; keep the Air
+   isolated and use a separately authorized recovery procedure.
+
+The read-only preflight is an empirical protected-path read/open/stat gate. It
+does not prove that the later full clone, settings write, or rollback will
+succeed. Apply independently creates and HMAC-verifies the Docker.raw clone
+before changing settings, and any rollback is a guarded best-effort attempt;
+an incomplete rollback retains recovery copies and requires operator recovery.
+This procedure never uses `tccutil`, edits the TCC database, changes SIP,
+automates a consent dialog, or calls a private Docker API. If the temporary
+foreground Terminal procedure is unacceptable or its read-only run still
+fails, leave apply blocked. Docker Desktop's Kubernetes **Stop** control is the
+vendor-supported manual alternative, but it does not provide this workflow's
+verified clone plus guarded rollback attempt and requires a separately approved
+recovery plan.
+
 Retirement is deliberately a two-run operation:
 
 1. Dispatch **Retire MacBook Air Docker Desktop Kubernetes** with the default
@@ -279,7 +357,8 @@ The preflight accepts only kubectl context `docker-desktop`, its local
 `127.0.0.1:6443` or `localhost:6443` API server, namespace `buddystudy`, and
 the known auxiliary Deployment
 `default/buddystudy-redis-stream-coordinator`. Its replica state and manifest
-are included in the encrypted backup and automatic rollback. Any other user
+are included in the encrypted backup and recorded for guarded rollback. Any
+other user
 workload outside `buddystudy`, active Job, standalone Pod, ReplicationController,
 or BuddyStudy DaemonSet blocks apply. Pods, ReplicaSets, Jobs, Events, and
 status churn are excluded from the independent desired-state digest, while
@@ -357,12 +436,13 @@ Kubernetes-labelled/control-plane containers while preserving every
 non-Kubernetes container identity. It does not remove stopped Kubernetes
 metadata.
 
-If anything fails after the disabled Desktop has started, rollback gracefully
-stops Desktop, preserves that failed-current Docker.raw, restores the verified
-APFS clone to the exact original Docker.raw path, restores the byte-for-byte
-settings file, restarts Desktop, and restores recorded replicas and CronJob
-suspend values. A failed rollback keeps every recovery copy and reports only
-safe paths/status. Docker Desktop itself is never force-killed.
+If anything fails after the disabled Desktop has started, guarded rollback
+attempts to stop Desktop gracefully, preserve that failed-current Docker.raw,
+restore the verified APFS clone to the exact original Docker.raw path, restore
+the byte-for-byte settings file, restart Desktop, and restore recorded replicas
+and CronJob suspend values. An incomplete rollback keeps every recovery copy,
+reports only safe paths/status, and requires operator recovery before the
+normal runner resumes. Docker Desktop itself is never force-killed.
 
 Keep `MACBOOKAIR_K8S_RETIREMENT_BACKUP_KEY` available for recovery. Before any
 workload is changed, apply stores the same value in the Air login Keychain under

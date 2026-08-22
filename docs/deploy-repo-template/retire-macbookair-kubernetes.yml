@@ -29,7 +29,7 @@ permissions:
 jobs:
   retire_macbookair_kubernetes:
     name: Retire MacBook Air Docker Desktop Kubernetes
-    runs-on: [self-hosted, macOS, ARM64, macbook-air, buddystudy]
+    runs-on: [self-hosted, macOS, ARM64, macbook-air-k8s-retirement]
     timeout-minutes: ${{ inputs.apply && 360 || 15 }}
     steps:
       - name: Checkout audited retirement helper
