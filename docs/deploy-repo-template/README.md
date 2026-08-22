@@ -47,6 +47,9 @@ Current workflow templates:
   build-cache reclamation on MacBook Air.
 - `diagnose-macbookair-host-pressure.yml`: manual, host-only memory, swap,
   disk, and process RSS snapshot on the normal MacBook Air runner labels.
+- `diagnose-macbookair-docker-rca.yml`: manual, bounded, read-only Docker
+  Desktop/Kubernetes RCA snapshot with sanitized macOS memory logs and recent
+  DiagnosticReports evidence on the normal MacBook Air runner labels.
 - `retire-macbookair-kubernetes.yml`: guarded, two-run retirement of only the
   legacy Docker Desktop Kubernetes runtime on the MacBook Air.
 

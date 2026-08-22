@@ -22,6 +22,7 @@ one workflow run just because they share a host.
 | TestZone legacy component logging | `Migrate TestZone Component Logging` | manual, one-time | MacBook Air self-hosted | Read-only audit and guarded log-driver-only recreation of the exact legacy PostgreSQL and Redis TestZone components |
 | MacBook Air Docker capacity | `Maintain MacBook Air Docker Capacity` | manual, weekly | MacBook Air self-hosted | Docker daemon readiness/recovery, host and Docker capacity diagnostics, and reclamation of old unreferenced images and all unused build cache older than seven days |
 | MacBook Air host pressure diagnostics | `Diagnose MacBook Air Host Pressure` | manual, incident-only | MacBook Air self-hosted, normal labels | Read-only physical-memory, VM-page, memory-pressure, swap, data-volume, and process RSS/virtual-size snapshot only |
+| MacBook Air Docker RCA | `Diagnose MacBook Air Docker RCA` | manual, incident-only | MacBook Air self-hosted, normal labels | Bounded read-only Docker/Kubernetes resource evidence, macOS memory events, and sanitized recent diagnostic reports only |
 | MacBook Air Kubernetes retirement | `Retire MacBook Air Docker Desktop Kubernetes` | manual, two-run, one-time | MacBook Air self-hosted, temporarily isolated retirement label | Read-only exact-plan audit, encrypted rollback backup, quiesced legacy workload shutdown, and Docker Desktop Kubernetes disablement only |
 | Health monitor | Cloudflare Worker workflow | manual or source workflow | GitHub-hosted | Explicit diagnostic endpoint only; production scheduled checks are disabled |
 
@@ -154,6 +155,42 @@ deployment.
   lines. The workflow performs no Docker API/CLI call, daemon wakeup, health
   check, Docker/runtime restart, stop, force-quit, prune, or data mutation, and
   can submit its snapshot after Docker Desktop exits.
+- Docker Desktop root-cause evidence collection belongs only to the manual
+  `Diagnose MacBook Air Docker RCA` workflow on the exact normal
+  `macbook-air,buddystudy` runner labels. Each fixed command is independently
+  bounded and a missing, unresponsive, TCC-protected, or failed probe is
+  reported as unavailable rather than becoming a runtime health gate. The
+  snapshot records the allowlisted macOS product/build version and Docker
+  Desktop version/status; current Docker component RSS and virtual size;
+  `docker stats --no-stream` resource values; only fixed Compose/Kubernetes
+  ownership labels from `docker ps`; Docker Desktop Kubernetes pod restart
+  counts, last termination times, and Warning-event reason/count/time columns;
+  six hours of fixed-predicate
+  macOS unified memory/application-memory/low-memory/jetsam/watchdog events
+  from kernel, memorystatusd, runningboardd, watchdogd, loginwindow, and Docker
+  sources; and current/previous Desktop
+  boot logs limited to that same six-hour window. Unified logs have a
+  20-second/32-MiB live bound and Desktop logs a 15-second/16-MiB live bound.
+  The four user/system `DiagnosticReports` and `Retired` roots are inspected in
+  a separate 20-second child so a protected-path consent stall cannot block the
+  job. Only recent bounded JetsamEvent, memory-resource, ResourceException,
+  Docker, com.docker, or Virtualization `.ips`/`.diag` candidates are parsed.
+  Jetsam resident pages are converted with that snapshot's page size;
+  coalition current bytes are summed only within the same snapshot.
+  `lifetimeMax` is retained per process and is never summed across processes
+  because it can represent different instants. Docker component names remain
+  recognizable; unrelated process and coalition identities are one-way
+  pseudonymized. Sanitized incident timestamps are correlated to the nearest
+  Desktop boot signal, Kubernetes container termination, or Warning-event time
+  with an absolute delta, making restart churn around a peak visible without
+  retaining an event message. The report never retains raw log/report lines, PIDs, container
+  IDs, environment values, mounts, paths, arbitrary label values, arguments,
+  backtraces, or device identifiers. It never runs Docker diagnose/gather or
+  support upload, and performs no restart, stop, force-quit, reset, prune,
+  delete, rollout, scale, or other runtime mutation.
+  Docker stats remain container-level: child processes such as a TestZone k6
+  run are attributed to the parent service and cannot appear as an independent
+  container row.
 - Docker Desktop Kubernetes retirement belongs only to the manual
   `Retire MacBook Air Docker Desktop Kubernetes` workflow. Its first run is
   read-only; a second apply run requires both the exact confirmation and the
