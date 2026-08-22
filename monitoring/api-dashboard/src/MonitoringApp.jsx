@@ -11,6 +11,7 @@ import { DeploymentsPage } from "./pages/DeploymentsPage.jsx";
 import { AdministratorsPage } from "./pages/AdministratorsPage.jsx";
 import { OrdersPage } from "./pages/OrdersPage.jsx";
 import { ExternalApiHistoryPage } from "./pages/ExternalApiHistoryPage.jsx";
+import { AdvertisingPage } from "./pages/AdvertisingPage.jsx";
 
 export function MonitoringApp() {
   const route = {
@@ -21,6 +22,7 @@ export function MonitoringApp() {
     "/users.html": UsersPage,
     "/feedback.html": FeedbackPage,
     "/jobs.html": JobsPage,
+    "/advertising.html": AdvertisingPage,
     "/streams.html": StreamsPage,
     "/audit.html": AuditPage,
     "/settings.html": SettingsPage,

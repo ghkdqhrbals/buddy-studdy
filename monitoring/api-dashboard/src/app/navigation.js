@@ -1,5 +1,6 @@
 import {
   Activity,
+  BadgeDollarSign,
   BookOpenText,
   CalendarClock,
   Cable,
@@ -18,7 +19,7 @@ import {
   Users,
 } from "lucide-react";
 
-export const UI_VERSION = "2026.08.22.1";
+export const UI_VERSION = "2026.08.23.1";
 export const NAV_COLLAPSED_KEY = "buddystudy.monitoring.nav.collapsed";
 export const NAV_GROUP_KEY = "buddystudy.monitoring.nav.groups";
 export const NAV_MODE_KEY = "buddystudy.monitoring.nav.mode";
@@ -44,6 +45,7 @@ export const navigationGroups = [
       { href: "/orders.html", label: "Orders & Billing", icon: ReceiptText },
       { href: "/administrators.html", label: "Administrators", icon: UserCog },
       { href: "/feedback.html", label: "User Feedback", icon: MessageSquareText },
+      { href: "/advertising.html", label: "Advertising", icon: BadgeDollarSign },
       { href: "/jobs.html", label: "Batch Jobs", icon: CalendarClock },
       { href: "/streams.html", label: "Redis Streams", icon: GitPullRequest },
       { href: "/deployments.html", label: "Deployments", icon: Rocket },

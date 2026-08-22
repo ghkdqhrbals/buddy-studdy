@@ -23,6 +23,7 @@ test("all monitoring pages load the shared React application", async () => {
     "users.html",
     "administrators.html",
     "feedback.html",
+    "advertising.html",
     "jobs.html",
     "orders.html",
     "streams.html",
@@ -47,6 +48,7 @@ test("all monitoring pages load the shared React application", async () => {
   assert.match(navigation, /Users & Quotas/);
   assert.match(navigation, /Administrators/);
   assert.match(navigation, /User Feedback/);
+  assert.match(navigation, /Advertising/);
   assert.match(navigation, /Batch Jobs/);
   assert.match(navigation, /Orders & Billing/);
   assert.match(navigation, /Redis Streams/);
@@ -55,6 +57,23 @@ test("all monitoring pages load the shared React application", async () => {
   assert.doesNotMatch(navigation, /Layers3/);
   assert.match(navigation, /Service Status/);
   assert.match(navigation, /External APIs/);
+});
+
+test("advertising administration manages Coupang campaigns and explains server ranking", async () => {
+  const app = await source("MonitoringApp.jsx");
+  const page = await source("pages/AdvertisingPage.jsx");
+  assert.match(app, /advertising\.html/);
+  assert.match(page, /\/native-ad-campaigns\?/);
+  assert.match(page, /\/native-ad-campaigns\/\$\{campaign\.id\}\/users\?/);
+  assert.match(page, /method:\s*campaign \? "PUT" : "POST"/);
+  assert.match(page, /Coupang destination URL/);
+  assert.match(page, /link\.coupang\.com/);
+  assert.match(page, /Advertising campaigns/);
+  assert.match(page, /How the server ranks advertisements/);
+  assert.match(page, /smoothed open rate/);
+  assert.match(page, /DataTable/);
+  assert.match(page, /DetailDrawer/);
+  assert.match(page, /Pagination/);
 });
 
 test("external API history is cursor paginated and loads full request and response on demand", async () => {
