@@ -437,7 +437,15 @@ def _verify_replacement(plan: MigrationPlan, replacement: Mapping[str, Any]) -> 
         *RESOURCE_KEYS,
     )
     for key in required_host_keys:
-        if actual_host.get(key) != expected_host.get(key):
+        expected_value = expected_host.get(key)
+        actual_value = actual_host.get(key)
+        # Docker normalizes an omitted OOM-kill flag to the explicit default
+        # `false` when a container is recreated. Both mean OOM killing remains
+        # enabled, so this is not a resource-policy change.
+        if key == "OomKillDisable":
+            expected_value = bool(expected_value)
+            actual_value = bool(actual_value)
+        if actual_value != expected_value:
             raise MigrationError(
                 f"{plan.spec.name} replacement host config verification failed for {key}."
             )
