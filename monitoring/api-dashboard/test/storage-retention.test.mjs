@@ -302,18 +302,25 @@ test("gateway log rotation rejects unsafe byte limits", async () => {
   );
 });
 
-test("host-wide Docker image cleanup has one bounded owner", async () => {
+test("host-wide Docker storage cleanup has one bounded owner", async () => {
   const [monitoringWorkflow, capacityWorkflow] = await Promise.all([
     fs.readFile(monitoringWorkflowTemplatePath, "utf8"),
     fs.readFile(capacityWorkflowTemplatePath, "utf8"),
   ]);
 
   assert.doesNotMatch(monitoringWorkflow, /docker image prune/);
+  assert.doesNotMatch(monitoringWorkflow, /docker builder prune/);
   assert.match(capacityWorkflow, /workflow_dispatch:/);
   assert.match(capacityWorkflow, /cron: "17 18 \* \* 0"/);
   assert.equal(
     capacityWorkflow.match(
       /docker image prune -a --filter "until=168h" --force/g,
+    )?.length,
+    1,
+  );
+  assert.equal(
+    capacityWorkflow.match(
+      /docker builder prune --filter until=168h --force/g,
     )?.length,
     1,
   );
@@ -323,7 +330,6 @@ test("host-wide Docker image cleanup has one bounded owner", async () => {
     "docker container prune",
     "docker volume prune",
     "docker network prune",
-    "docker builder prune",
     "docker buildx prune",
     "docker rmi",
     "docker rm",
@@ -344,8 +350,13 @@ test("host-wide Docker image cleanup has one bounded owner", async () => {
 
   assert.match(capacityWorkflow, /Status: maintenance submitted/);
   assert.match(capacityWorkflow, /Docker image prune reclaimed output/);
+  assert.match(capacityWorkflow, /Docker build-cache prune reclaimed output/);
   assert.match(
     capacityWorkflow,
     /removed images can be pulled again from their registries/,
+  );
+  assert.match(
+    capacityWorkflow,
+    /removed build cache can be recreated by rebuilding/,
   );
 });

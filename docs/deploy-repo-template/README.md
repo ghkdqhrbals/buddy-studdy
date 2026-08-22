@@ -40,8 +40,8 @@ Current workflow templates:
 - `deploy-testzone.yml`: TestZone k6 execution service and InfluxDB on MacBook
   Air.
 - `maintain-macbookair-docker-capacity.yml`: weekly or manual host-wide Docker
-  daemon recovery, capacity diagnostics, and bounded unused-image reclamation
-  on MacBook Air.
+  daemon recovery, capacity diagnostics, and bounded unused-image and old
+  build-cache reclamation on MacBook Air.
 
 ## Required Secrets
 
@@ -205,29 +205,32 @@ The MacBook Air workflow creates or replaces:
 Every MacBook Air module bounds its own container stdout/stderr with Docker's
 `local` driver at 10 MiB times three files. The monitoring deploy reports host,
 Docker, monitoring, and TestZone storage use but does not perform host-wide
-image reclamation. It always recreates only the API Dashboard gateway and its
-rotation sidecar after Docker is ready so a Docker Desktop restart cannot leave
-the long-running Nginx bridge endpoint stale. TestZone and RedisStreamScope
-policy changes still require their own module workflows; no runtime HTTP or
-container-health gate is added here.
+Docker storage reclamation. It always recreates only the API Dashboard gateway
+and its rotation sidecar after Docker is ready so a Docker Desktop restart
+cannot leave the long-running Nginx bridge endpoint stale. TestZone and
+RedisStreamScope policy changes still require their own module workflows; no
+runtime HTTP or container-health gate is added here.
 
 ## MacBook Air Docker Capacity Maintenance
 
 Copy `maintain-macbookair-docker-capacity.yml` into the deploy repository. It
 runs weekly and also supports a manual dispatch. The workflow reuses the scoped
 Docker Desktop restart recovery used by MacBook Air deploys, reports `df` and
-`docker system df --verbose` before and after maintenance, and runs only
-`docker image prune -a --filter until=168h`. Docker therefore removes images
-created more than seven days ago only when no running or stopped container
-references them.
+`docker system df --verbose` before and after maintenance, then runs only
+`docker image prune -a --filter until=168h` and
+`docker builder prune --filter until=168h --force`. Docker therefore removes
+images created more than seven days ago only when no running or stopped
+container references them, and removes build cache only after it is more than
+seven days old.
 
-This host-capacity workflow never prunes containers, volumes, networks, build
-cache, persisted module data, or host files. Images removed by the maintenance
-are recoverable by pulling them again from their registries. Monitoring,
-TestZone, and RedisStreamScope workflows remain responsible for their own log
-and data retention and must not duplicate host-wide image reclamation. Docker
-daemon readiness is the only runtime prerequisite; the workflow does not make
-HTTP or container-health checks.
+This host-capacity workflow never prunes containers, volumes, networks,
+persisted module data, or host files. Images removed by the maintenance are
+recoverable by pulling them again from their registries, and removed build
+cache is recoverable by rebuilding. Monitoring, TestZone, and RedisStreamScope
+workflows remain responsible for their own log and data retention and must not
+duplicate host-wide Docker storage reclamation. Docker daemon readiness is the
+only runtime prerequisite; the workflow does not make HTTP or container-health
+checks.
 
 The separate TestZone workflow creates or replaces:
 
