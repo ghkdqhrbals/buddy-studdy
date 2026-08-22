@@ -1968,3 +1968,933 @@ td small {
     width: 92px;
   }
 }
+
+/* Readability and task-focused admin layout */
+:root,
+:root[data-theme="dark"] {
+  --radius: 8px;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex="0"]:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.app-shell {
+  grid-template-columns: 184px minmax(0, 1fr);
+}
+
+.sidebar {
+  padding: 16px 12px;
+}
+
+.brand {
+  gap: 9px;
+  min-height: 40px;
+  padding: 0 7px 16px;
+}
+
+.brand-mark {
+  width: 28px;
+  height: 28px;
+  font-size: 13px;
+}
+
+.brand strong {
+  font-size: 13px;
+}
+
+.brand span {
+  font-size: 11px;
+}
+
+.nav-list {
+  gap: 3px;
+}
+
+.nav-item {
+  min-height: 36px;
+  padding: 0 10px;
+  font-size: 12.5px;
+}
+
+.sidebar-footer {
+  left: 12px;
+  right: 12px;
+}
+
+.admin-chip {
+  min-height: 36px;
+  padding: 0 8px;
+}
+
+.admin-chip strong {
+  font-size: 12px;
+}
+
+.admin-chip small {
+  font-size: 10px;
+}
+
+.topbar {
+  min-height: 58px;
+  height: auto;
+  padding: 9px 16px 9px 18px;
+}
+
+.topbar-title h1 {
+  font-size: 18px;
+}
+
+h2 {
+  font-size: 16px;
+}
+
+.primary-button,
+.secondary-button,
+.ghost-button {
+  min-height: 36px;
+  padding: 0 13px;
+  font-size: 13px;
+}
+
+.square-button {
+  width: 36px;
+  padding: 0;
+}
+
+.compact {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.ui-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.toolbar,
+.date-controls,
+.range-presets {
+  display: flex;
+  align-items: center;
+}
+
+.date-controls {
+  gap: 8px;
+}
+
+.range-presets {
+  gap: 3px;
+  padding: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.range-preset {
+  min-width: 42px;
+  height: 28px;
+  padding: 0 8px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.range-preset:hover,
+.range-preset.active {
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.date-range {
+  min-height: 36px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.date-range input {
+  width: 118px;
+}
+
+.dashboard,
+.app-updates-page {
+  gap: 14px;
+  padding: 16px 18px 28px;
+}
+
+.app-update-panel,
+.chart-panel,
+.operations-panel,
+.side-panel {
+  padding: 16px;
+}
+
+.app-update-heading p,
+.trend-panel-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.app-update-field {
+  gap: 6px;
+  font-size: 12px;
+}
+
+.app-update-field input,
+.app-update-field select,
+.app-update-filters input,
+.app-update-filters select {
+  height: 40px;
+  padding: 0 11px;
+  font-size: 13px;
+}
+
+.app-update-field textarea {
+  min-height: 84px;
+  padding: 10px 11px;
+  font-size: 13px;
+}
+
+.app-update-field small {
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+.metric-rail {
+  gap: 10px;
+}
+
+.metric-card {
+  min-height: 78px;
+  grid-template-columns: minmax(0, 1fr) minmax(72px, 38%);
+  padding: 11px 12px;
+}
+
+.metric-title span,
+.metric-card small {
+  font-size: 12px;
+}
+
+.metric-card strong {
+  font-size: 21px;
+}
+
+.sparkline {
+  height: 32px;
+}
+
+.dashboard-trend-panel {
+  min-width: 0;
+  padding: 18px;
+}
+
+.trend-panel-header {
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.trend-panel-header > div {
+  min-width: 0;
+}
+
+.dashboard-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  gap: 14px;
+}
+
+.primary-column,
+.insight-column {
+  gap: 12px;
+}
+
+.trend-grid {
+  grid-template-columns: repeat(auto-fit, minmax(430px, 1fr));
+  gap: 10px;
+}
+
+.trend-card {
+  padding: 12px 14px 10px;
+}
+
+.trend-card-head {
+  margin-bottom: 8px;
+}
+
+.trend-card-head span,
+.combined-legend {
+  font-size: 12px;
+}
+
+.trend-card-head strong {
+  font-size: 15px;
+}
+
+.trend-canvas svg {
+  height: 220px;
+}
+
+.combined-canvas svg {
+  height: 300px;
+}
+
+.axis-label {
+  font-size: 11px;
+}
+
+.line-path {
+  stroke-width: 2.4;
+}
+
+.chart-dot {
+  stroke-width: 2.5;
+}
+
+.chart-hit-area:focus {
+  stroke: color-mix(in srgb, var(--accent) 45%, transparent);
+  stroke-width: 2;
+}
+
+.chart-tooltip {
+  min-width: 156px;
+  max-width: 220px;
+  padding: 9px 10px;
+}
+
+.chart-tooltip strong,
+.chart-tooltip small,
+.chart-tooltip span {
+  font-size: 11px;
+}
+
+.summary-list span,
+.failed-job span,
+.failed-job small,
+.muted-line {
+  font-size: 12.5px;
+}
+
+/* Advertising workspace */
+.advertising-page {
+  scroll-margin-top: 70px;
+}
+
+.ad-page-intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-width: 0;
+  padding: 19px 20px;
+  color: white;
+  background: linear-gradient(135deg, #31338f, #5b5ce2 58%, #4976d8);
+  border-radius: 12px;
+}
+
+.ad-page-intro > div {
+  min-width: 0;
+}
+
+.ad-page-intro h2 {
+  font-size: 21px;
+  line-height: 1.25;
+}
+
+.ad-page-intro p:not(.eyebrow) {
+  max-width: 720px;
+  margin: 6px 0 0;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 13px;
+}
+
+.eyebrow {
+  margin: 0 0 5px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.ad-page-intro .eyebrow {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.ad-primary-action {
+  flex: 0 0 auto;
+  min-height: 42px;
+  color: #31338f;
+  background: white;
+  border-color: white;
+}
+
+.ad-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ad-summary-card {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 15px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.ad-summary-card span,
+.ad-summary-card small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.ad-summary-card strong {
+  font-size: 23px;
+  line-height: 1.1;
+}
+
+.ad-editor-panel,
+.ad-activity-panel {
+  scroll-margin-top: 72px;
+}
+
+.ad-editor-heading {
+  margin-bottom: 14px;
+}
+
+.ad-validation-summary {
+  margin: 0 0 14px;
+  padding: 11px 13px;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 20%, var(--border));
+  border-radius: var(--radius);
+  font-size: 12px;
+}
+
+.ad-validation-summary ul {
+  margin: 7px 0 0;
+  padding-left: 18px;
+}
+
+.ad-validation-summary li + li {
+  margin-top: 3px;
+}
+
+.ad-form-section {
+  min-width: 0;
+  margin: 0;
+  padding: 16px 0 18px;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.ad-form-section legend {
+  padding: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.ad-form-section > p {
+  margin: 5px 0 13px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ad-basics-grid,
+.ad-rules-grid,
+.ad-schedule-grid {
+  display: grid;
+  gap: 12px 14px;
+}
+
+.ad-basics-grid,
+.ad-schedule-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ad-rules-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.ad-field-span-2 {
+  grid-column: span 2;
+}
+
+.ad-locale-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ad-locale-card {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  padding: 13px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.ad-locale-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ad-locale-card header strong {
+  font-size: 13px;
+}
+
+.ad-locale-card header span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.required-mark {
+  color: var(--danger);
+}
+
+.ad-checkbox {
+  min-height: 40px;
+  font-size: 13px;
+}
+
+.app-update-field .ad-checkbox input {
+  width: 18px;
+  height: 18px;
+}
+
+.ad-editor-actions {
+  position: sticky;
+  z-index: 2;
+  bottom: 0;
+  margin: 0 -16px -16px;
+  padding: 12px 16px;
+  background: color-mix(in srgb, var(--surface) 95%, transparent);
+  border-top: 1px solid var(--border);
+  backdrop-filter: blur(10px);
+}
+
+.ad-list-heading {
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.ad-campaign-table {
+  min-width: 1120px;
+}
+
+.ad-user-table {
+  min-width: 1240px;
+}
+
+.ad-campaign-table tbody tr {
+  cursor: default;
+}
+
+.ad-table-actions {
+  text-align: right !important;
+}
+
+.ad-table-actions button + button {
+  margin-left: 5px;
+}
+
+.admin-table-scroll[tabindex="0"]:focus-visible {
+  outline-offset: 1px;
+}
+
+.ad-activity-toolbar {
+  display: grid;
+  grid-template-columns: minmax(240px, 1.1fr) minmax(280px, 1.4fr) minmax(190px, 0.8fr);
+  align-items: start;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.ad-user-search {
+  margin: 0;
+}
+
+.ad-search-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.ad-search-control .secondary-button {
+  min-height: 40px;
+}
+
+.ad-activity-context {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 9px;
+  font-size: 12px;
+}
+
+.ad-activity-context span,
+.ad-privacy-note {
+  color: var(--muted);
+}
+
+.ad-privacy-note {
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.ad-ranking-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.ad-ranking-panel > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 60px;
+  padding: 12px 16px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.ad-ranking-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ad-ranking-panel > summary span,
+.ad-ranking-panel > summary strong,
+.ad-ranking-panel > summary small {
+  display: block;
+}
+
+.ad-ranking-panel > summary small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.ad-ranking-panel > summary b {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.ad-ranking-panel[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.ad-ranking-formula {
+  margin: 14px 16px 16px;
+  padding: 14px;
+  font-size: 12px;
+}
+
+@media (max-width: 1180px) {
+  .app-shell {
+    grid-template-columns: 172px minmax(0, 1fr);
+  }
+
+  .ad-rules-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ad-locale-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ad-activity-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ad-activity-toolbar > :first-child {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 900px) {
+  .topbar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .toolbar {
+    flex: 1 1 100%;
+    justify-content: flex-end;
+  }
+
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ad-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ad-summary-card {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+  }
+
+  .ad-summary-card small {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: static;
+    padding: 8px 10px;
+  }
+
+  .nav-item {
+    min-height: 34px;
+    padding: 0 9px;
+    font-size: 12px;
+  }
+
+  .topbar {
+    padding: 10px;
+  }
+
+  .topbar-title {
+    display: block;
+  }
+
+  .topbar-title h1 {
+    font-size: 16px;
+  }
+
+  .date-controls {
+    min-width: 0;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .date-range,
+  .range-presets {
+    flex: 0 0 auto;
+  }
+
+  .dashboard,
+  .app-updates-page {
+    padding: 10px;
+  }
+
+  .metric-card {
+    min-height: 74px;
+  }
+
+  .trend-canvas svg {
+    height: 210px;
+  }
+
+  .trend-canvas.combined-canvas svg {
+    height: 250px;
+  }
+
+  .trend-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .insight-column {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+
+  .admin-table th,
+  .admin-table td {
+    display: table-cell;
+  }
+
+  .table-wrap th:nth-child(4),
+  .table-wrap td:nth-child(4),
+  .table-wrap th:nth-child(5),
+  .table-wrap td:nth-child(5),
+  .table-wrap th:nth-child(6),
+  .table-wrap td:nth-child(6) {
+    display: none;
+  }
+
+  .ad-page-intro {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 17px;
+  }
+
+  .ad-primary-action {
+    align-self: flex-start;
+  }
+
+  .ad-basics-grid,
+  .ad-rules-grid,
+  .ad-schedule-grid,
+  .ad-activity-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .ad-field-span-2,
+  .ad-activity-toolbar > :first-child {
+    grid-column: auto;
+  }
+
+  .ad-ranking-panel > summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .advertising-page .admin-table-scroll {
+    overflow-x: visible;
+  }
+
+  .advertising-page .admin-table,
+  .advertising-page .admin-table tbody {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .advertising-page .admin-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+
+  .advertising-page .admin-table tbody {
+    display: grid;
+    gap: 10px;
+  }
+
+  .advertising-page .admin-table tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 16px;
+    padding: 14px;
+    background: color-mix(in srgb, var(--surface) 96%, var(--bg));
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+
+  .advertising-page .admin-table td {
+    display: flex;
+    min-width: 0;
+    padding: 0;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    border: 0;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .advertising-page .admin-table td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 750;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+
+  .advertising-page .admin-table td:first-child,
+  .advertising-page .admin-table .ad-table-actions {
+    grid-column: 1 / -1;
+  }
+
+  .advertising-page .admin-table .ad-table-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding-top: 11px;
+    border-top: 1px solid var(--border);
+  }
+
+  .advertising-page .admin-table .ad-table-actions::before {
+    grid-column: 1 / -1;
+  }
+
+  .advertising-page .admin-table .ad-table-actions button {
+    width: 100%;
+    min-height: 38px;
+  }
+}
+
+@media (max-width: 520px) {
+  .topbar-title {
+    display: block;
+    flex: 1 1 100%;
+  }
+
+  .topbar {
+    justify-content: space-between;
+  }
+
+  .toolbar {
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+
+  .date-range input {
+    width: 104px;
+  }
+
+  .ad-page-intro h2 {
+    font-size: 18px;
+  }
+
+  .ad-search-control {
+    grid-template-columns: 1fr;
+  }
+
+  .ad-search-control .secondary-button {
+    width: 100%;
+  }
+}

@@ -206,3 +206,26 @@ export type NativeAdvertisementCampaignPage = {
   offset: number;
   rankingPolicy: NativeAdvertisementRankingPolicy;
 };
+
+export type NativeAdvertisementUserStatusFilter = "" | "OPENED" | "NOT_OPENED";
+
+export type NativeAdvertisementUserSummary = {
+  userId: number;
+  accountStatus: "ACTIVE" | "ANONYMOUS" | "PENDING_TERMS" | "WITHDRAWN";
+  email?: string | null;
+  displayName?: string | null;
+  selectionCount: number;
+  destinationOpenCount: number;
+  openRate: number;
+  distinctDeviceCount: number;
+  firstSelectedAt: string;
+  lastSelectedAt: string;
+  lastViewedAt?: string | null;
+};
+
+export type NativeAdvertisementUserPage = {
+  users: NativeAdvertisementUserSummary[];
+  totalCount: number;
+  limit: number;
+  offset: number;
+};

@@ -12,6 +12,8 @@ import type {
   NativeAdvertisementCampaignInput,
   NativeAdvertisementCampaignPage,
   NativeAdvertisementCampaignSummary,
+  NativeAdvertisementUserPage,
+  NativeAdvertisementUserStatusFilter,
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_ADMIN_API_BASE_URL ?? "";
@@ -218,4 +220,22 @@ export function updateNativeAdvertisementCampaign(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   }, onUnauthorized);
+}
+
+export function fetchNativeAdvertisementCampaignUsers(
+  campaignId: number,
+  onUnauthorized: UnauthorizedHandler,
+  limit = 20,
+  offset = 0,
+  query = "",
+  status: NativeAdvertisementUserStatusFilter = "",
+): Promise<NativeAdvertisementUserPage> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (query.trim()) params.set("query", query.trim());
+  if (status) params.set("status", status);
+  return request(
+    `/api/v1/admin/native-ad-campaigns/${campaignId}/users?${params}`,
+    { method: "GET" },
+    onUnauthorized,
+  );
 }

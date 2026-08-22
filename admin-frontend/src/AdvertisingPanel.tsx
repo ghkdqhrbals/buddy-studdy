@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   createNativeAdvertisementCampaign,
   fetchNativeAdvertisementCampaigns,
+  fetchNativeAdvertisementCampaignUsers,
   updateNativeAdvertisementCampaign,
   type UnauthorizedHandler,
 } from "./api";
@@ -9,9 +10,13 @@ import type {
   NativeAdvertisementCampaignInput,
   NativeAdvertisementCampaignSummary,
   NativeAdvertisementRankingPolicy,
+  NativeAdvertisementUserPage,
+  NativeAdvertisementUserStatusFilter,
+  NativeAdvertisementUserSummary,
 } from "./types";
 
 const PAGE_SIZE = 20;
+const emptyUserPage: NativeAdvertisementUserPage = { users: [], totalCount: 0, limit: PAGE_SIZE, offset: 0 };
 
 const initialForm: NativeAdvertisementCampaignInput = {
   campaignKey: "",
@@ -52,28 +57,43 @@ export function AdvertisingPanel({
   const [totalCount, setTotalCount] = useState(0);
   const [offset, setOffset] = useState(0);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
   const [form, setForm] = useState<NativeAdvertisementCampaignInput>(initialForm);
+  const [attemptedSubmit, setAttemptedSubmit] = useState(false);
+  const [activityCampaignId, setActivityCampaignId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const editorRef = useRef<HTMLElement | null>(null);
+  const validationRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    void loadCampaigns();
+    void loadCampaigns(offset);
   }, [offset, refreshKey]);
 
   const selected = useMemo(
     () => campaigns.find((campaign) => campaign.id === editingId) ?? null,
     [campaigns, editingId],
   );
+  const pagePerformance = useMemo(() => {
+    const selections = campaigns.reduce((sum, campaign) => sum + campaign.performanceSelections, 0);
+    const opens = campaigns.reduce((sum, campaign) => sum + campaign.performanceViews, 0);
+    return { selections, opens, rate: selections > 0 ? opens / selections : 0 };
+  }, [campaigns]);
+  const validationErrors = validateForm(form);
 
-  async function loadCampaigns() {
+  async function loadCampaigns(nextOffset: number) {
     setLoading(true);
     setError(null);
     try {
-      const page = await fetchNativeAdvertisementCampaigns(onUnauthorized, PAGE_SIZE, offset);
+      const page = await fetchNativeAdvertisementCampaigns(onUnauthorized, PAGE_SIZE, nextOffset);
       setCampaigns(page.campaigns);
       setTotalCount(page.totalCount);
       setRankingPolicy(page.rankingPolicy);
+      setActivityCampaignId((current) => {
+        if (current !== null && page.campaigns.some((campaign) => campaign.id === current)) return current;
+        return page.campaigns[0]?.id ?? null;
+      });
     } catch (cause) {
       setError(message(cause));
     } finally {
@@ -81,30 +101,54 @@ export function AdvertisingPanel({
     }
   }
 
+  function showEditor() {
+    window.requestAnimationFrame(() => editorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
+
+  function beginCreating() {
+    setEditingId(null);
+    setForm(initialForm);
+    setAttemptedSubmit(false);
+    setEditorOpen(true);
+    showEditor();
+  }
+
   function beginEditing(campaign: NativeAdvertisementCampaignSummary) {
     setEditingId(campaign.id);
     setForm(toInput(campaign));
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    setAttemptedSubmit(false);
+    setEditorOpen(true);
+    showEditor();
   }
 
-  function resetForm() {
+  function closeEditor() {
     setEditingId(null);
     setForm(initialForm);
+    setAttemptedSubmit(false);
+    setEditorOpen(false);
   }
 
-  async function saveCampaign() {
-    if (!isComplete(form)) return;
+  async function saveCampaign(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAttemptedSubmit(true);
+    if (validationErrors.length > 0) {
+      window.requestAnimationFrame(() => {
+        validationRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        validationRef.current?.focus({ preventScroll: true });
+      });
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
-      if (editingId === null) {
-        await createNativeAdvertisementCampaign(form, onUnauthorized);
-        setOffset(0);
-      } else {
-        await updateNativeAdvertisementCampaign(editingId, form, onUnauthorized);
-      }
-      resetForm();
-      await loadCampaigns();
+      const saved = editingId === null
+        ? await createNativeAdvertisementCampaign(form, onUnauthorized)
+        : await updateNativeAdvertisementCampaign(editingId, form, onUnauthorized);
+      const nextOffset = editingId === null ? 0 : offset;
+      setOffset(nextOffset);
+      setActivityCampaignId(saved.id);
+      closeEditor();
+      await loadCampaigns(nextOffset);
     } catch (cause) {
       setError(message(cause));
     } finally {
@@ -112,99 +156,166 @@ export function AdvertisingPanel({
     }
   }
 
+  function openAudience(campaignId: number) {
+    setActivityCampaignId(campaignId);
+    window.requestAnimationFrame(() => document.getElementById("ad-audience-activity")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
+
   return (
     <div className="app-updates-page advertising-page">
       {error ? <div className="error-banner inline-error" role="alert">{error}</div> : null}
 
-      <section className="app-update-panel">
-        <div className="panel-header app-update-heading">
-          <div>
-            <h2>{editingId === null ? "Create advertising campaign" : `Edit ${selected?.campaignKey ?? "campaign"}`}</h2>
-            <p>Coupang Partners links must use HTTPS on link.coupang.com or coupang.com. The app records the existing view event before opening the URL.</p>
-          </div>
-          <span className={`status-pill ${form.active ? "success" : ""}`}>{form.active ? "Eligible" : "Paused"}</span>
+      <section className="ad-page-intro" aria-labelledby="ad-page-title">
+        <div>
+          <p className="eyebrow">Campaign workspace</p>
+          <h2 id="ad-page-title">Manage delivery, creative, and audience activity</h2>
+          <p>Campaigns stay list-first. Open the editor only when you need to create or change one.</p>
         </div>
-
-        <div className="app-update-form-grid ad-form-grid">
-          <Field label="Campaign key" hint="Lowercase letters, numbers, hyphens">
-            <input value={form.campaignKey} placeholder="coupang-desk-lamp-august" onChange={(event) => update("campaignKey", event.target.value)} />
-          </Field>
-          <Field label="Audience">
-            <select value={form.audience} onChange={(event) => update("audience", event.target.value as NativeAdvertisementCampaignInput["audience"])}>
-              <option value="ALL">All users</option>
-              <option value="AUTHENTICATED">Authenticated only</option>
-              <option value="ANONYMOUS">Anonymous only</option>
-            </select>
-          </Field>
-          <Field label="Coupang advertising URL" hint="Affiliate query parameters are preserved">
-            <input className="wide-input" value={form.destinationUrl} placeholder="https://link.coupang.com/a/..." onChange={(event) => update("destinationUrl", event.target.value)} />
-          </Field>
-          <Field label="Active">
-            <label className="ad-checkbox"><input type="checkbox" checked={form.active} onChange={(event) => update("active", event.target.checked)} /> Allow ranking and delivery</label>
-          </Field>
-
-          <Field label="제목 · 한국어"><input value={form.titleKo} onChange={(event) => update("titleKo", event.target.value)} /></Field>
-          <Field label="Title · English"><input value={form.titleEn} onChange={(event) => update("titleEn", event.target.value)} /></Field>
-          <Field label="タイトル · 日本語"><input value={form.titleJa} onChange={(event) => update("titleJa", event.target.value)} /></Field>
-          <Field label="본문 · 한국어"><textarea rows={2} value={form.bodyKo ?? ""} onChange={(event) => update("bodyKo", event.target.value || null)} /></Field>
-          <Field label="Body · English"><textarea rows={2} value={form.bodyEn ?? ""} onChange={(event) => update("bodyEn", event.target.value || null)} /></Field>
-          <Field label="本文 · 日本語"><textarea rows={2} value={form.bodyJa ?? ""} onChange={(event) => update("bodyJa", event.target.value || null)} /></Field>
-
-          <Field label="Base priority" hint="0–10 · strongest manual ranking input"><NumberInput value={form.basePriority} step={0.1} onChange={(value) => update("basePriority", value)} /></Field>
-          <Field label="Authenticated relevance" hint="0–10"><NumberInput value={form.authenticatedRelevance} step={0.1} onChange={(value) => update("authenticatedRelevance", value)} /></Field>
-          <Field label="Anonymous relevance" hint="0–10"><NumberInput value={form.anonymousRelevance} step={0.1} onChange={(value) => update("anonymousRelevance", value)} /></Field>
-          <Field label="Daily cap per user"><NumberInput value={form.dailySelectionCap} onChange={(value) => update("dailySelectionCap", value)} /></Field>
-          <Field label="Minimum repeat gap" hint="hours per user"><NumberInput value={form.minimumSecondsBetweenSelections / 3600} step={1} onChange={(value) => update("minimumSecondsBetweenSelections", Math.round(value * 3600))} /></Field>
-          <Field label="Cooldown after view" hint="days per user"><NumberInput value={form.postViewCooldownSeconds / 86400} step={1} onChange={(value) => update("postViewCooldownSeconds", Math.round(value * 86400))} /></Field>
-          <Field label="Minimum public items"><NumberInput value={form.minimumFeedItemCount} onChange={(value) => update("minimumFeedItemCount", value)} /></Field>
-          <Field label="Position range" hint="0-based unified list index">
-            <div className="ad-position-range"><NumberInput value={form.earliestPosition} onChange={(value) => update("earliestPosition", value)} /><span>to</span><NumberInput value={form.latestPosition} onChange={(value) => update("latestPosition", value)} /></div>
-          </Field>
-          <Field label="Starts at" hint="optional, local time"><input type="datetime-local" value={toLocalDateTime(form.startsAt)} onChange={(event) => update("startsAt", toInstant(event.target.value))} /></Field>
-          <Field label="Ends at" hint="optional, local time"><input type="datetime-local" value={toLocalDateTime(form.endsAt)} onChange={(event) => update("endsAt", toInstant(event.target.value))} /></Field>
-        </div>
-        <details className="ad-disclosure-details">
-          <summary>Advertising disclosure labels</summary>
-          <div className="app-update-form-grid">
-            <Field label="한국어"><input value={form.disclosureKo} onChange={(event) => update("disclosureKo", event.target.value)} /></Field>
-            <Field label="English"><input value={form.disclosureEn} onChange={(event) => update("disclosureEn", event.target.value)} /></Field>
-            <Field label="日本語"><input value={form.disclosureJa} onChange={(event) => update("disclosureJa", event.target.value)} /></Field>
-          </div>
-        </details>
-        <div className="app-update-actions">
-          {editingId !== null ? <button className="secondary-button" disabled={saving} onClick={resetForm}>Cancel editing</button> : null}
-          <button className="primary-button" disabled={saving || !isComplete(form)} onClick={() => void saveCampaign()}>
-            {saving ? "Saving…" : editingId === null ? "Create campaign" : "Save campaign"}
-          </button>
-        </div>
+        <button className="primary-button ad-primary-action" onClick={beginCreating}>New campaign</button>
       </section>
 
-      {rankingPolicy ? <RankingExplanation policy={rankingPolicy} /> : null}
+      <div className="ad-summary-grid" aria-label="Advertising summary">
+        <SummaryCard label="Campaigns" value={totalCount.toLocaleString()} detail={`${campaigns.filter((item) => campaignStatus(item) === "ACTIVE").length} active on this page`} />
+        <SummaryCard label="30d feed deliveries" value={pagePerformance.selections.toLocaleString()} detail="Server-added placements on this page" />
+        <SummaryCard label="30d destination opens" value={pagePerformance.opens.toLocaleString()} detail={`${formatPercent(pagePerformance.rate)} open rate`} />
+      </div>
+
+      {editorOpen ? (
+        <section ref={editorRef} className="app-update-panel ad-editor-panel" aria-labelledby="campaign-editor-title">
+          <form noValidate onSubmit={(event) => void saveCampaign(event)}>
+            <div className="panel-header app-update-heading ad-editor-heading">
+              <div>
+                <p className="eyebrow">{editingId === null ? "New campaign" : "Editing campaign"}</p>
+                <h2 id="campaign-editor-title">{editingId === null ? "Create advertising campaign" : selected?.campaignKey ?? form.campaignKey}</h2>
+                <p>Required fields are marked. Times use your local timezone and are stored as UTC.</p>
+              </div>
+              <span className={`status-pill ${formStatus(form) === "ACTIVE" ? "success" : ""}`}>{formStatus(form)}</span>
+            </div>
+
+            {attemptedSubmit && validationErrors.length > 0 ? (
+              <div ref={validationRef} className="ad-validation-summary" role="alert" tabIndex={-1}>
+                <strong>Review {validationErrors.length} field{validationErrors.length === 1 ? "" : "s"} before saving.</strong>
+                <ul>{validationErrors.map((item) => <li key={item}>{item}</li>)}</ul>
+              </div>
+            ) : null}
+
+            <fieldset className="ad-form-section">
+              <legend>1. Campaign basics</legend>
+              <p>Identify the campaign, choose its audience, and provide the allowlisted destination.</p>
+              <div className="ad-basics-grid">
+                <Field label="Campaign key" hint="Lowercase letters, numbers, and hyphens · 3–96 characters" required>
+                  <input required value={form.campaignKey} placeholder="coupang-desk-lamp-august" onChange={(event) => update("campaignKey", event.target.value)} />
+                </Field>
+                <Field label="Audience" hint="Who can receive this campaign">
+                  <select value={form.audience} onChange={(event) => update("audience", event.target.value as NativeAdvertisementCampaignInput["audience"])}>
+                    <option value="ALL">All users</option>
+                    <option value="AUTHENTICATED">Authenticated only</option>
+                    <option value="ANONYMOUS">Anonymous only</option>
+                  </select>
+                </Field>
+                <Field className="ad-field-span-2" label="Destination URL" hint="HTTPS link.coupang.com, coupang.com, or a supported BuddyStudy deep link" required>
+                  <input required value={form.destinationUrl} placeholder="https://link.coupang.com/a/..." onChange={(event) => update("destinationUrl", event.target.value)} />
+                </Field>
+                <div className="app-update-field">
+                  <span id="ad-delivery-state-label">Delivery state</span>
+                  <label className="ad-checkbox">
+                    <input type="checkbox" aria-labelledby="ad-delivery-state-label ad-delivery-state-option" checked={form.active} onChange={(event) => update("active", event.target.checked)} />
+                    <span id="ad-delivery-state-option">Allow ranking and delivery</span>
+                  </label>
+                </div>
+              </div>
+            </fieldset>
+
+            <fieldset className="ad-form-section">
+              <legend>2. Localized creative</legend>
+              <p>Keep the title concise. The optional body and required disclosure are shown in the user’s app language.</p>
+              <div className="ad-locale-grid">
+                <LocaleCard language="한국어" code="KO">
+                  <Field label="Title" required><input required value={form.titleKo} onChange={(event) => update("titleKo", event.target.value)} /></Field>
+                  <Field label="Body" hint="Optional"><textarea rows={3} value={form.bodyKo ?? ""} onChange={(event) => update("bodyKo", event.target.value || null)} /></Field>
+                  <Field label="Disclosure" required><input required value={form.disclosureKo} onChange={(event) => update("disclosureKo", event.target.value)} /></Field>
+                </LocaleCard>
+                <LocaleCard language="English" code="EN">
+                  <Field label="Title" required><input required value={form.titleEn} onChange={(event) => update("titleEn", event.target.value)} /></Field>
+                  <Field label="Body" hint="Optional"><textarea rows={3} value={form.bodyEn ?? ""} onChange={(event) => update("bodyEn", event.target.value || null)} /></Field>
+                  <Field label="Disclosure" required><input required value={form.disclosureEn} onChange={(event) => update("disclosureEn", event.target.value)} /></Field>
+                </LocaleCard>
+                <LocaleCard language="日本語" code="JA">
+                  <Field label="Title" required><input required value={form.titleJa} onChange={(event) => update("titleJa", event.target.value)} /></Field>
+                  <Field label="Body" hint="Optional"><textarea rows={3} value={form.bodyJa ?? ""} onChange={(event) => update("bodyJa", event.target.value || null)} /></Field>
+                  <Field label="Disclosure" required><input required value={form.disclosureJa} onChange={(event) => update("disclosureJa", event.target.value)} /></Field>
+                </LocaleCard>
+              </div>
+            </fieldset>
+
+            <fieldset className="ad-form-section">
+              <legend>3. Delivery and ranking</legend>
+              <p>Ranking inputs use a 0–10 scale. Frequency rules are enforced separately for every historical user identity.</p>
+              <div className="ad-rules-grid">
+                <Field label="Base priority" hint="Strongest manual ranking input · 0–10"><NumberInput value={form.basePriority} max={10} step={0.1} onChange={(value) => update("basePriority", value)} /></Field>
+                <Field label="Authenticated relevance" hint="0–10"><NumberInput value={form.authenticatedRelevance} max={10} step={0.1} onChange={(value) => update("authenticatedRelevance", value)} /></Field>
+                <Field label="Anonymous relevance" hint="0–10"><NumberInput value={form.anonymousRelevance} max={10} step={0.1} onChange={(value) => update("anonymousRelevance", value)} /></Field>
+                <Field label="Daily delivery cap" hint="Per user · 0 disables delivery"><NumberInput value={form.dailySelectionCap} max={100} onChange={(value) => update("dailySelectionCap", value)} /></Field>
+                <Field label="Minimum repeat gap" hint="Hours per user"><NumberInput value={form.minimumSecondsBetweenSelections / 3600} max={720} onChange={(value) => update("minimumSecondsBetweenSelections", Math.round(value * 3600))} /></Field>
+                <Field label="Cooldown after open" hint="Days per user"><NumberInput value={form.postViewCooldownSeconds / 86400} max={365} onChange={(value) => update("postViewCooldownSeconds", Math.round(value * 86400))} /></Field>
+                <Field label="Minimum public items" hint="Feed must contain at least this many items"><NumberInput value={form.minimumFeedItemCount} min={1} max={100} onChange={(value) => update("minimumFeedItemCount", value)} /></Field>
+                <div className="app-update-field" role="group" aria-labelledby="ad-position-range-label">
+                  <span id="ad-position-range-label">Allowed position range</span>
+                  <div className="ad-position-range"><NumberInput ariaLabel="Earliest allowed position" value={form.earliestPosition} max={99} onChange={(value) => update("earliestPosition", value)} /><span>to</span><NumberInput ariaLabel="Latest allowed position" value={form.latestPosition} max={99} onChange={(value) => update("latestPosition", value)} /></div>
+                  <small>0-based unified feed index</small>
+                </div>
+              </div>
+            </fieldset>
+
+            <fieldset className="ad-form-section">
+              <legend>4. Schedule</legend>
+              <p>Leave both fields empty for an always-on campaign. End time must be later than start time.</p>
+              <div className="ad-schedule-grid">
+                <Field label="Starts at" hint="Optional · local time"><input type="datetime-local" value={toLocalDateTime(form.startsAt)} onChange={(event) => update("startsAt", toInstant(event.target.value))} /></Field>
+                <Field label="Ends at" hint="Optional · local time"><input type="datetime-local" value={toLocalDateTime(form.endsAt)} onChange={(event) => update("endsAt", toInstant(event.target.value))} /></Field>
+              </div>
+            </fieldset>
+
+            <div className="app-update-actions ad-editor-actions">
+              <button type="button" className="secondary-button" disabled={saving} onClick={closeEditor}>Cancel</button>
+              <button type="submit" className="primary-button" disabled={saving}>
+                {saving ? "Saving…" : editingId === null ? "Create campaign" : "Save changes"}
+              </button>
+            </div>
+          </form>
+        </section>
+      ) : null}
 
       <section className="app-update-panel">
-        <div className="panel-header app-update-heading">
-          <div><h2>Campaigns</h2><p>Views are the existing authenticated selection view event; rate uses the same 30-day ranking window.</p></div>
-          <span>{totalCount.toLocaleString()} campaigns</span>
+        <div className="panel-header app-update-heading ad-list-heading">
+          <div><h2>Campaigns</h2><p>Performance uses the same 30-day selected cohort as server ranking.</p></div>
+          <span>{totalCount.toLocaleString()} total</span>
         </div>
-        <div className="admin-table-scroll">
+        <div className="admin-table-scroll" role="region" aria-label="Advertising campaigns" tabIndex={0}>
           <table className="admin-table ad-campaign-table">
-            <thead><tr><th>Campaign</th><th>Status</th><th>Audience</th><th>Priority</th><th>30d selected</th><th>30d viewed</th><th>View rate</th><th>Destination</th><th>Updated</th></tr></thead>
+            <thead><tr><th>Campaign</th><th>Status</th><th>Audience</th><th>30d feed deliveries</th><th>30d destination opens</th><th>Open rate</th><th>Schedule</th><th><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
               {campaigns.map((campaign) => (
-                <tr key={campaign.id} className={editingId === campaign.id ? "selected" : ""} onClick={() => beginEditing(campaign)}>
-                  <td><strong>{campaign.titleKo}</strong><small>{campaign.campaignKey}</small></td>
-                  <td><span className={`status-pill ${campaignStatus(campaign) === "ACTIVE" ? "success" : ""}`}>{campaignStatus(campaign)}</span></td>
-                  <td>{campaign.audience}</td>
-                  <td>{campaign.basePriority.toFixed(1)}</td>
-                  <td>{campaign.performanceSelections.toLocaleString()}</td>
-                  <td>{campaign.performanceViews.toLocaleString()}</td>
-                  <td><strong>{formatPercent(campaign.performanceViewRate)}</strong></td>
-                  <td><a href={campaign.destinationUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>Open URL</a></td>
-                  <td>{formatDate(campaign.updatedAt)}</td>
+                <tr key={campaign.id} className={editingId === campaign.id ? "selected" : ""}>
+                  <td data-label="Campaign">
+                    <strong>{campaign.titleKo}</strong>
+                    <small>{campaign.campaignKey} · priority {campaign.basePriority.toFixed(1)}</small>
+                  </td>
+                  <td data-label="Status"><span className={`status-pill ${campaignStatus(campaign) === "ACTIVE" ? "success" : ""}`}>{campaignStatus(campaign)}</span></td>
+                  <td data-label="Audience">{audienceLabel(campaign.audience)}</td>
+                  <td data-label="30d feed deliveries"><strong>{campaign.performanceSelections.toLocaleString()}</strong></td>
+                  <td data-label="30d destination opens"><strong>{campaign.performanceViews.toLocaleString()}</strong></td>
+                  <td data-label="Open rate"><strong>{formatPercent(campaign.performanceViewRate)}</strong></td>
+                  <td data-label="Schedule">{campaignSchedule(campaign)}</td>
+                  <td className="ad-table-actions" data-label="Actions">
+                    <button className="ghost-button compact" onClick={() => openAudience(campaign.id)}>Audience</button>
+                    <button className="secondary-button compact" onClick={() => beginEditing(campaign)}>Edit</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {loading ? <p className="table-empty" role="status">Loading campaigns…</p> : null}
           {!loading && campaigns.length === 0 ? <p className="table-empty">No advertising campaigns yet.</p> : null}
         </div>
         <div className="pager ad-pager">
@@ -213,6 +324,16 @@ export function AdvertisingPanel({
           <button className="secondary-button" disabled={offset + campaigns.length >= totalCount || loading} onClick={() => setOffset(offset + PAGE_SIZE)}>Next</button>
         </div>
       </section>
+
+      <AudienceActivity
+        campaigns={campaigns}
+        campaignId={activityCampaignId}
+        onCampaignChange={setActivityCampaignId}
+        onUnauthorized={onUnauthorized}
+        refreshKey={refreshKey}
+      />
+
+      {rankingPolicy ? <RankingExplanation policy={rankingPolicy} /> : null}
     </div>
   );
 
@@ -221,29 +342,225 @@ export function AdvertisingPanel({
   }
 }
 
-function RankingExplanation({ policy }: { policy: NativeAdvertisementRankingPolicy }) {
+function AudienceActivity({
+  campaigns,
+  campaignId,
+  onCampaignChange,
+  onUnauthorized,
+  refreshKey,
+}: {
+  campaigns: NativeAdvertisementCampaignSummary[];
+  campaignId: number | null;
+  onCampaignChange: (campaignId: number) => void;
+  onUnauthorized: UnauthorizedHandler;
+  refreshKey: number;
+}) {
+  const [page, setPage] = useState<NativeAdvertisementUserPage>(emptyUserPage);
+  const [query, setQuery] = useState("");
+  const [appliedQuery, setAppliedQuery] = useState("");
+  const [status, setStatus] = useState<NativeAdvertisementUserStatusFilter>("");
+  const [offset, setOffset] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const previousCampaignId = useRef<number | null>(null);
+  const selected = campaigns.find((campaign) => campaign.id === campaignId) ?? null;
+
+  useEffect(() => {
+    if (campaignId === null) {
+      previousCampaignId.current = null;
+      setPage(emptyUserPage);
+      return;
+    }
+    const campaignChanged = previousCampaignId.current !== campaignId;
+    previousCampaignId.current = campaignId;
+    if (campaignChanged && offset !== 0) {
+      setOffset(0);
+      return;
+    }
+    void loadUsers(campaignId);
+  }, [campaignId, appliedQuery, status, offset, refreshKey]);
+
+  async function loadUsers(selectedCampaignId: number) {
+    setLoading(true);
+    setError(null);
+    try {
+      setPage(await fetchNativeAdvertisementCampaignUsers(selectedCampaignId, onUnauthorized, PAGE_SIZE, offset, appliedQuery, status));
+    } catch (cause) {
+      setError(message(cause));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function selectCampaign(value: string) {
+    setOffset(0);
+    onCampaignChange(Number(value));
+  }
+
+  function applySearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setOffset(0);
+    setAppliedQuery(query.trim());
+  }
+
   return (
-    <section className="app-update-panel ad-ranking-panel">
-      <div className="panel-header app-update-heading"><div><h2>Current server ranking</h2><p>The app does not rank or shuffle. It renders the unified PUBLIC_QUESTION / ADVERTISEMENT list in server order.</p></div><span>{policy.exploitationPercent}% exploit · {policy.explorationPercent}% explore</span></div>
-      <div className="ad-ranking-formula">
-        <strong>score = priority×{policy.basePriorityWeight} + audience relevance×{policy.relevanceWeight} + smoothed view rate×{policy.smoothedViewRateWeight} + exploration×{policy.explorationWeight} + freshness×{policy.freshnessWeight} − today selections×{policy.dailySelectionPenalty}</strong>
-        <p>Eligible campaigns first pass active dates, audience, per-user daily cap, repeat gap, post-view cooldown, destination safety, and minimum feed size. The server usually chooses rank #1, but explores rank #2–#{policy.selectionPoolSize} {policy.explorationPercent}% of the time. Position is then randomized only inside each campaign’s allowed range.</p>
+    <section id="ad-audience-activity" className="app-update-panel ad-activity-panel" aria-labelledby="ad-activity-title">
+      <div className="panel-header app-update-heading ad-list-heading">
+        <div>
+          <h2 id="ad-activity-title">Audience activity</h2>
+          <p>Feed deliveries are server-added placements. Destination opens are idempotent ad-tap events, not proof that the external page loaded.</p>
+        </div>
+        <span>{page.totalCount.toLocaleString()} users</span>
       </div>
+
+      <div className="ad-activity-toolbar">
+        <Field label="Campaign">
+          <select value={campaignId ?? ""} disabled={campaigns.length === 0} onChange={(event) => selectCampaign(event.target.value)}>
+            {campaigns.length === 0 ? <option value="">No campaigns</option> : null}
+            {campaigns.map((campaign) => <option key={campaign.id} value={campaign.id}>{campaign.titleKo} · {campaign.campaignKey}</option>)}
+          </select>
+        </Field>
+        <form className="ad-user-search" role="search" onSubmit={applySearch}>
+          <div className="app-update-field">
+            <label htmlFor="ad-user-search-input">Find user</label>
+            <div className="ad-search-control">
+              <input id="ad-user-search-input" aria-describedby="ad-user-search-hint" value={query} placeholder="Search users" onChange={(event) => setQuery(event.target.value)} />
+              <button className="secondary-button" type="submit">Search</button>
+            </div>
+            <small id="ad-user-search-hint">Email, display name, or exact user ID</small>
+          </div>
+        </form>
+        <Field label="Open status">
+          <select value={status} onChange={(event) => { setStatus(event.target.value as NativeAdvertisementUserStatusFilter); setOffset(0); }}>
+            <option value="">All delivery activity</option>
+            <option value="OPENED">Opened destination</option>
+            <option value="NOT_OPENED">No destination open</option>
+          </select>
+        </Field>
+      </div>
+
+      {selected ? <p className="ad-activity-context"><strong>{selected.titleKo}</strong><span>{selected.campaignKey}</span></p> : null}
+      {error ? <div className="ad-validation-summary" role="alert">{error}</div> : null}
+
+      <div className="admin-table-scroll" role="region" aria-label="Campaign audience activity" tabIndex={0}>
+        <table className="admin-table ad-user-table">
+          <thead><tr><th>User</th><th>Feed deliveries</th><th>Destination opens</th><th>Open rate</th><th>Devices</th><th>First delivery</th><th>Latest delivery</th><th>Latest open</th></tr></thead>
+          <tbody>
+            {page.users.map((user) => (
+              <tr key={user.userId}>
+                <td data-label="User"><UserIdentity user={user} /></td>
+                <td data-label="Feed deliveries"><strong>{user.selectionCount.toLocaleString()}</strong></td>
+                <td data-label="Destination opens"><strong>{user.destinationOpenCount.toLocaleString()}</strong></td>
+                <td data-label="Open rate"><strong>{formatPercent(user.openRate)}</strong></td>
+                <td data-label="Devices">{user.distinctDeviceCount.toLocaleString()}</td>
+                <td data-label="First delivery">{formatDate(user.firstSelectedAt)}</td>
+                <td data-label="Latest delivery">{formatDate(user.lastSelectedAt)}</td>
+                <td data-label="Latest open">{user.lastViewedAt ? formatDate(user.lastViewedAt) : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {loading ? <p className="table-empty" role="status">Loading audience activity…</p> : null}
+        {!loading && campaignId !== null && page.users.length === 0 ? <p className="table-empty">No users match these filters.</p> : null}
+        {!loading && campaignId === null ? <p className="table-empty">Create a campaign to inspect audience activity.</p> : null}
+      </div>
+      <div className="pager ad-pager">
+        <button className="secondary-button" disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>Previous</button>
+        <span>{page.totalCount === 0 ? 0 : offset + 1}–{Math.min(page.totalCount, offset + page.users.length)} of {page.totalCount}</span>
+        <button className="secondary-button" disabled={offset + page.users.length >= page.totalCount || loading} onClick={() => setOffset(offset + PAGE_SIZE)}>Next</button>
+      </div>
+      <p className="ad-privacy-note">Anonymous rows are historical installation identities and are not linked to a member who signs in later. Raw device identifiers are not shown.</p>
     </section>
   );
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return <label className="app-update-field"><span>{label}</span>{children}{hint ? <small>{hint}</small> : null}</label>;
+function UserIdentity({ user }: { user: NativeAdvertisementUserSummary }) {
+  if (user.accountStatus === "ACTIVE" || user.accountStatus === "PENDING_TERMS") {
+    const suffix = user.accountStatus === "PENDING_TERMS" ? " · terms pending" : "";
+    return <><strong>{user.displayName?.trim() || `User #${user.userId}`}</strong><small>{user.email?.trim() || `User #${user.userId}`}{suffix}</small></>;
+  }
+  if (user.accountStatus === "WITHDRAWN") {
+    return <><strong>Withdrawn user</strong><small>Historical user #{user.userId}</small></>;
+  }
+  return <><strong>Anonymous installation</strong><small>Historical user #{user.userId}</small></>;
 }
 
-function NumberInput({ value, step = 1, onChange }: { value: number; step?: number; onChange: (value: number) => void }) {
-  return <input type="number" min="0" step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} />;
+function SummaryCard({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return <article className="ad-summary-card"><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
 }
 
-function isComplete(form: NativeAdvertisementCampaignInput) {
-  return Boolean(form.campaignKey.trim() && form.destinationUrl.trim() && form.titleKo.trim() && form.titleEn.trim() && form.titleJa.trim());
+function LocaleCard({ language, code, children }: { language: string; code: string; children: ReactNode }) {
+  return <section className="ad-locale-card"><header><strong>{language}</strong><span>{code}</span></header>{children}</section>;
 }
+
+function RankingExplanation({ policy }: { policy: NativeAdvertisementRankingPolicy }) {
+  return (
+    <details className="app-update-panel ad-ranking-panel">
+      <summary>
+        <span><strong>How server ranking works</strong><small>Eligibility, ranking weights, and exploration policy</small></span>
+        <b>{policy.exploitationPercent}% top-ranked · {policy.explorationPercent}% explore</b>
+      </summary>
+      <div className="ad-ranking-formula">
+        <p>The app preserves server order. Campaigns first pass schedule, audience, frequency, destination, and feed-size checks.</p>
+        <strong>score = priority×{policy.basePriorityWeight} + audience relevance×{policy.relevanceWeight} + smoothed open rate×{policy.smoothedViewRateWeight} + exploration×{policy.explorationWeight} + freshness×{policy.freshnessWeight} − today deliveries×{policy.dailySelectionPenalty}</strong>
+        <p>The server normally uses rank #1 and explores rank #2–#{policy.selectionPoolSize} {policy.explorationPercent}% of the time. Position is randomized only within the campaign’s allowed range.</p>
+      </div>
+    </details>
+  );
+}
+
+function Field({ label, hint, required = false, className = "", children }: { label: string; hint?: string; required?: boolean; className?: string; children: ReactNode }) {
+  return <label className={`app-update-field ${className}`.trim()}><span>{label}{required ? <b className="required-mark" aria-hidden="true"> *</b> : null}</span>{children}{hint ? <small>{hint}</small> : null}</label>;
+}
+
+function NumberInput({ ariaLabel, value, min = 0, max, step = 1, onChange }: { ariaLabel?: string; value: number; min?: number; max?: number; step?: number; onChange: (value: number) => void }) {
+  return <input type="number" aria-label={ariaLabel} min={min} max={max} step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} />;
+}
+
+function validateForm(form: NativeAdvertisementCampaignInput): string[] {
+  const errors: string[] = [];
+  if (!/^[a-z0-9][a-z0-9-]{2,95}$/.test(form.campaignKey.trim())) errors.push("Campaign key must use 3–96 lowercase letters, numbers, or hyphens.");
+  if (!form.destinationUrl.trim()) errors.push("Destination URL is required.");
+  else if (form.destinationUrl.trim().length > 512) errors.push("Destination URL must be 512 characters or fewer.");
+  else if (!isSupportedDestination(form.destinationUrl.trim())) errors.push("Destination must be a supported BuddyStudy deep link or HTTPS Coupang URL.");
+  if (!form.titleKo.trim() || !form.titleEn.trim() || !form.titleJa.trim()) errors.push("A title is required in Korean, English, and Japanese.");
+  else if ([form.titleKo, form.titleEn, form.titleJa].some((value) => value.trim().length > 255)) errors.push("Advertising titles must be 255 characters or fewer.");
+  if (!form.disclosureKo.trim() || !form.disclosureEn.trim() || !form.disclosureJa.trim()) errors.push("An advertising disclosure is required in every language.");
+  else if ([form.disclosureKo, form.disclosureEn, form.disclosureJa].some((value) => value.trim().length > 32)) errors.push("Advertising disclosures must be 32 characters or fewer.");
+  if ([form.bodyKo, form.bodyEn, form.bodyJa].some((value) => (value?.trim().length ?? 0) > 500)) errors.push("Advertising body copy must be 500 characters or fewer.");
+  if (![form.basePriority, form.authenticatedRelevance, form.anonymousRelevance].every((value) => Number.isFinite(value) && value >= 0 && value <= 10)) errors.push("Ranking values must be between 0 and 10.");
+  if (!integerInRange(form.dailySelectionCap, 0, 100)) errors.push("Daily delivery cap must be between 0 and 100.");
+  if (!integerInRange(form.minimumSecondsBetweenSelections, 0, 2_592_000)) errors.push("Minimum repeat gap must be between 0 and 720 hours.");
+  if (!integerInRange(form.postViewCooldownSeconds, 0, 31_536_000)) errors.push("Cooldown after open must be between 0 and 365 days.");
+  if (!integerInRange(form.minimumFeedItemCount, 1, 100)) errors.push("Minimum public items must be between 1 and 100.");
+  if (!integerInRange(form.earliestPosition, 0, 99) || !integerInRange(form.latestPosition, 0, 99)) errors.push("Allowed positions must be whole numbers between 0 and 99.");
+  else if (form.latestPosition < form.earliestPosition) errors.push("Latest position must be equal to or later than earliest position.");
+  if (form.startsAt && form.endsAt && new Date(form.endsAt) <= new Date(form.startsAt)) errors.push("Campaign end time must be later than its start time.");
+  return errors;
+}
+
+function integerInRange(value: number, min: number, max: number) {
+  return Number.isInteger(value) && value >= min && value <= max;
+}
+
+function isSupportedDestination(value: string) {
+  try {
+    const url = new URL(value);
+    if (url.username || url.password || url.hash) return false;
+    if (url.protocol === "buddystudy:") {
+      return SUPPORTED_BUDDYSTUDY_DESTINATIONS.has(url.hostname.toLowerCase()) && !url.port;
+    }
+    return url.protocol === "https:"
+      && SUPPORTED_COUPANG_HOSTS.has(url.hostname.toLowerCase())
+      && (!url.port || url.port === "443")
+      && Boolean(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+const SUPPORTED_BUDDYSTUDY_DESTINATIONS = new Set(["home", "study", "studies", "records", "record", "history", "stats", "statistics", "settings", "profile", "public", "feedback"]);
+const SUPPORTED_COUPANG_HOSTS = new Set(["coupang.com", "www.coupang.com", "link.coupang.com"]);
 
 function toInput(campaign: NativeAdvertisementCampaignSummary): NativeAdvertisementCampaignInput {
   const { id: _id, placement: _placement, performanceSelections: _selections, performanceViews: _views, performanceViewRate: _rate, createdAt: _created, updatedAt: _updated, ...input } = campaign;
@@ -262,11 +579,32 @@ function toInstant(value: string) {
 }
 
 function campaignStatus(campaign: NativeAdvertisementCampaignSummary) {
-  if (!campaign.active) return "PAUSED";
+  return statusFromValues(campaign.active, campaign.startsAt, campaign.endsAt);
+}
+
+function formStatus(form: NativeAdvertisementCampaignInput) {
+  return statusFromValues(form.active, form.startsAt, form.endsAt);
+}
+
+function statusFromValues(active: boolean, startsAt: string | null, endsAt: string | null) {
+  if (!active) return "PAUSED";
   const now = Date.now();
-  if (campaign.startsAt && new Date(campaign.startsAt).getTime() > now) return "SCHEDULED";
-  if (campaign.endsAt && new Date(campaign.endsAt).getTime() <= now) return "ENDED";
+  if (startsAt && new Date(startsAt).getTime() > now) return "SCHEDULED";
+  if (endsAt && new Date(endsAt).getTime() <= now) return "ENDED";
   return "ACTIVE";
+}
+
+function campaignSchedule(campaign: NativeAdvertisementCampaignSummary) {
+  if (!campaign.startsAt && !campaign.endsAt) return "Always on";
+  if (campaign.startsAt && campaign.endsAt) return `${formatShortDate(campaign.startsAt)} – ${formatShortDate(campaign.endsAt)}`;
+  if (campaign.startsAt) return `From ${formatShortDate(campaign.startsAt)}`;
+  return `Until ${formatShortDate(campaign.endsAt!)}`;
+}
+
+function audienceLabel(audience: NativeAdvertisementCampaignInput["audience"]) {
+  if (audience === "AUTHENTICATED") return "Members";
+  if (audience === "ANONYMOUS") return "Anonymous";
+  return "All users";
 }
 
 function formatPercent(value: number) {
@@ -275,6 +613,10 @@ function formatPercent(value: number) {
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function formatShortDate(value: string) {
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(value));
 }
 
 function message(cause: unknown) {

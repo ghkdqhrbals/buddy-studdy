@@ -290,18 +290,20 @@ Public community feed
 -> comment translations remain isolated in question_comment_localizations
 -> only READY translation snapshots are exposed for the requested language
 -> on the first unfiltered page, the backend reads active native_ad_campaigns and applies audience, schedule, daily-cap, minimum-gap, and post-view cooldown gates
--> eligible campaigns are ranked by priority, authenticated/anonymous relevance, Bayesian-smoothed 30-day deep-link view rate, freshness, and exploration bonus
+-> eligible campaigns are ranked by priority, authenticated/anonymous relevance, Bayesian-smoothed 30-day destination-open rate, freshness, and exploration bonus
 -> 85% of selections use the top-ranked campaign; 15% explore one of the remaining top-three candidates
 -> the backend chooses a bounded position after the first two question rows and before the page tail, then persists native_ad_selection_history
 -> the response contains one final ordered items[] list with type PUBLIC_QUESTION or ADVERTISEMENT; questions[] remains a compatibility field for older clients
 -> ADVERTISEMENT carries selectionId, campaignId, localized disclosure/title/body, and a validated BuddyStudy deep link or HTTPS Coupang destination
 -> iOS renders items[] unchanged, routes buddystudy:// through AppRoute, and opens validated HTTPS destinations externally; it performs no ranking or placement
--> selecting an advertisement calls POST /api/v1/native-ad-selections/{selectionId}/view
+-> tapping an advertisement calls POST /api/v1/native-ad-selections/{selectionId}/view immediately before destination routing
 -> the request validates selection ownership and appends one stable native-ad-view-{selectionId} Outbox event
 -> community.native-ad.view.v1 delivers NATIVE_AD_VIEWED at least once; the Inbox consumer idempotently records viewed_at
 -> server-side selection/view history is the sole ranking evidence and is safe across reinstallations and multiple devices
 -> GET/POST/PUT /api/v1/admin/native-ad-campaigns is the authenticated operator source of truth for localized copy, Coupang URL, schedule, audience, ranking weights, fatigue limits, and feed-position bounds
--> the admin response exposes the exact ranking coefficients plus 30-day campaign selections, views, and view rate so the operator UI does not duplicate ranking constants
+-> the admin campaign response exposes the exact ranking coefficients plus 30-day feed-delivery selections, destination-open events, and open rate so the operator UI does not duplicate ranking constants or overstate them as verified impressions
+-> GET /api/v1/admin/native-ad-campaigns/{campaignId}/users groups selection history by user with query, OPENED/NOT_OPENED, limit, and offset controls
+-> the per-user response reports selection/open counts, first/latest selection, latest open, and distinct-device count; anonymous and withdrawn identities are redacted and raw device identifiers never leave the backend
 -> POST /api/v1/feedback accepts only content and stores it in the dedicated feedbacks table
 -> authenticated user and registered-device identifiers are captured as server-side metadata
 -> Monitoring GET /api/v1/admin/feedback provides paginated operator review
