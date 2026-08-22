@@ -253,6 +253,7 @@ test("monitoring uses one full-page administrator session and manages database a
   assert.match(operators, /BCrypt hashes/);
   assert.match(api, /\/session/);
   assert.match(api, /installAuthenticatedFetch/);
+  assert.match(api, /`Sign in failed \(\$\{response\.status\}\)`/);
   assert.match(shell, /nav-session-button/);
   assert.match(shell, /window\.location\.replace\("\/login\.html"\)/);
   for (const page of [

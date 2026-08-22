@@ -63,7 +63,8 @@ export async function loginAdmin(username, password, signal) {
   const body = await jsonBody(response);
   const token = body?.adminToken || body?.token;
   if (!response.ok || !token) {
-    throw new AdminApiError(errorMessage(body, "Sign in failed"), response.status, body);
+    const fallback = response.status ? `Sign in failed (${response.status})` : "Sign in failed";
+    throw new AdminApiError(errorMessage(body, fallback), response.status, body);
   }
   const session = { token, expiresAt: body.expiresAt || "", username: body.username || username };
   storeAdminSession(session);
