@@ -1,13 +1,14 @@
 package com.buddystudy.backend.community.application.port.outbound
 
+import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignFilter
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserPage
 import com.buddystudy.community.domain.entity.FeedbackEntity
 import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.community.domain.entity.QuestionLikeEntity
 import com.buddystudy.community.domain.entity.ReportEntity
-import com.buddystudy.community.domain.entity.UserBlockEntity
 import com.buddystudy.community.domain.entity.NativeAdvertisementCampaignEntity
 import com.buddystudy.community.domain.entity.NativeAdvertisementSelectionEntity
+import com.buddystudy.community.domain.entity.UserBlockEntity
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import java.time.Instant
@@ -63,8 +64,12 @@ interface NativeAdvertisementPort {
 }
 
 interface AdminNativeAdvertisementPort {
-    suspend fun countCampaigns(): Long
-    suspend fun findCampaigns(limit: Int, offset: Int): List<NativeAdvertisementCampaignEntity>
+    suspend fun countCampaigns(filter: AdminNativeAdvertisementCampaignFilter): Long
+    suspend fun findCampaigns(
+        filter: AdminNativeAdvertisementCampaignFilter,
+        limit: Int,
+        offset: Int,
+    ): List<NativeAdvertisementCampaignEntity>
     suspend fun findCampaign(id: Long): NativeAdvertisementCampaignEntity?
     suspend fun findCampaignByKey(campaignKey: String): NativeAdvertisementCampaignEntity?
     suspend fun saveCampaign(entity: NativeAdvertisementCampaignEntity): NativeAdvertisementCampaignEntity

@@ -2514,6 +2514,38 @@ h2 {
   gap: 16px;
 }
 
+.ad-campaign-filters {
+  display: grid;
+  grid-template-columns: minmax(300px, 1.5fr) minmax(160px, 0.7fr) minmax(180px, 0.8fr) auto;
+  align-items: end;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.ad-campaign-query-field,
+.ad-campaign-filters .app-update-field {
+  min-width: 0;
+}
+
+.ad-campaign-query-field > label {
+  color: var(--muted);
+}
+
+.ad-campaign-filter-actions {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+}
+
+.ad-campaign-filter-actions button {
+  min-height: 40px;
+  white-space: nowrap;
+}
+
 .ad-campaign-table {
   min-width: 1120px;
 }
@@ -2648,6 +2680,14 @@ h2 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .ad-campaign-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ad-campaign-query-field {
+    grid-column: span 2;
+  }
+
   .ad-activity-toolbar > :first-child {
     grid-column: span 2;
   }
@@ -2773,13 +2813,19 @@ h2 {
   .ad-basics-grid,
   .ad-rules-grid,
   .ad-schedule-grid,
-  .ad-activity-toolbar {
+  .ad-activity-toolbar,
+  .ad-campaign-filters {
     grid-template-columns: 1fr;
   }
 
   .ad-field-span-2,
-  .ad-activity-toolbar > :first-child {
+  .ad-activity-toolbar > :first-child,
+  .ad-campaign-query-field {
     grid-column: auto;
+  }
+
+  .ad-campaign-filter-actions button {
+    width: 100%;
   }
 
   .ad-ranking-panel > summary {

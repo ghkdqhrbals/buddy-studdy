@@ -7,7 +7,10 @@ import {
   type UnauthorizedHandler,
 } from "./api";
 import type {
+  NativeAdvertisementCampaignAudienceFilter,
+  NativeAdvertisementCampaignFilters,
   NativeAdvertisementCampaignInput,
+  NativeAdvertisementCampaignStatusFilter,
   NativeAdvertisementCampaignSummary,
   NativeAdvertisementRankingPolicy,
   NativeAdvertisementUserPage,
@@ -56,6 +59,10 @@ export function AdvertisingPanel({
   const [rankingPolicy, setRankingPolicy] = useState<NativeAdvertisementRankingPolicy | null>(null);
   const [totalCount, setTotalCount] = useState(0);
   const [offset, setOffset] = useState(0);
+  const [campaignQuery, setCampaignQuery] = useState("");
+  const [appliedCampaignQuery, setAppliedCampaignQuery] = useState("");
+  const [campaignStatusFilter, setCampaignStatusFilter] = useState<NativeAdvertisementCampaignStatusFilter>("");
+  const [campaignAudienceFilter, setCampaignAudienceFilter] = useState<NativeAdvertisementCampaignAudienceFilter>("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [form, setForm] = useState<NativeAdvertisementCampaignInput>(initialForm);
@@ -66,10 +73,15 @@ export function AdvertisingPanel({
   const [error, setError] = useState<string | null>(null);
   const editorRef = useRef<HTMLElement | null>(null);
   const validationRef = useRef<HTMLDivElement | null>(null);
+  const campaignRequestIdRef = useRef(0);
 
   useEffect(() => {
-    void loadCampaigns(offset);
-  }, [offset, refreshKey]);
+    void loadCampaigns(offset, {
+      query: appliedCampaignQuery,
+      status: campaignStatusFilter,
+      audience: campaignAudienceFilter,
+    });
+  }, [offset, refreshKey, appliedCampaignQuery, campaignStatusFilter, campaignAudienceFilter]);
 
   const selected = useMemo(
     () => campaigns.find((campaign) => campaign.id === editingId) ?? null,
@@ -81,12 +93,15 @@ export function AdvertisingPanel({
     return { selections, opens, rate: selections > 0 ? opens / selections : 0 };
   }, [campaigns]);
   const validationErrors = validateForm(form);
+  const hasCampaignFilters = Boolean(appliedCampaignQuery || campaignStatusFilter || campaignAudienceFilter);
 
-  async function loadCampaigns(nextOffset: number) {
+  async function loadCampaigns(nextOffset: number, filters: NativeAdvertisementCampaignFilters) {
+    const requestId = ++campaignRequestIdRef.current;
     setLoading(true);
     setError(null);
     try {
-      const page = await fetchNativeAdvertisementCampaigns(onUnauthorized, PAGE_SIZE, nextOffset);
+      const page = await fetchNativeAdvertisementCampaigns(onUnauthorized, PAGE_SIZE, nextOffset, filters);
+      if (requestId !== campaignRequestIdRef.current) return;
       setCampaigns(page.campaigns);
       setTotalCount(page.totalCount);
       setRankingPolicy(page.rankingPolicy);
@@ -95,9 +110,10 @@ export function AdvertisingPanel({
         return page.campaigns[0]?.id ?? null;
       });
     } catch (cause) {
+      if (requestId !== campaignRequestIdRef.current) return;
       setError(message(cause));
     } finally {
-      setLoading(false);
+      if (requestId === campaignRequestIdRef.current) setLoading(false);
     }
   }
 
@@ -148,7 +164,11 @@ export function AdvertisingPanel({
       setOffset(nextOffset);
       setActivityCampaignId(saved.id);
       closeEditor();
-      await loadCampaigns(nextOffset);
+      await loadCampaigns(nextOffset, {
+        query: appliedCampaignQuery,
+        status: campaignStatusFilter,
+        audience: campaignAudienceFilter,
+      });
     } catch (cause) {
       setError(message(cause));
     } finally {
@@ -159,6 +179,30 @@ export function AdvertisingPanel({
   function openAudience(campaignId: number) {
     setActivityCampaignId(campaignId);
     window.requestAnimationFrame(() => document.getElementById("ad-audience-activity")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
+
+  function applyCampaignSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setOffset(0);
+    setAppliedCampaignQuery(campaignQuery.trim());
+  }
+
+  function changeCampaignStatus(value: NativeAdvertisementCampaignStatusFilter) {
+    setOffset(0);
+    setCampaignStatusFilter(value);
+  }
+
+  function changeCampaignAudience(value: NativeAdvertisementCampaignAudienceFilter) {
+    setOffset(0);
+    setCampaignAudienceFilter(value);
+  }
+
+  function resetCampaignFilters() {
+    setCampaignQuery("");
+    setAppliedCampaignQuery("");
+    setCampaignStatusFilter("");
+    setCampaignAudienceFilter("");
+    setOffset(0);
   }
 
   return (
@@ -289,9 +333,46 @@ export function AdvertisingPanel({
       <section className="app-update-panel">
         <div className="panel-header app-update-heading ad-list-heading">
           <div><h2>Campaigns</h2><p>Performance uses the same 30-day selected cohort as server ranking.</p></div>
-          <span>{totalCount.toLocaleString()} total</span>
+          <span>{totalCount.toLocaleString()} {hasCampaignFilters ? "matching" : "total"}</span>
         </div>
-        <div className="admin-table-scroll" role="region" aria-label="Advertising campaigns" tabIndex={0}>
+        <form className="ad-campaign-filters" role="search" aria-label="Filter advertising campaigns" onSubmit={applyCampaignSearch}>
+          <div className="app-update-field ad-campaign-query-field">
+            <label htmlFor="ad-campaign-query">Find campaign</label>
+            <div className="ad-search-control">
+              <input
+                id="ad-campaign-query"
+                value={campaignQuery}
+                placeholder="Search campaigns"
+                aria-describedby="ad-campaign-query-hint"
+                disabled={saving}
+                onChange={(event) => setCampaignQuery(event.target.value)}
+              />
+              <button className="secondary-button" type="submit" disabled={saving}>Search</button>
+            </div>
+            <small id="ad-campaign-query-hint">Campaign key or localized title</small>
+          </div>
+          <Field label="Status">
+            <select disabled={saving} value={campaignStatusFilter} onChange={(event) => changeCampaignStatus(event.target.value as NativeAdvertisementCampaignStatusFilter)}>
+              <option value="">All statuses</option>
+              <option value="ACTIVE">Active</option>
+              <option value="PAUSED">Paused</option>
+              <option value="SCHEDULED">Scheduled</option>
+              <option value="ENDED">Ended</option>
+            </select>
+          </Field>
+          <Field label="Audience">
+            <select disabled={saving} value={campaignAudienceFilter} onChange={(event) => changeCampaignAudience(event.target.value as NativeAdvertisementCampaignAudienceFilter)}>
+              <option value="">All audiences</option>
+              <option value="ALL">All users</option>
+              <option value="AUTHENTICATED">Members</option>
+              <option value="ANONYMOUS">Anonymous</option>
+            </select>
+          </Field>
+          <div className="ad-campaign-filter-actions">
+            <button className="ghost-button" type="button" disabled={saving} onClick={resetCampaignFilters}>Reset filters</button>
+          </div>
+        </form>
+        <div className="admin-table-scroll" role="region" aria-label="Advertising campaigns" aria-busy={loading} tabIndex={0}>
           <table className="admin-table ad-campaign-table">
             <thead><tr><th>Campaign</th><th>Status</th><th>Audience</th><th>30d feed deliveries</th><th>30d destination opens</th><th>Open rate</th><th>Schedule</th><th><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
@@ -315,8 +396,14 @@ export function AdvertisingPanel({
               ))}
             </tbody>
           </table>
-          {loading ? <p className="table-empty" role="status">Loading campaigns…</p> : null}
-          {!loading && campaigns.length === 0 ? <p className="table-empty">No advertising campaigns yet.</p> : null}
+          {loading ? <p className="table-empty" role="status">{campaigns.length === 0 ? "Loading campaigns…" : "Updating campaign results…"}</p> : null}
+          {!loading && campaigns.length === 0 ? (
+            <p className="table-empty" role="status">
+              {hasCampaignFilters
+                ? "No campaigns match the current filters. Reset or adjust the search, status, or audience."
+                : "No advertising campaigns yet. Create a campaign to get started."}
+            </p>
+          ) : null}
         </div>
         <div className="pager ad-pager">
           <button className="secondary-button" disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>Previous</button>
@@ -363,17 +450,23 @@ function AudienceActivity({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const previousCampaignId = useRef<number | null>(null);
+  const userRequestIdRef = useRef(0);
   const selected = campaigns.find((campaign) => campaign.id === campaignId) ?? null;
 
   useEffect(() => {
     if (campaignId === null) {
+      userRequestIdRef.current += 1;
       previousCampaignId.current = null;
       setPage(emptyUserPage);
+      setLoading(false);
       return;
     }
     const campaignChanged = previousCampaignId.current !== campaignId;
     previousCampaignId.current = campaignId;
+    if (campaignChanged) setPage(emptyUserPage);
     if (campaignChanged && offset !== 0) {
+      userRequestIdRef.current += 1;
+      setLoading(false);
       setOffset(0);
       return;
     }
@@ -381,14 +474,18 @@ function AudienceActivity({
   }, [campaignId, appliedQuery, status, offset, refreshKey]);
 
   async function loadUsers(selectedCampaignId: number) {
+    const requestId = ++userRequestIdRef.current;
     setLoading(true);
     setError(null);
     try {
-      setPage(await fetchNativeAdvertisementCampaignUsers(selectedCampaignId, onUnauthorized, PAGE_SIZE, offset, appliedQuery, status));
+      const nextPage = await fetchNativeAdvertisementCampaignUsers(selectedCampaignId, onUnauthorized, PAGE_SIZE, offset, appliedQuery, status);
+      if (requestId !== userRequestIdRef.current) return;
+      setPage(nextPage);
     } catch (cause) {
+      if (requestId !== userRequestIdRef.current) return;
       setError(message(cause));
     } finally {
-      setLoading(false);
+      if (requestId === userRequestIdRef.current) setLoading(false);
     }
   }
 

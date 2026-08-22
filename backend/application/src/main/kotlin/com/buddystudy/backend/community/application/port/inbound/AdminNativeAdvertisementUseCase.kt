@@ -6,7 +6,13 @@ import com.buddystudy.backend.community.application.model.AdminNativeAdvertiseme
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserPage
 
 interface AdminNativeAdvertisementUseCase {
-    suspend fun campaigns(limit: Int, offset: Int): AdminNativeAdvertisementCampaignPage
+    suspend fun campaigns(
+        query: String?,
+        status: String?,
+        audience: String?,
+        limit: Int,
+        offset: Int,
+    ): AdminNativeAdvertisementCampaignPage
     suspend fun create(command: AdminNativeAdvertisementCampaignCommand): AdminNativeAdvertisementCampaignSummary
     suspend fun update(id: Long, command: AdminNativeAdvertisementCampaignCommand): AdminNativeAdvertisementCampaignSummary
     suspend fun users(

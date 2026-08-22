@@ -149,6 +149,15 @@ export type CreateAppUpdateCampaignInput = {
 
 export type NativeAdvertisementAudience = "ALL" | "AUTHENTICATED" | "ANONYMOUS";
 
+export type NativeAdvertisementCampaignStatusFilter = "" | "ACTIVE" | "PAUSED" | "SCHEDULED" | "ENDED";
+export type NativeAdvertisementCampaignAudienceFilter = "" | NativeAdvertisementAudience;
+
+export type NativeAdvertisementCampaignFilters = {
+  query?: string;
+  status?: NativeAdvertisementCampaignStatusFilter;
+  audience?: NativeAdvertisementCampaignAudienceFilter;
+};
+
 export type NativeAdvertisementCampaignInput = {
   campaignKey: string;
   audience: NativeAdvertisementAudience;

@@ -8,8 +8,49 @@ const apiSource = fs.readFileSync(path.join(root, "src", "api.ts"), "utf8");
 const typeSource = fs.readFileSync(path.join(root, "src", "types.ts"), "utf8");
 const chartSource = fs.readFileSync(path.join(root, "src", "Charts.tsx"), "utf8");
 const styleSource = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
+const campaignListApiSource = apiSource.slice(
+  apiSource.indexOf("export function fetchNativeAdvertisementCampaigns"),
+  apiSource.indexOf("export function createNativeAdvertisementCampaign"),
+);
+const campaignListPanelSource = panelSource.slice(0, panelSource.indexOf("function AudienceActivity"));
 
 const checks = [
+  {
+    ok: campaignListApiSource.includes('params.set("query", filters.query.trim())')
+      && campaignListApiSource.includes('params.set("status", filters.status)')
+      && campaignListApiSource.includes('params.set("audience", filters.audience)'),
+    message: "Campaign list requests must preserve optional query, status, and audience filters.",
+  },
+  {
+    ok: typeSource.includes('NativeAdvertisementCampaignStatusFilter = "" | "ACTIVE" | "PAUSED" | "SCHEDULED" | "ENDED"')
+      && typeSource.includes('NativeAdvertisementCampaignAudienceFilter = "" | NativeAdvertisementAudience'),
+    message: "Campaign list filter types must mirror the backend status and audience contract.",
+  },
+  {
+    ok: campaignListPanelSource.includes('role="search" aria-label="Filter advertising campaigns"')
+      && campaignListPanelSource.includes('htmlFor="ad-campaign-query"')
+      && campaignListPanelSource.includes("Reset filters"),
+    message: "Campaign filters must provide a labelled search form and an explicit reset action.",
+  },
+  {
+    ok: campaignListPanelSource.includes("function applyCampaignSearch")
+      && campaignListPanelSource.includes("function changeCampaignStatus")
+      && campaignListPanelSource.includes("function changeCampaignAudience")
+      && campaignListPanelSource.includes("function resetCampaignFilters")
+      && /\[offset, refreshKey, appliedCampaignQuery, campaignStatusFilter, campaignAudienceFilter\]/.test(campaignListPanelSource),
+    message: "Campaign filter changes must reset pagination and remain applied while paging or refreshing.",
+  },
+  {
+    ok: campaignListPanelSource.includes("No campaigns match the current filters")
+      && campaignListPanelSource.includes("Updating campaign results"),
+    message: "Campaign list loading and filtered-empty states must explain the current result state.",
+  },
+  {
+    ok: campaignListPanelSource.includes('disabled={saving} value={campaignStatusFilter}')
+      && campaignListPanelSource.includes('disabled={saving} value={campaignAudienceFilter}')
+      && campaignListPanelSource.includes('type="submit" disabled={saving}>Search'),
+    message: "Campaign filters must stay stable while a campaign save request is in flight.",
+  },
   {
     ok: apiSource.includes("/native-ad-campaigns/${campaignId}/users"),
     message: "Advertising must load per-campaign user activity from the nested users endpoint.",
@@ -18,6 +59,12 @@ const checks = [
     ok: /params\.set\("query",\s*query\.trim\(\)\)/.test(apiSource)
       && /params\.set\("status",\s*status\)/.test(apiSource),
     message: "Campaign user activity must preserve search and open-status filters.",
+  },
+  {
+    ok: panelSource.includes("const userRequestIdRef = useRef(0)")
+      && panelSource.includes("requestId !== userRequestIdRef.current")
+      && panelSource.includes("if (campaignChanged) setPage(emptyUserPage)"),
+    message: "Campaign changes must invalidate stale audience-activity responses.",
   },
   {
     ok: panelSource.includes("Feed deliveries are server-added placements")

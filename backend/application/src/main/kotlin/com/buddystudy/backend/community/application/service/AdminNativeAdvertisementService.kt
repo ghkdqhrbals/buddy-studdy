@@ -3,7 +3,9 @@ package com.buddystudy.backend.community.application.service
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignCommand
+import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignFilter
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignPage
+import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignStatus
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignSummary
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementRankingPolicySummary
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserPage
@@ -12,24 +14,38 @@ import com.buddystudy.backend.community.application.policy.NativeAdvertisementDe
 import com.buddystudy.backend.community.application.policy.NativeAdvertisementRankingPolicy
 import com.buddystudy.backend.community.application.port.inbound.AdminNativeAdvertisementUseCase
 import com.buddystudy.backend.community.application.port.outbound.AdminNativeAdvertisementPort
+import com.buddystudy.community.domain.entity.NativeAdvertisementAudience
 import com.buddystudy.community.domain.entity.NativeAdvertisementCampaignEntity
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
 import java.time.Instant
+import java.util.Locale
 
 @Service
 class AdminNativeAdvertisementService(
     private val advertisements: AdminNativeAdvertisementPort,
 ) : AdminNativeAdvertisementUseCase {
     @Transactional(readOnly = true)
-    override suspend fun campaigns(limit: Int, offset: Int): AdminNativeAdvertisementCampaignPage {
+    override suspend fun campaigns(
+        query: String?,
+        status: String?,
+        audience: String?,
+        limit: Int,
+        offset: Int,
+    ): AdminNativeAdvertisementCampaignPage {
         val safeLimit = limit.coerceIn(1, 100)
         val safeOffset = offset.coerceAtLeast(0)
         val now = Instant.now()
+        val filter = AdminNativeAdvertisementCampaignFilter(
+            query = query?.trim()?.takeIf(String::isNotEmpty)?.lowercase(Locale.ROOT),
+            status = status.toCampaignStatus(),
+            audience = audience.toCampaignAudience(),
+            evaluatedAt = now,
+        )
         val since = NativeAdvertisementRankingPolicy.performanceWindowStart(now)
-        val campaigns = advertisements.findCampaigns(safeLimit, safeOffset).map { campaign ->
+        val campaigns = advertisements.findCampaigns(filter, safeLimit, safeOffset).map { campaign ->
             campaign.toSummary(
                 selections = advertisements.countSelectionsSince(campaign.id, since),
                 views = advertisements.countViewsSince(campaign.id, since),
@@ -37,7 +53,7 @@ class AdminNativeAdvertisementService(
         }
         return AdminNativeAdvertisementCampaignPage(
             campaigns = campaigns,
-            totalCount = advertisements.countCampaigns(),
+            totalCount = advertisements.countCampaigns(filter),
             limit = safeLimit,
             offset = safeOffset,
             rankingPolicy = rankingPolicySummary(),
@@ -175,6 +191,16 @@ class AdminNativeAdvertisementService(
         val CAMPAIGN_KEY = Regex("[a-z0-9][a-z0-9-]{2,95}")
         val ADMIN_USER_STATUSES = setOf("OPENED", "NOT_OPENED")
     }
+}
+
+private fun String?.toCampaignStatus(): AdminNativeAdvertisementCampaignStatus? {
+    val normalized = this?.trim()?.uppercase(Locale.ROOT)?.takeIf(String::isNotEmpty) ?: return null
+    return AdminNativeAdvertisementCampaignStatus.entries.firstOrNull { it.name == normalized }
+}
+
+private fun String?.toCampaignAudience(): NativeAdvertisementAudience? {
+    val normalized = this?.trim()?.uppercase(Locale.ROOT)?.takeIf(String::isNotEmpty) ?: return null
+    return NativeAdvertisementAudience.entries.firstOrNull { it.name == normalized }
 }
 
 private fun BigDecimal.inRange() = this >= BigDecimal.ZERO && this <= BigDecimal.TEN

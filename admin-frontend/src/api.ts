@@ -9,6 +9,7 @@ import type {
   ScheduledJobRun,
   ScheduledJobRunsResponse,
   ScheduledJobStatusResponse,
+  NativeAdvertisementCampaignFilters,
   NativeAdvertisementCampaignInput,
   NativeAdvertisementCampaignPage,
   NativeAdvertisementCampaignSummary,
@@ -194,8 +195,12 @@ export function fetchNativeAdvertisementCampaigns(
   onUnauthorized: UnauthorizedHandler,
   limit = 20,
   offset = 0,
+  filters: NativeAdvertisementCampaignFilters = {},
 ): Promise<NativeAdvertisementCampaignPage> {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (filters.query?.trim()) params.set("query", filters.query.trim());
+  if (filters.status) params.set("status", filters.status);
+  if (filters.audience) params.set("audience", filters.audience);
   return request(`/api/v1/admin/native-ad-campaigns?${params}`, { method: "GET" }, onUnauthorized);
 }
 

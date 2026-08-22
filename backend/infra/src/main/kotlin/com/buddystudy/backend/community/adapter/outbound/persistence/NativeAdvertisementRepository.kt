@@ -1,9 +1,12 @@
 package com.buddystudy.backend.community.adapter.outbound.persistence
 
+import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignFilter
+import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignStatus
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserPage
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserSummary
 import com.buddystudy.backend.community.application.port.outbound.AdminNativeAdvertisementPort
 import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementPort
+import com.buddystudy.community.domain.entity.NativeAdvertisementAudience
 import com.buddystudy.community.domain.entity.NativeAdvertisementCampaignEntity
 import com.buddystudy.community.domain.entity.NativeAdvertisementSelectionEntity
 import io.r2dbc.spi.Row
@@ -15,9 +18,11 @@ import org.springframework.data.r2dbc.repository.Query
 import org.springframework.data.repository.kotlin.CoroutineCrudRepository
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.stereotype.Component
+import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneOffset
+import java.util.Locale
 
 interface NativeAdvertisementCampaignRepository : CoroutineCrudRepository<NativeAdvertisementCampaignEntity, Long> {
     @Query(
@@ -32,16 +37,6 @@ interface NativeAdvertisementCampaignRepository : CoroutineCrudRepository<Native
         """
     )
     fun findEligible(placement: String, now: Instant): Flow<NativeAdvertisementCampaignEntity>
-
-    @Query(
-        """
-        select *
-        from native_ad_campaigns
-        order by created_at desc, id desc
-        limit :limit offset :offset
-        """
-    )
-    fun findAdminPage(limit: Int, offset: Int): Flow<NativeAdvertisementCampaignEntity>
 
     suspend fun findByCampaignKey(campaignKey: String): NativeAdvertisementCampaignEntity?
 }
@@ -144,9 +139,37 @@ class NativeAdvertisementPersistenceAdapter(
         selections.markView(selectionId, userId, deviceId, at)
     }
 
-    override suspend fun countCampaigns(): Long = campaigns.count()
+    override suspend fun countCampaigns(filter: AdminNativeAdvertisementCampaignFilter): Long {
+        val where = campaignFilterWhere(filter)
+        return database.sql("select count(*) as total_count from native_ad_campaigns c $where")
+            .bindCampaignFilter(filter)
+            .map { row, _ -> row.long("total_count") }
+            .one()
+            .awaitSingle()
+    }
 
-    override suspend fun findCampaigns(limit: Int, offset: Int) = campaigns.findAdminPage(limit, offset).toList()
+    override suspend fun findCampaigns(
+        filter: AdminNativeAdvertisementCampaignFilter,
+        limit: Int,
+        offset: Int,
+    ): List<NativeAdvertisementCampaignEntity> {
+        val where = campaignFilterWhere(filter)
+        return database.sql(
+            """
+            select c.*
+            from native_ad_campaigns c
+            $where
+            order by c.created_at desc, c.id desc
+            limit :limit offset :offset
+            """.trimIndent(),
+        ).bindCampaignFilter(filter)
+            .bind("limit", limit)
+            .bind("offset", offset)
+            .map { row, _ -> row.toNativeAdvertisementCampaign() }
+            .all()
+            .collectList()
+            .awaitSingle()
+    }
 
     override suspend fun findCampaign(id: Long) = campaigns.findById(id)
 
@@ -228,6 +251,55 @@ class NativeAdvertisementPersistenceAdapter(
     }
 }
 
+private fun campaignFilterWhere(filter: AdminNativeAdvertisementCampaignFilter): String = buildString {
+    append("where 1 = 1")
+    if (filter.query != null) {
+        append(
+            " and (lower(c.campaign_key) like :campaignQuery" +
+                " or lower(c.title_ko) like :campaignQuery" +
+                " or lower(c.title_en) like :campaignQuery" +
+                " or lower(c.title_ja) like :campaignQuery)",
+        )
+    }
+    if (filter.audience != null) {
+        append(" and c.audience = :campaignAudience")
+    }
+    when (filter.status) {
+        AdminNativeAdvertisementCampaignStatus.PAUSED -> append(" and c.active = false")
+        AdminNativeAdvertisementCampaignStatus.SCHEDULED ->
+            append(" and c.active = true and c.starts_at is not null and c.starts_at > :evaluatedAt")
+        AdminNativeAdvertisementCampaignStatus.ENDED -> append(
+            " and c.active = true" +
+                " and (c.starts_at is null or c.starts_at <= :evaluatedAt)" +
+                " and c.ends_at is not null and c.ends_at <= :evaluatedAt",
+        )
+        AdminNativeAdvertisementCampaignStatus.ACTIVE -> append(
+            " and c.active = true" +
+                " and (c.starts_at is null or c.starts_at <= :evaluatedAt)" +
+                " and (c.ends_at is null or c.ends_at > :evaluatedAt)",
+        )
+        null -> Unit
+    }
+}
+
+private fun DatabaseClient.GenericExecuteSpec.bindCampaignFilter(
+    filter: AdminNativeAdvertisementCampaignFilter,
+): DatabaseClient.GenericExecuteSpec {
+    var spec = this
+    filter.query?.let { spec = spec.bind("campaignQuery", "%${it.lowercase(Locale.ROOT)}%") }
+    filter.audience?.let { spec = spec.bind("campaignAudience", it.name) }
+    if (filter.status in TIMED_CAMPAIGN_STATUSES) {
+        spec = spec.bind("evaluatedAt", filter.evaluatedAt)
+    }
+    return spec
+}
+
+private val TIMED_CAMPAIGN_STATUSES = setOf(
+    AdminNativeAdvertisementCampaignStatus.ACTIVE,
+    AdminNativeAdvertisementCampaignStatus.SCHEDULED,
+    AdminNativeAdvertisementCampaignStatus.ENDED,
+)
+
 private fun DatabaseClient.GenericExecuteSpec.bindUserSearch(
     search: String?,
     exactQuery: String?,
@@ -255,8 +327,41 @@ private fun Row.toAdminNativeAdvertisementUser(): AdminNativeAdvertisementUserSu
     )
 }
 
+private fun Row.toNativeAdvertisementCampaign() = NativeAdvertisementCampaignEntity(
+    id = long("id"),
+    campaignKey = string("campaign_key"),
+    placement = string("placement"),
+    audience = NativeAdvertisementAudience.valueOf(string("audience")),
+    disclosureKo = string("disclosure_ko"),
+    disclosureEn = string("disclosure_en"),
+    disclosureJa = string("disclosure_ja"),
+    titleKo = string("title_ko"),
+    titleEn = string("title_en"),
+    titleJa = string("title_ja"),
+    bodyKo = get("body_ko", String::class.java),
+    bodyEn = get("body_en", String::class.java),
+    bodyJa = get("body_ja", String::class.java),
+    deepLink = string("deep_link"),
+    basePriority = decimal("base_priority"),
+    authenticatedRelevance = decimal("authenticated_relevance"),
+    anonymousRelevance = decimal("anonymous_relevance"),
+    dailySelectionCap = int("daily_selection_cap"),
+    minimumSecondsBetweenSelections = int("minimum_seconds_between_selections"),
+    postViewCooldownSeconds = int("post_view_cooldown_seconds"),
+    minimumFeedItemCount = int("minimum_feed_item_count"),
+    earliestPosition = int("earliest_position"),
+    latestPosition = int("latest_position"),
+    active = get("active", java.lang.Boolean::class.java)?.booleanValue() ?: false,
+    startsAt = nullableInstant("starts_at"),
+    endsAt = nullableInstant("ends_at"),
+    createdAt = instant("created_at"),
+    updatedAt = instant("updated_at"),
+)
+
 private fun Row.string(name: String): String = get(name, String::class.java).orEmpty()
 private fun Row.long(name: String): Long = get(name, java.lang.Long::class.java)?.toLong() ?: 0L
+private fun Row.int(name: String): Int = get(name, java.lang.Integer::class.java)?.toInt() ?: 0
+private fun Row.decimal(name: String): BigDecimal = get(name, BigDecimal::class.java) ?: BigDecimal.ZERO
 private fun Row.instant(name: String): Instant = nullableInstant(name) ?: Instant.EPOCH
 private fun Row.nullableInstant(name: String): Instant? =
     get(name, LocalDateTime::class.java)?.toInstant(ZoneOffset.UTC)

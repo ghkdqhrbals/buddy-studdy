@@ -34,10 +34,20 @@ class AdminNativeAdvertisementController(
     @GetMapping
     suspend fun campaigns(
         @RequestHeader("Authorization") authorization: String?,
+        @RequestParam(required = false) query: String?,
+        @RequestParam(required = false) status: String?,
+        @RequestParam(required = false) audience: String?,
         @RequestParam(defaultValue = "20") limit: Int,
         @RequestParam(defaultValue = "0") offset: Int,
     ): AdminNativeAdvertisementCampaignPage =
-        advertisements.campaigns(authorization.adminBearerToken(), limit, offset)
+        advertisements.campaigns(
+            authorization.adminBearerToken(),
+            query,
+            status,
+            audience,
+            limit,
+            offset,
+        )
 
     @GetMapping("/{campaignId}/users")
     suspend fun users(
@@ -101,7 +111,14 @@ data class AdminNativeAdvertisementCampaignRequest(
 )
 
 interface AdminNativeAdvertisementWebPort {
-    suspend fun campaigns(adminToken: String, limit: Int, offset: Int): AdminNativeAdvertisementCampaignPage
+    suspend fun campaigns(
+        adminToken: String,
+        query: String?,
+        status: String?,
+        audience: String?,
+        limit: Int,
+        offset: Int,
+    ): AdminNativeAdvertisementCampaignPage
     suspend fun create(
         adminToken: String,
         request: AdminNativeAdvertisementCampaignRequest,
@@ -126,9 +143,16 @@ class AdminNativeAdvertisementWebAdapter(
     private val authentication: AdminAnalyticsUseCase,
     private val advertisements: AdminNativeAdvertisementUseCase,
 ) : AdminNativeAdvertisementWebPort {
-    override suspend fun campaigns(adminToken: String, limit: Int, offset: Int): AdminNativeAdvertisementCampaignPage {
+    override suspend fun campaigns(
+        adminToken: String,
+        query: String?,
+        status: String?,
+        audience: String?,
+        limit: Int,
+        offset: Int,
+    ): AdminNativeAdvertisementCampaignPage {
         authentication.validate(adminToken)
-        return advertisements.campaigns(limit, offset)
+        return advertisements.campaigns(query, status, audience, limit, offset)
     }
 
     override suspend fun create(

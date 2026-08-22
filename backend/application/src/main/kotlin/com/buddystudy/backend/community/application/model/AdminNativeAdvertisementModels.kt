@@ -32,6 +32,20 @@ data class AdminNativeAdvertisementCampaignCommand(
     val endsAt: Instant?,
 )
 
+enum class AdminNativeAdvertisementCampaignStatus {
+    ACTIVE,
+    PAUSED,
+    SCHEDULED,
+    ENDED,
+}
+
+data class AdminNativeAdvertisementCampaignFilter(
+    val query: String?,
+    val status: AdminNativeAdvertisementCampaignStatus?,
+    val audience: NativeAdvertisementAudience?,
+    val evaluatedAt: Instant,
+)
+
 data class AdminNativeAdvertisementCampaignSummary(
     val id: Long,
     val campaignKey: String,

@@ -300,7 +300,7 @@ Public community feed
 -> the request validates selection ownership and appends one stable native-ad-view-{selectionId} Outbox event
 -> community.native-ad.view.v1 delivers NATIVE_AD_VIEWED at least once; the Inbox consumer idempotently records viewed_at
 -> server-side selection/view history is the sole ranking evidence and is safe across reinstallations and multiple devices
--> GET/POST/PUT /api/v1/admin/native-ad-campaigns is the authenticated operator source of truth for localized copy, Coupang URL, schedule, audience, ranking weights, fatigue limits, and feed-position bounds
+-> GET/POST/PUT /api/v1/admin/native-ad-campaigns is the authenticated operator source of truth for localized copy, Coupang URL, schedule, audience, ranking weights, fatigue limits, and feed-position bounds; GET accepts optional query, ACTIVE/PAUSED/SCHEDULED/ENDED status, exact audience, limit, and offset filters whose count and page share one evaluation instant
 -> the admin campaign response exposes the exact ranking coefficients plus 30-day feed-delivery selections, destination-open events, and open rate so the operator UI does not duplicate ranking constants or overstate them as verified impressions
 -> GET /api/v1/admin/native-ad-campaigns/{campaignId}/users groups selection history by user with query, OPENED/NOT_OPENED, limit, and offset controls
 -> the per-user response reports selection/open counts, first/latest selection, latest open, and distinct-device count; anonymous and withdrawn identities are redacted and raw device identifiers never leave the backend
