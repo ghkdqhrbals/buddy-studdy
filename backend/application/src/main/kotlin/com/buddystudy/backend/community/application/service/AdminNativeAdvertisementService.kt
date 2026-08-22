@@ -6,6 +6,8 @@ import com.buddystudy.backend.community.application.model.AdminNativeAdvertiseme
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignPage
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignSummary
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementRankingPolicySummary
+import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserPage
+import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserSummary
 import com.buddystudy.backend.community.application.policy.NativeAdvertisementDeepLinkPolicy
 import com.buddystudy.backend.community.application.policy.NativeAdvertisementRankingPolicy
 import com.buddystudy.backend.community.application.port.inbound.AdminNativeAdvertisementUseCase
@@ -73,6 +75,31 @@ class AdminNativeAdvertisementService(
             advertisements.countSelectionsSince(id, since),
             advertisements.countViewsSince(id, since),
         )
+    }
+
+    @Transactional(readOnly = true)
+    override suspend fun users(
+        campaignId: Long,
+        query: String?,
+        status: String?,
+        limit: Int,
+        offset: Int,
+    ): AdminNativeAdvertisementUserPage {
+        if (advertisements.findCampaign(campaignId) == null) {
+            throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RESOURCE_NOT_FOUND, "Advertisement campaign not found.")
+        }
+        val normalizedStatus = status
+            ?.trim()
+            ?.uppercase()
+            ?.takeIf(ADMIN_USER_STATUSES::contains)
+        val page = advertisements.campaignUsers(
+            campaignId = campaignId,
+            query = query?.trim()?.takeIf(String::isNotEmpty),
+            status = normalizedStatus,
+            limit = limit.coerceIn(1, 100),
+            offset = offset.coerceAtLeast(0),
+        )
+        return page.copy(users = page.users.map { it.redactedIdentity() })
     }
 
     private fun validateAndNormalize(command: AdminNativeAdvertisementCampaignCommand): AdminNativeAdvertisementCampaignCommand {
@@ -146,12 +173,25 @@ class AdminNativeAdvertisementService(
 
     private companion object {
         val CAMPAIGN_KEY = Regex("[a-z0-9][a-z0-9-]{2,95}")
+        val ADMIN_USER_STATUSES = setOf("OPENED", "NOT_OPENED")
     }
 }
 
 private fun BigDecimal.inRange() = this >= BigDecimal.ZERO && this <= BigDecimal.TEN
 
 private fun String?.cleanOptional() = this?.trim()?.takeIf(String::isNotEmpty)
+
+private fun AdminNativeAdvertisementUserSummary.redactedIdentity(): AdminNativeAdvertisementUserSummary =
+    if (accountStatus.uppercase() in REDACTED_AD_USER_STATUSES) {
+        copy(email = null, displayName = null)
+    } else {
+        copy(
+            email = email?.trim()?.takeIf(String::isNotEmpty),
+            displayName = displayName?.trim()?.takeIf(String::isNotEmpty),
+        )
+    }
+
+private val REDACTED_AD_USER_STATUSES = setOf("ANONYMOUS", "WITHDRAWN")
 
 private fun AdminNativeAdvertisementCampaignCommand.toEntity(createdAt: Instant, updatedAt: Instant) =
     NativeAdvertisementCampaignEntity(

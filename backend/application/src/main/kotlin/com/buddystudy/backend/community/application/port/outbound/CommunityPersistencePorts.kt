@@ -1,5 +1,6 @@
 package com.buddystudy.backend.community.application.port.outbound
 
+import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserPage
 import com.buddystudy.community.domain.entity.FeedbackEntity
 import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.community.domain.entity.QuestionLikeEntity
@@ -69,4 +70,11 @@ interface AdminNativeAdvertisementPort {
     suspend fun saveCampaign(entity: NativeAdvertisementCampaignEntity): NativeAdvertisementCampaignEntity
     suspend fun countSelectionsSince(campaignId: Long, since: Instant): Long
     suspend fun countViewsSince(campaignId: Long, since: Instant): Long
+    suspend fun campaignUsers(
+        campaignId: Long,
+        query: String?,
+        status: String?,
+        limit: Int,
+        offset: Int,
+    ): AdminNativeAdvertisementUserPage
 }

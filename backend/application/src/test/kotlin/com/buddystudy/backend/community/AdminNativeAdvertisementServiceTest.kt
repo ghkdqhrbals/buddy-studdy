@@ -2,6 +2,8 @@ package com.buddystudy.backend.community
 
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignCommand
+import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserPage
+import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserSummary
 import com.buddystudy.backend.community.application.port.outbound.AdminNativeAdvertisementPort
 import com.buddystudy.backend.community.application.service.AdminNativeAdvertisementService
 import com.buddystudy.community.domain.entity.NativeAdvertisementAudience
@@ -69,10 +71,80 @@ class AdminNativeAdvertisementServiceTest {
         assertThat(updated.performanceSelections).isEqualTo(12)
     }
 
+    @Test
+    fun `campaign users normalize paging and redact anonymous and withdrawn identity fields`(): Unit = runBlocking {
+        val selectedAt = Instant.parse("2026-08-01T00:00:00Z")
+        val port = FakeAdminNativeAdvertisementPort().apply {
+            saved += command().toEntity(id = 8)
+            userRows += AdminNativeAdvertisementUserSummary(
+                userId = 10,
+                accountStatus = "ACTIVE",
+                email = "member@example.com",
+                displayName = "Member",
+                selectionCount = 4,
+                destinationOpenCount = 2,
+                openRate = 0.5,
+                distinctDeviceCount = 2,
+                firstSelectedAt = selectedAt,
+                lastSelectedAt = selectedAt,
+                lastViewedAt = selectedAt,
+            )
+            userRows += AdminNativeAdvertisementUserSummary(
+                userId = 11,
+                accountStatus = "ANONYMOUS",
+                email = "should-not-leak@example.com",
+                displayName = "Buddy",
+                selectionCount = 3,
+                destinationOpenCount = 0,
+                openRate = 0.0,
+                distinctDeviceCount = 1,
+                firstSelectedAt = selectedAt,
+                lastSelectedAt = selectedAt,
+                lastViewedAt = null,
+            )
+            userRows += AdminNativeAdvertisementUserSummary(
+                userId = 12,
+                accountStatus = "WITHDRAWN",
+                email = "withdrawn@example.com",
+                displayName = "Withdrawn user",
+                selectionCount = 1,
+                destinationOpenCount = 1,
+                openRate = 1.0,
+                distinctDeviceCount = 1,
+                firstSelectedAt = selectedAt,
+                lastSelectedAt = selectedAt,
+                lastViewedAt = selectedAt,
+            )
+        }
+        val service = AdminNativeAdvertisementService(port)
+
+        val page = service.users(
+            campaignId = 8,
+            query = "  member@example.com  ",
+            status = " opened ",
+            limit = 500,
+            offset = -10,
+        )
+
+        assertThat(port.lastUserRequest).isEqualTo(
+            UserRequest(8, "member@example.com", "OPENED", 100, 0),
+        )
+        assertThat(page.limit).isEqualTo(100)
+        assertThat(page.offset).isZero()
+        assertThat(page.users[0].email).isEqualTo("member@example.com")
+        assertThat(page.users[0].displayName).isEqualTo("Member")
+        assertThat(page.users[1].email).isNull()
+        assertThat(page.users[1].displayName).isNull()
+        assertThat(page.users[2].email).isNull()
+        assertThat(page.users[2].displayName).isNull()
+    }
+
     private class FakeAdminNativeAdvertisementPort : AdminNativeAdvertisementPort {
         val saved = mutableListOf<NativeAdvertisementCampaignEntity>()
         var selections = 0L
         var views = 0L
+        val userRows = mutableListOf<AdminNativeAdvertisementUserSummary>()
+        var lastUserRequest: UserRequest? = null
 
         override suspend fun countCampaigns() = saved.size.toLong()
         override suspend fun findCampaigns(limit: Int, offset: Int) = saved.drop(offset).take(limit)
@@ -86,7 +158,25 @@ class AdminNativeAdvertisementServiceTest {
         }
         override suspend fun countSelectionsSince(campaignId: Long, since: Instant) = selections
         override suspend fun countViewsSince(campaignId: Long, since: Instant) = views
+        override suspend fun campaignUsers(
+            campaignId: Long,
+            query: String?,
+            status: String?,
+            limit: Int,
+            offset: Int,
+        ): AdminNativeAdvertisementUserPage {
+            lastUserRequest = UserRequest(campaignId, query, status, limit, offset)
+            return AdminNativeAdvertisementUserPage(userRows, userRows.size.toLong(), limit, offset)
+        }
     }
+
+    private data class UserRequest(
+        val campaignId: Long,
+        val query: String?,
+        val status: String?,
+        val limit: Int,
+        val offset: Int,
+    )
 }
 
 private fun command(

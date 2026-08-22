@@ -1,5 +1,6 @@
 package com.buddystudy.backend.community.application.model
 
+import com.buddystudy.backend.common.application.model.PageResponse
 import com.buddystudy.community.domain.entity.NativeAdvertisementAudience
 import java.math.BigDecimal
 import java.time.Instant
@@ -85,3 +86,24 @@ data class AdminNativeAdvertisementCampaignPage(
     val offset: Int,
     val rankingPolicy: AdminNativeAdvertisementRankingPolicySummary,
 )
+
+data class AdminNativeAdvertisementUserSummary(
+    val userId: Long,
+    val accountStatus: String,
+    val email: String?,
+    val displayName: String?,
+    val selectionCount: Long,
+    val destinationOpenCount: Long,
+    val openRate: Double,
+    val distinctDeviceCount: Long,
+    val firstSelectedAt: Instant,
+    val lastSelectedAt: Instant,
+    val lastViewedAt: Instant?,
+)
+
+data class AdminNativeAdvertisementUserPage(
+    val users: List<AdminNativeAdvertisementUserSummary>,
+    override val totalCount: Long,
+    override val limit: Int,
+    override val offset: Int,
+) : PageResponse

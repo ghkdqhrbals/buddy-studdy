@@ -1,16 +1,23 @@
 package com.buddystudy.backend.community.adapter.outbound.persistence
 
-import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementPort
+import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserPage
+import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserSummary
 import com.buddystudy.backend.community.application.port.outbound.AdminNativeAdvertisementPort
+import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementPort
 import com.buddystudy.community.domain.entity.NativeAdvertisementCampaignEntity
 import com.buddystudy.community.domain.entity.NativeAdvertisementSelectionEntity
+import io.r2dbc.spi.Row
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.reactive.awaitSingle
 import org.springframework.data.r2dbc.repository.Modifying
 import org.springframework.data.r2dbc.repository.Query
 import org.springframework.data.repository.kotlin.CoroutineCrudRepository
+import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.stereotype.Component
 import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneOffset
 
 interface NativeAdvertisementCampaignRepository : CoroutineCrudRepository<NativeAdvertisementCampaignEntity, Long> {
     @Query(
@@ -86,8 +93,8 @@ interface NativeAdvertisementSelectionRepository : CoroutineCrudRepository<Nativ
         select count(*)
         from native_ad_selection_history
         where campaign_id = :campaignId
+          and selected_at >= :since
           and viewed_at is not null
-          and viewed_at >= :since
         """
     )
     suspend fun countCampaignViewsSince(campaignId: Long, since: Instant): Long
@@ -109,6 +116,7 @@ interface NativeAdvertisementSelectionRepository : CoroutineCrudRepository<Nativ
 class NativeAdvertisementPersistenceAdapter(
     private val campaigns: NativeAdvertisementCampaignRepository,
     private val selections: NativeAdvertisementSelectionRepository,
+    private val database: DatabaseClient,
 ) : NativeAdvertisementPort, AdminNativeAdvertisementPort {
     override suspend fun findEligibleCampaigns(placement: String, now: Instant) =
         campaigns.findEligible(placement, now).toList()
@@ -151,4 +159,104 @@ class NativeAdvertisementPersistenceAdapter(
 
     override suspend fun countViewsSince(campaignId: Long, since: Instant) =
         selections.countCampaignViewsSince(campaignId, since)
+
+    override suspend fun campaignUsers(
+        campaignId: Long,
+        query: String?,
+        status: String?,
+        limit: Int,
+        offset: Int,
+    ): AdminNativeAdvertisementUserPage {
+        val search = query?.lowercase()?.let { "%$it%" }
+        val where = buildString {
+            append("where h.campaign_id = :campaignId")
+            if (search != null) {
+                append(" and (lower(u.email) like :query or lower(u.display_name) like :query or cast(u.id as char) = :exactQuery)")
+            }
+        }
+        val having = when (status) {
+            "OPENED" -> "having sum(case when h.viewed_at is not null then 1 else 0 end) > 0"
+            "NOT_OPENED" -> "having sum(case when h.viewed_at is not null then 1 else 0 end) = 0"
+            else -> ""
+        }
+        val total = database.sql(
+            """
+            select count(*) as total_count
+            from (
+                select h.user_id
+                from native_ad_selection_history h
+                join users u on u.id = h.user_id
+                $where
+                group by h.user_id
+                $having
+            ) campaign_users
+            """.trimIndent(),
+        ).bind("campaignId", campaignId)
+            .bindUserSearch(search, query)
+            .map { row, _ -> row.long("total_count") }
+            .one()
+            .awaitSingle()
+        val users = database.sql(
+            """
+            select h.user_id,
+                   u.status as account_status,
+                   u.email,
+                   u.display_name,
+                   count(*) as selection_count,
+                   sum(case when h.viewed_at is not null then 1 else 0 end) as destination_open_count,
+                   count(distinct h.device_id) as distinct_device_count,
+                   min(h.selected_at) as first_selected_at,
+                   max(h.selected_at) as last_selected_at,
+                   max(h.viewed_at) as last_viewed_at
+            from native_ad_selection_history h
+            join users u on u.id = h.user_id
+            $where
+            group by h.user_id, u.status, u.email, u.display_name
+            $having
+            order by last_selected_at desc, h.user_id desc
+            limit :limit offset :offset
+            """.trimIndent(),
+        ).bind("campaignId", campaignId)
+            .bindUserSearch(search, query)
+            .bind("limit", limit)
+            .bind("offset", offset)
+            .map { row, _ -> row.toAdminNativeAdvertisementUser() }
+            .all()
+            .collectList()
+            .awaitSingle()
+        return AdminNativeAdvertisementUserPage(users, total, limit, offset)
+    }
 }
+
+private fun DatabaseClient.GenericExecuteSpec.bindUserSearch(
+    search: String?,
+    exactQuery: String?,
+): DatabaseClient.GenericExecuteSpec = if (search == null) {
+    this
+} else {
+    bind("query", search).bind("exactQuery", exactQuery.orEmpty())
+}
+
+private fun Row.toAdminNativeAdvertisementUser(): AdminNativeAdvertisementUserSummary {
+    val selections = long("selection_count")
+    val opens = long("destination_open_count").coerceIn(0, selections)
+    return AdminNativeAdvertisementUserSummary(
+        userId = long("user_id"),
+        accountStatus = string("account_status"),
+        email = get("email", String::class.java),
+        displayName = get("display_name", String::class.java),
+        selectionCount = selections,
+        destinationOpenCount = opens,
+        openRate = if (selections > 0) opens.toDouble() / selections else 0.0,
+        distinctDeviceCount = long("distinct_device_count"),
+        firstSelectedAt = instant("first_selected_at"),
+        lastSelectedAt = instant("last_selected_at"),
+        lastViewedAt = nullableInstant("last_viewed_at"),
+    )
+}
+
+private fun Row.string(name: String): String = get(name, String::class.java).orEmpty()
+private fun Row.long(name: String): Long = get(name, java.lang.Long::class.java)?.toLong() ?: 0L
+private fun Row.instant(name: String): Instant = nullableInstant(name) ?: Instant.EPOCH
+private fun Row.nullableInstant(name: String): Instant? =
+    get(name, LocalDateTime::class.java)?.toInstant(ZoneOffset.UTC)

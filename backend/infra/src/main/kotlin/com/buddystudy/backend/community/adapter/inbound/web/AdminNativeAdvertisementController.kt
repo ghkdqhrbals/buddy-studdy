@@ -4,6 +4,7 @@ import com.buddystudy.backend.admin.analytics.application.port.inbound.AdminAnal
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignCommand
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignPage
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementCampaignSummary
+import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserPage
 import com.buddystudy.backend.community.application.port.inbound.AdminNativeAdvertisementUseCase
 import com.buddystudy.community.domain.entity.NativeAdvertisementAudience
 import jakarta.validation.Valid
@@ -37,6 +38,24 @@ class AdminNativeAdvertisementController(
         @RequestParam(defaultValue = "0") offset: Int,
     ): AdminNativeAdvertisementCampaignPage =
         advertisements.campaigns(authorization.adminBearerToken(), limit, offset)
+
+    @GetMapping("/{campaignId}/users")
+    suspend fun users(
+        @RequestHeader("Authorization") authorization: String?,
+        @PathVariable campaignId: Long,
+        @RequestParam(required = false) query: String?,
+        @RequestParam(required = false) status: String?,
+        @RequestParam(defaultValue = "20") limit: Int,
+        @RequestParam(defaultValue = "0") offset: Int,
+    ): AdminNativeAdvertisementUserPage =
+        advertisements.users(
+            authorization.adminBearerToken(),
+            campaignId,
+            query,
+            status,
+            limit,
+            offset,
+        )
 
     @PostMapping
     suspend fun create(
@@ -92,6 +111,14 @@ interface AdminNativeAdvertisementWebPort {
         campaignId: Long,
         request: AdminNativeAdvertisementCampaignRequest,
     ): AdminNativeAdvertisementCampaignSummary
+    suspend fun users(
+        adminToken: String,
+        campaignId: Long,
+        query: String?,
+        status: String?,
+        limit: Int,
+        offset: Int,
+    ): AdminNativeAdvertisementUserPage
 }
 
 @Component
@@ -119,6 +146,18 @@ class AdminNativeAdvertisementWebAdapter(
     ): AdminNativeAdvertisementCampaignSummary {
         authentication.validate(adminToken)
         return advertisements.update(campaignId, request.toCommand())
+    }
+
+    override suspend fun users(
+        adminToken: String,
+        campaignId: Long,
+        query: String?,
+        status: String?,
+        limit: Int,
+        offset: Int,
+    ): AdminNativeAdvertisementUserPage {
+        authentication.validate(adminToken)
+        return advertisements.users(campaignId, query, status, limit, offset)
     }
 }
 
