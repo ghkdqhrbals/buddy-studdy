@@ -7,7 +7,7 @@ one workflow run just because they share a host.
 
 | Module | Workflow | Trigger | Runner | Owns |
 | --- | --- | --- | --- | --- |
-| Backend API | `Deploy BuddyStudy Backend` | `backend-image-published`, manual | EC2 self-hosted | Docker Swarm backend service rollout, backend env, fixed backend nginx route, standard application/runtime metrics, backend-log multiline collection |
+| Backend API | `Deploy BuddyStudy Backend` | `backend-image-published`, manual | EC2 self-hosted | Docker Swarm backend service rollout, backend env including the MCP feature flag and Host allowlist, fixed backend nginx route, standard application/runtime metrics, backend-log multiline collection |
 | Translation server | `Deploy BuddyStudy Translation Server` | manual | EC2 self-hosted | Internal LibreTranslate runtime and persisted `ko`, `en`, `ja` model cache |
 | Backend network | `Configure BuddyStudy Backend Network` | manual | EC2 self-hosted | Redis administrator ingress on the backend security group |
 | Database cutover | `Migrate BuddyStudy PostgreSQL To MySQL` | manual, one-time | EC2 self-hosted | PostgreSQL backup, MySQL import, row-count and reference validation, automatic pre-cutover rollback |
@@ -57,6 +57,14 @@ deployment.
   ask Apple to create or revoke development certificates; the App Store
   Connect API key is reserved for upload and version-management operations.
 - Backend image build remains in the app repository on GitHub-hosted runners.
+- The stateless MCP endpoint is part of the Backend API module and remains
+  disabled in production unless the repository variable
+  `MCP_SERVER_ENABLED=true`. Enabling it must not add a container, route,
+  workflow health check, or monitoring deployment; the backend workflow injects
+  the public backend Host allowlist and existing Grafana/Loki monitoring owns
+  runtime detection. The checked-in Kubernetes/k3s manifests also pin
+  `MCP_SERVER_ENABLED=false`; a local or alternate deployment must opt in
+  explicitly regardless of the active Spring profile.
 - Backend images support `native` and `jvm` runtime modes from one Dockerfile.
   JVM is the default for tag-triggered and manually dispatched releases. A
   manual image build may explicitly select native. Every build stamps the

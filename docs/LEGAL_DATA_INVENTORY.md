@@ -3,7 +3,7 @@
 This document is the engineering source of truth used when updating BuddyStudy's
 Terms of Service, Privacy Policy, and Marketing Information Consent.
 
-Last reviewed: 2026-08-14
+Last reviewed: 2026-08-22
 
 ## Published Documents
 
@@ -23,11 +23,13 @@ so localized copies must remain equivalent translations of that version.
 | Data or processing | Current implementation | Retention or deletion |
 | --- | --- | --- |
 | Account and profile | MySQL: provider, provider ID, email, display name, profile settings, app language | Until account deletion |
+| Optional learning context | MySQL: private resume Markdown and normalized interest list, supplied through an authenticated MCP connection | Until explicit clearing or account deletion |
 | Authentication | MySQL and signed access tokens; device credential and session state | Revoked on logout, device reset, or account deletion |
 | Email verification | Google SMTP; destination email and short-lived verification code | Code expires after 3 minutes |
 | Studies and questions | MySQL: study tree, scheduled/generated questions, answers, grading, feedback, statistics | Until item or account deletion |
 | Public community data | MySQL: public questions, public profile fields, likes, comments, views, reports, and user-to-user block relationships | Until item deletion, moderation, unblock, or account deletion |
 | AI processing | Server-managed OpenAI account for question generation, grading, feedback, recommendations, and fallback translation | Provider processing applies when the function is used |
+| User-authorized MCP access | Stateless HTTPS tools/resources expose the authenticated user's private profile, learning context, studies, questions, grading, and topic statistics to the MCP client selected by that user | No server-side MCP session; stored source data follows its normal retention |
 | Translation | Self-hosted LibreTranslate first; OpenAI fallback | Translation results are stored with content localizations |
 | Notifications | APNs device token, notification preferences, notification and read state | Until device unregister, invalidation, or account deletion |
 | Terms agreements | Immutable MySQL action history with version, source, time, app version, IP and user agent | Until account deletion unless required for a legal dispute |
@@ -68,6 +70,14 @@ personalized advertising.
   images remain masked.
 - Request logging must redact passwords, verification codes, access tokens,
   Google ID tokens, APNs credentials, client secrets, and API keys.
+- Request and response bodies on `/api/v1/mcp` must never be captured in API
+  logs because they can contain resume text, interests, answers, feedback, and
+  scores. The authenticated principal may be copied into tool context, but the
+  raw bearer token must not be copied or forwarded.
+- Resume and interests remain private and must not appear in community profile
+  responses, public questions, Firebase Analytics, Sentry attachments, or
+  prompts sent to a provider unless the user explicitly invokes a function
+  whose disclosed purpose requires that content.
 - Public-question responses must not expose email, authentication data, device
   identifiers, push tokens, private answers, or drafts.
 - Authenticated public-question and comment responses must omit content authored

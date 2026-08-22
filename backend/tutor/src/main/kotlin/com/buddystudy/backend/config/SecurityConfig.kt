@@ -127,6 +127,7 @@ class BearerTokenFilter(
             authentication(exchange.request, authorization)
                 .flatMap { authentication ->
                     val principal = authentication.principal as Principal
+                    exchange.attributes[AUTHENTICATED_PRINCIPAL_ATTRIBUTE] = principal
                     if (!principal.anonymous) {
                         exchange.attributes[RequestLoggingFilter.AUTHENTICATED_USER_ID_ATTRIBUTE] = principal.userId
                     }
@@ -185,6 +186,10 @@ class BearerTokenFilter(
         ).apply {
             details = ReactiveRequestDetails(request.headers.getFirst("X-App-Version"))
         }
+    }
+
+    companion object {
+        const val AUTHENTICATED_PRINCIPAL_ATTRIBUTE = "authenticatedPrincipal"
     }
 }
 

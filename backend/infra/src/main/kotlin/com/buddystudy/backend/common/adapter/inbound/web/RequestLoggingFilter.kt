@@ -8,6 +8,7 @@ import org.slf4j.MDC
 import org.springframework.core.io.buffer.DataBuffer
 import org.springframework.core.Ordered
 import org.springframework.core.annotation.Order
+import org.springframework.http.server.PathContainer
 import org.springframework.http.server.reactive.ServerHttpRequestDecorator
 import org.springframework.http.server.reactive.ServerHttpResponseDecorator
 import org.springframework.stereotype.Component
@@ -34,15 +35,16 @@ class RequestLoggingFilter(
 
     override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
         val requestId = UUID.randomUUID().toString()
-        val requestCapture = BodyCapture(if (loggingPolicy.capturesBodies) MAX_BODY_BYTES else 0)
-        val responseCapture = BodyCapture(if (loggingPolicy.capturesBodies) MAX_BODY_BYTES else 0)
+        val capturesBodies = loggingPolicy.capturesBodies && !isMcpEndpoint(exchange)
+        val requestCapture = BodyCapture(if (capturesBodies) MAX_BODY_BYTES else 0)
+        val responseCapture = BodyCapture(if (capturesBodies) MAX_BODY_BYTES else 0)
         val started = System.nanoTime()
         val logged = AtomicBoolean(false)
 
         exchange.attributes[REQUEST_ID_ATTRIBUTE] = requestId
         exchange.response.headers.set(REQUEST_ID_HEADER, requestId)
 
-        val decorated = if (loggingPolicy.capturesBodies) decorate(exchange, requestCapture, responseCapture) else exchange
+        val decorated = if (capturesBodies) decorate(exchange, requestCapture, responseCapture) else exchange
 
         return chain.filter(decorated)
             .doFinally {
@@ -83,6 +85,11 @@ class RequestLoggingFilter(
             override fun getResponse() = response
         }
     }
+
+    private fun isMcpEndpoint(exchange: ServerWebExchange): Boolean =
+        exchange.request.path.pathWithinApplication().elements()
+            .filterIsInstance<PathContainer.PathSegment>()
+            .map { it.valueToMatch() } == MCP_ENDPOINT_SEGMENTS
 
     private fun logExchange(
         requestId: String,
@@ -171,6 +178,7 @@ class RequestLoggingFilter(
         const val AUTHENTICATED_USER_ID_ATTRIBUTE = "authenticatedUserId"
         const val REQUEST_ID_HEADER = "X-Request-Id"
         const val ANONYMOUS_USER_ID = "-"
+        private val MCP_ENDPOINT_SEGMENTS = listOf("api", "v1", "mcp")
         private const val MAX_BODY_BYTES = 8_192
     }
 }

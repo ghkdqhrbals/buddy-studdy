@@ -9,7 +9,8 @@ plugins {
 dependencyManagement {
     imports {
         mavenBom(org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES)
-        mavenBom("org.springframework.ai:spring-ai-bom:2.0.0")
+        mavenBom("org.springframework.ai:spring-ai-bom:2.0.1")
+        mavenBom("io.modelcontextprotocol.sdk:mcp-bom:2.0.1")
     }
 }
 
@@ -33,6 +34,8 @@ dependencies {
     implementation("io.sentry:sentry-spring-boot-4:8.50.1")
     implementation("io.sentry:sentry-logback:8.50.1")
     implementation("org.springframework.ai:spring-ai-starter-model-openai")
+    implementation("org.springframework.ai:mcp-spring-webflux")
+    implementation("io.modelcontextprotocol.sdk:mcp-json-jackson2")
     implementation("org.springframework:spring-aop")
     implementation("org.aspectj:aspectjweaver")
     implementation("org.springframework.security:spring-security-core")

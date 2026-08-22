@@ -18,7 +18,8 @@ This backend is the operational source of truth for the iOS app. The app may cac
 - Stores study records, answer drafts, skipped/deleted states, and grading results.
 - Stores optional community profiles for Google-signed-in users.
 - Stores community question reports and can forward them by email when SMTP is configured.
-- Uses database-generated autoincrement `id` primary keys on every backend table.
+- Exposes an authenticated, stateless MCP server for private learning context, studies, questions, grading, and topic statistics when enabled.
+- Uses database-generated autoincrement `id` primary keys for aggregate and event tables; strict one-to-one state tables may use their owner key.
 - Uses Spring Data R2DBC with suspending repository/service transaction boundaries.
 - Runs Flyway through a startup-only JDBC connection in the `dev` profile.
 - Generates due questions with OpenAI.
@@ -47,6 +48,9 @@ Set these on the deployment host or deploy workflow. Do not commit them.
 - `DATABASE_URL`: Flyway startup JDBC connection string, for example `jdbc:mysql://db:3306/buddystudy`.
 - `DATABASE_USERNAME`, `DATABASE_PASSWORD`: MySQL credentials.
 - `ENABLE_OPENAPI_DOCS`: set `false` in production to hide `/docs`, `/redoc`, and `/openapi.json`.
+- `MCP_SERVER_ENABLED`: enables `POST /api/v1/mcp`; defaults to `false` in every profile and must be opted into explicitly.
+- `MCP_ALLOWED_HOSTS`, `MCP_ALLOWED_ORIGINS`: comma-separated MCP transport Host and browser Origin allowlists. See [MCP server](../docs/MCP_SERVER.md).
+- `MCP_REQUEST_TIMEOUT_SECONDS`: MCP tool/resource timeout, clamped to 5–120 seconds; defaults to `30`.
 - `OPENAPI_ACCESS_TOKEN`: required when API docs are enabled on production hosts.
 - `GOOGLE_IOS_CLIENT_ID`: Google OAuth iOS client ID. Required for community Google Login.
 - `REPORT_EMAIL_TO`: destination Gmail address for community question reports.

@@ -67,6 +67,11 @@ sentry:
     minimum-breadcrumb-level: info
 
 buddystudy:
+  mcp:
+    enabled: ${MCP_SERVER_ENABLED:false}
+    allowed-origins: ${MCP_ALLOWED_ORIGINS:}
+    allowed-hosts: ${MCP_ALLOWED_HOSTS:api.ghkdqhrbals.org,api.lowfidev.cloud,lowfidev.cloud,localhost:*,127.0.0.1:*}
+    request-timeout-seconds: ${MCP_REQUEST_TIMEOUT_SECONDS:30}
   logging:
     api:
       detail: ${API_LOG_DETAIL:detailed}

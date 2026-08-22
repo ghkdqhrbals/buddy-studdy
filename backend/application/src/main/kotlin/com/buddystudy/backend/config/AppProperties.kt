@@ -19,6 +19,7 @@ data class BuddyStudyProperties(
     var monitoring: Monitoring = Monitoring(),
     var billing: Billing = Billing(),
     var quota: Quota = Quota(),
+    var mcp: Mcp = Mcp(),
 ) {
     data class Auth(var jwtSecret: String = "", var accessTokenDays: Long = 90)
     data class Crypto(var masterKey: String = "")
@@ -162,6 +163,18 @@ data class BuddyStudyProperties(
         var initialDelayMs: Long = 10_000,
         var batchSize: Int = 200,
         var maxBatchesPerRun: Int = 10,
+    )
+    data class Mcp(
+        var enabled: Boolean = false,
+        var allowedOrigins: List<String> = emptyList(),
+        var allowedHosts: List<String> = listOf(
+            "api.ghkdqhrbals.org",
+            "api.lowfidev.cloud",
+            "lowfidev.cloud",
+            "localhost:*",
+            "127.0.0.1:*",
+        ),
+        var requestTimeoutSeconds: Long = 30,
     )
 }
 

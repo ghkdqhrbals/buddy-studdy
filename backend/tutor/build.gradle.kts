@@ -14,6 +14,7 @@ tasks.named<org.springframework.boot.gradle.tasks.aot.ProcessAot>("processAot") 
             "spring.r2dbc.url" to "r2dbc:mysql://localhost:3306/buddystudy?serverZoneId=UTC",
             "spring.r2dbc.username" to "buddystudy",
             "spring.r2dbc.password" to "aot-build-only",
+            "buddystudy.mcp.enabled" to "true",
             "SMTP_HOST" to "smtp.aot.invalid",
             "SMTP_PORT" to "587",
             "SMTP_USERNAME" to "aot@invalid.example",
@@ -79,7 +80,8 @@ java {
 dependencyManagement {
     imports {
         mavenBom("io.awspring.cloud:spring-cloud-aws-dependencies:4.0.2")
-        mavenBom("org.springframework.ai:spring-ai-bom:2.0.0")
+        mavenBom("org.springframework.ai:spring-ai-bom:2.0.1")
+        mavenBom("io.modelcontextprotocol.sdk:mcp-bom:2.0.1")
     }
 }
 
@@ -99,6 +101,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework:spring-aop")
     implementation("org.aspectj:aspectjweaver")
+    implementation("org.springframework.ai:mcp-spring-webflux")
+    implementation("io.modelcontextprotocol.sdk:mcp-json-jackson2")
     implementation("org.springdoc:springdoc-openapi-starter-webflux-ui:3.0.3")
     implementation("org.flywaydb:flyway-core")
     implementation("com.mysql:mysql-connector-j")

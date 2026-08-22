@@ -39,6 +39,7 @@ jobs:
       EXPECTED_BACKEND_RUNTIME: ${{ github.event.client_payload.backend_runtime || inputs.backend_runtime || 'auto' }}
       BACKEND_DOMAIN: api.ghkdqhrbals.org
       PROMOTE_SWARM: ${{ inputs.promote_swarm || 'false' }}
+      MCP_SERVER_ENABLED: ${{ vars.MCP_SERVER_ENABLED || 'false' }}
 
     steps:
       - name: Checkout deployment configuration
@@ -283,6 +284,10 @@ jobs:
           OPENAI_API_KEY_SYSTEM=${OPENAI_API_KEY_SYSTEM}
           OPENAI_MODEL=gpt-5.4
           OPENAI_SYSTEM_MODEL=gpt-5.4
+          MCP_SERVER_ENABLED=${MCP_SERVER_ENABLED}
+          MCP_ALLOWED_HOSTS=${BACKEND_DOMAIN}
+          MCP_ALLOWED_ORIGINS=
+          MCP_REQUEST_TIMEOUT_SECONDS=30
           BUDDYSTUDY_TRANSLATION_BASE_URL=http://buddystudy-libretranslate:5000
           SMTP_HOST=${SMTP_HOST}
           SMTP_PORT=${SMTP_PORT}

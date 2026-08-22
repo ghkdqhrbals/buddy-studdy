@@ -30,6 +30,7 @@ data:
   FLYWAY_LOCATIONS: classpath:db/migration-mysql
   GOOGLE_IOS_CLIENT_ID: 328281669925-evuebplih3vir99daj4lapj1javqsmsr.apps.googleusercontent.com
   MAX_PENDING_PER_STUDY: "1"
+  MCP_SERVER_ENABLED: "false"
   MONITORING_ADMIN_BASE_URL: https://api.ghkdqhrbals.org/admin
   MONITORING_ENVIRONMENT_NAME: development
   MONITORING_SCHEDULER_FAILURE_ALERT_REPEAT_SECONDS: "300"

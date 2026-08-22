@@ -36,6 +36,19 @@ X-Client-Secret: <clientSecret>
 
 Public question listing is readable without login. Profile editing, reports, records, statistics, study details, and private device data require `Authorization: Bearer <accessToken>`. Google Login links a Google account to that device identity.
 
+### Model Context Protocol
+
+The optional stateless MCP endpoint uses the same authenticated bearer boundary:
+
+```http
+POST /api/v1/mcp
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+Accept: application/json, text/event-stream
+```
+
+It exposes private profile/resume/interests, owned studies, asynchronous question and grading operations, records, feedback, scores, and topic statistics. It never accepts a `userId` argument. Production is disabled unless `MCP_SERVER_ENABLED=true`; connection, tool, privacy, and rollout details are documented in [MCP_SERVER.md](../docs/MCP_SERVER.md).
+
 ## Endpoints
 
 ### Health
