@@ -164,10 +164,18 @@ deployment.
   read-back-verified copy in the Air login Keychain before any workload is
   changed. External hostPath disappearance/symlinks and insufficient space for
   a 12 GiB base reserve plus staging/ciphertext coexistence fail closed. The
-  read-only command uses three Kubernetes inventory batches, one external-path
+  read-only command uses at most three Kubernetes inventory batches, one external-path
   size batch, 20-second API request timeouts, a 12-minute internal deadline,
   and a 15-minute Actions watchdog. Its fixed progress stages expose elapsed
-  seconds only. Workflow `exec` forwarding plus isolated child process groups
+  seconds only and separately identify settings, Docker storage, FileVault,
+  source planning, external-path validation, and capacity checks. Settings,
+  DataFolder/Docker.raw, and external paths are touched only by isolated
+  10-second Python probes. External paths also have a 90-second aggregate
+  preflight budget and a 90-second cumulative re-probe budget during quiesced
+  archives. They reject traversal/case aliases at every component, symlinks, paths outside the
+  exact runner home, `/Volumes` mount roots, and either-direction overlap with
+  the retirement backup root before backup. Workflow `exec`
+  forwarding plus isolated child process groups
   ensure timeout/cancellation kills and reaps pipe-holding descendants. That
   deadline is preflight-only. The apply path retains a six-hour Actions
   envelope; termination enters guarded rollback, and Docker/raw/settings plus

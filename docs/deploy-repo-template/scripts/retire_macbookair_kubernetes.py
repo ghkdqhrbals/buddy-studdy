@@ -9,6 +9,7 @@ contents, and Redis data, so command failures and reports stay secret-free.
 from __future__ import annotations
 
 import argparse
+import base64
 import gzip
 import hashlib
 import hmac
@@ -83,6 +84,9 @@ DATABASE_IMAGE_PATTERNS = {
 }
 MINIMUM_BACKUP_FREE_BYTES = 12 * 1024 * 1024 * 1024
 PREFLIGHT_DEADLINE_SECONDS = 12 * 60
+EXTERNAL_PATH_PROBE_TIMEOUT_SECONDS = 10
+EXTERNAL_PATH_PROBE_AGGREGATE_SECONDS = 90
+DOCKER_STORAGE_PROBE_TIMEOUT_SECONDS = 10
 FAILURE_BUNDLE_DEADLINE_SECONDS = 3 * 60
 FAILURE_CLEANUP_DEADLINE_SECONDS = 30
 PREFLIGHT_PROGRESS_STAGES = frozenset(
@@ -94,6 +98,10 @@ PREFLIGHT_PROGRESS_STAGES = frozenset(
         "kubernetes-storage",
         "kubernetes-audit",
         "desktop-settings",
+        "docker-storage",
+        "filevault",
+        "storage-source-plan",
+        "external-path-validation",
         "backup-preconditions",
         "docker-inventory",
         "complete",
@@ -101,6 +109,317 @@ PREFLIGHT_PROGRESS_STAGES = frozenset(
 )
 KEYCHAIN_SERVICE = "BuddyStudy MacBook Air Kubernetes Retirement Backup"
 KEYCHAIN_ACCOUNT = "buddystudy-kubernetes-retirement"
+EXTERNAL_PATH_PROBE_SCRIPT = r"""
+import json
+import os
+import stat
+import sys
+from pathlib import Path
+
+
+def emit(status):
+    sys.stdout.write(json.dumps({"status": status}, separators=(",", ":")))
+    sys.stdout.flush()
+    raise SystemExit(0)
+
+
+try:
+    request = json.load(sys.stdin)
+    raw_path = request.get("path")
+    raw_home = request.get("home")
+    raw_backup_root = request.get("backupRoot")
+    if not all(isinstance(value, str) for value in (raw_path, raw_home, raw_backup_root)):
+        emit("invalid")
+    candidate = Path(raw_path)
+    if (
+        not candidate.is_absolute()
+        or "\x00" in raw_path
+        or any(component in (".", "..") for component in raw_path.split("/"))
+    ):
+        emit("invalid")
+
+    directory_fd = os.open(candidate.anchor, os.O_RDONLY | os.O_DIRECTORY)
+    current = Path(candidate.anchor)
+    try:
+        for component in candidate.parts[1:]:
+            current = current / component
+            entries = os.listdir(directory_fd)
+            if component not in entries:
+                if any(entry.casefold() == component.casefold() for entry in entries):
+                    emit("alias")
+                emit("missing")
+            try:
+                metadata = os.lstat(current)
+            except FileNotFoundError:
+                emit("missing")
+            if stat.S_ISLNK(metadata.st_mode):
+                emit("symlink")
+            try:
+                next_fd = os.open(
+                    component,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                    dir_fd=directory_fd,
+                )
+            except FileNotFoundError:
+                emit("missing")
+            os.close(directory_fd)
+            directory_fd = next_fd
+
+        if not stat.S_ISDIR(os.fstat(directory_fd).st_mode):
+            emit("unsafe")
+
+        resolved = candidate.resolve(strict=True)
+        home = Path(raw_home).resolve(strict=True)
+        backup_root = Path(raw_backup_root).resolve(strict=False)
+        home_parts = home.parts
+        resolved_parts = resolved.parts
+        if candidate.parts[1:2] == ("Users",):
+            if (
+                resolved == home
+                or resolved_parts[: len(home_parts)] != home_parts
+                or len(resolved_parts) <= len(home_parts)
+            ):
+                emit("unsafe")
+        elif candidate.parts[1:2] == ("Volumes",):
+            if len(candidate.parts) < 4:
+                emit("unsafe")
+            mount_root = Path(candidate.anchor, *candidate.parts[1:3]).resolve(
+                strict=True
+            )
+            mount_parts = mount_root.parts
+            if (
+                resolved == mount_root
+                or resolved_parts[: len(mount_parts)] != mount_parts
+                or len(resolved_parts) <= len(mount_parts)
+            ):
+                emit("unsafe")
+        else:
+            emit("invalid")
+
+        resolved_folded = tuple(component.casefold() for component in resolved.parts)
+        backup_folded = tuple(component.casefold() for component in backup_root.parts)
+        if (
+            resolved_folded[: len(backup_folded)] == backup_folded
+            or backup_folded[: len(resolved_folded)] == resolved_folded
+        ):
+            emit("unsafe")
+        emit("ok")
+    finally:
+        os.close(directory_fd)
+except (OSError, RuntimeError, TypeError, ValueError):
+    emit("unavailable")
+"""
+DOCKER_STORAGE_PROBE_SCRIPT = r"""
+import base64
+import hashlib
+import json
+import os
+import stat
+import sys
+from pathlib import Path
+
+
+class ProbeFailure(Exception):
+    def __init__(self, status):
+        self.status = status
+
+
+def emit(status, **values):
+    document = {"status": status}
+    document.update(values)
+    sys.stdout.write(json.dumps(document, separators=(",", ":")))
+    sys.stdout.flush()
+    raise SystemExit(0)
+
+
+def lexical_absolute(raw):
+    if not isinstance(raw, str) or "\x00" in raw:
+        raise ProbeFailure("invalid")
+    if any(component in (".", "..") for component in raw.split("/")):
+        raise ProbeFailure("invalid")
+    path = Path(raw)
+    if not path.is_absolute():
+        raise ProbeFailure("invalid")
+    return path
+
+
+def open_nofollow(path, want_directory):
+    path = lexical_absolute(str(path))
+    descriptor = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY)
+    current = Path(path.anchor)
+    try:
+        for index, component in enumerate(path.parts[1:]):
+            current = current / component
+            entries = os.listdir(descriptor)
+            if component not in entries:
+                if any(entry.casefold() == component.casefold() for entry in entries):
+                    raise ProbeFailure("alias")
+                raise ProbeFailure("missing")
+            try:
+                metadata = os.lstat(current)
+            except FileNotFoundError:
+                raise ProbeFailure("missing")
+            if stat.S_ISLNK(metadata.st_mode):
+                raise ProbeFailure("symlink")
+            is_last = index == len(path.parts[1:]) - 1
+            flags = os.O_RDONLY | os.O_NOFOLLOW
+            if not is_last or want_directory:
+                flags |= os.O_DIRECTORY
+            try:
+                next_descriptor = os.open(component, flags, dir_fd=descriptor)
+            except FileNotFoundError:
+                raise ProbeFailure("missing")
+            os.close(descriptor)
+            descriptor = next_descriptor
+        metadata = os.fstat(descriptor)
+        if want_directory != stat.S_ISDIR(metadata.st_mode):
+            raise ProbeFailure("invalid")
+        if not want_directory and not stat.S_ISREG(metadata.st_mode):
+            raise ProbeFailure("invalid")
+        return descriptor, metadata
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def read_regular(path):
+    descriptor, metadata = open_nofollow(path, False)
+    try:
+        if metadata.st_size > 16 * 1024 * 1024:
+            raise ProbeFailure("invalid")
+        chunks = []
+        remaining = metadata.st_size + 1
+        while remaining > 0:
+            block = os.read(descriptor, min(1024 * 1024, remaining))
+            if not block:
+                break
+            chunks.append(block)
+            remaining -= len(block)
+        value = b"".join(chunks)
+        if len(value) != metadata.st_size:
+            raise ProbeFailure("unavailable")
+        return value, metadata
+    finally:
+        os.close(descriptor)
+
+
+try:
+    request = json.load(sys.stdin)
+    operation = request.get("operation")
+    home = lexical_absolute(request.get("home"))
+    if operation == "settings":
+        relatives = request.get("settingsRelatives")
+        keys = request.get("settingsKeys")
+        if not isinstance(relatives, list) or not isinstance(keys, list):
+            raise ProbeFailure("invalid")
+        matches = []
+        for index, relative in enumerate(relatives):
+            if not isinstance(relative, str):
+                raise ProbeFailure("invalid")
+            candidate = home / Path(relative)
+            try:
+                contents, metadata = read_regular(candidate)
+            except ProbeFailure as error:
+                if error.status == "missing":
+                    continue
+                raise
+            try:
+                document = json.loads(contents)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                raise ProbeFailure("invalid")
+            if not isinstance(document, dict):
+                raise ProbeFailure("invalid")
+            present = [key for key in keys if key in document]
+            if len(present) > 1:
+                raise ProbeFailure("ambiguous")
+            if present:
+                enabled = document[present[0]]
+                if not isinstance(enabled, bool):
+                    raise ProbeFailure("invalid")
+                data_folder = document.get("DataFolder")
+                if data_folder is not None and not isinstance(data_folder, str):
+                    raise ProbeFailure("invalid")
+                matches.append(
+                    (
+                        index,
+                        present[0],
+                        enabled,
+                        contents,
+                        stat.S_IMODE(metadata.st_mode),
+                        data_folder,
+                    )
+                )
+        if len(matches) != 1:
+            raise ProbeFailure("ambiguous")
+        index, key, enabled, contents, mode, data_folder = matches[0]
+        emit(
+            "ok",
+            settingsIndex=index,
+            key=key,
+            enabled=enabled,
+            contents=base64.b64encode(contents).decode("ascii"),
+            sha256=hashlib.sha256(contents).hexdigest(),
+            mode=mode,
+            dataFolder=data_folder,
+        )
+
+    if operation == "docker-raw":
+        docker_relative = request.get("dockerDataRelative")
+        if not isinstance(docker_relative, str):
+            raise ProbeFailure("invalid")
+        docker_data = home / Path(docker_relative)
+        docker_parts = docker_data.parts
+        data_folder = request.get("dataFolder")
+        candidates = []
+        if isinstance(data_folder, str) and data_folder:
+            folder = lexical_absolute(data_folder)
+            if (
+                folder.parts[: len(docker_parts)] != docker_parts
+                or len(folder.parts) <= len(docker_parts)
+            ):
+                raise ProbeFailure("unsafe")
+            candidates = [folder / "Docker.raw"]
+        elif data_folder is None:
+            vms = docker_data / "vms"
+            directory_fd, _ = open_nofollow(vms, True)
+            try:
+                names = os.listdir(directory_fd)
+            finally:
+                os.close(directory_fd)
+            for name in names:
+                if not isinstance(name, str) or name in ("", ".", "..") or "/" in name:
+                    raise ProbeFailure("invalid")
+                candidate = vms / name / "data" / "Docker.raw"
+                try:
+                    descriptor, _ = open_nofollow(candidate, False)
+                except ProbeFailure as error:
+                    if error.status == "missing":
+                        continue
+                    raise
+                else:
+                    os.close(descriptor)
+                    candidates.append(candidate)
+        else:
+            raise ProbeFailure("invalid")
+        if len(candidates) != 1:
+            raise ProbeFailure("ambiguous")
+        source = candidates[0]
+        if source.parts[: len(docker_parts)] != docker_parts:
+            raise ProbeFailure("unsafe")
+        descriptor, metadata = open_nofollow(source, False)
+        os.close(descriptor)
+        emit(
+            "ok",
+            rawRelative=str(source.relative_to(docker_data)),
+            device=metadata.st_dev,
+            size=metadata.st_size,
+        )
+    raise ProbeFailure("invalid")
+except ProbeFailure as error:
+    emit(error.status)
+except (OSError, RuntimeError, TypeError, ValueError):
+    emit("unavailable")
+"""
 
 
 class RetirementError(RuntimeError):
@@ -652,6 +971,22 @@ class SettingsTarget:
 
 
 @dataclass(frozen=True)
+class SettingsSnapshot:
+    target: SettingsTarget
+    contents: bytes
+    mode: int
+    sha256: str
+    data_folder: str | None
+
+
+@dataclass(frozen=True)
+class DockerRawSnapshot:
+    path: Path
+    device: int
+    size: int
+
+
+@dataclass(frozen=True)
 class DatabaseTarget:
     kind: str
     pod: str
@@ -663,43 +998,144 @@ class PvcSource:
     claim: str
     pv: str
     host_path: Path | None
+    raw_host_path: str | None = None
 
 
-def discover_settings(home: Path) -> SettingsTarget:
-    candidates = [home / relative for relative in SETTINGS_RELATIVE_PATHS]
-    existing = [path for path in candidates if path.is_file()]
-    if not existing:
-        raise RetirementError("Docker Desktop settings-store was not found.")
-
-    matches: list[SettingsTarget] = []
-    for path in existing:
-        _reject_symlink_components(path)
-        document = _read_json(path, "Docker Desktop settings")
-        if not isinstance(document, Mapping):
-            raise RetirementError("Docker Desktop settings are not a JSON object.")
-        present = [key for key in SETTINGS_KEYS if key in document]
-        if len(present) > 1:
-            raise RetirementError("Docker Desktop has ambiguous Kubernetes settings keys.")
-        if present:
-            value = document[present[0]]
-            if not isinstance(value, bool):
-                raise RetirementError("Docker Desktop Kubernetes setting is not boolean.")
-            matches.append(SettingsTarget(path, present[0], value))
-    if len(matches) != 1:
-        raise RetirementError(
-            "Exactly one existing Docker Desktop Kubernetes settings key is required."
+def _run_docker_storage_probe(
+    runner: CommandRunner, request: Mapping[str, Any]
+) -> Mapping[str, Any]:
+    try:
+        result = runner.run(
+            (sys.executable, "-I", "-c", DOCKER_STORAGE_PROBE_SCRIPT),
+            timeout=DOCKER_STORAGE_PROBE_TIMEOUT_SECONDS,
+            check=False,
+            input_bytes=json.dumps(request, separators=(",", ":")).encode("utf-8"),
         )
-    return matches[0]
+    except RetirementError as error:
+        raise RetirementError(
+            "Docker Desktop storage did not complete its bounded validation probe."
+        ) from error
+    if result.returncode != 0:
+        raise RetirementError("Docker Desktop storage validation failed safely.")
+    try:
+        response = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise RetirementError(
+            "Docker Desktop storage validation returned invalid data."
+        ) from error
+    if not isinstance(response, Mapping):
+        raise RetirementError("Docker Desktop storage validation returned invalid data.")
+    status = response.get("status")
+    if status == "symlink":
+        raise RetirementError("Docker Desktop storage contains a symbolic link.")
+    if status == "alias":
+        raise RetirementError("Docker Desktop storage uses an unsafe path alias.")
+    if status == "missing":
+        raise RetirementError("Docker Desktop storage is missing.")
+    if status == "unsafe":
+        raise RetirementError("Docker Desktop storage is outside the safe data scope.")
+    if status == "ambiguous":
+        raise RetirementError("Docker Desktop storage validation is ambiguous.")
+    if status != "ok":
+        raise RetirementError("Docker Desktop storage validation failed closed.")
+    return response
 
 
-def atomically_set_kubernetes_enabled(target: SettingsTarget, enabled: bool) -> None:
-    document = _read_json(target.path, "Docker Desktop settings")
+def discover_settings(runner: CommandRunner, home: Path) -> SettingsSnapshot:
+    response = _run_docker_storage_probe(
+        runner,
+        {
+            "operation": "settings",
+            "home": str(home),
+            "settingsRelatives": [str(path) for path in SETTINGS_RELATIVE_PATHS],
+            "settingsKeys": list(SETTINGS_KEYS),
+        },
+    )
+    index = response.get("settingsIndex")
+    key = response.get("key")
+    enabled = response.get("enabled")
+    encoded_contents = response.get("contents")
+    digest = response.get("sha256")
+    mode = response.get("mode")
+    data_folder = response.get("dataFolder")
+    if (
+        not isinstance(index, int)
+        or isinstance(index, bool)
+        or index < 0
+        or index >= len(SETTINGS_RELATIVE_PATHS)
+        or key not in SETTINGS_KEYS
+        or not isinstance(enabled, bool)
+        or not isinstance(encoded_contents, str)
+        or not isinstance(digest, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", digest)
+        or not isinstance(mode, int)
+        or isinstance(mode, bool)
+        or mode < 0
+        or mode > 0o777
+        or (data_folder is not None and not isinstance(data_folder, str))
+    ):
+        raise RetirementError("Docker Desktop settings validation returned invalid data.")
+    try:
+        contents = base64.b64decode(encoded_contents, validate=True)
+    except (ValueError, TypeError) as error:
+        raise RetirementError(
+            "Docker Desktop settings validation returned invalid data."
+        ) from error
+    if hashlib.sha256(contents).hexdigest() != digest:
+        raise RetirementError("Docker Desktop settings validation did not verify.")
+    target = SettingsTarget(home / SETTINGS_RELATIVE_PATHS[index], key, enabled)
+    return SettingsSnapshot(target, contents, mode, digest, data_folder)
+
+
+def discover_docker_raw(
+    runner: CommandRunner, home: Path, settings: SettingsSnapshot
+) -> DockerRawSnapshot:
+    response = _run_docker_storage_probe(
+        runner,
+        {
+            "operation": "docker-raw",
+            "home": str(home),
+            "dockerDataRelative": str(DOCKER_DATA_RELATIVE_PATH),
+            "dataFolder": settings.data_folder,
+        },
+    )
+    relative = response.get("rawRelative")
+    device = response.get("device")
+    size = response.get("size")
+    if (
+        not isinstance(relative, str)
+        or not relative
+        or "\x00" in relative
+        or Path(relative).is_absolute()
+        or any(component in (".", "..") for component in relative.split("/"))
+        or not isinstance(device, int)
+        or isinstance(device, bool)
+        or device < 0
+        or not isinstance(size, int)
+        or isinstance(size, bool)
+        or size <= 0
+    ):
+        raise RetirementError("Docker.raw validation returned invalid data.")
+    path = home / DOCKER_DATA_RELATIVE_PATH / Path(relative)
+    return DockerRawSnapshot(path, device, size)
+
+
+def atomically_set_kubernetes_enabled(
+    target: SettingsTarget,
+    enabled: bool,
+    *,
+    original_bytes: bytes,
+    original_mode: int,
+) -> None:
+    try:
+        document = json.loads(original_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RetirementError("Docker Desktop settings changed unexpectedly.") from error
     if not isinstance(document, dict) or target.key not in document:
         raise RetirementError("Docker Desktop Kubernetes settings changed unexpectedly.")
     if not isinstance(document[target.key], bool):
         raise RetirementError("Docker Desktop Kubernetes setting is not boolean.")
     document[target.key] = enabled
-    original_mode = target.path.stat().st_mode & 0o777
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{target.path.name}.", suffix=".tmp", dir=target.path.parent
     )
@@ -1093,6 +1529,7 @@ def pvc_sources(inventory: Mapping[str, Any]) -> list[PvcSource]:
                 claim=claim,
                 pv=pv_name,
                 host_path=host_path,
+                raw_host_path=raw_host_path if isinstance(raw_host_path, str) else None,
             )
         )
     return result
@@ -1238,51 +1675,130 @@ def _validate_redis_rdb(path: Path) -> None:
         raise RetirementError("The Redis RDB backup has an invalid signature.")
 
 
-def _safe_host_data_path(path: Path, *, home: Path, backup_root: Path) -> Path:
-    if not path.is_absolute():
-        raise RetirementError("A hostPath persistent volume is not absolute.")
-    _reject_symlink_components(path)
-    resolved = path.resolve(strict=True)
-    forbidden_exact = {
-        Path("/"),
-        Path("/Users"),
-        home.resolve(),
-        Path("/System"),
-        Path("/Library"),
-        Path("/private"),
-        Path("/var"),
-    }
-    if resolved in forbidden_exact or not resolved.is_dir():
-        raise RetirementError("A hostPath persistent volume resolves too broadly.")
+def _external_host_path_candidate(source: PvcSource, *, home: Path) -> Path | None:
+    if source.host_path is None:
+        return None
+    raw = source.raw_host_path or str(source.host_path)
+    if "\x00" in raw:
+        raise RetirementError("An external hostPath contains an invalid component.")
+    raw_components = raw.split("/")
+    if any(component in (".", "..") for component in raw_components):
+        raise RetirementError("An external hostPath contains path traversal.")
+    if raw.startswith("//"):
+        raise RetirementError("An external hostPath uses an unsafe path alias.")
+    candidate = Path(raw)
+    parts = candidate.parts
+    if len(parts) < 2 or parts[0] != "/":
+        return None
+    family = parts[1]
+    if family.casefold() not in ("users", "volumes"):
+        return None
+    if family not in ("Users", "Volumes"):
+        raise RetirementError("An external hostPath uses an unsafe path alias.")
+    if family == "Users":
+        home_parts = home.parts
+        if (
+            home_parts[:2] != ("/", "Users")
+            or parts[: len(home_parts)] != home_parts
+            or len(parts) <= len(home_parts)
+        ):
+            raise RetirementError(
+                "An external hostPath is outside the exact runner home data scope."
+            )
+    elif len(parts) < 4:
+        raise RetirementError(
+            "An external hostPath may not target a mounted-volume root."
+        )
+    return candidate
+
+
+def _probe_external_host_path(
+    runner: CommandRunner,
+    path: Path,
+    *,
+    home: Path,
+    backup_root: Path,
+    timeout: int,
+) -> Path:
+    request = json.dumps(
+        {
+            "path": str(path.expanduser()),
+            "home": str(home),
+            "backupRoot": str(backup_root.expanduser()),
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
     try:
-        resolved.relative_to(backup_root.resolve())
-    except ValueError:
-        pass
-    else:
-        raise RetirementError("A persistent volume points inside the retirement backup root.")
-    return resolved
-
-
-def _is_external_host_path(path: Path) -> bool:
-    value = str(path.expanduser())
-    return value.startswith("/Users/") or value.startswith("/Volumes/")
+        result = runner.run(
+            (sys.executable, "-I", "-c", EXTERNAL_PATH_PROBE_SCRIPT),
+            timeout=timeout,
+            check=False,
+            input_bytes=request,
+        )
+    except RetirementError as error:
+        raise RetirementError(
+            "An external hostPath did not complete its bounded validation probe."
+        ) from error
+    if result.returncode != 0:
+        raise RetirementError("An external hostPath validation probe failed safely.")
+    try:
+        response = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise RetirementError(
+            "An external hostPath validation probe returned invalid data."
+        ) from error
+    if not isinstance(response, Mapping):
+        raise RetirementError(
+            "An external hostPath validation probe returned invalid data."
+        )
+    status = response.get("status")
+    if status == "missing":
+        raise RetirementError("An external hostPath is missing on the MacBook Air.")
+    if status == "symlink":
+        raise RetirementError("An external hostPath contains a symbolic link.")
+    if status == "alias":
+        raise RetirementError("An external hostPath uses an unsafe path alias.")
+    if status == "unsafe":
+        raise RetirementError("An external hostPath resolves outside the safe data scope.")
+    if status != "ok":
+        raise RetirementError("An external hostPath could not be validated safely.")
+    return path
 
 
 def _validate_external_host_paths(
-    sources: Sequence[PvcSource], *, home: Path, backup_root: Path
+    runner: CommandRunner,
+    sources: Sequence[PvcSource],
+    *,
+    home: Path,
+    backup_root: Path,
 ) -> list[Path]:
-    paths = []
+    deadline = time.monotonic() + EXTERNAL_PATH_PROBE_AGGREGATE_SECONDS
+    paths: list[Path] = []
     for source in sources:
-        if source.host_path is None or not _is_external_host_path(source.host_path):
+        candidate = _external_host_path_candidate(source, home=home)
+        if candidate is None:
             continue
-        expanded = source.host_path.expanduser()
-        if not expanded.exists():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
             raise RetirementError(
-                f"External hostPath PV {source.pv} is missing on the MacBook Air."
+                "External hostPath validation exceeded its aggregate deadline."
             )
         paths.append(
-            _safe_host_data_path(expanded, home=home, backup_root=backup_root)
+            _probe_external_host_path(
+                runner,
+                candidate,
+                home=home,
+                backup_root=backup_root,
+                timeout=min(
+                    EXTERNAL_PATH_PROBE_TIMEOUT_SECONDS,
+                    max(1, int(remaining)),
+                ),
+            )
         )
+        if time.monotonic() > deadline:
+            raise RetirementError(
+                "External hostPath validation exceeded its aggregate deadline."
+            )
     return paths
 
 
@@ -1515,36 +2031,6 @@ def _seal_payload(
     shutil.rmtree(payload)
 
 
-def _docker_raw_path(settings: SettingsTarget, home: Path) -> Path:
-    document = _read_json(settings.path, "Docker Desktop settings")
-    data_folder = document.get("DataFolder") if isinstance(document, Mapping) else None
-    docker_data = (home / DOCKER_DATA_RELATIVE_PATH).resolve()
-    if isinstance(data_folder, str) and data_folder:
-        folder = Path(data_folder).expanduser()
-        if not folder.is_absolute():
-            raise RetirementError("Docker Desktop DataFolder is not absolute.")
-        candidates = [folder / "Docker.raw"]
-    elif data_folder is None:
-        candidates = list((docker_data / "vms").glob("*/data/Docker.raw"))
-        if len(candidates) != 1:
-            raise RetirementError(
-                "Exactly one standard Docker.raw is required when DataFolder is absent."
-            )
-    else:
-        raise RetirementError("Docker Desktop DataFolder has an invalid type.")
-    source = candidates[0]
-    _reject_symlink_components(source)
-    if not source.is_file() or source.is_symlink():
-        raise RetirementError("Docker Desktop Docker.raw is not a regular file.")
-    try:
-        source.resolve().relative_to(docker_data)
-    except ValueError as error:
-        raise RetirementError(
-            "Docker.raw is outside the audited Docker Desktop Data directory."
-        ) from error
-    return source.resolve()
-
-
 def _restore_docker_raw_clone(
     runner: CommandRunner,
     *,
@@ -1608,11 +2094,12 @@ def _validate_backup_preconditions(
     backup_root: Path,
     *,
     home: Path,
+    source_device: int | None = None,
     external_paths: Sequence[Path] = (),
 ) -> dict[str, int]:
     expanded = backup_root.expanduser()
     _reject_symlink_components(expanded)
-    docker_data = (home / DOCKER_DATA_RELATIVE_PATH).resolve()
+    docker_data = home / DOCKER_DATA_RELATIVE_PATH
     try:
         expanded.resolve().relative_to(docker_data)
     except ValueError:
@@ -1622,7 +2109,8 @@ def _validate_backup_preconditions(
     existing = expanded
     while not existing.exists() and existing != existing.parent:
         existing = existing.parent
-    if existing.stat().st_dev != source.stat().st_dev:
+    docker_device = source_device if source_device is not None else source.stat().st_dev
+    if existing.stat().st_dev != docker_device:
         raise RetirementError("Retirement backup root is not on Docker.raw's APFS filesystem.")
     filesystem = runner.run(
         ("diskutil", "info", str(existing)), timeout=30, check=False
@@ -1896,17 +2384,31 @@ def _archive_quiesced_host_paths(
     backup_dir = destination / "hostpath-quiesced"
     backup_dir.mkdir(mode=0o700)
     created: list[Path] = []
+    remaining_probe_budget = float(EXTERNAL_PATH_PROBE_AGGREGATE_SECONDS)
     for source in sources:
-        if source.host_path is None:
+        candidate = _external_host_path_candidate(source, home=home)
+        if candidate is None:
             continue
-        expanded = source.host_path.expanduser()
-        if not _is_external_host_path(expanded):
-            continue
-        if not expanded.exists():
+        if remaining_probe_budget <= 0:
             raise RetirementError(
-                f"External hostPath PV {source.pv} disappeared before backup."
+                "External hostPath archive validation exceeded its aggregate deadline."
             )
-        host_path = _safe_host_data_path(expanded, home=home, backup_root=backup_root)
+        probe_started = time.monotonic()
+        host_path = _probe_external_host_path(
+            runner,
+            candidate,
+            home=home,
+            backup_root=backup_root,
+            timeout=min(
+                EXTERNAL_PATH_PROBE_TIMEOUT_SECONDS,
+                max(1, int(remaining_probe_budget)),
+            ),
+        )
+        remaining_probe_budget -= time.monotonic() - probe_started
+        if remaining_probe_budget < 0:
+            raise RetirementError(
+                "External hostPath archive validation exceeded its aggregate deadline."
+            )
         path = backup_dir / f"{_safe_name(source.pv)}.tar.gz"
         _tar_host_directory(runner, host_path, path)
         created.append(path)
@@ -2265,23 +2767,27 @@ def _revalidate_before_mutation(
     home: Path,
     expected_report: Path,
     expected_digest: str,
-    settings: SettingsTarget,
+    settings: SettingsSnapshot,
     settings_original: bytes,
-    docker_raw_source: Path,
+    docker_raw: DockerRawSnapshot,
     baseline: Mapping[str, Any],
 ) -> dict[str, Any]:
     inventory = collect_inventory(cluster)
     _verify_expected_report(expected_report, inventory["digest"], expected_digest)
-    current_settings = discover_settings(home)
-    if current_settings != settings or settings.path.read_bytes() != settings_original:
+    current_settings = discover_settings(desktop.runner, home)
+    if (
+        current_settings.target != settings.target
+        or current_settings.contents != settings_original
+    ):
         raise RetirementError("Docker Desktop settings changed before mutation.")
-    if _docker_raw_path(current_settings, home) != docker_raw_source:
+    current_raw = discover_docker_raw(desktop.runner, home, current_settings)
+    if current_raw != docker_raw:
         raise RetirementError("Docker.raw identity changed before mutation.")
     current_docker = desktop.inventory()
     for identity_key in ("nonKubernetes", "volumes", "networks"):
         if current_docker[identity_key] != baseline[identity_key]:
             raise RetirementError("Docker identity changed before mutation.")
-    report = build_preflight_report(inventory, current_settings, current_docker)
+    report = build_preflight_report(inventory, current_settings.target, current_docker)
     if not report["ready"]:
         raise RetirementError("Retirement became unsafe immediately before mutation.")
     return inventory
@@ -2412,11 +2918,16 @@ def preflight(
     desktop.ensure_ready()
     inventory = collect_inventory(cluster, progress=progress)
     progress("desktop-settings")
-    settings = discover_settings(home)
-    docker_raw = _docker_raw_path(settings, home)
+    settings = discover_settings(desktop.runner, home)
+    progress("docker-storage")
+    docker_raw = discover_docker_raw(desktop.runner, home, settings)
+    progress("filevault")
     _require_filevault(desktop.runner)
+    progress("storage-source-plan")
     sources = pvc_sources(inventory)
+    progress("external-path-validation")
     external_paths = _validate_external_host_paths(
+        desktop.runner,
         sources,
         home=home,
         backup_root=home / DEFAULT_BACKUP_RELATIVE_PATH,
@@ -2424,14 +2935,15 @@ def preflight(
     progress("backup-preconditions")
     capacity = _validate_backup_preconditions(
         desktop.runner,
-        docker_raw,
+        docker_raw.path,
         home / DEFAULT_BACKUP_RELATIVE_PATH,
         home=home,
+        source_device=docker_raw.device,
         external_paths=external_paths,
     )
     progress("docker-inventory")
     docker = desktop.inventory()
-    report = build_preflight_report(inventory, settings, docker)
+    report = build_preflight_report(inventory, settings.target, docker)
     report["backupCapacity"] = capacity
     report["preflightDeadlineSeconds"] = PREFLIGHT_DEADLINE_SECONDS
     progress("complete")
@@ -2471,18 +2983,21 @@ def retire(
     desktop.ensure_ready()
     inventory = collect_inventory(cluster)
     _verify_expected_report(expected_report, inventory["digest"], expected_digest)
-    settings = discover_settings(home)
-    docker_raw_source = _docker_raw_path(settings, home)
+    settings_snapshot = discover_settings(runner, home)
+    settings = settings_snapshot.target
+    docker_raw = discover_docker_raw(runner, home, settings_snapshot)
+    docker_raw_source = docker_raw.path
     _require_filevault(runner)
     sources = pvc_sources(inventory)
     external_paths = _validate_external_host_paths(
-        sources, home=home, backup_root=backup_root
+        runner, sources, home=home, backup_root=backup_root
     )
     _validate_backup_preconditions(
         runner,
         docker_raw_source,
         backup_root,
         home=home,
+        source_device=docker_raw.device,
         external_paths=external_paths,
     )
     baseline = desktop.inventory()
@@ -2494,13 +3009,13 @@ def retire(
     _ensure_keychain_recovery_key(runner, encryption_secret)
 
     destination = _prepare_backup_directory(home, backup_root, run_key)
-    if docker_raw_source.stat().st_dev != destination.stat().st_dev:
+    if docker_raw.device != destination.stat().st_dev:
         raise RetirementError(
             "The retirement backup root is not on Docker.raw's APFS filesystem."
         )
     state = workload_state(inventory)
-    settings_original = settings.path.read_bytes()
-    settings_original_mode = settings.path.stat().st_mode & 0o777
+    settings_original = settings_snapshot.contents
+    settings_original_mode = settings_snapshot.mode
     payload = destination / "private-staging"
 
     cluster_changed = False
@@ -2525,9 +3040,9 @@ def retire(
             home=home,
             expected_report=expected_report,
             expected_digest=expected_digest,
-            settings=settings,
+            settings=settings_snapshot,
             settings_original=settings_original,
-            docker_raw_source=docker_raw_source,
+            docker_raw=docker_raw,
             baseline=baseline,
         )
         state = workload_state(mutation_inventory)
@@ -2565,15 +3080,31 @@ def retire(
             destination / "Docker.raw.apfs-clone",
             secret=encryption_secret,
         )
+        stopped_settings = discover_settings(runner, home)
+        if (
+            stopped_settings.target != settings
+            or stopped_settings.contents != settings_original
+        ):
+            raise RetirementError(
+                "Docker Desktop settings changed before the atomic disable operation."
+            )
         settings_may_have_changed = True
-        atomically_set_kubernetes_enabled(settings, False)
+        atomically_set_kubernetes_enabled(
+            settings,
+            False,
+            original_bytes=settings_original,
+            original_mode=settings_original_mode,
+        )
         desktop.start()
         docker_may_need_start = False
 
-        updated_settings = discover_settings(home)
-        if updated_settings.path != settings.path or updated_settings.key != settings.key:
+        updated_settings = discover_settings(runner, home)
+        if (
+            updated_settings.target.path != settings.path
+            or updated_settings.target.key != settings.key
+        ):
             raise RetirementError("Docker Desktop settings identity changed after restart.")
-        if updated_settings.enabled:
+        if updated_settings.target.enabled:
             raise RetirementError("Docker Desktop Kubernetes remains enabled after restart.")
         final_inventory = desktop.wait_for_no_running_kubernetes()
         if final_inventory["nonKubernetes"] != baseline["nonKubernetes"]:

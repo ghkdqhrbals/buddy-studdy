@@ -128,7 +128,7 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
             self.assertNotIn(value, self.workflow)
 
     def test_settings_discovery_requires_one_existing_boolean_key(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
             home = Path(directory)
             path = home / retirement.SETTINGS_RELATIVE_PATHS[0]
             path.parent.mkdir(parents=True)
@@ -136,9 +136,15 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
                 json.dumps({"KubernetesEnabled": True, "untouched": {"x": 1}}),
                 encoding="utf-8",
             )
-            with mock.patch.object(retirement, "_reject_symlink_components"):
-                target = retirement.discover_settings(home)
-                retirement.atomically_set_kubernetes_enabled(target, False)
+            snapshot = retirement.discover_settings(
+                retirement.CommandRunner(), home
+            )
+            retirement.atomically_set_kubernetes_enabled(
+                snapshot.target,
+                False,
+                original_bytes=snapshot.contents,
+                original_mode=snapshot.mode,
+            )
             updated = json.loads(path.read_text(encoding="utf-8"))
             self.assertIs(updated["KubernetesEnabled"], False)
             self.assertEqual(updated["untouched"], {"x": 1})
@@ -149,12 +155,11 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            with mock.patch.object(retirement, "_reject_symlink_components"):
-                with self.assertRaisesRegex(retirement.RetirementError, "ambiguous"):
-                    retirement.discover_settings(home)
+            with self.assertRaisesRegex(retirement.RetirementError, "ambiguous"):
+                retirement.discover_settings(retirement.CommandRunner(), home)
 
     def test_settings_and_backup_symlinks_fail_closed(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
             home = Path(directory)
             real = home / "real-settings.json"
             real.write_text(json.dumps({"KubernetesEnabled": True}), encoding="utf-8")
@@ -162,7 +167,7 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
             path.parent.mkdir(parents=True)
             path.symlink_to(real)
             with self.assertRaisesRegex(retirement.RetirementError, "symbolic link"):
-                retirement.discover_settings(home)
+                retirement.discover_settings(retirement.CommandRunner(), home)
 
             real_root = home / "backup-real"
             real_root.mkdir()
@@ -664,7 +669,7 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
     def test_settings_replace_failure_is_treated_as_possible_mutation(self):
         source = self.helper
         assignment = source.index("settings_may_have_changed = True")
-        mutation = source.index("atomically_set_kubernetes_enabled(settings, False)")
+        mutation = source.index("atomically_set_kubernetes_enabled(", assignment)
         self.assertLess(assignment, mutation)
         self.assertIn("_restore_docker_raw_clone", source)
         self.assertIn("atomically_restore_bytes", source)
@@ -687,7 +692,7 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
             "_seal_payload(",
             "stop_method = desktop.stop()",
             "raw_clone = _clone_docker_raw(",
-            "atomically_set_kubernetes_enabled(settings, False)",
+            "atomically_set_kubernetes_enabled(",
         )
         positions = [body.index(value) for value in ordered]
         self.assertEqual(positions, sorted(positions))
@@ -757,6 +762,29 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
             disabled_settings = retirement.SettingsTarget(
                 settings_path, "KubernetesEnabled", False
             )
+            settings_contents = settings_path.read_bytes()
+            settings_snapshot = retirement.SettingsSnapshot(
+                settings,
+                settings_contents,
+                settings_path.stat().st_mode & 0o777,
+                retirement.hashlib.sha256(settings_contents).hexdigest(),
+                None,
+            )
+            disabled_contents = json.dumps(
+                {"KubernetesEnabled": False}
+            ).encode("utf-8")
+            disabled_snapshot = retirement.SettingsSnapshot(
+                disabled_settings,
+                disabled_contents,
+                settings_path.stat().st_mode & 0o777,
+                retirement.hashlib.sha256(disabled_contents).hexdigest(),
+                None,
+            )
+            docker_raw_snapshot = retirement.DockerRawSnapshot(
+                docker_raw,
+                docker_raw.stat().st_dev,
+                docker_raw.stat().st_size,
+            )
 
             def create_staging(*_args, **_kwargs):
                 payload = destination / "private-staging"
@@ -794,8 +822,14 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
                 retirement,
                 collect_inventory=mock.Mock(return_value=inventory),
                 _verify_expected_report=mock.Mock(),
-                discover_settings=mock.Mock(side_effect=[settings, disabled_settings]),
-                _docker_raw_path=mock.Mock(return_value=docker_raw),
+                discover_settings=mock.Mock(
+                    side_effect=[
+                        settings_snapshot,
+                        settings_snapshot,
+                        disabled_snapshot,
+                    ]
+                ),
+                discover_docker_raw=mock.Mock(return_value=docker_raw_snapshot),
                 _require_filevault=mock.Mock(),
                 pvc_sources=mock.Mock(return_value=[]),
                 _validate_external_host_paths=mock.Mock(return_value=[]),
@@ -907,7 +941,8 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
         ordered = (
             "inventory = collect_inventory(cluster)",
             "_verify_expected_report(expected_report",
-            "current_settings = discover_settings(home)",
+            "current_settings = discover_settings(desktop.runner, home)",
+            "current_raw = discover_docker_raw(desktop.runner, home, current_settings)",
             "current_docker = desktop.inventory()",
             "report = build_preflight_report(",
             'if not report["ready"]:',
@@ -989,9 +1024,10 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
             self.assertEqual(clone.read_bytes(), b"original-state")
 
     def test_datafolder_absent_uses_exactly_one_standard_docker_raw(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
             home = Path(directory)
-            settings_path = home / "settings-store.json"
+            settings_path = home / retirement.SETTINGS_RELATIVE_PATHS[0]
+            settings_path.parent.mkdir(parents=True)
             settings_path.write_text(
                 json.dumps({"KubernetesEnabled": True}), encoding="utf-8"
             )
@@ -1002,16 +1038,102 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
             )
             raw.parent.mkdir(parents=True)
             raw.write_bytes(b"raw")
-            settings = retirement.SettingsTarget(
-                settings_path, "KubernetesEnabled", True
+            runner = retirement.CommandRunner()
+            settings = retirement.discover_settings(runner, home)
+            self.assertEqual(
+                retirement.discover_docker_raw(runner, home, settings).path,
+                raw,
             )
-            with mock.patch.object(retirement, "_reject_symlink_components"):
-                self.assertEqual(retirement._docker_raw_path(settings, home), raw.resolve())
-                second = raw.parents[2] / "1/data/Docker.raw"
-                second.parent.mkdir(parents=True)
-                second.write_bytes(b"raw-two")
-                with self.assertRaisesRegex(retirement.RetirementError, "Exactly one"):
-                    retirement._docker_raw_path(settings, home)
+            second = raw.parents[2] / "1/data/Docker.raw"
+            second.parent.mkdir(parents=True)
+            second.write_bytes(b"raw-two")
+            with self.assertRaisesRegex(retirement.RetirementError, "ambiguous"):
+                retirement.discover_docker_raw(runner, home, settings)
+
+    def test_datafolder_escape_is_rejected_before_filesystem_touch(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            home = Path(directory)
+            settings_path = home / retirement.SETTINGS_RELATIVE_PATHS[0]
+            settings_path.parent.mkdir(parents=True)
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "KubernetesEnabled": True,
+                        "DataFolder": str(home / "outside-docker-data"),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            runner = retirement.CommandRunner()
+            settings = retirement.discover_settings(runner, home)
+            with self.assertRaisesRegex(retirement.RetirementError, "safe data scope"):
+                retirement.discover_docker_raw(runner, home, settings)
+
+            traversal = (
+                home
+                / retirement.DOCKER_DATA_RELATIVE_PATH
+                / "vms/zero/../../outside"
+            )
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "KubernetesEnabled": True,
+                        "DataFolder": str(traversal),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            settings = retirement.discover_settings(runner, home)
+            with self.assertRaisesRegex(retirement.RetirementError, "failed closed"):
+                retirement.discover_docker_raw(runner, home, settings)
+
+    def test_settings_storage_probe_timeout_is_bounded_and_secret_free(self):
+        sensitive_home = "/Users/example/private-runner-home"
+
+        class Runner:
+            def run(self, arguments, **kwargs):
+                self.arguments = tuple(arguments)
+                self.input_bytes = kwargs["input_bytes"]
+                return subprocess.CompletedProcess(
+                    arguments, 0, b'{"status":"ok"}', b"suppressed"
+                )
+
+        runner = Runner()
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with mock.patch.object(sys, "stdout", stdout), redirect_stderr(stderr):
+            retirement._run_docker_storage_probe(
+                runner,
+                {
+                    "operation": "settings",
+                    "home": sensitive_home,
+                },
+            )
+        self.assertNotIn(sensitive_home, "\0".join(runner.arguments))
+        self.assertIn(sensitive_home.encode(), runner.input_bytes)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(stderr.getvalue(), "")
+
+        started = time.monotonic()
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with mock.patch.object(
+            retirement,
+            "DOCKER_STORAGE_PROBE_SCRIPT",
+            "import time; time.sleep(30)",
+        ), mock.patch.object(
+            retirement, "DOCKER_STORAGE_PROBE_TIMEOUT_SECONDS", 1
+        ), mock.patch.object(
+            sys, "stdout", stdout
+        ), redirect_stderr(stderr):
+            with self.assertRaises(retirement.RetirementError) as raised:
+                retirement.discover_settings(
+                    retirement.CommandRunner(), Path(sensitive_home)
+                )
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertNotIn(sensitive_home, str(raised.exception))
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(stderr.getvalue(), "")
 
     def test_context_is_local_docker_desktop_only(self):
         self.assertIn('"https://127.0.0.1:6443"', self.helper)
@@ -1213,6 +1335,92 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
             preflight_branch.index("with _preflight_deadline():"),
         )
         self.assertNotIn("_preflight_deadline", retire_branch)
+
+    def test_preflight_progress_separates_bounded_storage_stages(self):
+        inventory = empty_inventory()
+        settings = retirement.SettingsTarget(
+            Path("/Users/example/settings-store.json"),
+            "KubernetesEnabled",
+            True,
+        )
+        contents = b'{"KubernetesEnabled":true}'
+        snapshot = retirement.SettingsSnapshot(
+            settings,
+            contents,
+            0o600,
+            retirement.hashlib.sha256(contents).hexdigest(),
+            None,
+        )
+        raw = retirement.DockerRawSnapshot(
+            Path("/Users/example/Docker.raw"), 1, 1024
+        )
+        stages = []
+
+        class Desktop:
+            runner = mock.Mock()
+
+            def ensure_ready(self):
+                return None
+
+            def inventory(self):
+                return {
+                    "kubernetesTotal": 1,
+                    "kubernetesRunning": 1,
+                    "nonKubernetes": {},
+                    "volumes": [],
+                    "networks": {},
+                }
+
+        def collect(_cluster, *, progress):
+            for stage in (
+                "kubernetes-target",
+                "kubernetes-resources",
+                "kubernetes-storage",
+                "kubernetes-audit",
+            ):
+                progress(stage)
+            return inventory
+
+        with mock.patch.object(
+            retirement, "_report_preflight_progress", side_effect=lambda stage, _start: stages.append(stage)
+        ), mock.patch.object(
+            retirement, "collect_inventory", side_effect=collect
+        ), mock.patch.object(
+            retirement, "discover_settings", return_value=snapshot
+        ), mock.patch.object(
+            retirement, "discover_docker_raw", return_value=raw
+        ), mock.patch.object(
+            retirement, "_require_filevault"
+        ), mock.patch.object(
+            retirement, "pvc_sources", return_value=[]
+        ), mock.patch.object(
+            retirement, "_validate_external_host_paths", return_value=[]
+        ), mock.patch.object(
+            retirement, "_validate_backup_preconditions", return_value={}
+        ), mock.patch.object(
+            retirement, "build_preflight_report", return_value={"ready": True}
+        ):
+            retirement.preflight(mock.Mock(), Desktop(), home=Path("/Users/example"))
+
+        self.assertEqual(
+            stages,
+            [
+                "start",
+                "docker-runtime",
+                "kubernetes-target",
+                "kubernetes-resources",
+                "kubernetes-storage",
+                "kubernetes-audit",
+                "desktop-settings",
+                "docker-storage",
+                "filevault",
+                "storage-source-plan",
+                "external-path-validation",
+                "backup-preconditions",
+                "docker-inventory",
+                "complete",
+            ],
+        )
 
     @unittest.skipUnless(hasattr(os, "killpg"), "requires POSIX process groups")
     def test_preflight_alarm_kills_active_command_group(self):
@@ -1463,25 +1671,244 @@ class KubernetesRetirementSafetyTests(unittest.TestCase):
                     )
             self.assertFalse((destination / "private-staging").exists())
 
-    def test_external_hostpath_missing_or_symlink_fails_closed(self):
-        source = retirement.PvcSource(
-            "claim", "pv", Path("/Users/definitely-missing-buddystudy-data")
-        )
-        with self.assertRaisesRegex(retirement.RetirementError, "missing"):
-            retirement._validate_external_host_paths(
-                [source], home=Path("/Users/example"), backup_root=Path("/Users/example/backups")
+    def test_external_hostpath_missing_symlink_and_backup_escape_fail_closed(self):
+        runner = retirement.CommandRunner()
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            home = Path(directory)
+            backup_root = home / "backups"
+            missing = retirement.PvcSource(
+                "claim",
+                "pv",
+                home / "missing",
+                str(home / "missing"),
             )
-
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            actual = root / "actual"
-            actual.mkdir()
-            linked = root / "linked"
-            linked.symlink_to(actual, target_is_directory=True)
-            with self.assertRaisesRegex(retirement.RetirementError, "symbolic link"):
-                retirement._safe_host_data_path(
-                    linked, home=root / "home", backup_root=root / "backup"
+            with self.assertRaisesRegex(retirement.RetirementError, "missing"):
+                retirement._validate_external_host_paths(
+                    runner,
+                    [missing],
+                    home=home,
+                    backup_root=backup_root,
                 )
+
+            actual = home / "actual"
+            actual.mkdir()
+            linked = home / "linked"
+            linked.symlink_to(actual, target_is_directory=True)
+            symlink = retirement.PvcSource(
+                "claim", "pv", linked, str(linked)
+            )
+            with self.assertRaisesRegex(retirement.RetirementError, "symbolic link"):
+                retirement._validate_external_host_paths(
+                    runner,
+                    [symlink],
+                    home=home,
+                    backup_root=backup_root,
+                )
+
+            backup_root.mkdir()
+            inside_backup = backup_root / "data"
+            inside_backup.mkdir()
+            unsafe = retirement.PvcSource(
+                "claim", "pv", inside_backup, str(inside_backup)
+            )
+            with self.assertRaisesRegex(retirement.RetirementError, "safe data scope"):
+                retirement._validate_external_host_paths(
+                    runner,
+                    [unsafe],
+                    home=home,
+                    backup_root=backup_root,
+                )
+
+            ancestor = home / "Library"
+            ancestor.mkdir(exist_ok=True)
+            overlaps_backup = ancestor / "Application Support/BuddyStudy/backups"
+            overlapping = retirement.PvcSource(
+                "claim", "pv", ancestor, str(ancestor)
+            )
+            with self.assertRaisesRegex(retirement.RetirementError, "safe data scope"):
+                retirement._validate_external_host_paths(
+                    runner,
+                    [overlapping],
+                    home=home,
+                    backup_root=overlaps_backup,
+                )
+
+            casefold_backup = home / "library/Application Support/BuddyStudy/backups"
+            with self.assertRaisesRegex(retirement.RetirementError, "safe data scope"):
+                retirement._validate_external_host_paths(
+                    runner,
+                    [overlapping],
+                    home=home,
+                    backup_root=casefold_backup,
+                )
+
+            case_alias = home / "library"
+            alias_source = retirement.PvcSource(
+                "claim", "pv", case_alias, str(case_alias)
+            )
+            with self.assertRaisesRegex(
+                retirement.RetirementError, "path alias|missing"
+            ):
+                retirement._validate_external_host_paths(
+                    runner,
+                    [alias_source],
+                    home=home,
+                    backup_root=overlaps_backup,
+                )
+
+    def test_external_hostpath_lexical_escape_alias_and_broad_roots_fail_closed(self):
+        cases = (
+            ("/Users/example/../../etc", "traversal"),
+            ("/Users/other/data", "exact runner home"),
+            ("/users/example/data", "unsafe path alias"),
+            ("//Users/example/data", "unsafe path alias"),
+            ("/Volumes/volume", "mounted-volume root"),
+            ("/Volumes/volume/..", "traversal"),
+        )
+        for raw, message in cases:
+            with self.subTest(raw=raw), self.assertRaisesRegex(
+                retirement.RetirementError, message
+            ):
+                retirement._validate_external_host_paths(
+                    retirement.CommandRunner(),
+                    [retirement.PvcSource("claim", "pv", Path(raw), raw)],
+                    home=Path("/Users/example"),
+                    backup_root=Path("/Users/example/backups"),
+                )
+
+    def test_external_probe_keeps_path_out_of_argv_output_and_errors(self):
+        sensitive_path = Path("/Users/example/private-study-data")
+
+        class Runner:
+            def __init__(self):
+                self.arguments = None
+
+            def run(self, arguments, **kwargs):
+                self.arguments = tuple(arguments)
+                self.input_bytes = kwargs["input_bytes"]
+                return subprocess.CompletedProcess(
+                    arguments, 0, b'{"status":"ok"}', b"suppressed"
+                )
+
+        runner = Runner()
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with redirect_stderr(stderr), mock.patch("sys.stdout", stdout):
+            result = retirement._probe_external_host_path(
+                runner,
+                sensitive_path,
+                home=Path("/Users/example"),
+                backup_root=Path("/Users/example/backups"),
+                timeout=10,
+            )
+        self.assertEqual(result, sensitive_path)
+        self.assertNotIn(str(sensitive_path), "\0".join(runner.arguments))
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(stderr.getvalue(), "")
+        self.assertIn(str(sensitive_path).encode(), runner.input_bytes)
+
+        started = time.monotonic()
+        with mock.patch.object(
+            retirement,
+            "EXTERNAL_PATH_PROBE_SCRIPT",
+            "import time; time.sleep(30)",
+        ):
+            with self.assertRaises(retirement.RetirementError) as raised:
+                retirement._probe_external_host_path(
+                    retirement.CommandRunner(),
+                    sensitive_path,
+                    home=Path("/Users/example"),
+                    backup_root=Path("/Users/example/backups"),
+                    timeout=1,
+                )
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertNotIn(str(sensitive_path), str(raised.exception))
+
+    def test_parent_path_planners_do_not_touch_candidate_filesystems(self):
+        tree = ast.parse(self.helper)
+        functions = {
+            node.name: node
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        for name in (
+            "discover_settings",
+            "discover_docker_raw",
+            "_external_host_path_candidate",
+            "_probe_external_host_path",
+            "_validate_external_host_paths",
+        ):
+            body = ast.get_source_segment(self.helper, functions[name])
+            for forbidden in (
+                ".exists(",
+                ".is_file(",
+                ".is_dir(",
+                ".resolve(",
+                ".stat(",
+                ".read_bytes(",
+                ".read_text(",
+                ".glob(",
+            ):
+                with self.subTest(function=name, forbidden=forbidden):
+                    self.assertNotIn(forbidden, body)
+        self.assertNotIn('document["resolved"]', retirement.EXTERNAL_PATH_PROBE_SCRIPT)
+        self.assertIn("os.O_NOFOLLOW", retirement.EXTERNAL_PATH_PROBE_SCRIPT)
+        self.assertIn("dir_fd=directory_fd", retirement.EXTERNAL_PATH_PROBE_SCRIPT)
+        self.assertEqual(retirement.EXTERNAL_PATH_PROBE_TIMEOUT_SECONDS, 10)
+        self.assertEqual(retirement.EXTERNAL_PATH_PROBE_AGGREGATE_SECONDS, 90)
+
+    def test_external_probe_aggregate_and_archive_recheck_order_are_bounded(self):
+        sources = [
+            retirement.PvcSource(
+                "one", "pv-one", Path("/Users/example/one"), "/Users/example/one"
+            ),
+            retirement.PvcSource(
+                "two", "pv-two", Path("/Users/example/two"), "/Users/example/two"
+            ),
+        ]
+        with mock.patch.object(
+            retirement.time, "monotonic", side_effect=[0.0, 0.0, 89.0, 91.0]
+        ), mock.patch.object(
+            retirement,
+            "_probe_external_host_path",
+            return_value=Path("/Users/example/one"),
+        ) as probe:
+            with self.assertRaisesRegex(retirement.RetirementError, "aggregate"):
+                retirement._validate_external_host_paths(
+                    mock.Mock(),
+                    sources,
+                    home=Path("/Users/example"),
+                    backup_root=Path("/Users/example/backups"),
+                )
+        probe.assert_called_once()
+        self.assertEqual(probe.call_args.kwargs["timeout"], 10)
+
+        order = []
+
+        def record_probe(_runner, path, **_kwargs):
+            order.append(("probe", path.name))
+            return path
+
+        def record_tar(_runner, source, destination):
+            order.append(("tar", source.name))
+            destination.write_bytes(b"archive")
+
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            retirement, "_probe_external_host_path", side_effect=record_probe
+        ), mock.patch.object(
+            retirement, "_tar_host_directory", side_effect=record_tar
+        ):
+            retirement._archive_quiesced_host_paths(
+                mock.Mock(),
+                sources,
+                Path(directory),
+                home=Path("/Users/example"),
+                backup_root=Path("/Users/example/backups"),
+            )
+        self.assertEqual(
+            order,
+            [("probe", "one"), ("tar", "one"), ("probe", "two"), ("tar", "two")],
+        )
 
     def test_keychain_recovery_key_is_created_then_read_back(self):
         secret = "k" * 64

@@ -304,9 +304,29 @@ The host-only backup directory defaults to
 `~/Library/Application Support/BuddyStudy/KubernetesRetirementBackups` and is
 created with mode `0700` outside Docker Desktop's Data directory. Symlinked
 settings, data, and backup paths are rejected; a declared external `/Users` or
-`/Volumes` hostPath that is missing or symlinked also blocks apply. FileVault
-must be on and the source and backup must be on the same APFS filesystem. The
-preflight requires a 12 GiB base reserve plus twice the measured external
+`/Volumes` hostPath that is missing or symlinked also blocks apply. External
+paths are lexically rejected before filesystem access when they contain NUL,
+`.`/`..`, case aliases at any component, another user's home, the runner home itself, or a
+mounted-volume root. An accepted `/Users` path must be a non-empty descendant
+of the exact runner home; an accepted `/Volumes` path must be below
+`/Volumes/<mount>/`, not the mount root. Each component is then opened by an
+isolated Python child using `lstat` plus `openat`-style `O_NOFOLLOW` directory
+traversal and `fstat`. Each child has a 10-second process-group timeout and the
+preflight path plan has a 90-second aggregate deadline. The same bounded probe
+runs immediately before each quiesced hostPath tar, with a 90-second cumulative
+probe budget, so a stale mount cannot indefinitely delay rollback after writer
+shutdown. A data path that equals, contains, or is contained by the retirement
+backup root is rejected so an archive cannot recursively include its own
+staging or output. Overlap comparisons case-fold every path component to match
+the conservative behavior required on case-insensitive APFS volumes.
+
+Docker settings discovery and standard-Data-subtree `DataFolder`/`Docker.raw`
+discovery use separate 10-second isolated probes as well; the parent helper
+does not stat, resolve, read, or glob those candidates. Probe requests travel
+only through stdin, their stdout is captured in memory, and argv, paths,
+stdout, stderr, settings contents, and errors are never copied into job logs.
+FileVault must be on and the source and backup must be on the same APFS
+filesystem. The preflight requires a 12 GiB base reserve plus twice the measured external
 hostPath size so plaintext staging and ciphertext can safely coexist. The
 helper seals manifests, logical dumps, settings, workload state, and
 external hostPath archives as an OpenSSL AES-256-CBC/PBKDF2 bundle with a
@@ -353,7 +373,7 @@ database-health, or container-health gate. The logical dump and RDB commands
 are backup operations after writers stop, not readiness checks.
 
 The read-only run has a 12-minute helper deadline inside a 15-minute Actions
-watchdog. Kubernetes inventory uses three bounded bulk-list calls, every
+watchdog. Kubernetes inventory uses at most three bounded bulk-list calls, every
 `kubectl` request has a 20-second API timeout, and all external hostPaths are
 measured by one bounded `du` process. Progress output contains only a fixed
 non-sensitive stage label and elapsed seconds—never resource names, paths,
@@ -363,6 +383,10 @@ pipeline runs in its own process group, which is killed and reaped on timeout
 or interruption so descendants cannot keep an output pipe open. The 12-minute
 deadline is installed only for the standalone preflight command and is removed
 before exit; it is never shared with apply or rollback.
+Storage progress is split into fixed `desktop-settings`, `docker-storage`,
+`filevault`, `storage-source-plan`, `external-path-validation`, and
+`backup-preconditions` stages so a filesystem failure is localized without
+revealing a candidate path.
 
 The apply job allows six hours while each logical dump, hostPath archive,
 bundle seal, and APFS clone has a shorter bounded timeout, leaving rollback
