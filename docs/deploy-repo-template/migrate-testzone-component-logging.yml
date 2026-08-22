@@ -21,14 +21,13 @@ jobs:
     name: Migrate TestZone Component Logging
     runs-on: [self-hosted, macOS, ARM64, macbook-air, buddystudy]
     timeout-minutes: 15
-    env:
-      MIGRATION_REPORT: ${{ runner.temp }}/testzone-component-logging-migration-${{ github.run_id }}-${{ github.run_attempt }}.json
-
     steps:
       - name: Checkout audited migration helper
         uses: actions/checkout@v4
 
       - name: Strict read-only preflight of exact legacy containers
+        env:
+          MIGRATION_REPORT: ${{ runner.temp }}/testzone-component-logging-migration-${{ github.run_id }}-${{ github.run_attempt }}.json
         run: |
           set -euo pipefail
           python3 scripts/migrate_testzone_component_logging.py preflight \
@@ -36,6 +35,8 @@ jobs:
 
       - name: Recreate exact legacy component containers with bounded logs
         if: ${{ inputs.apply }}
+        env:
+          MIGRATION_REPORT: ${{ runner.temp }}/testzone-component-logging-migration-${{ github.run_id }}-${{ github.run_attempt }}.json
         run: |
           set -euo pipefail
           python3 scripts/migrate_testzone_component_logging.py migrate \
@@ -43,6 +44,8 @@ jobs:
 
       - name: Summary
         if: always()
+        env:
+          MIGRATION_REPORT: ${{ runner.temp }}/testzone-component-logging-migration-${{ github.run_id }}-${{ github.run_attempt }}.json
         run: |
           set -euo pipefail
           python3 scripts/migrate_testzone_component_logging.py render-summary \

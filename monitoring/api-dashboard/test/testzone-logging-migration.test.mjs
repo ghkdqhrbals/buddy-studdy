@@ -42,6 +42,8 @@ test("legacy TestZone logging migration defaults to read-only preflight", async 
     workflow,
     /migration-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}\.json/,
   );
+  assert.doesNotMatch(workflow.split("    steps:", 1)[0], /runner\.temp/);
+  assert.equal((workflow.match(/\$\{\{ runner\.temp \}\}/g) || []).length, 3);
   assert.match(workflow, /^        if: always\(\)$/m);
 });
 
