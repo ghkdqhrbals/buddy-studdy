@@ -25,7 +25,8 @@ Current workflow templates:
   partially applied V32 migration.
 - `configure-backend-network.yml`: Redis administrator ingress on the backend
   EC2 security group.
-- `deploy-admin-frontend.yml`: admin frontend runtime on EC2.
+- `deploy-admin-frontend.yml`: admin frontend Kubernetes image submission on
+  MacBook Air.
 - `notify-deployment-status.yml`: centralized Slack status receiver for
   one compact iOS release summary and concise threaded progress replies. Set
   `DEPLOY_SLACK_BOT_TOKEN` and `DEPLOY_SLACK_CHANNEL_ID`; the incoming webhook
@@ -161,11 +162,13 @@ The admin frontend is deployed separately from the backend. Copy
 `deploy-admin-frontend.yml` into the deploy repository's `.github/workflows/`
 directory. The app repository's `Build Admin Frontend Image` workflow dispatches
 `admin-frontend-image-published` and waits for **Deploy BuddyStudy Admin
-Frontend**.
+Frontend** on the MacBook Air runner.
 
-The admin deploy workflow owns only the `buddystudy-admin-frontend` container.
-It must not rebuild backend, recreate MySQL, recreate Loki/Grafana, or run
-runtime health checks.
+The admin deploy workflow owns only the `buddystudy-admin-frontend` Kubernetes
+Deployment image. It submits the immutable image and verifies the stored
+Deployment spec, but does not wait for rollout, pod readiness, or an HTTP health
+check. Grafana owns runtime outage monitoring. The workflow must not rebuild the
+backend or recreate MySQL, Loki, or Grafana.
 
 ## Monitoring Deploy
 

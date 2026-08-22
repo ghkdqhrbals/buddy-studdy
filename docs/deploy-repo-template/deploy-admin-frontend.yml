@@ -1,6 +1,6 @@
 name: Deploy BuddyStudy Admin Frontend
 
-on:
+"on":
   repository_dispatch:
     types:
       - admin-frontend-image-published
@@ -12,16 +12,23 @@ on:
         type: string
 
 concurrency:
-  group: deploy-admin-frontend
+  group: deploy-admin-frontend-macbook-air
   cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   deploy_admin_frontend:
-    name: Deploy Admin Frontend
-    runs-on: [self-hosted, Linux, ARM64, ec2, buddystudy]
+    name: Submit Admin Frontend Image on MacBook Air
+    runs-on: [self-hosted, macOS, ARM64, macbook-air, buddystudy]
     timeout-minutes: 10
     env:
       IMAGE_REF: ${{ github.event.client_payload.image || inputs.image }}
+      NAMESPACE: buddystudy
+      DEPLOYMENT: buddystudy-admin-frontend
+      CONTAINER: admin-frontend
+      ENVIRONMENT: macbook-air
 
     steps:
       - name: Validate input
@@ -32,34 +39,66 @@ jobs:
             exit 1
           fi
 
-      - name: Deploy admin frontend container
-        env:
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+      - name: Prepare kubectl environment
         run: |
           set -euo pipefail
+          echo "/opt/homebrew/bin" >> "${GITHUB_PATH}"
+          echo "/usr/local/bin" >> "${GITHUB_PATH}"
+          kubeconfig="${KUBECONFIG:-${HOME}/.kube/config}"
+          if [[ "${kubeconfig}" == *'$'* ]]; then
+            kubeconfig="${HOME}/.kube/config"
+          fi
+          echo "KUBECONFIG=${kubeconfig}" >> "${GITHUB_ENV}"
 
-          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
-          docker pull "${IMAGE_REF}"
-          docker network create buddystudy-net >/dev/null 2>&1 || true
+      - name: Validate kubectl context
+        run: |
+          set -euo pipefail
+          export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH}"
+          export KUBECONFIG="${KUBECONFIG:-${HOME}/.kube/config}"
+          if [[ "${KUBECONFIG}" == *'$'* ]]; then
+            export KUBECONFIG="${HOME}/.kube/config"
+          fi
+          kubectl config current-context
+          kubectl get namespace "${NAMESPACE}" >/dev/null
 
-          docker rm -f buddystudy-admin-frontend >/dev/null 2>&1 || true
-          docker run -d \
-            --name buddystudy-admin-frontend \
-            --network buddystudy-net \
-            --restart unless-stopped \
-            "${IMAGE_REF}"
+      - name: Submit admin frontend image
+        run: |
+          set -euo pipefail
+          export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH}"
+          export KUBECONFIG="${KUBECONFIG:-${HOME}/.kube/config}"
+          if [[ "${KUBECONFIG}" == *'$'* ]]; then
+            export KUBECONFIG="${HOME}/.kube/config"
+          fi
 
-          for attempt in $(seq 1 20); do
-            if docker inspect -f '{{.State.Running}}' buddystudy-admin-frontend 2>/dev/null | grep -qx true; then
-              sleep 2
-              if docker inspect -f '{{.State.Running}}' buddystudy-admin-frontend 2>/dev/null | grep -qx true; then
-                exit 0
-              fi
-            fi
-            sleep 2
-          done
+          kubectl -n "${NAMESPACE}" set image \
+            "deployment/${DEPLOYMENT}" \
+            "${CONTAINER}=${IMAGE_REF}"
+          kubectl -n "${NAMESPACE}" annotate \
+            "deployment/${DEPLOYMENT}" \
+            "buddystudy.github.com/deployed-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            "buddystudy.github.com/source-run=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --overwrite
 
-          echo "Admin frontend did not stay running." >&2
-          docker logs buddystudy-admin-frontend || true
-          exit 1
+          applied_image="$(
+            kubectl -n "${NAMESPACE}" get "deployment/${DEPLOYMENT}" \
+              --output="jsonpath={.spec.template.spec.containers[?(@.name==\"${CONTAINER}\")].image}"
+          )"
+          if [ "${applied_image}" != "${IMAGE_REF}" ]; then
+            echo "Deployment spec image mismatch: expected ${IMAGE_REF}, found ${applied_image:-<missing>}." >&2
+            exit 1
+          fi
+          echo "Deployment spec accepted image: ${applied_image}"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Admin Frontend Deployment"
+            echo ""
+            echo "- Target: \`${ENVIRONMENT}\`"
+            echo "- Namespace: \`${NAMESPACE}\`"
+            echo "- Deployment: \`${DEPLOYMENT}\`"
+            echo "- Image: \`${IMAGE_REF}\`"
+            echo "- Submission: \`${{ job.status }}\`"
+            echo "- Runtime readiness: monitored by Grafana, not gated by GitHub Actions"
+          } >> "${GITHUB_STEP_SUMMARY}"
