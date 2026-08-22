@@ -10,6 +10,8 @@ Grafana, and the private TestZone API behind one Basic Auth boundary.
 - `/system.html`: application, database, Redis, host, and runtime metrics
 - `/audit.html`: monitoring workspace page, authentication, and action history
 - `/users.html`: authenticated member search, membership tiers, and quota controls
+- `/jobs.html`: independently server-paginated managed-job status and execution
+  history, run details, and authenticated retries
 - `/streams.html`: authenticated Redis Stream delivery status with
   configured MAXLEN and retention use, consumer-group offsets, lag, pending
   ranges, per-consumer ownership, retry counts, partial-inspection errors,
@@ -20,7 +22,7 @@ Grafana, and the private TestZone API behind one Basic Auth boundary.
 
 Every monitoring route is served by the shared React application. It provides
 one fixed navigation shell and visual system across API Logs, API Performance,
-TestZone, Users & Quotas, Redis Streams, Access & Audit, and Settings. Manage
+TestZone, Users & Quotas, Batch Jobs, Redis Streams, Access & Audit, and Settings. Manage
 adds one session-scoped administrator API boundary, TanStack Query server
 state, dense reusable tables, and a right-side object inspector. Redis field
 values and outbox payload JSON can be explored as a nested tree or raw JSON

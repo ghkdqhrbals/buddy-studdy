@@ -21,6 +21,11 @@ import type {
 const PAGE_SIZE = 20;
 const emptyUserPage: NativeAdvertisementUserPage = { users: [], totalCount: 0, limit: PAGE_SIZE, offset: 0 };
 
+type CampaignView = {
+  offset: number;
+  filters: NativeAdvertisementCampaignFilters;
+};
+
 const initialForm: NativeAdvertisementCampaignInput = {
   campaignKey: "",
   audience: "ALL",
@@ -71,16 +76,20 @@ export function AdvertisingPanel({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [campaignResultAnnouncement, setCampaignResultAnnouncement] = useState("");
   const editorRef = useRef<HTMLElement | null>(null);
   const validationRef = useRef<HTMLDivElement | null>(null);
   const campaignRequestIdRef = useRef(0);
+  const campaignViewRef = useRef<CampaignView>({ offset: 0, filters: {} });
 
   useEffect(() => {
-    void loadCampaigns(offset, {
+    const filters = {
       query: appliedCampaignQuery,
       status: campaignStatusFilter,
       audience: campaignAudienceFilter,
-    });
+    };
+    campaignViewRef.current = { offset, filters };
+    void loadCampaigns(offset, filters);
   }, [offset, refreshKey, appliedCampaignQuery, campaignStatusFilter, campaignAudienceFilter]);
 
   const selected = useMemo(
@@ -105,6 +114,7 @@ export function AdvertisingPanel({
       setCampaigns(page.campaigns);
       setTotalCount(page.totalCount);
       setRankingPolicy(page.rankingPolicy);
+      setCampaignResultAnnouncement(`${page.totalCount.toLocaleString()} campaign results loaded.`);
       setActivityCampaignId((current) => {
         if (current !== null && page.campaigns.some((campaign) => campaign.id === current)) return current;
         return page.campaigns[0]?.id ?? null;
@@ -160,15 +170,13 @@ export function AdvertisingPanel({
       const saved = editingId === null
         ? await createNativeAdvertisementCampaign(form, onUnauthorized)
         : await updateNativeAdvertisementCampaign(editingId, form, onUnauthorized);
-      const nextOffset = editingId === null ? 0 : offset;
-      setOffset(nextOffset);
+      const latestView = campaignViewRef.current;
+      const refreshedView = editingId === null ? { ...latestView, offset: 0 } : latestView;
+      setOffset(refreshedView.offset);
       setActivityCampaignId(saved.id);
       closeEditor();
-      await loadCampaigns(nextOffset, {
-        query: appliedCampaignQuery,
-        status: campaignStatusFilter,
-        audience: campaignAudienceFilter,
-      });
+      campaignViewRef.current = refreshedView;
+      await loadCampaigns(refreshedView.offset, refreshedView.filters);
     } catch (cause) {
       setError(message(cause));
     } finally {
@@ -183,26 +191,68 @@ export function AdvertisingPanel({
 
   function applyCampaignSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const query = campaignQuery.trim();
+    const filters = {
+      query,
+      status: campaignStatusFilter,
+      audience: campaignAudienceFilter,
+    };
+    invalidateCampaignResults(0, filters);
     setOffset(0);
-    setAppliedCampaignQuery(campaignQuery.trim());
+    setAppliedCampaignQuery(query);
+    if (query === appliedCampaignQuery && offset === 0) void loadCampaigns(0, filters);
   }
 
   function changeCampaignStatus(value: NativeAdvertisementCampaignStatusFilter) {
+    invalidateCampaignResults(0, {
+      query: appliedCampaignQuery,
+      status: value,
+      audience: campaignAudienceFilter,
+    });
     setOffset(0);
     setCampaignStatusFilter(value);
   }
 
   function changeCampaignAudience(value: NativeAdvertisementCampaignAudienceFilter) {
+    invalidateCampaignResults(0, {
+      query: appliedCampaignQuery,
+      status: campaignStatusFilter,
+      audience: value,
+    });
     setOffset(0);
     setCampaignAudienceFilter(value);
   }
 
   function resetCampaignFilters() {
+    const filters: NativeAdvertisementCampaignFilters = { query: "", status: "", audience: "" };
+    invalidateCampaignResults(0, filters);
     setCampaignQuery("");
     setAppliedCampaignQuery("");
     setCampaignStatusFilter("");
     setCampaignAudienceFilter("");
     setOffset(0);
+    if (!appliedCampaignQuery && !campaignStatusFilter && !campaignAudienceFilter && offset === 0) {
+      void loadCampaigns(0, filters);
+    }
+  }
+
+  function changeCampaignOffset(nextOffset: number) {
+    invalidateCampaignResults(nextOffset, {
+      query: appliedCampaignQuery,
+      status: campaignStatusFilter,
+      audience: campaignAudienceFilter,
+    });
+    setOffset(nextOffset);
+  }
+
+  function invalidateCampaignResults(nextOffset: number, filters: NativeAdvertisementCampaignFilters) {
+    campaignRequestIdRef.current += 1;
+    campaignViewRef.current = { offset: nextOffset, filters };
+    setCampaigns([]);
+    setTotalCount(0);
+    setError(null);
+    setLoading(true);
+    setCampaignResultAnnouncement("");
   }
 
   return (
@@ -335,6 +385,7 @@ export function AdvertisingPanel({
           <div><h2>Campaigns</h2><p>Performance uses the same 30-day selected cohort as server ranking.</p></div>
           <span>{totalCount.toLocaleString()} {hasCampaignFilters ? "matching" : "total"}</span>
         </div>
+        <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">{campaignResultAnnouncement}</p>
         <form className="ad-campaign-filters" role="search" aria-label="Filter advertising campaigns" onSubmit={applyCampaignSearch}>
           <div className="app-update-field ad-campaign-query-field">
             <label htmlFor="ad-campaign-query">Find campaign</label>
@@ -406,9 +457,9 @@ export function AdvertisingPanel({
           ) : null}
         </div>
         <div className="pager ad-pager">
-          <button className="secondary-button" disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>Previous</button>
+          <button className="secondary-button" disabled={offset === 0 || loading} onClick={() => changeCampaignOffset(Math.max(0, offset - PAGE_SIZE))}>Previous</button>
           <span>{totalCount === 0 ? 0 : offset + 1}–{Math.min(totalCount, offset + campaigns.length)} of {totalCount}</span>
-          <button className="secondary-button" disabled={offset + campaigns.length >= totalCount || loading} onClick={() => setOffset(offset + PAGE_SIZE)}>Next</button>
+          <button className="secondary-button" disabled={offset + campaigns.length >= totalCount || loading} onClick={() => changeCampaignOffset(offset + PAGE_SIZE)}>Next</button>
         </div>
       </section>
 
@@ -449,40 +500,56 @@ function AudienceActivity({
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadedViewKey, setLoadedViewKey] = useState("");
+  const [userResultAnnouncement, setUserResultAnnouncement] = useState("");
   const previousCampaignId = useRef<number | null>(null);
   const userRequestIdRef = useRef(0);
   const selected = campaigns.find((campaign) => campaign.id === campaignId) ?? null;
+  const currentViewKey = userViewKey(campaignId, offset, appliedQuery, status, refreshKey);
+  const pageIsCurrent = loadedViewKey === currentViewKey;
+  const visiblePage = pageIsCurrent ? page : emptyUserPage;
+  const activityLoading = campaignId !== null && (loading || !pageIsCurrent);
 
   useEffect(() => {
     if (campaignId === null) {
       userRequestIdRef.current += 1;
       previousCampaignId.current = null;
       setPage(emptyUserPage);
+      setLoadedViewKey("");
       setLoading(false);
+      setUserResultAnnouncement("");
       return;
     }
     const campaignChanged = previousCampaignId.current !== campaignId;
     previousCampaignId.current = campaignId;
-    if (campaignChanged) setPage(emptyUserPage);
+    if (campaignChanged) invalidateUserResults();
     if (campaignChanged && offset !== 0) {
-      userRequestIdRef.current += 1;
-      setLoading(false);
       setOffset(0);
       return;
     }
-    void loadUsers(campaignId);
+    void loadUsers(campaignId, offset, appliedQuery, status, currentViewKey);
   }, [campaignId, appliedQuery, status, offset, refreshKey]);
 
-  async function loadUsers(selectedCampaignId: number) {
+  async function loadUsers(
+    selectedCampaignId: number,
+    nextOffset: number,
+    nextQuery: string,
+    nextStatus: NativeAdvertisementUserStatusFilter,
+    viewKey: string,
+  ) {
     const requestId = ++userRequestIdRef.current;
     setLoading(true);
     setError(null);
+    setUserResultAnnouncement("");
     try {
-      const nextPage = await fetchNativeAdvertisementCampaignUsers(selectedCampaignId, onUnauthorized, PAGE_SIZE, offset, appliedQuery, status);
+      const nextPage = await fetchNativeAdvertisementCampaignUsers(selectedCampaignId, onUnauthorized, PAGE_SIZE, nextOffset, nextQuery, nextStatus);
       if (requestId !== userRequestIdRef.current) return;
       setPage(nextPage);
+      setLoadedViewKey(viewKey);
+      setUserResultAnnouncement(`${nextPage.totalCount.toLocaleString()} audience activity results loaded.`);
     } catch (cause) {
       if (requestId !== userRequestIdRef.current) return;
+      setLoadedViewKey(viewKey);
       setError(message(cause));
     } finally {
       if (requestId === userRequestIdRef.current) setLoading(false);
@@ -490,14 +557,41 @@ function AudienceActivity({
   }
 
   function selectCampaign(value: string) {
+    invalidateUserResults();
     setOffset(0);
     onCampaignChange(Number(value));
   }
 
   function applySearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const nextQuery = query.trim();
+    invalidateUserResults();
     setOffset(0);
-    setAppliedQuery(query.trim());
+    setAppliedQuery(nextQuery);
+    if (nextQuery === appliedQuery && offset === 0 && campaignId !== null) {
+      const viewKey = userViewKey(campaignId, 0, nextQuery, status, refreshKey);
+      void loadUsers(campaignId, 0, nextQuery, status, viewKey);
+    }
+  }
+
+  function changeStatus(nextStatus: NativeAdvertisementUserStatusFilter) {
+    invalidateUserResults();
+    setStatus(nextStatus);
+    setOffset(0);
+  }
+
+  function changeUserOffset(nextOffset: number) {
+    invalidateUserResults();
+    setOffset(nextOffset);
+  }
+
+  function invalidateUserResults() {
+    userRequestIdRef.current += 1;
+    setPage(emptyUserPage);
+    setLoadedViewKey("");
+    setError(null);
+    setLoading(true);
+    setUserResultAnnouncement("");
   }
 
   return (
@@ -507,8 +601,9 @@ function AudienceActivity({
           <h2 id="ad-activity-title">Audience activity</h2>
           <p>Feed deliveries are server-added placements. Destination opens are idempotent ad-tap events, not proof that the external page loaded.</p>
         </div>
-        <span>{page.totalCount.toLocaleString()} users</span>
+        <span>{visiblePage.totalCount.toLocaleString()} users</span>
       </div>
+      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">{userResultAnnouncement}</p>
 
       <div className="ad-activity-toolbar">
         <Field label="Campaign">
@@ -528,7 +623,7 @@ function AudienceActivity({
           </div>
         </form>
         <Field label="Open status">
-          <select value={status} onChange={(event) => { setStatus(event.target.value as NativeAdvertisementUserStatusFilter); setOffset(0); }}>
+          <select value={status} onChange={(event) => changeStatus(event.target.value as NativeAdvertisementUserStatusFilter)}>
             <option value="">All delivery activity</option>
             <option value="OPENED">Opened destination</option>
             <option value="NOT_OPENED">No destination open</option>
@@ -539,11 +634,11 @@ function AudienceActivity({
       {selected ? <p className="ad-activity-context"><strong>{selected.titleKo}</strong><span>{selected.campaignKey}</span></p> : null}
       {error ? <div className="ad-validation-summary" role="alert">{error}</div> : null}
 
-      <div className="admin-table-scroll" role="region" aria-label="Campaign audience activity" tabIndex={0}>
+      <div className="admin-table-scroll" role="region" aria-label="Campaign audience activity" aria-busy={activityLoading} tabIndex={0}>
         <table className="admin-table ad-user-table">
           <thead><tr><th>User</th><th>Feed deliveries</th><th>Destination opens</th><th>Open rate</th><th>Devices</th><th>First delivery</th><th>Latest delivery</th><th>Latest open</th></tr></thead>
           <tbody>
-            {page.users.map((user) => (
+            {visiblePage.users.map((user) => (
               <tr key={user.userId}>
                 <td data-label="User"><UserIdentity user={user} /></td>
                 <td data-label="Feed deliveries"><strong>{user.selectionCount.toLocaleString()}</strong></td>
@@ -557,18 +652,28 @@ function AudienceActivity({
             ))}
           </tbody>
         </table>
-        {loading ? <p className="table-empty" role="status">Loading audience activity…</p> : null}
-        {!loading && campaignId !== null && page.users.length === 0 ? <p className="table-empty">No users match these filters.</p> : null}
-        {!loading && campaignId === null ? <p className="table-empty">Create a campaign to inspect audience activity.</p> : null}
+        {activityLoading ? <p className="table-empty" role="status">Loading audience activity…</p> : null}
+        {!activityLoading && campaignId !== null && visiblePage.users.length === 0 ? <p className="table-empty">No users match these filters.</p> : null}
+        {!activityLoading && campaignId === null ? <p className="table-empty">Create a campaign to inspect audience activity.</p> : null}
       </div>
       <div className="pager ad-pager">
-        <button className="secondary-button" disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>Previous</button>
-        <span>{page.totalCount === 0 ? 0 : offset + 1}–{Math.min(page.totalCount, offset + page.users.length)} of {page.totalCount}</span>
-        <button className="secondary-button" disabled={offset + page.users.length >= page.totalCount || loading} onClick={() => setOffset(offset + PAGE_SIZE)}>Next</button>
+        <button className="secondary-button" disabled={offset === 0 || activityLoading} onClick={() => changeUserOffset(Math.max(0, offset - PAGE_SIZE))}>Previous</button>
+        <span>{visiblePage.totalCount === 0 ? 0 : offset + 1}–{Math.min(visiblePage.totalCount, offset + visiblePage.users.length)} of {visiblePage.totalCount}</span>
+        <button className="secondary-button" disabled={offset + visiblePage.users.length >= visiblePage.totalCount || activityLoading} onClick={() => changeUserOffset(offset + PAGE_SIZE)}>Next</button>
       </div>
       <p className="ad-privacy-note">Anonymous rows are historical installation identities and are not linked to a member who signs in later. Raw device identifiers are not shown.</p>
     </section>
   );
+}
+
+function userViewKey(
+  campaignId: number | null,
+  offset: number,
+  query: string,
+  status: NativeAdvertisementUserStatusFilter,
+  refreshKey: number,
+) {
+  return JSON.stringify([campaignId, offset, query, status, refreshKey]);
 }
 
 function UserIdentity({ user }: { user: NativeAdvertisementUserSummary }) {

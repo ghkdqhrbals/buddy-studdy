@@ -127,8 +127,13 @@ export async function fetchJobRuns(
   return response;
 }
 
-export function fetchJobStatuses(onUnauthorized: UnauthorizedHandler): Promise<ScheduledJobStatusResponse> {
-  return request("/api/v1/admin/jobs/statuses", { method: "GET" }, onUnauthorized);
+export function fetchJobStatuses(
+  onUnauthorized: UnauthorizedHandler,
+  limit = 10,
+  offset = 0,
+): Promise<ScheduledJobStatusResponse> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  return request(`/api/v1/admin/jobs/statuses?${params}`, { method: "GET" }, onUnauthorized);
 }
 
 export function retryJob(jobName: string, runId: number | null, onUnauthorized: UnauthorizedHandler): Promise<ScheduledJobRun> {

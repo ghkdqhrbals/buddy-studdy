@@ -131,13 +131,17 @@ Example readiness response:
 }
 ```
 
-Admin users can inspect scheduler freshness and the latest run for each
-monitored job:
+Admin users can inspect scheduler freshness and the latest run for each managed
+job in bounded pages:
 
 ```http
-GET /api/v1/admin/jobs/statuses
+GET /api/v1/admin/jobs/statuses?limit=10&offset=0
 Authorization: Bearer <adminToken>
 ```
+
+New clients must send both pagination parameters. Omitting `limit` is retained
+only for legacy clients and returns the full registry using the same indexed
+latest-run lookup.
 
 Response:
 
@@ -146,7 +150,10 @@ Response:
   "jobs": [
     {
       "jobName": "question-schedule",
+      "displayName": "Scheduled question dispatch",
+      "description": "Delivers due scheduled study questions.",
       "enabled": true,
+      "monitored": true,
       "scheduleType": "FIXED_DELAY",
       "scheduleValue": "30s",
       "latestRun": null,
@@ -155,7 +162,10 @@ Response:
       "timeoutSeconds": 300,
       "stuck": false
     }
-  ]
+  ],
+  "totalCount": 23,
+  "limit": 10,
+  "offset": 0
 }
 ```
 

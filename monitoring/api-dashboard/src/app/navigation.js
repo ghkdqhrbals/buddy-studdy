@@ -18,7 +18,7 @@ import {
   Users,
 } from "lucide-react";
 
-export const UI_VERSION = "2026.08.19.2";
+export const UI_VERSION = "2026.08.22.1";
 export const NAV_COLLAPSED_KEY = "buddystudy.monitoring.nav.collapsed";
 export const NAV_GROUP_KEY = "buddystudy.monitoring.nav.groups";
 export const NAV_MODE_KEY = "buddystudy.monitoring.nav.mode";

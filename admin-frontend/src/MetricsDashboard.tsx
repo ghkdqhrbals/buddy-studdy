@@ -134,7 +134,7 @@ function FailedJobs({ jobs }: { jobs: ScheduledJobRun[] }) {
       {jobs.length === 0 ? <p className="muted-line">None</p> : null}
       {jobs.map((job) => (
         <div className="failed-job" key={job.id}>
-          <strong>{job.jobName}</strong>
+          <strong>{job.displayName || job.jobName}</strong>
           <span>{formatDateTime(job.startedAt)}</span>
           <small>{job.errorMessage ?? job.summary ?? "Failed"}</small>
         </div>

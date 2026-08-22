@@ -91,16 +91,17 @@ class ScheduledJobRunPersistenceAdapter(
         return ScheduledJobRunPageResponse(rows, total, limit, offset)
     }
 
-    override suspend fun findSnapshots(jobNames: List<String>): List<ScheduledJobSnapshot> {
-        val jobFilter = if (jobNames.isEmpty()) "" else "where job_name in (${indexedBindMarkers("jobName", jobNames.size)})"
-        var jobSpec = client.sql(
+    override suspend fun findSnapshotPage(limit: Int, offset: Int): ScheduledJobSnapshotPage {
+        val total = client.sql("select count(*) as total from scheduled_jobs")
+            .map { row, _ -> row.get("total", java.lang.Long::class.java)!!.toLong() }
+            .one()
+            .awaitSingle()
+        val snapshots = client.sql(
             """
             select job_name, enabled, schedule_type, schedule_value, timeout_seconds from scheduled_jobs
-                $jobFilter order by job_name
+            order by job_name limit :limit offset :offset
             """.trimIndent(),
-        )
-        if (jobNames.isNotEmpty()) jobSpec = jobSpec.bindIndexed("jobName", jobNames)
-        val snapshots = jobSpec.map { row, _ ->
+        ).bind("limit", limit).bind("offset", offset).map { row, _ ->
             RawSnapshot(
                 row.get("job_name", String::class.java)!!,
                 row.get("enabled", java.lang.Boolean::class.java)!!.booleanValue(),
@@ -109,31 +110,83 @@ class ScheduledJobRunPersistenceAdapter(
                 row.get("timeout_seconds", Integer::class.java)!!.toInt().coerceAtLeast(1),
             )
         }.all().collectList().awaitSingle()
-        if (snapshots.isEmpty()) return emptyList()
+        if (snapshots.isEmpty()) return ScheduledJobSnapshotPage(emptyList(), total, limit, offset)
         val names = snapshots.map { it.jobName }
-        val latest = latestRuns(names, null)
-        val successful = latestRuns(names, JobRunStatus.SUCCESS)
-        return snapshots.map {
+        val latestIds = findLatestRunIds(names).associateBy { it.jobName }
+        val runsById = findRunsById(
+            latestIds.values.flatMapTo(mutableSetOf()) { ids ->
+                listOfNotNull(ids.latestRunId, ids.lastSuccessfulRunId)
+            },
+        )
+        val rows = snapshots.map {
+            val ids = latestIds[it.jobName]
             ScheduledJobSnapshot(
                 it.jobName, it.enabled, it.scheduleType, it.scheduleValue, it.timeoutSeconds,
-                latest[it.jobName], successful[it.jobName],
+                ids?.latestRunId?.let(runsById::get),
+                ids?.lastSuccessfulRunId?.let(runsById::get),
             )
         }
+        return ScheduledJobSnapshotPage(rows, total, limit, offset)
     }
 
-    private suspend fun latestRuns(names: List<String>, status: JobRunStatus?): Map<String, ScheduledJobRun> {
-        val statusClause = if (status == null) "" else "and status = :status"
-        val jobMarkers = indexedBindMarkers("jobName", names.size)
-        var spec = client.sql(
+    override suspend fun findExistingJobNames(jobNames: List<String>): Set<String> {
+        if (jobNames.isEmpty()) return emptySet()
+        val jobMarkers = indexedBindMarkers("jobName", jobNames.size)
+        return client.sql("select job_name from scheduled_jobs where job_name in ($jobMarkers)")
+            .bindIndexed("jobName", jobNames)
+            .map { row, _ -> row.get("job_name", String::class.java)!! }
+            .all()
+            .collectList()
+            .awaitSingle()
+            .toSet()
+    }
+
+    private suspend fun findLatestRunIds(names: List<String>): List<LatestRunIds> {
+        val indexedTopOneQueries = names.indices.joinToString("\nunion all\n") { index ->
             """
-            select * from (
-                select r.*, row_number() over (partition by r.job_name order by r.started_at desc, r.id desc) rn
-                from scheduled_job_runs r where r.job_name in ($jobMarkers) $statusClause
-            ) ranked where rn = 1
-            """.trimIndent(),
-        ).bindIndexed("jobName", names)
-        if (status != null) spec = spec.bind("status", status.name)
-        return spec.map { row, _ -> row.toRun() }.all().collectList().awaitSingle().associateBy { it.jobName }
+            select
+                :jobName$index as job_name,
+                (
+                    select /*+ INDEX(candidate idx_scheduled_job_runs_name_started_id) */ candidate.id
+                    from scheduled_job_runs candidate
+                    where candidate.job_name = :jobName$index
+                    order by candidate.started_at desc, candidate.id desc
+                    limit 1
+                ) as latest_run_id,
+                (
+                    select /*+ INDEX(candidate idx_scheduled_job_runs_name_status_started_id) */ candidate.id
+                    from scheduled_job_runs candidate
+                    where candidate.job_name = :jobName$index and candidate.status = :successStatus
+                    order by candidate.started_at desc, candidate.id desc
+                    limit 1
+                ) as last_successful_run_id
+            """.trimIndent()
+        }
+        return client.sql(indexedTopOneQueries)
+            .bindIndexed("jobName", names)
+            .bind("successStatus", JobRunStatus.SUCCESS.name)
+            .map { row, _ ->
+                LatestRunIds(
+                    jobName = row.get("job_name", String::class.java)!!,
+                    latestRunId = (row.get("latest_run_id") as? Number)?.toLong(),
+                    lastSuccessfulRunId = (row.get("last_successful_run_id") as? Number)?.toLong(),
+                )
+            }
+            .all()
+            .collectList()
+            .awaitSingle()
+    }
+
+    private suspend fun findRunsById(runIds: Set<Long>): Map<Long, ScheduledJobRun> {
+        if (runIds.isEmpty()) return emptyMap()
+        val runMarkers = indexedBindMarkers("runId", runIds.size)
+        return client.sql("select * from scheduled_job_runs where id in ($runMarkers)")
+            .bindIndexed("runId", runIds)
+            .map { row, _ -> row.toRun() }
+            .all()
+            .collectList()
+            .awaitSingle()
+            .associateBy(ScheduledJobRun::id)
     }
 
     private suspend fun findById(id: Long): ScheduledJobRun =
@@ -167,6 +220,12 @@ class ScheduledJobRunPersistenceAdapter(
     private data class RawSnapshot(
         val jobName: String, val enabled: Boolean, val scheduleType: String,
         val scheduleValue: String, val timeoutSeconds: Int,
+    )
+
+    private data class LatestRunIds(
+        val jobName: String,
+        val latestRunId: Long?,
+        val lastSuccessfulRunId: Long?,
     )
 
     private fun <T : Any> DatabaseClient.GenericExecuteSpec.bindNullable(name: String, value: T?, type: Class<T>) =

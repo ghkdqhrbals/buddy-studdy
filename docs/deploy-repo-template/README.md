@@ -25,8 +25,8 @@ Current workflow templates:
   partially applied V32 migration.
 - `configure-backend-network.yml`: Redis administrator ingress on the backend
   EC2 security group.
-- `deploy-admin-frontend.yml`: admin frontend Kubernetes image submission on
-  MacBook Air.
+- `deploy-admin-frontend.yml`: private admin frontend container image
+  submission on the backend EC2 host.
 - `notify-deployment-status.yml`: centralized Slack status receiver for
   one compact iOS release summary and concise threaded progress replies. Set
   `DEPLOY_SLACK_BOT_TOKEN` and `DEPLOY_SLACK_CHANNEL_ID`; the incoming webhook
@@ -162,15 +162,15 @@ The admin frontend is deployed separately from the backend. Copy
 `deploy-admin-frontend.yml` into the deploy repository's `.github/workflows/`
 directory. The app repository's `Build Admin Frontend Image` workflow dispatches
 `admin-frontend-image-published` and waits for **Deploy BuddyStudy Admin
-Frontend** on the MacBook Air runner.
+Frontend** on the EC2 deploy-only runner.
 
-The admin deploy workflow owns only the `buddystudy-admin-frontend` Kubernetes
-Deployment image. It submits the immutable image and verifies the stored
-Deployment spec, but does not wait for rollout, pod readiness, or an HTTP health
-check. If the Docker Desktop Kubernetes API is unavailable, it may restart
-Docker Desktop and wait only for the namespace API required to submit the image.
-Grafana owns runtime outage monitoring. The workflow must not rebuild the
-backend or recreate MySQL, Loki, or Grafana.
+The admin deploy workflow owns only the private `buddystudy-admin-frontend`
+container attached to `buddystudy-swarm-net`, where the backend Nginx serves it
+under `https://api.ghkdqhrbals.org/admin/`. It pulls the immutable image,
+replaces only that container, and verifies its configured image without waiting
+for container state, readiness, or an HTTP health check. Grafana owns runtime
+outage monitoring. The workflow must not rebuild the backend or recreate MySQL,
+Loki, or Grafana.
 
 ## Monitoring Deploy
 

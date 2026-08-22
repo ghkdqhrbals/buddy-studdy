@@ -19,7 +19,8 @@ import { InlineNotice } from "../components/InlineNotice.jsx";
 import { ObjectInspector } from "../components/ObjectInspector.jsx";
 import { formatDateTime, formatDuration, statusTone } from "../lib/format.js";
 
-const PAGE_SIZE = 20;
+const STATUS_PAGE_SIZE = 10;
+const RUN_PAGE_SIZE = 20;
 
 function scheduleLabel(job) {
   if (job.scheduleType === "CRON") return `${job.scheduleValue} · server time`;
@@ -36,19 +37,28 @@ function effectiveStatus(job) {
 
 function JobsWorkspace() {
   const queryClient = useQueryClient();
-  const [jobName, setJobName] = useState("");
-  const [offset, setOffset] = useState(0);
+  const [selectedJob, setSelectedJob] = useState(null);
+  const [statusOffset, setStatusOffset] = useState(0);
+  const [runOffset, setRunOffset] = useState(0);
   const [selectedRun, setSelectedRun] = useState(null);
+  const jobName = selectedJob?.jobName || "";
 
   const statusesQuery = useQuery({
-    queryKey: ["admin", "jobs", "statuses"],
-    queryFn: () => adminFetch("/jobs/statuses"),
+    queryKey: ["admin", "jobs", "statuses", statusOffset],
+    queryFn: () => {
+      const params = new URLSearchParams({
+        limit: String(STATUS_PAGE_SIZE),
+        offset: String(statusOffset),
+      });
+      return adminFetch(`/jobs/statuses?${params}`);
+    },
     refetchInterval: 30_000,
+    placeholderData: keepPreviousData,
   });
   const runsQuery = useQuery({
-    queryKey: ["admin", "jobs", "runs", jobName, offset],
+    queryKey: ["admin", "jobs", "runs", jobName, runOffset],
     queryFn: () => {
-      const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
+      const params = new URLSearchParams({ limit: String(RUN_PAGE_SIZE), offset: String(runOffset) });
       if (jobName) params.set("jobName", jobName);
       return adminFetch(`/jobs/runs?${params}`);
     },
@@ -66,14 +76,21 @@ function JobsWorkspace() {
     },
   });
 
-  const jobs = Array.isArray(statusesQuery.data?.jobs) ? statusesQuery.data.jobs : [];
+  const statusJobs = Array.isArray(statusesQuery.data?.jobs) ? statusesQuery.data.jobs : [];
+  const statusPageTransitioning = statusesQuery.isPlaceholderData;
+  const visibleJobs = statusPageTransitioning ? [] : statusJobs;
+  const totalJobs = Number(statusesQuery.data?.totalCount) || statusJobs.length;
+  const statusPage = Math.floor(statusOffset / STATUS_PAGE_SIZE) + 1;
+  const totalStatusPages = Math.max(1, Math.ceil(totalJobs / STATUS_PAGE_SIZE));
   const runs = Array.isArray(runsQuery.data?.runs) ? runsQuery.data.runs : [];
+  const runPageTransitioning = runsQuery.isPlaceholderData;
+  const visibleRuns = runPageTransitioning ? [] : runs;
   const total = Number(runsQuery.data?.totalCount) || 0;
-  const page = Math.floor(offset / PAGE_SIZE) + 1;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const jobsByName = useMemo(() => new Map(jobs.map((job) => [job.jobName, job])), [jobs]);
-  const attentionCount = jobs.filter((job) => job.enabled && (job.stale || job.stuck || job.latestRun?.status === "FAILED")).length;
-  const healthyCount = jobs.filter((job) => job.enabled && !job.stale && !job.stuck && job.latestRun?.status === "SUCCESS").length;
+  const page = Math.floor(runOffset / RUN_PAGE_SIZE) + 1;
+  const totalPages = Math.max(1, Math.ceil(total / RUN_PAGE_SIZE));
+  const jobsByName = useMemo(() => new Map(statusJobs.map((job) => [job.jobName, job])), [statusJobs]);
+  const attentionCount = visibleJobs.filter((job) => job.enabled && (job.stale || job.stuck || job.latestRun?.status === "FAILED")).length;
+  const healthyCount = visibleJobs.filter((job) => job.enabled && !job.stale && !job.stuck && job.latestRun?.status === "SUCCESS").length;
 
   const jobColumns = useMemo(() => [
     {
@@ -122,7 +139,10 @@ function JobsWorkspace() {
     {
       key: "jobName",
       label: "Job",
-      render: (run) => jobsByName.get(run.jobName)?.displayName || run.jobName,
+      render: (run) => run.displayName
+        || (selectedJob?.jobName === run.jobName ? selectedJob.displayName : null)
+        || jobsByName.get(run.jobName)?.displayName
+        || run.jobName,
     },
     {
       key: "status",
@@ -134,11 +154,12 @@ function JobsWorkspace() {
     { key: "durationMs", label: "Duration", render: (run) => formatDuration(run.durationMs) },
     { key: "result", label: "Result", render: (run) => run.summary || run.errorMessage || "-" },
     { key: "createdBy", label: "Started by" },
-  ], [jobsByName]);
+  ], [jobsByName, selectedJob]);
 
   function selectJob(job) {
-    setJobName(job.jobName);
-    setOffset(0);
+    setSelectedJob(job);
+    setRunOffset(0);
+    setSelectedRun(null);
   }
 
   function retry(run) {
@@ -151,10 +172,10 @@ function JobsWorkspace() {
     <>
       {error ? <InlineNotice tone="danger">{error.message}</InlineNotice> : null}
       <div className="metric-strip batch-metric-strip">
-        <div><span>Registered jobs</span><strong>{jobs.length}</strong></div>
-        <div><span>Healthy</span><strong>{healthyCount}</strong></div>
-        <div><span>Needs attention</span><strong>{attentionCount}</strong></div>
-        <div><span>Monitored</span><strong>{jobs.filter((job) => job.monitored).length}</strong></div>
+        <div><span>Registered jobs</span><strong>{totalJobs}</strong></div>
+        <div><span>Healthy on page</span><strong>{statusPageTransitioning ? "…" : healthyCount}</strong></div>
+        <div><span>Attention on page</span><strong>{statusPageTransitioning ? "…" : attentionCount}</strong></div>
+        <div><span>Monitored on page</span><strong>{statusPageTransitioning ? "…" : visibleJobs.filter((job) => job.monitored).length}</strong></div>
       </div>
 
       <section className="workspace-section">
@@ -163,46 +184,70 @@ function JobsWorkspace() {
             <h2>Job status</h2>
             <p>Select a job to filter its execution history. Monitoring applies only to frequent critical jobs.</p>
           </div>
-          {jobName ? <Button variant="ghost" onClick={() => { setJobName(""); setOffset(0); }}>Show all runs</Button> : null}
+          {jobName ? <Button variant="ghost" onClick={() => { setSelectedJob(null); setRunOffset(0); setSelectedRun(null); }}>Show all runs</Button> : null}
         </div>
         <DataTable
           columns={jobColumns}
-          rows={jobs}
+          rows={visibleJobs}
           rowKey={(job) => job.jobName}
           onRowClick={selectJob}
           emptyText="No batch jobs are registered."
-          loading={statusesQuery.isLoading}
+          loading={statusesQuery.isLoading || statusPageTransitioning}
+        />
+        <Pagination
+          ariaLabel="Job status pagination"
+          page={statusPage}
+          totalPages={totalStatusPages}
+          label={statusPageTransitioning
+            ? `Loading job status page ${statusPage}…`
+            : totalJobs
+              ? `${Math.min(statusOffset + 1, totalJobs)}–${Math.min(statusOffset + visibleJobs.length, totalJobs)} of ${totalJobs} jobs`
+              : "0 jobs"}
+          fetching={statusesQuery.isFetching}
+          onPrevious={() => setStatusOffset(Math.max(0, statusOffset - STATUS_PAGE_SIZE))}
+          onNext={() => setStatusOffset(statusOffset + STATUS_PAGE_SIZE)}
         />
       </section>
 
       <section className="workspace-section">
         <div className="section-heading">
           <div>
-            <h2>{jobName ? `${jobsByName.get(jobName)?.displayName || jobName} history` : "Execution history"}</h2>
+            <h2>{selectedJob ? `${selectedJob.displayName || selectedJob.jobName} history` : "Execution history"}</h2>
             <p>Newest runs first. Open a row to inspect timing, result, error, and retry lineage.</p>
           </div>
         </div>
         <DataTable
           columns={runColumns}
-          rows={runs}
+          rows={visibleRuns}
           rowKey={(run) => run.id}
           onRowClick={setSelectedRun}
           emptyText="No job runs found."
-          loading={runsQuery.isLoading}
+          loading={runsQuery.isLoading || runPageTransitioning}
         />
         <Pagination
+          ariaLabel="Execution history pagination"
           page={page}
           totalPages={totalPages}
-          label={total ? `${Math.min(offset + 1, total)}–${Math.min(offset + PAGE_SIZE, total)} of ${total}` : "0 runs"}
-          onPrevious={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-          onNext={() => setOffset(offset + PAGE_SIZE)}
+          label={runPageTransitioning
+            ? `Loading execution history page ${page}…`
+            : total
+              ? `${Math.min(runOffset + 1, total)}–${Math.min(runOffset + visibleRuns.length, total)} of ${total}`
+              : "0 runs"}
+          fetching={runsQuery.isFetching}
+          onPrevious={() => setRunOffset(Math.max(0, runOffset - RUN_PAGE_SIZE))}
+          onNext={() => setRunOffset(runOffset + RUN_PAGE_SIZE)}
         />
       </section>
 
       <DetailDrawer
         open={Boolean(selectedRun)}
         title={selectedRun ? `Run #${selectedRun.id}` : ""}
-        subtitle={selectedRun ? jobsByName.get(selectedRun.jobName)?.displayName || selectedRun.jobName : ""}
+        subtitle={selectedRun
+          ? selectedRun.displayName
+            || (selectedJob?.jobName === selectedRun.jobName ? selectedJob.displayName : null)
+            || jobsByName.get(selectedRun.jobName)?.displayName
+            || selectedRun.jobName
+          : ""}
         onClose={() => setSelectedRun(null)}
       >
         {selectedRun ? (

@@ -14,6 +14,8 @@ import com.buddystudy.backend.scheduler.application.port.outbound.JobLockPort
 import com.buddystudy.backend.scheduler.application.port.outbound.ScheduledJobRunPort
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Isolation
+import org.springframework.transaction.annotation.Transactional
 import java.time.Duration
 import java.time.Instant
 
@@ -69,10 +71,25 @@ class ManagedJobExecutionService(
         }
     }
 
-    override suspend fun findRuns(jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse =
-        runs.findRuns(jobName, runId, limit.coerceIn(1, 200), offset.coerceAtLeast(0))
+    override suspend fun findRuns(
+        jobName: String?,
+        runId: Long?,
+        limit: Int,
+        offset: Int,
+    ): ScheduledJobRunPageResponse {
+        val page = runs.findRuns(jobName, runId, limit.coerceIn(1, 200), offset.coerceAtLeast(0))
+        return page.copy(
+            runs = page.runs.map { run ->
+                val displayName = jobsByName[run.jobName]?.displayName ?: run.displayName
+                if (displayName == run.displayName) run else run.copy(displayName = displayName)
+            },
+        )
+    }
 
-    override suspend fun findStatuses(): ScheduledJobStatusResponse {
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    override suspend fun findStatuses(limit: Int?, offset: Int): ScheduledJobStatusResponse {
+        val boundedLimit = limit?.coerceIn(1, 100) ?: Int.MAX_VALUE
+        val boundedOffset = offset.coerceAtLeast(0)
         val monitoredJobs = properties.monitoring.schedulerMonitoredJobs
             .map(String::trim)
             .filter(String::isNotEmpty)
@@ -80,13 +97,15 @@ class ManagedJobExecutionService(
         val thresholdMinutes = properties.monitoring.schedulerStaleThresholdMinutes.coerceAtLeast(1)
         val threshold = Duration.ofMinutes(thresholdMinutes)
         val now = Instant.now()
-        val snapshots = runs.findSnapshots(emptyList()).associateBy { it.jobName }
-        val orderedJobNames = buildList {
-            addAll(snapshots.keys.sorted())
-            addAll(monitoredJobs.filterNot(snapshots::containsKey))
-        }
-        val orderedSnapshots = orderedJobNames.map { jobName ->
-            snapshots[jobName] ?: ScheduledJobSnapshot(
+        val existingMonitoredJobs = runs.findExistingJobNames(monitoredJobs)
+        val missingMonitoredJobs = monitoredJobs.filterNot(existingMonitoredJobs::contains)
+        val snapshotPage = runs.findSnapshotPage(boundedLimit, boundedOffset)
+        val scheduledCount = snapshotPage.totalCount
+        val missingOffset = (boundedOffset.toLong() - scheduledCount).coerceAtLeast(0).toInt()
+        val remainingSlots = (boundedLimit - snapshotPage.snapshots.size).coerceAtLeast(0)
+        val missingSnapshots = if (boundedOffset.toLong() + snapshotPage.snapshots.size >= scheduledCount) {
+            missingMonitoredJobs.drop(missingOffset).take(remainingSlots).map { jobName ->
+                ScheduledJobSnapshot(
                     jobName = jobName,
                     enabled = true,
                     scheduleType = "MISSING",
@@ -95,7 +114,11 @@ class ManagedJobExecutionService(
                     latestRun = null,
                     lastSuccessfulRun = null,
                 )
+            }
+        } else {
+            emptyList()
         }
+        val orderedSnapshots = snapshotPage.snapshots + missingSnapshots
         val jobs = orderedSnapshots.map { snapshot ->
             val definition = jobsByName[snapshot.jobName]
             val monitored = snapshot.jobName in monitoredJobs
@@ -128,7 +151,13 @@ class ManagedJobExecutionService(
                 stuck = stuck,
             )
         }
-        return ScheduledJobStatusResponse(jobs)
+        val totalCount = scheduledCount + missingMonitoredJobs.size
+        return ScheduledJobStatusResponse(
+            jobs = jobs,
+            totalCount = totalCount,
+            limit = limit?.let { boundedLimit } ?: totalCount.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+            offset = boundedOffset,
+        )
     }
 
     private suspend fun elapsedMs(started: Long): Long =

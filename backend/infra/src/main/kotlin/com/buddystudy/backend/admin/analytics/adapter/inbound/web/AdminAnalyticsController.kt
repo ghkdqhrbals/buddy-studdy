@@ -110,8 +110,10 @@ class AdminAnalyticsController(
     @GetMapping("/jobs/statuses")
     suspend fun jobStatuses(
         @RequestHeader("Authorization") authorization: String?,
+        @RequestParam(required = false) limit: Int?,
+        @RequestParam(defaultValue = "0") offset: Int,
     ): ScheduledJobStatusResponse =
-        admin.jobStatuses(authorization.bearerToken())
+        admin.jobStatuses(authorization.bearerToken(), limit, offset)
 }
 
 data class AdminLoginRequest(
@@ -150,7 +152,7 @@ interface AdminAnalyticsWebPort {
     suspend fun metrics(adminToken: String, startDate: LocalDate, endDate: LocalDate, metricKeys: Set<String>): AdminMetricsResponse
     suspend fun jobRuns(adminToken: String, jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse
     suspend fun retryJob(adminToken: String, jobName: String, runId: Long?): ScheduledJobRun
-    suspend fun jobStatuses(adminToken: String): ScheduledJobStatusResponse
+    suspend fun jobStatuses(adminToken: String, limit: Int?, offset: Int): ScheduledJobStatusResponse
 }
 
 @Component
@@ -213,9 +215,9 @@ class AdminAnalyticsWebAdapter(
         return jobExecutions.execute(job, JobTriggerType.RETRY, retryOfRunId = runId, createdBy = "admin")
     }
 
-    override suspend fun jobStatuses(adminToken: String): ScheduledJobStatusResponse {
+    override suspend fun jobStatuses(adminToken: String, limit: Int?, offset: Int): ScheduledJobStatusResponse {
         admin.validate(adminToken)
-        return jobExecutions.findStatuses()
+        return jobExecutions.findStatuses(limit, offset)
     }
 }
 

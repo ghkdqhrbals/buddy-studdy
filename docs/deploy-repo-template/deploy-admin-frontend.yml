@@ -12,7 +12,7 @@ name: Deploy BuddyStudy Admin Frontend
         type: string
 
 concurrency:
-  group: deploy-admin-frontend-macbook-air
+  group: deploy-admin-frontend-ec2
   cancel-in-progress: false
 
 permissions:
@@ -20,15 +20,15 @@ permissions:
 
 jobs:
   deploy_admin_frontend:
-    name: Submit Admin Frontend Image on MacBook Air
-    runs-on: [self-hosted, macOS, ARM64, macbook-air, buddystudy]
+    name: Submit Admin Frontend Image on Backend Host
+    runs-on: [self-hosted, Linux, ARM64, ec2, buddystudy]
     timeout-minutes: 10
     env:
       IMAGE_REF: ${{ github.event.client_payload.image || inputs.image }}
-      NAMESPACE: buddystudy
-      DEPLOYMENT: buddystudy-admin-frontend
-      CONTAINER: admin-frontend
-      ENVIRONMENT: macbook-air
+      CONTAINER: buddystudy-admin-frontend
+      NETWORK: buddystudy-swarm-net
+      BACKEND_UPSTREAM: http://buddystudy_backend:8080
+      ENVIRONMENT: ec2
 
     steps:
       - name: Validate input
@@ -39,85 +39,35 @@ jobs:
             exit 1
           fi
 
-      - name: Prepare kubectl environment
-        run: |
-          set -euo pipefail
-          echo "/opt/homebrew/bin" >> "${GITHUB_PATH}"
-          echo "/usr/local/bin" >> "${GITHUB_PATH}"
-          kubeconfig="${KUBECONFIG:-${HOME}/.kube/config}"
-          if [[ "${kubeconfig}" == *'$'* ]]; then
-            kubeconfig="${HOME}/.kube/config"
-          fi
-          echo "KUBECONFIG=${kubeconfig}" >> "${GITHUB_ENV}"
-
-      - name: Validate kubectl context
-        run: |
-          set -euo pipefail
-          export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH}"
-          export KUBECONFIG="${KUBECONFIG:-${HOME}/.kube/config}"
-          if [[ "${KUBECONFIG}" == *'$'* ]]; then
-            export KUBECONFIG="${HOME}/.kube/config"
-          fi
-          kubectl config current-context
-
-          control_plane_ready=false
-          if kubectl --request-timeout=5s get namespace "${NAMESPACE}" >/dev/null 2>&1; then
-            control_plane_ready=true
-          else
-            echo "Docker Desktop Kubernetes API is unavailable; restarting Docker Desktop to restore the deployment control plane."
-            if ! /usr/bin/env -u RUNNER_TRACKING_ID \
-              docker desktop restart --timeout 75; then
-              /usr/bin/env -u RUNNER_TRACKING_ID \
-                docker desktop stop --force --timeout 30 \
-                || true
-              /usr/bin/env -u RUNNER_TRACKING_ID \
-                docker desktop start --timeout 105 \
-                || /usr/bin/env -u RUNNER_TRACKING_ID open -ga Docker \
-                || true
-            fi
-
-            for attempt in $(seq 1 24); do
-              if kubectl --request-timeout=5s get namespace "${NAMESPACE}" >/dev/null 2>&1; then
-                control_plane_ready=true
-                break
-              fi
-              echo "Waiting for the Kubernetes API. attempt=${attempt}/24"
-              sleep 5
-            done
-          fi
-
-          if [ "${control_plane_ready}" != true ]; then
-            echo "Kubernetes control plane did not become available within the deployment window." >&2
-            exit 1
-          fi
-
       - name: Submit admin frontend image
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
         run: |
           set -euo pipefail
-          export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH}"
-          export KUBECONFIG="${KUBECONFIG:-${HOME}/.kube/config}"
-          if [[ "${KUBECONFIG}" == *'$'* ]]; then
-            export KUBECONFIG="${HOME}/.kube/config"
-          fi
-
-          kubectl -n "${NAMESPACE}" set image \
-            "deployment/${DEPLOYMENT}" \
-            "${CONTAINER}=${IMAGE_REF}"
-          kubectl -n "${NAMESPACE}" annotate \
-            "deployment/${DEPLOYMENT}" \
-            "buddystudy.github.com/deployed-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            "buddystudy.github.com/source-run=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
-            --overwrite
-
-          applied_image="$(
-            kubectl -n "${NAMESPACE}" get "deployment/${DEPLOYMENT}" \
-              --output="jsonpath={.spec.template.spec.containers[?(@.name==\"${CONTAINER}\")].image}"
-          )"
-          if [ "${applied_image}" != "${IMAGE_REF}" ]; then
-            echo "Deployment spec image mismatch: expected ${IMAGE_REF}, found ${applied_image:-<missing>}." >&2
+          if [ -z "${GHCR_USERNAME}" ] || [ -z "${GHCR_TOKEN}" ]; then
+            echo "Missing GHCR deployment credentials." >&2
             exit 1
           fi
-          echo "Deployment spec accepted image: ${applied_image}"
+
+          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+          docker pull "${IMAGE_REF}"
+          docker network inspect "${NETWORK}" >/dev/null 2>&1 \
+            || docker network create "${NETWORK}" >/dev/null
+          docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
+          docker run -d \
+            --name "${CONTAINER}" \
+            --network "${NETWORK}" \
+            --restart unless-stopped \
+            -e "BACKEND_UPSTREAM=${BACKEND_UPSTREAM}" \
+            "${IMAGE_REF}"
+
+          applied_image="$(docker inspect --format '{{.Config.Image}}' "${CONTAINER}")"
+          if [ "${applied_image}" != "${IMAGE_REF}" ]; then
+            echo "Container config image mismatch: expected ${IMAGE_REF}, found ${applied_image:-<missing>}." >&2
+            exit 1
+          fi
+          echo "Container config accepted image: ${applied_image}"
 
       - name: Summary
         if: always()
@@ -126,8 +76,8 @@ jobs:
             echo "## Admin Frontend Deployment"
             echo ""
             echo "- Target: \`${ENVIRONMENT}\`"
-            echo "- Namespace: \`${NAMESPACE}\`"
-            echo "- Deployment: \`${DEPLOYMENT}\`"
+            echo "- Container: \`${CONTAINER}\`"
+            echo "- Network: \`${NETWORK}\`"
             echo "- Image: \`${IMAGE_REF}\`"
             echo "- Submission: \`${{ job.status }}\`"
             echo "- Runtime readiness: monitored by Grafana, not gated by GitHub Actions"

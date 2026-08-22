@@ -24,5 +24,5 @@ interface ManagedJobExecutionUseCase {
 
     suspend fun findRuns(jobName: String? = null, runId: Long? = null, limit: Int = 10, offset: Int = 0): ScheduledJobRunPageResponse
 
-    suspend fun findStatuses(): ScheduledJobStatusResponse
+    suspend fun findStatuses(limit: Int? = null, offset: Int = 0): ScheduledJobStatusResponse
 }

@@ -3,7 +3,7 @@ import { clearToken, fetchJobRuns, fetchJobStatuses, fetchMetrics, getStoredToke
 import { AdminShell } from "./AdminShell";
 import { AppUpdatesPanel } from "./AppUpdatesPanel";
 import { AdvertisingPanel } from "./AdvertisingPanel";
-import { JOB_PAGE_SIZE, sectionPaths, sections } from "./adminConfig";
+import { JOB_PAGE_SIZE, JOB_STATUS_PAGE_SIZE, sectionPaths, sections } from "./adminConfig";
 import { LoginScreen } from "./LoginScreen";
 import { MetricsDashboard } from "./MetricsDashboard";
 import { OperationsPanel } from "./OperationsPanel";
@@ -42,6 +42,9 @@ const emptyJobPage: ScheduledJobRunsResponse = {
 };
 const emptyJobStatuses: ScheduledJobStatusResponse = {
   jobs: [],
+  totalCount: 0,
+  limit: JOB_STATUS_PAGE_SIZE,
+  offset: 0,
 };
 
 function isIsoDate(value: string | null): value is string {
@@ -219,7 +222,7 @@ export function App() {
       } else if (activeSection === "operations") {
         const [runs, statuses] = await Promise.all([
           fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset, jobNameFilter, highlightRunId),
-          fetchJobStatuses(handleUnauthorized).catch(() => emptyJobStatuses),
+          fetchJobStatuses(handleUnauthorized, JOB_STATUS_PAGE_SIZE, 0).catch(() => emptyJobStatuses),
         ]);
         setJobPage(runs);
         setJobStatuses(statuses);
@@ -252,7 +255,7 @@ export function App() {
       } else if (activeSection === "operations") {
         const [runs, statuses] = await Promise.all([
           fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset, jobNameFilter, highlightRunId),
-          fetchJobStatuses(handleUnauthorized).catch(() => jobStatuses),
+          fetchJobStatuses(handleUnauthorized, JOB_STATUS_PAGE_SIZE, 0).catch(() => jobStatuses),
         ]);
         setJobPage(runs);
         setJobStatuses(statuses);
@@ -279,7 +282,7 @@ export function App() {
       await retryJob(job.jobName, job.id, handleUnauthorized);
       const [runs, statuses] = await Promise.all([
         fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset, jobNameFilter, highlightRunId),
-        fetchJobStatuses(handleUnauthorized).catch(() => jobStatuses),
+        fetchJobStatuses(handleUnauthorized, JOB_STATUS_PAGE_SIZE, 0).catch(() => jobStatuses),
       ]);
       setJobPage(runs);
       setJobStatuses(statuses);

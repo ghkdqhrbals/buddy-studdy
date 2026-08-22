@@ -47,10 +47,12 @@ export const sections: Array<{ key: SectionKey; label: string; metrics: string[]
   { key: "quota", label: "Quota", metrics: ["quota_used_count"] },
   { key: "advertising", label: "Advertising", metrics: [] },
   { key: "app_updates", label: "App updates", metrics: [] },
-  { key: "operations", label: "Operations", metrics: [] },
+  { key: "operations", label: "Batch Jobs", metrics: [] },
 ];
 
 export const JOB_PAGE_SIZE = 10;
+export const JOB_STATUS_PAGE_SIZE = 10;
+export const BATCH_JOBS_MONITOR_URL = "https://monitoring.lowfidev.cloud/jobs.html";
 
 export const sectionPaths: Record<SectionKey, string> = {
   overview: "/home",

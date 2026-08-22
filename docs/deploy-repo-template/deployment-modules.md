@@ -13,7 +13,7 @@ one workflow run just because they share a host.
 | Database cutover | `Migrate BuddyStudy PostgreSQL To MySQL` | manual, one-time | EC2 self-hosted | PostgreSQL backup, MySQL import, row-count and reference validation, automatic pre-cutover rollback |
 | Flyway V32 recovery | `Repair BuddyStudy Backend Flyway V32` | manual, one-time | EC2 self-hosted | Guarded removal of only the failed V32 history row and V32 partial check constraints |
 | Backend administrator recovery | `Reset BuddyStudy Backend Administrator` | manual, one-time | EC2 self-hosted | Activate only the fixed `admin` monitoring operator and replace its BCrypt password hash |
-| Admin frontend | `Deploy BuddyStudy Admin Frontend` | `admin-frontend-image-published`, manual | MacBook Air self-hosted | Kubernetes admin frontend Deployment image submission only |
+| Admin frontend | `Deploy BuddyStudy Admin Frontend` | `admin-frontend-image-published`, manual | EC2 self-hosted | Private `buddystudy-admin-frontend` container image submission only |
 | iOS TestFlight | `Release iOS App` | `v*`, manual | GitHub-hosted macOS | Release planning, signed IPA build, artifact retention, and TestFlight upload as separate jobs |
 | Monitoring receiver | `Deploy BuddyStudy Monitoring on MacBook Air` | manual | MacBook Air self-hosted | API Logs, API Performance, TestZone UI, deployment history, Grafana, Loki, ERROR-log Slack alerting, monitoring auth and access audit, and the backend/FRC maintenance operator UI |
 | Redis Stream operations | `Deploy RedisStreamScope on MacBook Air` | manual | MacBook Air self-hosted | RedisStreamScope runtime, persisted SQLite/config volume, production Redis connection, and attachment to the existing monitoring gateway |
@@ -163,11 +163,10 @@ deployment.
 - Runtime health checks are not GitHub Actions deploy gates. GitHub Actions
   validates image/config submission and Nginx syntax only. Docker Swarm owns
   task health, replacement ordering, and rollback; Grafana owns continuous
-  outage alerting. Kubernetes deployments submit the desired image and verify
-  only the stored Deployment spec; they must not use `kubectl rollout status`,
-  pod readiness, or an HTTP check as an Actions success condition. A successful
-  workflow is reported as staged, promoted, or submitted rather than as
-  runtime-health completion.
+  outage alerting. Admin container deployments verify only the configured image;
+  they must not use container state, readiness, or an HTTP check as an Actions
+  success condition. A successful workflow is reported as staged, promoted, or
+  submitted rather than as runtime-health completion.
 - Backend workflow lifecycle events are written to the monitoring TestZone
   store with the stable `<deploy-repository>:<run-id>` key. Start and terminal
   events update one record containing source, image, runtime, actor, phase,
@@ -264,12 +263,10 @@ deployment.
   volume for legacy-file cleanup. New profile-photo uploads are disabled;
   saving a pixel avatar or deleting an account removes the user's legacy file.
 - Admin frontend UI changes: build the immutable admin frontend image, then run
-  the MacBook Air Kubernetes admin frontend deploy. The deploy updates only the
-  `buddystudy-admin-frontend` Deployment image and verifies the submitted spec;
-  Grafana, rather than GitHub Actions, observes runtime readiness. If the local
-  Docker Desktop Kubernetes API is unavailable, the workflow may restart Docker
-  Desktop and wait only for the namespace API needed to submit the desired
-  image. That control-plane prerequisite is not an application readiness gate.
+  the EC2 admin frontend deploy. The deploy replaces only the private
+  `buddystudy-admin-frontend` container attached to `buddystudy-swarm-net` and
+  verifies its configured image; Grafana, rather than GitHub Actions, observes
+  runtime readiness.
 - Grafana/Loki/API Logs/TestZone UI changes: run the monitoring deploy.
   The app repository dispatches this module through
   `monitoring-source-published` when an explicit `deploy/monitoring-*` tag is

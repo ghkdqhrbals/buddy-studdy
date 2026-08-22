@@ -4,7 +4,9 @@ Standalone React admin console for BuddyStudy.
 
 React 19 and Vite power the analytics and scheduler administrator UI. Runtime
 operations such as Redis Stream inspection live in the unified monitoring
-console at `monitoring.lowfidev.cloud`.
+console at `monitoring.lowfidev.cloud`. The Admin `Batch Jobs` navigation links
+directly to the paginated operations workspace at
+`https://monitoring.lowfidev.cloud/jobs.html`.
 
 ## Local
 

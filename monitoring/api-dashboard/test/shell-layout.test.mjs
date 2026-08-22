@@ -145,8 +145,12 @@ test("feedback administration reviews submissions and sends deep-linked user not
 test("batch jobs show operator metadata, timing, results, paginated history, and retry controls", async () => {
   const app = await source("MonitoringApp.jsx");
   const page = await source("pages/JobsPage.jsx");
+  const adminUi = await source("components/AdminUI.jsx");
   assert.match(app, /jobs\.html/);
-  assert.match(page, /\/jobs\/statuses/);
+  assert.match(page, /\/jobs\/statuses\?\$\{params\}/);
+  assert.match(page, /limit:\s*String\(STATUS_PAGE_SIZE\)/);
+  assert.match(page, /offset:\s*String\(statusOffset\)/);
+  assert.match(page, /queryKey:\s*\["admin",\s*"jobs",\s*"statuses",\s*statusOffset\]/);
   assert.match(page, /\/jobs\/runs/);
   assert.match(page, /displayName/);
   assert.match(page, /description/);
@@ -154,6 +158,23 @@ test("batch jobs show operator metadata, timing, results, paginated history, and
   assert.match(page, /Duration/);
   assert.match(page, /Latest result/);
   assert.match(page, /Pagination/);
+  assert.equal((page.match(/<Pagination/g) || []).length, 2);
+  assert.match(page, /Registered jobs/);
+  assert.match(page, /Healthy on page/);
+  assert.match(page, /const statusPageTransitioning = statusesQuery\.isPlaceholderData/);
+  assert.match(page, /const visibleJobs = statusPageTransitioning \? \[\] : statusJobs/);
+  assert.match(page, /const visibleRuns = runPageTransitioning \? \[\] : runs/);
+  assert.match(page, /loading=\{statusesQuery\.isLoading \|\| statusPageTransitioning\}/);
+  assert.match(page, /loading=\{runsQuery\.isLoading \|\| runPageTransitioning\}/);
+  assert.match(page, /ariaLabel="Job status pagination"/);
+  assert.match(page, /ariaLabel="Execution history pagination"/);
+  assert.match(page, /fetching=\{statusesQuery\.isFetching\}/);
+  assert.match(page, /fetching=\{runsQuery\.isFetching\}/);
+  assert.match(page, /run\.displayName\s*\|\|/);
+  assert.match(page, /selectedRun\.displayName/);
+  assert.match(adminUi, /<nav className="pagination" aria-label=\{ariaLabel\} aria-busy=\{fetching\}>/);
+  assert.match(adminUi, /disabled=\{fetching \|\| page <= 1\}/);
+  assert.match(adminUi, /disabled=\{fetching \|\| hasNext === false/);
   assert.match(page, /Retry job/);
   assert.match(page, /retryOfRunId/);
 });

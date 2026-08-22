@@ -33,6 +33,7 @@ export type JobRunStatus = "RUNNING" | "SUCCESS" | "FAILED" | "SKIPPED";
 export type ScheduledJobRun = {
   id: number;
   jobName: string;
+  displayName?: string | null;
   triggerType: JobTriggerType;
   status: JobRunStatus;
   startedAt: string;
@@ -53,6 +54,8 @@ export type ScheduledJobRunsResponse = {
 
 export type ScheduledJobStatus = {
   jobName: string;
+  displayName?: string | null;
+  description?: string | null;
   enabled: boolean;
   scheduleType: string;
   scheduleValue: string;
@@ -65,6 +68,9 @@ export type ScheduledJobStatus = {
 
 export type ScheduledJobStatusResponse = {
   jobs: ScheduledJobStatus[];
+  totalCount: number;
+  limit: number;
+  offset: number;
 };
 
 export type AdminApiError = {

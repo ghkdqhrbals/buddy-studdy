@@ -95,16 +95,25 @@ export function DataTable({ columns, rows, rowKey, onRowClick, emptyText, loadin
   );
 }
 
-export function Pagination({ page, totalPages, onPrevious, onNext, hasNext, label }) {
+export function Pagination({
+  page,
+  totalPages,
+  onPrevious,
+  onNext,
+  hasNext,
+  label,
+  ariaLabel = "Pagination",
+  fetching = false,
+}) {
   return (
-    <div className="pagination">
-      <span>{label}</span>
+    <nav className="pagination" aria-label={ariaLabel} aria-busy={fetching}>
+      <span aria-live="polite" aria-atomic="true">{label}</span>
       <div>
         <Button
           variant="ghost"
           icon={ChevronLeft}
           onClick={onPrevious}
-          disabled={page <= 1}
+          disabled={fetching || page <= 1}
         >
           Previous
         </Button>
@@ -113,12 +122,12 @@ export function Pagination({ page, totalPages, onPrevious, onNext, hasNext, labe
           variant="ghost"
           icon={ChevronRight}
           onClick={onNext}
-          disabled={hasNext === false || (totalPages && page >= totalPages)}
+          disabled={fetching || hasNext === false || (totalPages && page >= totalPages)}
         >
           Next
         </Button>
       </div>
-    </div>
+    </nav>
   );
 }
 
