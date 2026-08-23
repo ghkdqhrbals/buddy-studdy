@@ -272,10 +272,15 @@ jobs:
             incident_receiver_config_changed=true
           fi
 
+          slack_webhook_hash="$(printf '%s' "${GRAFANA_SLACK_WEBHOOK_URL}" | shasum -a 256 | awk '{print $1}')"
           hmac_secret_hash="$(printf '%s' "${GRAFANA_INCIDENT_HMAC_SECRET}" | shasum -a 256 | awk '{print $1}')"
           github_token_hash="$(printf '%s' "${CODEX_AUTOFIX_GITHUB_TOKEN}" | shasum -a 256 | awk '{print $1}')"
+          previous_slack_webhook_hash="$(cat "${monitoring_root}/grafana/slack-webhook.sha256" 2>/dev/null || true)"
           previous_hmac_secret_hash="$(cat "${monitoring_root}/incident-receiver/hmac-secret.sha256" 2>/dev/null || true)"
           previous_github_token_hash="$(cat "${monitoring_root}/incident-receiver/github-token.sha256" 2>/dev/null || true)"
+          if [ "${slack_webhook_hash}" != "${previous_slack_webhook_hash}" ]; then
+            grafana_config_changed=true
+          fi
           if [ "${hmac_secret_hash}" != "${previous_hmac_secret_hash}" ]; then
             grafana_config_changed=true
             incident_receiver_config_changed=true
@@ -345,10 +350,19 @@ jobs:
             "${monitoring_root}/promtail/config/promtail.yml"
           grep -Eq '^[[:space:]]+job:[[:space:]]+monitoring-gateway-error[[:space:]]*$' \
             "${monitoring_root}/promtail/config/promtail.yml"
-          grep -Fq '<%s|해당 오류 로그 보기>' \
+          grep -Fq '<%s|Grafana 로그 보기>' \
             "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
-          grep -Fq 'coll.Dict "text" $fallback "blocks" $blocks | data.ToJSON' \
+          grep -Fq 'coll.Dict "text" $$fallback "blocks" $$blocks | data.ToJSON' \
             "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
+          grep -Fq '*에러 클래스* `%s`' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
+          grep -Fq '*Trace / Request ID* `%s`' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
+          if grep -Eq '\{\{[^}]*([^$]|^)\$(blocks|fallback|errorClass|traceID|occurredAt|logsURL|status|message)([^A-Za-z0-9_]|$)' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"; then
+            echo "Grafana contact-point Go template variables must escape provisioning interpolation with double dollars." >&2
+            exit 1
+          fi
           grep -Fq 'log_from=`{{ sub (unixEpochMillis (__timestamp__)) 120000 }}`' \
             "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
           grep -Fq '| occurred_at!="" | log_from!="" | log_to!="" | logger!="" | error_message!=""' \
@@ -536,6 +550,9 @@ jobs:
               grafana/grafana:12.3.0
             grafana_recreated=true
           fi
+          printf '%s' "${slack_webhook_hash}" \
+            > "${monitoring_root}/grafana/slack-webhook.sha256"
+          chmod 0600 "${monitoring_root}/grafana/slack-webhook.sha256"
 
           grafana_password_reset=false
           for attempt in $(seq 1 15); do

@@ -381,8 +381,39 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
   assert.doesNotMatch(alert, /type: slack/);
   assert.match(alert, /url: \$GRAFANA_SLACK_WEBHOOK_URL/);
   assert.match(alert, /payload:/);
-  assert.match(alert, /coll\.Dict "text" \$fallback "blocks" \$blocks \| data\.ToJSON/);
-  assert.match(alert, /<%s\|해당 오류 로그 보기>/);
+  assert.match(alert, /coll\.Dict "text" \$\$fallback "blocks" \$\$blocks \| data\.ToJSON/);
+  assert.match(alert, /<%s\|Grafana 로그 보기>/);
+  assert.match(alert, /\*에러 클래스\* `%s`/);
+  assert.match(alert, /\*Trace \/ Request ID\* `%s`/);
+  assert.match(alert, /error_class: '\{\{ \$labels\.error_type \}\}'/);
+  assert.match(alert, /trace_id: '\{\{ \$labels\.request_id \}\}'/);
+  assert.match(alert, /error_class: '\{\{ \$labels\.logger \}\}'/);
+  assert.match(alert, /trace_id: '-'/);
+  const contactPointPayload = alert.match(/payload:\n\s+template: \|-\n([\s\S]*?)\n\s+- uid: buddystudy-codex-incident-autofix/)?.[1];
+  assert.ok(contactPointPayload, "Slack contact-point payload template must be defined");
+  for (const localName of [
+    "blocks",
+    "fallback",
+    "errorClass",
+    "traceID",
+    "occurredAt",
+    "logsURL",
+    "status",
+    "message",
+  ]) {
+    assert.doesNotMatch(
+      contactPointPayload,
+      new RegExp(`(^|[^$])\\$${localName}([^A-Za-z0-9_]|$)`),
+      `${localName} must escape Grafana provisioning interpolation as $$${localName}`,
+    );
+    assert.match(contactPointPayload, new RegExp(`\\$\\$${localName}`));
+  }
+  const provisionedPayload = contactPointPayload
+    .replaceAll("$$", "\u0000")
+    .replace(/\$[A-Z_][A-Z0-9_]*/g, "")
+    .replaceAll("\u0000", "$");
+  assert.match(provisionedPayload, /\{\{- \$blocks := coll\.Slice -\}\}/);
+  assert.match(provisionedPayload, /coll\.Dict "text" \$fallback "blocks" \$blocks/);
   assert.doesNotMatch(alert, /\.GeneratorURL|알림 규칙 진단 보기/);
   assert.match(alert, /level="ERROR"/);
   assert.match(
@@ -429,12 +460,18 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
   assert.ok(incidentReceiverService, "incident receiver service must be defined");
   assert.doesNotMatch(incidentReceiverService, /^\s+ports:/m);
   assert.match(monitoringDeploy, /incident_receiver_config_changed=false/);
-  assert.match(monitoringDeploy, /--name buddystudy-incident-receiver/);
-  assert.match(monitoringDeploy, /--security-opt no-new-privileges/);
-  assert.match(monitoringDeploy, /<%s\|해당 오류 로그 보기>/);
+  assert.match(monitoringDeploy, /slack_webhook_hash=/);
+  assert.match(monitoringDeploy, /grafana\/slack-webhook\.sha256/);
   assert.match(
     monitoringDeploy,
-    /coll\.Dict "text" \$fallback "blocks" \$blocks \| data\.ToJSON/,
+    /if \[ "\$\{slack_webhook_hash\}" != "\$\{previous_slack_webhook_hash\}" \]; then\s+grafana_config_changed=true/,
+  );
+  assert.match(monitoringDeploy, /--name buddystudy-incident-receiver/);
+  assert.match(monitoringDeploy, /--security-opt no-new-privileges/);
+  assert.match(monitoringDeploy, /<%s\|Grafana 로그 보기>/);
+  assert.match(
+    monitoringDeploy,
+    /coll\.Dict "text" \$\$fallback "blocks" \$\$blocks \| data\.ToJSON/,
   );
   assert.match(
     monitoringDeploy,
@@ -442,7 +479,8 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
   );
   assert.match(monitoringDeploy, /must not link to the static alert-rule GeneratorURL/);
   assert.doesNotMatch(monitoringDeploy, /\.Annotations\.logs_url.*오류 로그 보기/);
-  assert.doesNotMatch(alert, /발생 시각|요청 위치|코드 위치|로그 식별자/);
+  assert.match(alert, /발생 시각/);
+  assert.doesNotMatch(alert, /요청 위치|코드 위치|로그 식별자/);
   assert.match(alert, /occurred_at: '\{\{ \$labels\.occurred_at \}\}'/);
   assert.match(alert, /error: '\{\{ \$labels\.error_type \}\}: \{\{ \$labels\.error_message \}\}'/);
   assert.match(alert, /error: '\{\{ \$labels\.error_message \}\}'/);

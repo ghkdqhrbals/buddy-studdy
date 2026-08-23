@@ -487,7 +487,10 @@ deployment.
   `GRAFANA_SLACK_WEBHOOK_URL`. Grafana's built-in Slack receiver is not used
   because it forces the clickable message title to the static alert-rule
   `GeneratorURL`. A custom webhook payload instead renders only the concise
-  incident summary and `해당 오류 로그 보기` link. API alert links query the
+  incident summary with error class, Trace / Request ID, event time, and a
+  `Grafana 로그 보기` link. The custom payload writes its Go-template locals as
+  `$$name`; Grafana provisioning reduces those to literal `$name` instead of
+  interpreting them as environment-variable references. API alert links query the
   exact `requestId`; background alert links query the original
   millisecond-precision timestamp and logger. Both links carry an absolute Loki
   range from two minutes before to two minutes after the event, so reopening a
@@ -499,7 +502,7 @@ deployment.
   itself emits an evaluation alert without a concrete log identity, Slack does
   not fabricate a log or alert-rule link and the Codex incident receiver rejects
   it instead of searching or dispatching unrelated ERROR logs.
-  A compact `해당 오류 로그 보기` hyperlink targets the Loki ERROR
+  A compact `Grafana 로그 보기` hyperlink targets the Loki ERROR
   event without printing the raw Explore URL in the message. API and background
   failures are separate alert rules so request metadata is never fabricated for
   scheduler, stream-consumer, or application-startup failures.
@@ -517,6 +520,9 @@ deployment.
   `GRAFANA_INCIDENT_HMAC_SECRET` and `CODEX_AUTOFIX_GITHUB_TOKEN` in the
   private deploy repository, and `OPENAI_API_KEY_CODEX_AUTOFIX` plus the
   optional `CODEX_AUTOFIX_SLACK_WEBHOOK_URL` in the source repository.
+  Monitoring stores only hashes of the Grafana Slack webhook and incident HMAC
+  secret on the host; rotating either secret forces the Grafana container to be
+  recreated so provisioned contact points cannot retain stale credentials.
   The Server Dashboard supports fixed and explicit From/To time ranges and
   reads the same structured Micrometer runtime samples as the provisioned
   Grafana Server Runtime dashboard. The same module publishes the fixed,
