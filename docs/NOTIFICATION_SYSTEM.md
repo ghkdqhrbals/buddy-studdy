@@ -49,6 +49,10 @@ sequenceDiagram
 
 ## Data Model
 
+The complete iOS URL route table and the differences between external URL,
+system-push, and notification-inbox navigation are documented in
+[DEEPLINKS.md](DEEPLINKS.md).
+
 `app_notifications` is the source of truth.
 
 Important columns:
@@ -89,6 +93,12 @@ Primary fields:
 - `userId`
 - `payload`
 
+Before publishing a user-scoped push request and again before calling APNs, the
+backend requires an active user-device session. The final delivery gate reloads
+the device attachment and APNs token from MySQL, so a notification queued
+before logout is discarded after logout instead of using the token copied into
+the Redis Stream entry.
+
 `payload` contains the same values as `NotificationRequestCommand`.
 
 ## Consistency and Ordering
@@ -104,13 +114,17 @@ Push is a separate channel from the inbox.
 
 - `should_push=false`: only the inbox item is created.
 - `should_push=true`: listener attempts APNs delivery after the inbox item is stored.
+- A completed study question writes one `NOTIFICATION_REQUESTED` event to `redis_event_outbox`. Its payload owns `shouldPush`; no second push outbox is created.
+- The notification listener first creates or reuses the `app_notifications` row. Only when `shouldPush=true` and a device is eligible does it publish `QUESTION_PUSH_REQUESTED` with that existing notification ID.
 - Push claim uses `push_claimed_at` and permits retry of stale claims after five minutes.
+- A notification is marked sent only after the APNs adapter accepts the request; publishing the intermediate push stream event is not delivery success.
+- Stream consumers use stable names so pending entries remain recoverable across container replacement.
 - If the process crashes after APNs accepts the push but before `push_sent_at` is written, a later retry may send another push. This is the unavoidable tradeoff without APNs-side dedupe acknowledgement.
 - The in-app notification remains exactly one visible item.
 
 ## Failure Handling
 
-- Stream consumer failure: message is nacked and retried.
+- Stream consumer failure: the message is not acknowledged and idle recovery retries it.
 - DB duplicate event id: processor returns the existing notification id.
 - Push failure: `push_error` is recorded; the notification still remains in the inbox.
 - Device without APNs token: push is marked failed with a clear reason.

@@ -21,6 +21,7 @@ import com.buddystudy.backend.auth.application.port.outbound.EmailVerificationQu
 import com.buddystudy.backend.auth.application.port.outbound.NotificationPreferenceQueryPort
 import com.buddystudy.backend.auth.application.port.outbound.PermissionQueryPort
 import com.buddystudy.backend.auth.application.port.outbound.PermissionQuotaQueryPort
+import com.buddystudy.backend.auth.application.port.outbound.PermissionQuotaStatus
 import com.buddystudy.backend.auth.application.port.outbound.PermissionRequirementProjection
 import com.buddystudy.backend.auth.application.port.outbound.PermissionRequirementQueryPort
 import com.buddystudy.backend.auth.application.port.outbound.TermsAgreementQueryPort
@@ -192,9 +193,10 @@ class DatabasePermissionEvaluatorTest {
 
     @Test
     fun `quota shortage fails with quota exceeded metadata`(): Unit = runBlocking {
-        permissions.rows += UserPermissionProjection(Permissions.STUDY_CREATE, requiresActiveAccount = true)
+        permissions.rows += UserPermissionProjection(Permissions.QUESTION_CREATE, requiresActiveAccount = true)
         users.statusByUser[7] = "ACTIVE"
         requirements.rows += requirement(
+            permissionCode = Permissions.QUESTION_CREATE,
             type = PermissionRequirementType.QUOTA_AVAILABLE,
             key = "monthly_question",
             operator = PermissionRequirementOperator.GTE,
@@ -206,7 +208,7 @@ class DatabasePermissionEvaluatorTest {
         val result = evaluator.evaluate(
             userId = 7,
             deviceId = "dev-1",
-            permissionCode = Permissions.STUDY_CREATE,
+            permissionCode = Permissions.QUESTION_CREATE,
             context = PermissionEvaluationContext(
                 now = Instant.parse("2026-07-23T12:34:56Z"),
                 sessionId = 1,
@@ -219,8 +221,29 @@ class DatabasePermissionEvaluatorTest {
         assertThat(result.metadata["remaining"]).isEqualTo(0L)
         assertThat(result.metadata["required"]).isEqualTo(1L)
         assertThat(result.metadata["quotaPeriod"]).isEqualTo("MONTHLY")
-        assertThat(result.metadata["quotaResetAt"]).isEqualTo("2026-08-01T00:00:00Z")
+        assertThat(result.metadata["quotaPeriodStartedAt"]).isEqualTo("2026-07-07T10:00:00Z")
+        assertThat(result.metadata["quotaResetAt"]).isEqualTo("2026-08-07T10:00:00Z")
         assertThat(result.metadata["quotaTimeZone"]).isEqualTo("Z")
+    }
+
+    @Test
+    fun `study creation is independent from question quota`(): Unit = runBlocking {
+        permissions.rows += UserPermissionProjection(Permissions.STUDY_CREATE, requiresActiveAccount = true)
+        permissions.rows += UserPermissionProjection(Permissions.QUESTION_CREATE, requiresActiveAccount = true)
+        users.statusByUser[7] = "ACTIVE"
+        requirements.rows += requirement(
+            permissionCode = Permissions.QUESTION_CREATE,
+            type = PermissionRequirementType.QUOTA_AVAILABLE,
+            key = "monthly_question",
+            operator = PermissionRequirementOperator.GTE,
+            value = "1",
+            failureCode = ApiErrorCode.QUOTA_EXCEEDED,
+        )
+        quotas.remaining = 0
+
+        val result = evaluator.evaluate(principal(status = "ACTIVE"), Permissions.STUDY_CREATE)
+
+        assertThat(result.granted).isTrue()
     }
 
     @Test
@@ -343,13 +366,20 @@ class DatabasePermissionEvaluatorTest {
 
     private class FakePermissionQuotaQueryPort : PermissionQuotaQueryPort {
         var remaining = 1L
-        override suspend fun remaining(userId: Long, key: String, now: Instant): Long = remaining
+        override suspend fun status(userId: Long, key: String, now: Instant): PermissionQuotaStatus =
+            PermissionQuotaStatus(
+                remaining = remaining,
+                periodStartedAt = Instant.parse("2026-07-07T10:00:00Z"),
+                resetAt = Instant.parse("2026-08-07T10:00:00Z"),
+            )
     }
 
     private class FakeDevicePort : DevicePort {
         var device: DeviceEntity? = DeviceEntity(deviceId = "dev-1", apnsToken = "token")
         override suspend fun save(entity: DeviceEntity): DeviceEntity = entity
         override suspend fun findByDeviceId(deviceId: String): DeviceEntity? = device
+        override suspend fun findByInstallationKeyHash(installationKeyHash: String): DeviceEntity? =
+            device?.takeIf { it.installationKeyHash == installationKeyHash }
         override suspend fun findAllByUserId(userId: Long): List<DeviceEntity> = emptyList()
     }
 

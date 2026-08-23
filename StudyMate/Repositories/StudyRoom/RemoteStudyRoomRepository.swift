@@ -12,13 +12,27 @@ struct RemoteStudyRoomRepository: StudyRoomRepository {
         registration: RemotePushRegistration,
         limit: Int,
         offset: Int,
-        query: String
+        query: String,
+        language: AppLanguage
     ) async throws -> BackendStudyPage {
         try await backendClient.fetchStudy(
             registration: registration,
             limit: limit,
             offset: offset,
-            query: query
+            query: query,
+            language: language
+        )
+    }
+
+    func fetchStudyDetail(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        language: AppLanguage
+    ) async throws -> BackendStudyRoom {
+        try await backendClient.fetchStudyDetail(
+            registration: registration,
+            studyID: studyID,
+            language: language
         )
     }
 
@@ -105,8 +119,23 @@ struct RemoteStudyRoomRepository: StudyRoomRepository {
 
     func createQuestion(
         registration: RemotePushRegistration,
-        studyID: Int
-    ) async throws -> StudyRecord {
-        try await backendClient.createQuestion(registration: registration, studyID: studyID)
+        studyID: Int,
+        idempotencyKey: String
+    ) async throws -> QuestionGenerationAccepted {
+        try await backendClient.createQuestion(
+            registration: registration,
+            studyID: studyID,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func fetchQuestionGenerationProcess(
+        registration: RemotePushRegistration,
+        correlationID: String
+    ) async throws -> QuestionGenerationProcess {
+        try await backendClient.fetchQuestionGenerationProcess(
+            registration: registration,
+            correlationID: correlationID
+        )
     }
 }

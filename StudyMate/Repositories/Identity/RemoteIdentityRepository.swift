@@ -9,12 +9,14 @@ struct RemoteIdentityRepository: IdentityRepository {
     }
 
     func registerDevice(
+        installationIdentifier: String,
         apnsToken: String?,
         language: AppLanguage,
         timezone: String,
         apnsEnvironment: String
     ) async throws -> RemotePushRegistration {
         try await backendClient.registerDevice(
+            installationIdentifier: installationIdentifier,
             apnsToken: apnsToken,
             language: language,
             timezone: timezone,

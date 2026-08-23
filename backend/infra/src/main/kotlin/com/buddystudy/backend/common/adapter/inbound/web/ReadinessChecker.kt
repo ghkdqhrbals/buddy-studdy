@@ -6,6 +6,7 @@ import com.buddystudy.backend.common.adapter.outbound.persistence.indexedBindMar
 import com.buddystudy.backend.common.adapter.inbound.web.dto.ReadinessCheckResponse
 import com.buddystudy.backend.common.adapter.inbound.web.dto.ReadinessResponse
 import io.r2dbc.spi.Row
+import kotlinx.coroutines.reactive.awaitFirstOrNull
 import kotlinx.coroutines.reactive.awaitSingle
 import org.springframework.data.redis.connection.ReactiveRedisConnectionFactory
 import org.springframework.r2dbc.core.DatabaseClient
@@ -56,7 +57,7 @@ class ReadinessChecker(
                     throw IllegalStateException("Unexpected Redis ping response: $pong")
                 }
             } finally {
-                connection.close()
+                connection.closeLater().awaitFirstOrNull()
             }
             ReadinessCheckResponse(ok = true)
         }

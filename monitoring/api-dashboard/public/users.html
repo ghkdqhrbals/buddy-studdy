@@ -4,99 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy Users & Quotas</title>
-    <script src="/nav-bootstrap.js?v=2026072507"></script>
-    <link rel="stylesheet" href="/styles.css?v=2026072602" />
+    <script src="/nav-bootstrap.js?v=2026072704"></script>
+    <link rel="stylesheet" href="/react/manage.css?v=2026073103" />
   </head>
   <body>
-    <div class="app-shell">
-      <aside class="side-nav" aria-label="Monitoring navigation"></aside>
-
-      <main class="content-shell">
-        <header class="topbar">
-          <div>
-            <h1>Users & Quotas</h1>
-            <p>Search users, assign internal plans, and control monthly question capacity</p>
-          </div>
-          <button id="adminLogoutButton" class="secondary-button" type="button" hidden>Sign out</button>
-        </header>
-
-        <section id="adminLoginPanel" class="admin-login-panel" aria-labelledby="adminLoginTitle">
-          <div>
-            <h2 id="adminLoginTitle">Admin authentication</h2>
-            <p>Use the backend administrator account. The token is kept only for this browser session.</p>
-          </div>
-          <form id="adminLoginForm" class="admin-login-form">
-            <label>
-              Username
-              <input id="adminUsername" autocomplete="username" required />
-            </label>
-            <label>
-              Password
-              <input id="adminPassword" type="password" autocomplete="current-password" required />
-            </label>
-            <button type="submit">Sign in</button>
-          </form>
-          <p id="adminLoginStatus" class="status-message" aria-live="polite"></p>
-        </section>
-
-        <div id="adminWorkspace" hidden>
-          <section class="admin-toolbar" aria-label="User filters">
-            <label class="admin-search-field">
-              User search
-              <input id="adminUserSearch" type="search" placeholder="Email, display name, or user ID" autocomplete="off" />
-            </label>
-            <button id="adminUserSearchButton" type="button">Search</button>
-            <span id="adminUserStatus" class="status-message" aria-live="polite"></span>
-          </section>
-
-          <section class="admin-section" aria-labelledby="tierSettingsTitle">
-            <header>
-              <div>
-                <h2 id="tierSettingsTitle">Plan limits</h2>
-                <p>Changing a plan limit applies to users without a personal override.</p>
-              </div>
-            </header>
-            <div id="tierSettingsRows" class="tier-settings-list"></div>
-          </section>
-
-          <section class="admin-section" aria-labelledby="userListTitle">
-            <header class="admin-section-heading">
-              <div>
-                <h2 id="userListTitle">Users</h2>
-                <p id="adminUserCount">0 users</p>
-              </div>
-              <div class="admin-pagination">
-                <button id="adminPreviousButton" class="secondary-button" type="button">Previous</button>
-                <strong id="adminPageLabel">Page 1</strong>
-                <button id="adminNextButton" class="secondary-button" type="button">Next</button>
-              </div>
-            </header>
-            <div class="admin-table-wrap">
-              <table class="admin-users-table">
-                <thead>
-                  <tr>
-                    <th>User</th>
-                    <th>Status</th>
-                    <th>Usage</th>
-                    <th>Reset</th>
-                    <th>Internal plan</th>
-                    <th>Personal limit</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody id="adminUserRows"></tbody>
-              </table>
-              <div id="adminUsersEmpty" class="empty-state" hidden>
-                <h3>No users found</h3>
-                <p>Change the search text and try again.</p>
-              </div>
-            </div>
-          </section>
-        </div>
-      </main>
-    </div>
-
-    <script type="module" src="/shell.js?v=2026072602"></script>
-    <script type="module" src="/users.js?v=2026072602"></script>
+    <div id="monitoring-react-root"></div>
+    <script type="module" src="/react/manage.js?v=2026073103"></script>
   </body>
 </html>

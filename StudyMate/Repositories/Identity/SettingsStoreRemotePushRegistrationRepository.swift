@@ -14,4 +14,8 @@ struct SettingsStoreRemotePushRegistrationRepository: RemotePushRegistrationRepo
     func saveRemotePushRegistration(_ registration: RemotePushRegistration?) {
         settingsStore.saveRemotePushRegistration(registration)
     }
+
+    func loadOrCreateBackendInstallationIdentifier() -> String {
+        settingsStore.loadOrCreateBackendInstallationIdentifier()
+    }
 }

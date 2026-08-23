@@ -1,11 +1,14 @@
 package com.buddystudy.backend.study.application.prompt
 
+import com.buddystudy.backend.study.application.content.MarkdownContentPolicy
 import org.springframework.stereotype.Component
 
 data class QuestionGenerationPrompt(
     val systemPrompt: String,
     val userPrompt: String,
     val fallbackTopic: String,
+    val level: Int = 5,
+    val language: String = "ko",
 )
 
 data class QuestionDiversityGuide(
@@ -20,6 +23,18 @@ data class QuestionCoverageGuide(
     val angleName: String,
     val conceptPath: String = conceptName,
 )
+
+object QuestionPromptDefaults {
+    val DEFAULT: String = """
+        Ask one short, clear study question at a time. Keep it focused so the learner can answer it directly.
+    """.trimIndent()
+
+    fun resolve(prompt: String?): String =
+        prompt
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: DEFAULT
+}
 
 @Component
 class QuestionDiversityPolicy {
@@ -84,7 +99,11 @@ class QuestionPromptProvider {
         coverage: QuestionCoverageGuide? = null,
     ): QuestionGenerationPrompt {
         val resolvedTopic = topic.ifBlank { "general study" }
-        val languageName = if (language == "en") "English" else "Korean"
+        val languageName = when (language.lowercase()) {
+            "en" -> "English"
+            "ja" -> "Japanese"
+            else -> "Korean"
+        }
         val recentQuestionText = recentQuestions
             .filter { it.isNotBlank() }
             .take(30)
@@ -101,6 +120,8 @@ class QuestionPromptProvider {
 
         return QuestionGenerationPrompt(
             fallbackTopic = resolvedTopic,
+            level = level.coerceIn(1, 10),
+            language = language,
             systemPrompt = DEFAULT_QUESTION_SYSTEM_PROMPT,
             userPrompt = """
                 Create one short study question.
@@ -117,7 +138,34 @@ class QuestionPromptProvider {
                 Use a different angle, concept, trade-off, or scenario from the previous questions.
                 Extra tutor prompt: $tutorPrompt
 
-                Return JSON only with keys question and expectedAnswerHint.
+                ${MarkdownContentPolicy.GENERATION_GUIDE}
+                Create an immutable grading rubric at the same time. The criteria must be specific to this exact
+                question, observable in a learner answer, mutually distinct, and have integer weights totaling 100.
+                Mark only genuinely indispensable criteria as essential. Include accepted alternative reasoning and
+                concrete misconceptions without requiring exact keyword matches.
+
+                Return JSON only:
+                {
+                  "question": "...",
+                  "expectedAnswerHint": "...",
+                  "rubric": {
+                    "version": "question-rubric-v1",
+                    "assessmentType": "explanation|comparison|diagnosis|design|prediction|other",
+                    "criteria": [
+                      {
+                        "id": "stable_snake_case",
+                        "description": "...",
+                        "weight": 25,
+                        "essential": true,
+                        "expectedEvidence": ["..."],
+                        "acceptedAlternatives": ["..."],
+                        "misconceptions": ["..."]
+                      }
+                    ],
+                    "acceptedAlternatives": ["..."],
+                    "fatalMisconceptions": ["..."]
+                  }
+                }
             """.trimIndent(),
         )
     }

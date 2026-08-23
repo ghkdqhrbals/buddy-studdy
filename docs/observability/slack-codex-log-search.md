@@ -42,6 +42,7 @@ Codex는 스크립트 출력 그대로 Slack에 전달한다. 응답에는 다�
 - 같은 조건으로 바로 열 수 있는 Grafana/API Logs 링크
 - 선택된 API 요청의 method/path/status/duration/requestId
 - 에러 코드, 메시지, stack trace가 있으면 stack trace
+- stack trace가 여러 로그 행으로 분리되더라도 예외 타입, root cause, 최초 발생 위치
 - 최근 매칭 API 요청 목록
 - trace id/requestId로 묶인 관련 로그
 - 선택된 요청의 request JSON과 response JSON

@@ -209,7 +209,7 @@ private struct CommunityFeedSection: View {
                 .frame(minHeight: 120)
             } else {
                 ForEach(appState.communityQuestions) { question in
-                    CommunityQuestionRow(question: question)
+                    CommunityQuestionRow(question: question, strings: strings)
                         .onAppear {
                             appState.shouldLoadNextCommunityQuestion(after: question.id)
                         }
@@ -240,6 +240,7 @@ private struct CommunityFeedSection: View {
 
 private struct CommunityQuestionRow: View {
     var question: CommunityQuestion
+    var strings: AppStrings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -249,7 +250,7 @@ private struct CommunityQuestionRow: View {
                 .font(.callout)
                 .fixedSize(horizontal: false, vertical: true)
 
-            CommunityQuestionStatsMeta(question: question)
+            CommunityQuestionStatsMeta(question: question, strings: strings)
         }
         .padding(.vertical, 2)
     }

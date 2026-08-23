@@ -15,13 +15,45 @@ monitor changes must be deployed through separate workflows/jobs. Start with
 
 Current workflow templates:
 
-- `deploy-backend.yml`: backend API runtime on EC2.
-- `deploy-admin-frontend.yml`: admin frontend runtime on EC2.
+- `deploy-backend.yml`: backend API runtime on EC2 with one compact,
+  emoji-free Slack result attachment.
+- `reset-backend-admin.yml`: guarded one-time recovery of the persisted backend
+  monitoring administrator credential.
+- `backend-swarm-stack.yml`: backend Swarm service update, health, and rollback
+  policy consumed by `deploy-backend.yml`.
+- `repair-backend-flyway-v32.yml`: guarded one-time cleanup for a failed,
+  partially applied V32 migration.
+- `configure-backend-network.yml`: Redis administrator ingress on the backend
+  EC2 security group.
+- `deploy-admin-frontend.yml`: private admin frontend container image
+  submission on the backend EC2 host.
+- `notify-deployment-status.yml`: centralized Slack status receiver for
+  one compact iOS release summary and concise threaded progress replies. Set
+  `DEPLOY_SLACK_BOT_TOKEN` and `DEPLOY_SLACK_CHANNEL_ID`; the incoming webhook
+  remains a parent-summary fallback.
 - `deploy-macbookair-monitoring.yml`: API Logs dashboard, Grafana, and Loki on
   MacBook Air.
+- `deploy-macbookair-redisstreamscope.yml`: Redis Streams operations console
+  attached to the existing monitoring gateway on MacBook Air.
+- `deploy-macbookair-monitoring-routing.yml`: Routingflare public hostnames for
+  monitoring, Grafana, and RedisStreamScope.
 - `deploy-testzone.yml`: TestZone k6 execution service and InfluxDB on MacBook
   Air.
-- `deploy-monitoring.yml`: legacy EC2-local monitoring fallback only.
+- `migrate-testzone-component-logging.yml`: guarded, one-time conversion of
+  the two legacy TestZone PostgreSQL/Redis component containers from
+  `json-file` to bounded Docker `local` logging.
+- `maintain-macbookair-docker-capacity.yml`: weekly or manual host-wide Docker
+  daemon recovery, capacity diagnostics, and bounded unused-image and old
+  build-cache reclamation on MacBook Air.
+- `diagnose-macbookair-host-pressure.yml`: manual, host-only memory, swap,
+  disk, and process RSS snapshot on the normal MacBook Air runner labels.
+- `diagnose-macbookair-docker-rca.yml`: manual, bounded, read-only Docker
+  Desktop/Kubernetes RCA snapshot with sanitized macOS memory logs and recent
+  DiagnosticReports evidence on the normal MacBook Air runner labels. Desktop
+  boot-log failures are retained only as classified unit/component/time/hash
+  aggregates; raw messages are discarded.
+- `retire-macbookair-kubernetes.yml`: guarded, two-run retirement of only the
+  legacy Docker Desktop Kubernetes runtime on the MacBook Air.
 
 ## Required Secrets
 
@@ -31,13 +63,19 @@ Backend deploy:
 - `GHCR_TOKEN`
 - `BACKEND_MASTER_KEY`
 - `BACKEND_API_TOKEN`
-- `APNS_AUTH_KEY_BASE64`
-- `APNS_KEY_ID`
-- `APNS_TEAM_ID`
-- `APNS_BUNDLE_ID`
-- `APNS_ENV`
 - `OPENAPI_ACCESS_TOKEN` (optional, only if docs API endpoint is enabled)
 - `GOOGLE_IOS_CLIENT_ID`
+- `ADMIN_RECOVERY_PASSWORD_BCRYPT_HASH` (temporary; only for the guarded
+  backend administrator recovery workflow, then delete it)
+
+Backend application values are stored in AWS Secrets Manager secret
+`buddystudy/prod`. Required APNs keys are `APNS_AUTH_KEY_BASE64`,
+`APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`, and `APNS_ENV`. Firebase
+Remote Config publication requires `FIREBASE_PROJECT_ID` and a Base64-encoded
+service-account JSON in `FIREBASE_SERVICE_ACCOUNT_JSON_BASE64`. The service
+account needs only Remote Config template read/update access. The deploy
+workflow reads and validates these values before writing the backend
+environment file; do not duplicate them as GitHub Actions Secrets.
 
 EC2 log forwarding to MacBook Air Loki:
 
@@ -47,7 +85,24 @@ EC2 log forwarding to MacBook Air Loki:
 MacBook Air monitoring deploy:
 
 - `GRAFANA_ADMIN_PASSWORD`
-- `API_DASHBOARD_BASIC_AUTH_HTPASSWD`
+- `GRAFANA_INCIDENT_HMAC_SECRET`
+- `CODEX_AUTOFIX_GITHUB_TOKEN` (fine-grained token scoped to dispatch the BuddyStudy source repository workflow)
+
+MacBook Air Docker Desktop Kubernetes retirement:
+
+- `MACBOOKAIR_K8S_RETIREMENT_BACKUP_KEY` (dedicated random value of at least 32
+  characters; keep it after retirement because it decrypts the local recovery
+  bundle and authenticates the retained Docker.raw clone)
+
+BuddyStudy source repository incident auto-fix:
+
+- `OPENAI_API_KEY_CODEX_AUTOFIX` (dedicated to `openai/codex-action`; never reuse backend OpenAI keys)
+- `CODEX_AUTOFIX_SLACK_WEBHOOK_URL` (optional Draft PR notification)
+
+MacBook Air RedisStreamScope deploy:
+
+- `RSC_REDIS_HOST`
+- `RSC_REDIS_PASSWORD`
 
 MacBook Air TestZone deploy:
 
@@ -63,6 +118,8 @@ Repository variables:
 
 - `REMOTE_LOKI_PUSH_URL`: remote Loki push endpoint consumed by the EC2 promtail sender, for example `http://100.79.59.22:3100/loki/api/v1/push` over Tailscale or `https://loki.lowfidev.cloud/loki/api/v1/push` when protected by a tunnel.
 - `MACBOOKAIR_MONITORING_ROOT`: persistent host path for MacBook Air PLG data, defaults to `$HOME/data/buddystudy/monitoring`.
+- `REDISSTREAMSCOPE_PORT`: loopback-only RedisStreamScope gateway port,
+  defaults to `3002`.
 - `GRAFANA_PORT`: MacBook Air Grafana host port, defaults to `3000`.
 - `LOKI_PORT`: MacBook Air Loki host port, defaults to `3100`.
 - `MACBOOKAIR_TESTZONE_ROOT`: persistent TestZone and InfluxDB path.
@@ -72,12 +129,19 @@ Repository variables:
 ## Runtime Layout
 
 - `buddystudy-nginx`: public HTTPS proxy on host port `443`.
-- `buddystudy-backend-a`: blue slot for Spring Boot app on Docker network port `8080`.
-- `buddystudy-backend-b`: green slot for Spring Boot app on Docker network port `8080`.
-- `buddystudy-db`: private MySQL container on Docker network port `3306`.
+- `buddystudy_backend`: single-replica Docker Swarm service for the Spring Boot
+  app on overlay network port `8080`.
+- `buddystudy-swarm-net`: attachable overlay shared by Nginx, the backend
+  service, MySQL, Redis, and LibreTranslate.
+- `buddystudy-db`: MySQL on Docker network port `3306`, published to host port
+  `3306` for approved administrator CIDRs.
+- `buddystudy-redis`: password-protected Redis on Docker network port `6379`,
+  published to host port `6379` for the same approved administrator CIDRs.
 - `buddystudy-mysql-data`: persistent Docker volume for MySQL data.
+- `buddystudy-redis-data`: persistent Docker volume for Redis AOF/RDB data.
 - `buddystudy-backend-data`: legacy SQLite volume, kept for historical safety and not deleted.
 - `buddystudy-promtail`: lightweight EC2 log sender. It scrapes Docker logs and forwards them to the MacBook Air Loki endpoint when `REMOTE_LOKI_PUSH_URL` is set.
+- `buddystudy-incident-receiver`: private Monitoring-network service that verifies Grafana HMAC alerts, enriches them from Loki and deployment history, deduplicates alert instances, and dispatches the bounded Codex auto-fix workflow. It has no published host port.
 - `buddystudy-mysql-data` retains live DB data across restarts and redeploys.
 - Nginx proxies `/health`, `/api/v1/health`, and `/api/v1/*` to the BuddyStudy Spring Boot app.
 - Other paths return 404 at Nginx.
@@ -119,11 +183,15 @@ The admin frontend is deployed separately from the backend. Copy
 `deploy-admin-frontend.yml` into the deploy repository's `.github/workflows/`
 directory. The app repository's `Build Admin Frontend Image` workflow dispatches
 `admin-frontend-image-published` and waits for **Deploy BuddyStudy Admin
-Frontend**.
+Frontend** on the EC2 deploy-only runner.
 
-The admin deploy workflow owns only the `buddystudy-admin-frontend` container.
-It must not rebuild backend, recreate MySQL, recreate Loki/Grafana, or run
-runtime health checks.
+The admin deploy workflow owns only the private `buddystudy-admin-frontend`
+container attached to `buddystudy-swarm-net`, where the backend Nginx serves it
+under `https://api.ghkdqhrbals.org/admin/`. It pulls the immutable image,
+replaces only that container, and verifies its configured image without waiting
+for container state, readiness, or an HTTP health check. Grafana owns runtime
+outage monitoring. The workflow must not rebuild the backend or recreate MySQL,
+Loki, or Grafana.
 
 ## Monitoring Deploy
 
@@ -140,11 +208,47 @@ runs-on: [self-hosted, macOS, ARM64, macbook-air, monitoring]
 
 The MacBook Air workflow creates or replaces:
 
-- `buddystudy-api-dashboard`: API Logs dashboard reverse proxy with Basic Auth.
+- `buddystudy-api-dashboard`: API Logs dashboard reverse proxy using the
+  backend administrator bearer session.
+- `buddystudy-monitoring-log-rotator`: isolated sidecar that bounds the
+  dashboard gateway access/error log files and signals Nginx to reopen them.
+- `buddystudy-monitoring-promtail`: module-local collector for the two exact
+  gateway log paths.
 - `buddystudy-loki`: Loki with persistent host data under
   `$HOME/data/buddystudy/monitoring/loki/data` by default.
 - `buddystudy-grafana`: Grafana with persistent host data under
   `$HOME/data/buddystudy/monitoring/grafana/data` by default.
+- `buddystudy-incident-receiver`: Grafana ERROR webhook receiver with persistent incident reservations under `$HOME/data/buddystudy/monitoring/incident-receiver/data` by default.
+
+Every MacBook Air module bounds its own container stdout/stderr with Docker's
+`local` driver at 10 MiB times three files. The monitoring deploy reports host,
+Docker, monitoring, and TestZone storage use but does not perform host-wide
+Docker storage reclamation. It always recreates only the API Dashboard gateway
+and its rotation sidecar after Docker is ready so a Docker Desktop restart
+cannot leave the long-running Nginx bridge endpoint stale. TestZone and
+RedisStreamScope policy changes still require their own module workflows; no
+runtime HTTP or container-health gate is added here.
+
+## MacBook Air Docker Capacity Maintenance
+
+Copy `maintain-macbookair-docker-capacity.yml` into the deploy repository. It
+runs weekly and also supports a manual dispatch. The workflow reuses the scoped
+Docker Desktop restart recovery used by MacBook Air deploys, reports `df` and
+`docker system df --verbose` before and after maintenance, then runs only
+`docker image prune -a --filter until=168h` and
+`docker builder prune -a --filter until=168h --force`. Docker therefore removes
+images created more than seven days ago only when no running or stopped
+container references them, and removes all unused build cache only after it is
+more than seven days old.
+
+This host-capacity workflow never prunes active/in-use build cache, containers,
+volumes, networks, persisted module data, or host files. Images removed by the
+maintenance are recoverable by pulling them again from their registries, and
+removed build cache is recoverable by rebuilding. Monitoring, TestZone, and
+RedisStreamScope workflows remain responsible for their own log and data
+retention and must not duplicate host-wide Docker storage reclamation. Docker
+daemon readiness is the only runtime prerequisite; the workflow does not make
+HTTP or container-health checks.
 
 The separate TestZone workflow creates or replaces:
 
@@ -153,15 +257,321 @@ The separate TestZone workflow creates or replaces:
 - approved disposable MySQL, Redis, or Kafka containers only when a user
   deploys them from TestZone.
 
+## MacBook Air Host Pressure Diagnostics
+
+Copy `diagnose-macbookair-host-pressure.yml` and
+`scripts/diagnose_macbookair_docker_pressure.py` into the deploy repository.
+Run **Diagnose MacBook Air Host Pressure** manually during an attended memory
+incident. It uses the normal `macbook-air,buddystudy` runner labels and does not
+enter the Kubernetes retirement-label or Full Disk Access procedure.
+
+The workflow submits one bounded, host-only snapshot. Its seven fixed probes
+read physical memory, VM page counters, memory-pressure level/free percentage,
+swap usage, data-volume capacity, and process RSS/virtual-size aggregation.
+Each utility has an eight-second deadline and a one-MiB live stdout cap;
+exceeding either limit terminates and reaps only that newly isolated diagnostic
+child group. Raw stdout/stderr is never printed. Process paths are reduced to
+display-safe executable basenames; environment values and command lines are not
+included in the report. This workflow never calls Docker, touches protected
+Docker data, performs a runtime health check, restarts/stops/force-quits Docker
+or another pre-existing process, prunes storage, or mutates persisted data. It
+therefore remains usable after Docker Desktop exits. A successful run is a
+submitted point-in-time snapshot, not a runtime readiness assertion.
+
+## MacBook Air Docker Desktop Kubernetes Retirement
+
+Copy `retire-macbookair-kubernetes.yml` and
+`scripts/retire_macbookair_kubernetes.py` into the deploy repository. This is
+a one-time infrastructure module and is manual-only. It runs exclusively when
+GitHub Actions supplies the exact `macbook-air-buddystudy` ARM64 runner
+identity. Local laptops and every other runner fail closed before inspection or
+mutation.
+
+The workflow intentionally has no interactive-consent mode. On macOS 15 and
+later, Docker's App Group container is protected app data. Apple documents that
+an unrelated process can receive a user authorization prompt when it crosses
+that boundary, and that the access decision belongs to the responsible app
+instance. The headless launchd runner, the top-level Python helper, and its
+isolated process-group children do not provide a provable single
+responsible-app lifetime across the independent preflight and apply runs. A
+successful prompt in one helper process must never be treated as authorization
+for another. See Apple's
+[App Group container guidance](https://developer.apple.com/documentation/xcode/accessing-app-group-containers),
+[App Data usage description](https://developer.apple.com/documentation/bundleresources/information-property-list/nsappdatausagedescription),
+and Apple DTS's [responsible-code guidance](https://developer.apple.com/forums/thread/678819).
+
+There is deliberately no `prepare-ui-stop` mode. Such a mode could quiesce
+writers and create logical PostgreSQL/MySQL/Redis backups, but it could not
+create or verify the full Docker.raw rollback clone that protects dynamic PVCs,
+etcd, Secrets, and cluster metadata. Handing control to the Docker Desktop UI
+between those phases would also break automatic workload rollback and the
+fresh desired-state digest boundary. Do not substitute that partial sequence
+for the guarded retirement transaction.
+
+For the one-time guarded retirement, use this attended operator procedure:
+
+1. Before any retirement dispatch or FDA window, the deployment controller—not
+   the person at the Air—confirms that no retirement job is queued or running,
+   then uses GitHub's repository runner-label REST API to replace the runner's
+   custom `macbook-air,buddystudy` labels with only
+   `macbook-air-k8s-retirement` and verifies the server-side result. The
+   retirement workflow requires that unique label. Every other Air workflow
+   continues to require both normal labels, so no new ordinary job can be
+   assigned and already queued ordinary jobs remain queued. Do not edit runner
+   labels manually.
+2. If an ordinary job was assigned before the label swap, let it finish. The
+   controller must then re-read the runner and confirm `busy=false`. Only now
+   log in to and unlock the MacBook Air. In the existing runner installation
+   directory, run `./svc.sh stop`, then `./svc.sh status`, and do not continue
+   until the listener is offline and the controller has reverified both its
+   offline state and dedicated label.
+3. In **System Settings > Privacy & Security > Full Disk Access**, manually add
+   or enable Apple's Terminal app. Fully quit and reopen Terminal so the new
+   setting applies. Do not grant this broad permission to `python3` or another
+   general-purpose interpreter.
+4. In that exact Terminal window, enter the existing runner installation
+   directory and run `exec ./run.sh`. Keep this foreground listener and the
+   Terminal window open. Do not use launchd, `nohup`, `&`, tmux, screen, or a
+   detached wrapper for either retirement run.
+5. Dispatch `apply=false`. It must finish both the `desktop-settings` and
+   `docker-storage` probes, report `ready=true`, and produce the reviewed
+   desired-state digest. Any access failure blocks retirement; do not dispatch
+   apply.
+6. Without restarting Terminal or the foreground listener, dispatch the
+   separate `apply=true` run with that digest and the exact confirmation
+   `RETIRE DOCKER DESKTOP KUBERNETES`. Keep the Air attended until the guarded
+   rollback attempt or success is fully reported.
+7. Once the job has finished, press Control-C and wait for the foreground
+   listener to exit and appear offline. Because `exec` replaced the shell, no
+   privileged shell remains. Close that window, disable Terminal's Full Disk
+   Access in System Settings, fully quit Terminal, and only then reopen it.
+8. After FDA is revoked, the deployment controller restores exactly the normal
+   `macbook-air,buddystudy` custom labels through the REST API. In the newly
+   opened, unprivileged Terminal, run `./svc.sh start` and `./svc.sh status`,
+   then confirm the normal runner is online. If rollback was reported
+   incomplete, do not restore labels or start the normal listener; keep the Air
+   isolated and use a separately authorized recovery procedure.
+
+The read-only preflight is an empirical protected-path read/open/stat gate. It
+does not prove that the later full clone, settings write, or rollback will
+succeed. Apply independently creates and HMAC-verifies the Docker.raw clone
+before changing settings, and any rollback is a guarded best-effort attempt;
+an incomplete rollback retains recovery copies and requires operator recovery.
+This procedure never uses `tccutil`, edits the TCC database, changes SIP,
+automates a consent dialog, or calls a private Docker API. If the temporary
+foreground Terminal procedure is unacceptable or its read-only run still
+fails, leave apply blocked. Docker Desktop's Kubernetes **Stop** control is the
+vendor-supported manual alternative, but it does not provide this workflow's
+verified clone plus guarded rollback attempt and requires a separately approved
+recovery plan.
+
+Retirement is deliberately a two-run operation:
+
+1. Dispatch **Retire MacBook Air Docker Desktop Kubernetes** with the default
+   `apply=false`. The read-only run prints a SHA-256 desired-state digest and
+   the exact non-secret workload/PVC plan.
+2. Review every identity and blocker. Dispatch a separate run with
+   `apply=true`, paste that 64-character digest into
+   `expected_inventory_digest`, and enter exactly
+   `RETIRE DOCKER DESKTOP KUBERNETES` as the confirmation. Any desired-state
+   change between runs invalidates the plan.
+
+Immediately before the first cluster mutation, apply repeats the full
+inventory, digest, blocker, settings, Docker.raw-path, and unrelated Docker
+identity checks. A change at that final boundary aborts without scaling a
+workload.
+
+The preflight accepts only kubectl context `docker-desktop`, its local
+`127.0.0.1:6443` or `localhost:6443` API server, namespace `buddystudy`, and
+the known auxiliary Deployment
+`default/buddystudy-redis-stream-coordinator`. Its replica state and manifest
+are included in the encrypted backup and recorded for guarded rollback. Any
+other user
+workload outside `buddystudy`, active Job, standalone Pod, ReplicationController,
+or BuddyStudy DaemonSet blocks apply. Pods, ReplicaSets, Jobs, Events, and
+status churn are excluded from the independent desired-state digest, while
+workload/PVC/PV/Secret/ConfigMap resource versions and desired specs are
+included.
+
+Apply first suspends the recorded CronJobs, immediately checks all non-system
+namespaces for an active Job, and only then stops writer Deployments, including
+the exact default-namespace coordinator. A Job that races with suspension
+causes rollback before writer scaling. After writer Pods have terminated, the
+helper creates verified gzip logical dumps for every running PostgreSQL/MySQL
+container. Redis backup requires `SAVE` and an in-container
+`redis-check-rdb` pass before the RDB is copied and signature-checked locally.
+It then scales data
+Deployments and StatefulSets to zero and waits for their Pods to terminate.
+Accessible external hostPath PV directories receive verified quiesced tar
+archives. Dynamic PVCs, Docker-VM-local hostPaths, etcd, Kubernetes Secrets,
+and the rest of Docker Desktop's VM state are protected together by the full
+Docker.raw rollback clone.
+
+The host-only backup directory defaults to
+`~/Library/Application Support/BuddyStudy/KubernetesRetirementBackups` and is
+created with mode `0700` outside Docker Desktop's Data directory. Symlinked
+settings, data, and backup paths are rejected; a declared external `/Users` or
+`/Volumes` hostPath that is missing or symlinked also blocks apply. External
+paths are lexically rejected before filesystem access when they contain NUL,
+`.`/`..`, case aliases at any component, another user's home, the runner home itself, or a
+mounted-volume root. An accepted `/Users` path must be a non-empty descendant
+of the exact runner home; an accepted `/Volumes` path must be below
+`/Volumes/<mount>/`, not the mount root. Each component is then opened by an
+isolated Python child using `lstat` plus `openat`-style `O_NOFOLLOW` directory
+traversal and `fstat`. Each child has a 10-second process-group timeout and the
+preflight path plan has a 90-second aggregate deadline. The same bounded probe
+runs immediately before each quiesced hostPath tar, with a 90-second cumulative
+probe budget, so a stale mount cannot indefinitely delay rollback after writer
+shutdown. A data path that equals, contains, or is contained by the retirement
+backup root is rejected so an archive cannot recursively include its own
+staging or output. Overlap comparisons case-fold every path component to match
+the conservative behavior required on case-insensitive APFS volumes.
+
+Docker settings discovery and standard-Data-subtree `DataFolder`/`Docker.raw`
+discovery use separate 10-second isolated probes as well; the parent helper
+does not stat, resolve, read, or glob those candidates. Probe requests travel
+only through stdin, their stdout is captured in memory, and argv, paths,
+stdout, stderr, settings contents, and errors are never copied into job logs.
+The Docker storage child does not enumerate every ancestor or repeat an
+absolute `lstat`. It uses fd-relative no-follow metadata checks, rejects a
+FIFO or any other non-regular settings candidate before open, opens a final
+file nonblocking, compares its pre/post-open device and inode, and uses
+Darwin `F_GETPATH` to verify the exact component spelling. Its eight-second
+inner deadline is backed by the unchanged ten-second parent process-group
+deadline. Failures expose only an allowlisted operation/candidate/substep
+reason; unknown child text collapses to `storage-probe/protocol-invalid` and
+is never echoed. While traversing either settings candidate, the substep is a
+fixed component ordinal plus `stat`, `open`, or `verify`; the ordinal reveals
+neither the user name nor any path component and pinpoints a stalled syscall.
+
+FileVault must be on and the source and backup must be on the same APFS
+filesystem. The preflight requires a 12 GiB base reserve plus twice the measured external
+hostPath size so plaintext staging and ciphertext can safely coexist. The
+helper seals manifests, logical dumps, settings, workload state, and
+external hostPath archives as an OpenSSL AES-256-CBC/PBKDF2 bundle with a
+separate HMAC-SHA256. It then stops Docker Desktop gracefully and creates a
+byte/HMAC-verified APFS copy-on-write `Docker.raw.apfs-clone`. Backups are never
+uploaded as Actions artifacts and secret or data payloads are never written to
+the job log.
+
+Docker documents the Desktop UI as the supported place to enable or disable
+Kubernetes. Because the deploy-only runner has no reliable interactive UI,
+this workflow uses a narrowly audited fallback: while Desktop is stopped it
+backs up the entire settings store, changes only the one existing boolean
+`KubernetesEnabled`/`kubernetesEnabled` key to `false` with an atomic replace,
+then restarts Desktop. It verifies that setting and requires zero *running*
+Kubernetes-labelled/control-plane containers while preserving every
+non-Kubernetes container identity. It does not remove stopped Kubernetes
+metadata.
+
+If anything fails after the disabled Desktop has started, guarded rollback
+attempts to stop Desktop gracefully, preserve that failed-current Docker.raw,
+restore the verified APFS clone to the exact original Docker.raw path, restore
+the byte-for-byte settings file, restart Desktop, and restore recorded replicas
+and CronJob suspend values. An incomplete rollback keeps every recovery copy,
+reports only safe paths/status, and requires operator recovery before the
+normal runner resumes. Docker Desktop itself is never force-killed.
+
+Keep `MACBOOKAIR_K8S_RETIREMENT_BACKUP_KEY` available for recovery. Before any
+workload is changed, apply stores the same value in the Air login Keychain under
+service `BuddyStudy MacBook Air Kubernetes Retirement Backup` and account
+`buddystudy-kubernetes-retirement`, then reads it back and compares it without
+logging command output. A mismatch blocks apply. Retain both the repository
+secret and this host-local Keychain copy. To inspect the encrypted bundle on
+the Air without logging content, recover/export the key only in the local shell
+and run:
+
+```sh
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 300000 \
+  -pass env:MACBOOKAIR_K8S_RETIREMENT_BACKUP_KEY \
+  -in retirement-backup.tar.enc | tar -tf -
+```
+
+This workflow never resets or purges Docker Desktop, deletes a namespace, PVC,
+PV, Docker volume, container, or network, or runs a prune. It performs no HTTP,
+database-health, or container-health gate. The logical dump and RDB commands
+are backup operations after writers stop, not readiness checks.
+
+The read-only run has a 12-minute helper deadline inside a 15-minute Actions
+watchdog. Kubernetes inventory uses at most three bounded bulk-list calls, every
+`kubectl` request has a 20-second API timeout, and all external hostPaths are
+measured by one bounded `du` process. Progress output contains only a fixed
+non-sensitive stage label and elapsed seconds—never resource names, paths,
+arguments, environment values, command output, or counts. Workflow steps use
+`exec` so cancellation reaches the helper directly; each child command or
+pipeline runs in its own process group, which is killed and reaped on timeout
+or interruption so descendants cannot keep an output pipe open. The 12-minute
+deadline is installed only for the standalone preflight command and is removed
+before exit; it is never shared with apply or rollback.
+Storage progress is split into fixed settings-probe and Docker-storage-probe
+start/complete stages followed by `filevault`, `storage-source-plan`,
+`external-path-validation`, and `backup-preconditions`. A timeout therefore
+identifies the unfinished bounded probe, while its fixed reason identifies the
+last allowlisted candidate/substep without revealing a path.
+
+The apply job allows six hours while each logical dump, hostPath archive,
+bundle seal, and APFS clone has a shorter bounded timeout, leaving rollback
+time. SIGTERM and SIGINT request the guarded rollback path. Runtime image,
+settings, and workload restoration always run before any failed plaintext
+staging is processed. Only after rollback does the helper make a best-effort
+failed-bundle seal under a three-minute outer bound and 120-second seal bound;
+an unsuccessful seal gets a separately bounded 30-second private-staging
+cleanup attempt. These backup-finalization results cannot mask or delay the
+reported rollback result.
+
+### Legacy TestZone component log migration
+
+Copy `migrate-testzone-component-logging.yml` and
+`scripts/migrate_testzone_component_logging.py` into the deploy repository.
+Run **Migrate TestZone Component Logging** first with its default
+`apply=false`. This is a read-only preflight over exactly
+`buddystudy-testzone-postgres` and `buddystudy-testzone-redis`; it keeps each
+inspect document in memory, validates the TestZone-managed label, an approved
+legacy image tag, `json-file` or an already-compliant `local` driver, and the
+single Docker volume at the component's exact data destination. The safe
+summary reports the actual named or anonymous Docker volume identities without
+environment variables, commands, entrypoints, or other potentially secret
+configuration. Auto-removing containers and any run-ID-suffixed backup left by
+an earlier attempt are rejected before mutation.
+
+After reviewing that preflight, explicitly run with `apply=true`. The workflow
+shares the `deploy-macbookair-testzone` concurrency group, stops each affected
+container with a 60-second grace period, and reuses its immutable inspected
+image ID, actual volume identity, container configuration, networks, ports,
+resources, restart policy, labels, environment, command, and entrypoint. Only
+the logging policy changes to Docker `local` at 10 MiB times three compressed
+files. Both replacements must accept their submitted configuration before
+run-ID-suffixed backups are removed without `-v`; a create, configuration, or
+start failure restores the original containers. The accepted migration causes
+a brief component restart when the original was running and preserves a stopped
+original as stopped. Removing a retired backup also removes its old
+`json-file` history, which Docker cannot recover unless it was copied or
+forwarded beforehand. The database/Redis volumes are never copied, removed, or
+pruned. Actions performs no HTTP, database, or container-health gate.
+
 EC2 does not run Loki or Grafana. It runs only `buddystudy-promtail` when
-`REMOTE_LOKI_PUSH_URL` is configured.
+`REMOTE_LOKI_PUSH_URL` is configured. Grafana and Loki are owned exclusively
+by `deploy-macbookair-monitoring.yml`; do not add an EC2-local fallback.
 
 Prometheus and Redis exporter containers are not part of this production
 monitoring profile.
 
-The legacy EC2-local monitoring workflow `deploy-monitoring.yml` is kept only
-as a fallback template. Prefer `deploy-macbookair-monitoring.yml` for the
-current cost-saving EC2 layout.
+## RedisStreamScope Deploy
+
+Copy `deploy-macbookair-redisstreamscope.yml` and
+`deploy-macbookair-monitoring-routing.yml` into the deploy repository. Run
+**Deploy RedisStreamScope on MacBook Air** first, then run
+**Deploy BuddyStudy Monitoring Routes on MacBook Air** to publish
+`redis.lowfidev.cloud`.
+
+The runtime workflow pulls the immutable RedisStreamScope GHCR digest, stores
+SQLite and connection configuration in the
+`buddystudy-redisstreamscope-data` Docker volume, and configures the production
+Redis cluster from repository secrets. The application container has no host
+port. The existing `buddystudy-api-dashboard` Nginx container owns the
+`127.0.0.1:3002` listener and proxies to RedisStreamScope on the shared private
+monitoring network. RedisStreamScope keeps its own session authentication.
+Routingflare maps the public hostname to that loopback listener.
 
 Grafana dashboard provisioning is file-based, so dashboards are restored on
 container recreation:
@@ -193,39 +603,77 @@ The backend image must be built on a GitHub-hosted runner and pushed to GHCR
 before this workflow runs. The self-hosted EC2 runner only pulls the image and
 runs containers; it must not compile backend code or build Docker images.
 
-The deploy process uses a blue/green rolling pattern:
+The deploy process uses Docker Swarm rolling updates:
 
-1. New image starts on the inactive slot (`buddystudy-backend-a` or `...-b`).
-2. GitHub Actions validates only deploy mechanics: the new container process
-   does not immediately exit, and Nginx configuration is valid. It must not
-   call backend health or readiness endpoints, inspect Docker `Health.Status`,
-   or call the Health Monitor Worker `/check` endpoint.
-3. Certificate checks are refreshed, and both old/new slots can coexist briefly.
-4. Traffic is switched to the new slot, then the old slot is drained and removed with graceful stop.
+1. The workflow submits the immutable image to `buddystudy_backend`.
+2. Swarm starts the replacement task before stopping the current task.
+3. The image health check calls only
+   `/api/v1/health/dependencies`; `failure_action: rollback` restores the
+   previous task when the replacement does not become healthy. The
+   post-readiness monitor window is five seconds.
+4. The workflow waits for Swarm `UpdateStatus=completed`, `1/1` replicas, and a
+   running task whose immutable image matches the requested release. A paused
+   or rolled-back update fails the workflow and the deployment notification.
+5. Nginx keeps the fixed `buddystudy_backend:8080` upstream, so routine updates
+   do not rewrite or race the proxy configuration.
+
+For the first migration only, run with `promote_swarm=false`, inspect the staged
+task and logs, then rerun the same image with `promote_swarm=true`. This switches
+Nginx once and removes the former A/B containers without resubmitting the
+stack, so the inspected staged task is the task that receives traffic. A single
+Swarm node provides zero-downtime application replacement but does not provide
+host failover.
+
+Use `Inspect BuddyStudy Backend Swarm` after the image startup grace period.
+It reports only the service image, replica count, update state, and task
+history. It does not call the application or expose the service environment.
 
 Only one scheduler leader is active during overlap windows. MySQL advisory lock is used so only one running backend instance processes scheduled question dispatch at a time.
 
+Backend deployments preserve the running MySQL and Redis containers. Redis is
+not recreated during an application rollout because a Redis restart would make
+all backend dependency health checks fail simultaneously. Redis runtime changes
+must use an infrastructure workflow.
+
 The workflow uses Let's Encrypt with the `tls-alpn-01` challenge, so only port `443` needs to be public. If certificate issuance fails, a temporary self-signed certificate keeps the service reachable for debugging.
 
-GitHub Actions must not call backend `/health` or readiness endpoints, must not inspect Docker `Health.Status`, must not use indirect container health gates such as `docker compose up --wait` or `docker compose wait`, and must not call the Health Monitor Worker `/check` endpoint. Runtime server-down alerts are handled by Grafana alerting. The Cloudflare Worker remains available for explicit diagnostics, but its production Cron check is disabled.
+GitHub Actions must not call backend `/health` or readiness endpoints, must not
+inspect Docker `Health.Status`, must not use indirect container health gates
+such as `docker compose up --wait` or `docker compose wait`, and must not call the Health Monitor Worker `/check` endpoint. It waits on Swarm's control-plane
+rollout state instead. Swarm evaluates the image health check as the platform
+rollout policy; only a completed rollout with the requested image and replica
+count is reported as successful. Runtime server-down alerts remain handled by
+Grafana alerting. The Cloudflare Worker remains available for explicit
+diagnostics, but its production Cron check is disabled.
 
-Backend scheduler failure alerts are separate from server-down alerts. Set the
-deploy repository secret `SLACK_WEBHOOK_URL` when the backend should send Slack
-messages for failed managed scheduler jobs. Set the deploy repository variable
-`MONITORING_ADMIN_BASE_URL` when the admin frontend origin differs from
-`https://api.ghkdqhrbals.org/admin`; scheduler alerts use it to link directly
-to the matching run list. Repeated failed-run alerts for the same scheduler job
-are throttled by `MONITORING_SCHEDULER_FAILURE_ALERT_REPEAT_SECONDS`, which
-defaults to `300`. The template also passes `MONITORING_SLACK_TIMEOUT_MS`,
+Backend scheduler failures are emitted as `ERROR` logs with the throwable and
+run identifiers. Promtail stores the complete stack as one Loki event, and
+Grafana alone sends the Slack notification and independently calls the private,
+HMAC-signed incident receiver. The backend application does not receive Slack,
+GitHub, or Codex credentials. The incident receiver dispatches only a bounded,
+redacted `codex-incident-autofix` payload; a separate GitHub-hosted workflow may
+open a verified Draft PR but never merges or deploys it. The template passes
 `MONITORING_SCHEDULER_READINESS_ENABLED`,
 `MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES`,
 `MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES`, and
 `MONITORING_SCHEDULER_MONITORED_JOBS` into the backend so Docker deployments
-use the same scheduler readiness policy as Kubernetes. Only frequent jobs belong
-in this 15-minute readiness list. Daily correction jobs are monitored through
-their failed-run alerts and must not make readiness stale between scheduled runs.
+use the same scheduler readiness policy as Kubernetes. Only frequent managed
+jobs belong in this 15-minute readiness list. Admin analytics is refreshed only
+by an explicit authenticated operator request and is not a managed batch job.
 Grafana alerting owns continuous server-down detection. The Cloudflare Worker
 scheduled check is disabled in production to avoid periodic KV writes.
+
+Slack uses separate app webhooks for separate sender identities:
+
+- `GRAFANA_SLACK_WEBHOOK_URL` belongs to the `BuddyStudy Grafana` Slack app and
+  must be the Incoming Webhook installed to `#error` (`C0BRMLFMH9V`). Slack
+  app webhooks are channel-bound and ignore payload channel overrides.
+- `DEPLOY_SLACK_WEBHOOK_URL` belongs to the BuddyStudy Deploy Slack app, whose
+  app name and icon are configured for deployments.
+- `SLACK_WEBHOOK_URL` remains a temporary fallback for both workflows while the
+  dedicated app webhooks are being provisioned. Slack app name and icon are
+  properties of the app behind an Incoming Webhook, so a single webhook cannot
+  reliably present two different sender identities.
 
 `api.ghkdqhrbals.org` must resolve to the EC2 host for trusted certificate issuance.
 

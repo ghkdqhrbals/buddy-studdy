@@ -9,6 +9,7 @@ import {
   counterRatePoints,
   customMetricRange,
   formatBytes,
+  formatDurationSeconds,
   formatMilliseconds,
   hasUnrecoveredRuntimeFailure,
   parseLokiMetricValues,
@@ -19,6 +20,18 @@ import {
   ratioPoints,
   toDateTimeLocalValue,
 } from "../public/metrics.js";
+
+test("formatDurationSeconds distinguishes unavailable values from a measured zero", () => {
+  assert.equal(formatDurationSeconds(null), "-");
+  assert.equal(formatDurationSeconds(undefined), "-");
+  assert.equal(formatDurationSeconds(""), "-");
+  assert.equal(formatDurationSeconds("   "), "-");
+  assert.equal(formatDurationSeconds(Number.NaN), "-");
+  assert.equal(formatDurationSeconds(-1), "-");
+  assert.equal(formatDurationSeconds(0), "0m");
+  assert.equal(formatDurationSeconds(60), "1m");
+  assert.equal(formatDurationSeconds(3_660), "1h 1m");
+});
 
 test("parseRuntimeMetrics extracts the flat runtime payload", () => {
   const value = [
@@ -103,19 +116,19 @@ test("formats latency without hiding sub-second detail", () => {
 test("request, error, and latency queries aggregate in Loki", () => {
   assert.equal(
     buildRequestRateQuery("1m"),
-    'sum(rate(({container=~"buddystudy-backend.*"} |= "api_exchange ")[1m]))',
+    'sum(rate(({app="buddystudy"} |= "api_exchange ")[1m]))',
   );
   assert.equal(
     buildErrorRateQuery("1m"),
-    'sum(rate(({container=~"buddystudy-backend.*"} |= "api_exchange " | json | __error__ = "" | status >= 500 and status < 600)[1m]))',
+    'sum(rate(({app="buddystudy"} |= "api_exchange " | pattern "<_> api_exchange <payload>" | line_format "{{.payload}}" | json | __error__ = "" | status >= 500 and status < 600)[1m]))',
   );
   assert.equal(
     buildClientErrorRateQuery("1m"),
-    'sum(rate(({container=~"buddystudy-backend.*"} |= "api_exchange " | json | __error__ = "" | status >= 400 and status < 500)[1m]))',
+    'sum(rate(({app="buddystudy"} |= "api_exchange " | pattern "<_> api_exchange <payload>" | line_format "{{.payload}}" | json | __error__ = "" | status >= 400 and status < 500)[1m]))',
   );
   assert.equal(
     buildLatencyQuantileQuery(0.95, "1m"),
-    'max(quantile_over_time(0.95, {container=~"buddystudy-backend.*"} |= "api_exchange " | json | __error__ = "" | unwrap durationMs [1m]))',
+    'max(quantile_over_time(0.95, {app="buddystudy"} |= "api_exchange " | pattern "<_> api_exchange <payload>" | line_format "{{.payload}}" | json | __error__ = "" | unwrap durationMs [1m]))',
   );
 });
 

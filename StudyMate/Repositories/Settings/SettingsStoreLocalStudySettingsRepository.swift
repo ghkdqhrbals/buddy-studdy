@@ -31,4 +31,24 @@ struct SettingsStoreLocalStudySettingsRepository: LocalStudySettingsRepository {
     func saveLocalSettingsMutationAt(_ date: Date?) {
         settingsStore.saveLocalSettingsMutationAt(date)
     }
+
+    func loadStudyTreeNodeOffsets(rootStudyID: Int) -> [Int: StudyTreeNodeOffset] {
+        settingsStore.loadStudyTreeNodeOffsets(rootStudyID: rootStudyID)
+    }
+
+    func saveStudyTreeNodeOffsets(_ offsets: [Int: StudyTreeNodeOffset], rootStudyID: Int) {
+        settingsStore.saveStudyTreeNodeOffsets(offsets, rootStudyID: rootStudyID)
+    }
+
+    func loadStudyTreeViewport(rootStudyID: Int) -> StudyTreeViewportState {
+        settingsStore.loadStudyTreeViewport(rootStudyID: rootStudyID)
+    }
+
+    func hasStudyTreeViewport(rootStudyID: Int) -> Bool {
+        settingsStore.hasStudyTreeViewport(rootStudyID: rootStudyID)
+    }
+
+    func saveStudyTreeViewport(_ viewport: StudyTreeViewportState, rootStudyID: Int) {
+        settingsStore.saveStudyTreeViewport(viewport, rootStudyID: rootStudyID)
+    }
 }

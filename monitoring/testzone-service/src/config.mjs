@@ -22,5 +22,6 @@ export function loadConfig(env = process.env) {
       token: env.TESTZONE_INFLUX_TOKEN || "",
     },
     componentPassword: env.TESTZONE_COMPONENT_PASSWORD || "testzone-local-only",
+    deploymentIngestToken: env.MONITORING_DEPLOYMENT_INGEST_TOKEN || "",
   };
 }

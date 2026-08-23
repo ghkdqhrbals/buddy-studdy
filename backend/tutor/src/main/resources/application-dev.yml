@@ -2,7 +2,7 @@ spring:
   config:
     activate:
       on-profile: dev
-    import: optional:aws-secretsmanager:${AWS_SECRET_ID:buddystudy/dev}
+    import: "optional:aws-secretsmanager:${AWS_SECRET_ID:buddystudy/dev}?prefix=local-secret."
   r2dbc:
     url: ${R2DBC_DATABASE_URL:r2dbc:mysql://localhost:3306/buddystudy?serverZoneId=UTC}
     username: ${DATABASE_USERNAME:buddystudy}
@@ -13,11 +13,10 @@ spring:
   cloud:
     aws:
       region:
-        static: ap-northeast-2
+        static: ${AWS_REGION:ap-northeast-2}
       secretsmanager:
         enabled: true
-        region: ap-northeast-2
-
+        region: ${AWS_REGION:ap-northeast-2}
 management:
   health:
     mail:
@@ -33,6 +32,42 @@ springdoc:
     url: /v3/api-docs
 
 buddystudy:
+  logging:
+    api:
+      detail: ${API_LOG_DETAIL:compact}
+  apns:
+    team-id: ${APNS_TEAM_ID:${local-secret.APNS_TEAM_ID:}}
+    key-id: ${APNS_KEY_ID:${local-secret.APNS_KEY_ID:}}
+    auth-key-p8: ${APNS_AUTH_KEY_P8:${APNS_AUTH_KEY_BASE64:${local-secret.APNS_AUTH_KEY_BASE64:}}}
+    bundle-id: ${APNS_BUNDLE_ID:${local-secret.APNS_BUNDLE_ID:io.github.ghkdqhrbals.StudyMate}}
+  billing:
+    apple:
+      bundle-id: ${APPLE_IAP_BUNDLE_ID:${local-secret.APPLE_IAP_BUNDLE_ID:${APNS_BUNDLE_ID:${local-secret.APNS_BUNDLE_ID:io.github.ghkdqhrbals.StudyMate}}}}
+      app-apple-id: ${APPLE_IAP_APP_APPLE_ID:${local-secret.APPLE_IAP_APP_APPLE_ID:6774108938}}
+      root-certificates-base64: ${APPLE_IAP_ROOT_CERTIFICATES_BASE64:${local-secret.APPLE_IAP_ROOT_CERTIFICATES_BASE64:}}
+      enable-online-checks: ${APPLE_IAP_ENABLE_ONLINE_CHECKS:true}
+      allow-xcode-environment: ${APPLE_IAP_ALLOW_XCODE_ENVIRONMENT:true}
+    revenue-cat:
+      webhook-signing-secret: ${REVENUECAT_WEBHOOK_SIGNING_SECRET:${local-secret.REVENUECAT_WEBHOOK_SIGNING_SECRET:}}
+      project-id: ${REVENUECAT_PROJECT_ID:${local-secret.REVENUECAT_PROJECT_ID:}}
+      app-id: ${REVENUECAT_APP_ID:${local-secret.REVENUECAT_APP_ID:}}
+      server-api-key: ${REVENUECAT_SERVER_API_KEY:${local-secret.REVENUECAT_SERVER_API_KEY:}}
+      allow-test-store: ${REVENUECAT_ALLOW_TEST_STORE:true}
+  firebase:
+    remote-config:
+      project-id: ${FIREBASE_PROJECT_ID:${local-secret.FIREBASE_PROJECT_ID:}}
+      service-account-json-base64: ${FIREBASE_SERVICE_ACCOUNT_JSON_BASE64:${local-secret.FIREBASE_SERVICE_ACCOUNT_JSON_BASE64:}}
+      parameter-key: ${FIREBASE_REMOTE_CONFIG_PARAMETER_KEY:ios_app_control_v1}
+  email:
+    host: ${SMTP_HOST:${local-secret.SMTP_HOST:smtp.gmail.com}}
+    port: ${SMTP_PORT:${local-secret.SMTP_PORT:587}}
+    username: ${SMTP_USERNAME:${local-secret.SMTP_USERNAME:}}
+    password: ${SMTP_PASSWORD:${local-secret.SMTP_PASSWORD:}}
+    from: ${SMTP_FROM:${local-secret.SMTP_FROM:${SMTP_USERNAME:${local-secret.SMTP_USERNAME:}}}}
+  openai:
+    user-content-api-key: ${OPENAI_API_KEY_USER:${OPENAI_USER_CONTENT_API_KEY:${OPENAI_API_KEY:${local-secret.OPENAI_API_KEY_USER:${local-secret.OPENAI_USER_CONTENT_API_KEY:${local-secret.OPENAI_API_KEY:}}}}}}
+    system-api-key: ${OPENAI_API_KEY_SYSTEM:${OPENAI_SYSTEM_API_KEY:${local-secret.OPENAI_API_KEY_SYSTEM:${local-secret.OPENAI_SYSTEM_API_KEY:}}}}
+    grading-response-style: ${OPENAI_GRADING_RESPONSE_STYLE:${local-secret.OPENAI_GRADING_RESPONSE_STYLE:structured-brief-v1}}
   scheduler:
     enabled: true
   streams:

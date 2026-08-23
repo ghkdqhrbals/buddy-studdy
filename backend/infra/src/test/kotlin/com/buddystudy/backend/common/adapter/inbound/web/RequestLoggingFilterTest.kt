@@ -18,7 +18,8 @@ import reactor.core.publisher.Mono
 
 @ExtendWith(OutputCaptureExtension::class)
 class RequestLoggingFilterTest {
-    private val filter = RequestLoggingFilter()
+    private val filter = RequestLoggingFilter(ApiLoggingPolicy("detailed"))
+    private val compactFilter = RequestLoggingFilter(ApiLoggingPolicy("compact"))
 
     @Test
     fun `response body is preserved after reactive logging`(): Unit = runBlocking {
@@ -136,12 +137,120 @@ class RequestLoggingFilterTest {
         assertThat(output.all).contains("\"status\":500")
     }
 
+    @Test
+    fun `compact api log includes redacted headers and bodies but omits request identity`(output: CapturedOutput) = runBlocking {
+        val requestBody = """{"topic":"Redis","accessToken":"secret-token"}"""
+        val exchange = execute(
+            request = MockServerHttpRequest.post("/api/v1/studies?source=dev")
+                .contentType(MediaType.APPLICATION_JSON)
+                .header("Authorization", "Bearer access-token")
+                .header("X-App-Version", "1.0.16")
+                .header("CF-Connecting-IP", "203.0.113.10")
+                .body(requestBody),
+            activeFilter = compactFilter,
+        ) { current ->
+            current.attributes[RequestLoggingFilter.AUTHENTICATED_USER_ID_ATTRIBUTE] = 42L
+            readBody(current).flatMap { body ->
+                assertThat(body).isEqualTo(requestBody)
+                writeJson(current, """{"id":10}""")
+            }
+        }
+
+        assertThat(exchange.response.bodyAsString.block()).isEqualTo("""{"id":10}""")
+        assertThat(output.out).contains("\"method\":\"POST\"")
+        assertThat(output.out).contains("\"path\":\"/api/v1/studies\"")
+        assertThat(output.out).contains("\"query\":\"source=dev\"")
+        assertThat(output.out).contains("\"requestHeaders\":")
+        assertThat(output.out).contains("\"X-App-Version\":\"1.0.16\"")
+        assertThat(output.out).contains("\"Authorization\":\"[REDACTED]\"")
+        assertThat(output.out).contains("\"requestBody\":{\"topic\":\"Redis\",\"accessToken\":\"[REDACTED]\"}")
+        assertThat(output.out).contains("\"status\":200")
+        assertThat(output.out).contains("\"responseHeaders\":")
+        assertThat(output.out).contains("\"responseBody\":{\"id\":10}")
+        assertThat(output.out).doesNotContain("requestId")
+        assertThat(output.out).doesNotContain("clientIp")
+        assertThat(output.out).doesNotContain("userId")
+        assertThat(output.out).doesNotContain("203.0.113.10")
+        assertThat(output.out).doesNotContain("secret-token")
+    }
+
+    @Test
+    fun `mcp exchange keeps metadata but never captures request or response bodies`(output: CapturedOutput) = runBlocking {
+        val requestBody = """{"resume":"private-resume-content"}"""
+        val responseBody = """{"feedback":"private-feedback-content"}"""
+        val exchange = execute(
+            MockServerHttpRequest.post("/api/v1/mcp?client=llm")
+                .contentType(MediaType.APPLICATION_JSON)
+                .header("X-App-Version", "1.0.16")
+                .body(requestBody),
+        ) { current ->
+            current.attributes[RequestLoggingFilter.AUTHENTICATED_USER_ID_ATTRIBUTE] = 42L
+            readBody(current).flatMap { body ->
+                assertThat(body).isEqualTo(requestBody)
+                writeJson(current, responseBody)
+            }
+        }
+
+        assertThat(exchange.response.bodyAsString.block()).isEqualTo(responseBody)
+        assertThat(output.out).contains("api_exchange")
+        assertThat(output.out).contains("\"method\":\"POST\"")
+        assertThat(output.out).contains("\"path\":\"/api/v1/mcp\"")
+        assertThat(output.out).contains("\"query\":\"client=llm\"")
+        assertThat(output.out).contains("\"X-App-Version\":\"1.0.16\"")
+        assertThat(output.out).contains("\"userId\":\"42\"")
+        assertThat(output.out).contains("\"status\":200")
+        assertThat(output.out).contains("\"requestBody\":\"\"")
+        assertThat(output.out).contains("\"responseBody\":\"\"")
+        assertThat(output.out).doesNotContain("private-resume-content")
+        assertThat(output.out).doesNotContain("private-feedback-content")
+    }
+
+    @Test
+    fun `mcp matrix parameter cannot bypass body suppression`(output: CapturedOutput) = runBlocking {
+        val requestBody = """{"resume":"matrix-private-resume"}"""
+        val responseBody = """{"feedback":"matrix-private-feedback"}"""
+        val exchange = execute(
+            MockServerHttpRequest.post("/api/v1/mcp;client=llm?source=test")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(requestBody),
+        ) { current ->
+            readBody(current).flatMap { body ->
+                assertThat(body).isEqualTo(requestBody)
+                writeJson(current, responseBody)
+            }
+        }
+
+        assertThat(exchange.response.bodyAsString.block()).isEqualTo(responseBody)
+        assertThat(output.out).contains("\"path\":\"/api/v1/mcp;client=llm\"")
+        assertThat(output.out).contains("\"query\":\"source=test\"")
+        assertThat(output.out).contains("\"requestBody\":\"\"")
+        assertThat(output.out).contains("\"responseBody\":\"\"")
+        assertThat(output.out).doesNotContain("matrix-private-resume")
+        assertThat(output.out).doesNotContain("matrix-private-feedback")
+    }
+
+    @Test
+    fun `body suppression does not apply to nested non-mcp api paths`(output: CapturedOutput) = runBlocking {
+        execute(
+            MockServerHttpRequest.post("/api/v1/mcp/tools")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body("""{"value":"ordinary-api-content"}"""),
+        ) { current ->
+            readBody(current).flatMap { writeJson(current, """{"value":"ordinary-api-response"}""") }
+        }
+
+        assertThat(output.out).contains("\"path\":\"/api/v1/mcp/tools\"")
+        assertThat(output.out).contains("ordinary-api-content")
+        assertThat(output.out).contains("ordinary-api-response")
+    }
+
     private fun execute(
         request: MockServerHttpRequest,
+        activeFilter: RequestLoggingFilter = filter,
         handler: (ServerWebExchange) -> Mono<Void>,
     ): MockServerWebExchange {
         val exchange = MockServerWebExchange.from(request)
-        filter.filter(exchange, WebFilterChain(handler)).block()
+        activeFilter.filter(exchange, WebFilterChain(handler)).block()
         return exchange
     }
 

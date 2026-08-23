@@ -56,7 +56,8 @@ secrets would overwrite live cluster credentials. Create or patch
 - `BACKEND_MASTER_KEY`
 - `AUTH_JWT_SECRET`
 - `ADMIN_PASSWORD`
-- `OPENAI_API_KEY`
+- `OPENAI_API_KEY_USER`
+- `OPENAI_API_KEY_SYSTEM` (must be a different key)
 - APNs values when push delivery is required
 - SMTP values when email login is required
 - `SLACK_WEBHOOK_URL` for production scheduler failure alerts
@@ -131,7 +132,7 @@ Cloudflare should be used in two different modes:
 `deploy/cloudflared/lowfidev-config.yaml` maps public HTTP services and keeps
 compatibility TCP hostnames:
 
-- `api.lowfidev.cloud` -> `http://localhost:30080`
+- `lowfidev.cloud` -> `http://localhost:30080`
 - `db.lowfidev.cloud` -> `tcp://localhost:30432`
 - Redis is exposed through a node `hostPort`, not a proxy service.
 

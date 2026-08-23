@@ -1,5 +1,12 @@
 package com.buddystudy.backend.config
 
+import com.buddystudy.auth.domain.entity.ApnsEnvironment
+import com.buddystudy.auth.domain.entity.DevicePlatform
+import com.buddystudy.avatar.domain.entity.AvatarSlot
+import com.buddystudy.common.domain.SupportedLanguage
+import com.buddystudy.notification.domain.entity.NotificationThreadType
+import com.buddystudy.study.domain.entity.QuestionSource
+import com.buddystudy.study.domain.entity.QuestionStatus
 import io.r2dbc.spi.ConnectionFactoryOptions
 import org.springframework.boot.r2dbc.autoconfigure.R2dbcConnectionDetails
 import org.springframework.context.annotation.Bean
@@ -28,6 +35,20 @@ class R2dbcConnectionDetailsConfig {
             OffsetDateTimeToInstantConverter,
             LocalDateTimeToInstantConverter,
             InstantToLocalDateTimeConverter,
+            StringToSupportedLanguageConverter,
+            SupportedLanguageToStringConverter,
+            StringToDevicePlatformConverter,
+            DevicePlatformToStringConverter,
+            StringToApnsEnvironmentConverter,
+            ApnsEnvironmentToStringConverter,
+            StringToAvatarSlotConverter,
+            AvatarSlotToStringConverter,
+            StringToNotificationThreadTypeConverter,
+            NotificationThreadTypeToStringConverter,
+            StringToQuestionStatusConverter,
+            QuestionStatusToStringConverter,
+            StringToQuestionSourceConverter,
+            QuestionSourceToStringConverter,
         )
 }
 
@@ -44,6 +65,76 @@ internal object LocalDateTimeToInstantConverter : Converter<LocalDateTime, Insta
 @WritingConverter
 internal object InstantToLocalDateTimeConverter : Converter<Instant, LocalDateTime> {
     override fun convert(source: Instant): LocalDateTime = LocalDateTime.ofInstant(source, ZoneOffset.UTC)
+}
+
+@ReadingConverter
+internal object StringToSupportedLanguageConverter : Converter<String, SupportedLanguage> {
+    override fun convert(source: String): SupportedLanguage = SupportedLanguage.fromDatabaseValue(source)
+}
+
+@WritingConverter
+internal object SupportedLanguageToStringConverter : Converter<SupportedLanguage, String> {
+    override fun convert(source: SupportedLanguage): String = source.databaseValue
+}
+
+@ReadingConverter
+internal object StringToDevicePlatformConverter : Converter<String, DevicePlatform> {
+    override fun convert(source: String): DevicePlatform = DevicePlatform.fromDatabaseValue(source)
+}
+
+@WritingConverter
+internal object DevicePlatformToStringConverter : Converter<DevicePlatform, String> {
+    override fun convert(source: DevicePlatform): String = source.databaseValue
+}
+
+@ReadingConverter
+internal object StringToApnsEnvironmentConverter : Converter<String, ApnsEnvironment> {
+    override fun convert(source: String): ApnsEnvironment = ApnsEnvironment.fromDatabaseValue(source)
+}
+
+@WritingConverter
+internal object ApnsEnvironmentToStringConverter : Converter<ApnsEnvironment, String> {
+    override fun convert(source: ApnsEnvironment): String = source.databaseValue
+}
+
+@ReadingConverter
+internal object StringToAvatarSlotConverter : Converter<String, AvatarSlot> {
+    override fun convert(source: String): AvatarSlot = AvatarSlot.fromDatabaseValue(source)
+}
+
+@WritingConverter
+internal object AvatarSlotToStringConverter : Converter<AvatarSlot, String> {
+    override fun convert(source: AvatarSlot): String = source.databaseValue
+}
+
+@ReadingConverter
+internal object StringToNotificationThreadTypeConverter : Converter<String, NotificationThreadType> {
+    override fun convert(source: String): NotificationThreadType = NotificationThreadType.fromDatabaseValue(source)
+}
+
+@WritingConverter
+internal object NotificationThreadTypeToStringConverter : Converter<NotificationThreadType, String> {
+    override fun convert(source: NotificationThreadType): String = source.databaseValue
+}
+
+@ReadingConverter
+internal object StringToQuestionStatusConverter : Converter<String, QuestionStatus> {
+    override fun convert(source: String): QuestionStatus = QuestionStatus.fromDatabaseValue(source)
+}
+
+@WritingConverter
+internal object QuestionStatusToStringConverter : Converter<QuestionStatus, String> {
+    override fun convert(source: QuestionStatus): String = source.databaseValue
+}
+
+@ReadingConverter
+internal object StringToQuestionSourceConverter : Converter<String, QuestionSource> {
+    override fun convert(source: String): QuestionSource = QuestionSource.fromDatabaseValue(source)
+}
+
+@WritingConverter
+internal object QuestionSourceToStringConverter : Converter<QuestionSource, String> {
+    override fun convert(source: QuestionSource): String = source.databaseValue
 }
 
 internal class EnvironmentR2dbcConnectionDetails(
@@ -68,6 +159,13 @@ internal class EnvironmentR2dbcConnectionDetails(
                 "DATABASE_PASSWORD",
             )
         val parsed = ConnectionFactoryOptions.parse(url)
+        val driver = parsed.getRequiredValue(ConnectionFactoryOptions.DRIVER).toString()
+        val protocol = parsed.getValue(ConnectionFactoryOptions.PROTOCOL)?.toString()
+        val databaseDriver = if (driver == "pool") protocol else driver
+        require(databaseDriver == "mysql") {
+            "BuddyStudy supports only MySQL R2DBC URLs, but '$databaseDriver' was configured. " +
+                "Check spring.r2dbc.url, R2DBC_DATABASE_URL, DATABASE_URL, and the active AWS secret."
+        }
         val builder = parsed.mutate()
 
         if (!parsed.hasOption(ConnectionFactoryOptions.USER) && username != null) {

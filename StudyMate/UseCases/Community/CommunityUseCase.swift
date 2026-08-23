@@ -29,12 +29,14 @@ struct CommunityUseCase {
     func fetchPublicQuestion(
         registration: RemotePushRegistration,
         questionID: String,
-        language: AppLanguage
+        language: AppLanguage,
+        view: LocalizedContentView
     ) async throws -> CommunityQuestion {
         try await repository.fetchPublicQuestion(
             registration: registration,
             questionID: questionID,
-            language: language
+            language: language,
+            view: view
         )
     }
 
@@ -43,6 +45,16 @@ struct CommunityUseCase {
         idToken: String
     ) async throws -> CommunityLoginResult {
         try await repository.loginWithGoogle(
+            registration: registration,
+            idToken: idToken
+        )
+    }
+
+    func loginWithApple(
+        registration: RemotePushRegistration,
+        idToken: String
+    ) async throws -> CommunityLoginResult {
+        try await repository.loginWithApple(
             registration: registration,
             idToken: idToken
         )
@@ -105,7 +117,8 @@ struct CommunityUseCase {
         avatarSymbolName: String?,
         avatarColorSeed: String?,
         avatarMode: String? = nil,
-        avatarConfig: [String: String]? = nil
+        avatarConfig: [String: String]? = nil,
+        allowPublicQuestions: Bool? = nil
     ) async throws -> CommunityUserProfile {
         try await repository.updateMyProfile(
             registration: registration,
@@ -114,7 +127,8 @@ struct CommunityUseCase {
             avatarSymbolName: avatarSymbolName,
             avatarColorSeed: avatarColorSeed,
             avatarMode: avatarMode,
-            avatarConfig: avatarConfig
+            avatarConfig: avatarConfig,
+            allowPublicQuestions: allowPublicQuestions
         )
     }
 
@@ -136,15 +150,55 @@ struct CommunityUseCase {
         )
     }
 
+    func setUserBlocked(
+        registration: RemotePushRegistration,
+        userID: Int,
+        blocked: Bool
+    ) async throws -> CommunityUserBlockState {
+        try await repository.setUserBlocked(
+            registration: registration,
+            userID: userID,
+            blocked: blocked
+        )
+    }
+
     func submitFeedback(
         registration: RemotePushRegistration,
-        category: String,
-        message: String
+        content: String
     ) async throws {
         try await repository.submitFeedback(
             registration: registration,
-            category: category,
-            message: message
+            content: content
+        )
+    }
+
+    func recordNativeAdvertisementView(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws {
+        try await repository.recordNativeAdvertisementView(
+            registration: registration,
+            selectionID: selectionID
+        )
+    }
+
+    func recordNativeAdvertisementImpression(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws {
+        try await repository.recordNativeAdvertisementImpression(
+            registration: registration,
+            selectionID: selectionID
+        )
+    }
+
+    func suppressNativeAdvertisement(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws {
+        try await repository.suppressNativeAdvertisement(
+            registration: registration,
+            selectionID: selectionID
         )
     }
 
@@ -164,25 +218,31 @@ struct CommunityUseCase {
         registration: RemotePushRegistration,
         questionID: String,
         limit: Int,
-        offset: Int
+        offset: Int,
+        language: AppLanguage,
+        view: LocalizedContentView
     ) async throws -> CommunityCommentsResponse {
         try await repository.fetchComments(
             registration: registration,
             questionID: questionID,
             limit: limit,
-            offset: offset
+            offset: offset,
+            language: language,
+            view: view
         )
     }
 
     func createComment(
         registration: RemotePushRegistration,
         questionID: String,
-        body: String
+        body: String,
+        sourceLanguage: String
     ) async throws -> CommunityQuestionComment {
         try await repository.createComment(
             registration: registration,
             questionID: questionID,
-            body: body
+            body: body,
+            sourceLanguage: sourceLanguage
         )
     }
 

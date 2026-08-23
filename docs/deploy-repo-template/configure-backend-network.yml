@@ -1,0 +1,125 @@
+name: Configure BuddyStudy Backend Network
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: configure-backend-network
+  cancel-in-progress: false
+
+jobs:
+  configure_backend_network:
+    name: Configure Backend Network
+    runs-on: [self-hosted, Linux, ARM64, ec2]
+    timeout-minutes: 10
+    steps:
+      - name: Mirror MySQL admin CIDRs to Redis
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          AWS_REGION="ap-northeast-2"
+          IMDS_TOKEN="$(curl -fsS -X PUT \
+            -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' \
+            http://169.254.169.254/latest/api/token)"
+          INSTANCE_ID="$(curl -fsS \
+            -H "X-aws-ec2-metadata-token: ${IMDS_TOKEN}" \
+            http://169.254.169.254/latest/meta-data/instance-id)"
+          SECURITY_GROUP_ID="$(aws ec2 describe-instances \
+            --region "${AWS_REGION}" \
+            --instance-ids "${INSTANCE_ID}" \
+            --query 'Reservations[0].Instances[0].SecurityGroups[0].GroupId' \
+            --output text)"
+
+          if [ -z "${SECURITY_GROUP_ID}" ] || [ "${SECURITY_GROUP_ID}" = "None" ]; then
+            echo "Could not resolve the backend security group." >&2
+            exit 1
+          fi
+
+          readarray -t MYSQL_CIDRS < <(
+            aws ec2 describe-security-groups \
+              --region "${AWS_REGION}" \
+              --group-ids "${SECURITY_GROUP_ID}" \
+              --query 'SecurityGroups[0].IpPermissions[?IpProtocol==`tcp` && FromPort==`3306` && ToPort==`3306`].IpRanges[].CidrIp' \
+              --output text |
+              tr '\t' '\n' |
+              sed '/^$/d' |
+              sort -u
+          )
+          readarray -t REDIS_CIDRS < <(
+            aws ec2 describe-security-groups \
+              --region "${AWS_REGION}" \
+              --group-ids "${SECURITY_GROUP_ID}" \
+              --query 'SecurityGroups[0].IpPermissions[?IpProtocol==`tcp` && FromPort==`6379` && ToPort==`6379`].IpRanges[].CidrIp' \
+              --output text |
+              tr '\t' '\n' |
+              sed '/^$/d' |
+              sort -u
+          )
+
+          if [ "${#MYSQL_CIDRS[@]}" -eq 0 ]; then
+            echo "MySQL has no approved admin CIDRs to mirror." >&2
+            exit 1
+          fi
+
+          contains() {
+            local needle="$1"
+            shift
+            local value
+            for value in "$@"; do
+              if [ "${value}" = "${needle}" ]; then
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          for cidr in "${REDIS_CIDRS[@]}"; do
+            if ! contains "${cidr}" "${MYSQL_CIDRS[@]}"; then
+              aws ec2 revoke-security-group-ingress \
+                --region "${AWS_REGION}" \
+                --group-id "${SECURITY_GROUP_ID}" \
+                --protocol tcp \
+                --port 6379 \
+                --cidr "${cidr}"
+            fi
+          done
+
+          for cidr in "${MYSQL_CIDRS[@]}"; do
+            if ! contains "${cidr}" "${REDIS_CIDRS[@]}"; then
+              aws ec2 authorize-security-group-ingress \
+                --region "${AWS_REGION}" \
+                --group-id "${SECURITY_GROUP_ID}" \
+                --protocol tcp \
+                --port 6379 \
+                --cidr "${cidr}"
+            fi
+          done
+
+          readarray -t FINAL_REDIS_CIDRS < <(
+            aws ec2 describe-security-groups \
+              --region "${AWS_REGION}" \
+              --group-ids "${SECURITY_GROUP_ID}" \
+              --query 'SecurityGroups[0].IpPermissions[?IpProtocol==`tcp` && FromPort==`6379` && ToPort==`6379`].IpRanges[].CidrIp' \
+              --output text |
+              tr '\t' '\n' |
+              sed '/^$/d' |
+              sort -u
+          )
+
+          EXPECTED="$(printf '%s\n' "${MYSQL_CIDRS[@]}" | sort -u)"
+          ACTUAL="$(printf '%s\n' "${FINAL_REDIS_CIDRS[@]}" | sort -u)"
+          if [ "${EXPECTED}" != "${ACTUAL}" ]; then
+            echo "Redis CIDRs do not match the approved MySQL admin CIDRs." >&2
+            echo "Expected: ${EXPECTED}" >&2
+            echo "Actual: ${ACTUAL}" >&2
+            exit 1
+          fi
+
+          {
+            echo "### Backend network"
+            echo "- Security group: \`${SECURITY_GROUP_ID}\`"
+            echo "- Redis port: \`6379/tcp\`"
+            echo "- Approved CIDRs:"
+            printf '  - `%s`\n' "${FINAL_REDIS_CIDRS[@]}"
+          } >> "${GITHUB_STEP_SUMMARY}"

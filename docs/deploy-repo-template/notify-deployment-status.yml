@@ -1,0 +1,36 @@
+name: Notify BuddyStudy Deployment Status
+
+on:
+  repository_dispatch:
+    types:
+      - deployment-status-updated
+
+permissions:
+  contents: read
+
+jobs:
+  monitor_ios_deployment:
+    name: Monitor iOS deployment thread
+    if: ${{ github.event.client_payload.module == 'ios' && github.event.client_payload.phase == 'planned' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      DEPLOY_SLACK_BOT_TOKEN: ${{ secrets.DEPLOY_SLACK_BOT_TOKEN }}
+      DEPLOY_SLACK_CHANNEL_ID: ${{ vars.DEPLOY_SLACK_CHANNEL_ID }}
+      DEPLOY_SLACK_WEBHOOK_URL: ${{ secrets.DEPLOY_SLACK_WEBHOOK_URL }}
+      LEGACY_SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      RELEASE_VERSION: ${{ github.event.client_payload.release.version }}
+      RELEASE_BUILD_NUMBER: ${{ github.event.client_payload.release.build }}
+      DEPLOYMENT_TARGETS: ${{ github.event.client_payload.targets }}
+      UPLOAD_ENABLED: ${{ github.event.client_payload.release.upload_enabled }}
+      SOURCE_REPOSITORY: ${{ github.event.client_payload.source.repo }}
+      SOURCE_SHA: ${{ github.event.client_payload.source.sha }}
+      SOURCE_REF: ${{ github.event.client_payload.source.ref }}
+      SOURCE_RUN_ID: ${{ github.event.client_payload.source.run_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Post summary and monitor deployment thread
+        run: python3 scripts/notify_ios_release.py

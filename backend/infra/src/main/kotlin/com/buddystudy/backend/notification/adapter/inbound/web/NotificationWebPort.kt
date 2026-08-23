@@ -9,6 +9,7 @@ interface NotificationWebPort {
     suspend fun notifications(limit: Int, offset: Int, authentication: Authentication): AppNotificationsResponse
     suspend fun unreadCount(authentication: Authentication): NotificationUnreadCountResponse
     suspend fun markRead(id: Long, authentication: Authentication): NotificationMutationResponse
+    suspend fun markAllRead(authentication: Authentication): NotificationMutationResponse
     suspend fun delete(id: Long, authentication: Authentication): NotificationMutationResponse
     suspend fun deleteAll(authentication: Authentication): NotificationMutationResponse
 }

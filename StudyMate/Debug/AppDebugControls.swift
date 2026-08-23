@@ -1,6 +1,118 @@
-#if DEBUG && os(iOS)
+#if os(iOS)
 import SwiftUI
 import UIKit
+
+struct RapidDeveloperUnlockTapTracker {
+    static let requiredTapCount = 5
+    static let tapWindow: TimeInterval = 2
+
+    private(set) var tapCount = 0
+    private var windowStartedAt: Date?
+
+    mutating func registerTap(at now: Date) -> Bool {
+        if let windowStartedAt,
+           now.timeIntervalSince(windowStartedAt) <= Self.tapWindow {
+            tapCount += 1
+        } else {
+            windowStartedAt = now
+            tapCount = 1
+        }
+
+        guard tapCount >= Self.requiredTapCount else {
+            return false
+        }
+
+        tapCount = 0
+        windowStartedAt = nil
+        return true
+    }
+}
+
+enum DebugOverlayPositionPolicy {
+    static func boundedOffset(
+        proposed: CGSize,
+        containerSize: CGSize,
+        panelSize: CGSize,
+        margin: CGFloat
+    ) -> CGSize {
+        let maxX = max(margin, containerSize.width - panelSize.width - margin)
+        let maxY = max(margin, containerSize.height - panelSize.height - margin)
+        return CGSize(
+            width: min(max(proposed.width, margin), maxX),
+            height: min(max(proposed.height, margin), maxY)
+        )
+    }
+
+    static func offsetAfterDrag(
+        committed: CGSize,
+        translation: CGSize,
+        containerSize: CGSize,
+        panelSize: CGSize,
+        margin: CGFloat
+    ) -> CGSize {
+        boundedOffset(
+            proposed: CGSize(
+                width: committed.width + translation.width,
+                height: committed.height + translation.height
+            ),
+            containerSize: containerSize,
+            panelSize: panelSize,
+            margin: margin
+        )
+    }
+
+    static func nextCornerOffset(
+        current: CGSize,
+        containerSize: CGSize,
+        panelSize: CGSize,
+        margin: CGFloat
+    ) -> CGSize {
+        let topLeft = boundedOffset(
+            proposed: CGSize(width: margin, height: margin),
+            containerSize: containerSize,
+            panelSize: panelSize,
+            margin: margin
+        )
+        let topRight = boundedOffset(
+            proposed: CGSize(width: CGFloat.greatestFiniteMagnitude, height: margin),
+            containerSize: containerSize,
+            panelSize: panelSize,
+            margin: margin
+        )
+        let bottomRight = boundedOffset(
+            proposed: CGSize(
+                width: CGFloat.greatestFiniteMagnitude,
+                height: CGFloat.greatestFiniteMagnitude
+            ),
+            containerSize: containerSize,
+            panelSize: panelSize,
+            margin: margin
+        )
+        let bottomLeft = boundedOffset(
+            proposed: CGSize(width: margin, height: CGFloat.greatestFiniteMagnitude),
+            containerSize: containerSize,
+            panelSize: panelSize,
+            margin: margin
+        )
+        let corners = [topLeft, topRight, bottomRight, bottomLeft]
+        let currentIndex = corners.indices.min { lhs, rhs in
+            distance(from: current, to: corners[lhs]) < distance(from: current, to: corners[rhs])
+        } ?? 0
+        return corners[(currentIndex + 1) % corners.count]
+    }
+
+    private static func distance(from lhs: CGSize, to rhs: CGSize) -> CGFloat {
+        hypot(lhs.width - rhs.width, lhs.height - rhs.height)
+    }
+}
+
+enum DebugOverlayHitTestPolicy {
+    static func captures(point: CGPoint, interactiveFrame: CGRect) -> Bool {
+        !interactiveFrame.isNull
+            && !interactiveFrame.isEmpty
+            && interactiveFrame.contains(point)
+    }
+}
 
 struct AppDebugSettingsTabLongPressBridge: UIViewRepresentable {
     let onLongPressSettingsTab: () -> Void

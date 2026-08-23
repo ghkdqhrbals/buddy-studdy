@@ -9,6 +9,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.r2dbc.core.DatabaseClient
+import java.time.Instant
 
 class ScheduledJobRunPersistenceAdapterTest {
     private val client = DatabaseClient.create(
@@ -38,16 +39,34 @@ class ScheduledJobRunPersistenceAdapterTest {
             )
             """.trimIndent(),
         )
+        execute(
+            """
+            create index if not exists idx_scheduled_job_runs_name_started_id
+            on scheduled_job_runs (job_name, started_at desc, id desc)
+            """.trimIndent(),
+        )
+        execute(
+            """
+            create index if not exists idx_scheduled_job_runs_name_status_started_id
+            on scheduled_job_runs (job_name, status, started_at desc, id desc)
+            """.trimIndent(),
+        )
+        execute(
+            """
+            create index if not exists idx_scheduled_job_runs_started_id
+            on scheduled_job_runs (started_at desc, id desc)
+            """.trimIndent(),
+        )
         execute("delete from scheduled_job_runs")
         execute("delete from scheduled_jobs")
     }
 
     @Test
     fun `stores job run lifecycle without blocking jdbc`(): Unit = runBlocking {
-        val started = adapter.start("admin-analytics-recent", JobTriggerType.SCHEDULED, null, "system")
+        val started = adapter.start("event-outbox-dispatch", JobTriggerType.SCHEDULED, null, "system")
 
         val finished = adapter.finish(started.id, JobRunStatus.SUCCESS, "rows=9", null, 17)
-        val page = adapter.findRuns("admin-analytics-recent", null, 10, 0)
+        val page = adapter.findRuns("event-outbox-dispatch", null, 10, 0)
 
         assertThat(finished.status).isEqualTo(JobRunStatus.SUCCESS)
         assertThat(finished.summary).isEqualTo("rows=9")
@@ -56,31 +75,89 @@ class ScheduledJobRunPersistenceAdapterTest {
     }
 
     @Test
-    fun `expands multiple scheduler names into r2dbc bind markers`(): Unit = runBlocking {
+    fun `pages all job runs in deterministic newest first order`(): Unit = runBlocking {
+        val first = adapter.finish(
+            adapter.start("event-outbox-dispatch", JobTriggerType.SCHEDULED, null, "system").id,
+            JobRunStatus.SUCCESS,
+            "first",
+            null,
+            10,
+        )
+        val second = adapter.finish(
+            adapter.start("question-schedule", JobTriggerType.SCHEDULED, null, "system").id,
+            JobRunStatus.SUCCESS,
+            "second",
+            null,
+            11,
+        )
+        val sharedStartedAt = Instant.parse("2026-08-23T00:00:00Z")
+        setStartedAt(first.id, sharedStartedAt)
+        setStartedAt(second.id, sharedStartedAt)
+
+        val page = adapter.findRuns(jobName = null, runId = null, limit = 1, offset = 0)
+
+        assertThat(page.runs.map { it.id }).containsExactly(second.id)
+        assertThat(page.totalCount).isEqualTo(2)
+    }
+
+    @Test
+    fun `pages scheduler snapshots before loading their latest runs`(): Unit = runBlocking {
         execute(
             """
             insert into scheduled_jobs (job_name, enabled, schedule_type, schedule_value, timeout_seconds) values
+                ('maintenance-cleanup', true, 'CRON', '0 0 3 * * *', 300),
                 ('question-schedule', true, 'FIXED_DELAY', '30s', 90),
                 ('user-stats-refresh', false, 'CRON', '0 */5 * * * *', 600)
             """.trimIndent(),
         )
-        val run = adapter.finish(
+        val successfulRun = adapter.finish(
             adapter.start("question-schedule", JobTriggerType.SCHEDULED, null, "system").id,
             JobRunStatus.SUCCESS,
-            "ok",
+            "first success",
             null,
             10,
         )
+        setStartedAt(successfulRun.id, Instant.parse("2026-01-01T00:00:00Z"))
+        val latestFailedRun = adapter.finish(
+            adapter.start("question-schedule", JobTriggerType.SCHEDULED, null, "system").id,
+            JobRunStatus.FAILED,
+            null,
+            "newer failure",
+            12,
+        )
+        // Matching timestamps exercise the deterministic id tie-breaker used by both indexes.
+        setStartedAt(latestFailedRun.id, Instant.parse("2026-01-01T00:00:00Z"))
 
-        val snapshots = adapter.findSnapshots(listOf("question-schedule", "user-stats-refresh"))
+        val page = adapter.findSnapshotPage(limit = 1, offset = 1)
+        val unboundedPage = adapter.findSnapshotPage(limit = Int.MAX_VALUE, offset = 0)
 
-        assertThat(snapshots.map { it.jobName }).containsExactly("question-schedule", "user-stats-refresh")
-        assertThat(snapshots.first().latestRun).isEqualTo(run)
-        assertThat(snapshots.first().lastSuccessfulRun).isEqualTo(run)
-        assertThat(snapshots.last().enabled).isFalse()
+        assertThat(page.snapshots.map { it.jobName }).containsExactly("question-schedule")
+        assertThat(page.snapshots.single().latestRun?.id).isEqualTo(latestFailedRun.id)
+        assertThat(page.snapshots.single().latestRun?.status).isEqualTo(JobRunStatus.FAILED)
+        assertThat(page.snapshots.single().lastSuccessfulRun?.id).isEqualTo(successfulRun.id)
+        assertThat(page.snapshots.single().lastSuccessfulRun?.status).isEqualTo(JobRunStatus.SUCCESS)
+        assertThat(page.totalCount).isEqualTo(3)
+        assertThat(page.limit).isEqualTo(1)
+        assertThat(page.offset).isEqualTo(1)
+        assertThat(unboundedPage.snapshots.map { it.jobName })
+            .containsExactly("maintenance-cleanup", "question-schedule", "user-stats-refresh")
+        assertThat(unboundedPage.snapshots.single { it.jobName == "maintenance-cleanup" }.latestRun).isNull()
+        assertThat(unboundedPage.snapshots.single { it.jobName == "question-schedule" }.latestRun?.id)
+            .isEqualTo(latestFailedRun.id)
+        assertThat(adapter.findExistingJobNames(listOf("question-schedule", "missing")))
+            .containsExactly("question-schedule")
     }
 
     private suspend fun execute(sql: String) {
         client.sql(sql).fetch().rowsUpdated().awaitSingle()
+    }
+
+    private suspend fun setStartedAt(runId: Long, startedAt: Instant) {
+        client.sql("update scheduled_job_runs set started_at = :startedAt where id = :runId")
+            .bind("startedAt", startedAt)
+            .bind("runId", runId)
+            .fetch()
+            .rowsUpdated()
+            .awaitSingle()
     }
 }

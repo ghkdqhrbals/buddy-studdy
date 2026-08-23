@@ -1,14 +1,33 @@
 import SwiftUI
+#if os(iOS)
+import MarkdownUI
+#endif
 
 struct StudyView: View {
     @EnvironmentObject private var appState: AppState
-    var preferredCategoryID: String? = nil
+    @Environment(\.dismiss) private var dismiss
+    let preferredCategoryID: String?
+    let isContentPrepared: Bool
     @State private var showsHint = false
     @State private var draftAnswer = ""
     @State private var showsPendingLimitHelp = false
+    @State private var editingStudyRoom: BackendStudyRoom?
+    @State private var selectedTreeRootID: Int?
+    @State private var answerSubmissionTask: Task<Void, Never>?
+    @State private var answerGradingOwnerID: String?
+    @State private var isResolvingInitialAnswerState: Bool
     #if os(iOS)
     @FocusState private var isAnswerEditorFocused: Bool
     #endif
+
+    init(
+        preferredCategoryID: String? = nil,
+        isContentPrepared: Bool = false
+    ) {
+        self.preferredCategoryID = preferredCategoryID
+        self.isContentPrepared = isContentPrepared
+        _isResolvingInitialAnswerState = State(initialValue: !isContentPrepared)
+    }
 
     var body: some View {
         let strings = appState.strings
@@ -34,12 +53,16 @@ struct StudyView: View {
 
                 Group {
                     if let record = selectedStudyRecord {
+                        let isGradingAnswer = appState.isAnswerGradingInProgress(for: record)
                         StudyConversationSection(
                             question: record.question,
                             draftAnswer: $draftAnswer,
                             showsHint: $showsHint,
+                            submittedAnswer: StudyAnswerPresentationPolicy.submittedAnswer(for: record),
                             gradingResult: record.gradingResult,
-                            isGradingAnswer: appState.isGradingAnswer,
+                            isGradingAnswer: isGradingAnswer,
+                            isResolvingAnswerState: isResolvingInitialAnswerState,
+                            gradingStatusMessage: appState.gradingPresentationMessage(for: record),
                             canSubmitAnswer: canSubmitAnswer,
                             strings: strings,
                             answerEditor: {
@@ -50,9 +73,12 @@ struct StudyView: View {
                                 appState.skipStudyRoomRecord(record)
                             }
                         )
+                    } else if appState.isGeneratingQuestion(categoryID: targetCategoryID) {
+                        questionLoadingMessage(strings: strings)
+                            .padding(.top, 4)
                     } else {
                         noQuestionView(strings: strings)
-                        .frame(maxWidth: .infinity, minHeight: 140)
+                            .frame(maxWidth: .infinity, minHeight: 140)
                     }
                 }
             }
@@ -69,10 +95,45 @@ struct StudyView: View {
         }
         .toolbar {
             #if os(iOS)
-            ToolbarItem(placement: .topBarTrailing) {
-                toolbarNewQuestionButton(strings: strings)
+            if #available(iOS 26.0, *) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    toolbarActions(strings: strings)
+                }
+                .sharedBackgroundVisibility(.hidden)
+            } else {
+                ToolbarItem(placement: .topBarTrailing) {
+                    toolbarActions(strings: strings)
+                }
             }
             #endif
+        }
+        .navigationDestination(item: $selectedTreeRootID) { rootStudyID in
+            MobileStudyTreeView(rootStudyID: rootStudyID)
+        }
+        .sheet(item: $editingStudyRoom) { room in
+            StudyEditorSheet(
+                navigationTitle: strings.editStudyCategory,
+                initialTitle: room.topic,
+                initialDifficulty: Difficulty(level: room.difficultyLevel),
+                initialQuestionRotationEnabled: room.activeForQuestions,
+                strings: strings,
+                onDelete: {
+                    deleteStudyRoom(room)
+                }
+            ) { title, difficulty, questionRotationEnabled in
+                appState.updateStudyTreeCategory(
+                    roomID: room.id,
+                    title: title,
+                    difficulty: difficulty
+                )
+                if let questionRotationEnabled,
+                   questionRotationEnabled != room.activeForQuestions {
+                    appState.setStudyTopicActive(
+                        studyID: room.id,
+                        active: questionRotationEnabled
+                    )
+                }
+            }
         }
         .alert(strings.pendingQuestionLimitTitle, isPresented: $showsPendingLimitHelp) {
             Button(strings.done, role: .cancel) {}
@@ -81,17 +142,51 @@ struct StudyView: View {
         }
         .onAppear {
             draftAnswer = appState.answerDraft(for: selectedStudyRecord)
+            presentPendingLimitNoticeIfNeeded()
         }
         .task(id: preferredCategoryID) {
-            async let roomPreparation: Void = appState.prepareStudyRoom(categoryID: questionHostCategoryID)
-            async let quotaRefresh: Void = appState.refreshQuestionQuota()
-            _ = await (roomPreparation, quotaRefresh)
+            let ownerID = UUID().uuidString
+            answerGradingOwnerID = ownerID
+            if isContentPrepared {
+                isResolvingInitialAnswerState = false
+                await appState.prepareStudyRoom(
+                    categoryID: preferredCategoryID,
+                    gradingPollingOwnerID: ownerID,
+                    onInitialStateResolved: {
+                        isResolvingInitialAnswerState = false
+                    },
+                    shouldRefreshDetail: false
+                )
+            } else {
+                isResolvingInitialAnswerState = true
+                async let roomPreparation: Void = appState.prepareStudyRoom(
+                    categoryID: preferredCategoryID,
+                    gradingPollingOwnerID: ownerID,
+                    onInitialStateResolved: {
+                        isResolvingInitialAnswerState = false
+                    }
+                )
+                async let quotaRefresh: Void = appState.refreshQuestionQuota()
+                _ = await (roomPreparation, quotaRefresh)
+            }
+            isResolvingInitialAnswerState = false
+            if answerGradingOwnerID == ownerID {
+                answerGradingOwnerID = nil
+            }
         }
         .onDisappear {
+            if let answerGradingOwnerID {
+                appState.cancelAnswerGradingPolling(
+                    ownerID: answerGradingOwnerID,
+                    reason: "study-view-disappeared"
+                )
+                self.answerGradingOwnerID = nil
+            }
             appState.flushPendingAnswerDraftSave()
         }
         .onChange(of: draftAnswer) {
             if let selectedStudyRecord,
+               StudyAnswerPresentationPolicy.shouldShowEditor(for: selectedStudyRecord),
                draftAnswer != appState.answerDraft(for: selectedStudyRecord) {
                 appState.updateAnswer(draftAnswer, for: selectedStudyRecord)
             }
@@ -105,28 +200,64 @@ struct StudyView: View {
                 draftAnswer = appState.answerDraft(for: selectedStudyRecord)
             }
         }
+        .onChange(of: appState.pendingQuestionLimitCategoryID) {
+            presentPendingLimitNoticeIfNeeded()
+        }
+    }
+
+    private func questionLoadingMessage(strings: AppStrings) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color.green.opacity(0.16))
+
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(.green)
+            }
+            .frame(width: 40, height: 40)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(strings.fetchingQuestion)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Text(strings.fetchingQuestionDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 14)
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.green.opacity(0.09))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.green.opacity(0.28), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(strings.fetchingQuestion). \(strings.fetchingQuestionDescription)")
     }
 
     private var canSubmitAnswer: Bool {
-        selectedStudyRecord?.gradingResult == nil &&
+        StudyAnswerPresentationPolicy.shouldShowEditor(for: selectedStudyRecord) &&
+            !isResolvingInitialAnswerState &&
             !draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            !appState.isGradingAnswer
+            !appState.isAnswerGradingInProgress(for: selectedStudyRecord)
     }
 
     private var selectedStudyRecord: StudyRecord? {
-        appState.backendStudyRoom(categoryID: questionHostCategoryID)?.pendingQuestion
-    }
-
-    private var questionHostCategoryID: String? {
-        guard let preferredCategoryID,
-              let studyID = Int(preferredCategoryID),
-              let root = appState.rootStudyRoom(for: studyID) else {
-            return preferredCategoryID
-        }
-        return String(root.id)
+        appState.studyRoomRecordForDisplay(categoryID: preferredCategoryID)
     }
 
     private var selectedDifficulty: Difficulty {
+        if let room = appState.backendStudyRoom(categoryID: preferredCategoryID) {
+            return Difficulty(level: room.difficultyLevel)
+        }
+
         if let preferredCategoryID,
            let category = appState.settings.category(for: preferredCategoryID) {
             return category.difficulty
@@ -149,6 +280,10 @@ struct StudyView: View {
     }
 
     private var selectedTopic: String {
+        if let room = appState.backendStudyRoom(categoryID: preferredCategoryID) {
+            return room.topic
+        }
+
         if let preferredCategoryID,
            let category = appState.settings.category(for: preferredCategoryID) {
             return category.title
@@ -194,57 +329,69 @@ struct StudyView: View {
         }
     }
 
-    @ViewBuilder
-    private func newQuestionButton(strings: AppStrings, prominent: Bool = false) -> some View {
-        if prominent {
-            Button {
-                requestNewQuestion()
-            } label: {
-                newQuestionButtonLabel(strings: strings)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(appState.isGeneratingQuestion)
-            .opacity(hasReachedPendingQuestionLimit ? 0.55 : 1)
-            .accessibilityHint(hasReachedPendingQuestionLimit ? strings.pendingQuestionLimitMessage : "")
-        } else {
-            Button {
-                requestNewQuestion()
-            } label: {
-                newQuestionButtonLabel(strings: strings)
-            }
-            .buttonStyle(.bordered)
-            .disabled(appState.isGeneratingQuestion)
-            .opacity(hasReachedPendingQuestionLimit ? 0.55 : 1)
-            .accessibilityHint(hasReachedPendingQuestionLimit ? strings.pendingQuestionLimitMessage : "")
+    private func toolbarActions(strings: AppStrings) -> some View {
+        HStack(spacing: 8) {
+            toolbarNewQuestionButton(strings: strings)
+            studyOptionsMenu(strings: strings)
         }
+        .fixedSize()
     }
 
     private func toolbarNewQuestionButton(strings: AppStrings) -> some View {
         Button {
             requestNewQuestion()
         } label: {
-            if appState.isGeneratingQuestion {
-                ProgressView()
-                    .controlSize(.small)
-            } else {
-                Image(systemName: "plus")
-                    .font(.system(size: 17, weight: .semibold))
-            }
+            #if os(iOS)
+            MobileToolbarIconButtonLabel(systemName: "plus")
+            #else
+            Image(systemName: "plus")
+            #endif
         }
+        .buttonStyle(.plain)
         .disabled(appState.isGeneratingQuestion)
-        .opacity(hasReachedPendingQuestionLimit ? 0.55 : 1)
-        .accessibilityLabel(strings.newQuestion)
+        .opacity(appState.isGeneratingQuestion || hasReachedPendingQuestionLimit ? 0.55 : 1)
+        .accessibilityLabel(appState.isGeneratingQuestion ? strings.fetchingQuestion : strings.newQuestion)
         .accessibilityHint(hasReachedPendingQuestionLimit ? strings.pendingQuestionLimitMessage : "")
     }
 
-    @ViewBuilder
-    private func newQuestionButtonLabel(strings: AppStrings) -> some View {
-        if appState.isGeneratingQuestion {
-            ProgressView()
-                .controlSize(.small)
-        } else {
-            Label(strings.newQuestion, systemImage: "plus.circle")
+    private func studyOptionsMenu(strings: AppStrings) -> some View {
+        Menu {
+            if let room = selectedBackendStudyRoom {
+                Button {
+                    editingStudyRoom = room
+                } label: {
+                    Label(strings.editStudyCategory, systemImage: "pencil")
+                }
+
+                Button {
+                    selectedTreeRootID = appState.rootStudyRoom(for: room.id)?.id ?? room.id
+                } label: {
+                    Label(
+                        strings.viewFullStudyTree,
+                        systemImage: "point.3.connected.trianglepath.dotted"
+                    )
+                }
+
+            }
+        } label: {
+            #if os(iOS)
+            MobileToolbarIconButtonLabel(systemName: "ellipsis")
+            #else
+            Image(systemName: "ellipsis")
+            #endif
         }
+        .buttonStyle(.plain)
+        .disabled(selectedBackendStudyRoom == nil)
+        .accessibilityLabel(strings.more)
+    }
+
+    private var selectedBackendStudyRoom: BackendStudyRoom? {
+        appState.backendStudyRoom(categoryID: targetCategoryID)
+    }
+
+    private func deleteStudyRoom(_ room: BackendStudyRoom) {
+        appState.deleteStudyCategory(id: String(room.id))
+        dismiss()
     }
 
     private func requestNewQuestion() {
@@ -258,13 +405,24 @@ struct StudyView: View {
         }
 
         Task {
-            await appState.generateQuestion(studyCategoryID: preferredCategoryID ?? selectedCategory?.id)
+            await appState.generateQuestion(studyCategoryID: targetCategoryID)
         }
     }
 
     private var hasReachedPendingQuestionLimit: Bool {
-        let hostCategory = questionHostCategoryID.flatMap { appState.settings.category(for: $0) }
-        return appState.hasReachedPendingQuestionLimit(for: hostCategory ?? selectedCategory)
+        appState.hasReachedPendingQuestionLimit(categoryID: targetCategoryID)
+    }
+
+    private var targetCategoryID: String? {
+        preferredCategoryID ?? selectedCategory?.id
+    }
+
+    private func presentPendingLimitNoticeIfNeeded() {
+        guard appState.pendingQuestionLimitCategoryID == targetCategoryID else {
+            return
+        }
+        showsPendingLimitHelp = true
+        appState.clearPendingQuestionLimitNotice(categoryID: targetCategoryID)
     }
 
     private func questionQuotaNoticeView(_ message: String, strings: AppStrings) -> some View {
@@ -337,7 +495,9 @@ struct StudyView: View {
     }
 
     private func submitCurrentAnswer() {
-        guard let selectedStudyRecord else {
+        guard let selectedStudyRecord,
+              canSubmitAnswer,
+              answerSubmissionTask == nil else {
             return
         }
 
@@ -345,9 +505,104 @@ struct StudyView: View {
         isAnswerEditorFocused = false
         #endif
 
-        Task {
-            await appState.gradeStudyRoomRecord(selectedStudyRecord, answer: draftAnswer)
+        let ownerID = UUID().uuidString
+        answerGradingOwnerID = ownerID
+        answerSubmissionTask = Task {
+            await appState.gradeStudyRoomRecord(
+                selectedStudyRecord,
+                answer: draftAnswer,
+                pollingOwnerID: ownerID
+            )
+            answerSubmissionTask = nil
+            guard answerGradingOwnerID == ownerID else {
+                return
+            }
+            answerGradingOwnerID = nil
         }
+    }
+}
+
+struct MarkdownMessageText: View {
+    var markdown: String
+    var fillsWidth = true
+
+    var body: some View {
+        #if os(iOS)
+        MarkdownUI.Markdown(markdown)
+            .markdownImageProvider(.asset)
+            .environment(
+                \.openURL,
+                OpenURLAction { url in
+                    guard ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
+                        return .discarded
+                    }
+                    return .systemAction
+                }
+            )
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
+        #else
+        Text(MarkdownContent.attributedString(markdown))
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
+        #endif
+    }
+}
+
+enum ConversationBubblePalette {
+    static var incomingBackground: Color {
+        #if os(iOS)
+        Color(uiColor: .systemGray5)
+        #elseif os(macOS)
+        Color(nsColor: .controlBackgroundColor)
+        #else
+        Color.secondary.opacity(0.14)
+        #endif
+    }
+
+    static let incomingBorder = Color.clear
+}
+
+struct CompactMessageLayout: Layout {
+    var minimumWidth: CGFloat = 44
+    var maximumWidth: CGFloat = 280
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        guard let subview = subviews.first else {
+            return .zero
+        }
+
+        let availableWidth = max(0, min(proposal.width ?? maximumWidth, maximumWidth))
+        let intrinsicSize = subview.sizeThatFits(.unspecified)
+        let resolvedWidth = min(
+            max(intrinsicSize.width, minimumWidth),
+            availableWidth
+        )
+        let resolvedSize = subview.sizeThatFits(
+            ProposedViewSize(width: resolvedWidth, height: proposal.height)
+        )
+        return CGSize(width: resolvedWidth, height: resolvedSize.height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        guard let subview = subviews.first else {
+            return
+        }
+
+        subview.place(
+            at: bounds.origin,
+            anchor: .topLeading,
+            proposal: ProposedViewSize(width: bounds.width, height: bounds.height)
+        )
     }
 }
 
@@ -355,8 +610,11 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
     var question: QuestionItem
     @Binding var draftAnswer: String
     @Binding var showsHint: Bool
+    var submittedAnswer: String?
     var gradingResult: GradingResult?
     var isGradingAnswer: Bool
+    var isResolvingAnswerState: Bool
+    var gradingStatusMessage: String?
     var canSubmitAnswer: Bool
     var strings: AppStrings
     @ViewBuilder var answerEditor: () -> AnswerEditorContent
@@ -368,32 +626,53 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
             StudyChatBubble(role: .tutor) {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .top, spacing: 10) {
-                        Text(question.question)
+                        MarkdownMessageText(markdown: question.question)
                             .font(.body)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
+                            .tint(.accentColor)
                             .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
 
-                        if gradingResult == nil {
-                            Button {
-                                onSkip()
-                            } label: {
-                                Image(systemName: "forward.fill")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(.white.opacity(0.9))
-                                    .frame(width: 30, height: 30)
-                                    .background(.white.opacity(0.16), in: Circle())
+                        ZStack {
+                            if submittedAnswer == nil &&
+                                gradingResult == nil &&
+                                !isGradingAnswer &&
+                                !isResolvingAnswerState {
+                                Button {
+                                    onSkip()
+                                } label: {
+                                    Image(systemName: "forward.fill")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 30, height: 30)
+                                        .background(Color.secondary.opacity(0.12), in: Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(strings.skipQuestion)
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(strings.skipQuestion)
                         }
+                        .frame(width: 30, height: 30)
                     }
 
                     hintView
                 }
             }
 
-            if gradingResult == nil {
+            if !isResolvingAnswerState,
+               let displayedLearnerAnswer {
+                StudyChatBubble(role: .learnerAnswer) {
+                    MarkdownMessageText(markdown: displayedLearnerAnswer, fillsWidth: false)
+                        .font(.body)
+                        .foregroundStyle(.white)
+                        .tint(.white)
+                        .textSelection(.enabled)
+                        .multilineTextAlignment(.leading)
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 13)
+                        .background(Color.green.opacity(0.92), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
+            } else if !isResolvingAnswerState &&
+                        gradingResult == nil &&
+                        !isGradingAnswer {
                 StudyChatBubble(role: .learnerInput) {
                     MessageAnswerInput(
                         strings: strings,
@@ -403,18 +682,23 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                         onSubmit: onSubmit
                     )
                 }
-            } else if !draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                StudyChatBubble(role: .learnerAnswer) {
-                    Text(draftAnswer)
-                        .font(.body)
-                        .foregroundStyle(.white)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .multilineTextAlignment(.leading)
-                        .padding(.vertical, 10)
-                        .padding(.horizontal, 13)
-                        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+
+            if !isResolvingAnswerState,
+               isGradingAnswer,
+               let gradingStatusMessage {
+                StudyChatBubble(role: .feedback) {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                            .controlSize(.small)
+
+                        Text(gradingStatusMessage)
+                            .font(.subheadline.weight(.medium))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(gradingStatusMessage)
             }
 
             if let gradingResult {
@@ -427,15 +711,24 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                                 .font(.headline)
                         }
 
-                        Text(gradingResult.feedback)
+                        MarkdownMessageText(markdown: gradingResult.feedback)
                             .font(.body)
-                        Text(gradingResult.explanation)
+
+                        MarkdownMessageText(markdown: gradingResult.explanation)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
                 }
             }
         }
+    }
+
+    private var displayedLearnerAnswer: String? {
+        if let submittedAnswer {
+            return submittedAnswer
+        }
+        let trimmedDraft = draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines)
+        return isGradingAnswer && !trimmedDraft.isEmpty ? draftAnswer : nil
     }
 
     @ViewBuilder
@@ -450,17 +743,16 @@ private struct StudyConversationSection<AnswerEditorContent: View>: View {
                 }
                 .buttonStyle(.borderless)
                 .font(.caption)
-                .foregroundStyle(.white)
-                .tint(.white)
+                .foregroundStyle(.secondary)
+                .tint(.accentColor)
 
                 if showsHint {
-                    Text(hint)
+                    MarkdownMessageText(markdown: hint)
                         .font(.caption)
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(.secondary)
+                        .tint(.accentColor)
                         .textSelection(.enabled)
                         .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .padding(.top, 4)
@@ -486,22 +778,22 @@ private enum StudyChatBubbleRole: Equatable {
     var bubbleColor: Color {
         switch self {
         case .tutor:
-            Color.green.opacity(0.92)
+            ConversationBubblePalette.incomingBackground
         case .learnerInput, .learnerAnswer:
             Color.clear
         case .feedback:
-            Color.secondary.opacity(0.06)
+            ConversationBubblePalette.incomingBackground
         }
     }
 
     var borderColor: Color {
         switch self {
         case .tutor:
-            Color.green.opacity(0.0)
+            ConversationBubblePalette.incomingBorder
         case .learnerInput, .learnerAnswer:
             Color.clear
         case .feedback:
-            Color.secondary.opacity(0.12)
+            ConversationBubblePalette.incomingBorder
         }
     }
 }
@@ -520,8 +812,9 @@ private struct StudyChatBubble<Content: View>: View {
                 content()
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else if role == .learnerAnswer {
-                content()
-                    .frame(minWidth: 44, maxWidth: 280, alignment: .trailing)
+                CompactMessageLayout {
+                    content()
+                }
             } else {
                 content()
                     .padding(.vertical, 11)

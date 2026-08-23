@@ -68,7 +68,7 @@
   "timezone": "browser",
   "uid": "buddystudy-api-performance",
   "title": "BuddyStudy API Performance",
-  "version": 1,
+  "version": 2,
   "panels": [
     {
       "datasource": {
@@ -238,7 +238,7 @@
             "uid": "buddystudy-loki"
           },
           "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.50, {container=~\".+\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | unwrap durationMs [$__range]) by (method, path))",
+          "expr": "topk(100, quantile_over_time(0.50, {app=\"buddystudy\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | unwrap durationMs [$__range]) by (method, path))",
           "legendFormat": "p50",
           "queryType": "instant",
           "refId": "P50"
@@ -249,7 +249,7 @@
             "uid": "buddystudy-loki"
           },
           "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.90, {container=~\".+\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | unwrap durationMs [$__range]) by (method, path))",
+          "expr": "topk(100, quantile_over_time(0.90, {app=\"buddystudy\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | unwrap durationMs [$__range]) by (method, path))",
           "legendFormat": "p90",
           "queryType": "instant",
           "refId": "P90"
@@ -260,7 +260,7 @@
             "uid": "buddystudy-loki"
           },
           "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.95, {container=~\".+\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | unwrap durationMs [$__range]) by (method, path))",
+          "expr": "topk(100, quantile_over_time(0.95, {app=\"buddystudy\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | unwrap durationMs [$__range]) by (method, path))",
           "legendFormat": "p95",
           "queryType": "instant",
           "refId": "P95"
@@ -271,7 +271,7 @@
             "uid": "buddystudy-loki"
           },
           "editorMode": "code",
-          "expr": "topk(100, quantile_over_time(0.99, {container=~\".+\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | unwrap durationMs [$__range]) by (method, path))",
+          "expr": "topk(100, quantile_over_time(0.99, {app=\"buddystudy\"} |= \"api_exchange\" | regexp `\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"durationMs\":\"?(?P<durationMs>[0-9.]+)` | unwrap durationMs [$__range]) by (method, path))",
           "legendFormat": "p99",
           "queryType": "instant",
           "refId": "P99"
@@ -405,7 +405,7 @@
             "uid": "buddystudy-loki"
           },
           "editorMode": "code",
-          "expr": "sum(count_over_time({container=~\".+\"} [$__interval]))",
+          "expr": "sum(count_over_time({app=\"buddystudy\"} |= \"api_exchange\" [$__interval]))",
           "legendFormat": "logs",
           "queryType": "range",
           "refId": "A"

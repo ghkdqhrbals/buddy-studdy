@@ -1879,6 +1879,80 @@ pre {
   flex: 1;
 }
 
+.admin-login-form input,
+.admin-toolbar input,
+.tier-settings-row input,
+.admin-users-table input,
+.admin-users-table select {
+  height: 38px;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 10px;
+  background: #ffffff;
+  color: var(--text);
+  outline: none;
+  font-size: 13px;
+}
+
+.admin-login-form input:focus,
+.admin-toolbar input:focus,
+.tier-settings-row input:focus,
+.admin-users-table input:focus,
+.admin-users-table select:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px var(--blue-soft);
+}
+
+.admin-login-form button,
+.admin-toolbar button,
+.tier-settings-row button,
+.admin-pagination button,
+.admin-users-table button,
+.topbar .secondary-button {
+  min-height: 38px;
+  border: 1px solid var(--blue);
+  border-radius: 7px;
+  padding: 0 14px;
+  background: var(--blue);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.admin-login-form button:hover,
+.admin-toolbar button:hover,
+.tier-settings-row button:hover,
+.admin-pagination button:not(:disabled):hover,
+.admin-users-table button:hover {
+  border-color: #1d4ed8;
+  background: #1d4ed8;
+}
+
+.admin-pagination button.secondary-button,
+.tier-settings-row button.secondary-button,
+.admin-users-table button.secondary-button,
+.topbar .secondary-button {
+  border-color: var(--line);
+  background: #ffffff;
+  color: var(--text);
+}
+
+.admin-pagination button.secondary-button:not(:disabled):hover,
+.tier-settings-row button.secondary-button:hover,
+.admin-users-table button.secondary-button:hover,
+.topbar .secondary-button:hover {
+  border-color: var(--blue);
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.admin-pagination button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
 .admin-toolbar {
   padding: 18px 28px;
 }
@@ -1999,5 +2073,295 @@ pre {
   .admin-toolbar {
     align-items: stretch;
     flex-direction: column;
+  }
+}
+
+.stream-toolbar {
+  display: grid;
+  grid-template-columns: minmax(280px, 1.4fr) minmax(180px, 0.9fr) minmax(180px, 0.8fr) 90px auto minmax(120px, auto);
+  align-items: end;
+  gap: 10px;
+  padding: 18px 28px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.stream-toolbar label,
+.stream-id-search label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.stream-toolbar input,
+.stream-toolbar select,
+.stream-id-search input {
+  width: 100%;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 10px;
+  background: #ffffff;
+  color: var(--text);
+  outline: none;
+  font-size: 13px;
+}
+
+.stream-toolbar input:focus,
+.stream-toolbar select:focus,
+.stream-id-search input:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px var(--blue-soft);
+}
+
+.stream-toolbar button,
+.stream-id-search button,
+.stream-pagination button,
+.stream-detail button {
+  min-height: 38px;
+  border: 1px solid var(--blue);
+  border-radius: 7px;
+  padding: 0 14px;
+  background: var(--blue);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.stream-toolbar button:hover,
+.stream-id-search button:hover,
+.stream-pagination button:not(:disabled):hover {
+  border-color: #1d4ed8;
+  background: #1d4ed8;
+}
+
+.stream-id-search button.secondary-button,
+.stream-pagination button.secondary-button,
+.stream-detail button.secondary-button {
+  border-color: var(--line);
+  background: #ffffff;
+  color: var(--text);
+}
+
+.stream-id-search button.secondary-button:hover,
+.stream-pagination button.secondary-button:not(:disabled):hover,
+.stream-detail button.secondary-button:hover {
+  border-color: var(--blue);
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.stream-input-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.stream-input-action input {
+  border-radius: 7px 0 0 7px;
+}
+
+.stream-input-action button {
+  border-radius: 0 7px 7px 0;
+}
+
+.stream-summary {
+  display: grid;
+  grid-template-columns: minmax(190px, 1.2fr) minmax(110px, 0.65fr) minmax(150px, 0.9fr) minmax(150px, 0.9fr) minmax(300px, 2fr);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+
+.stream-summary > div {
+  min-width: 0;
+  padding: 13px 16px;
+  border-right: 1px solid var(--line);
+}
+
+.stream-summary > div:last-child {
+  border-right: 0;
+}
+
+.stream-summary span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.stream-summary strong {
+  display: block;
+  overflow: hidden;
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stream-entry-section {
+  border-bottom: 0;
+}
+
+.stream-entry-heading {
+  align-items: end;
+}
+
+.stream-id-search {
+  display: flex;
+  align-items: end;
+  gap: 7px;
+}
+
+.stream-id-search label {
+  width: 220px;
+}
+
+.stream-table-wrap {
+  position: relative;
+  min-height: 260px;
+}
+
+.stream-table {
+  width: 100%;
+  min-width: 1020px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.stream-table th,
+.stream-table td {
+  overflow: hidden;
+  padding: 11px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.stream-table th {
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.stream-table th:nth-child(1) { width: 145px; }
+.stream-table th:nth-child(2) { width: 210px; }
+.stream-table th:nth-child(3) { width: 240px; }
+.stream-table th:nth-child(4) { width: 105px; }
+.stream-table th:nth-child(5) { width: 105px; }
+.stream-table th:nth-child(6) { width: 215px; }
+
+.stream-table tbody tr {
+  cursor: pointer;
+}
+
+.stream-table tbody tr:hover td,
+.stream-table tbody tr.selected td {
+  background: var(--blue-soft);
+}
+
+.stream-table tbody tr.selected td:first-child {
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.stream-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 0;
+}
+
+.stream-pagination strong {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stream-pagination button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.stream-detail {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.stream-detail > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+
+.stream-detail h3,
+.stream-detail p {
+  margin: 0;
+}
+
+.stream-detail h3 {
+  font-size: 14px;
+}
+
+.stream-detail p {
+  margin-top: 3px;
+  color: var(--muted);
+  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.stream-detail pre {
+  max-height: 420px;
+  margin: 0;
+  overflow: auto;
+  padding: 16px;
+  background: #101827;
+  color: #e5edf8;
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1200px) {
+  .stream-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stream-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stream-summary > div:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 800px) {
+  .stream-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .stream-entry-heading,
+  .stream-id-search {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .stream-id-search,
+  .stream-id-search label {
+    width: 100%;
   }
 }

@@ -58,7 +58,7 @@ enum PageAccessPolicy {
             return .records
         case .statistics:
             return .statistics
-        case .home, .settings:
+        case .home, .settings, .notifications:
             return nil
         }
     }
@@ -92,5 +92,11 @@ enum PageAccessPolicy {
             title: strings.communityLogin,
             message: ""
         )
+    }
+}
+
+enum SettingsAccessPolicy {
+    static func canEditAccountBackedPreferences(isSignedIn: Bool) -> Bool {
+        isSignedIn
     }
 }

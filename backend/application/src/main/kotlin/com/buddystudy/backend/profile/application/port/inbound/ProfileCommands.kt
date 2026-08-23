@@ -7,6 +7,7 @@ data class ProfileUpdateCommand(
     val avatarColorSeed: String? = null,
     val avatarMode: String? = null,
     val avatarConfig: Map<String, String>? = null,
+    val allowPublicQuestions: Boolean? = null,
 )
 
 data class AvatarUpdateCommand(

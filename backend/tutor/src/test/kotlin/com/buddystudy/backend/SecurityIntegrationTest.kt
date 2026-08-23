@@ -69,6 +69,18 @@ class SecurityIntegrationTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
+    fun `mcp endpoint is protected by the api bearer boundary`(): Unit = runBlocking {
+        val response = post(
+            path = "/api/v1/mcp",
+            body = """{"jsonrpc":"2.0","id":1,"method":"ping","params":{}}""",
+            headers = mapOf("Accept" to "application/json, text/event-stream"),
+        )
+
+        assertThat(response.statusCode()).isEqualTo(401)
+        assertThat(response.body()).contains("AUTH_ACCESS_TOKEN_REQUIRED")
+    }
+
+    @Test
     fun `invalid bearer token is rejected before controller execution`(output: CapturedOutput): Unit = runBlocking {
         val response = get("/api/v1/profile", "not-a-token")
 

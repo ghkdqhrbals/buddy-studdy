@@ -10,6 +10,20 @@ on:
         description: "Image ref to deploy."
         required: true
         type: string
+      backend_runtime:
+        description: "Expected image runtime. Auto trusts the image label."
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - native
+          - jvm
+      promote_swarm:
+        description: "One-time cutover after the staged Swarm task is verified."
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: deploy-backend
@@ -22,9 +36,15 @@ jobs:
     timeout-minutes: 20
     env:
       IMAGE_REF: ${{ github.event.client_payload.image || inputs.image }}
+      EXPECTED_BACKEND_RUNTIME: ${{ github.event.client_payload.backend_runtime || inputs.backend_runtime || 'auto' }}
       BACKEND_DOMAIN: api.ghkdqhrbals.org
+      PROMOTE_SWARM: ${{ inputs.promote_swarm || 'false' }}
+      MCP_SERVER_ENABLED: ${{ vars.MCP_SERVER_ENABLED || 'false' }}
 
     steps:
+      - name: Checkout deployment configuration
+        uses: actions/checkout@v4
+
       - name: Validate input
         run: |
           set -euo pipefail
@@ -32,6 +52,59 @@ jobs:
             echo "Missing image ref." >&2
             exit 1
           fi
+
+      - name: Publish deployment started
+        env:
+          MONITORING_DEPLOYMENT_INGEST_TOKEN: ${{ secrets.MONITORING_DEPLOYMENT_INGEST_TOKEN }}
+          SOURCE_REPOSITORY: ${{ github.event.client_payload.source_repo }}
+          SOURCE_SHA: ${{ github.event.client_payload.sha }}
+          SOURCE_RUN_ID: ${{ github.event.client_payload.source_run_id }}
+        run: |
+          set -euo pipefail
+          started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "DEPLOYMENT_STARTED_AT=${started_at}" >> "${GITHUB_ENV}"
+          if [ -z "${MONITORING_DEPLOYMENT_INGEST_TOKEN}" ]; then
+            echo "::warning::MONITORING_DEPLOYMENT_INGEST_TOKEN is missing; deployment history will not be updated."
+            exit 0
+          fi
+          jq -n \
+            --arg id "${GITHUB_REPOSITORY}:${GITHUB_RUN_ID}" \
+            --arg image "${IMAGE_REF}" \
+            --arg runtime "${EXPECTED_BACKEND_RUNTIME}" \
+            --arg source_repository "${SOURCE_REPOSITORY}" \
+            --arg source_sha "${SOURCE_SHA}" \
+            --arg source_run_id "${SOURCE_RUN_ID}" \
+            --arg deploy_repository "${GITHUB_REPOSITORY}" \
+            --arg deploy_run_id "${GITHUB_RUN_ID}" \
+            --arg deploy_url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --arg actor "${GITHUB_ACTOR}" \
+            --arg started_at "${started_at}" \
+            '{
+              id: $id,
+              service: "backend",
+              environment: "production",
+              status: "RUNNING",
+              phase: "workflow-started",
+              image: $image,
+              runtime: $runtime,
+              sourceRepository: $source_repository,
+              sourceSha: $source_sha,
+              sourceRunId: $source_run_id,
+              deployRepository: $deploy_repository,
+              deployRunId: $deploy_run_id,
+              deployUrl: $deploy_url,
+              actor: $actor,
+              startedAt: $started_at,
+              message: "Backend deployment started."
+            }' > /tmp/backend-deployment-event.json
+          curl --silent --show-error --retry 2 --max-time 10 \
+            -X POST \
+            -H "Authorization: Bearer ${MONITORING_DEPLOYMENT_INGEST_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data-binary @/tmp/backend-deployment-event.json \
+            https://monitoring.lowfidev.cloud/deployment-events/events \
+            >/dev/null \
+            || echo "::warning::Could not publish the deployment start event."
 
       - name: Deploy on self-hosted runner
         env:
@@ -42,29 +115,21 @@ jobs:
           MYSQL_SECRET_ID: buddystudy/prod/mysql
           APP_SECRET_ID: buddystudy/prod
           GOOGLE_IOS_CLIENT_ID: ${{ secrets.GOOGLE_IOS_CLIENT_ID }}
-          APNS_AUTH_KEY_BASE64: ${{ secrets.APNS_AUTH_KEY_BASE64 }}
-          APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
-          APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
-          APNS_BUNDLE_ID: ${{ secrets.APNS_BUNDLE_ID }}
-          APNS_ENV: ${{ secrets.APNS_ENV }}
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           MONITORING_ENVIRONMENT_NAME: ${{ vars.MONITORING_ENVIRONMENT_NAME || 'production' }}
           MONITORING_SERVICE_NAME: ${{ vars.MONITORING_SERVICE_NAME || 'BuddyStudy backend' }}
-          MONITORING_ADMIN_BASE_URL: ${{ vars.MONITORING_ADMIN_BASE_URL || 'https://api.ghkdqhrbals.org/admin' }}
-          MONITORING_SLACK_TIMEOUT_MS: ${{ vars.MONITORING_SLACK_TIMEOUT_MS || '5000' }}
-          MONITORING_SCHEDULER_FAILURE_ALERT_REPEAT_SECONDS: ${{ vars.MONITORING_SCHEDULER_FAILURE_ALERT_REPEAT_SECONDS || '300' }}
           MONITORING_SCHEDULER_READINESS_ENABLED: ${{ vars.MONITORING_SCHEDULER_READINESS_ENABLED || 'true' }}
           MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES: ${{ vars.MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES || '15' }}
           MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES: ${{ vars.MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES || '15' }}
-          MONITORING_SCHEDULER_MONITORED_JOBS: ${{ vars.MONITORING_SCHEDULER_MONITORED_JOBS || 'question-schedule,question-push-outbox-dispatch,user-stats-refresh,admin-analytics-recent' }}
+          MONITORING_SCHEDULER_MONITORED_JOBS: ${{ vars.MONITORING_SCHEDULER_MONITORED_JOBS || 'question-schedule,event-outbox-dispatch,user-stats-refresh,answer-grading-watchdog,billing-fulfillment-recovery,billing-subscription-event-projector' }}
           REMOTE_LOKI_PUSH_URL: ${{ vars.REMOTE_LOKI_PUSH_URL || '' }}
           REMOTE_LOKI_BASIC_AUTH_USER: ${{ secrets.REMOTE_LOKI_BASIC_AUTH_USER || '' }}
           REMOTE_LOKI_BASIC_AUTH_PASSWORD: ${{ secrets.REMOTE_LOKI_BASIC_AUTH_PASSWORD || '' }}
         run: |
           set -euo pipefail
 
-          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
-            echo "Missing GitHub Actions secret: SLACK_WEBHOOK_URL" >&2
+          if [ -z "${SENTRY_DSN}" ]; then
+            echo "Missing GitHub Actions secret: SENTRY_DSN" >&2
             exit 1
           fi
 
@@ -95,11 +160,60 @@ jobs:
             --secret-id "${APP_SECRET_ID}" \
             --query SecretString \
             --output text)"
-          OPENAI_API_KEY="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("OPENAI_API_KEY") or "")')"
-          if [ -z "${OPENAI_API_KEY}" ]; then
-            echo "Missing OPENAI_API_KEY in AWS Secrets Manager secret: ${APP_SECRET_ID}" >&2
+          OPENAI_API_KEY_USER="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("OPENAI_API_KEY_USER") or "")')"
+          OPENAI_API_KEY_SYSTEM="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("OPENAI_API_KEY_SYSTEM") or "")')"
+          if [ -z "${OPENAI_API_KEY_USER}" ]; then
+            echo "Missing OPENAI_API_KEY_USER in AWS Secrets Manager secret: ${APP_SECRET_ID}" >&2
             exit 1
           fi
+          if [ -z "${OPENAI_API_KEY_SYSTEM}" ]; then
+            echo "Missing OPENAI_API_KEY_SYSTEM in AWS Secrets Manager secret: ${APP_SECRET_ID}" >&2
+            exit 1
+          fi
+          if [ "${OPENAI_API_KEY_USER}" = "${OPENAI_API_KEY_SYSTEM}" ]; then
+            echo "OPENAI_API_KEY_USER and OPENAI_API_KEY_SYSTEM must be different." >&2
+            exit 1
+          fi
+          SMTP_HOST="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("SMTP_HOST") or "")')"
+          SMTP_PORT="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("SMTP_PORT") or "")')"
+          SMTP_USERNAME="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("SMTP_USERNAME") or "")')"
+          SMTP_PASSWORD="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("SMTP_PASSWORD") or "")')"
+          SMTP_FROM="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("SMTP_FROM") or "")')"
+          for required_smtp_key in SMTP_HOST SMTP_PORT SMTP_USERNAME SMTP_PASSWORD SMTP_FROM; do
+            if [ -z "${!required_smtp_key}" ]; then
+              echo "Missing ${required_smtp_key} in AWS Secrets Manager secret: ${APP_SECRET_ID}" >&2
+              exit 1
+            fi
+          done
+          APNS_AUTH_KEY_BASE64="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("APNS_AUTH_KEY_BASE64") or "")')"
+          APNS_KEY_ID="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("APNS_KEY_ID") or "")')"
+          APNS_TEAM_ID="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("APNS_TEAM_ID") or "")')"
+          APNS_BUNDLE_ID="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("APNS_BUNDLE_ID") or "")')"
+          APNS_ENV="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("APNS_ENV") or "production")')"
+          for required_apns_key in APNS_AUTH_KEY_BASE64 APNS_KEY_ID APNS_TEAM_ID APNS_BUNDLE_ID; do
+            if [ -z "${!required_apns_key}" ]; then
+              echo "Missing ${required_apns_key} in AWS Secrets Manager secret: ${APP_SECRET_ID}" >&2
+              exit 1
+            fi
+          done
+          FIREBASE_PROJECT_ID="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("FIREBASE_PROJECT_ID") or "")')"
+          FIREBASE_SERVICE_ACCOUNT_JSON_BASE64="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("FIREBASE_SERVICE_ACCOUNT_JSON_BASE64") or "")')"
+          for required_firebase_key in FIREBASE_PROJECT_ID FIREBASE_SERVICE_ACCOUNT_JSON_BASE64; do
+            if [ -z "${!required_firebase_key}" ]; then
+              echo "Missing ${required_firebase_key} in AWS Secrets Manager secret: ${APP_SECRET_ID}" >&2
+              exit 1
+            fi
+          done
+          REVENUECAT_WEBHOOK_SIGNING_SECRET="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("REVENUECAT_WEBHOOK_SIGNING_SECRET") or "")')"
+          REVENUECAT_PROJECT_ID="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("REVENUECAT_PROJECT_ID") or "")')"
+          REVENUECAT_APP_ID="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("REVENUECAT_APP_ID") or "")')"
+          REVENUECAT_SERVER_API_KEY="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("REVENUECAT_SERVER_API_KEY") or "")')"
+          for required_revenuecat_key in REVENUECAT_WEBHOOK_SIGNING_SECRET REVENUECAT_PROJECT_ID REVENUECAT_SERVER_API_KEY; do
+            if [ -z "${!required_revenuecat_key}" ]; then
+              echo "Missing ${required_revenuecat_key} in AWS Secrets Manager secret: ${APP_SECRET_ID}" >&2
+              exit 1
+            fi
+          done
           REDIS_PASSWORD="$(SECRET_JSON="${APP_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"]).get("REDIS_PASSWORD") or "")')"
           if [ -z "${REDIS_PASSWORD}" ]; then
             REDIS_PASSWORD="$(openssl rand -hex 32)"
@@ -166,8 +280,20 @@ jobs:
           REDIS_SSL=false
           SCHEDULER_ENABLED=true
           SCHEDULER_POLL_MS=30000
-          OPENAI_API_KEY=${OPENAI_API_KEY}
+          OPENAI_API_KEY_USER=${OPENAI_API_KEY_USER}
+          OPENAI_API_KEY_SYSTEM=${OPENAI_API_KEY_SYSTEM}
           OPENAI_MODEL=gpt-5.4
+          OPENAI_SYSTEM_MODEL=gpt-5.4
+          MCP_SERVER_ENABLED=${MCP_SERVER_ENABLED}
+          MCP_ALLOWED_HOSTS=${BACKEND_DOMAIN}
+          MCP_ALLOWED_ORIGINS=
+          MCP_REQUEST_TIMEOUT_SECONDS=30
+          BUDDYSTUDY_TRANSLATION_BASE_URL=http://buddystudy-libretranslate:5000
+          SMTP_HOST=${SMTP_HOST}
+          SMTP_PORT=${SMTP_PORT}
+          SMTP_USERNAME=${SMTP_USERNAME}
+          SMTP_PASSWORD=${SMTP_PASSWORD}
+          SMTP_FROM=${SMTP_FROM}
           BACKEND_MASTER_KEY=${BACKEND_MASTER_KEY}
           BACKEND_API_TOKEN=${BACKEND_API_TOKEN}
           GOOGLE_IOS_CLIENT_ID=${GOOGLE_IOS_CLIENT_ID}
@@ -176,14 +302,20 @@ jobs:
           APNS_TEAM_ID=${APNS_TEAM_ID}
           APNS_BUNDLE_ID=${APNS_BUNDLE_ID}
           APNS_ENV=${APNS_ENV}
+          FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
+          FIREBASE_SERVICE_ACCOUNT_JSON_BASE64=${FIREBASE_SERVICE_ACCOUNT_JSON_BASE64}
+          FIREBASE_REMOTE_CONFIG_PARAMETER_KEY=ios_app_control_v1
+          REVENUECAT_WEBHOOK_SIGNING_SECRET=${REVENUECAT_WEBHOOK_SIGNING_SECRET}
+          REVENUECAT_PROJECT_ID=${REVENUECAT_PROJECT_ID}
+          REVENUECAT_APP_ID=${REVENUECAT_APP_ID}
+          REVENUECAT_SERVER_API_KEY=${REVENUECAT_SERVER_API_KEY}
           AWS_SECRET_ID=${APP_SECRET_ID}
           AWS_REGION=ap-northeast-2
-          SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+          SENTRY_DSN=${SENTRY_DSN}
+          SENTRY_ENVIRONMENT=production
+          SENTRY_RELEASE=${IMAGE_REF##*:}
           MONITORING_ENVIRONMENT_NAME=${MONITORING_ENVIRONMENT_NAME}
           MONITORING_SERVICE_NAME=${MONITORING_SERVICE_NAME}
-          MONITORING_ADMIN_BASE_URL=${MONITORING_ADMIN_BASE_URL}
-          MONITORING_SLACK_TIMEOUT_MS=${MONITORING_SLACK_TIMEOUT_MS}
-          MONITORING_SCHEDULER_FAILURE_ALERT_REPEAT_SECONDS=${MONITORING_SCHEDULER_FAILURE_ALERT_REPEAT_SECONDS}
           MONITORING_SCHEDULER_READINESS_ENABLED=${MONITORING_SCHEDULER_READINESS_ENABLED}
           MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES=${MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES}
           MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES=${MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES}
@@ -206,37 +338,67 @@ jobs:
           chmod 600 redis.env
 
           echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+          echo "Reclaiming disk space from Docker images unused by any container."
+          docker image prune -af
           docker pull "${IMAGE_REF}"
+          BACKEND_RUNTIME="$(
+            docker image inspect \
+              --format '{{index .Config.Labels "io.buddystudy.backend.runtime"}}' \
+              "${IMAGE_REF}" 2>/dev/null || true
+          )"
+          case "${BACKEND_RUNTIME}" in
+            native|jvm)
+              ;;
+            "")
+              if [ "${EXPECTED_BACKEND_RUNTIME}" != "auto" ]; then
+                echo "Image ${IMAGE_REF} does not declare io.buddystudy.backend.runtime." >&2
+                exit 1
+              fi
+              BACKEND_RUNTIME="unknown"
+              ;;
+            *)
+              echo "Image ${IMAGE_REF} declares unsupported runtime: ${BACKEND_RUNTIME}" >&2
+              exit 1
+              ;;
+          esac
+          if [ "${EXPECTED_BACKEND_RUNTIME}" != "auto" ] && \
+             [ "${EXPECTED_BACKEND_RUNTIME}" != "${BACKEND_RUNTIME}" ]; then
+            echo "Expected ${EXPECTED_BACKEND_RUNTIME} image but received ${BACKEND_RUNTIME}." >&2
+            exit 1
+          fi
+          echo "Deploying backend runtime: ${BACKEND_RUNTIME}"
+          echo "BACKEND_RUNTIME=${BACKEND_RUNTIME}" >> "${GITHUB_ENV}"
           docker pull nginx:1.27-alpine
           docker pull mysql:8.4
           docker pull redis:7.4-alpine
           docker pull certbot/certbot:v2.11.0
           docker pull grafana/promtail:3.3.2
-          docker pull docker:27-cli
-
-          wait_for_container_running() {
-            local container_name="$1"
-            local label="$2"
-            for attempt in $(seq 1 30); do
-              if docker inspect -f '{{.State.Running}}' "${container_name}" 2>/dev/null | grep -qx true; then
-                sleep 5
-                if docker inspect -f '{{.State.Running}}' "${container_name}" 2>/dev/null | grep -qx true; then
-                  return 0
-                fi
-              fi
-              if [ "$attempt" -eq 30 ]; then
-                echo "${label} did not stay running after ${attempt} attempts." >&2
-                docker logs "${container_name}" || true
-                return 1
-              fi
-              sleep 2
-            done
-          }
 
           docker network create buddystudy-net >/dev/null 2>&1 || true
           docker volume create buddystudy-mysql-data >/dev/null
           docker volume create buddystudy-redis-data >/dev/null
           docker volume create buddystudy-profile-photos >/dev/null
+
+          SWARM_STATE="$(docker info --format '{{.Swarm.LocalNodeState}}')"
+          case "${SWARM_STATE}" in
+            active)
+              ;;
+            inactive)
+              PRIVATE_ADDRESS="$(hostname -I | awk '{print $1}')"
+              docker swarm init --advertise-addr "${PRIVATE_ADDRESS}"
+              ;;
+            *)
+              echo "Docker Swarm is not usable in state ${SWARM_STATE}." >&2
+              exit 1
+              ;;
+          esac
+          if ! docker network inspect buddystudy-swarm-net >/dev/null 2>&1; then
+            docker network create \
+              --driver overlay \
+              --attachable \
+              buddystudy-swarm-net >/dev/null
+          fi
+          cp "${GITHUB_WORKSPACE}/deploy/backend/swarm-stack.yml" backend-stack.yml
 
           mkdir -p promtail
           if [ -n "${REMOTE_LOKI_PUSH_URL}" ]; then
@@ -272,9 +434,17 @@ jobs:
                 - source_labels: ['__meta_docker_container_log_stream']
                   target_label: stream
                 - source_labels: ['__meta_docker_container_name']
-                  regex: '/(buddystudy-.*)'
+                  regex: '/(buddystudy[-_].*)'
                   action: keep
               pipeline_stages:
+                - multiline:
+                    firstline: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s'
+                    max_wait_time: 3s
+                    max_lines: 1024
+                - regex:
+                    expression: '^\S+\s+(?P<level>TRACE|DEBUG|INFO|WARN|ERROR)\s'
+                - labels:
+                    level:
                 - static_labels:
                     host: ec2
                     app: buddystudy
@@ -293,6 +463,7 @@ jobs:
           fi
 
           docker rm -f buddystudy-caddy >/dev/null 2>&1 || true
+          DATABASE_CONTAINER_READY=false
           if docker inspect buddystudy-db >/dev/null 2>&1; then
             DATABASE_IMAGE="$(docker inspect -f '{{.Config.Image}}' buddystudy-db)"
             case "${DATABASE_IMAGE}" in
@@ -303,9 +474,34 @@ jobs:
                 exit 1
                 ;;
             esac
-            docker start buddystudy-db >/dev/null
-            docker network connect buddystudy-net buddystudy-db >/dev/null 2>&1 || true
-          else
+
+            DATABASE_DATA_VOLUME="$(
+              docker inspect buddystudy-db \
+                | python3 -c 'import json, sys; mounts=json.load(sys.stdin)[0].get("Mounts", []); print(next((mount.get("Name", "") for mount in mounts if mount.get("Destination") == "/var/lib/mysql" and mount.get("Type") == "volume"), ""))'
+            )"
+            if [ "${DATABASE_DATA_VOLUME}" != "buddystudy-mysql-data" ]; then
+              echo "Refusing to recreate buddystudy-db because /var/lib/mysql is not backed by buddystudy-mysql-data." >&2
+              exit 1
+            fi
+
+            DATABASE_PORT_BINDING="$(
+              docker inspect buddystudy-db \
+                | python3 -c 'import json, sys; bindings=(json.load(sys.stdin)[0].get("HostConfig", {}).get("PortBindings") or {}).get("3306/tcp") or []; print(",".join("{}:{}".format(binding.get("HostIp", ""), binding.get("HostPort", "")) for binding in bindings))'
+            )"
+            case "${DATABASE_PORT_BINDING}" in
+              ":3306"|0.0.0.0:3306)
+                docker start buddystudy-db >/dev/null
+                docker network connect buddystudy-net buddystudy-db >/dev/null 2>&1 || true
+                DATABASE_CONTAINER_READY=true
+                ;;
+              *)
+                echo "Recreating buddystudy-db with host port 3306; preserving buddystudy-mysql-data."
+                docker rm -f buddystudy-db >/dev/null
+                ;;
+            esac
+          fi
+
+          if [ "${DATABASE_CONTAINER_READY}" != "true" ]; then
             docker run -d \
               --name buddystudy-db \
               --network buddystudy-net \
@@ -330,16 +526,33 @@ jobs:
             fi
             sleep 2
           done
+          docker network connect buddystudy-swarm-net buddystudy-db >/dev/null 2>&1 || true
 
-          docker rm -f buddystudy-redis >/dev/null 2>&1 || true
-          docker run -d \
-            --name buddystudy-redis \
-            --network buddystudy-net \
-            --restart unless-stopped \
-            --env-file redis.env \
-            -v buddystudy-redis-data:/data \
-            redis:7.4-alpine \
-            sh -c 'exec redis-server --requirepass "$REDIS_PASSWORD" --appendonly yes --appendfsync everysec --save 900 1 --save 300 10 --save 60 10000'
+          if docker inspect buddystudy-redis >/dev/null 2>&1; then
+            REDIS_IMAGE="$(docker inspect -f '{{.Config.Image}}' buddystudy-redis)"
+            REDIS_DATA_VOLUME="$(
+              docker inspect buddystudy-redis \
+                | python3 -c 'import json, sys; mounts=json.load(sys.stdin)[0].get("Mounts", []); print(next((mount.get("Name", "") for mount in mounts if mount.get("Destination") == "/data" and mount.get("Type") == "volume"), ""))'
+            )"
+            if [ "${REDIS_IMAGE}" != "redis:7.4-alpine" ] || [ "${REDIS_DATA_VOLUME}" != "buddystudy-redis-data" ]; then
+              echo "Refusing to replace the existing Redis container during a backend deployment." >&2
+              echo "Manage Redis image or volume changes through the infrastructure workflow." >&2
+              exit 1
+            fi
+            docker start buddystudy-redis >/dev/null
+            docker network connect buddystudy-net buddystudy-redis >/dev/null 2>&1 || true
+          else
+            docker run -d \
+              --name buddystudy-redis \
+              --network buddystudy-net \
+              --restart unless-stopped \
+              --env-file redis.env \
+              -p 6379:6379 \
+              -v buddystudy-redis-data:/data \
+              redis:7.4-alpine \
+              sh -c 'exec redis-server --requirepass "$REDIS_PASSWORD" --appendonly yes --appendfsync everysec --save 900 1 --save 300 10 --save 60 10000'
+          fi
+          docker network connect buddystudy-swarm-net buddystudy-redis >/dev/null 2>&1 || true
 
           sleep 2
           if [ "$(docker inspect -f '{{.State.Running}}' buddystudy-redis 2>/dev/null || true)" != "true" ]; then
@@ -347,45 +560,60 @@ jobs:
             docker logs buddystudy-redis || true
             exit 1
           fi
-
-          BLUE_SLOT="buddystudy-backend-a"
-          GREEN_SLOT="buddystudy-backend-b"
-          LEGACY_SLOT="buddystudy-backend"
-          ACTIVE_SLOT="$(cat .active_backend_slot 2>/dev/null || true)"
-          if [ -n "${ACTIVE_SLOT}" ] && ! docker inspect -f '{{.State.Running}}' "${ACTIVE_SLOT}" 2>/dev/null | grep -qx true; then
-            ACTIVE_SLOT=""
-          fi
-          if [ -z "${ACTIVE_SLOT}" ]; then
-            if docker inspect -f '{{.State.Running}}' "${BLUE_SLOT}" 2>/dev/null | grep -qx true; then
-              ACTIVE_SLOT="${BLUE_SLOT}"
-            elif docker inspect -f '{{.State.Running}}' "${GREEN_SLOT}" 2>/dev/null | grep -qx true; then
-              ACTIVE_SLOT="${GREEN_SLOT}"
-            elif docker inspect -f '{{.State.Running}}' "${LEGACY_SLOT}" 2>/dev/null | grep -qx true; then
-              ACTIVE_SLOT="${LEGACY_SLOT}"
-            fi
-          fi
-          if [ "${ACTIVE_SLOT}" = "${BLUE_SLOT}" ]; then
-            NEW_SLOT="${GREEN_SLOT}"
-            OLD_SLOT="${BLUE_SLOT}"
-          else
-            NEW_SLOT="${BLUE_SLOT}"
-            OLD_SLOT="${ACTIVE_SLOT}"
-          fi
-          echo "Deploying ${IMAGE_REF} to ${NEW_SLOT}; active slot is ${OLD_SLOT:-none}."
-
-          docker rm -f "${NEW_SLOT}" >/dev/null 2>&1 || true
-          docker run -d \
-            --name "${NEW_SLOT}" \
-            --network buddystudy-net \
-            --restart unless-stopped \
-            --env-file .env \
-            -v buddystudy-profile-photos:/app/profile-photos \
-            "${IMAGE_REF}"
-
-          if ! wait_for_container_running "${NEW_SLOT}" "New backend slot ${NEW_SLOT}"; then
-            docker rm -f "${NEW_SLOT}" >/dev/null 2>&1 || true
+          if ! docker inspect buddystudy-redis | python3 -c 'import json, sys; bindings = json.load(sys.stdin)[0]["HostConfig"]["PortBindings"] or {}; sys.exit(0 if any(item.get("HostPort") == "6379" for item in bindings.get("6379/tcp", [])) else 1)'; then
+            echo "Redis host port 6379 was not published." >&2
             exit 1
           fi
+          if docker inspect buddystudy-libretranslate >/dev/null 2>&1; then
+            docker network connect buddystudy-swarm-net buddystudy-libretranslate >/dev/null 2>&1 || true
+          fi
+
+          SWARM_ROUTING_ENABLED=false
+          if [ -f .swarm_routing_enabled ]; then
+            SWARM_ROUTING_ENABLED=true
+          fi
+
+          BACKEND_DEPLOYMENT_STATE="staged"
+          if [ "${PROMOTE_SWARM}" = "true" ] && [ "${SWARM_ROUTING_ENABLED}" = "false" ]; then
+            if ! docker service inspect buddystudy_backend >/dev/null 2>&1; then
+              echo "The staged Swarm service does not exist. Run once with promote_swarm=false first." >&2
+              exit 1
+            fi
+            BACKEND_DEPLOYMENT_STATE="promotion-requested"
+            echo "Promoting the existing staged Swarm task without resubmitting the stack."
+          else
+            export IMAGE_REF
+            docker stack config -c backend-stack.yml >/dev/null
+            docker stack deploy \
+              --with-registry-auth \
+              -c backend-stack.yml \
+              buddystudy
+            BACKEND_DEPLOYMENT_STATE="submitted"
+            if [ "${SWARM_ROUTING_ENABLED}" = "false" ]; then
+              BACKEND_DEPLOYMENT_STATE="staged"
+            fi
+            echo "Submitted ${IMAGE_REF} to Swarm service buddystudy_backend."
+          fi
+
+          {
+            echo "BACKEND_DEPLOYMENT_STATE=${BACKEND_DEPLOYMENT_STATE}"
+            echo "BACKEND_SWARM_SERVICE=buddystudy_backend"
+          } >> "${GITHUB_ENV}"
+
+          "${GITHUB_WORKSPACE}/scripts/wait_backend_swarm_rollout.sh" \
+            buddystudy_backend \
+            "${IMAGE_REF}" \
+            600
+          if [ "${BACKEND_DEPLOYMENT_STATE}" = "submitted" ]; then
+            BACKEND_DEPLOYMENT_STATE="rollout-completed"
+          elif [ "${BACKEND_DEPLOYMENT_STATE}" = "staged" ]; then
+            BACKEND_DEPLOYMENT_STATE="staged-ready"
+          fi
+
+          {
+            echo "BACKEND_DEPLOYMENT_STATE=${BACKEND_DEPLOYMENT_STATE}"
+            echo "BACKEND_SWARM_SERVICE=buddystudy_backend"
+          } >> "${GITHUB_ENV}"
 
           SSL_CERTIFICATE="/etc/letsencrypt/live/${BACKEND_DOMAIN}/fullchain.pem"
           SSL_CERTIFICATE_KEY="/etc/letsencrypt/live/${BACKEND_DOMAIN}/privkey.pem"
@@ -424,7 +652,6 @@ jobs:
           fi
 
           write_nginx_config() {
-            local backend_slot="$1"
             cat > nginx/nginx.conf <<NGINX
           events {}
 
@@ -457,7 +684,7 @@ jobs:
               }
 
               location / {
-                set \$backend http://${backend_slot}:8080;
+                set \$backend http://buddystudy_backend:8080;
                 proxy_pass \$backend;
                 proxy_http_version 1.1;
                 proxy_set_header Host \$host;
@@ -471,98 +698,50 @@ jobs:
           NGINX
           }
 
-          write_nginx_config "${NEW_SLOT}"
+          if [ -f .swarm_routing_enabled ] || [ "${PROMOTE_SWARM}" = "true" ]; then
+            write_nginx_config
 
-          if docker inspect buddystudy-nginx >/dev/null 2>&1; then
-            docker start buddystudy-nginx >/dev/null 2>&1 || true
-            docker network connect buddystudy-net buddystudy-nginx >/dev/null 2>&1 || true
-            docker exec buddystudy-nginx nginx -t
-            docker exec buddystudy-nginx nginx -s reload
-          else
-            docker run -d \
-              --name buddystudy-nginx \
-              --network buddystudy-net \
-              --restart unless-stopped \
-              -p 443:443 \
-              -v "$PWD/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
-              -v "$PWD/nginx/certs:/etc/nginx/certs:ro" \
-              -v "$PWD/letsencrypt:/etc/letsencrypt:ro" \
-              nginx:1.27-alpine
-          fi
-          if ! wait_for_container_running "${NEW_SLOT}" "Backend container ${NEW_SLOT}"; then
-            docker logs buddystudy-nginx || true
-            if [ -n "${OLD_SLOT}" ]; then
-              echo "Rolling Nginx back to ${OLD_SLOT}." >&2
-              write_nginx_config "${OLD_SLOT}"
-              docker exec buddystudy-nginx nginx -t || true
-              docker exec buddystudy-nginx nginx -s reload || true
+            if docker inspect buddystudy-nginx >/dev/null 2>&1; then
+              docker start buddystudy-nginx >/dev/null 2>&1 || true
+              docker network connect buddystudy-net buddystudy-nginx >/dev/null 2>&1 || true
+              docker network connect buddystudy-swarm-net buddystudy-nginx >/dev/null 2>&1 || true
+              docker exec buddystudy-nginx nginx -t
+              docker exec buddystudy-nginx nginx -s reload
+            else
+              docker run -d \
+                --name buddystudy-nginx \
+                --network buddystudy-swarm-net \
+                --restart unless-stopped \
+                -p 443:443 \
+                -v "$PWD/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
+                -v "$PWD/nginx/certs:/etc/nginx/certs:ro" \
+                -v "$PWD/letsencrypt:/etc/letsencrypt:ro" \
+                nginx:1.27-alpine
+              docker network connect buddystudy-net buddystudy-nginx >/dev/null 2>&1 || true
             fi
-            docker rm -f "${NEW_SLOT}" >/dev/null 2>&1 || true
-            exit 1
-          fi
 
-          printf '%s' "${NEW_SLOT}" > .active_backend_slot
-          if [ -n "${OLD_SLOT}" ] && [ "${OLD_SLOT}" != "${NEW_SLOT}" ]; then
-            docker stop --time 30 "${OLD_SLOT}" >/dev/null 2>&1 || true
-            docker rm "${OLD_SLOT}" >/dev/null 2>&1 || true
+            if [ "${PROMOTE_SWARM}" = "true" ] && [ ! -f .swarm_routing_enabled ]; then
+              touch .swarm_routing_enabled
+              BACKEND_DEPLOYMENT_STATE="promoted"
+              echo "BACKEND_DEPLOYMENT_STATE=${BACKEND_DEPLOYMENT_STATE}" >> "${GITHUB_ENV}"
+              echo "Nginx now routes backend traffic to buddystudy_backend."
+
+              for legacy_slot in buddystudy-backend-a buddystudy-backend-b buddystudy-backend; do
+                docker stop --time 45 "${legacy_slot}" >/dev/null 2>&1 || true
+                docker rm "${legacy_slot}" >/dev/null 2>&1 || true
+              done
+              rm -f .active_backend_slot
+            fi
+          else
+            echo "Swarm service is staged. Existing backend routing remains unchanged."
+            echo "Verify the Swarm task, then rerun manually with promote_swarm=true."
           fi
           docker image prune -f
 
-      - name: Deploy MySQL runtime observer
-        env:
-          REMOTE_LOKI_PUSH_URL: ${{ vars.REMOTE_LOKI_PUSH_URL || '' }}
+      - name: Remove legacy MySQL runtime observer
         run: |
           set -euo pipefail
-
           docker rm -f buddystudy-db-metrics >/dev/null 2>&1 || true
-          if [ -z "${REMOTE_LOKI_PUSH_URL}" ]; then
-            echo "REMOTE_LOKI_PUSH_URL is empty; MySQL runtime observer is disabled."
-            exit 0
-          fi
-
-          DEPLOY_ROOT="/opt/buddystudy-backend"
-          if [ ! -d "${DEPLOY_ROOT}" ]; then
-            DEPLOY_ROOT="${HOME}/buddystudy-backend"
-          fi
-          cd "${DEPLOY_ROOT}"
-          mkdir -p monitoring
-
-          SOURCE_SHA="${{ github.event.client_payload.sha || 'main' }}"
-          curl -fsSL \
-            "https://raw.githubusercontent.com/ghkdqhrbals/buddy-studdy/${SOURCE_SHA}/monitoring/scripts/database-runtime-collector.sh" \
-            -o monitoring/database-runtime-collector.sh
-          chmod 700 monitoring/database-runtime-collector.sh
-
-          MYSQL_DATABASE="$(
-            docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' buddystudy-db \
-              | sed -n 's/^MYSQL_DATABASE=//p' \
-              | head -n 1
-          )"
-          MYSQL_USER="$(
-            docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' buddystudy-db \
-              | sed -n 's/^MYSQL_USER=//p' \
-              | head -n 1
-          )"
-          MYSQL_PASSWORD="$(cat .mysql_password)"
-          if [ -z "${MYSQL_DATABASE}" ] || [ -z "${MYSQL_USER}" ] || [ -z "${MYSQL_PASSWORD}" ]; then
-            echo "Could not resolve MySQL database credentials from the running container." >&2
-            exit 1
-          fi
-
-          docker run -d \
-            --name buddystudy-db-metrics \
-            --restart unless-stopped \
-            --read-only \
-            --tmpfs /tmp:rw,noexec,nosuid,size=16m \
-            -e MYSQL_DATABASE="${MYSQL_DATABASE}" \
-            -e MYSQL_USER="${MYSQL_USER}" \
-            -e MYSQL_PASSWORD="${MYSQL_PASSWORD}" \
-            -e MYSQL_CONTAINER=buddystudy-db \
-            -e DATABASE_METRICS_INTERVAL_SECONDS=30 \
-            -v /var/run/docker.sock:/var/run/docker.sock:ro \
-            -v "$PWD/monitoring/database-runtime-collector.sh:/collector.sh:ro" \
-            docker:27-cli \
-            sh /collector.sh
 
       - name: Summary
         if: always()
@@ -572,36 +751,162 @@ jobs:
             echo ""
             echo "- Target: \`ec2\`"
             echo "- Image: \`${IMAGE_REF}\`"
-            echo "- Result: \`${{ job.status }}\`"
+            echo "- Runtime: \`${BACKEND_RUNTIME}\`"
+            echo "- Workflow: \`${{ job.status }}\`"
+            echo "- Swarm state: \`${BACKEND_DEPLOYMENT_STATE:-not-submitted}\`"
+            echo "- Service: \`${BACKEND_SWARM_SERVICE:-buddystudy_backend}\`"
           } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Publish deployment result
+        if: always()
+        env:
+          MONITORING_DEPLOYMENT_INGEST_TOKEN: ${{ secrets.MONITORING_DEPLOYMENT_INGEST_TOKEN }}
+          DEPLOY_STATUS: ${{ job.status }}
+          SOURCE_REPOSITORY: ${{ github.event.client_payload.source_repo }}
+          SOURCE_SHA: ${{ github.event.client_payload.sha }}
+          SOURCE_RUN_ID: ${{ github.event.client_payload.source_run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MONITORING_DEPLOYMENT_INGEST_TOKEN}" ]; then
+            echo "::warning::MONITORING_DEPLOYMENT_INGEST_TOKEN is missing; deployment history will not be updated."
+            exit 0
+          fi
+          case "${DEPLOY_STATUS}" in
+            success) status="SUCCEEDED" ;;
+            cancelled) status="CANCELLED" ;;
+            *) status="FAILED" ;;
+          esac
+          finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          duration_ms="$(
+            STARTED_AT="${DEPLOYMENT_STARTED_AT:-${finished_at}}" FINISHED_AT="${finished_at}" python3 -c \
+              'from datetime import datetime; import os; parse=lambda value: datetime.fromisoformat(value.replace("Z", "+00:00")); print(max(0, int((parse(os.environ["FINISHED_AT"]) - parse(os.environ["STARTED_AT"])).total_seconds() * 1000)))'
+          )"
+          jq -n \
+            --arg id "${GITHUB_REPOSITORY}:${GITHUB_RUN_ID}" \
+            --arg status "${status}" \
+            --arg phase "${BACKEND_DEPLOYMENT_STATE:-not-submitted}" \
+            --arg image "${IMAGE_REF}" \
+            --arg runtime "${BACKEND_RUNTIME:-${EXPECTED_BACKEND_RUNTIME}}" \
+            --arg source_repository "${SOURCE_REPOSITORY}" \
+            --arg source_sha "${SOURCE_SHA}" \
+            --arg source_run_id "${SOURCE_RUN_ID}" \
+            --arg deploy_repository "${GITHUB_REPOSITORY}" \
+            --arg deploy_run_id "${GITHUB_RUN_ID}" \
+            --arg deploy_url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --arg actor "${GITHUB_ACTOR}" \
+            --arg started_at "${DEPLOYMENT_STARTED_AT:-${finished_at}}" \
+            --arg finished_at "${finished_at}" \
+            --argjson duration_ms "${duration_ms}" \
+            --arg swarm_service "${BACKEND_SWARM_SERVICE:-buddystudy_backend}" \
+            '{
+              id: $id,
+              service: "backend",
+              environment: "production",
+              status: $status,
+              phase: $phase,
+              image: $image,
+              runtime: $runtime,
+              sourceRepository: $source_repository,
+              sourceSha: $source_sha,
+              sourceRunId: $source_run_id,
+              deployRepository: $deploy_repository,
+              deployRunId: $deploy_run_id,
+              deployUrl: $deploy_url,
+              actor: $actor,
+              startedAt: $started_at,
+              finishedAt: $finished_at,
+              durationMs: $duration_ms,
+              message: ("Backend deployment " + ($status | ascii_downcase) + "."),
+              metadata: { swarmService: $swarm_service }
+            }' > /tmp/backend-deployment-event.json
+          curl --silent --show-error --retry 2 --max-time 10 \
+            -X POST \
+            -H "Authorization: Bearer ${MONITORING_DEPLOYMENT_INGEST_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data-binary @/tmp/backend-deployment-event.json \
+            https://monitoring.lowfidev.cloud/deployment-events/events \
+            >/dev/null \
+            || echo "::warning::Could not publish the deployment result event."
 
       - name: Notify Slack
         if: always()
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          DEPLOY_SLACK_WEBHOOK_URL: ${{ secrets.DEPLOY_SLACK_WEBHOOK_URL }}
+          LEGACY_SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           DEPLOY_STATUS: ${{ job.status }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SOURCE_REPOSITORY: ${{ github.event.client_payload.source_repo }}
+          SOURCE_SHA: ${{ github.event.client_payload.sha }}
         run: |
           set -euo pipefail
-          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
-            echo "SLACK_WEBHOOK_URL is empty; skip deploy notification."
+          webhook_url="${DEPLOY_SLACK_WEBHOOK_URL:-${LEGACY_SLACK_WEBHOOK_URL:-}}"
+          if [ -z "${webhook_url}" ]; then
+            echo "DEPLOY_SLACK_WEBHOOK_URL and legacy SLACK_WEBHOOK_URL are empty; skip deploy notification."
             exit 0
           fi
           python3 - <<'PY' > /tmp/buddystudy-deploy-slack.json
-          import os
           import json
-          status = os.environ["DEPLOY_STATUS"]
-          image = os.environ["IMAGE_REF"]
+          import os
+
+          def escape(value):
+              return str(value or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+          status = os.environ.get("DEPLOY_STATUS", "failure")
           run_url = os.environ["RUN_URL"]
+          runtime = os.environ.get("BACKEND_RUNTIME") or os.environ.get("EXPECTED_BACKEND_RUNTIME") or "unknown"
+          source_repository = os.environ.get("SOURCE_REPOSITORY", "")
+          source_sha = os.environ.get("SOURCE_SHA", "")
+          deployment_state = os.environ.get("BACKEND_DEPLOYMENT_STATE", "not-submitted")
+
+          if status == "success":
+              state_labels = {
+                  "staged": "Swarm 스테이징됨",
+                  "promoted": "Swarm 승격됨",
+                  "submitted": "Swarm 업데이트 제출됨",
+                  "rollout-completed": "배포 완료",
+              }
+              color, status_label = "#2EB67D", state_labels.get(deployment_state, "배포 요청됨")
+          elif status == "cancelled":
+              color, status_label = "#ECB22E", "취소"
+          else:
+              color, status_label = "#E01E5A", "실패"
+          source_url = (
+              f"https://github.com/{source_repository}/commit/{source_sha}"
+              if source_repository and source_sha
+              else ""
+          )
+          source_text = (
+              f"<{source_url}|`{escape(source_sha[:8])}`>"
+              if source_url
+              else "수동 실행"
+          )
+
           payload = {
-              "text": f"BuddyStudy backend deploy {status}",
-              "blocks": [
+              "text": f"Backend 배포 · {status_label}",
+              "attachments": [
                   {
-                      "type": "section",
-                      "text": {
-                          "type": "mrkdwn",
-                          "text": f"*BuddyStudy backend deploy*\\nStatus: `{status}`\\nTarget: `ec2`\\nImage: `{image}`\\nRun: {run_url}"
-                      },
+                      "color": color,
+                      "blocks": [
+                          {
+                              "type": "section",
+                              "text": {
+                                  "type": "mrkdwn",
+                                  "text": (
+                                      "*Backend 배포*\n"
+                                      f"`{status_label}` · `production` · `{escape(runtime)}`"
+                                  ),
+                              },
+                          },
+                          {
+                              "type": "context",
+                              "elements": [
+                                  {
+                                      "type": "mrkdwn",
+                                      "text": f"<{run_url}|GitHub Actions> · {source_text}",
+                                  }
+                              ],
+                          },
+                      ],
                   }
               ],
           }
@@ -610,4 +915,4 @@ jobs:
           curl -fsS -X POST \
             -H "Content-Type: application/json" \
             --data @/tmp/buddystudy-deploy-slack.json \
-            "${SLACK_WEBHOOK_URL}"
+            "${webhook_url}"

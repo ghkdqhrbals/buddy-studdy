@@ -36,6 +36,19 @@ X-Client-Secret: <clientSecret>
 
 Public question listing is readable without login. Profile editing, reports, records, statistics, study details, and private device data require `Authorization: Bearer <accessToken>`. Google Login links a Google account to that device identity.
 
+### Model Context Protocol
+
+The optional stateless MCP endpoint uses the same authenticated bearer boundary:
+
+```http
+POST /api/v1/mcp
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+Accept: application/json, text/event-stream
+```
+
+It exposes private profile/resume/interests, owned studies, asynchronous question and grading operations, records, feedback, scores, and topic statistics. It never accepts a `userId` argument. Production is disabled unless `MCP_SERVER_ENABLED=true`; connection, tool, privacy, and rollout details are documented in [MCP_SERVER.md](../docs/MCP_SERVER.md).
+
 ## Endpoints
 
 ### Health
@@ -53,9 +66,9 @@ Response:
 ```
 
 `/health` is intentionally lightweight for container and load-balancer probes.
-Runtime uptime monitoring must not run from GitHub Actions. Use the
-Cloudflare Worker in `deploy/cloudflare-health-monitor` for scheduled external
-checks and Slack alerts. That Worker should call readiness:
+Runtime checks must not run from GitHub Actions. Production alerting is owned
+by Grafana, which evaluates Loki and the configured observability data sources.
+The readiness endpoint is available for operator diagnostics:
 
 ```http
 GET /api/v1/health/readiness
@@ -63,8 +76,8 @@ GET /api/v1/health/readiness
 
 It returns `200` when required dependencies are reachable and core scheduler
 jobs have recent successful runs, otherwise `503` with component-level check
-results. Scheduler checks include structured `details` so external monitors
-and Slack alerts can show missing jobs, disabled jobs, stale jobs, and
+results. Scheduler checks include structured `details` so dashboards and
+operator diagnostics can show missing jobs, disabled jobs, stale jobs, and
 configured thresholds without parsing free-form text. A scheduler run that
 remains `RUNNING` past its configured `timeoutSeconds` is reported as a stuck
 job.
@@ -96,10 +109,9 @@ Example readiness response:
       "details": {
         "monitoredJobs": [
           "question-schedule",
-          "question-push-outbox-dispatch",
+          "event-outbox-dispatch",
           "user-stats-refresh",
-          "admin-analytics-recent",
-          "admin-analytics-correction"
+          "answer-grading-watchdog"
         ],
         "thresholdSeconds": 900,
         "startupGraceSeconds": 900,
@@ -119,13 +131,17 @@ Example readiness response:
 }
 ```
 
-Admin users can inspect scheduler freshness and the latest run for each
-monitored job:
+Admin users can inspect scheduler freshness and the latest run for each managed
+job in bounded pages:
 
 ```http
-GET /api/v1/admin/jobs/statuses
+GET /api/v1/admin/jobs/statuses?limit=10&offset=0
 Authorization: Bearer <adminToken>
 ```
+
+New clients must send both pagination parameters. Omitting `limit` is retained
+only for legacy clients and returns the full registry using the same indexed
+latest-run lookup.
 
 Response:
 
@@ -134,7 +150,10 @@ Response:
   "jobs": [
     {
       "jobName": "question-schedule",
+      "displayName": "Scheduled question dispatch",
+      "description": "Delivers due scheduled study questions.",
       "enabled": true,
+      "monitored": true,
       "scheduleType": "FIXED_DELAY",
       "scheduleValue": "30s",
       "latestRun": null,
@@ -143,9 +162,51 @@ Response:
       "timeoutSeconds": 300,
       "stuck": false
     }
-  ]
+  ],
+  "totalCount": 23,
+  "limit": 10,
+  "offset": 0
 }
 ```
+
+### Admin Feedback And Targeted Notifications
+
+```http
+GET /api/v1/admin/feedback?query=&status=NEW&limit=20&offset=0
+Authorization: Bearer <BACKEND_API_TOKEN>
+
+PATCH /api/v1/admin/feedback/{feedbackId}/review
+Authorization: Bearer <BACKEND_API_TOKEN>
+
+POST /api/v1/admin/feedback/{feedbackId}/notifications
+Authorization: Bearer <BACKEND_API_TOKEN>
+
+POST /api/v1/admin/users/{userId}/notifications
+Authorization: Bearer <BACKEND_API_TOKEN>
+```
+
+The feedback list supports `NEW`, `REVIEWED`, and `REPLIED` status filters.
+Sending through a feedback targets its captured registered user, or its
+submitting device when the feedback was anonymous. A direct user notification
+targets the selected member.
+
+Both notification endpoints accept:
+
+```json
+{
+  "title": "피드백을 확인했어요",
+  "body": "소중한 피드백 감사합니다. **무료 크레딧**을 확인해 주세요.",
+  "deepLink": "buddystudy://home/message"
+}
+```
+
+`deepLink` defaults to `buddystudy://home/message`. Only validated
+`buddystudy://` app destinations are accepted; HTTP and HTTPS destinations are
+rejected. `home/message` presents the full Markdown body in a Home popup after
+an explicit notification tap. Other supported destinations route to Home, My
+Studies, Records, Statistics, Settings/Profile, or Public Questions. APNs uses
+a parser-derived plain-text preview while the notification inbox retains the
+original Markdown.
 
 ### Register Device
 
@@ -243,6 +304,7 @@ Response:
 
 ```http
 POST /api/v1/auth/google
+POST /api/v1/auth/apple
 Content-Type: application/json
 Authorization: Bearer <accessToken>
 ```
@@ -353,7 +415,7 @@ Patch request:
 }
 ```
 
-`DELETE /api/v1/profile` deletes the active Google-linked account for the current device. The backend immediately removes the profile, sign-in mapping, public questions, and related study records for that user, reconnects the current device to an anonymous user, and returns a fresh anonymous `accessToken`.
+`DELETE /api/v1/profile` immediately withdraws the active member, revokes its sessions, scrubs login/profile secrets, reconnects the current device to an anonymous user, and returns a fresh anonymous `accessToken`. In the same transaction it writes an `ACCOUNT_WITHDRAWN` outbox event. An at-least-once Redis Stream consumer then idempotently removes profile assets, public questions, studies, records, reactions, user-block relationships, notifications, and related data.
 
 ### Permission Policy, Terms, And Notifications
 
@@ -408,6 +470,24 @@ Request:
 
 Reports are always stored in MySQL. If `REPORT_EMAIL_TO` and SMTP settings are configured, the backend also forwards the report by email.
 
+### Block A Community User
+
+```http
+PUT /api/v1/community/users/{userId}/block
+DELETE /api/v1/community/users/{userId}/block
+Authorization: Bearer <accessToken>
+```
+
+Both operations require the `public-user:block` permission and are idempotent.
+The `PUT` response is `{ "userId": 42, "blocked": true }`; `DELETE` returns
+the same shape with `blocked: false`. A member cannot block their own account.
+
+For an authenticated requester, blocking an author removes that author's
+questions from public-question lists, returns not found for direct public-detail
+reads, and removes that author's comments from comment lists. The relationship
+is stored by the backend, so it applies on every signed-in device until the user
+unblocks the author or either account is deleted.
+
 ### Upsert Study Settings
 
 ```http
@@ -426,7 +506,6 @@ Request:
   "enabled": true,
   "openaiApiKey": "sk-...",
   "notificationSound": "default",
-  "customPrompt": "Ask concise production-oriented questions.",
   "appLanguage": "ko",
   "openaiModel": "gpt-5.4",
   "maxHistoryCount": 100
@@ -441,7 +520,7 @@ Fields:
 - `enabled`: whether scheduled pushes are active.
 - `openaiApiKey`: optional per-device OpenAI API key. If provided, it is encrypted at rest using `BACKEND_MASTER_KEY`.
 - `notificationSound`: optional APNs sound name.
-- `customPrompt`: optional tutor instruction.
+- `customPrompt`: optional tutor-instruction override. When omitted, `null`, or blank, the backend uses its static default question prompt.
 - `appLanguage`: user-level app language, `ko` or `en`. It also controls generated question and feedback language.
 - `openaiModel`: selected model. Defaults to `gpt-5.4`.
 
@@ -486,7 +565,7 @@ GPT-5 family models receive Responses API `reasoning.effort` and `text.verbosity
 when supported. Non-reasoning models use a minimal Responses payload with
 structured JSON output only.
 
-- `maxHistoryCount`: record retention preference from 10 to 10,000.
+- `maxHistoryCount`: deprecated compatibility field. It is still accepted from older clients but does not delete or cap backend records.
 
 Response:
 
@@ -550,12 +629,59 @@ GET /api/v1/studies?limit=500&offset=0
 Authorization: Bearer <accessToken>
 ```
 
-Returns the authenticated user's study rooms. It does not return record history, but each study can include one `pendingQuestion` for the current unanswered study-room question.
+Returns the authenticated user's study tree/list synchronization page. It is not
+the detail or record-history endpoint. Each list item can include one
+`pendingQuestion` so list badges and pending counts can be synchronized without
+loading completed record history.
+
+### Study Detail
+
+```http
+GET /api/v1/studies/{studyId}?tl=ko
+Authorization: Bearer <accessToken>
+```
+
+Returns exactly one authenticated user-owned study room. `pendingQuestion` is
+the latest non-skipped, non-deleted question without a score, including a
+persisted submitted answer and grading state when present. `latestQuestion` is
+the latest completed question and includes its user answer and AI grading
+response. Clients display `pendingQuestion` first and fall back to
+`latestQuestion` when no pending question exists.
+
+### Study Topic Suggestions
+
+```http
+POST /api/v1/studies/{studyId}/topic-suggestions?count=10
+Authorization: Bearer <accessToken>
+```
+
+The backend first reuses children from the shared system topic catalog for the
+same root, parent path, language, and depth. It calls the topic generator only
+for missing candidates and stores those candidates back in the catalog for
+later users. A parent can expose at most 10 candidates and descendants can be
+created through depth 5. User-owned study nodes are materialized only when the
+user selects a candidate, and newly created nodes are active for questions by
+default.
+
+Response:
+
+```json
+{
+  "parentStudyId": 42,
+  "suggestions": ["정규화", "인덱스", "트랜잭션"],
+  "source": "CATALOG",
+  "depth": 2,
+  "maxDepth": 5,
+  "childLimit": 10
+}
+```
+
+`source` is `CATALOG`, `GENERATED`, `MIXED`, or `DEPTH_LIMIT`.
 
 ### Records
 
 ```http
-GET /api/v1/records?limit=100&offset=0
+GET /api/v1/records?limit=30&offset=0
 GET /api/v1/records/{recordId}
 PATCH /api/v1/records/{recordId}/answer
 POST /api/v1/records/{recordId}/answer
@@ -566,9 +692,21 @@ DELETE /api/v1/records
 
 Study record `id` values are database-generated autoincrement IDs returned as strings for client compatibility.
 `PATCH .../answer` saves an answer draft without grading. `POST .../answer` grades the answer using the device's stored OpenAI API key and persists the score, feedback, and explanation. Delete endpoints immediately remove the target records and related report/public-question references.
+`GET /api/v1/studies/{studyId}` includes the latest ungraded `pendingQuestion`
+for that study and the latest completed `latestQuestion`. When an answer has
+already been submitted, the pending nested record includes
+`answer`, `questionStatus`, `correlationId` (with `gradingRequestId` retained as
+a compatibility alias), `gradingLastEventId`, `gradingStatus`, and
+`gradingError` so a reopened
+client can restore the submitted state and resume grading-status polling.
+`GET /api/v1/records/{recordId}` remains the canonical record-detail endpoint;
+`GET /api/v1/studies` is reserved for tree/list synchronization.
+Records have no per-user retention cap and remain until the user deletes them or
+withdraws the account. Clients should request subsequent `offset` pages while
+scrolling instead of loading the complete history at once.
 
 ### Statistics
-ㅅ
+
 ```http
 GET /api/v1/stats?period=all&sort=level&limit=8&offset=0
 GET /api/v1/stats?startAt=2026-06-01T00:00:00Z&endAt=2026-06-02T00:00:00Z
@@ -584,6 +722,21 @@ Query fields:
 - `limit` / `offset`: topic pagination.
 
 The response is topic-first and includes total response/topic counts, topic aliases, level range, correct rate, and the records for each returned topic.
+
+Study-tree growth uses a separate endpoint:
+
+```http
+GET /api/v1/stats/studies?startAt=2026-06-01T00:00:00Z&endAt=2026-09-01T00:00:00Z
+Authorization: Bearer <accessToken>
+```
+
+It returns root summaries and a flat study-node list. Each root contains a
+`profile` with normalized `achievement`, `challenge`, `completion`, `breadth`,
+and `depth` values. Achievement is mean score, challenge is mean answered
+difficulty, completion is completed/generated questions, breadth is
+answered/all subtree studies, and depth is deepest answered/all available tree
+levels for the selected period. Ungraded generated questions affect only
+completion, not ability, growth, or trend calculations.
 
 ### Manual Question
 
@@ -627,6 +780,22 @@ Response:
 
 This endpoint is intended for explicit operator-triggered scheduler checks. It must not be called from GitHub Actions health checks. The normal scheduler loop runs automatically when `SCHEDULER_ENABLED=true`.
 
+### External API History
+
+```http
+GET /api/v1/admin/external-api-history?limit=20&provider=openai&status=FAILED&query=translate
+Authorization: Bearer <adminToken>
+```
+
+Returns a descending cursor page of outbound provider call summaries. Request and response bodies are omitted from the page payload.
+
+```http
+GET /api/v1/admin/external-api-history/{id}
+Authorization: Bearer <adminToken>
+```
+
+Returns the selected call's complete request and response as observed by the backend. Authentication headers, cookies, API keys, tokens, verification codes, and APNs device tokens are redacted before persistence.
+
 ## Error Format
 
 Validation, auth, and server failures return one unified JSON shape:
@@ -655,6 +824,7 @@ Common error codes:
 - `AUTH_GOOGLE_REQUIRED`
 - `AUTH_INVALID_ACCESS_TOKEN`
 - `AUTH_INVALID_DEVICE_CREDENTIALS`
+- `AUTH_INVALID_EMAIL_CREDENTIALS`
 - `DEVICE_NOT_FOUND`
 - `OPENAI_API_KEY_INVALID`
 - `OPENAI_API_KEY_MISSING`

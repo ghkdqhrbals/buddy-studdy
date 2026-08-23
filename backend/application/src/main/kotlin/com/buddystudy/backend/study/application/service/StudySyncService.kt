@@ -14,6 +14,8 @@ import com.buddystudy.backend.study.application.port.inbound.StudySyncUseCase
 import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
+import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
+import com.buddystudy.backend.localization.application.service.applyReadyQuestionLocalization
 import com.buddystudy.study.domain.StudyRoomSettings
 import com.buddystudy.study.domain.StudyRoomSettingsCommand
 import com.buddystudy.study.domain.StudyRoomSettingsState
@@ -22,6 +24,7 @@ import com.buddystudy.study.domain.entity.StudyEntity
 import com.buddystudy.study.domain.StudyRecord
 import com.buddystudy.study.domain.StudyRecordState
 import com.buddystudy.study.domain.StudyRecordStats
+import com.buddystudy.study.domain.QuestionLanguage
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import org.springframework.data.domain.PageRequest
@@ -35,9 +38,20 @@ class StudySyncService(
     private val studies: StudyPort,
     private val questions: QuestionPort,
     private val questionStats: QuestionStatsPort,
+    private val contentLocalizations: ContentLocalizationPort,
 ) : StudySyncUseCase {
     @Transactional(readOnly = true)
-    override suspend fun study(principal: Principal, limit: Int, offset: Int, query: String?): StudyPageResponse {
+    override suspend fun study(principal: Principal, limit: Int, offset: Int, query: String?): StudyPageResponse =
+        study(principal, limit, offset, query, QuestionLanguage.KOREAN)
+
+    @Transactional(readOnly = true)
+    override suspend fun study(
+        principal: Principal,
+        limit: Int,
+        offset: Int,
+        query: String?,
+        language: String,
+    ): StudyPageResponse {
         val search = query?.trim()?.takeIf { it.isNotEmpty() }
         val pageable = PageRequest.of(offset / limit, limit)
         val page = if (search == null) {
@@ -46,11 +60,35 @@ class StudySyncService(
             studies.findByUserIdAndQuery(principal.userId, search, pageable)
         }
         return StudyPageResponse(
-            studies = page.content.toStudyRoomResponses(),
+            studies = page.content.toStudyRoomResponses(QuestionLanguage.normalize(language)),
             totalCount = page.totalElements,
             limit = limit,
             offset = offset,
             serverTime = Instant.now(),
+        )
+    }
+
+    @Transactional(readOnly = true)
+    override suspend fun study(principal: Principal, studyId: Long, language: String): StudyRoomResponse {
+        val study = studies.findByIdAndUserId(studyId, principal.userId)
+            ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
+        val normalizedLanguage = QuestionLanguage.normalize(language)
+        val pendingQuestion = questions
+            .findLatestPendingByStudyIdsAndLanguage(listOf(studyId), normalizedLanguage)
+            .singleOrNull()
+            ?.localizedForDisplay(normalizedLanguage)
+        val latestQuestion = questions
+            .findLatestCompletedByStudyIdAndUserId(studyId, principal.userId)
+            ?.localizedForDisplay(normalizedLanguage)
+        val questionIds = listOfNotNull(pendingQuestion?.id, latestQuestion?.id).distinct()
+        val statsByQuestionId = questionIds
+            .takeIf { it.isNotEmpty() }
+            ?.let { questionStats.findAllByIds(it).associateBy { stats -> stats.questionId } }
+            .orEmpty()
+        return study.toStudyRoomResponse(
+            pendingQuestion = pendingQuestion,
+            latestQuestion = latestQuestion,
+            statsByQuestionId = statsByQuestionId,
         )
     }
 
@@ -114,8 +152,12 @@ class StudySyncService(
         val now = Instant.now()
         val duplicate = studies.findAllByUserId(principal.userId)
             .firstOrNull { it.topic.normalizedStudyTopicKey() == topic.normalizedStudyTopicKey() }
-        if (duplicate != null && (parentStudy != null || duplicate.parentStudyId != null)) {
+        val duplicateBelongsToRequestedParent = duplicate != null && duplicate.parentStudyId == parentStudy?.id
+        if (duplicate != null && !duplicateBelongsToRequestedParent && (parentStudy != null || duplicate.parentStudyId != null)) {
             throw ApiException(HttpStatus.CONFLICT, ApiErrorCode.VALIDATION_ERROR, "A study topic with the same name already exists.")
+        }
+        if (duplicate != null && parentStudy != null && duplicateBelongsToRequestedParent) {
+            return duplicate.toStudyRoomResponse()
         }
         val study = duplicate ?: StudyEntity(
                 deviceId = principal.deviceId,
@@ -171,39 +213,50 @@ class StudySyncService(
 
     @Transactional
     override suspend fun deleteStudy(principal: Principal, studyId: Long) {
-        val study = studies.findByIdAndUserId(studyId, principal.userId)
+        studies.findByIdAndUserId(studyId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
-        val now = Instant.now()
-        questions.softDeleteByStudySubtree(study.id, principal.userId, now)
         val deleted = studies.deleteByIdAndUserId(studyId, principal.userId)
         if (deleted == 0L) {
             throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study not found.")
         }
     }
 
-    private suspend fun List<StudyEntity>.toStudyRoomResponses(): List<StudyRoomResponse> {
+    private suspend fun List<StudyEntity>.toStudyRoomResponses(language: String): List<StudyRoomResponse> {
         if (isEmpty()) return emptyList()
-        val pendingByStudyId = questions.findLatestPendingByStudyIds(map { it.id }).associateBy { it.studyId }
+        val pendingByStudyId = questions
+            .findLatestPendingByStudyIdsAndLanguage(map { it.id }, language)
+            .associateBy { it.studyId }
         val statsByQuestionId = pendingByStudyId.values
             .map { it.id }
             .takeIf { it.isNotEmpty() }
             ?.let { questionStats.findAllByIds(it).associateBy { stats -> stats.questionId } }
             .orEmpty()
         return map { study ->
+            val pendingQuestion = pendingByStudyId[study.id]?.localizedForDisplay(language)
             study.toStudyRoomResponse(
-                pendingQuestion = pendingByStudyId[study.id],
+                pendingQuestion = pendingQuestion,
                 statsByQuestionId = statsByQuestionId,
             )
         }
     }
 
+    private suspend fun QuestionEntity.localizedForDisplay(language: String): QuestionEntity =
+        applyReadyQuestionLocalization(
+            contentLocalizations.record(id, language),
+            language,
+        )
+
 }
 
 internal suspend fun StudyEntity.toStudyRoomResponse(
     pendingQuestion: QuestionEntity? = null,
+    latestQuestion: QuestionEntity? = null,
     statsByQuestionId: Map<Long, QuestionStatsEntity> = emptyMap(),
 ): StudyRoomResponse {
     val pending = pendingQuestion?.let { question ->
+        question.toStudyRecord(statsByQuestionId[question.id]).toProjection().toRecordResponse()
+    }
+    val latest = latestQuestion?.let { question ->
         question.toStudyRecord(statsByQuestionId[question.id]).toProjection().toRecordResponse()
     }
 
@@ -224,6 +277,7 @@ internal suspend fun StudyEntity.toStudyRoomResponse(
         lastSentAt = lastSentAt,
         lastError = lastError,
         pendingQuestion = pending,
+        latestQuestion = latest,
         createdAt = createdAt,
         updatedAt = updatedAt,
     )

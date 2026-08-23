@@ -91,21 +91,21 @@ struct MobileToolbarSearchField: View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(.secondary)
 
             ZStack(alignment: .leading) {
                 if text.isEmpty {
                     Text(prompt)
                         .font(.system(size: 18, weight: .regular))
-                        .foregroundStyle(.white.opacity(0.62))
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
 
                 TextField("", text: $text)
                     .textFieldStyle(.plain)
                     .font(.system(size: 18, weight: .regular))
-                    .foregroundStyle(.white)
-                    .tint(.white)
+                    .foregroundStyle(.primary)
+                    .tint(.accentColor)
                     .lineLimit(1)
                     .submitLabel(.search)
                     .focused(focus)
@@ -115,7 +115,7 @@ struct MobileToolbarSearchField: View {
 
             Image(systemName: "xmark")
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(.secondary)
                 .frame(width: 32, height: 32)
                 .contentShape(Rectangle())
                 .onTapGesture(perform: onClose)
@@ -239,15 +239,11 @@ struct MobileExpandingToolbarSearch<CollapsedContent: View>: View {
 
 private enum MobileSearchColors {
     static var toolbarSearchFill: Color {
-        Color(uiColor: UIColor { traits in
-            traits.userInterfaceStyle == .dark ? .secondarySystemBackground : .secondarySystemFill
-        })
+        Color(uiColor: .secondarySystemFill)
     }
 
     static var toolbarSearchStroke: Color {
-        Color(uiColor: UIColor { traits in
-            traits.userInterfaceStyle == .dark ? .separator : .separator
-        })
+        Color(uiColor: .separator)
     }
 }
 

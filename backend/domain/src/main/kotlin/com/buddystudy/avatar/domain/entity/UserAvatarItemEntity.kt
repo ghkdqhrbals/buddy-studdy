@@ -11,6 +11,6 @@ class UserAvatarItemEntity(
     var id: Long = 0,
     var userId: Long = 0,
     var itemKey: String = "",
-    var grantedSource: String = "SYSTEM",
+    var grantedSource: AvatarGrantSource = AvatarGrantSource.SYSTEM,
     var createdAt: Instant = Instant.now(),
 )

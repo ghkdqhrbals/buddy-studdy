@@ -3,12 +3,16 @@ package com.buddystudy.backend.auth
 import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.account.domain.entity.UserStatus
 import com.buddystudy.auth.domain.entity.DeviceEntity
 import com.buddystudy.auth.domain.entity.UserDeviceEntity
+import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.backend.auth.application.port.inbound.EmailLoginCommand
 import com.buddystudy.backend.auth.application.port.inbound.PushTokenCommand
 import com.buddystudy.backend.auth.application.port.inbound.RegisterDeviceCommand
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
+import com.buddystudy.backend.auth.application.port.outbound.AppleIdentity
+import com.buddystudy.backend.auth.application.port.outbound.AppleIdentityPort
 import com.buddystudy.backend.auth.application.port.outbound.EmailVerificationCodePort
 import com.buddystudy.backend.auth.application.port.outbound.EmailVerificationSenderPort
 import com.buddystudy.backend.auth.application.port.outbound.GoogleIdentity
@@ -18,7 +22,9 @@ import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.auth.application.service.AccountSessionManager
 import com.buddystudy.backend.auth.application.service.AuthenticatedLoginManager
+import com.buddystudy.backend.auth.application.service.DeviceRegistrationManager
 import com.buddystudy.backend.auth.application.service.LoginService
+import com.buddystudy.backend.auth.application.service.RandomDisplayNameProvider
 import com.buddystudy.backend.auth.application.service.RandomTokenGenerator
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
@@ -37,6 +43,7 @@ class LoginServiceEmailVerificationTest {
     private val emailCodes = CapturingEmailCodePort()
     private val emailSender = CapturingEmailSender()
     private val roles = InMemoryRoleAssignmentPort()
+    private val appleIdentities = StubAppleIdentityPort()
     private val googleIdentities = StubGoogleIdentityPort()
     private val properties = BuddyStudyProperties().apply {
         auth.jwtSecret = "test-jwt-secret"
@@ -50,13 +57,71 @@ class LoginServiceEmailVerificationTest {
         devices = devices,
         tokenService = tokenProvider,
         sessions = sessions,
-        tokens = RandomTokenGenerator(),
         emailCodes = emailCodes,
         emailSender = emailSender,
         roles = roles,
+        appleIdentities = appleIdentities,
         googleIdentities = googleIdentities,
-        authenticatedLogins = AuthenticatedLoginManager(users, devices, sessions, roles, tokenProvider),
+        authenticatedLogins = AuthenticatedLoginManager(
+            users,
+            devices,
+            sessions,
+            roles,
+            tokenProvider,
+            RandomDisplayNameProvider(),
+        ),
+        deviceRegistrations = DeviceRegistrationManager(
+            users,
+            devices,
+            tokenProvider,
+            sessions,
+            RandomTokenGenerator(),
+            roles,
+        ),
     )
+
+    @Test
+    fun `apple login attaches verified identity to the device`(): Unit = runBlocking {
+        val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
+        val principal = login.authenticateDevice(device.deviceId, device.clientSecret)
+
+        val response = login.appleLogin(principal, "apple-token")
+
+        assertThat(response.profile.email).isEqualTo("apple-user@example.com")
+        assertThat(users.findByProviderAndProviderId("APPLE", "apple-provider-id")).isNotNull
+    }
+
+    @Test
+    fun `switching accounts on one device revokes every previous account session`(): Unit = runBlocking {
+        val device = login.register(RegisterDeviceCommand(apnsToken = "token", language = "ko"))
+        val anonymousPrincipal = login.authenticateDevice(device.deviceId, device.clientSecret)
+
+        login.googleLogin(anonymousPrincipal, "google-token")
+        val googleUser = users.findByProviderAndProviderId("GOOGLE", "google-provider-id")!!
+        val googleSession = userDevices.findByUserIdAndDeviceId(googleUser.id, device.deviceId)!!
+
+        assertThat(userDevices.findActiveByUserId(anonymousPrincipal.userId)).isEmpty()
+        assertThat(userDevices.findActiveByUserId(googleUser.id).map { it.deviceId })
+            .containsExactly(device.deviceId)
+
+        login.appleLogin(
+            Principal(
+                userId = googleUser.id,
+                deviceId = device.deviceId,
+                sessionId = googleSession.id,
+                anonymous = false,
+                status = googleUser.status.name,
+            ),
+            "apple-token",
+        )
+        val appleUser = users.findByProviderAndProviderId("APPLE", "apple-provider-id")!!
+
+        assertThat(userDevices.findActiveByUserId(anonymousPrincipal.userId)).isEmpty()
+        assertThat(userDevices.findActiveByUserId(googleUser.id)).isEmpty()
+        assertThat(userDevices.findActiveByUserId(appleUser.id).map { it.deviceId })
+            .containsExactly(device.deviceId)
+        assertThat(devices.findByDeviceId(device.deviceId)?.userId).isEqualTo(appleUser.id)
+    }
 
     @Test
     fun `email code is generated stored and sent`(): Unit = runBlocking {
@@ -80,6 +145,34 @@ class LoginServiceEmailVerificationTest {
 
         assertThat(response.accessToken).isNotBlank()
         assertThat(users.findByIdCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun `device registration is idempotent for the same installation`(): Unit = runBlocking {
+        val installationId = "installation-id-that-is-stable-for-this-test"
+
+        val first = login.register(
+            RegisterDeviceCommand(
+                installationId = installationId,
+                apnsToken = "first-token",
+                language = "ko",
+            )
+        )
+        val second = login.register(
+            RegisterDeviceCommand(
+                installationId = installationId,
+                apnsToken = "second-token",
+                language = "en",
+            )
+        )
+
+        assertThat(second.deviceId).isEqualTo(first.deviceId)
+        assertThat(second.clientSecret).isNotEqualTo(first.clientSecret)
+        assertThat(devices.count()).isEqualTo(1)
+        assertThat(users.countByProviderAndProviderId("ANONYMOUS", first.deviceId)).isEqualTo(1)
+        assertThat(devices.findByDeviceId(first.deviceId)?.apnsToken).isEqualTo("second-token")
+        assertThat(devices.findByDeviceId(first.deviceId)?.language).isEqualTo(SupportedLanguage.ENGLISH)
+        assertThat(login.token(second.deviceId, second.clientSecret).accessToken).isNotBlank()
     }
 
     @Test
@@ -183,9 +276,10 @@ class LoginServiceEmailVerificationTest {
 
         val user = users.findByEmailAndProvider("new@example.com", "EMAIL")
         assertThat(user).isNotNull
-        assertThat(user?.status).isEqualTo("PENDING_TERMS")
+        assertThat(user?.status).isEqualTo(UserStatus.PENDING_TERMS)
         assertThat(user?.passwordHash).isEqualTo(sha256("password123"))
-        assertThat(response.profile.displayName).isEqualTo("new")
+        assertThat(response.profile.displayName).matches("[A-Z][a-z]+-[A-Z][a-z]+-\\d{4}")
+        assertThat(response.profile.displayName).isNotEqualTo("new")
         assertThat(emailCodes.consumed).isTrue()
         assertThat(roles.grantRoleCalls).isEqualTo(2)
         assertThat(roles.grantRoleCallsFor(user!!.id, "REGISTERED_USER")).isEqualTo(1)
@@ -212,6 +306,36 @@ class LoginServiceEmailVerificationTest {
     }
 
     @Test
+    fun `existing email user with wrong password returns email credential error`(): Unit = runBlocking {
+        val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
+        val principal = Principal(userId = 1, deviceId = device.deviceId, sessionId = 1, anonymous = true)
+        login.emailCode("existing@example.com")
+        login.emailLogin(
+            principal,
+            EmailLoginCommand(
+                email = "existing@example.com",
+                password = "correct-password",
+                verificationCode = emailCodes.savedCode,
+            ),
+        )
+
+        assertThatThrownBy {
+            runBlocking {
+                login.emailLogin(
+                    principal,
+                    EmailLoginCommand(
+                        email = "existing@example.com",
+                        password = "wrong-password",
+                    ),
+                )
+            }
+        }
+            .isInstanceOf(ApiException::class.java)
+            .extracting("code")
+            .isEqualTo(ApiErrorCode.AUTH_INVALID_EMAIL_CREDENTIALS)
+    }
+
+    @Test
     fun `google login uses identity returned by verifier`(): Unit = runBlocking {
         val device = login.register(RegisterDeviceCommand(apnsToken = "", language = "ko"))
 
@@ -221,7 +345,8 @@ class LoginServiceEmailVerificationTest {
         )
 
         assertThat(response.profile.email).isEqualTo("google@example.com")
-        assertThat(response.profile.displayName).isEqualTo("Google User")
+        assertThat(response.profile.displayName).matches("[A-Z][a-z]+-[A-Z][a-z]+-\\d{4}")
+        assertThat(response.profile.displayName).isNotEqualTo("Google User")
         assertThat(users.findByProviderAndProviderId("GOOGLE", "google-provider-id")).isNotNull
     }
 
@@ -286,6 +411,15 @@ class LoginServiceEmailVerificationTest {
         override suspend fun verify(idToken: String): GoogleIdentity? = identity
     }
 
+    private class StubAppleIdentityPort : AppleIdentityPort {
+        var identity: AppleIdentity? = AppleIdentity(
+            providerId = "apple-provider-id",
+            email = "apple-user@example.com",
+        )
+
+        override suspend fun verify(idToken: String): AppleIdentity? = identity
+    }
+
     private class InMemoryUserPort : UserPort {
         private val users = linkedMapOf<Long, UserEntity>()
         private var nextId = 1L
@@ -305,18 +439,20 @@ class LoginServiceEmailVerificationTest {
         }
         override suspend fun findAllById(ids: Iterable<Long>): MutableList<UserEntity> = ids.mapNotNull { users[it] }.toMutableList()
         override suspend fun findByProviderAndProviderId(provider: String, providerId: String): UserEntity? =
-            users.values.firstOrNull { it.provider == provider && it.providerId == providerId }
+            users.values.firstOrNull { it.provider.name == provider && it.providerId == providerId }
 
         override suspend fun findByEmailAndProvider(email: String, provider: String): UserEntity? =
-            users.values.firstOrNull { it.email == email && it.provider == provider }
+            users.values.firstOrNull { it.email == email && it.provider.name == provider }
 
         fun countByProviderAndProviderId(provider: String, providerId: String): Int =
-            users.values.count { it.provider == provider && it.providerId == providerId }
+            users.values.count { it.provider.name == provider && it.providerId == providerId }
     }
 
     private class InMemoryDevicePort : DevicePort {
         private val devices = linkedMapOf<String, DeviceEntity>()
         private var nextId = 1L
+
+        fun count(): Int = devices.size
 
         override suspend fun save(entity: DeviceEntity): DeviceEntity {
             if (entity.id == 0L) {
@@ -327,6 +463,8 @@ class LoginServiceEmailVerificationTest {
         }
 
         override suspend fun findByDeviceId(deviceId: String): DeviceEntity? = devices[deviceId]
+        override suspend fun findByInstallationKeyHash(installationKeyHash: String): DeviceEntity? =
+            devices.values.firstOrNull { it.installationKeyHash == installationKeyHash }
         override suspend fun findAllByUserId(userId: Long): List<DeviceEntity> =
             devices.values.filter { it.userId == userId }
     }
@@ -354,6 +492,21 @@ class LoginServiceEmailVerificationTest {
 
         override suspend fun hasActiveSession(userId: Long, deviceId: String): Boolean =
             sessions.values.any { it.userId == userId && it.deviceId == deviceId && it.isActive() }
+
+        override suspend fun revokeOtherActiveSessionsForDevice(
+            deviceId: String,
+            userId: Long,
+            revokedAt: Instant,
+        ): Int {
+            val conflicting = sessions.values.filter {
+                it.deviceId == deviceId && it.userId != userId && it.isActive(revokedAt)
+            }
+            conflicting.forEach {
+                it.revokedAt = revokedAt
+                it.updatedAt = revokedAt
+            }
+            return conflicting.size
+        }
     }
 
     private class InMemoryRoleAssignmentPort : RoleAssignmentPort {

@@ -1,0 +1,40 @@
+BuddyStudy 1.1.0 App Review Information
+
+Video and devices
+- Video: {{ATTACHED_VIDEO_FILENAME}}
+- Physical models, exact OS versions, selected build: {{ACTUALLY_TESTED_DEVICE_MODELS_AND_IOS_VERSIONS}}
+- The selected build is the App Review resubmission candidate and connects to the production BuddyStudy API at https://api.ghkdqhrbals.org. TestFlight purchase confirmation uses Apple's sandbox environment.
+- The unedited physical-iPhone video uses the latest public iOS available that date. It starts on the Home Screen, launches BuddyStudy, opens Apple's purchase sheet, and cancels.
+
+Access and setup
+- Test ID: {{DEMO_ACCOUNT_NAME}}
+- Password: {{DEMO_ACCOUNT_PASSWORD}}
+- This active free account needs no OTP, invitation, membership, sample file, or special hardware. New email registration separately needs its delivered code.
+- Apple, Google, and email login are visible. Accept the updated Privacy Policy if prompted.
+
+Purpose and main flow
+- For students and self-directed learners age 14+, BuddyStudy creates active-recall questions, grades answers, saves records, and shows topic progress to identify weak areas.
+1. Home > My Studies > open/create a study or topic > generate a question > answer > submit.
+2. Grading completes asynchronously without replacing an active answer draft.
+3. Records and Statistics show the saved answer, AI feedback, and topic progress.
+
+Accounts, UGC, and permissions
+- Delete account: Settings > Account Settings > Delete Account. Use a disposable account, not this permanent review account.
+- Home > All Studies shows public questions/comments. A signed-in user can like/comment, choose ... > Report Question, or Block User. Blocking hides that author's questions/comments; long-press a comment to block its author.
+- Profile > Notification Settings requests notification permission contextually. No location, contacts, camera, photos, or ATT permission is requested.
+
+In-App Purchase
+- Path: Home > top-left Profile > Membership & Billing > Manage membership.
+- Tier 2: one-month auto-renewable, 300 AI questions/monthly quota period. Tier 3: one-month auto-renewable, 1,000. Each generated question uses one allowance; study/topic creation does not.
+- Offers show title, localized price, one-month duration, allowance, renewal disclosure, Terms, Privacy, Restore, and purchase/change control. Get Tier/Switch to Tier opens Apple's purchase sheet; cancel before purchase. This free account shows purchase/restore; Manage Subscription requires an active subscription.
+
+External services
+- AWS Seoul: API, data, operator-managed LibreTranslate. Cloudflare: DNS, proxy, TLS, security. OpenAI: questions, grading, feedback, suggestions, translation fallback.
+- Apple: sign-in, billing, APNs. RevenueCat: products, purchase/restore, Customer Center, subscription sync. Google: sign-in, registration email verification, Firebase Analytics/Remote Config. Sentry: masked diagnostics.
+
+Regions and status
+- Features/benefits are consistent in all offered regions. Korean, English, and Japanese are localized; only storefront price, currency, and tax vary.
+- Not regulated and no protected third-party material: this is a general educational aid, not a medical, financial, gambling, legal, or other regulated service. It has no licensed media catalog. Questions/comments are UGC; Terms prohibit infringement, and reporting/blocking are available. No ads or IDFA tracking.
+- Privacy: https://ghkdqhrbals.github.io/buddy-studdy/en/privacy-2026-08-14.html
+- Terms: https://ghkdqhrbals.github.io/buddy-studdy/en/terms-2026-07-30.html
+- Apple EULA: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/

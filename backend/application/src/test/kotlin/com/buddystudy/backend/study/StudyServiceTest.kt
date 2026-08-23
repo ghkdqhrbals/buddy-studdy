@@ -3,13 +3,18 @@ package com.buddystudy.backend.study
 import kotlinx.coroutines.runBlocking
 
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.account.domain.entity.UserStatus
+import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
+import com.buddystudy.backend.common.application.outbox.OutboxPublishSummary
+import com.buddystudy.backend.common.application.outbox.OutboxReference
+import com.buddystudy.backend.common.application.outbox.PublishOutboxUseCase
+import com.buddystudy.backend.common.application.outbox.RedisEventOutboxAppendPort
 import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.crypto.KeyCipher
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
-import com.buddystudy.backend.notification.application.port.inbound.PublishNotificationUseCase
 import com.buddystudy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
 import com.buddystudy.backend.study.application.port.outbound.OpenAIPort
@@ -24,22 +29,37 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKeyProvider
+import com.buddystudy.backend.study.application.openai.UserContentOpenAIKeyProvider
 import com.buddystudy.backend.study.application.prompt.QuestionDiversityPolicy
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
 import com.buddystudy.backend.study.application.prompt.QuestionPromptProvider
-import com.buddystudy.backend.study.application.service.QuestionCreationWriteManager
-import com.buddystudy.backend.study.application.service.StudyRecordWriteManager
+import com.buddystudy.backend.study.application.service.QuestionCreationWriteService
+import com.buddystudy.backend.study.application.service.StudyRecordWriteService
 import com.buddystudy.backend.study.application.service.StudyService
+import com.buddystudy.backend.study.application.model.AnswerGradingProgress
+import com.buddystudy.backend.study.application.model.AnswerGradingRequestedEvent
+import com.buddystudy.backend.study.application.model.AnswerGradingStatus
+import com.buddystudy.backend.study.application.model.QuestionGeneratedEvent
+import com.buddystudy.backend.study.application.port.outbound.AnswerGradingProgressPort
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.study.domain.entity.StudyEntity
+import com.buddystudy.backend.test.EmptyContentLocalizationPort
+import com.buddystudy.backend.test.PassthroughLanguageDetector
+import com.buddystudy.backend.test.RecordingLocalizationRequests
+import com.buddystudy.backend.test.RecordingContentTranslationEventPort
+import com.buddystudy.backend.localization.application.service.ContentTranslationRequestManager
+import com.buddystudy.backend.localization.application.model.LocalizableContentType
+import com.buddystudy.backend.localization.application.model.RecordLocalizationSnapshot
+import com.buddystudy.backend.localization.application.model.TextLocalizationSnapshot
+import com.buddystudy.backend.localization.application.policy.ContentSourceHashPolicy
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.Pageable
 import java.time.Instant
-import java.time.YearMonth
 import java.util.Optional
 
 class StudyServiceTest {
@@ -51,31 +71,31 @@ class StudyServiceTest {
     private val questionCoverage = FakeQuestionCoveragePort()
     private val serviceStudies = FakeStudyPort()
     private val memberships = FakeQuestionMembershipPort()
-    private val properties = BuddyStudyProperties().apply { openai.apiKey = "test-api-key" }
+    private val properties = BuddyStudyProperties().apply { openai.userContentApiKey = "test-api-key" }
     private val cipher = KeyCipher(BuddyStudyProperties().apply { crypto.masterKey = "test-key" })
-    private val questionKeys = OpenAIQuestionKeyProvider(properties, memberships)
+    private val questionKeys = OpenAIQuestionKeyProvider(UserContentOpenAIKeyProvider(properties), memberships)
+    private val gradingProgress = FakeAnswerGradingProgressPort()
+    private val notificationOutbox = FakeNotificationOutbox()
+    private val translationEvents = RecordingContentTranslationEventPort()
+    private val outboxPublisher = NoOpOutboxPublisher()
+    private val recordWriter = StudyRecordWriteService(
+        questions,
+        questionCoverage,
+        gradingProgress,
+        notificationOutbox,
+        PassthroughLanguageDetector(),
+        ContentTranslationRequestManager(EmptyContentLocalizationPort(), translationEvents),
+    )
     private val service = StudyService(
-        properties = properties,
-        studies = serviceStudies,
         questions = questions,
         questionStats = questionStats,
-        openAI = openAI,
-        questionEmbeddings = questionEmbeddings,
-        questionCoverage = questionCoverage,
+        recordWriter = recordWriter,
+        gradingWriter = recordWriter,
+        outboxPublisher = outboxPublisher,
         users = users,
-        cipher = cipher,
-        questionKeys = questionKeys,
-        questionPrompts = QuestionPromptProvider(),
-        questionDiversity = QuestionDiversityPolicy(),
-        questionWriter = QuestionCreationWriteManager(
-            questions = questions,
-            questionStats = questionStats,
-            questionEmbeddings = questionEmbeddings,
-            questionCoverage = questionCoverage,
-            questionKeys = questionKeys,
-            notifications = FakeNotificationPublisher(),
-        ),
-        recordWriter = StudyRecordWriteManager(questions, questionCoverage),
+        languageDetector = PassthroughLanguageDetector(),
+        contentLocalizations = EmptyContentLocalizationPort(),
+        localizationRequests = RecordingLocalizationRequests(),
     )
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
@@ -92,6 +112,26 @@ class StudyServiceTest {
         assertThat(response.records.map { it.likeCount }).containsExactly(3, 4)
         assertThat(questionStats.findByIdCalls).isZero()
         assertThat(questionStats.findAllByIdsCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun `records can be paged for one study tree node`(): Unit = runBlocking {
+        questions.visibleRows += gradedQuestion(id = 101, topic = "Swift").apply { studyId = 11 }
+        questions.visibleRows += gradedQuestion(id = 102, topic = "Kotlin").apply { studyId = 12 }
+        questions.visibleRows += gradedQuestion(id = 103, topic = "Swift concurrency").apply { studyId = 11 }
+
+        val response = service.records(
+            principal,
+            limit = 1,
+            offset = 0,
+            query = null,
+            studyId = 11,
+        )
+
+        assertThat(response.records.map { it.studyId }).containsExactly(11)
+        assertThat(response.totalCount).isEqualTo(2)
+        assertThat(response.limit).isEqualTo(1)
+        assertThat(response.offset).isZero()
     }
 
     @Test
@@ -122,18 +162,111 @@ class StudyServiceTest {
     }
 
     @Test
-    fun `graded answer loads user and question stats only once`(): Unit = runBlocking {
-        users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
+    fun `graded answer is queued without waiting for OpenAI`(): Unit = runBlocking {
+        users.row = UserEntity(
+            id = principal.userId,
+            providerId = "u7",
+            status = UserStatus.ACTIVE,
+            appLanguage = SupportedLanguage.ENGLISH,
+        )
         questions.visibleRows += pendingQuestion(id = 501, topic = "Kotlin")
         questionStats.rows += QuestionStatsEntity(questionId = 501, viewCount = 5)
 
         val response = service.answer(principal, recordId = 501, answer = "My answer", grade = true)
 
         assertThat(response.id).isEqualTo("501")
-        assertThat(response.gradingResult?.score).isEqualTo(100)
-        assertThat(openAI.gradeCalls).isEqualTo(1)
+        assertThat(response.answer).isEqualTo("My answer")
+        assertThat(response.answeredAt).isNotNull()
+        assertThat(response.gradingResult).isNull()
+        assertThat(response.gradingStatus).isEqualTo(AnswerGradingStatus.QUEUED)
+        assertThat(response.questionStatus).isEqualTo(QuestionStatus.GRADING)
+        assertThat(response.gradingRequestId).isNotBlank()
+        assertThat(response.correlationId).isEqualTo(response.gradingRequestId)
+        assertThat(response.gradingLastEventId).isEqualTo(1)
+        assertThat(notificationOutbox.gradingEvents).hasSize(1)
+        assertThat(openAI.gradeCalls).isZero()
         assertThat(users.findByIdCalls).isEqualTo(1)
         assertThat(questionStats.findByIdCalls).isEqualTo(1)
+        assertThat(
+            translationEvents.events
+                .filter { it.contentType == LocalizableContentType.ANSWER }
+                .map { it.targetLanguage },
+        ).containsExactlyInAnyOrder("ko", "ja")
+        assertThat(outboxPublisher.published).isNotEmpty
+    }
+
+    @Test
+    fun `answer without grading still appends locale translation work`(): Unit = runBlocking {
+        users.row = UserEntity(
+            id = principal.userId,
+            providerId = "u7",
+            status = UserStatus.ACTIVE,
+            appLanguage = SupportedLanguage.ENGLISH,
+        )
+        questions.visibleRows += pendingQuestion(id = 504, topic = "Kotlin")
+
+        val response = service.answer(principal, recordId = 504, answer = "My answer", grade = false)
+
+        assertThat(response.answer).isEqualTo("My answer")
+        assertThat(
+            translationEvents.events
+                .filter { it.contentType == LocalizableContentType.ANSWER }
+                .map { it.targetLanguage },
+        ).containsExactlyInAnyOrder("ko", "ja")
+        assertThat(outboxPublisher.published).isNotEmpty
+    }
+
+    @Test
+    fun `second answer submission is rejected without another grading event`(): Unit = runBlocking {
+        users.row = UserEntity(
+            id = principal.userId,
+            providerId = "u7",
+            status = UserStatus.ACTIVE,
+            appLanguage = SupportedLanguage.ENGLISH,
+        )
+        questions.visibleRows += pendingQuestion(id = 503, topic = "Kotlin")
+
+        service.answer(principal, recordId = 503, answer = "First answer", grade = true)
+        val failure = runCatching {
+            service.answer(principal, recordId = 503, answer = "Changed answer", grade = true)
+        }.exceptionOrNull()
+
+        assertThat(failure)
+            .isInstanceOf(com.buddystudy.backend.common.application.error.ApiException::class.java)
+        assertThat(
+            (failure as com.buddystudy.backend.common.application.error.ApiException).code,
+        ).isEqualTo(ApiErrorCode.ANSWER_ALREADY_SUBMITTED)
+        val persisted = questions.findByIdAndUserIdAndDeletedAtIsNull(503, principal.userId)
+        assertThat(persisted?.answer).isEqualTo("First answer")
+        assertThat(persisted?.status).isEqualTo(QuestionStatus.GRADING)
+        assertThat(persisted?.gradingStatus).isEqualTo(AnswerGradingStatus.QUEUED)
+        assertThat(persisted?.gradingLastEventId).isEqualTo(1)
+        assertThat(notificationOutbox.gradingEvents).hasSize(1)
+    }
+
+    @Test
+    fun `terminal grading failure moves the question to failed status`(): Unit = runBlocking {
+        val now = Instant.parse("2026-08-03T01:00:00Z")
+        val question = pendingQuestion(id = 505, topic = "Kotlin").apply {
+            status = QuestionStatus.GRADING
+            gradingRequestId = "request-505"
+            gradingStatus = AnswerGradingStatus.JUDGING
+        }
+        questions.visibleRows += question
+        val event = AnswerGradingRequestedEvent(
+            eventId = "event-505",
+            requestId = "request-505",
+            recordId = 505,
+            userId = principal.userId,
+            requestedAt = now.minusSeconds(10),
+            responseLanguage = "en",
+        )
+
+        recordWriter.fail(event, "Provider failed.", now)
+
+        assertThat(question.status).isEqualTo(QuestionStatus.FAILED)
+        assertThat(question.gradingStatus).isEqualTo(AnswerGradingStatus.FAILED)
+        assertThat(question.gradingError).isEqualTo("Provider failed.")
     }
 
     @Test
@@ -146,159 +279,26 @@ class StudyServiceTest {
     }
 
     @Test
-    fun `create question reuses loaded user for search sync`(): Unit = runBlocking {
-        users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
-        serviceStudies.rows += StudyEntity(
-            id = 77,
-            deviceId = principal.deviceId,
-            userId = principal.userId,
-            topic = "Kotlin",
-            difficultyLevel = 6,
-            intervalMinutes = 15,
-            customPrompt = "Keep it short.",
-            openaiModel = "gpt-5.4",
-        )
+    fun `clear soft deletes every record owned by the user`(): Unit = runBlocking {
+        questions.visibleRows += gradedQuestion(id = 601, topic = "Redis")
+        questions.visibleRows += gradedQuestion(id = 602, topic = "Kotlin").apply { userId = 99 }
+        questions.pendingRows += pendingQuestion(id = 603, topic = "Swift")
 
-        val response = service.createQuestion(principal, studyId = 77)
+        service.clear(principal)
 
-        assertThat(response.question.question).isEqualTo("Question")
-        assertThat(openAI.generateCalls).isEqualTo(1)
-        assertThat(users.findByIdCalls).isEqualTo(1)
+        assertThat(questions.visibleRows.single { it.id == 601L }.deletedAt).isNotNull()
+        assertThat(questions.pendingRows.single { it.id == 603L }.deletedAt).isNotNull()
+        assertThat(questions.visibleRows.single { it.id == 602L }.deletedAt).isNull()
     }
 
     @Test
-    fun `create question sends same study and same topic history before openai generation`(): Unit = runBlocking {
-        users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
-        serviceStudies.rows += StudyEntity(
-            id = 82,
-            deviceId = principal.deviceId,
-            userId = principal.userId,
-            topic = "Redis",
-            difficultyLevel = 6,
-            intervalMinutes = 15,
-            customPrompt = "Ask practical scenarios.",
-            openaiModel = "gpt-5.4",
+    fun `queued grading does not update coverage before the consumer completes`(): Unit = runBlocking {
+        users.row = UserEntity(
+            id = principal.userId,
+            providerId = "u7",
+            status = UserStatus.ACTIVE,
+            appLanguage = SupportedLanguage.ENGLISH,
         )
-        questions.visibleRows += question(id = 901, topic = "Redis").apply {
-            studyId = 82
-            question = "How does Redis persistence work?"
-        }
-        questions.visibleRows += question(id = 902, topic = "Redis").apply {
-            studyId = 99
-            question = "When should Redis use AOF instead of snapshots?"
-        }
-        questions.visibleRows += question(id = 903, topic = "Kafka").apply {
-            studyId = 82
-            question = "What is Kafka consumer lag?"
-        }
-
-        service.createQuestion(principal, studyId = 82)
-
-        assertThat(openAI.generatedPrompt?.userPrompt).contains("How does Redis persistence work?")
-        assertThat(openAI.generatedPrompt?.userPrompt).contains("When should Redis use AOF instead of snapshots?")
-        assertThat(openAI.generatedPrompt?.userPrompt).doesNotContain("What is Kafka consumer lag?")
-        assertThat(openAI.generatedPrompt?.userPrompt).contains("Diversity angle:")
-        assertThat(openAI.generatedPrompt?.userPrompt).contains("Question format:")
-        assertThat(openAI.generatedPrompt?.userPrompt).contains("Reasoning mode:")
-        assertThat(questions.findRecentQuestionTextsByStudyIdAndTopicCalls).isEqualTo(1)
-        assertThat(questions.findRecentQuestionTextsByUserIdAndTopicCalls).isEqualTo(1)
-    }
-
-    @Test
-    fun `create question retries and stores embedding when generated question is too similar`(): Unit = runBlocking {
-        users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
-        serviceStudies.rows += StudyEntity(
-            id = 83,
-            deviceId = principal.deviceId,
-            userId = principal.userId,
-            topic = "Redis",
-            difficultyLevel = 6,
-            intervalMinutes = 15,
-            customPrompt = "Ask practical scenarios.",
-            openaiModel = "gpt-5.4",
-        )
-        questionEmbeddings.rows += QuestionEmbeddingCandidate(
-            questionId = 700,
-            question = "How does Redis persistence work?",
-            embedding = listOf(1f, 0f, 0f),
-        )
-        openAI.generatedQuestions += GeneratedQuestion("How does Redis persistence work in production?", null)
-        openAI.generatedQuestions += GeneratedQuestion("How would you diagnose Redis memory fragmentation?", null)
-        openAI.embeddings["How does Redis persistence work in production?"] = listOf(0.99f, 0.01f, 0f)
-        openAI.embeddings["How would you diagnose Redis memory fragmentation?"] = listOf(0f, 1f, 0f)
-
-        val response = service.createQuestion(principal, studyId = 83)
-
-        assertThat(response.question.question).isEqualTo("How would you diagnose Redis memory fragmentation?")
-        assertThat(openAI.generateCalls).isEqualTo(2)
-        assertThat(questionEmbeddings.savedRows).hasSize(1)
-        val savedEmbedding = questionEmbeddings.savedRows.single()
-        assertThat(savedEmbedding.questionId).isEqualTo(response.id.toLong())
-        assertThat(savedEmbedding.embedding).containsExactly(0f, 1f, 0f)
-    }
-
-    @Test
-    fun `create question lazily creates coverage and stores selected concept angle`(): Unit = runBlocking {
-        users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
-        serviceStudies.rows += StudyEntity(
-            id = 84,
-            deviceId = principal.deviceId,
-            userId = principal.userId,
-            topic = "Redis",
-            difficultyLevel = 7,
-            intervalMinutes = 15,
-            customPrompt = "Ask production questions.",
-            openaiModel = "gpt-5.4",
-        )
-        openAI.coverageBlueprint = listOf(
-            OpenAIPort.QuestionCoverageConcept(
-                key = "persistence",
-                name = "Persistence",
-                angles = emptyList(),
-                children = listOf(
-                    OpenAIPort.QuestionCoverageConcept(
-                        key = "aof",
-                        name = "AOF",
-                        angles = emptyList(),
-                        children = listOf(
-                            OpenAIPort.QuestionCoverageConcept(
-                                key = "recovery",
-                                name = "Recovery",
-                                angles = listOf(OpenAIPort.QuestionCoverageAngle("failure_mode", "Failure Mode")),
-                            )
-                        ),
-                    )
-                ),
-            )
-        )
-
-        val response = service.createQuestion(principal, studyId = 84)
-
-        assertThat(response.question.question).isEqualTo("Question")
-        assertThat(openAI.coverageBlueprintCalls).isEqualTo(1)
-        assertThat(questionCoverage.createdBlueprintStudyIds).containsExactly(84)
-        assertThat(questions.visibleRows.single { it.id == response.id.toLong() }.conceptId).isEqualTo(1)
-        assertThat(questions.visibleRows.single { it.id == response.id.toLong() }.angleKey).isEqualTo("failure_mode")
-        assertThat(questionCoverage.markAskedCalls).containsExactly(
-            QuestionCoverageSelection(
-                conceptId = 1,
-                coverageId = 1,
-                conceptKey = "recovery",
-                conceptName = "Recovery",
-                angleKey = "failure_mode",
-                angleName = "Failure Mode",
-                conceptKeyPath = "persistence/aof/recovery",
-                conceptPath = "Persistence > AOF > Recovery",
-            )
-        )
-        assertThat(openAI.generatedPrompt?.userPrompt).contains("Focus concept path: Persistence > AOF > Recovery")
-        assertThat(openAI.generatedPrompt?.userPrompt).contains("Focus concept: Recovery")
-        assertThat(openAI.generatedPrompt?.userPrompt).contains("Question angle: Failure Mode")
-    }
-
-    @Test
-    fun `graded answer updates coverage score when question has concept angle`(): Unit = runBlocking {
-        users.row = UserEntity(id = principal.userId, providerId = "u7", status = "ACTIVE", appLanguage = "en")
         questions.visibleRows += pendingQuestion(id = 502, topic = "Redis").apply {
             conceptId = 11
             conceptKey = "replication"
@@ -307,123 +307,7 @@ class StudyServiceTest {
 
         service.answer(principal, recordId = 502, answer = "My answer", grade = true)
 
-        assertThat(questionCoverage.markAnsweredCalls).containsExactly(
-            FakeQuestionCoveragePort.AnsweredCall(conceptId = 11, angleKey = "failure_mode", score = 100, correct = true),
-        )
-    }
-
-    @Test
-    fun `create question uses system key and consumes monthly tier quota when user key is missing`(): Unit = runBlocking {
-        users.row = UserEntity(
-            id = principal.userId,
-            providerId = "u7",
-            status = "ACTIVE",
-            appLanguage = "en",
-        )
-        memberships.usedCount = 2
-        serviceStudies.rows += StudyEntity(
-            id = 78,
-            deviceId = principal.deviceId,
-            userId = principal.userId,
-            topic = "Redis",
-            difficultyLevel = 5,
-            intervalMinutes = 15,
-            openaiModel = "gpt-5.4",
-        )
-
-        service.createQuestion(principal, studyId = 78)
-
-        assertThat(openAI.generatedApiKeys).containsExactly("test-api-key")
-        assertThat(memberships.usedCount).isEqualTo(3)
-        assertThat(users.savedRows).isEmpty()
-    }
-
-    @Test
-    fun `create question rejects after monthly tier question limit`(): Unit = runBlocking {
-        users.row = UserEntity(
-            id = principal.userId,
-            providerId = "u7",
-            status = "ACTIVE",
-            appLanguage = "en",
-        )
-        memberships.activePlan = QuestionMembershipPlan(tierCode = "TIER1", monthlyQuestionLimit = 7)
-        memberships.usedCount = 7
-        serviceStudies.rows += StudyEntity(
-            id = 79,
-            deviceId = principal.deviceId,
-            userId = principal.userId,
-            topic = "Postgres",
-            difficultyLevel = 5,
-            intervalMinutes = 15,
-            openaiModel = "gpt-5.4",
-        )
-
-        org.assertj.core.api.Assertions.assertThatThrownBy {
-            runBlocking { service.createQuestion(principal, studyId = 79) }
-        }
-            .isInstanceOf(com.buddystudy.backend.common.application.error.ApiException::class.java)
-            .hasMessage("Monthly question limit reached.")
-            .extracting("code")
-            .isEqualTo(ApiErrorCode.QUOTA_EXCEEDED)
-
-        assertThat(openAI.generateCalls).isZero()
-    }
-
-    @Test
-    fun `create question uses system key and consumes monthly tier quota even when user key is configured`(): Unit = runBlocking {
-        users.row = UserEntity(
-            id = principal.userId,
-            providerId = "u7",
-            status = "ACTIVE",
-            appLanguage = "en",
-            openaiApiKeyCipher = cipher.encrypt("sk-user"),
-        )
-        memberships.usedCount = 29
-        serviceStudies.rows += StudyEntity(
-            id = 80,
-            deviceId = principal.deviceId,
-            userId = principal.userId,
-            topic = "Kafka",
-            difficultyLevel = 5,
-            intervalMinutes = 15,
-            openaiModel = "gpt-5.4",
-        )
-
-        service.createQuestion(principal, studyId = 80)
-
-        assertThat(openAI.generatedApiKeys).containsExactly("test-api-key")
-        assertThat(memberships.usedCount).isEqualTo(30)
-        assertThat(memberships.consumeCalls).isEqualTo(1)
-    }
-
-    @Test
-    fun `create question does not consume monthly tier quota when openai generation fails`(): Unit = runBlocking {
-        users.row = UserEntity(
-            id = principal.userId,
-            providerId = "u7",
-            status = "ACTIVE",
-            appLanguage = "en",
-        )
-        memberships.usedCount = 2
-        openAI.failure = IllegalStateException("OpenAI unavailable")
-        serviceStudies.rows += StudyEntity(
-            id = 81,
-            deviceId = principal.deviceId,
-            userId = principal.userId,
-            topic = "Redis",
-            difficultyLevel = 5,
-            intervalMinutes = 15,
-            openaiModel = "gpt-5.4",
-        )
-
-        org.assertj.core.api.Assertions.assertThatThrownBy {
-            runBlocking { service.createQuestion(principal, studyId = 81) }
-        }.isInstanceOf(IllegalStateException::class.java)
-
-        assertThat(openAI.generatedApiKeys).containsExactly("test-api-key")
-        assertThat(memberships.usedCount).isEqualTo(2)
-        assertThat(memberships.consumeCalls).isEqualTo(1)
-        assertThat(memberships.refundCalls).isEqualTo(1)
+        assertThat(questionCoverage.markAnsweredCalls).isEmpty()
     }
 
     @Test
@@ -438,8 +322,55 @@ class StudyServiceTest {
         assertThat(questionStats.findByIdCalls).isEqualTo(1)
     }
 
+    @Test
+    fun `record detail returns translated answer to its author`(): Unit = runBlocking {
+        val question = gradedQuestion(id = 402, topic = "Redis").apply {
+            sourceLanguage = SupportedLanguage.KOREAN
+            answer = "Use AOF for stronger durability."
+            answerSourceLanguage = SupportedLanguage.ENGLISH
+        }
+        questions.visibleRows += question
+        val answerHash = requireNotNull(ContentSourceHashPolicy.recordHashes(question).answer)
+        val localizedService = StudyService(
+            questions = questions,
+            questionStats = questionStats,
+            recordWriter = recordWriter,
+            gradingWriter = recordWriter,
+            outboxPublisher = outboxPublisher,
+            users = users,
+            languageDetector = PassthroughLanguageDetector(),
+            contentLocalizations = object : EmptyContentLocalizationPort() {
+                override suspend fun record(questionId: Long, targetLanguage: String) =
+                    RecordLocalizationSnapshot(
+                        question = null,
+                        answer = TextLocalizationSnapshot(
+                            sourceLanguage = "en",
+                            targetLanguage = "ko",
+                            sourceHash = answerHash,
+                            status = "READY",
+                            fields = mapOf("answer" to "더 강한 내구성을 위해 AOF를 사용합니다."),
+                            provider = "test",
+                        ),
+                        aiResponse = null,
+                    )
+            },
+            localizationRequests = RecordingLocalizationRequests(),
+        )
+
+        val response = localizedService.record(
+            principal = principal,
+            id = question.id,
+            language = "ko",
+            view = "localized",
+        )
+
+        assertThat(response.answer).isEqualTo("더 강한 내구성을 위해 AOF를 사용합니다.")
+        assertThat(response.localization?.answer?.isTranslated).isTrue()
+        assertThat(response.localization?.answer?.displayLanguage).isEqualTo("ko")
+    }
+
     private fun gradedQuestion(id: Long, topic: String) = question(id, topic).apply {
-        status = "graded"
+        status = QuestionStatus.GRADED
         answer = "Answer"
         score = 90
         correct = true
@@ -450,7 +381,7 @@ class StudyServiceTest {
     }
 
     private fun pendingQuestion(id: Long, topic: String) = question(id, topic).apply {
-        status = "ungraded"
+        status = QuestionStatus.UNGRADED
     }
 
     private fun question(id: Long, topic: String) = QuestionEntity(
@@ -489,6 +420,23 @@ class StudyServiceTest {
         override suspend fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity> = pendingRows.filter { it.studyId in studyIds }
         override suspend fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity> = PageImpl(visibleRows, pageable, visibleRows.size.toLong())
         override suspend fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity> = PageImpl(visibleRows.filter { it.topic.contains(query, ignoreCase = true) }, pageable, visibleRows.size.toLong())
+        override suspend fun findVisibleByUserAndStudyId(
+            userId: Long,
+            includePending: Boolean,
+            studyId: Long,
+            query: String?,
+            pageable: Pageable,
+        ): Page<QuestionEntity> {
+            val matches = visibleRows.filter {
+                it.userId == userId &&
+                    it.studyId == studyId &&
+                    (includePending || it.score != null) &&
+                    (query.isNullOrBlank() || it.topic.contains(query, ignoreCase = true))
+            }
+            val fromIndex = pageable.offset.toInt().coerceAtMost(matches.size)
+            val toIndex = (fromIndex + pageable.pageSize).coerceAtMost(matches.size)
+            return PageImpl(matches.subList(fromIndex, toIndex), pageable, matches.size.toLong())
+        }
         var findRecentQuestionTextsByStudyIdAndTopicCalls = 0
         var findRecentQuestionTextsByUserIdAndTopicCalls = 0
         override suspend fun findRecentQuestionTextsByStudyIdAndTopic(studyId: Long, topic: String, pageable: Pageable): List<String> {
@@ -524,8 +472,8 @@ class StudyServiceTest {
             row.deletedAt = now
             return 1
         }
-        override suspend fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int {
-            val rows = (visibleRows + pendingRows).filter { it.studyId == studyId && it.userId == userId && it.deletedAt == null }
+        override suspend fun softDeleteByUserId(userId: Long, now: Instant): Int {
+            val rows = (visibleRows + pendingRows).filter { it.userId == userId && it.deletedAt == null }
             rows.forEach { it.deletedAt = now }
             return rows.size
         }
@@ -602,19 +550,19 @@ class StudyServiceTest {
         var consumeCalls = 0
         var refundCalls = 0
         override suspend fun activePlanForUser(userId: Long): QuestionMembershipPlan? = activePlan
-        override suspend fun quotaStatusForUser(userId: Long, yearMonth: YearMonth): QuestionQuotaStatus =
+        override suspend fun quotaStatusForUser(userId: Long, at: Instant): QuestionQuotaStatus =
             QuestionQuotaStatus(
                 tierCode = activePlan.tierCode,
                 usedCount = usedCount,
                 monthlyQuestionLimit = activePlan.monthlyQuestionLimit,
             )
-        override suspend fun tryConsumeMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, limit: Int, now: Instant): Boolean {
+        override suspend fun tryConsumeMonthlySystemQuestion(userId: Long, periodStartedAt: Instant, limit: Int, now: Instant): Boolean {
             consumeCalls += 1
             if (usedCount >= limit) return false
             usedCount += 1
             return true
         }
-        override suspend fun refundMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, now: Instant) {
+        override suspend fun refundMonthlySystemQuestion(userId: Long, periodStartedAt: Instant, now: Instant) {
             refundCalls += 1
             if (usedCount > 0) usedCount -= 1
         }
@@ -634,7 +582,7 @@ class StudyServiceTest {
             generatedPrompt = prompt
             assertThat(prompt.userPrompt).contains("Language: English")
             if (generatedQuestions.isNotEmpty()) return generatedQuestions.removeFirst()
-            return GeneratedQuestion("Question", null)
+            return GeneratedQuestion("Generated question", null)
         }
         val generatedQuestions = ArrayDeque<GeneratedQuestion>()
         val embeddings = mutableMapOf<String, List<Float>>()
@@ -656,9 +604,11 @@ class StudyServiceTest {
     private class FakeQuestionEmbeddingPort : QuestionEmbeddingPort {
         val rows = mutableListOf<QuestionEmbeddingCandidate>()
         val savedRows = mutableListOf<QuestionEmbeddingCandidate>()
+        val savedStudyIds = mutableListOf<Long>()
         override suspend fun save(questionId: Long, userId: Long, studyId: Long, topic: String, question: String, embedding: List<Float>): QuestionEmbeddingCandidate {
             val row = QuestionEmbeddingCandidate(questionId, question, embedding)
             savedRows += row
+            savedStudyIds += studyId
             rows += row
             return row
         }
@@ -721,11 +671,65 @@ class StudyServiceTest {
         data class AnsweredCall(val conceptId: Long, val angleKey: String, val score: Int, val correct: Boolean)
     }
 
-    private class FakeNotificationPublisher : PublishNotificationUseCase {
+    private class FakeNotificationOutbox : RedisEventOutboxAppendPort {
         val commands = mutableListOf<NotificationRequestCommand>()
-        override suspend fun publish(command: NotificationRequestCommand): Boolean {
+        val gradingEvents = mutableListOf<AnswerGradingRequestedEvent>()
+        val generatedEvents = mutableListOf<QuestionGeneratedEvent>()
+
+        override suspend fun appendNotification(command: NotificationRequestCommand, createdAt: Instant): Long {
             commands += command
-            return true
+            return commands.size.toLong()
+        }
+
+        override suspend fun appendAnswerGrading(event: AnswerGradingRequestedEvent, createdAt: Instant): Long {
+            gradingEvents += event
+            return (commands.size + gradingEvents.size).toLong()
+        }
+
+        override suspend fun appendQuestionGenerated(event: QuestionGeneratedEvent, createdAt: Instant): Long {
+            generatedEvents += event
+            return (commands.size + gradingEvents.size + generatedEvents.size).toLong()
+        }
+    }
+
+    private class FakeAnswerGradingProgressPort : AnswerGradingProgressPort {
+        private val events = mutableListOf<AnswerGradingProgress>()
+
+        override suspend fun append(
+            recordId: Long,
+            userId: Long,
+            requestId: String,
+            status: AnswerGradingStatus,
+            questionStatus: QuestionStatus,
+            errorMessage: String?,
+            occurredAt: Instant,
+        ): AnswerGradingProgress = AnswerGradingProgress(
+            id = (events.size + 1).toLong(),
+            recordId = recordId,
+            requestId = requestId,
+            status = status,
+            questionStatus = questionStatus,
+            errorMessage = errorMessage,
+            occurredAt = occurredAt,
+        ).also(events::add)
+
+        override suspend fun findAfter(
+            recordId: Long,
+            userId: Long,
+            requestId: String,
+            afterId: Long,
+            limit: Int,
+        ): List<AnswerGradingProgress> = events
+            .filter { it.recordId == recordId && it.requestId == requestId && it.id > afterId }
+            .take(limit)
+    }
+
+    private class NoOpOutboxPublisher : PublishOutboxUseCase {
+        val published = mutableListOf<OutboxReference>()
+
+        override suspend fun publishNow(references: Collection<OutboxReference>): OutboxPublishSummary {
+            published += references
+            return OutboxPublishSummary(references.size, references.size, 0)
         }
     }
 

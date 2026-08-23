@@ -12,7 +12,7 @@ class AvatarCategoryEntity(
     var key: String = "",
     var titleKo: String = "",
     var titleEn: String = "",
-    var slot: String = "",
+    var slot: AvatarSlot = AvatarSlot.BASE,
     var required: Boolean = false,
     var singleSelect: Boolean = true,
     var zIndex: Int = 0,

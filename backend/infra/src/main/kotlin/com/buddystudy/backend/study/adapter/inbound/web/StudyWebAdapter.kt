@@ -3,12 +3,14 @@ package com.buddystudy.backend.study.adapter.inbound.web
 import com.buddystudy.backend.common.adapter.inbound.web.principalOrThrow
 import com.buddystudy.backend.stats.application.model.StatsQuery
 import com.buddystudy.backend.stats.application.port.inbound.GetStudyStatsUseCase
+import com.buddystudy.backend.stats.application.port.inbound.GetStudyGrowthUseCase
 import com.buddystudy.backend.study.adapter.inbound.web.dto.AnswerRequest
 import com.buddystudy.backend.study.adapter.inbound.web.dto.CreateStudyRequest
 import com.buddystudy.backend.study.adapter.inbound.web.dto.CreateStudyTopicRequest
 import com.buddystudy.backend.study.adapter.inbound.web.dto.RecordPublicityRequest
 import com.buddystudy.backend.study.adapter.inbound.web.dto.StudyTopicActivationRequest
 import com.buddystudy.backend.study.application.port.inbound.BrowseRecordsUseCase
+import com.buddystudy.backend.study.application.port.inbound.GetAnswerGradingProcessUseCase
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyCommand
 import com.buddystudy.backend.study.application.port.inbound.CreateStudyTopicCommand
 import com.buddystudy.backend.study.application.port.inbound.StudySyncUseCase
@@ -16,6 +18,9 @@ import com.buddystudy.backend.study.application.port.inbound.StudyUseCase
 import com.buddystudy.backend.study.application.port.inbound.StudyTreeUseCase
 import com.buddystudy.backend.study.application.port.inbound.UpdateStudyTopicActivationCommand
 import com.buddystudy.backend.study.application.port.inbound.QuestionQuotaUseCase
+import com.buddystudy.backend.study.application.port.inbound.GetQuestionGenerationProcessUseCase
+import com.buddystudy.backend.study.application.port.inbound.RequestQuestionGenerationUseCase
+import com.buddystudy.backend.study.application.prompt.QuestionPromptDefaults
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
 import org.springframework.stereotype.Component
@@ -28,26 +33,82 @@ class StudyWebAdapter(
     private val studyUseCase: StudyUseCase,
     private val recordsUseCase: BrowseRecordsUseCase,
     private val statsUseCase: GetStudyStatsUseCase,
+    private val studyGrowthUseCase: GetStudyGrowthUseCase,
     private val studySyncUseCase: StudySyncUseCase,
     private val studyTreeUseCase: StudyTreeUseCase,
     private val questionQuotaUseCase: QuestionQuotaUseCase,
+    private val answerGrading: GetAnswerGradingProcessUseCase,
+    private val requestQuestionGeneration: RequestQuestionGenerationUseCase,
+    private val getQuestionGenerationProcess: GetQuestionGenerationProcessUseCase,
 ) : StudyWebPort {
-    override suspend fun study(limit: Int, offset: Int, query: String?, authentication: Authentication) =
-        studySyncUseCase.study(authentication.principalOrThrow(), safeLimit(limit, 1000), max(0, offset), query)
+    override suspend fun study(
+        limit: Int,
+        offset: Int,
+        query: String?,
+        language: String,
+        authentication: Authentication,
+    ) = studySyncUseCase.study(
+        authentication.principalOrThrow(),
+        safeLimit(limit, 1000),
+        max(0, offset),
+        query,
+        language,
+    )
 
-    override suspend fun records(limit: Int, offset: Int, query: String?, language: String, authentication: Authentication) =
-        recordsUseCase.records(authentication.principalOrThrow(), safeLimit(limit, 500), max(0, offset), query, language)
+    override suspend fun study(studyId: Long, language: String, authentication: Authentication) =
+        studySyncUseCase.study(authentication.principalOrThrow(), studyId, language)
 
-    override suspend fun clearRecords(authentication: Authentication): ResponseEntity<Unit> = ResponseEntity.noContent().build()
+    override suspend fun records(
+        limit: Int,
+        offset: Int,
+        query: String?,
+        studyId: Long?,
+        language: String,
+        view: String,
+        authentication: Authentication,
+    ) = recordsUseCase.records(
+        authentication.principalOrThrow(),
+        safeLimit(limit, 500),
+        max(0, offset),
+        query,
+        studyId,
+        language,
+        view,
+    )
 
-    override suspend fun record(id: Long, language: String, authentication: Authentication) =
-        recordsUseCase.record(authentication.principalOrThrow(), id, language)
+    override suspend fun clearRecords(authentication: Authentication): ResponseEntity<Unit> {
+        studyUseCase.clear(authentication.principalOrThrow())
+        return ResponseEntity.noContent().build()
+    }
+
+    override suspend fun record(id: Long, language: String, view: String, authentication: Authentication) =
+        recordsUseCase.record(authentication.principalOrThrow(), id, language, view)
 
     override suspend fun saveAnswer(id: Long, body: AnswerRequest, authentication: Authentication) =
-        studyUseCase.answer(authentication.principalOrThrow(), id, body.answer, grade = false)
+        studyUseCase.answer(
+            authentication.principalOrThrow(),
+            id,
+            body.answer,
+            body.sourceLanguage,
+            grade = false,
+        )
 
     override suspend fun grade(id: Long, body: AnswerRequest, authentication: Authentication) =
-        studyUseCase.answer(authentication.principalOrThrow(), id, body.answer, grade = true)
+        ResponseEntity.accepted().body(
+            studyUseCase.answer(
+                authentication.principalOrThrow(),
+                id,
+                body.answer,
+                body.sourceLanguage,
+                grade = true,
+            ),
+        )
+
+    override suspend fun answerGradingProcess(
+        correlationId: String,
+        afterId: Long,
+        authentication: Authentication,
+    ) = answerGrading.get(authentication.principalOrThrow(), correlationId, afterId)
 
     override suspend fun skip(id: Long, authentication: Authentication) =
         studyUseCase.skip(authentication.principalOrThrow(), id)
@@ -66,8 +127,23 @@ class StudyWebAdapter(
     override suspend fun statsActivity(startAt: Instant?, endAt: Instant?, authentication: Authentication) =
         statsUseCase.activity(authentication.principalOrThrow(), startAt, endAt)
 
-    override suspend fun createQuestion(studyId: Long, authentication: Authentication) =
-        studyUseCase.createQuestion(authentication.principalOrThrow(), studyId)
+    override suspend fun studyGrowth(startAt: Instant?, endAt: Instant?, authentication: Authentication) =
+        studyGrowthUseCase.growth(authentication.principalOrThrow(), startAt, endAt)
+
+    override suspend fun createQuestion(
+        studyId: Long,
+        idempotencyKey: String,
+        authentication: Authentication,
+    ) = ResponseEntity.accepted().body(
+        requestQuestionGeneration.request(
+            principal = authentication.principalOrThrow(),
+            studyId = studyId,
+            idempotencyKey = idempotencyKey,
+        ),
+    )
+
+    override suspend fun questionProcess(correlationId: String, authentication: Authentication) =
+        getQuestionGenerationProcess.get(authentication.principalOrThrow(), correlationId)
 
     override suspend fun questionQuota(authentication: Authentication) =
         questionQuotaUseCase.status(authentication.principalOrThrow())
@@ -81,7 +157,7 @@ class StudyWebAdapter(
                 intervalMinutes = body.intervalMinutes,
                 enabled = body.enabled,
                 notificationSound = body.notificationSound,
-                customPrompt = body.customPrompt,
+                customPrompt = QuestionPromptDefaults.resolve(body.customPrompt),
                 openaiModel = body.openaiModel,
                 maxHistoryCount = body.maxHistoryCount,
             ),

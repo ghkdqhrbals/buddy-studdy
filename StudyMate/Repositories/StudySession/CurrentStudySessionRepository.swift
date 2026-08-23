@@ -13,4 +13,6 @@ protocol CurrentStudySessionRepository {
     func saveIsRunning(_ isRunning: Bool)
     func saveExplicitIsRunning(_ isRunning: Bool)
     func hasExplicitRunningPreference() -> Bool
+    func loadPendingQuestionGenerationProcess() -> PendingQuestionGenerationProcess?
+    func savePendingQuestionGenerationProcess(_ process: PendingQuestionGenerationProcess?)
 }

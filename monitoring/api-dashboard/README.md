@@ -1,7 +1,7 @@
 # BuddyStudy Monitoring Dashboard
 
 The monitoring Nginx container serves the operational UI and proxies Loki,
-Grafana, and the private TestZone API behind one Basic Auth boundary.
+Grafana, and the private TestZone API behind the backend administrator session.
 
 ## Pages
 
@@ -9,18 +9,57 @@ Grafana, and the private TestZone API behind one Basic Auth boundary.
 - `/performance.html`: endpoint latency and throughput grouped by API
 - `/system.html`: application, database, Redis, host, and runtime metrics
 - `/audit.html`: monitoring workspace page, authentication, and action history
+- `/users.html`: authenticated member search, membership tiers, and quota controls
+- `/jobs.html`: independently server-paginated managed-job status and execution
+  history, run details, and authenticated retries
+- `/advertising.html`: Coupang advertising campaign creation and editing,
+  localized creative, audience and frequency controls, performance totals, and
+  the live server-ranking policy used to mix ads into public questions
+- `/streams.html`: authenticated Redis Stream delivery status with
+  configured MAXLEN and retention use, consumer-group offsets, lag, pending
+  ranges, per-consumer ownership, retry counts, partial-inspection errors,
+  cursor navigation, exact entry lookup, and redacted message details
 - `/testzone.html`: live k6 script workspace, execution history, disposable
   test components, and Grafana links
 - `/settings.html`: browser-local navigation and access-history preferences
 
+Every monitoring route is served by the shared React application. It provides
+one fixed navigation shell and visual system across API Logs, API Performance,
+TestZone, Users & Quotas, Advertising, Batch Jobs, Redis Streams, Access & Audit, and Settings. Manage
+adds one session-scoped administrator API boundary, TanStack Query server
+state, dense reusable tables, and a right-side object inspector. Redis field
+values and outbox payload JSON can be explored as a nested tree or raw JSON
+without flattening the stored object. The migration and controller boundary are documented in
+`docs/observability/MONITORING_REACT_MIGRATION.md`.
+
 ## Access Audit
 
-The monitoring Nginx gateway records page views, denied Basic Auth attempts,
-and mutating TestZone actions in a dedicated JSON access log. A local Promtail
-instance forwards that file to Loki with only stable `job`, `service`, and
-`event` labels. Client IP, authenticated username, path, user agent, status,
-duration, and request ID remain JSON fields. Passwords, authorization values,
-request bodies, and TestZone configuration values are not recorded.
+The monitoring Nginx gateway records page views, denied administrator-session
+requests, and mutating TestZone actions in a dedicated JSON access log. It also
+writes gateway warnings and errors to a separate file. A local Promtail
+instance tails the active files into Loki with only stable `job`, `service`,
+and `event` labels. Client IP, authenticated username, path, user agent,
+status, duration, and request ID remain JSON fields. Passwords, authorization
+values, request bodies, and TestZone configuration values are not recorded.
+
+The host files are delivery spools, not the long-term archive. The access log
+rotates at 8 MiB and the error log at 2 MiB, with three numeric archives for
+each. The isolated rotator shares only the Nginx PID namespace and log mount;
+after a rename it sends `USR1` so Nginx reopens the active path. Promtail stores
+its offsets on a persistent mount and keeps reading the renamed inode while it
+runs. The rotator waits 60 seconds after startup so Promtail can attach before
+the first rename. The scrape path intentionally does not match numeric archives,
+because doing so would ingest the same file again after each rename. Rotation
+is checked every 30 seconds after that grace period, so a write burst can
+temporarily exceed those sizes.
+If Promtail restarts while it still has unread data in a renamed file, or Loki
+is unavailable long enough for a fourth rotation, those unshipped audit/error
+lines can be lost. Loki retains successfully shipped logs for seven days.
+
+Container stdout/stderr uses Docker's bounded `local` log driver (10 MiB times
+three files, compressed) independently of these Nginx spools. See the main
+[monitoring storage policy](../README.md#disk-retention-and-data-loss-boundaries)
+for all limits and trade-offs.
 
 ## TestZone Behavior
 
@@ -78,7 +117,7 @@ Metric semantics and component collection behavior are documented in
 ## Verification
 
 ```bash
-(cd monitoring/api-dashboard && npm test)
+(cd monitoring/api-dashboard && npm ci && npm test)
 (cd monitoring/testzone-service && npm test)
 node --check monitoring/api-dashboard/public/testzone.js
 node --check monitoring/testzone-service/src/server.mjs
@@ -88,3 +127,8 @@ Monitoring UI deployment is owned by
 `docs/deploy-repo-template/deploy-macbookair-monitoring.yml`. The execution
 service and InfluxDB are owned by
 `docs/deploy-repo-template/deploy-testzone.yml`.
+
+`npm test` builds the React bundle into `public/react` before running the
+contract suite. The generated `manage.js` and `manage.css` are committed
+because the monitoring deployment copies the versioned `public` artifact
+without compiling on the deploy host.

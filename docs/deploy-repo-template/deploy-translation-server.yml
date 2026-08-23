@@ -1,0 +1,92 @@
+name: Deploy BuddyStudy Translation Server
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "Immutable LibreTranslate image to deploy."
+        required: true
+        default: "libretranslate/libretranslate:v1.9.6@sha256:1de2d7056bb8ad607a412f4563d9abe324ff632b43b5be9428bcc8e213aebb32"
+        type: string
+
+concurrency:
+  group: deploy-translation-server
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy_translation_server:
+    name: Deploy Translation Server
+    runs-on: [self-hosted, Linux, ARM64, ec2]
+    timeout-minutes: 20
+    env:
+      IMAGE_REF: ${{ inputs.image }}
+
+    steps:
+      - name: Validate input
+        run: |
+          set -euo pipefail
+          if [ -z "${IMAGE_REF}" ]; then
+            echo "Missing LibreTranslate image ref." >&2
+            exit 1
+          fi
+
+      - name: Deploy translation server
+        run: |
+          set -euo pipefail
+
+          docker network create buddystudy-net >/dev/null 2>&1 || true
+          if [ "$(docker info --format '{{.Swarm.LocalNodeState}}')" = "active" ] && \
+             ! docker network inspect buddystudy-swarm-net >/dev/null 2>&1; then
+            docker network create \
+              --driver overlay \
+              --attachable \
+              buddystudy-swarm-net >/dev/null
+          fi
+          docker volume create buddystudy-libretranslate-models >/dev/null
+          docker pull "${IMAGE_REF}"
+
+          docker rm -f buddystudy-libretranslate >/dev/null 2>&1 || true
+          docker run -d \
+            --name buddystudy-libretranslate \
+            --network buddystudy-net \
+            --restart unless-stopped \
+            -e LT_LOAD_ONLY=en,ko,ja \
+            -e LT_UPDATE_MODELS=true \
+            -e LT_THREADS=1 \
+            -e LT_DISABLE_WEB_UI=true \
+            -e LT_DISABLE_FILES_TRANSLATION=true \
+            -v buddystudy-libretranslate-models:/home/libretranslate/.local \
+            "${IMAGE_REF}"
+          if docker network inspect buddystudy-swarm-net >/dev/null 2>&1; then
+            docker network connect \
+              buddystudy-swarm-net \
+              buddystudy-libretranslate >/dev/null 2>&1 || true
+          fi
+
+          for attempt in 1 2 3; do
+            if ! docker inspect -f '{{.State.Running}}' buddystudy-libretranslate 2>/dev/null \
+              | grep -qx true; then
+              echo "Translation server process exited during deployment." >&2
+              docker logs buddystudy-libretranslate || true
+              exit 1
+            fi
+            sleep 5
+          done
+
+          docker image prune -f
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Translation Server Deployment"
+            echo ""
+            echo "- Target: \`ec2\`"
+            echo "- Container: \`buddystudy-libretranslate\`"
+            echo "- Languages: \`en,ko,ja\`"
+            echo "- Image: \`${IMAGE_REF}\`"
+            echo "- Result: \`${{ job.status }}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"

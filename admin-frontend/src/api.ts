@@ -2,9 +2,19 @@ import type {
   AdminApiError,
   AdminLoginResponse,
   AdminMetricsResponse,
+  AppUpdateCampaignPage,
+  AppUpdateCampaignSummary,
+  AppUpdateUserPage,
+  CreateAppUpdateCampaignInput,
   ScheduledJobRun,
   ScheduledJobRunsResponse,
   ScheduledJobStatusResponse,
+  NativeAdvertisementCampaignFilters,
+  NativeAdvertisementCampaignInput,
+  NativeAdvertisementCampaignPage,
+  NativeAdvertisementCampaignSummary,
+  NativeAdvertisementUserPage,
+  NativeAdvertisementUserStatusFilter,
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_ADMIN_API_BASE_URL ?? "";
@@ -117,8 +127,13 @@ export async function fetchJobRuns(
   return response;
 }
 
-export function fetchJobStatuses(onUnauthorized: UnauthorizedHandler): Promise<ScheduledJobStatusResponse> {
-  return request("/api/v1/admin/jobs/statuses", { method: "GET" }, onUnauthorized);
+export function fetchJobStatuses(
+  onUnauthorized: UnauthorizedHandler,
+  limit = 10,
+  offset = 0,
+): Promise<ScheduledJobStatusResponse> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  return request(`/api/v1/admin/jobs/statuses?${params}`, { method: "GET" }, onUnauthorized);
 }
 
 export function retryJob(jobName: string, runId: number | null, onUnauthorized: UnauthorizedHandler): Promise<ScheduledJobRun> {
@@ -128,4 +143,109 @@ export function retryJob(jobName: string, runId: number | null, onUnauthorized: 
   }
   const suffix = params.toString() ? `?${params}` : "";
   return request(`/api/v1/admin/jobs/${encodeURIComponent(jobName)}/retry${suffix}`, { method: "POST" }, onUnauthorized);
+}
+
+export function fetchAppUpdateCampaigns(
+  onUnauthorized: UnauthorizedHandler,
+  limit = 20,
+  offset = 0,
+): Promise<AppUpdateCampaignPage> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  return request(`/api/v1/admin/app-updates?${params}`, { method: "GET" }, onUnauthorized);
+}
+
+export function createAppUpdateCampaign(
+  input: CreateAppUpdateCampaignInput,
+  onUnauthorized: UnauthorizedHandler,
+): Promise<AppUpdateCampaignSummary> {
+  return request("/api/v1/admin/app-updates", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }, onUnauthorized);
+}
+
+export function endAppUpdateCampaign(
+  campaignId: number,
+  onUnauthorized: UnauthorizedHandler,
+): Promise<AppUpdateCampaignSummary> {
+  return request(`/api/v1/admin/app-updates/${campaignId}/end`, { method: "POST" }, onUnauthorized);
+}
+
+export function republishAppControlPolicy(
+  onUnauthorized: UnauthorizedHandler,
+): Promise<AppUpdateCampaignSummary | null> {
+  return request(
+    "/api/v1/admin/app-updates/remote-config/publish",
+    { method: "POST" },
+    onUnauthorized,
+  );
+}
+
+export function fetchAppUpdateUsers(
+  campaignId: number,
+  onUnauthorized: UnauthorizedHandler,
+  limit = 20,
+  offset = 0,
+  query = "",
+  status = "",
+): Promise<AppUpdateUserPage> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (query.trim()) params.set("query", query.trim());
+  if (status) params.set("status", status);
+  return request(`/api/v1/admin/app-updates/${campaignId}/users?${params}`, { method: "GET" }, onUnauthorized);
+}
+
+export function fetchNativeAdvertisementCampaigns(
+  onUnauthorized: UnauthorizedHandler,
+  limit = 20,
+  offset = 0,
+  filters: NativeAdvertisementCampaignFilters = {},
+): Promise<NativeAdvertisementCampaignPage> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (filters.query?.trim()) params.set("query", filters.query.trim());
+  if (filters.status) params.set("status", filters.status);
+  if (filters.audience) params.set("audience", filters.audience);
+  return request(`/api/v1/admin/native-ad-campaigns?${params}`, { method: "GET" }, onUnauthorized);
+}
+
+export function createNativeAdvertisementCampaign(
+  input: NativeAdvertisementCampaignInput,
+  onUnauthorized: UnauthorizedHandler,
+): Promise<NativeAdvertisementCampaignSummary> {
+  return request("/api/v1/admin/native-ad-campaigns", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }, onUnauthorized);
+}
+
+export function updateNativeAdvertisementCampaign(
+  campaignId: number,
+  input: NativeAdvertisementCampaignInput,
+  onUnauthorized: UnauthorizedHandler,
+): Promise<NativeAdvertisementCampaignSummary> {
+  return request(`/api/v1/admin/native-ad-campaigns/${campaignId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }, onUnauthorized);
+}
+
+export function fetchNativeAdvertisementCampaignUsers(
+  campaignId: number,
+  onUnauthorized: UnauthorizedHandler,
+  limit = 20,
+  offset = 0,
+  query = "",
+  status: NativeAdvertisementUserStatusFilter = "",
+): Promise<NativeAdvertisementUserPage> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (query.trim()) params.set("query", query.trim());
+  if (status) params.set("status", status);
+  return request(
+    `/api/v1/admin/native-ad-campaigns/${campaignId}/users?${params}`,
+    { method: "GET" },
+    onUnauthorized,
+  );
 }

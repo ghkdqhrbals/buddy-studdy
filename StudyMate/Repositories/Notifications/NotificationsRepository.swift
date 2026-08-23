@@ -15,6 +15,8 @@ protocol NotificationsRepository {
         notificationID: String
     ) async throws
 
+    func markAllRead(registration: RemotePushRegistration) async throws
+
     func deleteNotification(
         registration: RemotePushRegistration,
         notificationID: String

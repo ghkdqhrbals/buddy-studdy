@@ -1,6 +1,7 @@
 import { EmptyState } from "./EmptyState";
 import { formatDateTime, formatDurationMs, statusLabel } from "./format";
 import { Pagination } from "./Pagination";
+import { BATCH_JOBS_MONITOR_URL } from "./adminConfig";
 import type { ScheduledJobRun, ScheduledJobRunsResponse, ScheduledJobStatus } from "./types";
 
 type OperationsPanelProps = {
@@ -23,10 +24,29 @@ export function OperationsPanel({
   compact = false,
 }: OperationsPanelProps) {
   const jobs = page.runs;
+  const header = (
+    <div className="panel-header">
+      <h2>Recent job runs</h2>
+      {compact ? (
+        <a className="panel-link" href={hrefForPage(1)}>View all</a>
+      ) : (
+        <a
+          className="secondary-button compact operations-monitor-link"
+          href={BATCH_JOBS_MONITOR_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Open Batch Jobs monitor in a new tab"
+        >
+          Open Batch Jobs <span aria-hidden="true">↗</span>
+        </a>
+      )}
+    </div>
+  );
   if (jobs.length === 0) {
     return (
       <section className={compact ? "operations-panel compact-panel" : "operations-panel"}>
         <SchedulerStatusGrid statuses={statuses} onRetry={onRetry} />
+        {header}
         <EmptyState title="No job runs" message="Scheduled job history will appear here." compact={compact} />
       </section>
     );
@@ -40,12 +60,7 @@ export function OperationsPanel({
   return (
     <section className={compact ? "operations-panel compact-panel" : "operations-panel"}>
       <SchedulerStatusGrid statuses={statuses} onRetry={onRetry} />
-      <div className="panel-header">
-        <h2>Scheduler runs</h2>
-        {compact ? (
-          <a className="panel-link" href={hrefForPage(1)}>View all</a>
-        ) : null}
-      </div>
+      {header}
       <div className="table-wrap horizontal-scroll">
         <table>
           <thead>
@@ -63,7 +78,8 @@ export function OperationsPanel({
             {jobs.map((job) => (
               <tr className={job.id === highlightRunId ? "highlighted-run" : undefined} key={job.id}>
                 <td>
-                  <strong>{job.jobName}</strong>
+                  <strong>{job.displayName || job.jobName}</strong>
+                  {job.displayName && job.displayName !== job.jobName ? <small>{job.jobName}</small> : null}
                   {job.errorMessage ? <small>{job.errorMessage}</small> : null}
                 </td>
                 <td>{formatDateTime(job.startedAt)}</td>
@@ -139,7 +155,8 @@ function SchedulerStatusGrid({
         return (
           <article className={`scheduler-status-card ${state}`} key={job.jobName}>
             <div>
-              <strong>{job.jobName}</strong>
+              <strong>{job.displayName || job.jobName}</strong>
+              {job.displayName && job.displayName !== job.jobName ? <small>{job.jobName}</small> : null}
               <span>{job.scheduleType} {job.scheduleValue}</span>
             </div>
             <div className="scheduler-status-meta">

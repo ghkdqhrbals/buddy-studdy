@@ -10,7 +10,7 @@ import jakarta.validation.constraints.NotBlank
 data class ScheduleItemRequest @JsonCreator constructor(
     @field:NotBlank @JsonProperty("topic") val topic: String,
     @field:Min(1) @field:Max(10) @JsonProperty("difficultyLevel") val difficultyLevel: Int = 5,
-    @JsonProperty("customPrompt") val customPrompt: String = "",
+    @JsonProperty("customPrompt") val customPrompt: String? = null,
     @JsonProperty("openaiModel") val openaiModel: String = "gpt-5.4",
 )
 
@@ -21,7 +21,7 @@ data class ScheduleRequest @JsonCreator constructor(
     @JsonProperty("enabled") val enabled: Boolean = true,
     @JsonProperty("openaiApiKey") val openaiApiKey: String? = null,
     @JsonProperty("notificationSound") val notificationSound: String? = null,
-    @JsonProperty("customPrompt") val customPrompt: String = "",
+    @JsonProperty("customPrompt") val customPrompt: String? = null,
     @JsonProperty("appLanguage") val appLanguage: String = "ko",
     @JsonProperty("openaiModel") val openaiModel: String = "gpt-5.4",
     @field:Min(10) @field:Max(10_000) @JsonProperty("maxHistoryCount") val maxHistoryCount: Int = 100,

@@ -10,7 +10,10 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import com.buddystudy.backend.study.application.service.StudySyncService
+import com.buddystudy.backend.test.EmptyContentLocalizationPort
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.AnswerGradingStatus
+import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.study.domain.entity.StudyEntity
 import org.assertj.core.api.Assertions.assertThat
@@ -26,14 +29,19 @@ class StudySyncServiceTest {
     private val studies = FakeStudyPort()
     private val questions = FakeQuestionPort()
     private val questionStats = FakeQuestionStatsPort()
-    private val service = StudySyncService(studies, questions, questionStats)
+    private val service = StudySyncService(studies, questions, questionStats, EmptyContentLocalizationPort())
     private val principal = Principal(userId = 7, deviceId = "dev-1", sessionId = 1, anonymous = false)
 
     @Test
     fun `study list does not query pending question once per study`(): Unit = runBlocking {
         studies.rows += study(id = 11, topic = "Swift")
         studies.rows += study(id = 12, topic = "Kotlin")
-        questions.pendingRows += pendingQuestion(id = 101, studyId = 11, topic = "Swift")
+        questions.pendingRows += pendingQuestion(id = 101, studyId = 11, topic = "Swift").apply {
+            answer = "A process owns resources while a thread is an execution flow."
+            answeredAt = Instant.parse("2026-06-10T00:05:00Z")
+            gradingRequestId = "grading-101"
+            gradingStatus = AnswerGradingStatus.JUDGING
+        }
         questions.pendingRows += pendingQuestion(id = 102, studyId = 12, topic = "Kotlin")
         questionStats.rows += QuestionStatsEntity(questionId = 101, viewCount = 3)
         questionStats.rows += QuestionStatsEntity(questionId = 102, viewCount = 4)
@@ -42,10 +50,58 @@ class StudySyncServiceTest {
 
         assertThat(response.studies.map { it.pendingQuestion?.id }).containsExactly("101", "102")
         assertThat(response.studies.map { it.pendingQuestion?.viewCount }).containsExactly(3, 4)
+        assertThat(response.studies.first().pendingQuestion?.answer)
+            .isEqualTo("A process owns resources while a thread is an execution flow.")
+        assertThat(response.studies.first().pendingQuestion?.gradingRequestId).isEqualTo("grading-101")
+        assertThat(response.studies.first().pendingQuestion?.gradingStatus?.name).isEqualTo("JUDGING")
         assertThat(questions.findPendingByStudyIdCalls).isZero()
         assertThat(questions.findLatestPendingByStudyIdsCalls).isEqualTo(1)
         assertThat(questionStats.findByIdCalls).isZero()
         assertThat(questionStats.findAllByIdsCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun `study detail returns pending and latest completed questions without loading the study list`(): Unit = runBlocking {
+        studies.rows += study(id = 11, topic = "Swift")
+        questions.pendingRows += pendingQuestion(id = 103, studyId = 11, topic = "Swift").apply {
+            answer = "Submitted answer"
+            gradingRequestId = "grading-103"
+            gradingStatus = AnswerGradingStatus.JUDGING
+            status = QuestionStatus.GRADING
+        }
+        questions.completedRows += pendingQuestion(id = 102, studyId = 11, topic = "Swift").apply {
+            answer = "Completed answer"
+            score = 92
+            correct = true
+            feedback = "Good"
+            explanation = "Detailed feedback"
+            status = QuestionStatus.GRADED
+            answeredAt = Instant.parse("2026-06-10T00:10:00Z")
+        }
+        questionStats.rows += QuestionStatsEntity(questionId = 102, viewCount = 7)
+        questionStats.rows += QuestionStatsEntity(questionId = 103, viewCount = 3)
+
+        val response = service.study(principal, studyId = 11, language = "ko")
+
+        assertThat(response.id).isEqualTo(11)
+        assertThat(response.pendingQuestion?.id).isEqualTo("103")
+        assertThat(response.pendingQuestion?.questionStatus).isEqualTo(QuestionStatus.GRADING)
+        assertThat(response.latestQuestion?.id).isEqualTo("102")
+        assertThat(response.latestQuestion?.answer).isEqualTo("Completed answer")
+        assertThat(response.latestQuestion?.gradingResult?.feedback).isEqualTo("Good")
+        assertThat(response.latestQuestion?.viewCount).isEqualTo(7)
+        assertThat(questions.findLatestPendingByStudyIdsCalls).isEqualTo(1)
+        assertThat(questions.findLatestCompletedCalls).isEqualTo(1)
+        assertThat(questionStats.findAllByIdsCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun `study detail rejects a study owned by another user`() {
+        studies.rows += study(id = 11, topic = "Swift").apply { userId = 99 }
+
+        assertThatThrownBy {
+            runBlocking { service.study(principal, studyId = 11, language = "ko") }
+        }.isInstanceOf(ApiException::class.java)
     }
 
     @Test
@@ -133,6 +189,27 @@ class StudySyncServiceTest {
     }
 
     @Test
+    fun `retrying the same child topic under the same parent is idempotent`(): Unit = runBlocking {
+        studies.rows += study(id = 11, topic = "Redis")
+
+        val first = service.createStudyTopic(
+            principal,
+            parentStudyId = 11,
+            CreateStudyTopicCommand(topic = "Redis Streams", sortOrder = 1, difficultyLevel = 6),
+        )
+        val retried = service.createStudyTopic(
+            principal,
+            parentStudyId = 11,
+            CreateStudyTopicCommand(topic = "  redis   streams ", sortOrder = 1, difficultyLevel = 6),
+        )
+
+        assertThat(retried.id).isEqualTo(first.id)
+        assertThat(retried.parentStudyId).isEqualTo(11)
+        assertThat(retried.topic).isEqualTo("Redis Streams")
+        assertThat(studies.rows.count { it.parentStudyId == 11L }).isEqualTo(1)
+    }
+
+    @Test
     fun `same normalized topic is rejected across the study tree`() {
         studies.rows += study(id = 11, topic = "Redis")
         studies.rows += study(id = 12, topic = "Kafka")
@@ -173,13 +250,15 @@ class StudySyncServiceTest {
     }
 
     @Test
-    fun `deleting study removes records in that study subtree without using topic matching`(): Unit = runBlocking {
+    fun `deleting study preserves records and deletes only the owned study`(): Unit = runBlocking {
         studies.rows += study(id = 8, topic = "Redis")
+        questions.completedRows += pendingQuestion(id = 81, studyId = 8, topic = "Redis")
 
         service.deleteStudy(principal, studyId = 8)
 
-        assertThat(questions.softDeletedSubtreeIds).containsExactly(8)
-        assertThat(questions.softDeletedTopics).isEmpty()
+        assertThat(studies.rows).noneMatch { it.id == 8L }
+        assertThat(questions.completedRows).hasSize(1)
+        assertThat(questions.softDeletedQuestionIds).isEmpty()
     }
 
     private fun study(id: Long, topic: String) = StudyEntity(
@@ -202,7 +281,7 @@ class StudySyncServiceTest {
         difficultyLevel = 5,
         scheduledFor = Instant.parse("2026-06-10T00:00:00Z"),
         sentAt = Instant.parse("2026-06-10T00:00:00Z"),
-        status = "ungraded",
+        status = QuestionStatus.UNGRADED,
         createdAt = Instant.parse("2026-06-10T00:00:00Z").plusSeconds(id),
         updatedAt = Instant.parse("2026-06-10T00:00:00Z").plusSeconds(id),
     )
@@ -238,11 +317,11 @@ class StudySyncServiceTest {
 
     private class FakeQuestionPort : QuestionPort {
         val pendingRows = mutableListOf<QuestionEntity>()
-        val softDeletedStudyIds = mutableListOf<Long>()
-        val softDeletedSubtreeIds = mutableListOf<Long>()
-        val softDeletedTopics = mutableListOf<String>()
+        val completedRows = mutableListOf<QuestionEntity>()
+        val softDeletedQuestionIds = mutableListOf<Long>()
         var findPendingByStudyIdCalls = 0
         var findLatestPendingByStudyIdsCalls = 0
+        var findLatestCompletedCalls = 0
         override suspend fun save(entity: QuestionEntity): QuestionEntity = entity
         override suspend fun findQuestionById(id: Long): QuestionEntity? = null
         override suspend fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? = null
@@ -264,6 +343,12 @@ class StudySyncServiceTest {
                 .values
                 .mapNotNull { rows -> rows.maxWithOrNull(compareBy<QuestionEntity> { it.createdAt }.thenBy { it.id }) }
         }
+        override suspend fun findLatestCompletedByStudyIdAndUserId(studyId: Long, userId: Long): QuestionEntity? {
+            findLatestCompletedCalls += 1
+            return completedRows
+                .filter { it.studyId == studyId && it.userId == userId }
+                .maxWithOrNull(compareBy<QuestionEntity> { it.answeredAt }.thenBy { it.createdAt }.thenBy { it.id })
+        }
         override suspend fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override suspend fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override suspend fun findRecentQuestionTextsByStudyIdAndTopic(studyId: Long, topic: String, pageable: Pageable): List<String> = emptyList()
@@ -280,19 +365,12 @@ class StudySyncServiceTest {
         override suspend fun findPublicAnsweredByQuery(query: String, pageable: Pageable): Page<QuestionEntity> = Page.empty()
         override suspend fun findPublicAnsweredById(id: Long): QuestionEntity? = null
         override suspend fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = emptyList()
-        override suspend fun softDelete(id: Long, userId: Long, now: Instant): Int = 0
-        override suspend fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int {
-            softDeletedStudyIds += studyId
+        override suspend fun softDelete(id: Long, userId: Long, now: Instant): Int {
+            softDeletedQuestionIds += id
             return 0
         }
-        override suspend fun softDeleteByStudySubtree(rootStudyId: Long, userId: Long, now: Instant): Int {
-            softDeletedSubtreeIds += rootStudyId
-            return 0
-        }
-        override suspend fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int {
-            softDeletedTopics += topic
-            return 0
-        }
+        override suspend fun softDeleteByUserId(userId: Long, now: Instant): Int = 0
+        override suspend fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int = 0
     }
 
     private class FakeQuestionStatsPort : QuestionStatsPort {

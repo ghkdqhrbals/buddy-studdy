@@ -120,7 +120,7 @@ jobs:
           printf '%s' "$HEALTH_MONITOR_SLACK_WEBHOOK_URL" | npx wrangler secret put SLACK_WEBHOOK_URL
           printf '%s' "$MANUAL_CHECK_TOKEN" | npx wrangler secret put MANUAL_CHECK_TOKEN
       - name: Check backend health
-        run: curl -fsS https://api.lowfidev.cloud/api/v1/health/readiness
+        run: curl -fsS https://lowfidev.cloud/api/v1/health/readiness
 `;
 
   assert.match(validateWorkflowText(workflow).join("\n"), /must not directly call backend health endpoints/);
@@ -135,7 +135,7 @@ jobs:
   build:
     steps:
       - name: Health check
-        run: wget -qO- https://api.lowfidev.cloud/health
+        run: wget -qO- https://lowfidev.cloud/health
 `;
 
   assert.match(validateNoActionsRuntimeHealthChecks(workflow, "backend-image.yml").join("\n"), /backend-image\.yml/);
@@ -271,11 +271,11 @@ test("deploy repo docs prohibit Actions runtime and container health checks", ()
   const readme = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/README.md"), "utf8");
 
   assert.match(readme, /must not call backend `\/health` or readiness endpoints/i);
-  assert.match(readme, /must not inspect Docker `Health\.Status`/i);
-  assert.match(readme, /must not use indirect container health gates/i);
+  assert.match(readme, /must not\s+inspect Docker `Health\.Status`/i);
+  assert.match(readme, /must not\s+use indirect container health gates/i);
   assert.match(readme, /`docker compose up --wait`/i);
   assert.match(readme, /`docker compose wait`/i);
-  assert.match(readme, /must not call the Health Monitor Worker `\/check` endpoint/i);
+  assert.match(readme, /must not\s+call the Health Monitor Worker `\/check` endpoint/i);
 });
 
 test("deploy repo docs explain Grafana-owned outage alerting", () => {
@@ -283,7 +283,7 @@ test("deploy repo docs explain Grafana-owned outage alerting", () => {
 
   assert.match(readme, /Grafana alerting owns continuous server-down detection/i);
   assert.match(readme, /Cloudflare Worker[\s\S]*scheduled check is disabled/i);
-  assert.doesNotMatch(readme, /internal Redis Stream Coordinator/i);
+  assert.doesNotMatch(readme, /internal stream coordination service/i);
 });
 
 test("deploy repo monitoring template remains PLG only", () => {
@@ -292,19 +292,20 @@ test("deploy repo monitoring template remains PLG only", () => {
   assert.match(template, /docker pull grafana\/loki:/);
   assert.match(template, /docker pull grafana\/promtail:/);
   assert.match(template, /docker pull grafana\/grafana:/);
-  assert.match(template, /docker rm -f[\s\S]*rsc-prometheus[\s\S]*redis-exporter-6379[\s\S]*redis-exporter-6381/);
+  assert.match(template, /docker rm -f[\s\S]*redis-exporter-6379[\s\S]*redis-exporter-6381/);
   assert.doesNotMatch(template, /docker run[\s\S]*prom\/prometheus/);
   assert.doesNotMatch(template, /docker run[\s\S]*redis_exporter/);
   assert.doesNotMatch(template, /prometheus\.yml/);
+  assert.doesNotMatch(template, /\brsc-/);
 });
 
 test("deploy repo monitoring template persists Loki and Grafana state", () => {
   const template = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-monitoring.yml"), "utf8");
 
-  assert.match(template, /docker volume create rsc-loki-data/);
-  assert.match(template, /docker volume create rsc-grafana-data/);
-  assert.match(template, /-v rsc-loki-data:\/loki/);
-  assert.match(template, /-v rsc-grafana-data:\/var\/lib\/grafana/);
+  assert.match(template, /docker volume create buddystudy-loki-data/);
+  assert.match(template, /docker volume create buddystudy-grafana-data/);
+  assert.match(template, /-v buddystudy-loki-data:\/loki/);
+  assert.match(template, /-v buddystudy-grafana-data:\/var\/lib\/grafana/);
   assert.match(template, /retention_period:\s*168h/);
   assert.match(template, /retention_enabled:\s*true/);
 });
@@ -352,6 +353,19 @@ test("deploy repo backend template wires scheduler Slack webhook into backend en
   assert.match(template, /SLACK_WEBHOOK_URL=\$\{SLACK_WEBHOOK_URL\}/);
 });
 
+test("backend deployment Slack notification is compact and emoji-free", () => {
+  const template = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"), "utf8");
+  const notification = template.slice(template.indexOf("- name: Notify Slack"));
+
+  assert.match(notification, /"text": f"Backend 배포 · \{status_label\}"/);
+  assert.match(notification, /"attachments": \[/);
+  assert.match(notification, /\*Backend 배포\*\\n/);
+  assert.match(notification, /`production` · `\{escape\(runtime\)\}`/);
+  assert.match(notification, /GitHub Actions/);
+  assert.doesNotMatch(notification, /icon_emoji|emoji|배포 이미지|type": "header"|type": "actions"/);
+  assert.doesNotMatch(notification, /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u);
+});
+
 test("kubernetes backend config throttles scheduler failure Slack alerts", () => {
   const applicationConfig = fs.readFileSync(path.join(repoRoot, "backend/tutor/src/main/resources/application.yml"), "utf8");
   const backendConfig = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/config/backend-config.yaml"), "utf8");
@@ -393,7 +407,10 @@ test("repository workflow files do not run backend health probes in Actions", ()
 
   const errors = files.flatMap((file) => {
     const relativePath = path.relative(repoRoot, file);
-    return validateNoActionsRuntimeHealthChecks(fs.readFileSync(file, "utf8"), relativePath);
+    const workflow = fs.readFileSync(file, "utf8");
+    return /^\s*jobs\s*:/m.test(workflow)
+      ? validateNoActionsRuntimeHealthChecks(workflow, relativePath)
+      : [];
   });
 
   assert.deepEqual(errors, []);
@@ -408,11 +425,71 @@ test("image build workflows do not run health-check scanners or probes", () => {
   }
 });
 
-test("backend image does not define Docker health metadata", () => {
+test("backend image exposes dependency readiness to Docker Swarm", () => {
   const dockerfile = fs.readFileSync(path.join(repoRoot, "backend/Dockerfile"), "utf8");
 
-  assert.doesNotMatch(dockerfile, /^\s*HEALTHCHECK\b/im);
-  assert.doesNotMatch(dockerfile, /curl\s+-fsS\s+http:\/\/127\.0\.0\.1:8080\/health/);
+  assert.match(dockerfile, /microdnf install -y curl-minimal shadow-utils/);
+  assert.match(dockerfile, /apt-get install -y --no-install-recommends curl/);
+  assert.equal(
+    (dockerfile.match(/^HEALTHCHECK\b/gm) ?? []).length,
+    2,
+    "native and JVM runtime images must expose the same readiness contract",
+  );
+  assert.equal(
+    (dockerfile.match(/http:\/\/127\.0\.0\.1:8080\/api\/v1\/health\/dependencies/g) ?? []).length,
+    2,
+  );
+});
+
+test("Swarm stack gates replacement tasks on dependency readiness", () => {
+  const stack = fs.readFileSync(
+    path.join(repoRoot, "docs/deploy-repo-template/backend-swarm-stack.yml"),
+    "utf8",
+  );
+
+  assert.match(stack, /http:\/\/127\.0\.0\.1:8080\/api\/v1\/health\/dependencies/);
+  assert.match(stack, /order:\s*start-first/);
+  assert.match(stack, /failure_action:\s*rollback/);
+  assert.match(stack, /start_period:\s*120s/);
+  assert.match(stack, /monitor:\s*5s/);
+});
+
+test("backend deployment waits for the Swarm rollout and current image", () => {
+  const workflow = fs.readFileSync(
+    path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"),
+    "utf8",
+  );
+  const rolloutScript = fs.readFileSync(
+    path.join(
+      repoRoot,
+      "docs/deploy-repo-template/scripts/wait_backend_swarm_rollout.sh",
+    ),
+    "utf8",
+  );
+
+  assert.match(
+    workflow,
+    /wait_backend_swarm_rollout\.sh[\s\S]*buddystudy_backend[\s\S]*"\$\{IMAGE_REF\}"/,
+  );
+  assert.match(workflow, /BACKEND_DEPLOYMENT_STATE="rollout-completed"/);
+  assert.match(rolloutScript, /update_state}" = "completed"/);
+  assert.match(rolloutScript, /replicas}" = "1\/1"/);
+  assert.match(rolloutScript, /expected_task_running}" = "true"/);
+  assert.match(
+    rolloutScript,
+    /paused\|rollback_started\|rollback_paused\|rollback_completed/,
+  );
+  assert.doesNotMatch(rolloutScript, /\/api\/v1\/health|\.State\.Health/);
+});
+
+test("translation deploy preserves Swarm backend connectivity", () => {
+  const workflow = fs.readFileSync(
+    path.join(repoRoot, "docs/deploy-repo-template/deploy-translation-server.yml"),
+    "utf8",
+  );
+
+  assert.match(workflow, /docker network inspect buddystudy-swarm-net/);
+  assert.match(workflow, /docker network connect[\s\S]*buddystudy-swarm-net[\s\S]*buddystudy-libretranslate/);
 });
 
 test("workflow scan rejects container health probes in Actions", () => {
@@ -424,7 +501,7 @@ jobs:
   deploy:
     steps:
       - name: Check Grafana
-        run: docker exec rsc-grafana wget -qO- http://127.0.0.1:3000/api/health
+        run: docker exec buddystudy-grafana wget -qO- http://127.0.0.1:3000/api/health
 `;
 
   assert.match(validateNoActionsRuntimeHealthChecks(workflow, "deploy-monitoring.yml").join("\n"), /must not run container health probes/);
@@ -546,7 +623,7 @@ jobs:
       - name: Check backend readiness
         run: |
           curl -fsS \\
-            "https://api.lowfidev.cloud/api/v1/health/readiness"
+            "https://lowfidev.cloud/api/v1/health/readiness"
 `;
 
   const errors = validateNoActionsRuntimeHealthChecks(workflow, "deploy-backend.yml").join("\n");
@@ -564,7 +641,7 @@ jobs:
   deploy:
     steps:
       - name: Check backend readiness
-        run: node -e "fetch('https://api.lowfidev.cloud/api/v1/health/readiness')"
+        run: node -e "fetch('https://lowfidev.cloud/api/v1/health/readiness')"
 `;
 
   const errors = validateNoActionsRuntimeHealthChecks(workflow, "deploy-backend.yml").join("\n");
@@ -582,7 +659,7 @@ jobs:
   deploy:
     steps:
       - name: Wait for backend readiness
-        run: npx wait-on https://api.lowfidev.cloud/api/v1/health/readiness
+        run: npx wait-on https://lowfidev.cloud/api/v1/health/readiness
 `;
 
   const errors = validateNoActionsRuntimeHealthChecks(workflow, "deploy-backend.yml").join("\n");
@@ -660,12 +737,12 @@ test("kubernetes backend probes use dependency readiness while external monitor 
   assert.match(workerConfig, /api\.ghkdqhrbals\.org\/api\/v1\/health\/readiness/);
 });
 
-test("scheduler readiness monitors frequent jobs and excludes daily correction", () => {
+test("scheduler readiness monitors every registered managed job", () => {
   const applicationConfig = fs.readFileSync(path.join(repoRoot, "backend/tutor/src/main/resources/application.yml"), "utf8");
   const backendConfig = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/config/backend-config.yaml"), "utf8");
   const combinedManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/deploy.yaml"), "utf8");
   const deployTemplate = fs.readFileSync(path.join(repoRoot, "docs/deploy-repo-template/deploy-backend.yml"), "utf8");
-  const requiredJobs = managedJobNames().filter((jobName) => jobName !== "admin-analytics-correction");
+  const requiredJobs = managedJobNames();
 
   assert.ok(requiredJobs.length > 0, "expected at least one ManagedJob implementation");
   for (const jobName of requiredJobs) {
@@ -675,10 +752,6 @@ test("scheduler readiness monitors frequent jobs and excludes daily correction",
     assert.match(deployTemplate, new RegExp(`MONITORING_SCHEDULER_MONITORED_JOBS:.*${jobName}`));
     assert.match(deployTemplate, new RegExp(`MONITORING_SCHEDULER_MONITORED_JOBS=\\$\\{MONITORING_SCHEDULER_MONITORED_JOBS\\}`));
   }
-  for (const config of [applicationConfig, backendConfig, combinedManifest, deployTemplate]) {
-    const readinessLine = config.split("\n").find((line) => line.includes("MONITORING_SCHEDULER_MONITORED_JOBS") || line.includes("scheduler-monitored-jobs"));
-    assert.doesNotMatch(readinessLine ?? "", /admin-analytics-correction/);
-  }
 });
 
 test("deploy repo backend template wires scheduler readiness policy into backend env", () => {
@@ -686,29 +759,26 @@ test("deploy repo backend template wires scheduler readiness policy into backend
 
   assert.match(template, /MONITORING_ENVIRONMENT_NAME:\s*\$\{\{\s*vars\.MONITORING_ENVIRONMENT_NAME\s*\|\|\s*'production'\s*\}\}/);
   assert.match(template, /MONITORING_SERVICE_NAME:\s*\$\{\{\s*vars\.MONITORING_SERVICE_NAME\s*\|\|\s*'BuddyStudy backend'\s*\}\}/);
-  assert.match(template, /MONITORING_SLACK_TIMEOUT_MS:\s*\$\{\{\s*vars\.MONITORING_SLACK_TIMEOUT_MS\s*\|\|\s*'5000'\s*\}\}/);
   assert.match(template, /MONITORING_SCHEDULER_READINESS_ENABLED:\s*\$\{\{\s*vars\.MONITORING_SCHEDULER_READINESS_ENABLED\s*\|\|\s*'true'\s*\}\}/);
   assert.match(template, /MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES:\s*\$\{\{\s*vars\.MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES\s*\|\|\s*'15'\s*\}\}/);
   assert.match(template, /MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES:\s*\$\{\{\s*vars\.MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES\s*\|\|\s*'15'\s*\}\}/);
   assert.match(template, /MONITORING_ENVIRONMENT_NAME=\$\{MONITORING_ENVIRONMENT_NAME\}/);
   assert.match(template, /MONITORING_SERVICE_NAME=\$\{MONITORING_SERVICE_NAME\}/);
-  assert.match(template, /MONITORING_SLACK_TIMEOUT_MS=\$\{MONITORING_SLACK_TIMEOUT_MS\}/);
   assert.match(template, /MONITORING_SCHEDULER_READINESS_ENABLED=\$\{MONITORING_SCHEDULER_READINESS_ENABLED\}/);
   assert.match(template, /MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES=\$\{MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES\}/);
   assert.match(template, /MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES=\$\{MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES\}/);
 });
 
-test("kubernetes backend config does not depend on an undeployed stream coordinator", () => {
+test("kubernetes backend config does not depend on an external stream service", () => {
   const backendConfig = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/config/backend-config.yaml"), "utf8");
   const combinedManifest = fs.readFileSync(path.join(repoRoot, "deploy/kubernetes/deploy.yaml"), "utf8");
 
   for (const text of [backendConfig, combinedManifest]) {
     assert.doesNotMatch(text, /MONITORING_COORDINATOR_/);
-    assert.doesNotMatch(text, /buddystudy-redis-stream-coordinator/);
   }
 });
 
-test("backend scheduler seeds every job but readiness defaults include only frequent jobs", () => {
+test("backend scheduler seeds and monitors every registered managed job", () => {
   const appProperties = fs.readFileSync(
     path.join(repoRoot, "backend/application/src/main/kotlin/com/buddystudy/backend/config/AppProperties.kt"),
     "utf8",
@@ -721,19 +791,13 @@ test("backend scheduler seeds every job but readiness defaults include only freq
     .join("\n");
 
   const managedJobs = managedJobNames();
-  const readinessJobs = managedJobs.filter((jobName) => jobName !== "admin-analytics-correction");
-  for (const jobName of readinessJobs) {
+  for (const jobName of managedJobs) {
     assert.match(appProperties, new RegExp(`"${jobName}"`), `AppProperties default must monitor ${jobName}`);
     assert.match(applicationConfig, new RegExp(`scheduler-monitored-jobs:.*${jobName}`), `application.yml default must monitor ${jobName}`);
   }
   for (const jobName of managedJobs) {
     assert.match(migrations, new RegExp(`'${jobName}'`), `Flyway scheduler seed must include ${jobName}`);
   }
-  assert.doesNotMatch(appProperties, /schedulerMonitoredJobs:[\s\S]*"admin-analytics-correction"/);
-  assert.doesNotMatch(
-    applicationConfig.split("\n").find((line) => line.includes("scheduler-monitored-jobs")) ?? "",
-    /admin-analytics-correction/,
-  );
 });
 
 test("kubernetes production apply path does not include placeholder backend secret", () => {

@@ -1,0 +1,12 @@
+spring:
+  config:
+    activate:
+      on-profile: dev-aws
+    import: optional:aws-secretsmanager:${AWS_SECRET_ID:buddystudy/dev}
+  cloud:
+    aws:
+      region:
+        static: ${AWS_REGION:ap-northeast-2}
+      secretsmanager:
+        enabled: true
+        region: ${AWS_REGION:ap-northeast-2}

@@ -1,10 +1,11 @@
 package com.buddystudy.backend.study.application.port.outbound
 
+import com.buddystudy.backend.common.application.outbox.PublishedStreamRecord
 import java.time.Instant
 
 data class QuestionPushRequest(
     val recordId: Long,
-    val notificationId: Long? = null,
+    val notificationId: Long,
     val studyId: Long?,
     val deviceId: String,
     val userId: Long?,
@@ -19,48 +20,12 @@ data class QuestionPushRequest(
     val body: String? = null,
     val deepLink: String? = null,
     val createdAt: Instant = Instant.now(),
-)
+) {
+    val eventId: String get() = "question-push-$notificationId-$deviceId"
+}
 
 interface QuestionPushPublishPort {
-    suspend fun publishPush(request: QuestionPushRequest): Boolean
-}
-
-data class QuestionPushOutboxCommand(
-    val studyId: Long?,
-    val deviceId: String,
-    val userId: Long?,
-    val question: String,
-    val expectedAnswerHint: String?,
-    val topic: String,
-    val difficultyLevel: Int,
-    val language: String,
-    val sound: String?,
-    val intervalMinutes: Int,
-    val createdAt: Instant = Instant.now(),
-) {
-    fun toRequest(recordId: Long): QuestionPushRequest =
-        QuestionPushRequest(
-            recordId = recordId,
-            studyId = studyId,
-            createdAt = createdAt,
-            deviceId = deviceId,
-            userId = userId,
-            question = question,
-            expectedAnswerHint = expectedAnswerHint,
-            topic = topic,
-            difficultyLevel = difficultyLevel,
-            language = language,
-            sound = sound,
-            intervalMinutes = intervalMinutes,
-        )
-}
-
-interface QuestionPushOutboxPort {
-    suspend fun enqueue(request: QuestionPushRequest, now: Instant = Instant.now()): Long
-}
-
-interface QuestionPushOutboxDispatchPort {
-    suspend fun dispatchOutbox(outboxId: Long)
+    suspend fun publishPush(request: QuestionPushRequest): PublishedStreamRecord?
 }
 
 enum class PushMessageType {

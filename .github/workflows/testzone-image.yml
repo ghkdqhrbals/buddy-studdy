@@ -41,7 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           (cd monitoring/testzone-service && npm test)
-          (cd monitoring/api-dashboard && npm test)
+          (cd monitoring/api-dashboard && npm ci && npm test)
           node --check monitoring/testzone-service/src/server.mjs
           node --check monitoring/api-dashboard/public/testzone.js
           node --check monitoring/api-dashboard/public/testzone-model.js

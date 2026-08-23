@@ -6,7 +6,8 @@ import com.buddystudy.backend.auth.application.permission.RequirePermission
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
 import com.buddystudy.backend.common.adapter.inbound.web.ApiErrorResponseFactory
-import com.buddystudy.backend.common.adapter.inbound.web.ClientIpResolver
+import com.buddystudy.backend.common.adapter.inbound.web.ApiLoggingPolicy
+import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.common.adapter.inbound.web.ReactiveRequestDetails
 import com.buddystudy.backend.common.adapter.inbound.web.RequirePermissionAuthorizationManager
 import com.buddystudy.backend.common.adapter.inbound.web.RequestLoggingFilter
@@ -14,9 +15,6 @@ import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.common.application.error.ApiRuntimeException
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
-import com.fasterxml.jackson.module.kotlin.KotlinModule
-import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import org.slf4j.LoggerFactory
 import org.springframework.aop.Advisor
 import org.springframework.aop.support.ComposablePointcut
@@ -67,13 +65,7 @@ class SecurityConfig {
 
     @Bean
     @ConditionalOnMissingBean(ObjectMapper::class)
-    fun objectMapper(): ObjectMapper = ObjectMapper().registerKotlinModule().findAndRegisterModules()
-
-    @Bean
-    fun kotlinJacksonModule(): KotlinModule = KotlinModule.Builder().build()
-
-    @Bean
-    fun javaTimeJacksonModule(): JavaTimeModule = JavaTimeModule()
+    fun objectMapper(): ObjectMapper = JsonMapperProvider.mapper
 
     @Bean
     fun securityWebFilterChain(
@@ -81,6 +73,7 @@ class SecurityConfig {
         bearerTokenFilter: BearerTokenFilter,
         objectMapper: ObjectMapper,
         errorResponseFactory: ApiErrorResponseFactory,
+        loggingPolicy: ApiLoggingPolicy,
     ): SecurityWebFilterChain =
         http
             .csrf { it.disable() }
@@ -109,6 +102,7 @@ class SecurityConfig {
                         status = HttpStatus.UNAUTHORIZED,
                         code = ApiErrorCode.AUTH_ACCESS_TOKEN_REQUIRED,
                         errorResponseFactory = errorResponseFactory,
+                        loggingPolicy = loggingPolicy,
                     )
                 }
             }
@@ -123,6 +117,7 @@ class BearerTokenFilter(
     private val userDevices: UserDevicePort,
     private val objectMapper: ObjectMapper,
     private val errorResponseFactory: ApiErrorResponseFactory,
+    private val loggingPolicy: ApiLoggingPolicy,
 ) : WebFilter {
     override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
         val authorization = exchange.request.headers.getFirst("Authorization")
@@ -132,6 +127,7 @@ class BearerTokenFilter(
             authentication(exchange.request, authorization)
                 .flatMap { authentication ->
                     val principal = authentication.principal as Principal
+                    exchange.attributes[AUTHENTICATED_PRINCIPAL_ATTRIBUTE] = principal
                     if (!principal.anonymous) {
                         exchange.attributes[RequestLoggingFilter.AUTHENTICATED_USER_ID_ATTRIBUTE] = principal.userId
                     }
@@ -141,7 +137,7 @@ class BearerTokenFilter(
         }
         return filtered.onErrorResume(ApiRuntimeException::class.java) { error ->
             if (AnonymousRoutes.matches(exchange.request) || NonApiRoutes.matches(exchange.request)) {
-                logIgnoredAuthenticationFailure(exchange, error)
+                logIgnoredAuthenticationFailure(exchange, error, loggingPolicy)
                 chain.filter(exchange)
             } else {
                 writeSecurityError(
@@ -150,6 +146,7 @@ class BearerTokenFilter(
                     status = error.status,
                     code = error.errorCode,
                     errorResponseFactory = errorResponseFactory,
+                    loggingPolicy = loggingPolicy,
                     requiredPermissions = error.requiredPermissions,
                 )
             }
@@ -190,6 +187,10 @@ class BearerTokenFilter(
             details = ReactiveRequestDetails(request.headers.getFirst("X-App-Version"))
         }
     }
+
+    companion object {
+        const val AUTHENTICATED_PRINCIPAL_ATTRIBUTE = "authenticatedPrincipal"
+    }
 }
 
 private object NonApiRoutes {
@@ -213,6 +214,8 @@ private object AnonymousRoutes {
         Route(HttpMethod.GET, "/api/v1/public/**"),
         Route(HttpMethod.GET, "/api/v2/public/**"),
         Route(HttpMethod.GET, "/api/v1/profile/photo/**"),
+        Route(HttpMethod.POST, "/api/v1/billing/apple/notifications"),
+        Route(HttpMethod.POST, "/api/v1/billing/revenuecat/webhooks"),
         Route(null, "/api/v1/admin/**"),
     )
 
@@ -233,19 +236,22 @@ private object AnonymousRoutes {
     }
 }
 
-private fun logIgnoredAuthenticationFailure(exchange: ServerWebExchange, error: ApiRuntimeException) {
-    val request = exchange.request
+private fun logIgnoredAuthenticationFailure(
+    exchange: ServerWebExchange,
+    error: ApiRuntimeException,
+    loggingPolicy: ApiLoggingPolicy,
+) {
     val requestId = exchange.getAttribute<String>(RequestLoggingFilter.REQUEST_ID_ATTRIBUTE)
         ?: UUID.randomUUID().toString()
     securityLog.debug(
-        "api_auth_ignored requestId={} clientIp={} method={} path={} status={} code={} message={}",
-        requestId,
-        ClientIpResolver.resolve(request),
-        request.method,
-        request.path.value(),
-        error.status.value(),
-        error.errorCode.name,
-        error.message,
+        "api_auth_ignored {}",
+        loggingPolicy.authentication(
+            exchange = exchange,
+            requestId = requestId,
+            status = error.status,
+            code = error.errorCode.name,
+            message = error.message,
+        ),
     )
 }
 
@@ -255,6 +261,7 @@ private fun writeSecurityError(
     status: HttpStatus,
     code: ApiErrorCode,
     errorResponseFactory: ApiErrorResponseFactory,
+    loggingPolicy: ApiLoggingPolicy,
     requiredPermissions: List<String>? = null,
 ): Mono<Void> {
     val response = exchange.response
@@ -266,14 +273,14 @@ private fun writeSecurityError(
         requiredPermissions = requiredPermissions,
     )
     securityLog.warn(
-        "api_auth_failed requestId={} clientIp={} method={} path={} status={} code={} message={}",
-        body.error.requestId,
-        ClientIpResolver.resolve(exchange.request),
-        exchange.request.method,
-        exchange.request.path.value(),
-        status.value(),
-        code.name,
-        body.error.message,
+        "api_auth_failed {}",
+        loggingPolicy.authentication(
+            exchange = exchange,
+            requestId = body.error.requestId,
+            status = status,
+            code = code.name,
+            message = body.error.message,
+        ),
     )
     val bytes = objectMapper.writeValueAsBytes(body)
     response.statusCode = status

@@ -14,6 +14,7 @@ import com.buddystudy.backend.settings.application.port.inbound.ScheduleItemComm
 import com.buddystudy.backend.settings.application.service.SettingsService
 import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionRepository
 import com.buddystudy.backend.study.adapter.outbound.persistence.StudyRepository
+import com.buddystudy.common.domain.SupportedLanguage
 import com.buddystudy.study.domain.entity.QuestionEntity
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -67,7 +68,7 @@ class UserOpenAISettingsTest : MySqlIntegrationTestSupport() {
         val study = studies.findByUserIdAndTopic(principal.userId, "SwiftUI")
 
         assertThat(cipher.decrypt(user.openaiApiKeyCipher)).isEqualTo("sk-test-user-key")
-        assertThat(user.appLanguage).isEqualTo("en")
+        assertThat(user.appLanguage).isEqualTo(SupportedLanguage.ENGLISH)
         assertThat(study?.openaiModel).isEqualTo("gpt-5.4")
         assertThat(admin.apiStatus(otherDevicePrincipal).openaiKeyConfigured).isTrue()
         assertThat(admin.apiStatus(otherDevicePrincipal).openaiModel).isEqualTo("gpt-5.4")

@@ -14,10 +14,16 @@ protocol CommunityRepository {
     func fetchPublicQuestion(
         registration: RemotePushRegistration,
         questionID: String,
-        language: AppLanguage
+        language: AppLanguage,
+        view: LocalizedContentView
     ) async throws -> CommunityQuestion
 
     func loginWithGoogle(
+        registration: RemotePushRegistration,
+        idToken: String
+    ) async throws -> CommunityLoginResult
+
+    func loginWithApple(
         registration: RemotePushRegistration,
         idToken: String
     ) async throws -> CommunityLoginResult
@@ -54,7 +60,8 @@ protocol CommunityRepository {
         avatarSymbolName: String?,
         avatarColorSeed: String?,
         avatarMode: String?,
-        avatarConfig: [String: String]?
+        avatarConfig: [String: String]?,
+        allowPublicQuestions: Bool?
     ) async throws -> CommunityUserProfile
 
     func withdrawMyProfile(registration: RemotePushRegistration) async throws -> RemotePushRegistration
@@ -66,10 +73,30 @@ protocol CommunityRepository {
         message: String
     ) async throws
 
+    func setUserBlocked(
+        registration: RemotePushRegistration,
+        userID: Int,
+        blocked: Bool
+    ) async throws -> CommunityUserBlockState
+
     func submitFeedback(
         registration: RemotePushRegistration,
-        category: String,
-        message: String
+        content: String
+    ) async throws
+
+    func recordNativeAdvertisementView(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws
+
+    func recordNativeAdvertisementImpression(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws
+
+    func suppressNativeAdvertisement(
+        registration: RemotePushRegistration,
+        selectionID: String
     ) async throws
 
     func setQuestionLike(
@@ -82,13 +109,16 @@ protocol CommunityRepository {
         registration: RemotePushRegistration,
         questionID: String,
         limit: Int,
-        offset: Int
+        offset: Int,
+        language: AppLanguage,
+        view: LocalizedContentView
     ) async throws -> CommunityCommentsResponse
 
     func createComment(
         registration: RemotePushRegistration,
         questionID: String,
-        body: String
+        body: String,
+        sourceLanguage: String
     ) async throws -> CommunityQuestionComment
 
     func deleteComment(

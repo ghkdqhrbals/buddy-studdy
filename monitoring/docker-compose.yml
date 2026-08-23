@@ -1,15 +1,50 @@
+x-bounded-local-logging: &bounded-local-logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "3"
+    compress: "true"
+
 services:
+  incident-receiver:
+    image: node:22-alpine
+    container_name: buddystudy-incident-receiver
+    restart: unless-stopped
+    command:
+      - node
+      - /app/src/server.mjs
+    environment:
+      INCIDENT_RECEIVER_PORT: "3030"
+      INCIDENT_DATA_DIR: /data
+      GRAFANA_INCIDENT_HMAC_SECRET: ${GRAFANA_INCIDENT_HMAC_SECRET:?set GRAFANA_INCIDENT_HMAC_SECRET}
+      CODEX_AUTOFIX_GITHUB_TOKEN: ${CODEX_AUTOFIX_GITHUB_TOKEN:?set CODEX_AUTOFIX_GITHUB_TOKEN}
+      GITHUB_AUTOFIX_REPOSITORY: ${GITHUB_AUTOFIX_REPOSITORY:-ghkdqhrbals/buddy-studdy}
+      GITHUB_AUTOFIX_EVENT_TYPE: codex-incident-autofix
+      LOKI_BASE_URL: http://buddystudy-loki:3100
+      DEPLOYMENT_HISTORY_URL: http://buddystudy-testzone-service:3020
+    volumes:
+      - ./incident-receiver/src:/app/src:ro
+      - ${HOME}/buddystudy/monitoring/incident-receiver/data:/data
+    depends_on:
+      - loki
+      - testzone-service
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging: *bounded-local-logging
+    networks:
+      - monitoring
+
   api-dashboard:
     image: nginx:1.27-alpine
     container_name: buddystudy-api-dashboard
     restart: unless-stopped
     ports:
       - "127.0.0.1:3000:80"
-    environment:
-      API_DASHBOARD_BASIC_AUTH_HTPASSWD: ${API_DASHBOARD_BASIC_AUTH_HTPASSWD:?set API_DASHBOARD_BASIC_AUTH_HTPASSWD}
-    command: >
-      /bin/sh -c 'printf "%s\n" "$$API_DASHBOARD_BASIC_AUTH_HTPASSWD" > /etc/nginx/.htpasswd
-      && nginx -g "daemon off;"'
     volumes:
       - ./api-dashboard/public:/usr/share/nginx/html:ro
       - ./api-dashboard/nginx.conf:/etc/nginx/conf.d/default.conf:ro
@@ -17,8 +52,39 @@ services:
     depends_on:
       - loki
       - testzone-service
+    logging: *bounded-local-logging
     networks:
       - monitoring
+
+  monitoring-log-rotator:
+    image: alpine:3.21
+    container_name: buddystudy-monitoring-log-rotator
+    restart: unless-stopped
+    entrypoint:
+      - /bin/sh
+      - /opt/monitoring/rotate-gateway-logs.sh
+    environment:
+      LOG_DIRECTORY: /var/log/nginx
+      ACCESS_LOG_ROTATE_BYTES: "8388608"
+      ERROR_LOG_ROTATE_BYTES: "2097152"
+      ROTATED_LOG_COUNT: "3"
+      LOG_ROTATE_CHECK_INTERVAL_SECONDS: "30"
+      LOG_ROTATE_STARTUP_GRACE_SECONDS: "60"
+      NGINX_MASTER_PID: "1"
+    volumes:
+      - ./log-retention/rotate-gateway-logs.sh:/opt/monitoring/rotate-gateway-logs.sh:ro
+      - ${HOME}/buddystudy/monitoring/api-dashboard/logs:/var/log/nginx
+    depends_on:
+      - api-dashboard
+      - monitoring-promtail
+    network_mode: none
+    pid: "service:api-dashboard"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging: *bounded-local-logging
 
   monitoring-promtail:
     image: grafana/promtail:3.3.2
@@ -33,6 +99,7 @@ services:
     depends_on:
       - api-dashboard
       - loki
+    logging: *bounded-local-logging
     networks:
       - monitoring
 
@@ -47,6 +114,7 @@ services:
     volumes:
       - ${HOME}/buddystudy/monitoring/loki/data:/loki
       - ./loki/config/loki.yml:/etc/loki/local-config.yaml:ro
+    logging: *bounded-local-logging
     networks:
       - monitoring
 
@@ -65,13 +133,17 @@ services:
       TESTZONE_INFLUX_ORG: ${TESTZONE_INFLUX_ORG:-buddystudy}
       TESTZONE_INFLUX_BUCKET: ${TESTZONE_INFLUX_BUCKET:-testzone}
       TESTZONE_INFLUX_TOKEN: ${TESTZONE_INFLUX_TOKEN:?set TESTZONE_INFLUX_TOKEN}
+      GRAFANA_SLACK_WEBHOOK_URL: ${GRAFANA_SLACK_WEBHOOK_URL:-${SLACK_WEBHOOK_URL:-}}
+      GRAFANA_INCIDENT_HMAC_SECRET: ${GRAFANA_INCIDENT_HMAC_SECRET:?set GRAFANA_INCIDENT_HMAC_SECRET}
     volumes:
       - ${HOME}/buddystudy/monitoring/grafana/data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
+      - incident-receiver
       - loki
       - testzone-influxdb
+    logging: *bounded-local-logging
     networks:
       - monitoring
 
@@ -85,6 +157,7 @@ services:
       - ./grafana-gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - grafana
+    logging: *bounded-local-logging
     networks:
       - monitoring
 
@@ -104,6 +177,7 @@ services:
       DOCKER_INFLUXDB_INIT_RETENTION: ${TESTZONE_INFLUX_RETENTION:-30d}
     volumes:
       - ${HOME}/buddystudy/monitoring/testzone/influxdb:/var/lib/influxdb2
+    logging: *bounded-local-logging
     networks:
       - monitoring
 
@@ -131,6 +205,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - testzone-influxdb
+    logging: *bounded-local-logging
     networks:
       - monitoring
       - testzone

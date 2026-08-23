@@ -135,6 +135,16 @@ export class InfluxWriter {
   }
 
   async writeRunSummary(run, project, script, summary) {
+    const {
+      iterationRate,
+      ...summaryFields
+    } = summary;
+    const persistedSummary = {
+      ...summaryFields,
+      iterationsPerSecond: Number.isFinite(Number(iterationRate))
+        ? Number(iterationRate)
+        : null,
+    };
     return this.write([
       lineProtocol("testzone_run_summary", {
         run_id: run.id,
@@ -144,7 +154,7 @@ export class InfluxWriter {
         script: script.name,
         profile: run.profile,
         status: run.status,
-      }, summary, Date.parse(run.finishedAt || run.startedAt || run.createdAt)),
+      }, persistedSummary, Date.parse(run.finishedAt || run.startedAt || run.createdAt)),
     ]);
   }
 

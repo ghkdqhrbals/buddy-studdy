@@ -51,7 +51,7 @@ WebFlux does not make CPU-heavy work faster. It also does not increase MySQL que
 ## Boundaries
 
 - MySQL request-path I/O uses R2DBC.
-- Redis publication and ACK use reactive APIs. Redis Stream `XREAD BLOCK` is deliberately confined to Spring scheduler threads, then coroutine listeners launch suspend handlers.
+- Redis publication and ACK use reactive APIs. Redis Stream `XREAD BLOCK` is isolated on `Dispatchers.IO`; suspended scheduled listeners process each polled batch sequentially so one record is not handled concurrently before acknowledgement.
 - Request and response logging streams bounded payload previews without joining unbounded bodies.
 - Flyway uses JDBC only during startup because migration execution is not request traffic.
 - Google OAuth, LibreTranslate, and Slack use Reactor Netty `WebClient`; APNs uses Java `HttpClient.sendAsync`.
@@ -65,7 +65,7 @@ WebFlux transactions are carried in Reactor context, not thread-local state. A c
 - Do not wrap external HTTP, OpenAI, SMTP, APNs, or Redis publication in a database transaction.
 - Use a dedicated write manager for multi-table mutations so the atomic boundary is visible and testable.
 - Do not launch an application coroutine from inside a transaction for database work.
-- Register non-durable integrations with `afterReactiveCommit`; use a transactional outbox when losing an event during a process crash is unacceptable.
+- Register non-durable integrations through `AfterCommitPort`; use a transactional outbox when losing an event during a process crash is unacceptable.
 - R2DBC entities are detached values. Every mutation requires an explicit `save` or update statement.
 
 The scheduled-question flow claims work in a short transaction, releases the connection while OpenAI runs, and completes or fails in a second short transaction. The claim has an expiry, allowing another worker to recover work after a process crash.

@@ -13,13 +13,16 @@ jobs:
   deploy_monitoring:
     name: Deploy Monitoring Module
     runs-on: [self-hosted, macOS, ARM64, macbook-air, buddystudy]
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       MONITORING_ROOT: ${{ vars.MACBOOKAIR_MONITORING_ROOT || '$HOME/buddystudy/monitoring' }}
       MONITORING_SOURCE_DIR: ${{ github.workspace }}/buddy-studdy-source/monitoring
       API_DASHBOARD_PORT: ${{ vars.API_DASHBOARD_PORT || '3000' }}
       GRAFANA_PORT: ${{ vars.GRAFANA_PORT || '3001' }}
       LOKI_PORT: ${{ vars.LOKI_PORT || '3100' }}
+      REDISSTREAMSCOPE_PORT: ${{ vars.REDISSTREAMSCOPE_PORT || '3002' }}
+      MONITORING_DOCKER_LOG_MAX_SIZE: ${{ vars.MONITORING_DOCKER_LOG_MAX_SIZE || '10m' }}
+      MONITORING_DOCKER_LOG_MAX_FILE: ${{ vars.MONITORING_DOCKER_LOG_MAX_FILE || '3' }}
 
     steps:
       - name: Checkout BuddyStudy monitoring config
@@ -32,7 +35,10 @@ jobs:
       - name: Deploy monitoring module
         env:
           GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
-          API_DASHBOARD_BASIC_AUTH_HTPASSWD: ${{ secrets.API_DASHBOARD_BASIC_AUTH_HTPASSWD }}
+          GRAFANA_SLACK_WEBHOOK_URL: ${{ secrets.GRAFANA_SLACK_WEBHOOK_URL }}
+          GRAFANA_INCIDENT_HMAC_SECRET: ${{ secrets.GRAFANA_INCIDENT_HMAC_SECRET }}
+          CODEX_AUTOFIX_GITHUB_TOKEN: ${{ secrets.CODEX_AUTOFIX_GITHUB_TOKEN }}
+          LEGACY_SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           TESTZONE_ROOT: ${{ vars.MACBOOKAIR_TESTZONE_ROOT || '$HOME/buddystudy/monitoring/testzone' }}
           TESTZONE_INFLUX_ORG: ${{ vars.TESTZONE_INFLUX_ORG || 'buddystudy' }}
           TESTZONE_INFLUX_BUCKET: ${{ vars.TESTZONE_INFLUX_BUCKET || 'testzone' }}
@@ -43,10 +49,17 @@ jobs:
             echo "Missing GitHub Actions secret: GRAFANA_ADMIN_PASSWORD" >&2
             exit 1
           fi
-          if [ -z "${API_DASHBOARD_BASIC_AUTH_HTPASSWD}" ]; then
-            echo "Missing GitHub Actions secret: API_DASHBOARD_BASIC_AUTH_HTPASSWD" >&2
+          GRAFANA_SLACK_WEBHOOK_URL="${GRAFANA_SLACK_WEBHOOK_URL:-${LEGACY_SLACK_WEBHOOK_URL:-}}"
+          if [ -z "${GRAFANA_SLACK_WEBHOOK_URL}" ]; then
+            echo "Missing GitHub Actions secret: GRAFANA_SLACK_WEBHOOK_URL (or legacy SLACK_WEBHOOK_URL)" >&2
             exit 1
           fi
+          for required_secret in GRAFANA_INCIDENT_HMAC_SECRET CODEX_AUTOFIX_GITHUB_TOKEN; do
+            if [ -z "${!required_secret:-}" ]; then
+              echo "Missing GitHub Actions secret: ${required_secret}" >&2
+              exit 1
+            fi
+          done
 
           monitoring_root="$(eval echo "${MONITORING_ROOT}")"
           testzone_root="$(eval echo "${TESTZONE_ROOT}")"
@@ -56,9 +69,142 @@ jobs:
           fi
           TESTZONE_INFLUX_TOKEN="$(cat "${testzone_root}/.influx_token")"
 
+          run_with_timeout() {
+            local seconds="$1"
+            shift
+            python3 - "${seconds}" "$@" <<'PY'
+          import os
+          import signal
+          import subprocess
+          import sys
+
+          timeout_seconds = float(sys.argv[1])
+          process = subprocess.Popen(sys.argv[2:], start_new_session=True)
+          try:
+              return_code = process.wait(timeout=timeout_seconds)
+          except subprocess.TimeoutExpired:
+              os.killpg(process.pid, signal.SIGTERM)
+              try:
+                  process.wait(timeout=3)
+              except subprocess.TimeoutExpired:
+                  os.killpg(process.pid, signal.SIGKILL)
+                  process.wait()
+              raise SystemExit(124)
+          raise SystemExit(return_code if return_code >= 0 else 128 - return_code)
+          PY
+          }
+
+          export DOCKER_CLI_HINTS=false
+          docker_ready=false
+          if run_with_timeout 10 docker info >/dev/null 2>&1; then
+            docker_ready=true
+          else
+            echo "Docker daemon is unavailable; restarting Docker Desktop."
+            if ! run_with_timeout 90 \
+              /usr/bin/env -u RUNNER_TRACKING_ID \
+              docker desktop restart --timeout 75; then
+              run_with_timeout 45 \
+                /usr/bin/env -u RUNNER_TRACKING_ID \
+                docker desktop stop --force --timeout 30 \
+                || true
+              run_with_timeout 120 \
+                /usr/bin/env -u RUNNER_TRACKING_ID \
+                docker desktop start --timeout 105 \
+                || /usr/bin/env -u RUNNER_TRACKING_ID open -ga Docker \
+                || true
+            fi
+            for _ in $(seq 1 24); do
+              if run_with_timeout 10 docker info >/dev/null 2>&1; then
+                docker_ready=true
+                break
+              fi
+              sleep 5
+            done
+          fi
+          if [ "${docker_ready}" != true ]; then
+            echo "Docker Desktop did not become ready within the deployment window." >&2
+            exit 1
+          fi
+
+          if [[ ! "${MONITORING_DOCKER_LOG_MAX_SIZE}" =~ ^([1-9][0-9]{0,2})m$ ]]; then
+            echo "MONITORING_DOCKER_LOG_MAX_SIZE must be between 1m and 100m." >&2
+            exit 1
+          fi
+          monitoring_docker_log_max_megabytes="${BASH_REMATCH[1]}"
+          if [ "${monitoring_docker_log_max_megabytes}" -gt 100 ]; then
+            echo "MONITORING_DOCKER_LOG_MAX_SIZE must be between 1m and 100m." >&2
+            exit 1
+          fi
+          if [[ ! "${MONITORING_DOCKER_LOG_MAX_FILE}" =~ ^[1-9][0-9]*$ ]] \
+            || [ "${MONITORING_DOCKER_LOG_MAX_FILE}" -gt 10 ]; then
+            echo "MONITORING_DOCKER_LOG_MAX_FILE must be between 1 and 10." >&2
+            exit 1
+          fi
+          capacity_probe="${monitoring_root}"
+          while [ ! -e "${capacity_probe}" ]; do
+            parent_probe="$(dirname "${capacity_probe}")"
+            if [ "${parent_probe}" = "${capacity_probe}" ]; then
+              break
+            fi
+            capacity_probe="${parent_probe}"
+          done
+          echo "MacBook Air capacity before bounded monitoring deployment:"
+          df -h "${capacity_probe}"
+          df -Pk "${capacity_probe}"
+          run_with_timeout 30 docker system df --verbose || true
+          for diagnostic_path in \
+            "${monitoring_root}/api-dashboard/logs" \
+            "${monitoring_root}/grafana/data" \
+            "${monitoring_root}/loki/data" \
+            "${monitoring_root}/promtail/data" \
+            "${testzone_root}/data" \
+            "${testzone_root}/influxdb"; do
+            if [ -e "${diagnostic_path}" ]; then
+              run_with_timeout 30 du -sh "${diagnostic_path}" \
+                || echo "Capacity scan timed out for ${diagnostic_path}."
+            fi
+          done
+          for managed_container in \
+            buddystudy-loki \
+            buddystudy-incident-receiver \
+            buddystudy-grafana \
+            buddystudy-grafana-gateway \
+            buddystudy-api-dashboard \
+            buddystudy-monitoring-log-rotator \
+            buddystudy-monitoring-promtail; do
+            if docker inspect "${managed_container}" >/dev/null 2>&1; then
+              docker inspect --size \
+                --format 'name={{.Name}} running={{.State.Running}} sizeRw={{.SizeRw}} logDriver={{.HostConfig.LogConfig.Type}} maxSize={{index .HostConfig.LogConfig.Config "max-size"}} maxFile={{index .HostConfig.LogConfig.Config "max-file"}} compress={{index .HostConfig.LogConfig.Config "compress"}}' \
+                "${managed_container}" \
+                || true
+            fi
+          done
+          echo "TestZone-managed dynamic container storage policies:"
+          testzone_dynamic_container_found=false
+          while IFS= read -r testzone_container_id; do
+            if [ -z "${testzone_container_id}" ]; then
+              continue
+            fi
+            testzone_dynamic_container_found=true
+            run_with_timeout 30 docker inspect --size \
+              --format 'name={{.Name}} running={{.State.Running}} sizeRw={{.SizeRw}} logDriver={{.HostConfig.LogConfig.Type}} maxSize={{index .HostConfig.LogConfig.Config "max-size"}} maxFile={{index .HostConfig.LogConfig.Config "max-file"}} compress={{index .HostConfig.LogConfig.Config "compress"}}' \
+              "${testzone_container_id}" \
+              || true
+          done < <(
+            docker ps -a \
+              --filter label=testzone.managed=true \
+              --format '{{.ID}}'
+          )
+          if [ "${testzone_dynamic_container_found}" != true ]; then
+            echo "No TestZone-managed dynamic containers found."
+          fi
+
           mkdir -p \
             "${monitoring_root}/api-dashboard/public" \
             "${monitoring_root}/api-dashboard/logs" \
+            "${monitoring_root}/log-retention" \
+            "${monitoring_root}/incident-receiver/src" \
+            "${monitoring_root}/incident-receiver/data" \
             "${monitoring_root}/grafana/provisioning/datasources" \
             "${monitoring_root}/grafana/provisioning/dashboards" \
             "${monitoring_root}/grafana/provisioning/plugins" \
@@ -78,8 +224,21 @@ jobs:
           loki_config_changed=false
           grafana_config_changed=false
           grafana_gateway_config_changed=false
-          api_dashboard_config_changed=false
+          incident_receiver_config_changed=false
           promtail_config_changed=false
+          api_dashboard_config_hash="$(shasum -a 256 "${MONITORING_SOURCE_DIR}/api-dashboard/nginx.conf" | awk '{print $1}')"
+          api_dashboard_revision_file="${monitoring_root}/api-dashboard/.nginx-config.sha256"
+          grafana_config_hash="$(
+            (
+              cd "${MONITORING_SOURCE_DIR}"
+              find grafana/provisioning grafana/dashboards -type f -print \
+                | LC_ALL=C sort \
+                | while IFS= read -r source_file; do
+                    shasum -a 256 "${source_file}"
+                  done
+            ) | shasum -a 256 | awk '{print $1}'
+          )"
+          grafana_revision_file="${monitoring_root}/grafana/.config.sha256"
 
           if file_differs \
             "${MONITORING_SOURCE_DIR}/loki/config/loki.yml" \
@@ -94,7 +253,12 @@ jobs:
               "${monitoring_root}/grafana/provisioning/datasources/testzone-influx.yml" \
             || file_differs \
               "${MONITORING_SOURCE_DIR}/grafana/provisioning/dashboards/dashboards.yml" \
-              "${monitoring_root}/grafana/provisioning/dashboards/dashboards.yml"; then
+              "${monitoring_root}/grafana/provisioning/dashboards/dashboards.yml" \
+            || ! diff -qr \
+              "${MONITORING_SOURCE_DIR}/grafana/provisioning/alerting" \
+              "${monitoring_root}/grafana/provisioning/alerting" >/dev/null 2>&1 \
+            || ! grep -Fxq "${grafana_config_hash}" \
+              "${grafana_revision_file}" 2>/dev/null; then
             grafana_config_changed=true
           fi
           if file_differs \
@@ -102,10 +266,27 @@ jobs:
             "${monitoring_root}/gateway/grafana-nginx.conf"; then
             grafana_gateway_config_changed=true
           fi
-          if file_differs \
-            "${MONITORING_SOURCE_DIR}/api-dashboard/nginx.conf" \
-            "${monitoring_root}/api-dashboard/nginx.conf"; then
-            api_dashboard_config_changed=true
+          if ! diff -qr \
+            "${MONITORING_SOURCE_DIR}/incident-receiver/src" \
+            "${monitoring_root}/incident-receiver/src" >/dev/null 2>&1; then
+            incident_receiver_config_changed=true
+          fi
+
+          slack_webhook_hash="$(printf '%s' "${GRAFANA_SLACK_WEBHOOK_URL}" | shasum -a 256 | awk '{print $1}')"
+          hmac_secret_hash="$(printf '%s' "${GRAFANA_INCIDENT_HMAC_SECRET}" | shasum -a 256 | awk '{print $1}')"
+          github_token_hash="$(printf '%s' "${CODEX_AUTOFIX_GITHUB_TOKEN}" | shasum -a 256 | awk '{print $1}')"
+          previous_slack_webhook_hash="$(cat "${monitoring_root}/grafana/slack-webhook.sha256" 2>/dev/null || true)"
+          previous_hmac_secret_hash="$(cat "${monitoring_root}/incident-receiver/hmac-secret.sha256" 2>/dev/null || true)"
+          previous_github_token_hash="$(cat "${monitoring_root}/incident-receiver/github-token.sha256" 2>/dev/null || true)"
+          if [ "${slack_webhook_hash}" != "${previous_slack_webhook_hash}" ]; then
+            grafana_config_changed=true
+          fi
+          if [ "${hmac_secret_hash}" != "${previous_hmac_secret_hash}" ]; then
+            grafana_config_changed=true
+            incident_receiver_config_changed=true
+          fi
+          if [ "${github_token_hash}" != "${previous_github_token_hash}" ]; then
+            incident_receiver_config_changed=true
           fi
           if file_differs \
             "${MONITORING_SOURCE_DIR}/promtail/config/promtail.yml" \
@@ -118,6 +299,9 @@ jobs:
             "${monitoring_root}/grafana/provisioning/datasources/"
           cp "${MONITORING_SOURCE_DIR}/grafana/provisioning/dashboards/dashboards.yml" \
             "${monitoring_root}/grafana/provisioning/dashboards/dashboards.yml"
+          find "${monitoring_root}/grafana/provisioning/alerting" -maxdepth 1 -type f -name '*.yml' -delete
+          cp "${MONITORING_SOURCE_DIR}/grafana/provisioning/alerting/"*.yml \
+            "${monitoring_root}/grafana/provisioning/alerting/"
           for source_dashboard in "${MONITORING_SOURCE_DIR}/grafana/dashboards/"*.json; do
             dashboard_name="$(basename "${source_dashboard}")"
             dashboard_target="${monitoring_root}/grafana/dashboards/${dashboard_name}"
@@ -137,6 +321,11 @@ jobs:
             "${monitoring_root}/api-dashboard/public/"
           cp "${MONITORING_SOURCE_DIR}/api-dashboard/nginx.conf" \
             "${monitoring_root}/api-dashboard/nginx.conf"
+          cp "${MONITORING_SOURCE_DIR}/log-retention/rotate-gateway-logs.sh" \
+            "${monitoring_root}/log-retention/rotate-gateway-logs.sh"
+          find "${monitoring_root}/incident-receiver/src" -mindepth 1 -delete
+          cp -R "${MONITORING_SOURCE_DIR}/incident-receiver/src/." \
+            "${monitoring_root}/incident-receiver/src/"
           cp "${MONITORING_SOURCE_DIR}/promtail/config/promtail.yml" \
             "${monitoring_root}/promtail/config/promtail.yml"
           cp "${MONITORING_SOURCE_DIR}/grafana-gateway/nginx.conf" \
@@ -150,10 +339,47 @@ jobs:
             "${monitoring_root}/gateway/grafana-nginx.conf"
           grep -q 'monitoring_access' \
             "${monitoring_root}/api-dashboard/nginx.conf"
-          grep -q 'job: monitoring-access' \
+          grep -Fq 'error_log /var/log/nginx/monitoring-error.log warn;' \
+            "${monitoring_root}/api-dashboard/nginx.conf"
+          /bin/sh -n "${monitoring_root}/log-retention/rotate-gateway-logs.sh"
+          grep -Eq '^[[:space:]]+__path__:[[:space:]]+/var/log/monitoring/monitoring-access\.log[[:space:]]*$' \
             "${monitoring_root}/promtail/config/promtail.yml"
+          grep -Eq '^[[:space:]]+__path__:[[:space:]]+/var/log/monitoring/monitoring-error\.log[[:space:]]*$' \
+            "${monitoring_root}/promtail/config/promtail.yml"
+          grep -Eq '^[[:space:]]+job:[[:space:]]+monitoring-access[[:space:]]*$' \
+            "${monitoring_root}/promtail/config/promtail.yml"
+          grep -Eq '^[[:space:]]+job:[[:space:]]+monitoring-gateway-error[[:space:]]*$' \
+            "${monitoring_root}/promtail/config/promtail.yml"
+          grep -Fq '<%s|Grafana 로그 보기>' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
+          grep -Fq 'coll.Dict "text" $$fallback "blocks" $$blocks | data.ToJSON' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
+          grep -Fq '*에러 클래스* `%s`' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
+          grep -Fq '*Trace / Request ID* `%s`' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
+          grep -Fq '#error (C0BRMLFMH9V)' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
+          if grep -Eq '\{\{[^}]*([^$]|^)\$(blocks|fallback|errorClass|traceID|occurredAt|logsURL|status|message)([^A-Za-z0-9_]|$)' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"; then
+            echo "Grafana contact-point Go template variables must escape provisioning interpolation with double dollars." >&2
+            exit 1
+          fi
+          grep -Fq 'log_from=`{{ sub (unixEpochMillis (__timestamp__)) 120000 }}`' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
+          grep -Fq '| occurred_at!="" | log_from!="" | log_to!="" | logger!="" | error_message!=""' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
+          if grep -Fq '.GeneratorURL' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"; then
+            echo "Grafana Slack payload must not link to the static alert-rule GeneratorURL." >&2
+            exit 1
+          fi
+          grep -Fq 'http://buddystudy-incident-receiver:3030/internal/incidents/grafana' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
+          grep -Fq 'timestampHeader: X-Grafana-Alerting-Timestamp' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
 
-          docker network create buddystudy-monitoring >/dev/null 2>&1 || true
+          run_with_timeout 30 docker network create buddystudy-monitoring >/dev/null 2>&1 || true
 
           docker_config_backup=""
           if [ -f "${HOME}/.docker/config.json" ] && grep -q '"credsStore"[[:space:]]*:' "${HOME}/.docker/config.json"; then
@@ -168,10 +394,12 @@ jobs:
           path.write_text(json.dumps(data, indent=2))
           PY
           fi
-          docker pull nginx:1.27-alpine
-          docker pull grafana/loki:3.3.2
-          docker pull grafana/promtail:3.3.2
-          docker pull grafana/grafana:12.3.0
+          run_with_timeout 300 docker pull nginx:1.27-alpine
+          run_with_timeout 300 docker pull alpine:3.21
+          run_with_timeout 300 docker pull node:22-alpine
+          run_with_timeout 300 docker pull grafana/loki:3.3.2
+          run_with_timeout 300 docker pull grafana/promtail:3.3.2
+          run_with_timeout 300 docker pull grafana/grafana:12.3.0
           if [ -n "${docker_config_backup}" ]; then
             cp "${docker_config_backup}" "${HOME}/.docker/config.json"
           fi
@@ -199,25 +427,113 @@ jobs:
             [ "$(docker inspect --format '{{.State.Running}}' "$1" 2>/dev/null || true)" = "true" ]
           }
 
+          container_has_bounded_local_logs() {
+            local container_name="$1"
+            local log_driver max_size max_file compress
+            log_driver="$(docker inspect --format '{{.HostConfig.LogConfig.Type}}' "${container_name}" 2>/dev/null || true)"
+            max_size="$(docker inspect --format '{{index .HostConfig.LogConfig.Config "max-size"}}' "${container_name}" 2>/dev/null || true)"
+            max_file="$(docker inspect --format '{{index .HostConfig.LogConfig.Config "max-file"}}' "${container_name}" 2>/dev/null || true)"
+            compress="$(docker inspect --format '{{index .HostConfig.LogConfig.Config "compress"}}' "${container_name}" 2>/dev/null || true)"
+            [ "${log_driver}" = "local" ] \
+              && [ "${max_size}" = "${MONITORING_DOCKER_LOG_MAX_SIZE}" ] \
+              && [ "${max_file}" = "${MONITORING_DOCKER_LOG_MAX_FILE}" ] \
+              && [ "${compress}" = "true" ]
+          }
+
+          loki_recreated=false
+          incident_receiver_recreated=false
+          grafana_recreated=false
+          grafana_gateway_recreated=false
+          api_dashboard_recreated=false
+          log_rotator_recreated=false
+          promtail_recreated=false
+
+          loki_recreate_required=false
           if ! container_running buddystudy-loki || [ "${loki_config_changed}" = "true" ]; then
+            loki_recreate_required=true
+          fi
+          if ! container_has_bounded_local_logs buddystudy-loki; then
+            loki_recreate_required=true
+          fi
+          if [ "${loki_recreate_required}" = "true" ]; then
             docker rm -f buddystudy-loki >/dev/null 2>&1 || true
             docker run -d \
               --name buddystudy-loki \
               --network buddystudy-monitoring \
               --restart unless-stopped \
+              --log-driver local \
+              --log-opt "max-size=${MONITORING_DOCKER_LOG_MAX_SIZE}" \
+              --log-opt "max-file=${MONITORING_DOCKER_LOG_MAX_FILE}" \
+              --log-opt compress=true \
               -p "127.0.0.1:${LOKI_PORT}:3100" \
               -v "${monitoring_root}/loki/data:/loki" \
               -v "${monitoring_root}/loki/config/loki.yml:/etc/loki/local-config.yaml:ro" \
               grafana/loki:3.3.2 \
               -config.file=/etc/loki/local-config.yaml
+            loki_recreated=true
           fi
 
+          incident_receiver_recreate_required=false
+          if ! container_running buddystudy-incident-receiver \
+            || [ "${incident_receiver_config_changed}" = "true" ]; then
+            incident_receiver_recreate_required=true
+          fi
+          if ! container_has_bounded_local_logs buddystudy-incident-receiver; then
+            incident_receiver_recreate_required=true
+          fi
+          if [ "${incident_receiver_recreate_required}" = "true" ]; then
+            docker rm -f buddystudy-incident-receiver >/dev/null 2>&1 || true
+            docker run -d \
+              --name buddystudy-incident-receiver \
+              --network buddystudy-monitoring \
+              --restart unless-stopped \
+              --log-driver local \
+              --log-opt "max-size=${MONITORING_DOCKER_LOG_MAX_SIZE}" \
+              --log-opt "max-file=${MONITORING_DOCKER_LOG_MAX_FILE}" \
+              --log-opt compress=true \
+              --read-only \
+              --tmpfs /tmp \
+              --cap-drop ALL \
+              --security-opt no-new-privileges \
+              -e INCIDENT_RECEIVER_PORT=3030 \
+              -e INCIDENT_DATA_DIR=/data \
+              -e GRAFANA_INCIDENT_HMAC_SECRET="${GRAFANA_INCIDENT_HMAC_SECRET}" \
+              -e CODEX_AUTOFIX_GITHUB_TOKEN="${CODEX_AUTOFIX_GITHUB_TOKEN}" \
+              -e GITHUB_AUTOFIX_REPOSITORY=ghkdqhrbals/buddy-studdy \
+              -e GITHUB_AUTOFIX_EVENT_TYPE=codex-incident-autofix \
+              -e LOKI_BASE_URL=http://buddystudy-loki:3100 \
+              -e DEPLOYMENT_HISTORY_URL=http://buddystudy-testzone-service:3020 \
+              -v "${monitoring_root}/incident-receiver/src:/app/src:ro" \
+              -v "${monitoring_root}/incident-receiver/data:/data" \
+              node:22-alpine \
+              node /app/src/server.mjs
+            incident_receiver_recreated=true
+          fi
+          printf '%s' "${hmac_secret_hash}" \
+            > "${monitoring_root}/incident-receiver/hmac-secret.sha256"
+          printf '%s' "${github_token_hash}" \
+            > "${monitoring_root}/incident-receiver/github-token.sha256"
+          chmod 0600 \
+            "${monitoring_root}/incident-receiver/hmac-secret.sha256" \
+            "${monitoring_root}/incident-receiver/github-token.sha256"
+
+          grafana_recreate_required=false
           if ! container_running buddystudy-grafana || [ "${grafana_config_changed}" = "true" ]; then
+            grafana_recreate_required=true
+          fi
+          if ! container_has_bounded_local_logs buddystudy-grafana; then
+            grafana_recreate_required=true
+          fi
+          if [ "${grafana_recreate_required}" = "true" ]; then
             docker rm -f buddystudy-grafana >/dev/null 2>&1 || true
             docker run -d \
               --name buddystudy-grafana \
               --network buddystudy-monitoring \
               --restart unless-stopped \
+              --log-driver local \
+              --log-opt "max-size=${MONITORING_DOCKER_LOG_MAX_SIZE}" \
+              --log-opt "max-file=${MONITORING_DOCKER_LOG_MAX_FILE}" \
+              --log-opt compress=true \
               -e GF_SECURITY_ADMIN_USER=admin \
               -e GF_SECURITY_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD}" \
               -e GF_USERS_ALLOW_SIGN_UP=false \
@@ -228,11 +544,17 @@ jobs:
               -e TESTZONE_INFLUX_TOKEN="${TESTZONE_INFLUX_TOKEN}" \
               -e TESTZONE_INFLUX_ORG="${TESTZONE_INFLUX_ORG}" \
               -e TESTZONE_INFLUX_BUCKET="${TESTZONE_INFLUX_BUCKET}" \
+              -e GRAFANA_SLACK_WEBHOOK_URL="${GRAFANA_SLACK_WEBHOOK_URL}" \
+              -e GRAFANA_INCIDENT_HMAC_SECRET="${GRAFANA_INCIDENT_HMAC_SECRET}" \
               -v "${grafana_volume}:/var/lib/grafana" \
               -v "${monitoring_root}/grafana/provisioning:/etc/grafana/provisioning:ro" \
               -v "${monitoring_root}/grafana/dashboards:/var/lib/grafana/dashboards:ro" \
               grafana/grafana:12.3.0
+            grafana_recreated=true
           fi
+          printf '%s' "${slack_webhook_hash}" \
+            > "${monitoring_root}/grafana/slack-webhook.sha256"
+          chmod 0600 "${monitoring_root}/grafana/slack-webhook.sha256"
 
           grafana_password_reset=false
           for attempt in $(seq 1 15); do
@@ -249,48 +571,122 @@ jobs:
             echo "Failed to synchronize the Grafana admin password." >&2
             exit 1
           fi
+          grafana_revision_temp="${grafana_revision_file}.tmp"
+          printf '%s\n' "${grafana_config_hash}" > "${grafana_revision_temp}"
+          mv -f "${grafana_revision_temp}" "${grafana_revision_file}"
 
+          grafana_gateway_recreate_required=false
           if ! container_running buddystudy-grafana-gateway \
             || [ "${grafana_gateway_config_changed}" = "true" ]; then
+            grafana_gateway_recreate_required=true
+          fi
+          if ! container_has_bounded_local_logs buddystudy-grafana-gateway; then
+            grafana_gateway_recreate_required=true
+          fi
+          if [ "${grafana_gateway_recreate_required}" = "true" ]; then
             docker rm -f buddystudy-grafana-gateway >/dev/null 2>&1 || true
             docker run -d \
               --name buddystudy-grafana-gateway \
               --network buddystudy-monitoring \
               --restart unless-stopped \
+              --log-driver local \
+              --log-opt "max-size=${MONITORING_DOCKER_LOG_MAX_SIZE}" \
+              --log-opt "max-file=${MONITORING_DOCKER_LOG_MAX_FILE}" \
+              --log-opt compress=true \
               -p "127.0.0.1:${GRAFANA_PORT}:80" \
               -v "${monitoring_root}/gateway/grafana-nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
               nginx:1.27-alpine
+            grafana_gateway_recreated=true
           fi
 
-          if ! container_running buddystudy-api-dashboard \
-            || [ "${api_dashboard_config_changed}" = "true" ]; then
-            docker rm -f buddystudy-api-dashboard >/dev/null 2>&1 || true
-            docker run -d \
-              --name buddystudy-api-dashboard \
-              --network buddystudy-monitoring \
-              --restart unless-stopped \
-              -p "127.0.0.1:${API_DASHBOARD_PORT}:80" \
-              -e API_DASHBOARD_BASIC_AUTH_HTPASSWD="${API_DASHBOARD_BASIC_AUTH_HTPASSWD}" \
-              -v "${monitoring_root}/api-dashboard/public:/usr/share/nginx/html:ro" \
-              -v "${monitoring_root}/api-dashboard/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
-              -v "${monitoring_root}/api-dashboard/logs:/var/log/nginx" \
-              nginx:1.27-alpine \
-              /bin/sh -c 'printf "%s\n" "$API_DASHBOARD_BASIC_AUTH_HTPASSWD" > /etc/nginx/.htpasswd && nginx -g "daemon off;"'
-          fi
+          # Maintenance is published exclusively through backend-managed
+          # Firebase Remote Config. Remove the retired local status server
+          # while preserving its on-disk data for manual recovery.
+          docker rm -f buddystudy-service-status >/dev/null 2>&1 || true
 
+          # Always replace the gateway after Docker is ready. Docker Desktop can
+          # restart and auto-start this container while leaving its bridge
+          # endpoint unable to reach the backend. A scoped replacement creates
+          # a fresh endpoint without touching the shared network or data stores.
+          run_with_timeout 30 docker run --rm \
+            -v "${monitoring_root}/api-dashboard/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+            nginx:1.27-alpine \
+            nginx -t
+          docker rm -f buddystudy-monitoring-log-rotator >/dev/null 2>&1 || true
+          docker rm -f buddystudy-api-dashboard >/dev/null 2>&1 || true
+          docker run -d \
+            --name buddystudy-api-dashboard \
+            --network buddystudy-monitoring \
+            --restart unless-stopped \
+            --log-driver local \
+            --log-opt "max-size=${MONITORING_DOCKER_LOG_MAX_SIZE}" \
+            --log-opt "max-file=${MONITORING_DOCKER_LOG_MAX_FILE}" \
+            --log-opt compress=true \
+            -p "127.0.0.1:${API_DASHBOARD_PORT}:80" \
+            -p "127.0.0.1:${REDISSTREAMSCOPE_PORT}:8082" \
+            -v "${monitoring_root}/api-dashboard/public:/usr/share/nginx/html:ro" \
+            -v "${monitoring_root}/api-dashboard/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+            -v "${monitoring_root}/api-dashboard/logs:/var/log/nginx" \
+            nginx:1.27-alpine
+          api_dashboard_recreated=true
+          api_dashboard_revision_temp="${api_dashboard_revision_file}.tmp"
+          printf '%s\n' "${api_dashboard_config_hash}" > "${api_dashboard_revision_temp}"
+          mv -f "${api_dashboard_revision_temp}" "${api_dashboard_revision_file}"
+
+          promtail_recreate_required=false
           if ! container_running buddystudy-monitoring-promtail \
             || [ "${promtail_config_changed}" = "true" ]; then
+            promtail_recreate_required=true
+          fi
+          if ! container_has_bounded_local_logs buddystudy-monitoring-promtail; then
+            promtail_recreate_required=true
+          fi
+          if [ "${promtail_recreate_required}" = "true" ]; then
             docker rm -f buddystudy-monitoring-promtail >/dev/null 2>&1 || true
             docker run -d \
               --name buddystudy-monitoring-promtail \
               --network buddystudy-monitoring \
               --restart unless-stopped \
+              --log-driver local \
+              --log-opt "max-size=${MONITORING_DOCKER_LOG_MAX_SIZE}" \
+              --log-opt "max-file=${MONITORING_DOCKER_LOG_MAX_FILE}" \
+              --log-opt compress=true \
               -v "${monitoring_root}/api-dashboard/logs:/var/log/monitoring:ro" \
               -v "${monitoring_root}/promtail/config/promtail.yml:/etc/promtail/config.yml:ro" \
               -v "${monitoring_root}/promtail/data:/var/lib/promtail" \
               grafana/promtail:3.3.2 \
               -config.file=/etc/promtail/config.yml
+            promtail_recreated=true
           fi
+
+          # Start the collector before the rotator. The sidecar also waits one
+          # minute before its first rename so Promtail can attach to the active
+          # inodes after Docker Desktop or this scoped gateway restarts.
+          docker run -d \
+            --name buddystudy-monitoring-log-rotator \
+            --network none \
+            --pid container:buddystudy-api-dashboard \
+            --restart unless-stopped \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --log-driver local \
+            --log-opt "max-size=${MONITORING_DOCKER_LOG_MAX_SIZE}" \
+            --log-opt "max-file=${MONITORING_DOCKER_LOG_MAX_FILE}" \
+            --log-opt compress=true \
+            --entrypoint /bin/sh \
+            -e LOG_DIRECTORY=/var/log/nginx \
+            -e ACCESS_LOG_ROTATE_BYTES=8388608 \
+            -e ERROR_LOG_ROTATE_BYTES=2097152 \
+            -e ROTATED_LOG_COUNT=3 \
+            -e LOG_ROTATE_CHECK_INTERVAL_SECONDS=30 \
+            -e LOG_ROTATE_STARTUP_GRACE_SECONDS=60 \
+            -e NGINX_MASTER_PID=1 \
+            -v "${monitoring_root}/log-retention/rotate-gateway-logs.sh:/opt/monitoring/rotate-gateway-logs.sh:ro" \
+            -v "${monitoring_root}/api-dashboard/logs:/var/log/nginx" \
+            alpine:3.21 \
+            /opt/monitoring/rotate-gateway-logs.sh
+          log_rotator_recreated=true
 
           sleep 2
           echo "Grafana startup log:"
@@ -299,11 +695,15 @@ jobs:
           docker logs --tail 80 buddystudy-grafana-gateway || true
           echo "Monitoring gateway startup log:"
           docker logs --tail 80 buddystudy-api-dashboard || true
+          echo "Monitoring log rotator startup log:"
+          docker logs --tail 80 buddystudy-monitoring-log-rotator || true
           echo "Monitoring access collector startup log:"
           docker logs --tail 80 buddystudy-monitoring-promtail || true
+          echo "Incident receiver startup log:"
+          docker logs --tail 80 buddystudy-incident-receiver || true
 
-          echo "MacBook Air monitoring module is running."
-          echo "Restarted components: loki=${loki_config_changed}, grafana=${grafana_config_changed}, grafana_gateway=${grafana_gateway_config_changed}, api_dashboard=${api_dashboard_config_changed}, promtail=${promtail_config_changed}"
+          echo "MacBook Air monitoring container configuration submitted."
+          echo "Recreated components: loki=${loki_recreated}, grafana=${grafana_recreated}, grafana_gateway=${grafana_gateway_recreated}, api_dashboard=${api_dashboard_recreated}, log_rotator=${log_rotator_recreated}, incident_receiver=${incident_receiver_recreated}, promtail=${promtail_recreated}"
           echo "API Logs: http://127.0.0.1:${API_DASHBOARD_PORT}"
           echo "TestZone: http://127.0.0.1:${API_DASHBOARD_PORT}/testzone.html"
           echo "Grafana: http://127.0.0.1:${GRAFANA_PORT}/"

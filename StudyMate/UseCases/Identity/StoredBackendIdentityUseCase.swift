@@ -15,6 +15,10 @@ struct StoredBackendIdentityUseCase {
         repository.saveRemotePushRegistration(registration)
     }
 
+    func installationIdentifier() -> String {
+        repository.loadOrCreateBackendInstallationIdentifier()
+    }
+
     func hasAccessToken() -> Bool {
         loadRegistration()?.hasAccessToken == true
     }

@@ -58,8 +58,8 @@ const els = {
   timeSortButton: document.querySelector("#timeSortButton"),
 };
 
-const API_EXCHANGE_QUERY = '{container=~".+"} |= "api_exchange"';
-const TIMELINE_QUERY = 'sum(count_over_time(({container=~".+"} |= "api_exchange")[$__range]))';
+const API_EXCHANGE_QUERY = '{app="buddystudy"} |= "api_exchange"';
+const TIMELINE_QUERY = 'sum(count_over_time(({app="buddystudy"} |= "api_exchange")[$__range]))';
 
 function nowMs() {
   return Date.now();
@@ -368,12 +368,20 @@ function jsonPanel(title, value) {
 }
 
 function stackPanel(error) {
+  const exception = error.exceptionType
+    ? `${error.exceptionType}${error.exceptionMessage && error.exceptionMessage !== "-" ? `: ${error.exceptionMessage}` : ""}`
+    : error.message || "";
+  const rootCause = error.rootCauseType && error.rootCauseType !== error.exceptionType
+    ? `${error.rootCauseType}${error.rootCauseMessage && error.rootCauseMessage !== "-" ? `: ${error.rootCauseMessage}` : ""}`
+    : "";
   return `
     <article class="stack-panel">
       <div class="stack-heading">
-        <h3>Error Stack Trace</h3>
-        <span>${escapeHtml(error.code || "ERROR")} · ${escapeHtml(error.message || "")}</span>
+        <h3>Error Detail</h3>
+        <span>${escapeHtml(error.code || "ERROR")} · ${escapeHtml(exception)}</span>
       </div>
+      ${rootCause ? `<p><strong>Root cause:</strong> ${escapeHtml(rootCause)}</p>` : ""}
+      ${error.origin ? `<p><strong>Origin:</strong> <code>${escapeHtml(error.origin)}</code></p>` : ""}
       <pre>${escapeHtml(error.stack || error.rawLine)}</pre>
     </article>
   `;
@@ -417,7 +425,7 @@ async function loadDetails(request) {
   const requestMs = Number(BigInt(request.nanoseconds) / 1_000_000n);
   const startNs = ns(requestMs - 10 * 60 * 1000);
   const endNs = ns(requestMs + 10 * 60 * 1000);
-  const query = `{container=~".+"} |= "${request.requestId}"`;
+  const query = `{app="buddystudy"} |= "${request.requestId}"`;
   const values = await lokiQueryRange(query, { startNs, endNs, limit: 200, direction: "forward" });
   const logs = values.map(parseRelatedLog).sort((a, b) => Number(BigInt(a.nanoseconds) - BigInt(b.nanoseconds)));
   const errors = values

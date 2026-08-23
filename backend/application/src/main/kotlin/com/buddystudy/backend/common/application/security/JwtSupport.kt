@@ -1,7 +1,7 @@
 package com.buddystudy.backend.common.application.security
 
+import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.fasterxml.jackson.core.type.TypeReference
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import java.math.BigInteger
 import java.security.MessageDigest
 import java.security.PrivateKey
@@ -11,7 +11,7 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
 object JwtSupport {
-    private val mapper = jacksonObjectMapper()
+    private val mapper = JsonMapperProvider.mapper
     private val mapType = object : TypeReference<Map<String, Any?>>() {}
     private val urlEncoder = Base64.getUrlEncoder().withoutPadding()
     private val urlDecoder = Base64.getUrlDecoder()

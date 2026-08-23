@@ -17,12 +17,22 @@ interface UserPort {
 interface DevicePort {
     suspend fun save(entity: DeviceEntity): DeviceEntity
     suspend fun findByDeviceId(deviceId: String): DeviceEntity?
+    suspend fun findByInstallationKeyHash(installationKeyHash: String): DeviceEntity?
     suspend fun findAllByUserId(userId: Long): List<DeviceEntity>
 }
 
 interface AccountDeletionPort {
-    suspend fun deleteAccountData(userId: Long, currentDeviceId: String, now: Instant)
+    suspend fun beginWithdrawal(userId: Long, now: Instant): AccountWithdrawalSnapshot
+    suspend fun deleteAccountData(
+        userId: Long,
+        deviceIds: List<String>,
+        withdrawnAt: Instant,
+    )
 }
+
+data class AccountWithdrawalSnapshot(
+    val deviceIds: List<String>,
+)
 
 interface UserDevicePort {
     suspend fun save(entity: UserDeviceEntity): UserDeviceEntity
@@ -30,6 +40,7 @@ interface UserDevicePort {
     suspend fun findByIdAndUserId(id: Long, userId: Long): UserDeviceEntity?
     suspend fun findActiveByUserId(userId: Long): List<UserDeviceEntity>
     suspend fun hasActiveSession(userId: Long, deviceId: String): Boolean
+    suspend fun revokeOtherActiveSessionsForDevice(deviceId: String, userId: Long, revokedAt: Instant): Int
 }
 
 interface EmailVerificationCodePort {

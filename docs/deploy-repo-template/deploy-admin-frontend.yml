@@ -1,6 +1,6 @@
 name: Deploy BuddyStudy Admin Frontend
 
-on:
+"on":
   repository_dispatch:
     types:
       - admin-frontend-image-published
@@ -12,16 +12,23 @@ on:
         type: string
 
 concurrency:
-  group: deploy-admin-frontend
+  group: deploy-admin-frontend-ec2
   cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   deploy_admin_frontend:
-    name: Deploy Admin Frontend
-    runs-on: [self-hosted, Linux, ARM64, ec2, rsc-deploy]
+    name: Submit Admin Frontend Image on Backend Host
+    runs-on: [self-hosted, Linux, ARM64, ec2, buddystudy]
     timeout-minutes: 10
     env:
       IMAGE_REF: ${{ github.event.client_payload.image || inputs.image }}
+      CONTAINER: buddystudy-admin-frontend
+      NETWORK: buddystudy-swarm-net
+      BACKEND_UPSTREAM: http://buddystudy_backend:8080
+      ENVIRONMENT: ec2
 
     steps:
       - name: Validate input
@@ -32,34 +39,46 @@ jobs:
             exit 1
           fi
 
-      - name: Deploy admin frontend container
+      - name: Submit admin frontend image
         env:
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
         run: |
           set -euo pipefail
+          if [ -z "${GHCR_USERNAME}" ] || [ -z "${GHCR_TOKEN}" ]; then
+            echo "Missing GHCR deployment credentials." >&2
+            exit 1
+          fi
 
           echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
           docker pull "${IMAGE_REF}"
-          docker network create buddystudy-net >/dev/null 2>&1 || true
-
-          docker rm -f buddystudy-admin-frontend >/dev/null 2>&1 || true
+          docker network inspect "${NETWORK}" >/dev/null 2>&1 \
+            || docker network create "${NETWORK}" >/dev/null
+          docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
           docker run -d \
-            --name buddystudy-admin-frontend \
-            --network buddystudy-net \
+            --name "${CONTAINER}" \
+            --network "${NETWORK}" \
             --restart unless-stopped \
+            -e "BACKEND_UPSTREAM=${BACKEND_UPSTREAM}" \
             "${IMAGE_REF}"
 
-          for attempt in $(seq 1 20); do
-            if docker inspect -f '{{.State.Running}}' buddystudy-admin-frontend 2>/dev/null | grep -qx true; then
-              sleep 2
-              if docker inspect -f '{{.State.Running}}' buddystudy-admin-frontend 2>/dev/null | grep -qx true; then
-                exit 0
-              fi
-            fi
-            sleep 2
-          done
+          applied_image="$(docker inspect --format '{{.Config.Image}}' "${CONTAINER}")"
+          if [ "${applied_image}" != "${IMAGE_REF}" ]; then
+            echo "Container config image mismatch: expected ${IMAGE_REF}, found ${applied_image:-<missing>}." >&2
+            exit 1
+          fi
+          echo "Container config accepted image: ${applied_image}"
 
-          echo "Admin frontend did not stay running." >&2
-          docker logs buddystudy-admin-frontend || true
-          exit 1
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Admin Frontend Deployment"
+            echo ""
+            echo "- Target: \`${ENVIRONMENT}\`"
+            echo "- Container: \`${CONTAINER}\`"
+            echo "- Network: \`${NETWORK}\`"
+            echo "- Image: \`${IMAGE_REF}\`"
+            echo "- Submission: \`${{ job.status }}\`"
+            echo "- Runtime readiness: monitored by Grafana, not gated by GitHub Actions"
+          } >> "${GITHUB_STEP_SUMMARY}"

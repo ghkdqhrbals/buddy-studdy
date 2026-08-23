@@ -16,6 +16,7 @@ enum class ApiErrorCode(
     AUTH_INVALID_ACCESS_TOKEN(HttpStatus.UNAUTHORIZED, 105, "error.auth.invalid_access_token", "Access token is invalid."),
     AUTH_INVALID_DEVICE_CREDENTIALS(HttpStatus.UNAUTHORIZED, 106, "error.auth.invalid_device_credentials", "Device credentials are invalid."),
     DEVICE_NOT_FOUND(HttpStatus.NOT_FOUND, 107, "error.device.not_found", "Device registration was not found."),
+    AUTH_INVALID_EMAIL_CREDENTIALS(HttpStatus.UNAUTHORIZED, 108, "error.auth.invalid_email_credentials", "Email credentials are invalid."),
 
     OPENAI_API_KEY_MISSING(HttpStatus.BAD_REQUEST, 200, "error.openai.api_key_missing", "OpenAI API key is missing."),
     STUDY_SETTINGS_MISSING(HttpStatus.NOT_FOUND, 201, "error.study.settings_missing", "Study settings are missing."),
@@ -36,10 +37,76 @@ enum class ApiErrorCode(
     RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, 401, "error.resource.not_found", "Resource was not found."),
 
     VALIDATION_ERROR(HttpStatus.UNPROCESSABLE_ENTITY, 500, "error.validation", "Request validation failed."),
+    STUDY_PENDING_QUESTION_EXISTS(
+        HttpStatus.CONFLICT,
+        501,
+        "error.study.pending_question_exists",
+        "A pending question already exists for this study.",
+    ),
+    DISPLAY_NAME_TAKEN(
+        HttpStatus.CONFLICT,
+        502,
+        "error.profile.display_name_taken",
+        "Display name is already in use.",
+    ),
+    ANSWER_ALREADY_SUBMITTED(
+        HttpStatus.CONFLICT,
+        503,
+        "error.answer.already_submitted",
+        "An answer has already been submitted for this question.",
+    ),
+    METHOD_NOT_ALLOWED(
+        HttpStatus.METHOD_NOT_ALLOWED,
+        504,
+        "error.request.method_not_allowed",
+        "Request method is not supported.",
+    ),
+    BILLING_ACCOUNT_REQUIRED(
+        HttpStatus.FORBIDDEN,
+        505,
+        "error.billing.account_required",
+        "A registered account is required for purchases.",
+    ),
+    BILLING_TRANSACTION_INVALID(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        506,
+        "error.billing.transaction_invalid",
+        "The App Store transaction is invalid.",
+    ),
+    BILLING_TRANSACTION_CONFLICT(
+        HttpStatus.CONFLICT,
+        507,
+        "error.billing.transaction_conflict",
+        "The App Store transaction belongs to another account or invoice.",
+    ),
+    BILLING_ACTION_NOT_ALLOWED(
+        HttpStatus.CONFLICT,
+        508,
+        "error.billing.action_not_allowed",
+        "The requested billing action is not allowed in the current state.",
+    ),
+    BILLING_CONFIGURATION_ERROR(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        509,
+        "error.billing.configuration",
+        "Billing is temporarily unavailable.",
+    ),
+    BILLING_APPLICATION_FAILED(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        510,
+        "error.billing.application_failed",
+        "The verified payment could not be applied to the membership.",
+    ),
 
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, 900, "error.internal.server_error", "Internal server error."),
     EMAIL_DELIVERY_FAILED(HttpStatus.SERVICE_UNAVAILABLE, 901, "error.email.delivery_failed", "Email delivery failed."),
     SERVER_BUSY(HttpStatus.SERVICE_UNAVAILABLE, 902, "error.server.busy", "Server is temporarily busy."),
+    SERVICE_UNDER_MAINTENANCE(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        903,
+        "error.service.under_maintenance",
+        "Service is temporarily unavailable for maintenance.",
+    ),
     ;
 }
 

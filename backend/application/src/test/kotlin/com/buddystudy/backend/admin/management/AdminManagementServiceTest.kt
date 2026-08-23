@@ -51,11 +51,24 @@ class AdminManagementServiceTest {
         }.isInstanceOf(ApiException::class.java)
     }
 
+    @Test
+    fun `administrator can override only the current quota period`() = runBlocking {
+        val port = FakeAdminManagementPort()
+        val service = AdminManagementService(port)
+
+        val result = service.setCurrentPeriodQuestionLimit(userId = 7, questionLimitOverride = 45)
+
+        assertThat(port.lastCurrentPeriodLimit).isEqualTo(45)
+        assertThat(result.currentPeriodQuestionLimitOverride).isEqualTo(45)
+        assertThat(result.monthlyLimit).isEqualTo(45)
+    }
+
     private class FakeAdminManagementPort : AdminManagementPort {
         var lastQuery: String? = null
         var lastLimit = 0
         var lastOffset = 0
         var lastAssignment: AssignUserPlanCommand? = null
+        var lastCurrentPeriodLimit: Int? = null
 
         override suspend fun users(query: String?, limit: Int, offset: Int): AdminUserPageResponse {
             lastQuery = query
@@ -82,7 +95,21 @@ class AdminManagementServiceTest {
             return summary(monthlyLimit = command.monthlyQuestionLimitOverride ?: 30)
         }
 
-        private fun summary(monthlyLimit: Int = 30) = AdminUserSummary(
+        override suspend fun setCurrentPeriodQuestionLimit(
+            userId: Long,
+            questionLimitOverride: Int?,
+        ): AdminUserSummary {
+            lastCurrentPeriodLimit = questionLimitOverride
+            return summary(
+                monthlyLimit = questionLimitOverride ?: 30,
+                currentPeriodQuestionLimitOverride = questionLimitOverride,
+            )
+        }
+
+        private fun summary(
+            monthlyLimit: Int = 30,
+            currentPeriodQuestionLimitOverride: Int? = null,
+        ) = AdminUserSummary(
             id = 7,
             email = "user@example.com",
             displayName = "Jamma",
@@ -92,8 +119,10 @@ class AdminManagementServiceTest {
             tierDescription = "Free",
             monthlyLimit = monthlyLimit,
             monthlyLimitOverride = null,
+            currentPeriodQuestionLimitOverride = currentPeriodQuestionLimitOverride,
             usedCount = 0,
             remainingCount = monthlyLimit,
+            periodStartedAt = Instant.parse("2026-07-01T00:00:00Z"),
             resetAt = Instant.parse("2026-08-01T00:00:00Z"),
             createdAt = Instant.parse("2026-07-01T00:00:00Z"),
         )

@@ -6,23 +6,74 @@ import com.buddystudy.backend.study.application.model.StudyPageResponse
 import com.buddystudy.backend.study.application.model.StudyRecordResponse
 import com.buddystudy.backend.study.application.model.StudyRoomResponse
 import com.buddystudy.backend.study.application.model.StudyTopicSuggestionsResponse
+import com.buddystudy.backend.study.application.model.QuestionGenerationAcceptedResponse
+import com.buddystudy.backend.study.application.model.QuestionGenerationProcessResponse
+import com.buddystudy.backend.study.application.model.QuestionGenerationRequestedEvent
+import com.buddystudy.backend.study.application.model.QuestionGenerationRollbackRequestedEvent
 
 interface StudyUseCase {
-    suspend fun createQuestion(principal: Principal, studyId: Long): StudyRecordResponse
-    suspend fun answer(principal: Principal, recordId: Long, answer: String, grade: Boolean): StudyRecordResponse
+    suspend fun answer(
+        principal: Principal,
+        recordId: Long,
+        answer: String,
+        sourceLanguage: String? = null,
+        grade: Boolean,
+    ): StudyRecordResponse
     suspend fun skip(principal: Principal, id: Long): StudyRecordResponse
     suspend fun delete(principal: Principal, id: Long)
+    suspend fun clear(principal: Principal)
     suspend fun publicity(principal: Principal, id: Long, isPublic: Boolean): StudyRecordResponse
 }
 
+interface RequestQuestionGenerationUseCase {
+    suspend fun request(
+        principal: Principal,
+        studyId: Long,
+        idempotencyKey: String,
+    ): QuestionGenerationAcceptedResponse
+}
+
+interface GetQuestionGenerationProcessUseCase {
+    suspend fun get(principal: Principal, correlationId: String): QuestionGenerationProcessResponse
+}
+
+interface ProcessQuestionGenerationUseCase {
+    suspend fun process(event: QuestionGenerationRequestedEvent, streamKey: String = "test")
+}
+
+interface ProcessQuestionGenerationRollbackUseCase {
+    suspend fun process(event: QuestionGenerationRollbackRequestedEvent, streamKey: String = "test")
+}
+
 interface BrowseRecordsUseCase {
-    suspend fun records(principal: Principal, limit: Int, offset: Int, query: String? = null, language: String = "ko"): RecordsPageResponse
+    suspend fun records(
+        principal: Principal,
+        limit: Int,
+        offset: Int,
+        query: String? = null,
+        studyId: Long? = null,
+        language: String = "ko",
+        view: String = "localized",
+    ): RecordsPageResponse
     suspend fun pending(principal: Principal, limit: Int, offset: Int): RecordsPageResponse
-    suspend fun record(principal: Principal, id: Long, language: String = "ko"): StudyRecordResponse
+    suspend fun record(
+        principal: Principal,
+        id: Long,
+        language: String = "ko",
+        view: String = "localized",
+    ): StudyRecordResponse
 }
 
 interface StudySyncUseCase {
     suspend fun study(principal: Principal, limit: Int, offset: Int, query: String? = null): StudyPageResponse
+    suspend fun study(
+        principal: Principal,
+        limit: Int,
+        offset: Int,
+        query: String? = null,
+        language: String,
+    ): StudyPageResponse = study(principal, limit, offset, query)
+    suspend fun study(principal: Principal, studyId: Long, language: String): StudyRoomResponse
     suspend fun createStudy(principal: Principal, command: CreateStudyCommand): StudyRoomResponse
     suspend fun createStudyTopic(
         principal: Principal,

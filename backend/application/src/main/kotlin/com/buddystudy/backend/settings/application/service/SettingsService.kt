@@ -11,13 +11,18 @@ import com.buddystudy.backend.settings.application.port.inbound.ScheduleCommand
 import com.buddystudy.backend.settings.application.port.inbound.ScheduleItemCommand
 import com.buddystudy.backend.settings.application.port.inbound.SettingsUseCase
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
+import com.buddystudy.backend.study.application.service.StudyTreeSelector
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
+import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.study.domain.StudyRoomSettings
 import com.buddystudy.study.domain.StudyRoomSettingsCommand
 import com.buddystudy.study.domain.StudyRoomSettingsState
 import com.buddystudy.study.domain.StudyRoomSettingsUpdate
+import com.buddystudy.study.domain.QuestionLanguage
+import com.buddystudy.common.domain.SupportedLanguage
 import org.springframework.http.HttpStatus
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
@@ -27,13 +32,15 @@ class SettingsService(
     private val studies: StudyPort,
     private val users: UserPort,
     private val cipher: KeyCipher,
+    private val properties: BuddyStudyProperties,
 ) : SettingsUseCase {
+    private val log = LoggerFactory.getLogger(javaClass)
+
     @Transactional
     override suspend fun upsertSchedule(principal: Principal, command: ScheduleCommand): ScheduleResponse {
         val now = Instant.now()
         val encryptedKey = cipher.encrypt(command.openaiApiKey)
         val items = command.schedules
-            ?.takeIf { it.isNotEmpty() }
             ?: command.topic.trim().takeIf { it.isNotEmpty() }?.let { topic ->
                 listOf(ScheduleItemCommand(topic, command.difficultyLevel, command.customPrompt, command.openaiModel))
             }.orEmpty()
@@ -41,19 +48,28 @@ class SettingsService(
             if (encryptedKey != null) {
                 user.openaiApiKeyCipher = encryptedKey
             }
-            user.appLanguage = command.appLanguage.ifBlank { user.appLanguage }
+            user.appLanguage = SupportedLanguage.fromLocale(
+                QuestionLanguage.normalize(command.appLanguage.ifBlank { user.appLanguage.databaseValue }),
+            )
             user.updatedAt = now
             users.save(user)
         }
         var next: Instant? = null
+        val allUserStudies = studies.findAllByUserId(principal.userId).toMutableList()
         val studiesByTopic = studies.findByUserIdAndTopics(principal.userId, items.map { it.topic }.distinct())
             .associateBy { it.topic }
             .toMutableMap()
         items.forEach { item ->
-            val study = studiesByTopic.getOrPut(item.topic) {
-                StudyEntity(deviceId = principal.deviceId, userId = principal.userId, topic = item.topic, createdAt = now)
+            val study = studiesByTopic[item.topic]
+            if (study == null) {
+                log.warn(
+                    "study_schedule_unknown_topic_ignored userId={} deviceId={} topic={}",
+                    principal.userId,
+                    principal.deviceId,
+                    item.topic,
+                )
+                return@forEach
             }
-            val isNewStudy = study.id == 0L
             val previousEnabled = study.enabled
             val previousIntervalMinutes = study.intervalMinutes
             val previousNextDueAt = study.nextDueAt
@@ -72,11 +88,19 @@ class SettingsService(
                 anonymous = principal.anonymous,
                 now = now,
             ))
-            if (study.shouldReschedule(isNewStudy, previousEnabled, previousIntervalMinutes, previousNextDueAt)) {
+            if (study.shouldReschedule(false, previousEnabled, previousIntervalMinutes, previousNextDueAt)) {
                 study.reschedule(now)
+            }
+            if (command.enabled && StudyTreeSelector.nextActiveTopic(study, allUserStudies + study) == null) {
+                study.activeForQuestions = true
+                study.lastError = null
+                study.updatedAt = now
             }
             val saved = studies.save(study)
             studiesByTopic[item.topic] = saved
+            if (allUserStudies.none { it.id == saved.id }) {
+                allUserStudies += saved
+            }
             next = saved.nextDueAt
         }
         return ScheduleResponse(principal.deviceId, command.enabled, next)
@@ -85,7 +109,9 @@ class SettingsService(
     @Transactional(readOnly = true)
     override suspend fun settings(principal: Principal): StudySettingsResponse {
         val user = users.findById(principal.userId)
-        return studies.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId).toSettings(user)
+        return studies.findFirstRootByUserIdOrderByUpdatedAtDesc(principal.userId)
+            .toSettings(user)
+            .copy(openaiKeyConfigured = properties.openai.userContentApiKey.isNotBlank())
     }
 
     @Transactional(readOnly = true)
@@ -94,6 +120,7 @@ class SettingsService(
         val study = studies.findByIdAndUserId(studyId, principal.userId)
             ?: throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.STUDY_SETTINGS_MISSING, "Study settings are not configured.")
         return study.toSettings(user)
+            .copy(openaiKeyConfigured = properties.openai.userContentApiKey.isNotBlank())
     }
 
     @Transactional
@@ -109,7 +136,9 @@ class SettingsService(
             if (encryptedKey != null) {
                 user.openaiApiKeyCipher = encryptedKey
             }
-            user.appLanguage = command.appLanguage.ifBlank { user.appLanguage }
+            user.appLanguage = SupportedLanguage.fromLocale(
+                QuestionLanguage.normalize(command.appLanguage.ifBlank { user.appLanguage.databaseValue }),
+            )
             user.updatedAt = now
             users.save(user)
         }
@@ -132,6 +161,14 @@ class SettingsService(
         study.deviceId = principal.deviceId
         if (study.shouldReschedule(false, previousEnabled, previousIntervalMinutes, previousNextDueAt)) {
             study.reschedule(now)
+        }
+        if (study.parentStudyId == null && command.enabled) {
+            val allUserStudies = studies.findAllByUserId(principal.userId)
+            if (StudyTreeSelector.nextActiveTopic(study, allUserStudies) == null) {
+                study.activeForQuestions = true
+                study.lastError = null
+                study.updatedAt = now
+            }
         }
         val saved = studies.save(study)
         return ScheduleResponse(principal.deviceId, saved.enabled, saved.nextDueAt)

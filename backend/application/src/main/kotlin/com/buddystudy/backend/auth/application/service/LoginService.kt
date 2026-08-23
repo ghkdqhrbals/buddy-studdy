@@ -7,7 +7,12 @@ import com.buddystudy.auth.domain.Account
 import com.buddystudy.auth.domain.AccountDevice
 import com.buddystudy.auth.domain.AccountUser
 import com.buddystudy.auth.domain.PushTokenUpdate
+import com.buddystudy.auth.domain.entity.DeviceEntity
+import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.account.domain.entity.UserStatus
+import com.buddystudy.auth.domain.entity.ApnsEnvironment
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
+import com.buddystudy.backend.auth.application.port.outbound.AppleIdentityPort
 import com.buddystudy.backend.auth.application.port.outbound.EmailVerificationCodePort
 import com.buddystudy.backend.auth.application.port.outbound.EmailVerificationSenderPort
 import com.buddystudy.backend.auth.application.port.outbound.GoogleIdentityPort
@@ -24,14 +29,13 @@ import com.buddystudy.backend.auth.application.permission.Roles
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.config.BuddyStudyProperties
-import com.buddystudy.auth.domain.entity.DeviceEntity
-import com.buddystudy.account.domain.entity.UserEntity
 import com.buddystudy.backend.auth.application.model.AccessTokenResponse
 import com.buddystudy.backend.auth.application.model.DeviceRegisterResponse
 import com.buddystudy.backend.auth.application.model.EmailVerificationCodeResponse
 import com.buddystudy.backend.auth.application.model.GoogleLoginResponse
 import com.buddystudy.backend.auth.application.model.LoggedInDeviceResponse
 import com.buddystudy.backend.auth.application.model.LoggedInDevicesResponse
+import org.springframework.dao.DuplicateKeyException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -46,51 +50,34 @@ class LoginService(
     private val devices: DevicePort,
     private val tokenService: TokenProvider,
     private val sessions: AccountSessionManager,
-    private val tokens: RandomTokenGenerator,
     private val emailCodes: EmailVerificationCodePort,
     private val emailSender: EmailVerificationSenderPort,
     private val roles: RoleAssignmentPort,
+    private val appleIdentities: AppleIdentityPort,
     private val googleIdentities: GoogleIdentityPort,
     private val authenticatedLogins: AuthenticatedLoginManager,
+    private val deviceRegistrations: DeviceRegistrationManager,
 ) : RegisterDeviceUseCase, IssueDeviceTokenUseCase, LoginUseCase, UpdatePushTokenUseCase {
     private val secureRandom = SecureRandom()
 
-    @Transactional
     override suspend fun register(command: RegisterDeviceCommand): DeviceRegisterResponse {
-        val deviceId = tokens.create("dev")
-        val secret = tokens.create("sec")
-        val now = Instant.now()
-        val user = users.save(
-            UserEntity(
-                provider = "ANONYMOUS",
-                providerId = deviceId,
-                status = "ANONYMOUS",
-                email = "",
-                displayName = "Buddy",
-                avatarColorSeed = "avatar-color-gray",
-                createdAt = now,
-                updatedAt = now,
+        val installationId = command.installationId.trim()
+        if (installationId.isNotEmpty() && installationId.length !in 32..256) {
+            throw ApiException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                ApiErrorCode.VALIDATION_ERROR,
+                "Installation identifier must be between 32 and 256 characters.",
             )
-        )
-        val device = devices.save(
-            DeviceEntity(
-                deviceId = deviceId,
-                clientSecretHash = sha256(secret),
-                userId = user.id,
-                apnsToken = command.apnsToken,
-                platform = command.platform,
-                apnsEnvironment = command.apnsEnvironment,
-                language = command.language,
-                timezone = command.timezone,
-                createdAt = now,
-                updatedAt = now,
-                lastSeenAt = now,
-            )
-        )
-        roles.grantRoleIfMissing(user.id, Roles.ANONYMOUS_USER)
-        val session = sessions.saveSession(user.id, device.deviceId, now, null)
-        val token = tokenService.create(user.id, device.deviceId, session.id, true, user.status)
-        return DeviceRegisterResponse(device.deviceId, secret, token.first, token.second)
+        }
+        val installationKeyHash = installationId.takeIf(String::isNotEmpty)?.let(::sha256)
+        return try {
+            deviceRegistrations.register(command, installationKeyHash)
+        } catch (duplicate: DuplicateKeyException) {
+            if (installationKeyHash == null) {
+                throw duplicate
+            }
+            deviceRegistrations.register(command, installationKeyHash)
+        }
     }
 
     @Transactional
@@ -109,9 +96,9 @@ class LoginService(
         val user = device.userId
             ?.let { users.findById(it) ?: error("Authenticated user not found: $it") }
             ?: sessions.ensureAnonymousUser(device).also { roles.grantRoleIfMissing(it.id, Roles.ANONYMOUS_USER) }
-        val expiresAt = if (user.status == "ANONYMOUS") null else Instant.now().plusSeconds(90 * 86_400)
+        val expiresAt = if (user.status == UserStatus.ANONYMOUS) null else Instant.now().plusSeconds(90 * 86_400)
         val session = sessions.saveSession(user.id, device.deviceId, Instant.now(), expiresAt)
-        return Principal(user.id, device.deviceId, session.id, user.status == "ANONYMOUS", user.status)
+        return Principal(user.id, device.deviceId, session.id, user.status == UserStatus.ANONYMOUS, user.status.name)
     }
 
     @Transactional
@@ -154,8 +141,8 @@ class LoginService(
                 val device = deviceById[session.deviceId] ?: return@mapNotNull null
                 LoggedInDeviceResponse(
                     deviceId = session.deviceId,
-                    platform = device.platform,
-                    apnsEnvironment = device.apnsEnvironment,
+                    platform = device.platform.databaseValue,
+                    apnsEnvironment = device.apnsEnvironment.databaseValue,
                     timezone = device.timezone,
                     lastLoginAt = session.lastLoginAt,
                     lastSeenAt = session.lastSeenAt,
@@ -178,7 +165,7 @@ class LoginService(
                 throw ApiException(HttpStatus.FORBIDDEN, ApiErrorCode.AUTH_EMAIL_VERIFICATION_REQUIRED, "Invalid or expired email verification code.")
             }
         } else if (existingUser.passwordHash != passwordHash) {
-            throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_DEVICE_CREDENTIALS, "Invalid email or password.")
+            throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_EMAIL_CREDENTIALS, "Invalid email or password.")
         }
         return authenticatedLogins.attachEmailIdentity(principal, normalized, passwordHash, Instant.now())
     }
@@ -198,13 +185,19 @@ class LoginService(
         return authenticatedLogins.attachGoogleIdentity(principal, identity, Instant.now())
     }
 
-    private suspend fun UserEntity.toAccountUser() = AccountUser(id = id, status = status)
+    override suspend fun appleLogin(principal: Principal, idToken: String): GoogleLoginResponse {
+        val identity = appleIdentities.verify(idToken)
+            ?: throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_INVALID_ACCESS_TOKEN, "Invalid Apple token.")
+        return authenticatedLogins.attachAppleIdentity(principal, identity, Instant.now())
+    }
+
+    private suspend fun UserEntity.toAccountUser() = AccountUser(id = id, status = status.name)
 
     private suspend fun DeviceEntity.toAccountDevice() = AccountDevice(deviceId = deviceId, userId = userId)
 
     private suspend fun DeviceEntity.apply(update: PushTokenUpdate) {
         apnsToken = update.apnsToken
-        apnsEnvironment = update.apnsEnvironment
+        apnsEnvironment = ApnsEnvironment.fromDatabaseValue(update.apnsEnvironment.lowercase())
         updatedAt = update.updatedAt
     }
 

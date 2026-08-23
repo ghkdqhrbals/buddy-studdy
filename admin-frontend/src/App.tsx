@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { clearToken, fetchJobRuns, fetchJobStatuses, fetchMetrics, getStoredToken, refreshMetrics, retryJob } from "./api";
 import { AdminShell } from "./AdminShell";
-import { JOB_PAGE_SIZE, sectionPaths, sections } from "./adminConfig";
+import { AppUpdatesPanel } from "./AppUpdatesPanel";
+import { AdvertisingPanel } from "./AdvertisingPanel";
+import { JOB_PAGE_SIZE, JOB_STATUS_PAGE_SIZE, sectionPaths, sections } from "./adminConfig";
 import { LoginScreen } from "./LoginScreen";
 import { MetricsDashboard } from "./MetricsDashboard";
 import { OperationsPanel } from "./OperationsPanel";
@@ -15,7 +17,12 @@ import type {
 } from "./types";
 
 const today = new Date();
-const isoDate = (date: Date) => date.toISOString().slice(0, 10);
+const isoDate = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
 const defaultEnd = isoDate(today);
 const defaultStart = isoDate(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6));
 const basePath = normalizeBasePath(import.meta.env.BASE_URL);
@@ -35,6 +42,9 @@ const emptyJobPage: ScheduledJobRunsResponse = {
 };
 const emptyJobStatuses: ScheduledJobStatusResponse = {
   jobs: [],
+  totalCount: 0,
+  limit: JOB_STATUS_PAGE_SIZE,
+  offset: 0,
 };
 
 function isIsoDate(value: string | null): value is string {
@@ -103,7 +113,7 @@ function sectionHref(
 ): string {
   const params = new URLSearchParams();
   if (section !== "operations") {
-    if (range) {
+    if (range && sectionUsesDateRange(section)) {
       params.set("startDate", range.startDate);
       params.set("endDate", range.endDate);
     }
@@ -122,6 +132,10 @@ function sectionHref(
   return `${path}${query ? `?${query}` : ""}`;
 }
 
+function sectionUsesDateRange(section: SectionKey): boolean {
+  return section !== "operations" && section !== "app_updates" && section !== "advertising";
+}
+
 export function App() {
   const [token, setToken] = useState(() => getStoredToken());
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem("buddystudy.adminTheme") as Theme) || "light");
@@ -136,6 +150,8 @@ export function App() {
   const [highlightRunId, setHighlightRunId] = useState(() => routeState().runId);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [appUpdatesRefreshKey, setAppUpdatesRefreshKey] = useState(0);
+  const [advertisingRefreshKey, setAdvertisingRefreshKey] = useState(0);
 
   const active = sections.find((section) => section.key === activeSection) ?? sections[0];
   const isAuthenticated = Boolean(token);
@@ -200,10 +216,13 @@ export function App() {
     setLoading(true);
     setError(null);
     try {
-      if (activeSection === "operations") {
+      if (activeSection === "app_updates" || activeSection === "advertising") {
+        setSeries([]);
+        setJobPage(emptyJobPage);
+      } else if (activeSection === "operations") {
         const [runs, statuses] = await Promise.all([
           fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset, jobNameFilter, highlightRunId),
-          fetchJobStatuses(handleUnauthorized).catch(() => emptyJobStatuses),
+          fetchJobStatuses(handleUnauthorized, JOB_STATUS_PAGE_SIZE, 0).catch(() => emptyJobStatuses),
         ]);
         setJobPage(runs);
         setJobStatuses(statuses);
@@ -229,10 +248,14 @@ export function App() {
     setLoading(true);
     setError(null);
     try {
-      if (activeSection === "operations") {
+      if (activeSection === "app_updates") {
+        setAppUpdatesRefreshKey((value) => value + 1);
+      } else if (activeSection === "advertising") {
+        setAdvertisingRefreshKey((value) => value + 1);
+      } else if (activeSection === "operations") {
         const [runs, statuses] = await Promise.all([
           fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset, jobNameFilter, highlightRunId),
-          fetchJobStatuses(handleUnauthorized).catch(() => jobStatuses),
+          fetchJobStatuses(handleUnauthorized, JOB_STATUS_PAGE_SIZE, 0).catch(() => jobStatuses),
         ]);
         setJobPage(runs);
         setJobStatuses(statuses);
@@ -259,7 +282,7 @@ export function App() {
       await retryJob(job.jobName, job.id, handleUnauthorized);
       const [runs, statuses] = await Promise.all([
         fetchJobRuns(handleUnauthorized, JOB_PAGE_SIZE, jobOffset, jobNameFilter, highlightRunId),
-        fetchJobStatuses(handleUnauthorized).catch(() => jobStatuses),
+        fetchJobStatuses(handleUnauthorized, JOB_STATUS_PAGE_SIZE, 0).catch(() => jobStatuses),
       ]);
       setJobPage(runs);
       setJobStatuses(statuses);
@@ -300,7 +323,7 @@ export function App() {
   function updateDateRange(nextStartDate: string, nextEndDate: string) {
     setStartDate(nextStartDate);
     setEndDate(nextEndDate);
-    if (activeSection !== "operations") {
+    if (sectionUsesDateRange(activeSection)) {
       window.history.replaceState(null, "", sectionHref(activeSection, 0, { startDate: nextStartDate, endDate: nextEndDate }));
     }
   }
@@ -342,8 +365,13 @@ export function App() {
       onNavigate={navigateToSection}
       onRefresh={handleRefresh}
       onThemeChange={setTheme}
+      showDateRange={sectionUsesDateRange(activeSection)}
     >
-      {activeSection === "operations" ? (
+      {activeSection === "app_updates" ? (
+        <AppUpdatesPanel onUnauthorized={handleUnauthorized} refreshKey={appUpdatesRefreshKey} />
+      ) : activeSection === "advertising" ? (
+        <AdvertisingPanel onUnauthorized={handleUnauthorized} refreshKey={advertisingRefreshKey} />
+      ) : activeSection === "operations" ? (
         <OperationsPanel
           page={jobPage}
           statuses={jobStatuses.jobs}

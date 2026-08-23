@@ -49,13 +49,22 @@ Deploy repository:
 - `GHCR_TOKEN`: GitHub token with `read:packages`.
 - `BACKEND_MASTER_KEY`: random base64 key for encrypting stored OpenAI keys.
 - `BACKEND_API_TOKEN`: optional token required by registration/admin endpoints.
-- `APNS_AUTH_KEY_P8`: raw or base64 encoded Apple APNs `.p8` key.
+- `APNS_AUTH_KEY_BASE64`: Base64-encoded Apple APNs `.p8` key.
 - `APNS_KEY_ID`: APNs key ID.
 - `APNS_TEAM_ID`: Apple Developer Team ID.
 - `APNS_BUNDLE_ID`: `io.github.ghkdqhrbals.StudyMate`.
 - `APNS_ENV`: `production` for TestFlight/App Store.
 
-MySQL credentials are managed in AWS Secrets Manager, not GitHub Actions Secrets.
+APNs credentials are managed in AWS Secrets Manager, not GitHub Actions
+Secrets.
+
+- AWS Secrets Manager secret: `buddystudy/prod`.
+- Required keys: `APNS_AUTH_KEY_BASE64`, `APNS_KEY_ID`, `APNS_TEAM_ID`,
+  `APNS_BUNDLE_ID`, and `APNS_ENV`.
+- The deploy workflow validates all required APNs values before starting the
+  backend.
+
+MySQL credentials are also managed in AWS Secrets Manager.
 
 - AWS Secrets Manager secret: `buddystudy/prod/mysql`.
 - EC2 instance profile: `BuddyStudyEC2SecretsProfile`.
@@ -78,7 +87,10 @@ The AWS access key is not required for the SSH-based deployment workflow. If an 
 
 - Public HTTPS: `https://api.ghkdqhrbals.org -> nginx:443 -> buddystudy-backend:8080`
 - Backend app port `8080` is not published on the EC2 host.
-- MySQL port `3306` is published on the EC2 host for production database access.
+- MySQL port `3306` is published on the EC2 host for production database access
+  from approved administrator CIDRs.
+- Redis port `6379` is published on the EC2 host with password authentication
+  and is restricted to the same approved administrator CIDRs as MySQL.
 - The workflow requests/renews a Let's Encrypt certificate with the `http-01` challenge, so public port `80` is used temporarily during certificate issuance.
 - If certificate issuance fails, the workflow can still keep the service reachable with a temporary self-signed certificate, but iOS production traffic should use the trusted certificate path.
 
@@ -92,6 +104,20 @@ user: buddystudy
 ```
 
 The password is managed through AWS Secrets Manager at `buddystudy/prod/mysql` and mirrored on EC2 at `/opt/buddystudy-backend/.mysql_password`. Keep it private and restrict the EC2 security group if public access is no longer required.
+
+Use these connection basics for Redis administration:
+
+```text
+host: api.ghkdqhrbals.org
+port: 6379
+TLS: disabled
+authentication: REDIS_PASSWORD
+```
+
+The Redis password remains in AWS Secrets Manager and must not be copied into
+source control. Run the separate `Configure BuddyStudy Backend Network`
+workflow before deploying a Redis host-port change; it mirrors the approved
+MySQL administrator CIDRs to Redis without opening `6379` to the whole internet.
 
 ## Data Durability
 

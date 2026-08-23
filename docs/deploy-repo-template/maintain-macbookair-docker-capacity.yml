@@ -1,0 +1,156 @@
+name: Maintain MacBook Air Docker Capacity
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 18 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: maintain-macbookair-docker-capacity
+  cancel-in-progress: false
+
+jobs:
+  maintain_docker_capacity:
+    name: Submit Docker Capacity Maintenance
+    runs-on: [self-hosted, macOS, ARM64, macbook-air, buddystudy]
+    timeout-minutes: 25
+
+    steps:
+      - name: Submit bounded Docker storage maintenance
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          run_with_timeout() {
+            local seconds="$1"
+            shift
+            python3 - "${seconds}" "$@" <<'PY'
+          import os
+          import signal
+          import subprocess
+          import sys
+
+          timeout_seconds = float(sys.argv[1])
+          process = subprocess.Popen(sys.argv[2:], start_new_session=True)
+          try:
+              return_code = process.wait(timeout=timeout_seconds)
+          except subprocess.TimeoutExpired:
+              os.killpg(process.pid, signal.SIGTERM)
+              try:
+                  process.wait(timeout=3)
+              except subprocess.TimeoutExpired:
+                  os.killpg(process.pid, signal.SIGKILL)
+                  process.wait()
+              raise SystemExit(124)
+          raise SystemExit(return_code if return_code >= 0 else 128 - return_code)
+          PY
+          }
+
+          export DOCKER_CLI_HINTS=false
+          docker_ready=false
+          if run_with_timeout 10 docker info >/dev/null 2>&1; then
+            docker_ready=true
+          else
+            echo "Docker daemon is unavailable; restarting Docker Desktop."
+            if ! run_with_timeout 90 \
+              /usr/bin/env -u RUNNER_TRACKING_ID \
+              docker desktop restart --timeout 75; then
+              run_with_timeout 45 \
+                /usr/bin/env -u RUNNER_TRACKING_ID \
+                docker desktop stop --force --timeout 30 \
+                || true
+              run_with_timeout 120 \
+                /usr/bin/env -u RUNNER_TRACKING_ID \
+                docker desktop start --timeout 105 \
+                || /usr/bin/env -u RUNNER_TRACKING_ID open -ga Docker \
+                || true
+            fi
+            for _ in $(seq 1 24); do
+              if run_with_timeout 10 docker info >/dev/null 2>&1; then
+                docker_ready=true
+                break
+              fi
+              sleep 5
+            done
+          fi
+          if [ "${docker_ready}" != true ]; then
+            echo "Docker Desktop did not become ready within the maintenance window." >&2
+            exit 1
+          fi
+
+          capacity_probe="${RUNNER_TEMP}"
+          if [ ! -d "${capacity_probe}" ]; then
+            echo "Runner temporary directory is unavailable for capacity diagnostics." >&2
+            exit 1
+          fi
+
+          echo "MacBook Air capacity before bounded Docker maintenance:"
+          df -h "${capacity_probe}"
+          df -Pk "${capacity_probe}"
+          available_before_kb="$(df -Pk "${capacity_probe}" | awk 'NR == 2 {print $4}')"
+          echo "Docker storage before bounded Docker maintenance:"
+          run_with_timeout 30 docker system df --verbose \
+            || echo "Docker storage diagnosis timed out before maintenance."
+
+          # `docker image prune -a` excludes every image referenced by a
+          # running or stopped container. The age filter further limits this
+          # host-wide maintenance to images created more than seven days ago.
+          # The separate builder prune includes all unused build cache, then
+          # limits deletion to entries older than seven days. Active/in-use
+          # build cache, containers, volumes, networks, persisted module data,
+          # and host files are never cleanup targets in this workflow.
+          image_prune_output="$({
+            run_with_timeout 180 \
+              docker image prune -a --filter "until=168h" --force
+          })"
+          build_cache_prune_output="$({
+            run_with_timeout 180 \
+              docker builder prune -a --filter until=168h --force
+          })"
+
+          echo "Docker image prune reclaimed output:"
+          printf '%s\n' "${image_prune_output}"
+          echo "Docker build-cache prune reclaimed output:"
+          printf '%s\n' "${build_cache_prune_output}"
+          echo "MacBook Air capacity after bounded Docker maintenance:"
+          df -h "${capacity_probe}"
+          df -Pk "${capacity_probe}"
+          available_after_kb="$(df -Pk "${capacity_probe}" | awk 'NR == 2 {print $4}')"
+          echo "Docker storage after bounded Docker maintenance:"
+          run_with_timeout 30 docker system df --verbose \
+            || echo "Docker storage diagnosis timed out after maintenance."
+
+          available_delta_kb="unknown"
+          if [[ "${available_before_kb}" =~ ^[0-9]+$ ]] \
+            && [[ "${available_after_kb}" =~ ^[0-9]+$ ]]; then
+            available_delta_kb="$((available_after_kb - available_before_kb))"
+          fi
+
+          {
+            echo "## MacBook Air Docker capacity maintenance"
+            echo
+            echo "- Status: maintenance submitted"
+            echo "- Image scope: images older than seven days and unreferenced by every running or stopped container"
+            echo "- Build-cache scope: all unused build cache older than seven days"
+            echo "- Untouched: active/in-use build cache, containers, volumes, networks, persisted module data, and host files"
+            echo "- Filesystem available before: ${available_before_kb} KiB"
+            echo "- Filesystem available after: ${available_after_kb} KiB"
+            echo "- Filesystem available delta: ${available_delta_kb} KiB"
+            echo "- Recovery: removed images can be pulled again from their registries; removed build cache can be recreated by rebuilding"
+            echo
+            echo "### Docker image prune reclaimed output"
+            echo '```text'
+            printf '%s\n' "${image_prune_output}"
+            echo '```'
+            echo
+            echo "### Docker build-cache prune reclaimed output"
+            echo '```text'
+            printf '%s\n' "${build_cache_prune_output}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          echo "MacBook Air Docker capacity maintenance submitted."
+          echo "Removed images remain recoverable by registry pull; removed build cache is recreated by rebuilding."

@@ -1,0 +1,101 @@
+package com.buddystudy.backend.localization.application.port
+
+import com.buddystudy.backend.common.application.outbox.OutboxReference
+import com.buddystudy.backend.localization.application.model.ContentTranslationRequestedEvent
+import com.buddystudy.backend.localization.application.model.ContentTranslationResult
+import com.buddystudy.backend.localization.application.model.LocalizableContentType
+import com.buddystudy.backend.localization.application.model.PendingContentTranslation
+import com.buddystudy.backend.localization.application.model.RecordLocalizationSnapshot
+import com.buddystudy.backend.localization.application.model.RecordSourceHashes
+import com.buddystudy.backend.localization.application.model.TextLocalizationSnapshot
+import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.community.domain.entity.QuestionCommentEntity
+import java.time.Instant
+
+interface ContentLocalizationPort {
+    suspend fun record(questionId: Long, targetLanguage: String): RecordLocalizationSnapshot
+    suspend fun comment(commentId: Long, targetLanguage: String): TextLocalizationSnapshot?
+    suspend fun ensureRecordPending(
+        question: QuestionEntity,
+        targetLanguage: String,
+        sourceHashes: RecordSourceHashes,
+        now: Instant,
+        retryPendingBefore: Instant,
+    ): List<PendingContentTranslation>
+    suspend fun ensureCommentPending(
+        comment: QuestionCommentEntity,
+        targetLanguage: String,
+        sourceHash: String,
+        now: Instant,
+        retryPendingBefore: Instant,
+    ): PendingContentTranslation?
+    suspend fun saveQuestionReady(
+        question: QuestionEntity,
+        targetLanguage: String,
+        sourceHash: String,
+        result: ContentTranslationResult,
+        now: Instant,
+    ): Boolean
+    suspend fun saveAnswerReady(
+        question: QuestionEntity,
+        targetLanguage: String,
+        sourceHash: String,
+        result: ContentTranslationResult,
+        now: Instant,
+    ): Boolean
+    suspend fun saveAiResponseReady(
+        question: QuestionEntity,
+        targetLanguage: String,
+        sourceHash: String,
+        result: ContentTranslationResult,
+        now: Instant,
+    ): Boolean
+    suspend fun saveCommentReady(
+        comment: QuestionCommentEntity,
+        targetLanguage: String,
+        sourceHash: String,
+        result: ContentTranslationResult,
+        now: Instant,
+    ): Boolean
+    suspend fun markFailed(
+        event: ContentTranslationRequestedEvent,
+        error: String,
+        now: Instant,
+    )
+}
+
+interface ContentTranslationPort {
+    suspend fun translate(
+        fields: Map<String, String?>,
+        sourceLanguages: Map<String, String>,
+        targetLanguage: String,
+    ): ContentTranslationResult
+}
+
+interface ContentTranslationEventPort {
+    suspend fun append(event: ContentTranslationRequestedEvent, now: Instant = Instant.now()): Long
+}
+
+interface ContentTranslationRequestAppendPort {
+    suspend fun appendRecordForSupportedLanguages(
+        question: QuestionEntity,
+        requestedAt: Instant,
+    ): List<OutboxReference>
+
+    suspend fun appendCommentForSupportedLanguages(
+        comment: QuestionCommentEntity,
+        requestedAt: Instant,
+    ): List<OutboxReference>
+
+    suspend fun appendRecord(
+        question: QuestionEntity,
+        targetLanguage: String,
+        requestedAt: Instant,
+    ): List<OutboxReference>
+
+    suspend fun appendComment(
+        comment: QuestionCommentEntity,
+        targetLanguage: String,
+        requestedAt: Instant,
+    ): OutboxReference?
+}

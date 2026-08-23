@@ -12,6 +12,12 @@
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>ko</string>
+		<string>ja</string>
+	</array>
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundlePackageType</key>
@@ -37,6 +43,18 @@
 	<string>$(GOOGLE_OAUTH_CLIENT_ID)</string>
 	<key>GoogleOAuthRedirectScheme</key>
 	<string>$(GOOGLE_OAUTH_REDIRECT_SCHEME)</string>
+	<key>BuddyStudyBackendBaseURL</key>
+	<string>$(BUDDYSTUDY_BACKEND_BASE_URL)</string>
+	<key>FirebaseAppDelegateProxyEnabled</key>
+	<false/>
+	<key>FirebaseAutomaticScreenReportingEnabled</key>
+	<false/>
+	<key>GOOGLE_ANALYTICS_REGISTRATION_WITH_AD_NETWORK_ENABLED</key>
+	<false/>
+	<key>SentryDSN</key>
+	<string>https://1f27f8ce965e634944d4b0b4dc2f4ec9@o4511814165790720.ingest.us.sentry.io/4511814175948805</string>
+	<key>RevenueCatPublicSDKKey</key>
+	<string>$(REVENUECAT_PUBLIC_SDK_KEY)</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>

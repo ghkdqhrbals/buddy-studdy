@@ -2,6 +2,46 @@ import XCTest
 @testable import StudyMate
 
 final class QuestionSchedulePolicyTests: XCTestCase {
+    func testIOSRemotePushRequiresOnlyAnAPNSToken() {
+        XCTAssertTrue(
+            QuestionSchedulePolicy.shouldEnableIOSRemotePush(
+                apnsToken: "device-token"
+            )
+        )
+        XCTAssertFalse(
+            QuestionSchedulePolicy.shouldEnableIOSRemotePush(
+                apnsToken: " "
+            )
+        )
+    }
+
+    func testRemotePushRequiresOnlyAnEnabledScheduleAndAPNSToken() {
+        XCTAssertTrue(
+            QuestionSchedulePolicy.shouldEnableRemotePush(
+                isRunning: true,
+                apnsToken: "device-token"
+            )
+        )
+    }
+
+    func testRemotePushIsDisabledWithoutAPNSToken() {
+        XCTAssertFalse(
+            QuestionSchedulePolicy.shouldEnableRemotePush(
+                isRunning: true,
+                apnsToken: "  "
+            )
+        )
+    }
+
+    func testRemotePushIsDisabledWhenScheduleIsStopped() {
+        XCTAssertFalse(
+            QuestionSchedulePolicy.shouldEnableRemotePush(
+                isRunning: false,
+                apnsToken: "device-token"
+            )
+        )
+    }
+
     func testNextDueDateUsesLatestQuestionDateAcrossCurrentQuestionAndRecords() {
         let now = Date(timeIntervalSince1970: 1_800)
         let currentQuestion = QuestionItem(

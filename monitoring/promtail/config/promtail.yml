@@ -4,6 +4,8 @@ server:
 
 positions:
   filename: /var/lib/promtail/positions.yaml
+  sync_period: 10s
+  ignore_invalid_yaml: false
 
 clients:
   - url: http://buddystudy-loki:3100/loki/api/v1/push
@@ -23,3 +25,12 @@ scrape_configs:
             event: event
       - labels:
           event:
+
+  - job_name: monitoring-gateway-error
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: monitoring-gateway-error
+          service: buddystudy-monitoring
+          __path__: /var/log/monitoring/monitoring-error.log

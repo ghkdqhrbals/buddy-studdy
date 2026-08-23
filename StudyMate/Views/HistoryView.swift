@@ -7,15 +7,13 @@ struct HistoryView: View {
     @EnvironmentObject private var appState: AppState
     @State private var selectedRecordID: String?
     @State private var searchText = ""
-    @State private var visibleCount = 0
     @State private var showsRecordSettings = false
     @State private var isRefreshing = false
     @State private var isSearchVisible = false
     @State private var searchFocusTask: Task<Void, Never>?
     @State private var recordSearchDebounceTask: Task<Void, Never>?
+    @State private var pendingRecordDeletion: StudyRecord?
     @FocusState private var isSearchFocused: Bool
-
-    private let pageSize = 10
 
     private var orderedRecords: [StudyRecord] {
         recordsSource
@@ -49,12 +47,31 @@ struct HistoryView: View {
     }
 
     private var visibleRecords: [StudyRecord] {
-        let clamped = min(max(visibleCount, 0), filteredRecords.count)
-        return Array(filteredRecords.prefix(clamped))
+        filteredRecords
     }
 
     private var hasMoreRecords: Bool {
-        visibleRecords.count < filteredRecords.count
+        if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return isBackendRecordSearchActive && appState.canLoadMoreRecordSearchResults
+        }
+        return appState.canLoadMoreRecords
+    }
+
+    private var displayedTotalCount: Int {
+        if isBackendRecordSearchActive {
+            return appState.recordSearchTotalCount
+        }
+        if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return filteredRecords.count
+        }
+        return appState.recordTotalCount
+    }
+
+    private var isLoadingNextPage: Bool {
+        if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return isBackendRecordSearchActive && appState.isLoadingRecordSearchPage
+        }
+        return appState.isLoadingRecordPage
     }
 
     private var weeklyRecords: [StudyRecord] {
@@ -95,28 +112,6 @@ struct HistoryView: View {
         }
     }
 
-    private func resetVisibleCount() {
-        visibleCount = min(pageSize, max(filteredRecords.count, 0))
-    }
-
-    private func reconcileVisibleCount() {
-        let total = filteredRecords.count
-        if total == 0 {
-            visibleCount = 0
-            return
-        }
-
-        let minimumVisible = min(pageSize, total)
-        visibleCount = min(max(visibleCount, minimumVisible), total)
-    }
-
-    private func ensureVisibleCount(atLeast minimum: Int) {
-        let clampedMinimum = min(max(minimum, 1), max(filteredRecords.count, 0))
-        if visibleCount < clampedMinimum {
-            visibleCount = clampedMinimum
-        }
-    }
-
     var body: some View {
         let strings = appState.strings
         let displayedRecords = filteredRecords
@@ -154,7 +149,7 @@ struct HistoryView: View {
 
                             Spacer()
 
-                            Text(strings.filteredRecordCount(displayedVisibleRecords.count, total: displayedRecords.count))
+                            Text(strings.filteredRecordCount(displayedVisibleRecords.count, total: displayedTotalCount))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -201,7 +196,7 @@ struct HistoryView: View {
                                 }
                             }
 
-                            if hasMoreRecords {
+                            if hasMoreRecords || isLoadingNextPage {
                                 HStack {
                                     Spacer()
 
@@ -265,11 +260,7 @@ struct HistoryView: View {
             }
             #endif
         }
-        .onChange(of: appState.studyRecords.count) {
-            reconcileVisibleCount()
-        }
         .onChange(of: searchText) {
-            resetVisibleCount()
             selectedRecordID = nil
             appState.clearBackendRecordSearchResults()
         }
@@ -277,7 +268,6 @@ struct HistoryView: View {
             showFocusedRecord()
         }
         .onAppear {
-            resetVisibleCount()
             if appState.focusedRecordRequest != nil {
                 showFocusedRecord()
             }
@@ -302,6 +292,28 @@ struct HistoryView: View {
         .sheet(isPresented: $showsRecordSettings) {
             RecordSettingsSheet()
         }
+        .confirmationDialog(
+            strings.deleteRecordHelp,
+            isPresented: Binding(
+                get: { pendingRecordDeletion != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        pendingRecordDeletion = nil
+                    }
+                }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let pendingRecordDeletion {
+                Button(strings.clear, role: .destructive) {
+                    delete(pendingRecordDeletion)
+                    self.pendingRecordDeletion = nil
+                }
+            }
+            Button(strings.cancel, role: .cancel) {
+                pendingRecordDeletion = nil
+            }
+        }
         #if os(iOS)
         .navigationDestination(item: $selectedRecordID) { recordID in
             recordDetailDestination(recordID: recordID, strings: strings)
@@ -319,6 +331,11 @@ struct HistoryView: View {
 
     private var isRecordSearchActive: Bool {
         isSearchVisible || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var isBackendRecordSearchActive: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && appState.recordSearchResults != nil
     }
 
     private func recordToolbarSearchControl(strings: AppStrings) -> some View {
@@ -427,17 +444,18 @@ struct HistoryView: View {
     }
 
     private func loadNextPageIfNeeded(for record: StudyRecord) {
-        guard hasMoreRecords else {
+        guard hasMoreRecords, !isLoadingNextPage else {
             return
         }
-        guard let index = filteredRecords.firstIndex(where: { $0.id == record.id }) else {
+        guard record.id == visibleRecords.last?.id else {
             return
         }
-        guard !isRefreshing else {
-            return
-        }
-        if index >= max(visibleRecords.count - 2, 0) {
-            visibleCount = min(visibleRecords.count + pageSize, filteredRecords.count)
+        Task {
+            if isBackendRecordSearchActive {
+                await appState.loadMoreBackendRecordSearchResults()
+            } else {
+                await appState.loadMoreBackendRecords()
+            }
         }
     }
 
@@ -454,7 +472,6 @@ struct HistoryView: View {
                 return
             }
             await appState.searchBackendRecords(query: query)
-            resetVisibleCount()
         }
     }
 
@@ -464,12 +481,11 @@ struct HistoryView: View {
 
     private func showFocusedRecord() {
         guard let request = appState.focusedRecordRequest,
-              let index = orderedRecords.firstIndex(where: { $0.id == request.recordID }) else {
+              orderedRecords.contains(where: { $0.id == request.recordID }) else {
             return
         }
 
         searchText = ""
-        ensureVisibleCount(atLeast: index + 1)
         selectedRecordID = request.recordID
     }
 
@@ -477,15 +493,29 @@ struct HistoryView: View {
     private func recordDetailDestination(recordID: String, strings: AppStrings) -> some View {
         if let record = record(for: recordID) {
             #if os(iOS)
-            if let question = record.asCommunityQuestion(author: appState.communityProfile) {
-                CommunityQuestionDetailView(question: question)
-                    .navigationTitle(strings.browseQuestions)
-                    .navigationBarTitleDisplayMode(.inline)
-            } else {
-                StudyRecordDetailView(record: record)
-                    .padding(.horizontal, 16)
-                    .navigationTitle(strings.recordDetail)
-                    .navigationBarTitleDisplayMode(.inline)
+            Group {
+                if let question = record.asCommunityQuestion(author: appState.communityProfile) {
+                    CommunityQuestionDetailView(question: question)
+                        .navigationTitle(strings.browseQuestions)
+                        .navigationBarTitleDisplayMode(.inline)
+                } else {
+                    StudyRecordDetailView(record: record)
+                        .padding(.horizontal, 16)
+                        .navigationTitle(strings.recordDetail)
+                        .navigationBarTitleDisplayMode(.inline)
+                }
+            }
+            .toolbar {
+                if #available(iOS 26.0, *) {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        recordDetailActionsMenu(record: record, strings: strings)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                } else {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        recordDetailActionsMenu(record: record, strings: strings)
+                    }
+                }
             }
             #else
             StudyRecordDetailView(record: record)
@@ -503,6 +533,30 @@ struct HistoryView: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
         }
+    }
+
+    private func recordDetailActionsMenu(record: StudyRecord, strings: AppStrings) -> some View {
+        Menu {
+            if appState.isCommunitySessionActive {
+                Button {
+                    appState.updateStudyRecordPublicity(record, isPublic: !record.isPublic)
+                } label: {
+                    Label(
+                        record.isPublic ? strings.makeQuestionPrivate : strings.makeQuestionPublic,
+                        systemImage: record.isPublic ? "lock.fill" : "globe"
+                    )
+                }
+            }
+
+            Button(role: .destructive) {
+                pendingRecordDeletion = record
+            } label: {
+                Label(strings.clear, systemImage: "trash")
+            }
+        } label: {
+            MobileToolbarIconButtonLabel(systemName: "ellipsis")
+        }
+        .accessibilityLabel(strings.more)
     }
 
     private func record(for recordID: String) -> StudyRecord? {
@@ -533,7 +587,6 @@ struct HistoryView: View {
         await appState.refreshBackendRecords()
 
         await MainActor.run {
-            reconcileVisibleCount()
             if appState.focusedRecordRequest != nil {
                 showFocusedRecord()
             }
@@ -544,7 +597,6 @@ struct HistoryView: View {
     private func delete(_ record: StudyRecord) {
         withAnimation(.easeOut(duration: 0.22)) {
             appState.deleteStudyRecord(record)
-            reconcileVisibleCount()
             if selectedRecordID == record.id {
                 selectedRecordID = nil
             }
@@ -570,26 +622,6 @@ private struct RecordSettingsSheet: View {
 
         NavigationStack {
             Form {
-                Section {
-                    Stepper(
-                        "\(strings.maxRecordCount): \(appState.draftSettings.sanitizedMaxHistoryCount)",
-                        value: $appState.draftSettings.maxHistoryCount,
-                        in: 10...10_000,
-                        step: 100
-                    )
-
-                    TextField(
-                        "100",
-                        value: $appState.draftSettings.maxHistoryCount,
-                        format: .number
-                    )
-                    #if os(iOS)
-                    .keyboardType(.numberPad)
-                    #endif
-                } footer: {
-                    Text(strings.recordLimitHelp(limit: appState.draftSettings.sanitizedMaxHistoryCount, count: appState.studyRecords.count))
-                }
-
                 Section {
                     Button(role: .destructive) {
                         showsDeleteConfirmation = true
@@ -638,7 +670,7 @@ private struct RecordSettingsSheet: View {
     }
 }
 
-private struct HistoryRow: View {
+struct HistoryRow: View {
     var record: StudyRecord
     var strings: AppStrings
     var isSelected: Bool
@@ -685,7 +717,7 @@ private struct HistoryRow: View {
                     }
                 }
 
-                Text(record.question.question)
+                Text(MarkdownContent.plainText(record.question.question))
                     .font(.body.weight(.medium))
                     .lineLimit(2)
 

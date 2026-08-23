@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { metricCatalog, type MetricDefinition } from "./adminConfig";
 import { EmptyState } from "./EmptyState";
 import { clamp, fallbackDefinition, formatCompact, formatMetric, formatShortDate, roundOne } from "./format";
@@ -49,9 +49,8 @@ function CombinedTrendChart({
   definitions: MetricDefinition[];
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
-  const width = 760;
-  const height = 178;
-  const padding = { top: 12, right: 18, bottom: 24, left: 42 };
+  const { canvasRef, width, height } = useChartSize(1_000, 300);
+  const padding = { top: 18, right: 24, bottom: 34, left: 54 };
   const dates = allDates(series);
   const pointMaps = series.map((item) => new Map(item.points.map((point) => [point.date, point.value])));
   const values = series.flatMap((item) => item.points.map((point) => point.value));
@@ -62,9 +61,15 @@ function CombinedTrendChart({
   const x = (index: number) => padding.left + (dates.length <= 1 ? 0 : (index / (dates.length - 1)) * plotWidth);
   const y = (value: number) => padding.top + (1 - ((value - scale.min) / Math.max(1, scale.max - scale.min))) * plotHeight;
   const activeDate = dates[activeIndex];
+  const activeValueText = activeDate
+    ? `${formatShortDate(activeDate)}; ${series.map((item, index) => {
+      const value = pointMaps[index].get(activeDate);
+      return `${definitions[index].shortLabel} ${value === undefined ? "no data" : formatMetric(definitions[index], value)}`;
+    }).join(", ")}`
+    : "No chart data";
 
   const moveHover = (clientX: number, bounds: DOMRect) => {
-    const ratio = clamp((clientX - bounds.left - padding.left * (bounds.width / width)) / (plotWidth * (bounds.width / width)), 0, 1);
+    const ratio = clamp((clientX - bounds.left) / Math.max(1, bounds.width), 0, 1);
     setHovered(Math.round(ratio * Math.max(0, dates.length - 1)));
   };
 
@@ -79,7 +84,7 @@ function CombinedTrendChart({
           </span>
         ))}
       </div>
-      <div className="trend-canvas combined-canvas">
+      <div ref={canvasRef} className="trend-canvas combined-canvas">
         <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Metric trend chart">
           {scale.ticks.map((tick) => {
             const yy = y(tick);
@@ -112,13 +117,29 @@ function CombinedTrendChart({
             </text>
           ))}
           <rect
+            className="chart-hit-area"
             x={padding.left}
             y={padding.top}
             width={plotWidth}
             height={plotHeight}
             fill="transparent"
-            onMouseMove={(event) => moveHover(event.clientX, event.currentTarget.getBoundingClientRect())}
+            role="slider"
+            tabIndex={0}
+            aria-label="Explore metric trends by date"
+            aria-valuemin={0}
+            aria-valuemax={Math.max(0, dates.length - 1)}
+            aria-valuenow={activeIndex}
+            aria-valuetext={activeValueText}
+            onPointerMove={(event) => moveHover(event.clientX, event.currentTarget.getBoundingClientRect())}
             onMouseLeave={() => setHovered(null)}
+            onFocus={() => setHovered(Math.max(0, dates.length - 1))}
+            onBlur={() => setHovered(null)}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+              event.preventDefault();
+              const direction = event.key === "ArrowLeft" ? -1 : 1;
+              setHovered((current) => clamp((current ?? dates.length - 1) + direction, 0, Math.max(0, dates.length - 1)));
+            }}
           />
         </svg>
         {hovered !== null && activeDate ? (
@@ -145,9 +166,8 @@ function MetricTrendChart({ item }: { item: AdminMetricSeries }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const definition = metricCatalog[item.metricKey] ?? fallbackDefinition(item.metricKey);
   const points = item.points;
-  const width = 420;
-  const height = 124;
-  const padding = { top: 10, right: 16, bottom: 22, left: 40 };
+  const { canvasRef, width, height } = useChartSize(560, 220);
+  const padding = { top: 14, right: 20, bottom: 30, left: 48 };
   const values = points.map((point) => point.value);
   const rawMax = Math.max(1, ...values);
   const rawMin = Math.min(0, ...values);
@@ -161,7 +181,7 @@ function MetricTrendChart({ item }: { item: AdminMetricSeries }) {
   const active = points[activeIndex];
 
   const moveHover = (clientX: number, bounds: DOMRect) => {
-    const ratio = clamp((clientX - bounds.left - padding.left * (bounds.width / width)) / (plotWidth * (bounds.width / width)), 0, 1);
+    const ratio = clamp((clientX - bounds.left) / Math.max(1, bounds.width), 0, 1);
     setHovered(Math.round(ratio * Math.max(0, points.length - 1)));
   };
 
@@ -174,7 +194,7 @@ function MetricTrendChart({ item }: { item: AdminMetricSeries }) {
         </span>
         <strong>{formatMetric(definition, points.at(-1)?.value ?? 0)}</strong>
       </div>
-      <div className="trend-canvas">
+      <div ref={canvasRef} className="trend-canvas">
         <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${definition.label} trend chart`}>
           {scale.ticks.map((tick) => {
             const yy = y(tick);
@@ -199,13 +219,29 @@ function MetricTrendChart({ item }: { item: AdminMetricSeries }) {
             </text>
           ))}
           <rect
+            className="chart-hit-area"
             x={padding.left}
             y={padding.top}
             width={plotWidth}
             height={plotHeight}
             fill="transparent"
-            onMouseMove={(event) => moveHover(event.clientX, event.currentTarget.getBoundingClientRect())}
+            role="slider"
+            tabIndex={0}
+            aria-label={`Explore ${definition.label} by date`}
+            aria-valuemin={0}
+            aria-valuemax={Math.max(0, points.length - 1)}
+            aria-valuenow={activeIndex}
+            aria-valuetext={active ? `${formatShortDate(active.date)}; ${definition.shortLabel} ${formatMetric(definition, active.value)}` : "No chart data"}
+            onPointerMove={(event) => moveHover(event.clientX, event.currentTarget.getBoundingClientRect())}
             onMouseLeave={() => setHovered(null)}
+            onFocus={() => setHovered(Math.max(0, points.length - 1))}
+            onBlur={() => setHovered(null)}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+              event.preventDefault();
+              const direction = event.key === "ArrowLeft" ? -1 : 1;
+              setHovered((current) => clamp((current ?? points.length - 1) + direction, 0, Math.max(0, points.length - 1)));
+            }}
           />
         </svg>
         {hovered !== null && active ? (
@@ -221,6 +257,30 @@ function MetricTrendChart({ item }: { item: AdminMetricSeries }) {
       </div>
     </article>
   );
+}
+
+function useChartSize(defaultWidth: number, defaultHeight: number) {
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [size, setSize] = useState({ width: defaultWidth, height: defaultHeight });
+
+  useLayoutEffect(() => {
+    const element = canvasRef.current;
+    if (!element) return;
+    const update = () => {
+      const bounds = element.getBoundingClientRect();
+      const next = {
+        width: Math.max(1, Math.round(bounds.width)),
+        height: Math.max(1, Math.round(bounds.height)),
+      };
+      setSize((current) => current.width === next.width && current.height === next.height ? current : next);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  return { canvasRef, ...size };
 }
 
 function allDates(series: AdminMetricSeries[]): string[] {

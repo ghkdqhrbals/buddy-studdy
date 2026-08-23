@@ -87,6 +87,38 @@ test("summarizeK6 reads the flat k6 0.54 summary export", () => {
   assert.equal(summary.maxVus, 1);
 });
 
+test("run summaries avoid the legacy iterationRate field type", async () => {
+  const writes = [];
+  const writer = new InfluxWriter({
+    url: "http://influx.test",
+    token: "token",
+    org: "test",
+    bucket: "testzone",
+  }, async (_url, request) => {
+    writes.push(request.body);
+    return new Response(null, { status: 204 });
+  });
+
+  await writer.writeRunSummary(
+    {
+      id: "run-1",
+      profile: "script",
+      status: "completed",
+      finishedAt: "2026-07-27T05:00:00.000Z",
+    },
+    { id: "project-1", name: "API" },
+    { id: "script-1", name: "read.js" },
+    {
+      requestRate: 30,
+      iterationRate: 29.5,
+    },
+  );
+
+  assert.equal(writes.length, 1);
+  assert.doesNotMatch(writes[0], /iterationRate=/);
+  assert.match(writes[0], /iterationsPerSecond=29\.5/);
+});
+
 test("InfluxWriter imports k6 0.54 points with a top-level metric name", async (context) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "testzone-influx-"));
   context.after(() => fs.rm(directory, { recursive: true, force: true }));

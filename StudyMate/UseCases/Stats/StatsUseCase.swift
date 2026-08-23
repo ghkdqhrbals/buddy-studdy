@@ -39,4 +39,16 @@ struct StatsUseCase {
             endAt: endAt
         )
     }
+
+    func fetchStudyGrowth(
+        registration: RemotePushRegistration,
+        startAt: Date?,
+        endAt: Date?
+    ) async throws -> BackendStudyGrowth {
+        try await repository.fetchStudyGrowth(
+            registration: registration,
+            startAt: startAt,
+            endAt: endAt
+        )
+    }
 }

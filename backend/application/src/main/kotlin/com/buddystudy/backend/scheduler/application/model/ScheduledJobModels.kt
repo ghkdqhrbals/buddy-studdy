@@ -28,6 +28,7 @@ data class ScheduledJobRun(
     val errorMessage: String? = null,
     val retryOfRunId: Long? = null,
     val createdBy: String = "system",
+    val displayName: String? = null,
 )
 
 data class ScheduledJobRunPageResponse(
@@ -47,9 +48,19 @@ data class ScheduledJobSnapshot(
     val lastSuccessfulRun: ScheduledJobRun? = null,
 )
 
+data class ScheduledJobSnapshotPage(
+    val snapshots: List<ScheduledJobSnapshot>,
+    val totalCount: Long,
+    val limit: Int,
+    val offset: Int,
+)
+
 data class ScheduledJobStatus(
     val jobName: String,
+    val displayName: String = jobName,
+    val description: String = "",
     val enabled: Boolean,
+    val monitored: Boolean = false,
     val scheduleType: String,
     val scheduleValue: String,
     val latestRun: ScheduledJobRun?,
@@ -62,4 +73,7 @@ data class ScheduledJobStatus(
 
 data class ScheduledJobStatusResponse(
     val jobs: List<ScheduledJobStatus>,
-)
+    override val totalCount: Long,
+    override val limit: Int,
+    override val offset: Int,
+) : PageResponse

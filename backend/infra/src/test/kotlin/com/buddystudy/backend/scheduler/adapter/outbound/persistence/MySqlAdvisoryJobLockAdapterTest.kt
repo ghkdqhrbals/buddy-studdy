@@ -30,8 +30,8 @@ class MySqlAdvisoryJobLockAdapterTest {
             .thenReturn(acquireStatement)
         `when`(connection.createStatement("select release_lock(?) as released"))
             .thenReturn(releaseStatement)
-        `when`(acquireStatement.bind(0, "admin-analytics-recent")).thenReturn(acquireStatement)
-        `when`(releaseStatement.bind(0, "admin-analytics-recent")).thenReturn(releaseStatement)
+        `when`(acquireStatement.bind(0, "event-outbox-dispatch")).thenReturn(acquireStatement)
+        `when`(releaseStatement.bind(0, "event-outbox-dispatch")).thenReturn(releaseStatement)
         `when`(acquireStatement.execute()).thenReturn(Mono.just(acquireResult))
         `when`(releaseStatement.execute()).thenReturn(Mono.just(releaseResult))
         `when`(acquireResult.map<Boolean>(any<BiFunction<io.r2dbc.spi.Row, io.r2dbc.spi.RowMetadata, Boolean>>()))
@@ -42,8 +42,8 @@ class MySqlAdvisoryJobLockAdapterTest {
 
         val adapter = MySqlAdvisoryJobLockAdapter(factory)
 
-        assertThat(adapter.tryAcquire("admin-analytics-recent")).isTrue()
-        adapter.release("admin-analytics-recent")
+        assertThat(adapter.tryAcquire("event-outbox-dispatch")).isTrue()
+        adapter.release("event-outbox-dispatch")
 
         verify(releaseResult, times(1))
             .map<Boolean>(any<BiFunction<io.r2dbc.spi.Row, io.r2dbc.spi.RowMetadata, Boolean>>())

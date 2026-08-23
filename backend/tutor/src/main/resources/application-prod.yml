@@ -18,10 +18,13 @@ spring:
         region: ${AWS_REGION:ap-northeast-2}
 
 buddystudy:
+  logging:
+    api:
+      detail: ${API_LOG_DETAIL:detailed}
   scheduler:
     enabled: ${SCHEDULER_ENABLED:true}
   streams:
-    enabled: ${REACTION_STREAM_ENABLED:true}
+    enabled: ${BUDDYSTUDY_STREAMS_ENABLED:true}
   openapi:
     enabled: ${ENABLE_OPENAPI_DOCS:false}
     access-token: ${OPENAPI_ACCESS_TOKEN:}

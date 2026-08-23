@@ -9,7 +9,8 @@ plugins {
 dependencyManagement {
     imports {
         mavenBom(org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES)
-        mavenBom("org.springframework.ai:spring-ai-bom:2.0.0")
+        mavenBom("org.springframework.ai:spring-ai-bom:2.0.1")
+        mavenBom("io.modelcontextprotocol.sdk:mcp-bom:2.0.1")
     }
 }
 
@@ -26,23 +27,37 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-webflux")
     implementation("org.springframework.boot:spring-boot-starter-data-r2dbc")
     implementation("org.springframework.boot:spring-boot-starter-data-redis")
+    implementation("io.lettuce:lettuce-core")
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-mail")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("io.sentry:sentry-spring-boot-4:8.50.1")
+    implementation("io.sentry:sentry-logback:8.50.1")
     implementation("org.springframework.ai:spring-ai-starter-model-openai")
+    implementation("org.springframework.ai:mcp-spring-webflux")
+    implementation("io.modelcontextprotocol.sdk:mcp-json-jackson2")
     implementation("org.springframework:spring-aop")
     implementation("org.aspectj:aspectjweaver")
     implementation("org.springframework.security:spring-security-core")
+    implementation("org.springframework.security:spring-security-oauth2-jose")
     implementation("org.springdoc:springdoc-openapi-starter-webflux-api:3.0.3")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
+    implementation("com.github.pemistahl:lingua:1.2.2")
+    implementation("com.google.firebase:firebase-admin:9.10.0")
+    implementation("com.apple.itunes.storekit:app-store-server-library:5.2.0")
     implementation("org.jooq:jooq:3.21.6")
     implementation("org.jooq:jooq-kotlin-coroutines:3.21.6")
 
     runtimeOnly("io.asyncer:r2dbc-mysql")
     runtimeOnly("io.r2dbc:r2dbc-pool")
+    runtimeOnly("io.netty:netty-resolver-dns-native-macos") {
+        artifact {
+            classifier = "osx-aarch_64"
+        }
+    }
 
     jooqCodegen("org.jooq:jooq-meta-extensions:3.21.6")
 

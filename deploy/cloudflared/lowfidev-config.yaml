@@ -2,7 +2,7 @@ tunnel: 24c83c3f-3c20-402f-a9ca-247ca8d25fbb
 credentials-file: ~/.cloudflared/24c83c3f-3c20-402f-a9ca-247ca8d25fbb.json
 origincert: /Users/gyuminhwangbo/.cloudflared/cert.pem
 ingress:
-  - hostname: api.lowfidev.cloud
+  - hostname: lowfidev.cloud
     service: http://localhost:30080
   # Compatibility TCP hostnames. Prefer WARP private routing for DB/Redis
   # administration because it exposes the MacBook Air node IP once instead of

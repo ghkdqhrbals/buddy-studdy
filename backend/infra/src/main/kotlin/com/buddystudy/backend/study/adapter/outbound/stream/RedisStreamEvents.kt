@@ -2,10 +2,6 @@ package com.buddystudy.backend.study.adapter.outbound.stream
 
 import com.buddystudy.common.application.model.QuestionStreamEventType
 import com.fasterxml.jackson.annotation.JsonInclude
-import com.fasterxml.jackson.annotation.JsonInclude.Value
-import com.fasterxml.jackson.databind.SerializationFeature
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import java.time.Instant
 import java.util.UUID
 
@@ -36,9 +32,10 @@ data class QuestionPushRequestedEvent(
     val body: String? = null,
     val deepLink: String? = null,
     val createdAt: Instant = Instant.now(),
-    override val eventId: String = UUID.randomUUID().toString(),
+    override val eventId: String = "question-push-${notificationId ?: recordId}-$deviceId",
 ) : BaseRedisStreamEvent(QuestionStreamEventType.QUESTION_PUSH_REQUESTED, eventId)
 
+@JsonInclude(JsonInclude.Include.NON_NULL)
 data class QuestionPushRequestedPayload(
     val recordId: Long,
     val notificationId: Long? = null,
@@ -58,19 +55,7 @@ data class QuestionPushRequestedPayload(
     val createdAt: Instant,
 )
 
-private val redisStreamEventMapper = jacksonObjectMapper()
-    .registerModule(JavaTimeModule())
-    .setDefaultPropertyInclusion(Value.construct(JsonInclude.Include.NON_NULL, JsonInclude.Include.NON_NULL))
-    .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
-
-fun QuestionPushRequestedEvent.toRedisStreamFields(): Map<String, String> =
-    mapOf(
-        "eventId" to eventId,
-        "eventType" to eventType.name,
-        "payload" to redisStreamEventMapper.writeValueAsString(toPayload()),
-    )
-
-private fun QuestionPushRequestedEvent.toPayload(): QuestionPushRequestedPayload =
+fun QuestionPushRequestedEvent.toPayload(): QuestionPushRequestedPayload =
     QuestionPushRequestedPayload(
         recordId = recordId,
         notificationId = notificationId,

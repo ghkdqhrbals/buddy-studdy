@@ -1,0 +1,23 @@
+{
+  "ko": {
+    "supportUrl": "https://ghkdqhrbals.github.io/buddy-studdy/",
+    "marketingUrl": "https://ghkdqhrbals.github.io/buddy-studdy/",
+    "keywords": "공부,학습,복습,퀴즈,암기,오답,통계,기록,시험,자기주도,AI튜터,지식,성장",
+    "promotionalText": "짧은 AI 학습 질문을 꾸준히 풀고, 답변을 기록하며, 주제별 성장 통계로 실력을 확인하세요.",
+    "description": "BuddyStudy는 짧고 꾸준한 학습을 돕는 AI 학습 파트너입니다.\n\n학습할 주제와 난이도를 정하면 집중해서 답할 수 있는 질문을 만날 수 있습니다. 직접 새 질문을 만들거나 원하는 주기로 학습을 이어가고, 작성 중인 답변은 자동으로 보존됩니다.\n\n주요 기능\n• 주제와 난이도에 맞춘 짧은 학습 질문\n• 힌트, 채점 피드백, 자세한 설명\n• 루트 학습과 하위 주제를 연결하는 학습 트리\n• 답변 기록과 검색, 개별 기록 관리\n• 주제별 실력 범위와 성장 추이를 보여주는 통계\n• 새 질문과 학습 흐름을 놓치지 않도록 돕는 알림\n• 한국어, 영어, 일본어 지원\n\n외운 내용을 다시 확인하고, 부족한 주제를 찾고, 매일 조금씩 성장하세요.\n\n이용약관(EULA): https://www.apple.com/legal/internet-services/itunes/dev/stdeula/\n개인정보 처리방침: https://ghkdqhrbals.github.io/buddy-studdy/privacy-2026-08-14.html"
+  },
+  "en-US": {
+    "supportUrl": "https://ghkdqhrbals.github.io/buddy-studdy/en/",
+    "marketingUrl": "https://ghkdqhrbals.github.io/buddy-studdy/en/",
+    "keywords": "study,quiz,learning,revision,flashcards,tutor,practice,knowledge,exam,statistics,recall,progress",
+    "promotionalText": "Build lasting knowledge with short AI study questions, saved answers, and clear topic-by-topic progress.",
+    "description": "BuddyStudy is a focused AI study companion built for steady, active learning.\n\nChoose a topic and difficulty, then practice with concise questions designed to make you recall and explain what you know. Create a question whenever you are ready or keep learning on your preferred schedule. Your active answer draft stays saved while you work.\n\nKey features\n• Short study questions tailored to your topic and difficulty\n• Hints, grading feedback, and detailed explanations\n• A study tree for organizing root subjects and deeper topics\n• Searchable answer history with individual record controls\n• Topic-level ability ranges and progress trends\n• Notifications that help you keep your study rhythm\n• Korean, English, and Japanese language support\n\nReview what you know, find the topics that need attention, and make consistent progress one question at a time.\n\nTerms of Use (EULA): https://www.apple.com/legal/internet-services/itunes/dev/stdeula/\nPrivacy Policy: https://ghkdqhrbals.github.io/buddy-studdy/en/privacy-2026-08-14.html"
+  },
+  "ja": {
+    "supportUrl": "https://ghkdqhrbals.github.io/buddy-studdy/ja/",
+    "marketingUrl": "https://ghkdqhrbals.github.io/buddy-studdy/ja/",
+    "keywords": "勉強,学習,復習,クイズ,問題,暗記,記録,統計,試験,自主学習,AIチューター",
+    "promotionalText": "短いAI学習問題に答え、記録を残し、トピックごとの成長を分かりやすく確認できます。",
+    "description": "BuddyStudyは、短時間でも着実に学び続けるためのAI学習パートナーです。\n\n学びたいトピックと難易度を選ぶと、知識を思い出して自分の言葉で説明するための短い問題に取り組めます。好きなタイミングで新しい問題を作成したり、設定した学習ペースを続けたりできます。入力中の回答は自動的に保存されます。\n\n主な機能\n• トピックと難易度に合わせた短い学習問題\n• ヒント、採点フィードバック、詳しい解説\n• メインの学習テーマと下位トピックを整理する学習ツリー\n• 回答履歴の検索と個別管理\n• トピック別の実力範囲と成長推移を示す統計\n• 学習リズムを保つための通知\n• 韓国語、英語、日本語に対応\n\n覚えた内容を振り返り、伸ばしたい分野を見つけ、1問ずつ着実に成長しましょう。\n\n利用規約（EULA）: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/\nプライバシーポリシー: https://ghkdqhrbals.github.io/buddy-studdy/ja/privacy-2026-08-14.html"
+  }
+}

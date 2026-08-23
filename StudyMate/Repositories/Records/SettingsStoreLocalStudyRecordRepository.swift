@@ -15,8 +15,8 @@ struct SettingsStoreLocalStudyRecordRepository: LocalStudyRecordRepository {
         settingsStore.appendStudyRecord(question: question, settings: settings)
     }
 
-    func updateStudyRecordAnswer(question: QuestionItem, answer: String, onlyIfUngraded: Bool) {
-        settingsStore.updateStudyRecordAnswer(
+    func saveSubmittedAnswer(question: QuestionItem, answer: String, onlyIfUngraded: Bool) {
+        settingsStore.saveSubmittedStudyRecordAnswer(
             question: question,
             answer: answer,
             onlyIfUngraded: onlyIfUngraded

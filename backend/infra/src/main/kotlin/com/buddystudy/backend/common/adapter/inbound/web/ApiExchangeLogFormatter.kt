@@ -44,6 +44,25 @@ internal class ApiExchangeLogFormatter(
             "responseBody" to body(responseBody, response.headers),
         )
 
+    fun compactApiExchangeJson(
+        request: ServerHttpRequest,
+        response: ServerHttpResponse,
+        requestBody: CapturedBody,
+        responseBody: CapturedBody,
+        durationMs: Double,
+    ): String =
+        buildJson(
+            "method" to request.method.name(),
+            "path" to request.path.value(),
+            "query" to (request.uri.rawQuery ?: ""),
+            "requestHeaders" to headers(request.headers),
+            "requestBody" to body(requestBody, request.headers),
+            "status" to (response.statusCode?.value() ?: 200),
+            "durationMs" to "%.2f".format(Locale.US, durationMs),
+            "responseHeaders" to headers(response.headers),
+            "responseBody" to body(responseBody, response.headers),
+        )
+
     fun apiResponseJson(
         requestId: String,
         request: ServerHttpRequest,
@@ -63,6 +82,20 @@ internal class ApiExchangeLogFormatter(
                 "headers" to headers(response.headers),
                 "body" to if (includeBody) body(responseBody, response.headers) else "",
             ),
+        )
+
+    fun compactApiResponseJson(
+        request: ServerHttpRequest,
+        response: ServerHttpResponse,
+        responseBody: CapturedBody,
+        durationMs: Double,
+    ): String =
+        buildJson(
+            "method" to request.method.name(),
+            "path" to request.path.value(),
+            "status" to (response.statusCode?.value() ?: 200),
+            "durationMs" to "%.2f".format(Locale.US, durationMs),
+            "responseBody" to body(responseBody, response.headers),
         )
 
     private fun headers(headers: HttpHeaders): Map<String, Any?> =
@@ -120,7 +153,7 @@ internal class ApiExchangeLogFormatter(
 
     private fun redact(value: String): String =
         value.replace(
-            Regex("(?i)(\"(?:openaiApiKey|apiKey|idToken|accessToken|refreshToken|clientSecret|password|verificationCode)\"\\s*:\\s*)\"[^\"]*\""),
+            Regex("(?i)(\"(?:openaiApiKey|apiKey|idToken|accessToken|refreshToken|clientSecret|installationId|password|verificationCode)\"\\s*:\\s*)\"[^\"]*\""),
         ) {
             "${it.groupValues[1]}\"[REDACTED]\""
         }

@@ -1,0 +1,192 @@
+package com.buddystudy.backend.admin.stream.adapter.inbound.web
+
+import com.buddystudy.backend.admin.analytics.application.port.inbound.AdminAnalyticsUseCase
+import com.buddystudy.backend.admin.stream.application.model.AdminCursorPage
+import com.buddystudy.backend.admin.stream.application.model.AdminRedisEventOutboxEntry
+import com.buddystudy.backend.admin.stream.application.model.AdminStreamEntry
+import com.buddystudy.backend.admin.stream.application.model.AdminStreamInboxAttempt
+import com.buddystudy.backend.admin.stream.application.model.AdminStreamPendingEntry
+import com.buddystudy.backend.admin.stream.application.model.AdminStreamTopicSummary
+import com.buddystudy.backend.admin.stream.application.port.inbound.AdminEventStreamUseCase
+import org.springframework.stereotype.Component
+import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.RequestHeader
+import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.bind.annotation.RestController
+
+@RestController
+@RequestMapping("/api/v1/admin/event-streams")
+class AdminEventStreamController(
+    private val streams: AdminEventStreamWebPort,
+) {
+    @GetMapping("/topics")
+    suspend fun topics(
+        @RequestHeader("Authorization") authorization: String?,
+        @RequestParam(required = false) query: String?,
+    ): List<AdminStreamTopicSummary> =
+        streams.topics(authorization.adminBearerToken(), query)
+
+    @GetMapping("/topics/{topic}/entries")
+    suspend fun entries(
+        @RequestHeader("Authorization") authorization: String?,
+        @PathVariable topic: String,
+        @RequestParam(required = false) cursor: String?,
+        @RequestParam(defaultValue = "20") limit: Int,
+        @RequestParam(required = false) eventType: String?,
+    ): AdminCursorPage<AdminStreamEntry> =
+        streams.entries(authorization.adminBearerToken(), topic, cursor, limit, eventType)
+
+    @GetMapping("/topics/{topic}/entries/{entryId}")
+    suspend fun entry(
+        @RequestHeader("Authorization") authorization: String?,
+        @PathVariable topic: String,
+        @PathVariable entryId: String,
+    ): AdminStreamEntry =
+        streams.entry(authorization.adminBearerToken(), topic, entryId)
+
+    @GetMapping("/topics/{topic}/groups/{group}/pending")
+    suspend fun pending(
+        @RequestHeader("Authorization") authorization: String?,
+        @PathVariable topic: String,
+        @PathVariable group: String,
+        @RequestParam(required = false) cursor: String?,
+        @RequestParam(defaultValue = "20") limit: Int,
+    ): AdminCursorPage<AdminStreamPendingEntry> =
+        streams.pending(authorization.adminBearerToken(), topic, group, cursor, limit)
+
+    @GetMapping("/inbox/attempts")
+    suspend fun inboxAttempts(
+        @RequestHeader("Authorization") authorization: String?,
+        @RequestParam(required = false) cursor: String?,
+        @RequestParam(defaultValue = "20") limit: Int,
+        @RequestParam(required = false) consumerGroup: String?,
+        @RequestParam(required = false) status: String?,
+        @RequestParam(required = false) query: String?,
+    ): AdminCursorPage<AdminStreamInboxAttempt> =
+        streams.inboxAttempts(
+            authorization.adminBearerToken(),
+            cursor,
+            limit,
+            consumerGroup,
+            status,
+            query,
+        )
+
+    @GetMapping("/outboxes/events")
+    suspend fun eventOutbox(
+        @RequestHeader("Authorization") authorization: String?,
+        @RequestParam(required = false) cursor: String?,
+        @RequestParam(defaultValue = "20") limit: Int,
+        @RequestParam(required = false) status: String?,
+        @RequestParam(required = false) eventType: String?,
+    ): AdminCursorPage<AdminRedisEventOutboxEntry> =
+        streams.eventOutbox(authorization.adminBearerToken(), cursor, limit, status, eventType)
+
+}
+
+interface AdminEventStreamWebPort {
+    suspend fun topics(adminToken: String, query: String?): List<AdminStreamTopicSummary>
+
+    suspend fun entries(
+        adminToken: String,
+        topic: String,
+        cursor: String?,
+        limit: Int,
+        eventType: String?,
+    ): AdminCursorPage<AdminStreamEntry>
+
+    suspend fun entry(adminToken: String, topic: String, entryId: String): AdminStreamEntry
+
+    suspend fun pending(
+        adminToken: String,
+        topic: String,
+        group: String,
+        cursor: String?,
+        limit: Int,
+    ): AdminCursorPage<AdminStreamPendingEntry>
+
+    suspend fun inboxAttempts(
+        adminToken: String,
+        cursor: String?,
+        limit: Int,
+        consumerGroup: String?,
+        status: String?,
+        query: String?,
+    ): AdminCursorPage<AdminStreamInboxAttempt>
+
+    suspend fun eventOutbox(
+        adminToken: String,
+        cursor: String?,
+        limit: Int,
+        status: String?,
+        eventType: String?,
+    ): AdminCursorPage<AdminRedisEventOutboxEntry>
+
+}
+
+@Component
+class AdminEventStreamWebAdapter(
+    private val authentication: AdminAnalyticsUseCase,
+    private val streams: AdminEventStreamUseCase,
+) : AdminEventStreamWebPort {
+    override suspend fun topics(adminToken: String, query: String?): List<AdminStreamTopicSummary> {
+        authentication.validate(adminToken)
+        return streams.topics(query)
+    }
+
+    override suspend fun entries(
+        adminToken: String,
+        topic: String,
+        cursor: String?,
+        limit: Int,
+        eventType: String?,
+    ): AdminCursorPage<AdminStreamEntry> {
+        authentication.validate(adminToken)
+        return streams.streamEntries(topic, cursor, limit, eventType)
+    }
+
+    override suspend fun entry(adminToken: String, topic: String, entryId: String): AdminStreamEntry {
+        authentication.validate(adminToken)
+        return streams.streamEntry(topic, entryId)
+    }
+
+    override suspend fun pending(
+        adminToken: String,
+        topic: String,
+        group: String,
+        cursor: String?,
+        limit: Int,
+    ): AdminCursorPage<AdminStreamPendingEntry> {
+        authentication.validate(adminToken)
+        return streams.pendingEntries(topic, group, cursor, limit)
+    }
+
+    override suspend fun inboxAttempts(
+        adminToken: String,
+        cursor: String?,
+        limit: Int,
+        consumerGroup: String?,
+        status: String?,
+        query: String?,
+    ): AdminCursorPage<AdminStreamInboxAttempt> {
+        authentication.validate(adminToken)
+        return streams.inboxAttempts(cursor, limit, consumerGroup, status, query)
+    }
+
+    override suspend fun eventOutbox(
+        adminToken: String,
+        cursor: String?,
+        limit: Int,
+        status: String?,
+        eventType: String?,
+    ): AdminCursorPage<AdminRedisEventOutboxEntry> {
+        authentication.validate(adminToken)
+        return streams.redisEventOutbox(cursor, limit, status, eventType)
+    }
+
+}
+
+private fun String?.adminBearerToken(): String =
+    this?.takeIf { it.startsWith("Bearer ") }?.removePrefix("Bearer ")?.trim().orEmpty()

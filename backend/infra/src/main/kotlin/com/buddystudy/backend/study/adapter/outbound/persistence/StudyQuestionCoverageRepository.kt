@@ -61,6 +61,19 @@ class StudyQuestionCoveragePersistenceAdapter(
         ).bind("now", now).bind("id", selection.coverageId).fetch().rowsUpdated().awaitSingle()
     }
 
+    override suspend fun rollbackAsked(conceptId: Long, angleKey: String, now: Instant) {
+        template.databaseClient.sql(
+            """
+            update study_question_coverage
+            set asked_count = greatest(asked_count - 1, 0),
+                last_asked_at = case when asked_count <= 1 then null else last_asked_at end,
+                updated_at = :now
+            where concept_id = :conceptId and angle_key = :angleKey
+            """.trimIndent(),
+        ).bind("now", now).bind("conceptId", conceptId).bind("angleKey", angleKey)
+            .fetch().rowsUpdated().awaitSingle()
+    }
+
     override suspend fun markAnswered(conceptId: Long, angleKey: String, score: Int, correct: Boolean, now: Instant) {
         template.databaseClient.sql(
             """

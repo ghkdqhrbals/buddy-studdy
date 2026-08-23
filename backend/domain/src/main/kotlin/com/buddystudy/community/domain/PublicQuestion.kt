@@ -27,6 +27,9 @@ class PublicQuestion private constructor(
         commentCount = stats?.commentCount ?: 0,
         viewCount = stats?.viewCount ?: 0,
         isLikedByMe = likedByMe,
+        questionSourceLanguage = question.questionSourceLanguage,
+        answerSourceLanguage = question.answerSourceLanguage,
+        aiResponseSourceLanguage = question.aiResponseSourceLanguage,
     )
 
     companion object {
@@ -53,6 +56,9 @@ data class PublicQuestionState(
     val source: String,
     val createdAt: Instant,
     val answeredAt: Instant?,
+    val questionSourceLanguage: String = "ko",
+    val answerSourceLanguage: String? = null,
+    val aiResponseSourceLanguage: String? = null,
 )
 
 data class PublicQuestionStats(
@@ -90,4 +96,7 @@ data class PublicQuestionProjection(
     val commentCount: Int,
     val viewCount: Int,
     val isLikedByMe: Boolean,
+    val questionSourceLanguage: String = "ko",
+    val answerSourceLanguage: String? = null,
+    val aiResponseSourceLanguage: String? = null,
 )

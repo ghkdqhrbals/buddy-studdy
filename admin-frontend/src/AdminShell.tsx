@@ -10,6 +10,7 @@ type AdminShellProps = {
   theme: Theme;
   loading: boolean;
   error: string | null;
+  showDateRange: boolean;
   hrefForSection: (section: SectionKey) => string;
   onDateRangeChange: (startDate: string, endDate: string) => void;
   onLogout: () => void;
@@ -27,6 +28,7 @@ export function AdminShell({
   theme,
   loading,
   error,
+  showDateRange,
   hrefForSection,
   onDateRangeChange,
   onLogout,
@@ -94,7 +96,7 @@ export function AdminShell({
             <h1>{activeLabel}</h1>
           </div>
           <div className="toolbar">
-            {activeSection === "operations" ? null : (
+            {showDateRange && (
               <DateRange
                 startDate={startDate}
                 endDate={endDate}
@@ -130,23 +132,60 @@ function DateRange({
   setStartDate: (value: string) => void;
   setEndDate: (value: string) => void;
 }) {
+  const rangeDays = inclusiveDays(startDate, endDate);
   return (
-    <div className="date-range" role="group" aria-label="Metric date range">
-      <input
-        aria-label="Start date"
-        type="date"
-        value={startDate}
-        onChange={(event) => setStartDate(event.target.value)}
-      />
-      <span aria-hidden="true">~</span>
-      <input
-        aria-label="End date"
-        type="date"
-        value={endDate}
-        onChange={(event) => setEndDate(event.target.value)}
-      />
+    <div className="date-controls">
+      <div className="range-presets" aria-label="Quick metric date ranges">
+        {[7, 30, 90].map((days) => (
+          <button
+            key={days}
+            type="button"
+            className={rangeDays === days ? "range-preset active" : "range-preset"}
+            aria-pressed={rangeDays === days}
+            onClick={() => setStartDate(startDateForRange(endDate, days))}
+          >
+            {days}d
+          </button>
+        ))}
+      </div>
+      <div className="date-range" role="group" aria-label="Metric date range">
+        <input
+          aria-label="Start date"
+          type="date"
+          max={endDate}
+          value={startDate}
+          onChange={(event) => setStartDate(event.target.value)}
+        />
+        <span aria-hidden="true">–</span>
+        <input
+          aria-label="End date"
+          type="date"
+          min={startDate}
+          value={endDate}
+          onChange={(event) => setEndDate(event.target.value)}
+        />
+      </div>
     </div>
   );
+}
+
+function startDateForRange(endDate: string, days: number): string {
+  const end = new Date(`${endDate}T12:00:00`);
+  end.setDate(end.getDate() - Math.max(0, days - 1));
+  return localIsoDate(end);
+}
+
+function inclusiveDays(startDate: string, endDate: string): number {
+  const start = new Date(`${startDate}T12:00:00`).getTime();
+  const end = new Date(`${endDate}T12:00:00`).getTime();
+  return Math.round((end - start) / 86_400_000) + 1;
+}
+
+function localIsoDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function shouldHandleClientNavigation(event: MouseEvent<HTMLAnchorElement>): boolean {

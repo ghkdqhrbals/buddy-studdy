@@ -1188,7 +1188,7 @@ test("validateEnv rejects non https and wrong production health hosts at runtime
   );
   const wrongHost = internals.validateEnv(
     manualEnv({
-      HEALTHCHECK_URL: "https://api.lowfidev.cloud/api/v1/health/readiness",
+      HEALTHCHECK_URL: "https://lowfidev.cloud/api/v1/health/readiness",
     }),
   );
 

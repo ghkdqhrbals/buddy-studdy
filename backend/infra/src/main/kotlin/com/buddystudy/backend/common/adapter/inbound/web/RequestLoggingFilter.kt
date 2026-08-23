@@ -1,5 +1,6 @@
 package com.buddystudy.backend.common.adapter.inbound.web
 
+import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.reactivestreams.Publisher
 import org.slf4j.LoggerFactory
@@ -7,6 +8,7 @@ import org.slf4j.MDC
 import org.springframework.core.io.buffer.DataBuffer
 import org.springframework.core.Ordered
 import org.springframework.core.annotation.Order
+import org.springframework.http.server.PathContainer
 import org.springframework.http.server.reactive.ServerHttpRequestDecorator
 import org.springframework.http.server.reactive.ServerHttpResponseDecorator
 import org.springframework.stereotype.Component
@@ -25,40 +27,24 @@ import java.util.concurrent.atomic.AtomicLong
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
 class RequestLoggingFilter(
-    objectMapper: ObjectMapper = ObjectMapper().findAndRegisterModules(),
+    private val loggingPolicy: ApiLoggingPolicy,
+    objectMapper: ObjectMapper = JsonMapperProvider.mapper,
 ) : WebFilter {
     private val log = LoggerFactory.getLogger(javaClass)
     private val formatter = ApiExchangeLogFormatter(objectMapper)
 
     override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
         val requestId = UUID.randomUUID().toString()
-        val requestCapture = BodyCapture(MAX_BODY_BYTES)
-        val responseCapture = BodyCapture(MAX_BODY_BYTES)
+        val capturesBodies = loggingPolicy.capturesBodies && !isMcpEndpoint(exchange)
+        val requestCapture = BodyCapture(if (capturesBodies) MAX_BODY_BYTES else 0)
+        val responseCapture = BodyCapture(if (capturesBodies) MAX_BODY_BYTES else 0)
         val started = System.nanoTime()
         val logged = AtomicBoolean(false)
 
         exchange.attributes[REQUEST_ID_ATTRIBUTE] = requestId
         exchange.response.headers.set(REQUEST_ID_HEADER, requestId)
 
-        val request = object : ServerHttpRequestDecorator(exchange.request) {
-            override fun getBody(): Flux<DataBuffer> =
-                super.getBody().doOnNext(requestCapture::capture)
-        }
-        val response = object : ServerHttpResponseDecorator(exchange.response) {
-            override fun writeWith(body: Publisher<out DataBuffer>): Mono<Void> =
-                super.writeWith(Flux.from(body).doOnNext(responseCapture::capture))
-
-            override fun writeAndFlushWith(body: Publisher<out Publisher<out DataBuffer>>): Mono<Void> =
-                super.writeAndFlushWith(
-                    Flux.from(body).map { publisher ->
-                        Flux.from(publisher).doOnNext(responseCapture::capture)
-                    }
-                )
-        }
-        val decorated = object : ServerWebExchangeDecorator(exchange) {
-            override fun getRequest() = request
-            override fun getResponse() = response
-        }
+        val decorated = if (capturesBodies) decorate(exchange, requestCapture, responseCapture) else exchange
 
         return chain.filter(decorated)
             .doFinally {
@@ -74,6 +60,37 @@ class RequestLoggingFilter(
             }
     }
 
+    private fun decorate(
+        exchange: ServerWebExchange,
+        requestCapture: BodyCapture,
+        responseCapture: BodyCapture,
+    ): ServerWebExchange {
+        val request = object : ServerHttpRequestDecorator(exchange.request) {
+            override fun getBody(): Flux<DataBuffer> =
+                super.getBody().doOnNext(requestCapture::capture)
+        }
+        val response = object : ServerHttpResponseDecorator(exchange.response) {
+            override fun writeWith(body: Publisher<out DataBuffer>): Mono<Void> =
+                super.writeWith(Flux.from(body).doOnNext(responseCapture::capture))
+
+            override fun writeAndFlushWith(body: Publisher<out Publisher<out DataBuffer>>): Mono<Void> =
+                super.writeAndFlushWith(
+                    Flux.from(body).map { publisher ->
+                        Flux.from(publisher).doOnNext(responseCapture::capture)
+                    }
+                )
+        }
+        return object : ServerWebExchangeDecorator(exchange) {
+            override fun getRequest() = request
+            override fun getResponse() = response
+        }
+    }
+
+    private fun isMcpEndpoint(exchange: ServerWebExchange): Boolean =
+        exchange.request.path.pathWithinApplication().elements()
+            .filterIsInstance<PathContainer.PathSegment>()
+            .map { it.valueToMatch() } == MCP_ENDPOINT_SEGMENTS
+
     private fun logExchange(
         requestId: String,
         exchange: ServerWebExchange,
@@ -83,37 +100,60 @@ class RequestLoggingFilter(
     ) {
         val status = exchange.response.statusCode?.value() ?: 200
         try {
-            MDC.put("requestId", requestId)
+            if (loggingPolicy.includesRequestIdInMdc) {
+                MDC.put("requestId", requestId)
+            }
             if (exchange.request.path.value().startsWith("/api/")) {
                 logApiExchange(
-                    formatter.apiExchangeJson(
-                        requestId,
-                        exchange.getAttribute<Long>(AUTHENTICATED_USER_ID_ATTRIBUTE)?.toString() ?: ANONYMOUS_USER_ID,
-                        exchange.request,
-                        exchange.response,
-                        requestBody,
-                        responseBody,
-                        durationMs,
-                    ),
+                    if (loggingPolicy.includesRequestMetadata) {
+                        formatter.apiExchangeJson(
+                            requestId,
+                            exchange.getAttribute<Long>(AUTHENTICATED_USER_ID_ATTRIBUTE)?.toString() ?: ANONYMOUS_USER_ID,
+                            exchange.request,
+                            exchange.response,
+                            requestBody,
+                            responseBody,
+                            durationMs,
+                        )
+                    } else {
+                        formatter.compactApiExchangeJson(
+                            exchange.request,
+                            exchange.response,
+                            requestBody,
+                            responseBody,
+                            durationMs,
+                        )
+                    },
                     status,
                 )
             } else {
                 logApiResponse(
-                    formatter.apiResponseJson(
-                        requestId,
-                        exchange.request,
-                        exchange.response,
-                        responseBody,
-                        durationMs,
-                        includeBody = false,
-                    ),
+                    if (loggingPolicy.includesRequestMetadata) {
+                        formatter.apiResponseJson(
+                            requestId,
+                            exchange.request,
+                            exchange.response,
+                            responseBody,
+                            durationMs,
+                            includeBody = false,
+                        )
+                    } else {
+                        formatter.compactApiResponseJson(
+                            exchange.request,
+                            exchange.response,
+                            responseBody,
+                            durationMs,
+                        )
+                    },
                     status,
                 )
             }
         } catch (error: Exception) {
-            log.warn("api_exchange_logging_failed requestId={} message={}", requestId, error.message)
+            log.warn("api_exchange_logging_failed {}", loggingPolicy.loggingFailure(requestId, error.message))
         } finally {
-            MDC.remove("requestId")
+            if (loggingPolicy.includesRequestIdInMdc) {
+                MDC.remove("requestId")
+            }
         }
     }
 
@@ -138,6 +178,7 @@ class RequestLoggingFilter(
         const val AUTHENTICATED_USER_ID_ATTRIBUTE = "authenticatedUserId"
         const val REQUEST_ID_HEADER = "X-Request-Id"
         const val ANONYMOUS_USER_ID = "-"
+        private val MCP_ENDPOINT_SEGMENTS = listOf("api", "v1", "mcp")
         private const val MAX_BODY_BYTES = 8_192
     }
 }

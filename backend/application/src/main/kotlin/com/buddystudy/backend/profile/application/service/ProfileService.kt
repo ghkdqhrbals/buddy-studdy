@@ -1,5 +1,6 @@
 package com.buddystudy.backend.profile.application.service
 
+import com.buddystudy.account.domain.entity.AvatarMode
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.TokenProvider
 import com.buddystudy.backend.auth.application.model.AccessTokenResponse
@@ -11,8 +12,9 @@ import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.auth.application.service.AccountSessionManager
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
-import com.buddystudy.backend.profile.application.model.UserProfileResponse
+import com.buddystudy.backend.profile.application.model.AccountWithdrawnEvent
 import com.buddystudy.backend.profile.application.model.AvatarCatalogResponse
+import com.buddystudy.backend.profile.application.model.UserProfileResponse
 import com.buddystudy.backend.profile.application.model.toAvatarConfigJson
 import com.buddystudy.backend.profile.application.model.toAvatarConfigMap
 import com.buddystudy.backend.profile.application.model.toCompatibleBases
@@ -21,11 +23,13 @@ import com.buddystudy.backend.profile.application.model.toResponse
 import com.buddystudy.backend.profile.application.port.inbound.AvatarUpdateCommand
 import com.buddystudy.backend.profile.application.port.inbound.ProfileUpdateCommand
 import com.buddystudy.backend.profile.application.port.inbound.ProfileUseCase
+import com.buddystudy.backend.profile.application.port.outbound.AccountWithdrawalEventPort
 import com.buddystudy.backend.profile.application.port.outbound.AvatarCatalogPort
 import com.buddystudy.backend.profile.application.port.outbound.ProfilePhotoStoragePort
 import com.buddystudy.backend.profile.application.port.outbound.StoredProfilePhoto
 import com.buddystudy.backend.profile.application.port.outbound.UnavailableProfilePhotoStoragePort
 import org.slf4j.LoggerFactory
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -39,6 +43,7 @@ class ProfileService(
     private val roles: RoleAssignmentPort,
     private val tokenService: TokenProvider,
     private val accountDeletion: AccountDeletionPort,
+    private val withdrawalEvents: AccountWithdrawalEventPort,
     private val avatarCatalog: AvatarCatalogPort,
     private val profilePhotos: ProfilePhotoStoragePort = UnavailableProfilePhotoStoragePort,
 ) : ProfileUseCase {
@@ -65,7 +70,7 @@ class ProfileService(
     override suspend fun updateAvatar(principal: Principal, command: AvatarUpdateCommand): UserProfileResponse {
         val user = user(principal.userId)
         val config = validateAvatarConfig(command.avatarConfig, user.id)
-        user.avatarMode = command.avatarMode.ifBlank { BUILDER_AVATAR_MODE }.take(32)
+        user.avatarMode = command.avatarMode.toAvatarMode(default = AvatarMode.BUILDER)
         user.avatarConfig = config.toAvatarConfigJson()
         profilePhotos.delete(user.id)
         user.avatarUrl = null
@@ -98,8 +103,9 @@ class ProfileService(
         command.bio?.let { user.bio = it.take(500) }
         command.avatarSymbolName?.let { user.avatarSymbolName = it.take(64) }
         command.avatarColorSeed?.let { user.avatarColorSeed = it.take(64) }
+        command.allowPublicQuestions?.let { user.allowPublicQuestions = it }
         command.avatarMode?.let { requestedMode ->
-            user.avatarMode = requestedMode.take(32)
+            user.avatarMode = requestedMode.toAvatarMode(default = user.avatarMode)
             if (!requestedMode.equals(PHOTO_AVATAR_MODE, ignoreCase = true)) {
                 profilePhotos.delete(user.id)
                 user.avatarUrl = null
@@ -114,7 +120,18 @@ class ProfileService(
             validated["base"]?.let { user.avatarSymbolName = baseSymbolName(it) }
         }
         user.updatedAt = Instant.now()
-        val saved = users.save(user)
+        val saved = try {
+            users.save(user)
+        } catch (duplicate: DataIntegrityViolationException) {
+            if (command.displayName == null) {
+                throw duplicate
+            }
+            throw ApiException(
+                HttpStatus.CONFLICT,
+                ApiErrorCode.DISPLAY_NAME_TAKEN,
+                "Display name is already in use.",
+            )
+        }
         log.info(
             "profile_update_saved userId={} avatarSymbolName={} avatarColorSeed={}",
             saved.id,
@@ -135,14 +152,20 @@ class ProfileService(
             throw ApiException(HttpStatus.UNAUTHORIZED, ApiErrorCode.AUTH_ACCESS_TOKEN_REQUIRED, "Account deletion requires an active login.")
         }
         val now = Instant.now()
-        profilePhotos.delete(principal.userId)
-        accountDeletion.deleteAccountData(principal.userId, principal.deviceId, now)
+        val withdrawal = accountDeletion.beginWithdrawal(principal.userId, now)
+        withdrawalEvents.append(
+            AccountWithdrawnEvent.create(
+                userId = principal.userId,
+                deviceIds = withdrawal.deviceIds,
+                withdrawnAt = now,
+            ),
+        )
         val device = sessions.device(principal.deviceId)
         val anonymousUser = sessions.ensureAnonymousUser(device)
         devices.save(device)
         roles.grantRoleIfMissing(anonymousUser.id, Roles.ANONYMOUS_USER)
         val session = sessions.saveSession(anonymousUser.id, device.deviceId, now, null)
-        val token = tokenService.create(anonymousUser.id, device.deviceId, session.id, true, anonymousUser.status)
+        val token = tokenService.create(anonymousUser.id, device.deviceId, session.id, true, anonymousUser.status.name)
         return AccessTokenResponse(token.first, token.second)
     }
 
@@ -158,7 +181,7 @@ class ProfileService(
         val requested = (defaultAvatarConfig + input)
             .mapValues { (_, value) -> value.trim() }
             .filterValues { it.isNotBlank() }
-        val categoriesBySlot = avatarCatalog.activeCategories().associateBy { it.slot }
+        val categoriesBySlot = avatarCatalog.activeCategories().associateBy { it.slot.databaseValue }
         val availableItemsByKey = avatarCatalog.availableItems(userId).associateBy { it.key }
         val normalized = requested.mapValues { (slot, itemKey) ->
             val category = categoriesBySlot[slot]
@@ -174,8 +197,8 @@ class ProfileService(
         categoriesBySlot.values
             .filter { it.required }
             .forEach { category ->
-                if (normalized[category.slot].isNullOrBlank()) {
-                    throw validation("Avatar slot ${category.slot} is required.")
+                if (normalized[category.slot.databaseValue].isNullOrBlank()) {
+                    throw validation("Avatar slot ${category.slot.databaseValue} is required.")
                 }
             }
 
@@ -204,8 +227,16 @@ class ProfileService(
         else -> itemKey
     }
 
+    private suspend fun String.toAvatarMode(default: AvatarMode): AvatarMode {
+        val value = trim()
+        if (value.isEmpty()) {
+            return default
+        }
+        return runCatching { AvatarMode.valueOf(value.uppercase()) }
+            .getOrElse { throw validation("Unsupported avatar mode: $value") }
+    }
+
     companion object {
-        private const val BUILDER_AVATAR_MODE = "BUILDER"
         private const val PHOTO_AVATAR_MODE = "PHOTO"
         private const val PIXEL_AVATAR_MODE = "PIXEL"
 

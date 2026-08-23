@@ -27,12 +27,17 @@ interface BrowseNotificationsUseCase {
 
 interface MutateNotificationsUseCase {
     suspend fun markRead(principal: Principal, id: Long): NotificationMutationResponse
+    suspend fun markAllRead(principal: Principal): NotificationMutationResponse
     suspend fun delete(principal: Principal, id: Long): NotificationMutationResponse
     suspend fun deleteAll(principal: Principal): NotificationMutationResponse
 }
 
 interface ProcessNotificationEventUseCase {
     suspend fun process(command: NotificationRequestCommand): Long
+}
+
+interface RecoverNotificationCommandUseCase {
+    suspend fun recover(eventId: String): NotificationRequestCommand?
 }
 
 interface PublishNotificationUseCase {

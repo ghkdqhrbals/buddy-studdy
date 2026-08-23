@@ -6,8 +6,15 @@ protocol StudyRoomRepository {
         registration: RemotePushRegistration,
         limit: Int,
         offset: Int,
-        query: String
+        query: String,
+        language: AppLanguage
     ) async throws -> BackendStudyPage
+
+    func fetchStudyDetail(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        language: AppLanguage
+    ) async throws -> BackendStudyRoom
 
     func createStudy(
         registration: RemotePushRegistration,
@@ -54,6 +61,12 @@ protocol StudyRoomRepository {
 
     func createQuestion(
         registration: RemotePushRegistration,
-        studyID: Int
-    ) async throws -> StudyRecord
+        studyID: Int,
+        idempotencyKey: String
+    ) async throws -> QuestionGenerationAccepted
+
+    func fetchQuestionGenerationProcess(
+        registration: RemotePushRegistration,
+        correlationID: String
+    ) async throws -> QuestionGenerationProcess
 }

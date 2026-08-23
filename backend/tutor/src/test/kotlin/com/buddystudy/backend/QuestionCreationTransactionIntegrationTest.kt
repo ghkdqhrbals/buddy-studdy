@@ -1,16 +1,20 @@
 package com.buddystudy.backend
 
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.account.domain.entity.UserProvider
+import com.buddystudy.account.domain.entity.UserStatus
 import com.buddystudy.backend.auth.adapter.outbound.persistence.UserRepository
-import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionRepository
 import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionStatsRepository
 import com.buddystudy.backend.study.adapter.outbound.persistence.StudyRepository
 import com.buddystudy.backend.study.application.openai.OpenAIQuestionKey
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingCandidate
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingPort
-import com.buddystudy.backend.study.application.service.QuestionCreationWriteManager
+import com.buddystudy.backend.study.application.service.QuestionCreationWriteService
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.common.domain.SupportedLanguage
+import com.buddystudy.study.domain.entity.QuestionSource
+import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.StudyEntity
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -40,17 +44,18 @@ class QuestionCreationTransactionIntegrationTest : MySqlIntegrationTestSupport()
     @Autowired lateinit var studies: StudyRepository
     @Autowired lateinit var questions: QuestionRepository
     @Autowired lateinit var stats: QuestionStatsRepository
-    @Autowired lateinit var manager: QuestionCreationWriteManager
+    @Autowired lateinit var writer: QuestionCreationWriteService
 
     @Test
     fun `late persistence failure rolls back question and stats together`(): Unit = runBlocking {
         val now = Instant.parse("2030-02-01T00:00:00Z")
         val user = users.save(
             UserEntity(
-                provider = "EMAIL",
+                provider = UserProvider.EMAIL,
                 providerId = "question-rollback@example.com",
                 email = "question-rollback@example.com",
-                status = "ACTIVE",
+                status = UserStatus.ACTIVE,
+                displayName = "Question-Rollback-0001",
             ),
         )
         val study = studies.save(
@@ -66,29 +71,21 @@ class QuestionCreationTransactionIntegrationTest : MySqlIntegrationTestSupport()
             studyId = study.id,
             question = "This question must be rolled back.",
             topic = study.topic,
-            language = "en",
+            sourceLanguage = SupportedLanguage.ENGLISH,
             difficultyLevel = 3,
-            status = "ungraded",
-            source = "manual",
+            status = QuestionStatus.UNGRADED,
+            source = QuestionSource.MANUAL,
             createdAt = now,
             updatedAt = now,
         )
         val statsBefore = stats.count()
 
         val result = runCatching {
-            manager.saveQuestionWithNotification(
+            writer.saveQuestionWithOutboxes(
                 question = question,
                 embedding = listOf(0.1f, 0.2f),
                 coverage = null,
                 questionKey = OpenAIQuestionKey(apiKey = "test", user = user),
-                notification = {
-                    NotificationRequestCommand(
-                        eventId = "rollback-${it.id}",
-                        userId = user.id,
-                        title = "Question",
-                        body = it.question,
-                    )
-                },
                 now = now,
             )
         }

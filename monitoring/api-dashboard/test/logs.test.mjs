@@ -79,6 +79,21 @@ test("parseApiError keeps stack trace when present", () => {
   assert.match(parsed.stack, /DispatcherServlet/);
 });
 
+test("parseApiError keeps one-line exception cause and origin fields", () => {
+  const line = [
+    "2026-07-26T04:20:00.000Z ERROR [req-linkage] 1 --- [buddystudy-backend]",
+    "c.b.ErrorHandler : api_error requestId=req-linkage clientIp=203.0.113.2 method=POST path=/api/v1/studies/2/questions status=500 code=INTERNAL_SERVER_ERROR message=Internal backend error. exceptionType=NoClassDefFoundError exceptionMessage=Could not initialize class org.jooq.impl.DefaultDSLContext rootCauseType=ExceptionInInitializerError rootCauseMessage=jOOQ SQLDataType initialization failed origin=org.jooq.impl.DSL.using(DSL.java:918)",
+  ].join(" ");
+
+  const parsed = parseApiError(["1785039600000000000", line]);
+
+  assert.equal(parsed.exceptionType, "NoClassDefFoundError");
+  assert.equal(parsed.exceptionMessage, "Could not initialize class org.jooq.impl.DefaultDSLContext");
+  assert.equal(parsed.rootCauseType, "ExceptionInInitializerError");
+  assert.equal(parsed.rootCauseMessage, "jOOQ SQLDataType initialization failed");
+  assert.equal(parsed.origin, "org.jooq.impl.DSL.using(DSL.java:918)");
+});
+
 test("related logs expose a concise summary instead of the full log line", () => {
   const requestId = "7dc19fed-31b7-43cd-be6d-b37862cf01c0";
   const line = [
@@ -92,6 +107,15 @@ test("related logs expose a concise summary instead of the full log line", () =>
   assert.equal(parsed.summary.includes(requestId), false);
   assert.equal(parsed.summary.includes("Email sender is not configured"), false);
   assert.equal(parsed.rawLine, line);
+});
+
+test("stack continuation lines are not mislabeled as INFO", () => {
+  const parsed = parseRelatedLog([
+    "1783255799514000000",
+    "\tat com.buddystudy.backend.Worker.process(Worker.kt:42)",
+  ]);
+
+  assert.equal(parsed.level, "UNKNOWN");
 });
 
 test("duration and percentile helpers are stable", () => {

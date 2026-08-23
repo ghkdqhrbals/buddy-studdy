@@ -2,140 +2,154 @@ package com.buddystudy.backend.notification.adapter.inbound.stream
 
 import com.buddystudy.backend.auth.application.port.outbound.DevicePort
 import com.buddystudy.backend.auth.application.port.outbound.UserDevicePort
-import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamConsumer
-import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamMessage
-import com.buddystudy.backend.config.BuddyStudyProperties
-import com.buddystudy.backend.config.ApplicationCoroutineScope
+import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamTopic
+import com.buddystudy.backend.common.adapter.stream.StreamListener
+import com.buddystudy.backend.common.adapter.stream.StreamMessageContext
+import com.buddystudy.backend.common.adapter.stream.StreamOptions
+import com.buddystudy.backend.common.adapter.stream.StreamScheduler
+import com.buddystudy.backend.common.application.json.JsonMapperProvider
 import com.buddystudy.backend.notification.adapter.outbound.stream.NotificationRequestedPayload
 import com.buddystudy.backend.notification.application.port.inbound.NotificationRequestCommand
 import com.buddystudy.backend.notification.application.port.inbound.ProcessNotificationEventUseCase
+import com.buddystudy.backend.notification.application.port.inbound.RecoverNotificationCommandUseCase
 import com.buddystudy.backend.notification.application.port.outbound.NotificationPersistencePort
 import com.buddystudy.backend.notification.application.service.NotificationSendPolicy
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushPublishPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionPushRequest
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.buddystudy.backend.study.application.content.MarkdownContentPolicy
 import com.fasterxml.jackson.module.kotlin.readValue
 import org.slf4j.LoggerFactory
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
-import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
-import java.time.Duration
 import java.time.Instant
-import kotlinx.coroutines.launch
 
 @Component
 @ConditionalOnProperty(prefix = "buddystudy.streams", name = ["enabled"], havingValue = "true", matchIfMissing = true)
 class NotificationStreamListener(
-    private val properties: BuddyStudyProperties,
-    private val consumer: RedisStreamConsumer,
     private val processor: ProcessNotificationEventUseCase,
     private val notifications: NotificationPersistencePort,
     private val devices: DevicePort,
     private val userDevices: UserDevicePort,
     private val pushPublisher: QuestionPushPublishPort,
-    private val sendPolicy: NotificationSendPolicy,
-    private val coroutineScope: ApplicationCoroutineScope,
+    private val notificationRecovery: RecoverNotificationCommandUseCase,
+    private val notificationSendPolicy: NotificationSendPolicy,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
-    private val stalePushClaimAge = Duration.ofMinutes(5)
-    private val group = "bs-backend-notification"
-    private val consumerName = "notification-${java.net.InetAddress.getLocalHost().hostName}"
-    private val eventType = "NOTIFICATION_REQUESTED"
 
-    @Scheduled(fixedDelayString = "\${NOTIFICATION_CONSUMER_POLL_DELAY_MS:1000}")
-    fun pollNotificationRequests() {
-        consumer.poll(properties.streams.key, group, consumerName, 100, Duration.ofMillis(3000)) {
-            coroutineScope.launch { onNotificationRequested(it) }
-        }
+    @StreamListener(
+        topic = RedisStreamTopic.NOTIFICATION_MESSAGE_REQUESTED,
+        group = GROUP,
+        consumer = CONSUMER,
+        eventType = EVENT_TYPE,
+        payloadType = NotificationRequestedPayload::class,
+        batchSize = 100,
+        blockTimeMs = 3_000,
+        pollDelayMs = 1_000,
+        enabledProperty = "buddystudy.streams.enabled",
+        options = StreamOptions.ACK,
+    )
+    private suspend fun consumeNotification(
+        payload: NotificationRequestedPayload,
+        context: StreamMessageContext,
+    ) {
+        deliver(payload, context)
     }
 
-    suspend fun onNotificationRequested(message: RedisStreamMessage) {
-        try {
-            if (message.fields["eventType"] != eventType) {
-                consumer.acknowledge(message, group)
+    @StreamScheduler(
+        topic = RedisStreamTopic.NOTIFICATION_MESSAGE_REQUESTED,
+        group = GROUP,
+        consumer = RECOVERY_CONSUMER,
+        eventType = EVENT_TYPE,
+        payloadType = NotificationRequestedPayload::class,
+        batchSize = 100,
+        minIdleTimeMs = 300_000,
+        fixedDelayMs = 30_000,
+        initialDelayMs = 30_000,
+        enabledProperty = "buddystudy.streams.enabled",
+        options = StreamOptions.ACK,
+    )
+    private suspend fun recoverIdleNotification(
+        payload: NotificationRequestedPayload,
+        context: StreamMessageContext,
+    ) {
+        deliver(payload, context)
+    }
+
+    internal suspend fun deliver(
+        payload: NotificationRequestedPayload,
+        context: StreamMessageContext,
+    ) {
+        val eventId = payload.eventId?.takeIf(String::isNotBlank)
+            ?: context.eventId?.takeIf(String::isNotBlank)
+            ?: run {
+                discardMalformed(payload, context, "eventId")
                 return
             }
-            logger.debug(
-                "redis_stream_consume_started listener={} stream={} redisRecordId={} eventId={} eventType={} userId={} fieldKeys={}",
-                "buddystudy-notification-listener",
-                message.streamKey,
-                message.recordId,
-                message.fields["eventId"],
-                message.fields["eventType"],
-                message.fields["userId"],
-                message.fields.keys,
-            )
-            val command = NotificationPayloadParser.toCommand(message.fields)
-            val notificationId = processor.process(command)
-            logger.info(
-                "notification_event_processed notificationId={} eventId={} userId={} shouldPush={} threadType={} threadId={} deepLink={}",
-                notificationId,
-                command.eventId,
-                command.userId,
-                command.shouldPush,
-                command.threadType,
-                command.threadId,
-                command.deepLink,
-            )
-            if (command.shouldPush) {
-                sendPushIfClaimed(notificationId, command)
-            } else {
-                logger.info(
-                    "notification_push_skipped reason=should_push_false notificationId={} eventId={} userId={}",
-                    notificationId,
-                    command.eventId,
-                    command.userId,
+        val command = payload.toCommandOrNull(eventId)
+            ?: notificationRecovery.recover(eventId)?.also {
+                logger.warn(
+                    "notification_event_payload_recovered stream={} redisRecordId={} eventId={} eventType={} missingFields={} claimed={}",
+                    context.streamKey,
+                    context.recordId,
+                    eventId,
+                    context.eventType,
+                    payload.missingRequiredFields(eventIdAvailable = true),
+                    context.claimed,
                 )
             }
-            consumer.acknowledge(message, group)
-            logger.debug(
-                "redis_stream_consume_succeeded listener={} stream={} redisRecordId={} eventId={} eventType={} userId={} notificationId={}",
-                "buddystudy-notification-listener",
-                message.streamKey,
-                message.recordId,
-                command.eventId,
-                eventType,
-                command.userId,
-                notificationId,
-            )
-        } catch (error: Exception) {
-            logger.warn(
-                "redis_stream_consume_failed listener={} stream={} redisRecordId={} eventId={} eventType={} userId={} error={}",
-                "buddystudy-notification-listener",
-                message.streamKey,
-                message.recordId,
-                message.fields["eventId"],
-                message.fields["eventType"],
-                message.fields["userId"],
-                error.message,
-            )
-        }
-    }
-
-    private suspend fun sendPushIfClaimed(notificationId: Long, command: NotificationRequestCommand) {
-        val now = Instant.now()
-        if (notifications.claimPush(notificationId, now, now.minus(stalePushClaimAge)) == 0) {
+            ?: run {
+                discardMalformed(
+                    payload,
+                    context,
+                    payload.missingRequiredFields(eventIdAvailable = true).joinToString(","),
+                )
+                return
+            }
+        logger.debug(
+            "redis_stream_consume_started listener={} stream={} redisRecordId={} eventId={} eventType={} userId={} claimed={}",
+            "buddystudy-notification-listener",
+            context.streamKey,
+            context.recordId,
+            context.eventId,
+            context.eventType,
+            command.userId,
+            context.claimed,
+        )
+        val notificationId = processor.process(command)
+        logger.info(
+            "notification_event_processed notificationId={} eventId={} userId={} shouldPush={} threadType={} threadId={} deepLink={}",
+            notificationId,
+            command.eventId,
+            command.userId,
+            command.shouldPush,
+            command.threadType,
+            command.threadId,
+            command.deepLink,
+        )
+        if (!command.shouldPush) {
             logger.info(
-                "notification_push_skipped reason=claim_not_acquired notificationId={} eventId={} userId={}",
+                "notification_push_skipped reason=should_push_false notificationId={} eventId={} userId={}",
                 notificationId,
                 command.eventId,
                 command.userId,
             )
             return
         }
-        val currentSession = command.userId?.let { userDevices.findActiveByUserId(it).firstOrNull() }
-        val targetDeviceId = currentSession?.deviceId ?: command.deviceId
-        val targetDevice = targetDeviceId
-            ?.let { devices.findByDeviceId(it) }
-            ?.takeIf { it.apnsToken.isNotBlank() }
-        logger.info(
-            "notification_push_targets_resolved notificationId={} eventId={} userId={} currentDeviceId={} hasApnsToken={}",
-            notificationId,
-            command.eventId,
-            command.userId,
-            currentSession?.deviceId,
-            targetDevice != null,
-        )
+        publishPush(notificationId, command)
+    }
+
+    private suspend fun publishPush(notificationId: Long, command: NotificationRequestCommand) {
+        val activeSessions = command.userId?.let { userDevices.findActiveByUserId(it) }.orEmpty()
+        val candidateDeviceIds = buildList {
+            addAll(activeSessions.map { it.deviceId })
+            command.deviceId?.let(::add)
+        }.distinct()
+        val targetDevice = candidateDeviceIds.firstNotNullOfOrNull { deviceId ->
+            devices.findByDeviceId(deviceId)?.takeIf { device ->
+                device.apnsToken.isNotBlank() &&
+                    (command.userId == null || device.userId == command.userId)
+            }
+        }
         if (targetDevice == null) {
             notifications.markPushFailed(notificationId, "No active APNs target.", Instant.now())
             logger.info(
@@ -146,22 +160,18 @@ class NotificationStreamListener(
             )
             return
         }
-        val policyCommand = command.copy(
-            userId = command.userId ?: targetDevice.userId,
-            deviceId = targetDevice.deviceId,
-        )
-        if (!sendPolicy.canSendPush(policyCommand)) {
+        if (!notificationSendPolicy.canSendPush(command.copy(deviceId = targetDevice.deviceId))) {
             notifications.markPushFailed(notificationId, "Push policy denied.", Instant.now())
             logger.info(
-                "notification_push_skipped reason=send_policy_denied notificationId={} eventId={} userId={} deviceId={} type={}",
+                "notification_push_skipped reason=send_policy_denied notificationId={} eventId={} userId={} deviceId={}",
                 notificationId,
                 command.eventId,
-                policyCommand.userId,
+                command.userId,
                 targetDevice.deviceId,
-                command.type,
             )
             return
         }
+
         try {
             val metadata = NotificationPushMetadata.from(command.metadataJson)
             val published = pushPublisher.publishPush(
@@ -179,14 +189,13 @@ class NotificationStreamListener(
                     sound = metadata.sound ?: "default",
                     intervalMinutes = metadata.intervalMinutes ?: 0,
                     title = command.title,
-                    body = command.body,
+                    body = MarkdownContentPolicy.plainText(command.body),
                     deepLink = command.deepLink ?: "buddystudy://notifications/$notificationId",
-                )
+                ),
             )
-            if (!published) {
-                notifications.markPushFailed(notificationId, "Push publish failed for device: ${targetDevice.deviceId}", Instant.now())
-                logger.warn(
-                    "notification_push_failed reason=push_stream_publish_failed notificationId={} eventId={} userId={} deviceId={}",
+            if (published == null) {
+                logger.info(
+                    "notification_push_skipped reason=push_not_publishable notificationId={} eventId={} userId={} deviceId={}",
                     notificationId,
                     command.eventId,
                     command.userId,
@@ -194,7 +203,6 @@ class NotificationStreamListener(
                 )
                 return
             }
-            notifications.markPushSent(notificationId, Instant.now())
             logger.info(
                 "notification_push_published notificationId={} eventId={} userId={} deviceId={}",
                 notificationId,
@@ -211,8 +219,65 @@ class NotificationStreamListener(
                 command.userId,
                 error.message,
             )
+            throw error
         }
     }
+
+    private fun discardMalformed(
+        payload: NotificationRequestedPayload,
+        context: StreamMessageContext,
+        missingFields: String,
+    ) {
+        val error = IllegalArgumentException(
+            "Notification event payload cannot be recovered; missing fields: ${missingFields.ifBlank { "unknown" }}",
+        )
+        logger.error(
+            "notification_event_discarded reason=malformed_payload stream={} redisRecordId={} eventId={} eventType={} missingFields={} claimed={}",
+            context.streamKey,
+            context.recordId,
+            payload.eventId ?: context.eventId,
+            context.eventType,
+            missingFields.ifBlank { "unknown" },
+            context.claimed,
+            error,
+        )
+    }
+
+    private companion object {
+        const val GROUP = "bs-backend-notification"
+        const val CONSUMER = "buddystudy-notification"
+        const val RECOVERY_CONSUMER = "buddystudy-notification-recovery"
+        const val EVENT_TYPE = "NOTIFICATION_REQUESTED"
+    }
+}
+
+internal fun NotificationRequestedPayload.toCommandOrNull(eventId: String): NotificationRequestCommand? {
+    val resolvedTitle = title ?: return null
+    val resolvedBody = body ?: return null
+    if (userId == null && deviceId.isNullOrBlank()) return null
+    return NotificationRequestCommand(
+        eventId = eventId,
+        userId = userId,
+        deviceId = deviceId,
+        actorUserId = actorUserId,
+        type = type,
+        title = resolvedTitle,
+        body = resolvedBody,
+        threadType = threadType,
+        threadId = threadId,
+        deepLink = deepLink,
+        metadataJson = metadataJson,
+        shouldPush = shouldPush,
+    )
+}
+
+internal fun NotificationRequestedPayload.missingRequiredFields(
+    eventIdAvailable: Boolean = !eventId.isNullOrBlank(),
+): List<String> = buildList {
+    if (!eventIdAvailable) add("eventId")
+    if (userId == null && deviceId.isNullOrBlank()) add("owner")
+    if (title == null) add("title")
+    if (body == null) add("body")
 }
 
 private data class NotificationPushMetadata(
@@ -225,49 +290,9 @@ private data class NotificationPushMetadata(
     val intervalMinutes: Int? = null,
 ) {
     companion object {
-        private val mapper = jacksonObjectMapper().findAndRegisterModules()
-
         fun from(raw: String?): NotificationPushMetadata =
             raw?.takeIf(String::isNotBlank)?.let {
-                runCatching { mapper.readValue<NotificationPushMetadata>(it) }.getOrNull()
+                runCatching { JsonMapperProvider.mapper.readValue<NotificationPushMetadata>(it) }.getOrNull()
             } ?: NotificationPushMetadata()
-    }
-}
-
-internal object NotificationPayloadParser {
-    private val mapper = jacksonObjectMapper().findAndRegisterModules()
-
-    fun toCommand(fields: Map<String, String>): NotificationRequestCommand {
-        fields["payload"]?.takeIf(String::isNotBlank)?.let {
-            val payload = mapper.readValue<NotificationRequestedPayload>(it)
-            return NotificationRequestCommand(
-                eventId = payload.eventId,
-                userId = payload.userId,
-                deviceId = payload.deviceId,
-                actorUserId = payload.actorUserId,
-                type = payload.type,
-                title = payload.title,
-                body = payload.body,
-                threadType = payload.threadType,
-                threadId = payload.threadId,
-                deepLink = payload.deepLink,
-                metadataJson = payload.metadataJson,
-                shouldPush = payload.shouldPush,
-            )
-        }
-        return NotificationRequestCommand(
-            eventId = fields["eventId"] ?: throw IllegalArgumentException("eventId is required."),
-            userId = fields["userId"]?.toLongOrNull(),
-            deviceId = fields["deviceId"],
-            actorUserId = fields["actorUserId"]?.toLongOrNull(),
-            type = fields["type"] ?: "ACTIVITY",
-            title = fields["title"] ?: "BuddyStudy",
-            body = fields["body"] ?: "",
-            threadType = fields["threadType"],
-            threadId = fields["threadId"],
-            deepLink = fields["deepLink"],
-            metadataJson = fields["metadataJson"],
-            shouldPush = fields["shouldPush"].toBoolean(),
-        )
     }
 }

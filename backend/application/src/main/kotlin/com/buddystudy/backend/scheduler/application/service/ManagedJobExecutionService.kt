@@ -11,10 +11,11 @@ import com.buddystudy.backend.scheduler.application.model.ScheduledJobStatusResp
 import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJob
 import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJobExecutionUseCase
 import com.buddystudy.backend.scheduler.application.port.outbound.JobLockPort
-import com.buddystudy.backend.scheduler.application.port.outbound.ScheduledJobAlertPort
 import com.buddystudy.backend.scheduler.application.port.outbound.ScheduledJobRunPort
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Isolation
+import org.springframework.transaction.annotation.Transactional
 import java.time.Duration
 import java.time.Instant
 
@@ -22,10 +23,11 @@ import java.time.Instant
 class ManagedJobExecutionService(
     private val runs: ScheduledJobRunPort,
     private val locks: JobLockPort,
-    private val alerts: ScheduledJobAlertPort,
     private val properties: BuddyStudyProperties,
+    registeredJobs: List<ManagedJob> = emptyList(),
 ) : ManagedJobExecutionUseCase {
     private val logger = LoggerFactory.getLogger(javaClass)
+    private val jobsByName = registeredJobs.associateBy(ManagedJob::name)
 
     override suspend fun execute(
         job: ManagedJob,
@@ -51,35 +53,59 @@ class ManagedJobExecutionService(
         } catch (error: Exception) {
             val startedRun = run ?: throw error
             val failed = runs.finish(startedRun.id, JobRunStatus.FAILED, null, error.message ?: error.javaClass.simpleName, elapsedMs(started))
-            runCatching { alerts.notifyFailed(failed) }
-                .onFailure { alertError ->
-                    logger.warn(
-                        "scheduled_job_alert_failed jobName={} runId={} error={}",
-                        failed.jobName,
-                        failed.id,
-                        alertError.message,
-                    )
-                }
+            logger.error(
+                "scheduled_job_failed jobName={} runId={} retryOfRunId={} triggerType={} createdBy={} durationMs={} errorType={} error={}",
+                failed.jobName,
+                failed.id,
+                failed.retryOfRunId,
+                failed.triggerType,
+                failed.createdBy,
+                failed.durationMs,
+                error.javaClass.name,
+                error.message,
+                error,
+            )
             failed
         } finally {
             releaseLock(job.name)
         }
     }
 
-    override suspend fun findRuns(jobName: String?, runId: Long?, limit: Int, offset: Int): ScheduledJobRunPageResponse =
-        runs.findRuns(jobName, runId, limit.coerceIn(1, 200), offset.coerceAtLeast(0))
+    override suspend fun findRuns(
+        jobName: String?,
+        runId: Long?,
+        limit: Int,
+        offset: Int,
+    ): ScheduledJobRunPageResponse {
+        val page = runs.findRuns(jobName, runId, limit.coerceIn(1, 200), offset.coerceAtLeast(0))
+        return page.copy(
+            runs = page.runs.map { run ->
+                val displayName = jobsByName[run.jobName]?.displayName ?: run.displayName
+                if (displayName == run.displayName) run else run.copy(displayName = displayName)
+            },
+        )
+    }
 
-    override suspend fun findStatuses(): ScheduledJobStatusResponse {
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    override suspend fun findStatuses(limit: Int?, offset: Int): ScheduledJobStatusResponse {
+        val boundedLimit = limit?.coerceIn(1, 100) ?: Int.MAX_VALUE
+        val boundedOffset = offset.coerceAtLeast(0)
         val monitoredJobs = properties.monitoring.schedulerMonitoredJobs
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .distinct()
         val thresholdMinutes = properties.monitoring.schedulerStaleThresholdMinutes.coerceAtLeast(1)
         val threshold = Duration.ofMinutes(thresholdMinutes)
         val now = Instant.now()
-        val snapshots = runs.findSnapshots(monitoredJobs).associateBy { it.jobName }
-        val orderedSnapshots = if (monitoredJobs.isEmpty()) {
-            snapshots.values.sortedBy { it.jobName }
-        } else {
-            monitoredJobs.map { jobName ->
-                snapshots[jobName] ?: ScheduledJobSnapshot(
+        val existingMonitoredJobs = runs.findExistingJobNames(monitoredJobs)
+        val missingMonitoredJobs = monitoredJobs.filterNot(existingMonitoredJobs::contains)
+        val snapshotPage = runs.findSnapshotPage(boundedLimit, boundedOffset)
+        val scheduledCount = snapshotPage.totalCount
+        val missingOffset = (boundedOffset.toLong() - scheduledCount).coerceAtLeast(0).toInt()
+        val remainingSlots = (boundedLimit - snapshotPage.snapshots.size).coerceAtLeast(0)
+        val missingSnapshots = if (boundedOffset.toLong() + snapshotPage.snapshots.size >= scheduledCount) {
+            missingMonitoredJobs.drop(missingOffset).take(remainingSlots).map { jobName ->
+                ScheduledJobSnapshot(
                     jobName = jobName,
                     enabled = true,
                     scheduleType = "MISSING",
@@ -89,14 +115,20 @@ class ManagedJobExecutionService(
                     lastSuccessfulRun = null,
                 )
             }
+        } else {
+            emptyList()
         }
+        val orderedSnapshots = snapshotPage.snapshots + missingSnapshots
         val jobs = orderedSnapshots.map { snapshot ->
+            val definition = jobsByName[snapshot.jobName]
+            val monitored = snapshot.jobName in monitoredJobs
             val latestRun = snapshot.latestRun
             val lastSuccessfulRun = snapshot.lastSuccessfulRun
             val stuck = snapshot.enabled &&
                 latestRun?.status == JobRunStatus.RUNNING &&
                 Duration.between(latestRun.startedAt, now).seconds > snapshot.timeoutSeconds.coerceAtLeast(1)
-            val stale = snapshot.enabled &&
+            val stale = monitored &&
+                snapshot.enabled &&
                 (
                     lastSuccessfulRun == null ||
                         latestRun?.status == JobRunStatus.FAILED ||
@@ -105,7 +137,10 @@ class ManagedJobExecutionService(
                     )
             ScheduledJobStatus(
                 jobName = snapshot.jobName,
+                displayName = definition?.displayName ?: snapshot.jobName,
+                description = definition?.description.orEmpty(),
                 enabled = snapshot.enabled,
+                monitored = monitored,
                 scheduleType = snapshot.scheduleType,
                 scheduleValue = snapshot.scheduleValue,
                 latestRun = latestRun,
@@ -116,7 +151,13 @@ class ManagedJobExecutionService(
                 stuck = stuck,
             )
         }
-        return ScheduledJobStatusResponse(jobs)
+        val totalCount = scheduledCount + missingMonitoredJobs.size
+        return ScheduledJobStatusResponse(
+            jobs = jobs,
+            totalCount = totalCount,
+            limit = limit?.let { boundedLimit } ?: totalCount.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+            offset = boundedOffset,
+        )
     }
 
     private suspend fun elapsedMs(started: Long): Long =
@@ -125,10 +166,12 @@ class ManagedJobExecutionService(
     private suspend fun releaseLock(jobName: String) {
         runCatching { locks.release(jobName) }
             .onFailure { error ->
-                logger.warn(
-                    "scheduled_job_lock_release_failed jobName={} error={}",
+                logger.error(
+                    "scheduled_job_lock_release_failed jobName={} errorType={} error={}",
                     jobName,
+                    error.javaClass.name,
                     error.message,
+                    error,
                 )
             }
     }

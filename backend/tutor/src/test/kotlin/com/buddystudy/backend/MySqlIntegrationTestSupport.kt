@@ -27,6 +27,11 @@ abstract class MySqlIntegrationTestSupport {
             registry.add("spring.flyway.enabled") { true }
             registry.add("spring.flyway.validate-on-migrate") { false }
             registry.add("buddystudy.analytics.datasource.database-name") { "" }
+            registry.add("buddystudy.email.host") { "smtp.test.invalid" }
+            registry.add("buddystudy.email.port") { 587 }
+            registry.add("buddystudy.email.username") { "test@invalid.example" }
+            registry.add("buddystudy.email.password") { "test-only" }
+            registry.add("buddystudy.email.from") { "BuddyStudy <test@invalid.example>" }
         }
     }
 }

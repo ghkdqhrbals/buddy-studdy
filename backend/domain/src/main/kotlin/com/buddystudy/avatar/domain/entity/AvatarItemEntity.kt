@@ -12,7 +12,7 @@ class AvatarItemEntity(
     var key: String = "",
     @Column("category_key")
     var category: String = "",
-    var slot: String = "",
+    var slot: AvatarSlot = AvatarSlot.BASE,
     var displayNameKo: String = "",
     var displayNameEn: String = "",
     var assetName: String = "",

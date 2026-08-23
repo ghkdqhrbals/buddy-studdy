@@ -11,7 +11,6 @@ import com.buddystudy.backend.auth.application.port.outbound.PermissionRequireme
 import com.buddystudy.backend.auth.application.port.outbound.TermsAgreementQueryPort
 import com.buddystudy.backend.auth.application.port.outbound.UserStatusQueryPort
 import com.buddystudy.backend.common.application.error.ApiErrorCode
-import com.buddystudy.backend.common.application.quota.MonthlyQuotaWindow
 import org.springframework.stereotype.Component
 import java.time.Instant
 
@@ -320,16 +319,20 @@ class QuotaAvailableRequirementEvaluator(
         context: PermissionEvaluationContext,
     ): RequirementEvaluationResult {
         val required = requirement.value?.toLongOrNull() ?: 1L
-        val remaining = quotas.remaining(subject.userId, requirement.key, context.now)
-        return if (remaining >= required) {
+        val quota = quotas.status(subject.userId, requirement.key, context.now)
+        return if (quota.remaining >= required) {
             RequirementEvaluationResult.granted
         } else {
             RequirementEvaluationResult.denied(
                 requirement.failureCode,
                 reason = "Quota is exceeded.",
-                metadata = MonthlyQuotaWindow.exceededMetadata(
-                    context.now,
-                    additional = mapOf("remaining" to remaining, "required" to required),
+                metadata = mapOf(
+                    "quotaPeriod" to "MONTHLY",
+                    "quotaPeriodStartedAt" to quota.periodStartedAt.toString(),
+                    "quotaResetAt" to quota.resetAt.toString(),
+                    "quotaTimeZone" to "Z",
+                    "remaining" to quota.remaining,
+                    "required" to required,
                 ),
             )
         }

@@ -29,12 +29,14 @@ struct RemoteCommunityRepository: CommunityRepository {
     func fetchPublicQuestion(
         registration: RemotePushRegistration,
         questionID: String,
-        language: AppLanguage
+        language: AppLanguage,
+        view: LocalizedContentView
     ) async throws -> CommunityQuestion {
         try await backendClient.fetchPublicQuestion(
             registration: registration,
             questionID: questionID,
-            language: language
+            language: language,
+            view: view
         )
     }
 
@@ -43,6 +45,16 @@ struct RemoteCommunityRepository: CommunityRepository {
         idToken: String
     ) async throws -> CommunityLoginResult {
         try await backendClient.loginWithGoogle(
+            registration: registration,
+            idToken: idToken
+        )
+    }
+
+    func loginWithApple(
+        registration: RemotePushRegistration,
+        idToken: String
+    ) async throws -> CommunityLoginResult {
+        try await backendClient.loginWithApple(
             registration: registration,
             idToken: idToken
         )
@@ -105,7 +117,8 @@ struct RemoteCommunityRepository: CommunityRepository {
         avatarSymbolName: String?,
         avatarColorSeed: String?,
         avatarMode: String?,
-        avatarConfig: [String: String]?
+        avatarConfig: [String: String]?,
+        allowPublicQuestions: Bool?
     ) async throws -> CommunityUserProfile {
         try await backendClient.updateMyProfile(
             registration: registration,
@@ -114,7 +127,8 @@ struct RemoteCommunityRepository: CommunityRepository {
             avatarSymbolName: avatarSymbolName,
             avatarColorSeed: avatarColorSeed,
             avatarMode: avatarMode,
-            avatarConfig: avatarConfig
+            avatarConfig: avatarConfig,
+            allowPublicQuestions: allowPublicQuestions
         )
     }
 
@@ -136,15 +150,55 @@ struct RemoteCommunityRepository: CommunityRepository {
         )
     }
 
+    func setUserBlocked(
+        registration: RemotePushRegistration,
+        userID: Int,
+        blocked: Bool
+    ) async throws -> CommunityUserBlockState {
+        try await backendClient.setCommunityUserBlocked(
+            registration: registration,
+            userID: userID,
+            blocked: blocked
+        )
+    }
+
     func submitFeedback(
         registration: RemotePushRegistration,
-        category: String,
-        message: String
+        content: String
     ) async throws {
         try await backendClient.submitAppFeedback(
             registration: registration,
-            category: category,
-            message: message
+            content: content
+        )
+    }
+
+    func recordNativeAdvertisementView(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws {
+        try await backendClient.recordNativeAdvertisementView(
+            registration: registration,
+            selectionID: selectionID
+        )
+    }
+
+    func recordNativeAdvertisementImpression(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws {
+        try await backendClient.recordNativeAdvertisementImpression(
+            registration: registration,
+            selectionID: selectionID
+        )
+    }
+
+    func suppressNativeAdvertisement(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws {
+        try await backendClient.suppressNativeAdvertisement(
+            registration: registration,
+            selectionID: selectionID
         )
     }
 
@@ -164,25 +218,31 @@ struct RemoteCommunityRepository: CommunityRepository {
         registration: RemotePushRegistration,
         questionID: String,
         limit: Int,
-        offset: Int
+        offset: Int,
+        language: AppLanguage,
+        view: LocalizedContentView
     ) async throws -> CommunityCommentsResponse {
         try await backendClient.fetchCommunityQuestionComments(
             registration: registration,
             questionID: questionID,
             limit: limit,
-            offset: offset
+            offset: offset,
+            language: language,
+            view: view
         )
     }
 
     func createComment(
         registration: RemotePushRegistration,
         questionID: String,
-        body: String
+        body: String,
+        sourceLanguage: String
     ) async throws -> CommunityQuestionComment {
         try await backendClient.createCommunityQuestionComment(
             registration: registration,
             questionID: questionID,
-            body: body
+            body: body,
+            sourceLanguage: sourceLanguage
         )
     }
 

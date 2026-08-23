@@ -24,6 +24,7 @@ async function fixture() {
     grafanaBaseUrl: "https://grafana.example.test/grafana",
     influx: { url: "", token: "", org: "", bucket: "" },
     componentPassword: "test",
+    deploymentIngestToken: "deployment-test-token",
   };
   const runs = {
     active: new Map(),
@@ -84,6 +85,96 @@ async function fixture() {
     },
   };
 }
+
+test("deployment events require a bearer token and upsert paginated history", async (context) => {
+  const app = await fixture();
+  context.after(() => app.close());
+  const event = {
+    id: "ghkdqhrbals/personal-deploy:1234",
+    service: "backend",
+    environment: "production",
+    status: "RUNNING",
+    phase: "submitted",
+    image: "ghcr.io/ghkdqhrbals/buddystudy-backend:abc123",
+    runtime: "native",
+    sourceRepository: "ghkdqhrbals/buddy-studdy",
+    sourceSha: "abc123",
+    deployRepository: "ghkdqhrbals/personal-deploy",
+    deployRunId: "1234",
+    deployUrl: "https://github.com/ghkdqhrbals/personal-deploy/actions/runs/1234",
+    actor: "operator",
+    startedAt: new Date().toISOString(),
+  };
+
+  const unauthorized = await fetch(`${app.baseUrl}/api/deployments/events`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(event),
+  });
+  assert.equal(unauthorized.status, 401);
+
+  const accepted = await fetch(`${app.baseUrl}/api/deployments/events`, {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer deployment-test-token",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(event),
+  });
+  assert.equal(accepted.status, 202);
+  assert.equal((await accepted.json()).deployment.status, "RUNNING");
+
+  const completed = await fetch(`${app.baseUrl}/api/deployments/events`, {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer deployment-test-token",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      ...event,
+      status: "SUCCEEDED",
+      phase: "promoted",
+      finishedAt: "2026-07-31T00:01:00.000Z",
+      durationMs: 60_000,
+    }),
+  });
+  assert.equal(completed.status, 202);
+
+  const history = await fetch(`${app.baseUrl}/api/deployments?limit=10&offset=0`)
+    .then((response) => response.json());
+  assert.equal(history.totalCount, 1);
+  assert.equal(history.items[0].status, "SUCCEEDED");
+  assert.equal(history.items[0].phase, "promoted");
+  assert.equal(history.items[0].durationMs, 60_000);
+  assert.equal(history.summary.activeCount, 0);
+  assert.equal(history.summary.succeeded24h, 1);
+  assert.equal(history.summary.failed24h, 0);
+  assert.equal(history.summary.current.id, event.id);
+
+  const detail = await fetch(`${app.baseUrl}/api/deployments/${encodeURIComponent(event.id)}`)
+    .then((response) => response.json());
+  assert.equal(detail.deployment.image, event.image);
+});
+
+test("deployment event validation rejects unsupported status values", async (context) => {
+  const app = await fixture();
+  context.after(() => app.close());
+
+  const response = await fetch(`${app.baseUrl}/api/deployments/events`, {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer deployment-test-token",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      id: "deployment:invalid",
+      service: "backend",
+      status: "READYISH",
+    }),
+  });
+  assert.equal(response.status, 422);
+  assert.match((await response.json()).error, /must be one of/);
+});
 
 test("status and project APIs expose runtime-neutral TestZone state", async (context) => {
   const app = await fixture();
@@ -266,6 +357,42 @@ test("script workspace supports create, edit, and delete", async (context) => {
   });
   assert.equal(deleteResponse.status, 200);
   assert.equal(await app.store.getScript(created.script.id), null);
+});
+
+test("script workspace saves empty and invalid drafts without running validation", async (context) => {
+  const app = await fixture();
+  context.after(() => app.close());
+  const project = app.store.state.projects[0];
+
+  const createResponse = await fetch(`${app.baseUrl}/api/scripts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      projectId: project.id,
+      name: "draft.js",
+      description: "",
+      code: "",
+    }),
+  });
+  assert.equal(createResponse.status, 201);
+  const created = (await createResponse.json()).script;
+  assert.equal(created.code, "");
+
+  const invalidDraft = "export default function (";
+  const updateResponse = await fetch(`${app.baseUrl}/api/scripts/${created.id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: invalidDraft }),
+  });
+  assert.equal(updateResponse.status, 200);
+  assert.equal((await updateResponse.json()).script.code, invalidDraft);
+
+  const validationResponse = await fetch(`${app.baseUrl}/api/scripts/${created.id}/validate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: invalidDraft }),
+  });
+  assert.equal(validationResponse.status, 422);
 });
 
 test("run history preserves the script name after the script is deleted", async (context) => {
@@ -535,4 +662,35 @@ test("store migration backfills names for legacy run metadata", async (context) 
   const migratedStore = await new TestZoneStore(dataDir).init();
   assert.equal(migratedStore.state.runs[0].scriptName, script.name);
   assert.equal(migratedStore.state.runs[0].targetUrl, "https://legacy.example.test");
+});
+
+test("store migration recovers successful runs mislabeled by InfluxDB failures", async (context) => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "testzone-metrics-migration-"));
+  context.after(() => fs.rm(dataDir, { recursive: true, force: true }));
+  const initialStore = await new TestZoneStore(dataDir).init();
+  const script = initialStore.state.scripts[0];
+  const run = await initialStore.createRun({
+    projectId: script.projectId,
+    scriptId: script.id,
+    scriptName: script.name,
+    targetUrl: "https://api.example.test",
+    name: "Successful k6 run",
+    profile: "script",
+    options: {},
+  });
+  const influxError = "InfluxDB write failed (422): field type conflict";
+  await initialStore.patchRun(run.id, {
+    status: "failed",
+    summary: { requestRate: 30, errorRate: 0 },
+    error: influxError,
+  });
+  delete initialStore.state.runs[0].metricsWarning;
+  await initialStore.persist();
+
+  const migratedStore = await new TestZoneStore(dataDir).init();
+  const migratedRun = migratedStore.state.runs[0];
+
+  assert.equal(migratedRun.status, "completed");
+  assert.equal(migratedRun.error, null);
+  assert.equal(migratedRun.metricsWarning, influxError);
 });

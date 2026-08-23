@@ -58,3 +58,59 @@ data class StatsActivityResponse(
     val monthAnswerCount: Int,
     val generatedAt: Instant,
 )
+
+data class StudyGrowthResponse(
+    val roots: List<StudyGrowthRootResponse>,
+    val nodes: List<StudyGrowthNodeResponse>,
+    val startAt: Instant,
+    val endAt: Instant,
+    val generatedAt: Instant,
+)
+
+data class StudyGrowthRootResponse(
+    val studyId: Long,
+    val topic: String,
+    val activeForQuestions: Boolean,
+    val currentLevel: Double?,
+    val previousLevel: Double?,
+    val growth: Double?,
+    val answerCount: Int,
+    val measuredTopicCount: Int,
+    val totalTopicCount: Int,
+    val trend: List<Double>,
+    val trendPoints: List<StudyGrowthTrendPointResponse>,
+    val profile: StudyGrowthProfileResponse,
+)
+
+data class StudyGrowthProfileResponse(
+    val achievement: Double?,
+    val challenge: Double?,
+    val completion: Double?,
+    val breadth: Double?,
+    val depth: Double?,
+)
+
+data class StudyGrowthNodeResponse(
+    val studyId: Long,
+    val parentStudyId: Long?,
+    val rootStudyId: Long,
+    val topic: String,
+    val sortOrder: Int,
+    val depth: Int,
+    val childCount: Int,
+    val activeForQuestions: Boolean,
+    val currentLevel: Double?,
+    val previousLevel: Double?,
+    val growth: Double?,
+    val answerCount: Int,
+    val measuredTopicCount: Int,
+    val totalTopicCount: Int,
+    val latestAt: Instant?,
+    val trend: List<Double>,
+    val trendPoints: List<StudyGrowthTrendPointResponse>,
+)
+
+data class StudyGrowthTrendPointResponse(
+    val measuredAt: Instant,
+    val level: Double,
+)

@@ -9,18 +9,57 @@ This directory is the source of truth for the MacBook Air Grafana/Loki setup.
 - Grafana data: `~/buddystudy/monitoring/grafana/data` -> `/var/lib/grafana`
 - Grafana provisioning: `monitoring/grafana/provisioning` -> `/etc/grafana/provisioning`
 - Grafana dashboards: `monitoring/grafana/dashboards` -> `/var/lib/grafana/dashboards`
+- Monitoring gateway logs: `~/buddystudy/monitoring/api-dashboard/logs` -> `/var/log/nginx`
+- Promtail read positions: `~/buddystudy/monitoring/promtail/data` -> `/var/lib/promtail`
 - TestZone state/scripts/runs: `~/buddystudy/monitoring/testzone/data` -> `/data`
 - TestZone InfluxDB: `~/buddystudy/monitoring/testzone/influxdb` -> `/var/lib/influxdb2`
 
+## Disk Retention and Data-Loss Boundaries
+
+Production log storage has three independent bounds. Keep all three enabled;
+bounding Loki alone does not constrain Nginx files or Docker container output.
+
+| Storage path | Bound | Trade-off |
+| --- | --- | --- |
+| Loki `/loki` | All streams are retained for 168 hours. The singleton compactor runs and applies retention every 10 minutes, then waits 2 hours before deleting marked chunks. | The window remains seven days, but deletion is asynchronous and time-based rather than a byte quota. A sudden seven-day volume spike can still require additional disk. Expired chunks cannot be queried after deletion. |
+| Nginx access spool | Rotate at 8 MiB and keep 3 archives plus the active file (about 32 MiB at normal rollover). | The rotator waits 60 seconds at startup and then checks every 30 seconds, so a burst can temporarily exceed the threshold. Removing the oldest archive can lose entries that Promtail has not shipped yet. |
+| Nginx error spool | Rotate at 2 MiB and keep 3 archives plus the active file (about 8 MiB at normal rollover). | The same 30-second burst allowance and unshipped-line loss apply. |
+| Docker container output | Docker `local` driver, 10 MiB per file, 3 files, compression enabled, for every Compose service and TestZone-managed MySQL/Redis container. | `docker logs` exposes only the retained rotations; older stdout/stderr is discarded. |
+
+The gateway rotator renames the active file, signals the Nginx master with
+`USR1`, and never makes a full-size copy. Promtail tails only each active path;
+its open file descriptor finishes a renamed file before following the reopened
+path. Do not change the scrape paths to `*.log*`: matching a renamed archive as
+a new target re-ingests the same lines. The position file is synchronized every
+10 seconds and must remain on the persistent mount. Deleting or silently
+ignoring an invalid position file can replay the active files and create
+duplicate Loki entries. If Promtail restarts before finishing a renamed file,
+or the oldest archive is removed while it is behind, unread lines can be lost.
+
+The Loki compactor working directory and marker files live under the persistent
+`/loki` mount. Do not run a second compactor against the same filesystem and do
+not delete the marker directory while retention is pending.
+
+These controls bound operational logs, not durable product or tool state.
+InfluxDB has a 30-day default retention policy, and incident records older than
+90 days are pruned when the receiver starts. Saved TestZone
+projects/scripts/run metadata, k6 `run.log`/raw metric artifacts, and Grafana
+state remain until an operator deletes or archives them; applying an automatic
+byte cap to those directories would destroy user-managed state. A TestZone run
+is limited to 60 minutes and one concurrent run by default, but operators must
+still delete obsolete high-volume runs to reclaim their artifact storage.
+
 ## Access Control
 
-- `api-dashboard` is protected with nginx Basic Auth.
-- Set `API_DASHBOARD_BASIC_AUTH_HTPASSWD` to a full htpasswd line before starting the stack.
-- Generate the value with:
-
-```sh
-docker run --rm httpd:2.4-alpine htpasswd -nbB admin 'your-password'
-```
+- `api-dashboard` uses the backend administrator session for both monitoring
+  and Manage pages. An unauthenticated browser is redirected to
+  `/login.html`, then returned to its original page after sign-in.
+- Administrator accounts are stored as BCrypt password hashes in the backend
+  database and managed under `Manage > Administrators`. The configured
+  `ADMIN_USERNAME` and `ADMIN_PASSWORD` account is imported on its first
+  successful login so existing deployments keep access during migration.
+- Nginx validates the same bearer session before proxying Loki and TestZone
+  requests. There is no separate dashboard Basic Auth credential.
 
 - Loki and both public gateway ports are bound to `127.0.0.1` only.
   Routingflare exposes the authenticated monitoring gateway and the Grafana
@@ -28,6 +67,14 @@ docker run --rm httpd:2.4-alpine htpasswd -nbB admin 'your-password'
   private on the monitoring Docker network.
 - TestZone has no public container port. Its API is reachable only through the
   authenticated dashboard Nginx route.
+- Operators manage update campaigns and maintenance under `Manage > App
+  Control`. The `App updates` tab publishes recommended or required iOS
+  campaigns and exposes per-device version/conversion progress. The
+  `Maintenance` tab starts, schedules, and ends full-screen maintenance
+  windows. The dashboard calls the authenticated backend admin API; the backend
+  stores the audit history and publishes the active policy to Firebase Remote
+  Config. Monitoring does not run a separate service-status server or expose a
+  public status API.
 - Saved k6 scripts may target any valid HTTP or HTTPS URL. The authenticated
   operator is responsible for testing only systems they are authorized to load.
 - Disposable components are selected from a fixed server-side catalog. The
@@ -54,6 +101,17 @@ docker run --rm httpd:2.4-alpine htpasswd -nbB admin 'your-password'
     the `GRAFANA_ADMIN_PASSWORD` deployment secret on every rollout.
   - Anonymous access is disabled; unauthenticated users see the login screen
     instead of a protected default dashboard.
+  - Backend ERROR alerts show only the error class, Trace / Request ID, event
+    time, and a compact `Grafana 로그 보기` hyperlink in Slack. The custom
+    webhook template escapes its Go-template variables with `$$` so Grafana
+    provisioning does not treat them as environment variables. API links use
+    the captured `requestId`, while background links use the original timestamp
+    and logger; both ranges start at the event time instead of a moving
+    `now-15m` window.
+  - `GRAFANA_SLACK_WEBHOOK_URL` is the `BuddyStudy Grafana` Incoming Webhook
+    installed specifically to Slack `#error` (`C0BRMLFMH9V`). Slack app
+    webhooks do not allow a payload to override their channel, so routing is
+    controlled by this dedicated channel-bound secret.
   - Legacy custom-dashboard paths redirect to
     `https://monitoring.lowfidev.cloud` so old bookmarks cannot send Loki
     requests to Grafana.

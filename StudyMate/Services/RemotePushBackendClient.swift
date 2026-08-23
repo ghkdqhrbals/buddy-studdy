@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 
 struct RemotePushRegistration: Codable, Equatable {
     var deviceID: String
@@ -129,6 +130,8 @@ struct AvatarCategory: Codable, Equatable, Identifiable {
             return titleKo
         case .english:
             return titleEn
+        case .japanese:
+            return titleEn
         }
     }
 }
@@ -154,6 +157,8 @@ struct AvatarCatalogItem: Codable, Equatable, Identifiable {
             return displayNameKo
         case .english:
             return displayNameEn
+        case .japanese:
+            return displayNameEn
         }
     }
 }
@@ -165,10 +170,15 @@ struct EmailVerificationCodeResult: Equatable {
 
 @MainActor
 struct BackendBaseURLConfiguration: Equatable {
+    static let bundledBaseURLInfoKey = "BuddyStudyBackendBaseURL"
     static let defaultDebugBaseURL = URL(string: "https://lowfidev.cloud")!
 
     var isDebuggingEnabled: Bool
     var debugBackendBaseURL: String
+    var bundledBackendBaseURL: String? = Bundle.main.object(
+        forInfoDictionaryKey: BackendBaseURLConfiguration.bundledBaseURLInfoKey
+    ) as? String
+    var launchBackendBaseURL: String? = ProcessInfo.processInfo.environment["BUDDYSTUDY_BACKEND_BASE_URL"]
 
     var normalizedDebugBackendBaseURL: String {
         Self.normalizedDebugBackendBaseURL(debugBackendBaseURL)
@@ -179,11 +189,19 @@ struct BackendBaseURLConfiguration: Equatable {
     }
 
     var effectiveBaseURL: URL {
-        guard isDebuggingEnabled else {
-            return RemotePushBackendClient.defaultBaseURL
+        if let launchBackendBaseURL,
+           let launchURL = Self.resolvedDebugBackendURL(from: launchBackendBaseURL) {
+            return launchURL
+        }
+        if isDebuggingEnabled {
+            return debugBackendURL ?? Self.defaultDebugBaseURL
+        }
+        if let bundledBackendBaseURL,
+           let bundledURL = Self.resolvedDebugBackendURL(from: bundledBackendBaseURL) {
+            return bundledURL
         }
 
-        return debugBackendURL ?? Self.defaultDebugBaseURL
+        return RemotePushBackendClient.defaultBaseURL
     }
 
     var displayBaseURL: String {
@@ -204,8 +222,16 @@ struct BackendBaseURLConfiguration: Equatable {
             return trimmedURL
         }
 
-        return String(trimmedURL.drop { $0 == "/" })
+        let normalizedURL = String(trimmedURL.drop { $0 == "/" })
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        switch normalizedURL.lowercased() {
+        case "https://api.lowfidev.cloud":
+            return "https://lowfidev.cloud"
+        case "http://api.lowfidev.cloud":
+            return "http://lowfidev.cloud"
+        default:
+            return normalizedURL
+        }
     }
 
     static func resolvedDebugBackendURL(from value: String) -> URL? {
@@ -224,7 +250,24 @@ struct BackendBaseURLConfiguration: Equatable {
 
 @MainActor
 protocol RemotePushBackendClientProtocol {
+    func checkAppUpdate(
+        registration: RemotePushRegistration,
+        language: AppLanguage
+    ) async throws -> BackendAppUpdateDecision
+
+    func recordAppUpdateEvent(
+        registration: RemotePushRegistration,
+        campaignID: Int64,
+        event: BackendAppUpdateEvent
+    ) async throws
+
+    func recordAppControlEvent(
+        registration: RemotePushRegistration,
+        request: BackendAppControlEventRequest
+    ) async throws
+
     func registerDevice(
+        installationIdentifier: String,
         apnsToken: String?,
         language: AppLanguage,
         timezone: String,
@@ -270,6 +313,8 @@ protocol RemotePushBackendClientProtocol {
 
     func markNotificationRead(registration: RemotePushRegistration, notificationID: String) async throws
 
+    func markAllNotificationsRead(registration: RemotePushRegistration) async throws
+
     func deleteNotification(registration: RemotePushRegistration, notificationID: String) async throws
 
     func deleteAllNotifications(registration: RemotePushRegistration) async throws
@@ -285,8 +330,15 @@ protocol RemotePushBackendClientProtocol {
         registration: RemotePushRegistration,
         limit: Int,
         offset: Int,
-        query: String
+        query: String,
+        language: AppLanguage
     ) async throws -> BackendStudyPage
+
+    func fetchStudyDetail(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        language: AppLanguage
+    ) async throws -> BackendStudyRoom
 
     func createStudy(
         registration: RemotePushRegistration,
@@ -331,11 +383,80 @@ protocol RemotePushBackendClientProtocol {
         registration: RemotePushRegistration
     ) async throws -> BackendQuestionQuota
 
+    func fetchBillingCatalog(
+        registration: RemotePushRegistration
+    ) async throws -> BackendBillingCatalog
+
+    func fetchBillingStatus(
+        registration: RemotePushRegistration
+    ) async throws -> BackendBillingStatus
+
+    func reconcileBillingSubscription(
+        registration: RemotePushRegistration
+    ) async throws -> BackendBillingStatus
+
+    func createBillingCheckout(
+        registration: RemotePushRegistration,
+        productID: String,
+        idempotencyKey: String
+    ) async throws -> BackendBillingInvoice
+
+    func abandonBillingCheckout(
+        registration: RemotePushRegistration,
+        invoiceNumber: UUID
+    ) async throws -> BackendBillingInvoice
+
+    func confirmRevenueCatTransaction(
+        registration: RemotePushRegistration,
+        invoiceNumber: UUID,
+        transactionID: String
+    ) async throws -> BackendBillingInvoice
+
+    func syncAppleTransaction(
+        registration: RemotePushRegistration,
+        signedTransaction: String,
+        environment: String,
+        invoiceNumber: UUID?
+    ) async throws -> BackendBillingInvoice
+
+    func fetchBillingInvoices(
+        registration: RemotePushRegistration,
+        limit: Int,
+        offset: Int
+    ) async throws -> BackendBillingInvoicePage
+
+    func fetchBillingInvoice(
+        registration: RemotePushRegistration,
+        invoiceID: Int64
+    ) async throws -> BackendBillingInvoice
+
+    func requestBillingRefund(
+        registration: RemotePushRegistration,
+        paymentID: Int64,
+        idempotencyKey: String,
+        reason: String?
+    ) async throws -> BackendBillingAction
+
+    func requestBillingCancellation(
+        registration: RemotePushRegistration,
+        originalTransactionID: String,
+        idempotencyKey: String,
+        reason: String?
+    ) async throws -> BackendBillingAction
+
     func fetchRecords(
         registration: RemotePushRegistration,
         limit: Int,
         offset: Int,
         query: String,
+        language: AppLanguage
+    ) async throws -> BackendRecordsPage
+
+    func fetchRecordsForStudy(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        limit: Int,
+        offset: Int,
         language: AppLanguage
     ) async throws -> BackendRecordsPage
 
@@ -363,6 +484,12 @@ protocol RemotePushBackendClientProtocol {
         endAt: Date?
     ) async throws -> BackendStatsActivity
 
+    func fetchStudyGrowth(
+        registration: RemotePushRegistration,
+        startAt: Date?,
+        endAt: Date?
+    ) async throws -> BackendStudyGrowth
+
     func fetchPublicQuestions(
         registration: RemotePushRegistration,
         query: String?,
@@ -375,10 +502,16 @@ protocol RemotePushBackendClientProtocol {
     func fetchPublicQuestion(
         registration: RemotePushRegistration,
         questionID: String,
-        language: AppLanguage
+        language: AppLanguage,
+        view: LocalizedContentView
     ) async throws -> CommunityQuestion
 
     func loginWithGoogle(
+        registration: RemotePushRegistration,
+        idToken: String
+    ) async throws -> CommunityLoginResult
+
+    func loginWithApple(
         registration: RemotePushRegistration,
         idToken: String
     ) async throws -> CommunityLoginResult
@@ -413,7 +546,8 @@ protocol RemotePushBackendClientProtocol {
         avatarSymbolName: String?,
         avatarColorSeed: String?,
         avatarMode: String?,
-        avatarConfig: [String: String]?
+        avatarConfig: [String: String]?,
+        allowPublicQuestions: Bool?
     ) async throws -> CommunityUserProfile
 
     func withdrawMyProfile(registration: RemotePushRegistration) async throws -> RemotePushRegistration
@@ -425,10 +559,30 @@ protocol RemotePushBackendClientProtocol {
         message: String
     ) async throws
 
+    func setCommunityUserBlocked(
+        registration: RemotePushRegistration,
+        userID: Int,
+        blocked: Bool
+    ) async throws -> CommunityUserBlockState
+
     func submitAppFeedback(
         registration: RemotePushRegistration,
-        category: String,
-        message: String
+        content: String
+    ) async throws
+
+    func recordNativeAdvertisementView(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws
+
+    func recordNativeAdvertisementImpression(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws
+
+    func suppressNativeAdvertisement(
+        registration: RemotePushRegistration,
+        selectionID: String
     ) async throws
 
     func setCommunityQuestionLike(
@@ -441,13 +595,16 @@ protocol RemotePushBackendClientProtocol {
         registration: RemotePushRegistration,
         questionID: String,
         limit: Int,
-        offset: Int
+        offset: Int,
+        language: AppLanguage,
+        view: LocalizedContentView
     ) async throws -> CommunityCommentsResponse
 
     func createCommunityQuestionComment(
         registration: RemotePushRegistration,
         questionID: String,
-        body: String
+        body: String,
+        sourceLanguage: String
     ) async throws -> CommunityQuestionComment
 
     func deleteCommunityQuestionComment(
@@ -456,18 +613,35 @@ protocol RemotePushBackendClientProtocol {
         commentID: String
     ) async throws
 
-    func createQuestion(registration: RemotePushRegistration, studyID: Int) async throws -> StudyRecord
+    func createQuestion(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        idempotencyKey: String
+    ) async throws -> QuestionGenerationAccepted
+
+    func fetchQuestionGenerationProcess(
+        registration: RemotePushRegistration,
+        correlationID: String
+    ) async throws -> QuestionGenerationProcess
 
     func gradeRecord(
         registration: RemotePushRegistration,
         recordID: String,
-        answer: String
+        answer: String,
+        sourceLanguage: String
     ) async throws -> StudyRecord
+
+    func fetchAnswerGradingProcess(
+        registration: RemotePushRegistration,
+        correlationID: String,
+        afterEventID: Int64
+    ) async throws -> AnswerGradingProcess
 
     func saveRecordAnswer(
         registration: RemotePushRegistration,
         recordID: String,
-        answer: String
+        answer: String,
+        sourceLanguage: String
     ) async throws -> StudyRecord
 
     func skipRecord(
@@ -490,8 +664,137 @@ protocol RemotePushBackendClientProtocol {
 
     func fetchRecord(
         registration: RemotePushRegistration,
-        recordID: String
+        recordID: String,
+        language: AppLanguage,
+        view: LocalizedContentView
     ) async throws -> StudyRecord
+}
+
+extension RemotePushBackendClientProtocol {
+    func suppressNativeAdvertisement(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func fetchBillingStatus(
+        registration: RemotePushRegistration
+    ) async throws -> BackendBillingStatus {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func reconcileBillingSubscription(
+        registration: RemotePushRegistration
+    ) async throws -> BackendBillingStatus {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func fetchBillingCatalog(
+        registration: RemotePushRegistration
+    ) async throws -> BackendBillingCatalog {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func syncAppleTransaction(
+        registration: RemotePushRegistration,
+        signedTransaction: String,
+        environment: String,
+        invoiceNumber: UUID?
+    ) async throws -> BackendBillingInvoice {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func createBillingCheckout(
+        registration: RemotePushRegistration,
+        productID: String,
+        idempotencyKey: String
+    ) async throws -> BackendBillingInvoice {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func abandonBillingCheckout(
+        registration: RemotePushRegistration,
+        invoiceNumber: UUID
+    ) async throws -> BackendBillingInvoice {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func confirmRevenueCatTransaction(
+        registration: RemotePushRegistration,
+        invoiceNumber: UUID,
+        transactionID: String
+    ) async throws -> BackendBillingInvoice {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func fetchBillingInvoices(
+        registration: RemotePushRegistration,
+        limit: Int,
+        offset: Int
+    ) async throws -> BackendBillingInvoicePage {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func fetchBillingInvoice(
+        registration: RemotePushRegistration,
+        invoiceID: Int64
+    ) async throws -> BackendBillingInvoice {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func requestBillingRefund(
+        registration: RemotePushRegistration,
+        paymentID: Int64,
+        idempotencyKey: String,
+        reason: String?
+    ) async throws -> BackendBillingAction {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func requestBillingCancellation(
+        registration: RemotePushRegistration,
+        originalTransactionID: String,
+        idempotencyKey: String,
+        reason: String?
+    ) async throws -> BackendBillingAction {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func loginWithApple(
+        registration: RemotePushRegistration,
+        idToken: String
+    ) async throws -> CommunityLoginResult {
+        throw RemotePushBackendError.invalidResponse
+    }
+
+    func checkAppUpdate(
+        registration: RemotePushRegistration,
+        language: AppLanguage
+    ) async throws -> BackendAppUpdateDecision {
+        BackendAppUpdateDecision(updateAvailable: false, shouldPresent: false)
+    }
+
+    func recordAppUpdateEvent(
+        registration: RemotePushRegistration,
+        campaignID: Int64,
+        event: BackendAppUpdateEvent
+    ) async throws {}
+
+    func recordAppControlEvent(
+        registration: RemotePushRegistration,
+        request: BackendAppControlEventRequest
+    ) async throws {}
+
+    func fetchRecordsForStudy(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        limit: Int,
+        offset: Int,
+        language: AppLanguage
+    ) async throws -> BackendRecordsPage {
+        throw RemotePushBackendError.invalidResponse
+    }
 }
 
 @MainActor
@@ -518,18 +821,73 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return decoder
     }
 
+    func checkAppUpdate(
+        registration: RemotePushRegistration,
+        language: AppLanguage
+    ) async throws -> BackendAppUpdateDecision {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "app-updates", "check")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(
+            AppUpdateCheckRequest(
+                platform: "ios",
+                currentVersion: Self.currentAppVersion,
+                currentBuild: Self.currentAppBuild,
+                language: language.backendCode
+            )
+        )
+        let data = try await perform(request)
+        return try decoder.decode(BackendAppUpdateDecision.self, from: data)
+    }
+
+    func recordAppUpdateEvent(
+        registration: RemotePushRegistration,
+        campaignID: Int64,
+        event: BackendAppUpdateEvent
+    ) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "app-updates", String(campaignID), "events")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(AppUpdateEventRequest(event: event))
+        _ = try await perform(request)
+    }
+
+    func recordAppControlEvent(
+        registration: RemotePushRegistration,
+        request event: BackendAppControlEventRequest
+    ) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "app-updates", "events")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(event)
+        _ = try await perform(request)
+    }
+
     func registerDevice(
+        installationIdentifier: String,
         apnsToken: String?,
         language: AppLanguage,
         timezone: String,
         apnsEnvironment: String
     ) async throws -> RemotePushRegistration {
         let requestBody = RegisterDeviceRequest(
+            installationId: installationIdentifier,
             apnsToken: apnsToken ?? "",
             platform: "ios",
             apnsEnvironment: apnsEnvironment,
             language: language.backendCode,
-            timezone: timezone
+            timezone: timezone,
+            appVersion: Self.currentAppVersion,
+            appBuild: Self.currentAppBuild
         )
         var request = URLRequest(url: endpoint("api", "v1", "devices", "register"))
         request.httpMethod = "POST"
@@ -669,37 +1027,36 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return try decoder.decode(BackendNotificationPreference.self, from: data)
     }
 
+    private func customPromptOverride(_ prompt: String) -> String? {
+        let value = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, value != StudySettings.defaultCustomPrompt else {
+            return nil
+        }
+        return value
+    }
+
     func updateSchedule(
         registration: RemotePushRegistration,
         settings: StudySettings,
         apiKey: String?,
         enabled: Bool
     ) async throws {
-        let scheduleItems = settings.studyCategories.isEmpty
-            ? [
-                ScheduleItemRequest(
-                    topic: settings.effectiveTopic,
-                    difficultyLevel: settings.difficulty.level,
-                    customPrompt: settings.customPrompt,
-                    openAIModel: settings.sanitizedOpenAIModel
-                )
-            ]
-            : settings.studyCategories.map { category in
-                ScheduleItemRequest(
-                    topic: category.normalizedTitle,
-                    difficultyLevel: category.difficulty.level,
-                    customPrompt: category.normalizedCustomPrompt,
-                    openAIModel: category.sanitizedOpenAIModel
-                )
-            }
+        let scheduleItems = settings.studyCategories.map { category in
+            ScheduleItemRequest(
+                topic: category.normalizedTitle,
+                difficultyLevel: category.difficulty.level,
+                customPrompt: customPromptOverride(category.normalizedCustomPrompt),
+                openAIModel: category.sanitizedOpenAIModel
+            )
+        }
         let requestBody = ScheduleRequest(
-            topic: settings.effectiveTopic,
+            topic: scheduleItems.first?.topic ?? "",
             difficultyLevel: settings.difficulty.level,
             intervalMinutes: settings.sanitizedIntervalMinutes,
             enabled: enabled,
             openAIAPIKey: apiKey,
             notificationSound: settings.notificationSound.backendSoundName,
-            customPrompt: settings.customPrompt,
+            customPrompt: customPromptOverride(settings.customPrompt),
             appLanguage: settings.appLanguage.backendCode,
             openAIModel: settings.sanitizedOpenAIModel,
             maxHistoryCount: settings.sanitizedMaxHistoryCount,
@@ -720,7 +1077,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         registration: RemotePushRegistration,
         limit: Int = 500,
         offset: Int = 0,
-        query: String = ""
+        query: String = "",
+        language: AppLanguage = .korean
     ) async throws -> BackendStudyPage {
         var components = URLComponents(
             url: endpoint("api", "v1", "studies"),
@@ -729,7 +1087,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         components?.queryItems = [
             URLQueryItem(name: "limit", value: "\(limit)"),
             URLQueryItem(name: "offset", value: "\(offset)"),
-            URLQueryItem(name: "query", value: query)
+            URLQueryItem(name: "query", value: query),
+            URLQueryItem(name: "language", value: language.backendCode)
         ]
         guard let url = components?.url else {
             throw RemotePushBackendError.invalidResponse
@@ -739,6 +1098,28 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.httpMethod = "GET"
         let data = try await perform(request)
         return try decoder.decode(BackendStudyPage.self, from: data)
+    }
+
+    func fetchStudyDetail(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        language: AppLanguage = .korean
+    ) async throws -> BackendStudyRoom {
+        var components = URLComponents(
+            url: endpoint("api", "v1", "studies", String(studyID)),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "tl", value: language.backendCode)
+        ]
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+
+        var request = authenticatedRequest(registration: registration, url: url)
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(BackendStudyRoom.self, from: data)
     }
 
     func createStudy(
@@ -752,7 +1133,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             intervalMinutes: settings.sanitizedIntervalMinutes,
             enabled: true,
             notificationSound: settings.notificationSound.backendSoundName,
-            customPrompt: category.normalizedCustomPrompt,
+            customPrompt: customPromptOverride(category.normalizedCustomPrompt),
             openAIModel: category.sanitizedOpenAIModel,
             maxHistoryCount: settings.sanitizedMaxHistoryCount
         )
@@ -797,7 +1178,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func suggestStudyTopics(
         registration: RemotePushRegistration,
         parentStudyID: Int,
-        count: Int = 4
+        count: Int = 10
     ) async throws -> [String] {
         var components = URLComponents(
             url: endpoint("api", "v1", "studies", String(parentStudyID), "topic-suggestions"),
@@ -842,7 +1223,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             enabled: true,
             openAIAPIKey: nil,
             notificationSound: settings.notificationSound.backendSoundName,
-            customPrompt: category.normalizedCustomPrompt,
+            customPrompt: customPromptOverride(category.normalizedCustomPrompt),
             appLanguage: settings.appLanguage.backendCode,
             openAIModel: category.sanitizedOpenAIModel,
             maxHistoryCount: settings.sanitizedMaxHistoryCount,
@@ -865,6 +1246,192 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         let request = authenticatedRequest(registration: registration, url: url)
         let data = try await perform(request)
         return try decoder.decode(BackendQuestionQuota.self, from: data)
+    }
+
+    func fetchBillingStatus(
+        registration: RemotePushRegistration
+    ) async throws -> BackendBillingStatus {
+        let request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "billing", "status")
+        )
+        let data = try await perform(request)
+        return try decoder.decode(BackendBillingStatus.self, from: data)
+    }
+
+    func reconcileBillingSubscription(
+        registration: RemotePushRegistration
+    ) async throws -> BackendBillingStatus {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "billing", "subscriptions", "reconcile")
+        )
+        request.httpMethod = "POST"
+        let data = try await perform(request)
+        return try decoder.decode(BackendBillingStatus.self, from: data)
+    }
+
+    func fetchBillingCatalog(
+        registration: RemotePushRegistration
+    ) async throws -> BackendBillingCatalog {
+        let request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "billing", "catalog")
+        )
+        let data = try await perform(request)
+        return try decoder.decode(BackendBillingCatalog.self, from: data)
+    }
+
+    func createBillingCheckout(
+        registration: RemotePushRegistration,
+        productID: String,
+        idempotencyKey: String
+    ) async throws -> BackendBillingInvoice {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "billing", "checkouts")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(
+            BillingCheckoutRequest(productId: productID, idempotencyKey: idempotencyKey)
+        )
+        let data = try await perform(request)
+        return try decoder.decode(BackendBillingInvoice.self, from: data)
+    }
+
+    func abandonBillingCheckout(
+        registration: RemotePushRegistration,
+        invoiceNumber: UUID
+    ) async throws -> BackendBillingInvoice {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint(
+                "api", "v1", "billing", "checkouts",
+                invoiceNumber.uuidString.lowercased(), "abandon"
+            )
+        )
+        request.httpMethod = "POST"
+        let data = try await perform(request)
+        return try decoder.decode(BackendBillingInvoice.self, from: data)
+    }
+
+    func confirmRevenueCatTransaction(
+        registration: RemotePushRegistration,
+        invoiceNumber: UUID,
+        transactionID: String
+    ) async throws -> BackendBillingInvoice {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint(
+                "api", "v1", "billing", "invoices",
+                invoiceNumber.uuidString.lowercased(), "confirm"
+            )
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(
+            RevenueCatTransactionConfirmRequest(transactionId: transactionID)
+        )
+        let data = try await perform(request)
+        return try decoder.decode(BackendBillingInvoice.self, from: data)
+    }
+
+    func syncAppleTransaction(
+        registration: RemotePushRegistration,
+        signedTransaction: String,
+        environment: String,
+        invoiceNumber: UUID?
+    ) async throws -> BackendBillingInvoice {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "billing", "apple", "transactions")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(
+            AppleTransactionSyncRequest(
+                signedTransaction: signedTransaction,
+                environment: environment,
+                invoiceNumber: invoiceNumber
+            )
+        )
+        let data = try await perform(request)
+        return try decoder.decode(BackendBillingInvoice.self, from: data)
+    }
+
+    func fetchBillingInvoices(
+        registration: RemotePushRegistration,
+        limit: Int,
+        offset: Int
+    ) async throws -> BackendBillingInvoicePage {
+        var components = URLComponents(
+            url: endpoint("api", "v1", "billing", "invoices"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "limit", value: String(max(1, min(limit, 100)))),
+            URLQueryItem(name: "offset", value: String(max(offset, 0)))
+        ]
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+        let request = authenticatedRequest(registration: registration, url: url)
+        let data = try await perform(request)
+        return try decoder.decode(BackendBillingInvoicePage.self, from: data)
+    }
+
+    func fetchBillingInvoice(
+        registration: RemotePushRegistration,
+        invoiceID: Int64
+    ) async throws -> BackendBillingInvoice {
+        let request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "billing", "invoices", String(invoiceID))
+        )
+        let data = try await perform(request)
+        return try decoder.decode(BackendBillingInvoiceDetail.self, from: data).invoice
+    }
+
+    func requestBillingRefund(
+        registration: RemotePushRegistration,
+        paymentID: Int64,
+        idempotencyKey: String,
+        reason: String?
+    ) async throws -> BackendBillingAction {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "billing", "payments", String(paymentID), "refund-requests")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(
+            BillingActionRequest(idempotencyKey: idempotencyKey, reason: reason)
+        )
+        let data = try await perform(request)
+        return try decoder.decode(BackendBillingAction.self, from: data)
+    }
+
+    func requestBillingCancellation(
+        registration: RemotePushRegistration,
+        originalTransactionID: String,
+        idempotencyKey: String,
+        reason: String?
+    ) async throws -> BackendBillingAction {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint(
+                "api", "v1", "billing", "subscriptions", originalTransactionID,
+                "cancellation-requests"
+            )
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(
+            BillingActionRequest(idempotencyKey: idempotencyKey, reason: reason)
+        )
+        let data = try await perform(request)
+        return try decoder.decode(BackendBillingAction.self, from: data)
     }
 
     func deleteStudy(
@@ -894,7 +1461,36 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             URLQueryItem(name: "limit", value: "\(limit)"),
             URLQueryItem(name: "offset", value: "\(offset)"),
             URLQueryItem(name: "query", value: query),
-            URLQueryItem(name: "language", value: language.backendCode)
+            URLQueryItem(name: "tl", value: language.backendCode),
+            URLQueryItem(name: "view", value: LocalizedContentView.localized.rawValue)
+        ]
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+
+        var request = authenticatedRequest(registration: registration, url: url)
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(BackendRecordsPage.self, from: data)
+    }
+
+    func fetchRecordsForStudy(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        limit: Int = 30,
+        offset: Int = 0,
+        language: AppLanguage = .korean
+    ) async throws -> BackendRecordsPage {
+        var components = URLComponents(
+            url: endpoint("api", "v1", "records"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "limit", value: "\(limit)"),
+            URLQueryItem(name: "offset", value: "\(offset)"),
+            URLQueryItem(name: "studyId", value: "\(studyID)"),
+            URLQueryItem(name: "tl", value: language.backendCode),
+            URLQueryItem(name: "view", value: LocalizedContentView.localized.rawValue)
         ]
         guard let url = components?.url else {
             throw RemotePushBackendError.invalidResponse
@@ -943,6 +1539,15 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var request = authenticatedRequest(
             registration: registration,
             url: endpoint("api", "v1", "notifications", notificationID, "read")
+        )
+        request.httpMethod = "POST"
+        _ = try await perform(request)
+    }
+
+    func markAllNotificationsRead(registration: RemotePushRegistration) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "notifications", "read-all")
         )
         request.httpMethod = "POST"
         _ = try await perform(request)
@@ -1073,6 +1678,33 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         return try decoder.decode(BackendStatsActivity.self, from: data)
     }
 
+    func fetchStudyGrowth(
+        registration: RemotePushRegistration,
+        startAt: Date? = nil,
+        endAt: Date? = nil
+    ) async throws -> BackendStudyGrowth {
+        var components = URLComponents(
+            url: endpoint("api", "v1", "stats", "studies"),
+            resolvingAgainstBaseURL: false
+        )
+        var queryItems: [URLQueryItem] = []
+        if let startAt {
+            queryItems.append(URLQueryItem(name: "startAt", value: Self.dateFormatter.string(from: startAt)))
+        }
+        if let endAt {
+            queryItems.append(URLQueryItem(name: "endAt", value: Self.dateFormatter.string(from: endAt)))
+        }
+        components?.queryItems = queryItems.isEmpty ? nil : queryItems
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+
+        var request = authenticatedRequest(registration: registration, url: url)
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(BackendStudyGrowth.self, from: data)
+    }
+
     func fetchPublicQuestions(
         registration: RemotePushRegistration,
         query: String?,
@@ -1091,7 +1723,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var queryItems = [
             URLQueryItem(name: "limit", value: "\(max(1, min(limit, 100)))"),
             URLQueryItem(name: "offset", value: "\(max(0, offset))"),
-            URLQueryItem(name: "language", value: language.backendCode)
+            URLQueryItem(name: "tl", value: language.backendCode),
+            URLQueryItem(name: "view", value: LocalizedContentView.localized.rawValue)
         ]
         if !normalizedQuery.isEmpty {
             queryItems.append(URLQueryItem(name: "query", value: normalizedQuery))
@@ -1114,14 +1747,16 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func fetchPublicQuestion(
         registration: RemotePushRegistration,
         questionID: String,
-        language: AppLanguage = .korean
+        language: AppLanguage = .korean,
+        view: LocalizedContentView = .localized
     ) async throws -> CommunityQuestion {
         var components = URLComponents(
             url: endpoint("api", "v1", "public", "questions", questionID),
             resolvingAgainstBaseURL: false
         )
         components?.queryItems = [
-            URLQueryItem(name: "language", value: language.backendCode)
+            URLQueryItem(name: "tl", value: language.backendCode),
+            URLQueryItem(name: "view", value: view.rawValue)
         ]
         guard let url = components?.url else {
             throw RemotePushBackendError.invalidResponse
@@ -1144,6 +1779,29 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(GoogleLoginRequest(idToken: idToken))
+        let data = try await perform(request)
+        let response = try decoder.decode(CommunityLoginResponse.self, from: data)
+        let updatedRegistration = RemotePushRegistration(
+            deviceID: registration.deviceID,
+            clientSecret: registration.clientSecret,
+            apnsToken: registration.apnsToken,
+            accessToken: response.accessToken,
+            accessTokenExpiresAt: response.accessTokenExpiresAt
+        )
+        return CommunityLoginResult(profile: response.profile, registration: updatedRegistration)
+    }
+
+    func loginWithApple(
+        registration: RemotePushRegistration,
+        idToken: String
+    ) async throws -> CommunityLoginResult {
+        var request = loginRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "auth", "apple")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(AppleLoginRequest(idToken: idToken))
         let data = try await perform(request)
         let response = try decoder.decode(CommunityLoginResponse.self, from: data)
         let updatedRegistration = RemotePushRegistration(
@@ -1253,7 +1911,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         avatarSymbolName: String? = nil,
         avatarColorSeed: String? = nil,
         avatarMode: String? = nil,
-        avatarConfig: [String: String]? = nil
+        avatarConfig: [String: String]? = nil,
+        allowPublicQuestions: Bool? = nil
     ) async throws -> CommunityUserProfile {
         var request = authenticatedRequest(
             registration: registration,
@@ -1268,7 +1927,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                 avatarSymbolName: avatarSymbolName,
                 avatarColorSeed: avatarColorSeed,
                 avatarMode: avatarMode,
-                avatarConfig: avatarConfig
+                avatarConfig: avatarConfig,
+                allowPublicQuestions: allowPublicQuestions
             )
         )
         let data = try await perform(request)
@@ -1308,10 +1968,23 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         _ = try await perform(request)
     }
 
+    func setCommunityUserBlocked(
+        registration: RemotePushRegistration,
+        userID: Int,
+        blocked: Bool
+    ) async throws -> CommunityUserBlockState {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "community", "users", String(userID), "block")
+        )
+        request.httpMethod = blocked ? "PUT" : "DELETE"
+        let data = try await perform(request)
+        return try decoder.decode(CommunityUserBlockState.self, from: data)
+    }
+
     func submitAppFeedback(
         registration: RemotePushRegistration,
-        category: String,
-        message: String
+        content: String
     ) async throws {
         var request = authenticatedRequest(
             registration: registration,
@@ -1319,9 +1992,43 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(
-            SubmitFeedbackRequest(category: category, message: message)
+        request.httpBody = try encoder.encode(SubmitFeedbackRequest(content: content))
+        _ = try await perform(request)
+    }
+
+    func recordNativeAdvertisementView(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "native-ad-selections", selectionID, "view")
         )
+        request.httpMethod = "POST"
+        _ = try await perform(request)
+    }
+
+    func recordNativeAdvertisementImpression(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "native-ad-selections", selectionID, "impression")
+        )
+        request.httpMethod = "POST"
+        _ = try await perform(request)
+    }
+
+    func suppressNativeAdvertisement(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "native-ad-selections", selectionID, "not-interested")
+        )
+        request.httpMethod = "POST"
         _ = try await perform(request)
     }
 
@@ -1343,7 +2050,9 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         registration: RemotePushRegistration,
         questionID: String,
         limit: Int = 30,
-        offset: Int = 0
+        offset: Int = 0,
+        language: AppLanguage = .korean,
+        view: LocalizedContentView = .localized
     ) async throws -> CommunityCommentsResponse {
         var components = URLComponents(
             url: endpoint("api", "v1", "public", "questions", questionID, "comments"),
@@ -1351,7 +2060,9 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         components?.queryItems = [
             URLQueryItem(name: "limit", value: "\(max(1, min(limit, 100)))"),
-            URLQueryItem(name: "offset", value: "\(max(0, offset))")
+            URLQueryItem(name: "offset", value: "\(max(0, offset))"),
+            URLQueryItem(name: "tl", value: language.backendCode),
+            URLQueryItem(name: "view", value: view.rawValue)
         ]
         guard let url = components?.url else {
             throw RemotePushBackendError.invalidResponse
@@ -1366,7 +2077,8 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     func createCommunityQuestionComment(
         registration: RemotePushRegistration,
         questionID: String,
-        body: String
+        body: String,
+        sourceLanguage: String
     ) async throws -> CommunityQuestionComment {
         var request = authenticatedRequest(
             registration: registration,
@@ -1374,7 +2086,9 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(CommunityCommentRequest(body: body))
+        request.httpBody = try encoder.encode(
+            CommunityCommentRequest(body: body, sourceLanguage: sourceLanguage)
+        )
         let data = try await perform(request)
         return try decoder.decode(CommunityQuestionComment.self, from: data)
     }
@@ -1392,20 +2106,39 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         _ = try await perform(request)
     }
 
-    func createQuestion(registration: RemotePushRegistration, studyID: Int) async throws -> StudyRecord {
+    func createQuestion(
+        registration: RemotePushRegistration,
+        studyID: Int,
+        idempotencyKey: String
+    ) async throws -> QuestionGenerationAccepted {
         var request = authenticatedRequest(
             registration: registration,
             url: endpoint("api", "v1", "studies", String(studyID), "questions")
         )
         request.httpMethod = "POST"
+        request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
         let data = try await perform(request)
-        return try decoder.decode(StudyRecord.self, from: data)
+        return try decoder.decode(QuestionGenerationAccepted.self, from: data)
+    }
+
+    func fetchQuestionGenerationProcess(
+        registration: RemotePushRegistration,
+        correlationID: String
+    ) async throws -> QuestionGenerationProcess {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "question-processes", correlationID)
+        )
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(QuestionGenerationProcess.self, from: data)
     }
 
     func gradeRecord(
         registration: RemotePushRegistration,
         recordID: String,
-        answer: String
+        answer: String,
+        sourceLanguage: String
     ) async throws -> StudyRecord {
         var request = authenticatedRequest(
             registration: registration,
@@ -1413,15 +2146,35 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(AnswerRequest(answer: answer))
+        request.httpBody = try encoder.encode(AnswerRequest(answer: answer, sourceLanguage: sourceLanguage))
         let data = try await perform(request)
         return try decoder.decode(StudyRecord.self, from: data)
+    }
+
+    func fetchAnswerGradingProcess(
+        registration: RemotePushRegistration,
+        correlationID: String,
+        afterEventID: Int64
+    ) async throws -> AnswerGradingProcess {
+        var components = URLComponents(
+            url: endpoint("api", "v1", "answer-processes", correlationID),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [URLQueryItem(name: "after", value: String(afterEventID))]
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+        var request = authenticatedRequest(registration: registration, url: url)
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(AnswerGradingProcess.self, from: data)
     }
 
     func saveRecordAnswer(
         registration: RemotePushRegistration,
         recordID: String,
-        answer: String
+        answer: String,
+        sourceLanguage: String
     ) async throws -> StudyRecord {
         var request = authenticatedRequest(
             registration: registration,
@@ -1429,7 +2182,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         )
         request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(AnswerRequest(answer: answer))
+        request.httpBody = try encoder.encode(AnswerRequest(answer: answer, sourceLanguage: sourceLanguage))
         let data = try await perform(request)
         return try decoder.decode(StudyRecord.self, from: data)
     }
@@ -1486,18 +2239,31 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     func fetchRecord(
         registration: RemotePushRegistration,
-        recordID: String
+        recordID: String,
+        language: AppLanguage = .korean,
+        view: LocalizedContentView = .localized
     ) async throws -> StudyRecord {
-        var request = authenticatedRequest(
-            registration: registration,
-            url: endpoint("api", "v1", "records", recordID)
+        var components = URLComponents(
+            url: endpoint("api", "v1", "records", recordID),
+            resolvingAgainstBaseURL: false
         )
+        components?.queryItems = [
+            URLQueryItem(name: "tl", value: language.backendCode),
+            URLQueryItem(name: "view", value: view.rawValue)
+        ]
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+        var request = authenticatedRequest(registration: registration, url: url)
         request.httpMethod = "GET"
         let data = try await perform(request)
         return try decoder.decode(StudyRecord.self, from: data)
     }
 
-    private func perform(_ request: URLRequest) async throws -> Data {
+    private func perform(
+        _ request: URLRequest,
+        ignoresHTTPStatus: Bool = false
+    ) async throws -> Data {
         var request = request
         request.cachePolicy = .reloadIgnoringLocalCacheData
         let startedAt = Date()
@@ -1536,14 +2302,29 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             let statusCode = httpResponse.statusCode
             let responseBodyText = String(data: data, encoding: .utf8) ?? ""
 
+            if ignoresHTTPStatus {
+                let entry = APITrafficLogEntry(
+                    id: requestLog.id,
+                    method: requestLog.method,
+                    url: requestLog.url,
+                    statusCode: statusCode,
+                    durationMS: durationMS,
+                    requestHeaders: requestLog.requestHeaders,
+                    requestBody: requestLog.requestBody,
+                    responseBody: Self.safeResponseBody(responseBodyText),
+                    isError: false
+                )
+                NotificationCenter.default.post(
+                    name: APITrafficNotification.didReceiveLog,
+                    object: self,
+                    userInfo: [APITrafficNotification.userInfoKey: entry]
+                )
+                didPostTrafficLog = true
+                return data
+            }
+
             if !(200..<300).contains(statusCode) {
                 let backendError = Self.decodeBackendAPIError(from: data)
-                if statusCode == 401 {
-                    NotificationCenter.default.post(
-                        name: BackendAuthorizationNotification.didReceiveUnauthorized,
-                        object: self
-                    )
-                }
                 let entry = APITrafficLogEntry(
                     id: requestLog.id,
                     method: requestLog.method,
@@ -1562,6 +2343,12 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
                     userInfo: [APITrafficNotification.userInfoKey: entry]
                 )
                 didPostTrafficLog = true
+                if statusCode == 401 {
+                    NotificationCenter.default.post(
+                        name: BackendAuthorizationNotification.didReceiveUnauthorized,
+                        object: self
+                    )
+                }
                 throw RemotePushBackendError.httpStatus(statusCode, responseBodyText, backendError)
             }
 
@@ -1684,6 +2471,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.setValue(registration.deviceID, forHTTPHeaderField: "X-Device-Id")
         request.setValue(registration.clientSecret, forHTTPHeaderField: "X-Client-Secret")
         request.setValue(Self.currentAppVersion, forHTTPHeaderField: "X-App-Version")
+        request.setValue(Self.currentAppBuild, forHTTPHeaderField: "X-App-Build")
         if registration.hasAccessToken,
            let accessToken = registration.accessToken,
            !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -1697,25 +2485,44 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         request.setValue(registration.deviceID, forHTTPHeaderField: "X-Device-Id")
         request.setValue(registration.clientSecret, forHTTPHeaderField: "X-Client-Secret")
         request.setValue(Self.currentAppVersion, forHTTPHeaderField: "X-App-Version")
+        request.setValue(Self.currentAppBuild, forHTTPHeaderField: "X-App-Build")
         return request
     }
 
     private static var currentAppVersion: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let trimmed = version?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "0" : trimmed
+    }
+
+    private static var currentAppBuild: String {
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-        return [version, build]
-            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first { !$0.isEmpty } ?? "0"
+        let trimmed = build?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "0" : trimmed
     }
 
     private static let dateFormatter = ISO8601DateFormatter()
 
     private struct RegisterDeviceRequest: Encodable {
+        var installationId: String
         var apnsToken: String
         var platform: String
         var apnsEnvironment: String
         var language: String
         var timezone: String
+        var appVersion: String
+        var appBuild: String
+    }
+
+    private struct AppUpdateCheckRequest: Encodable {
+        var platform: String
+        var currentVersion: String
+        var currentBuild: String
+        var language: String
+    }
+
+    private struct AppUpdateEventRequest: Encodable {
+        var event: BackendAppUpdateEvent
     }
 
     private struct PushTokenRequest: Encodable {
@@ -1760,7 +2567,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var enabled: Bool
         var openAIAPIKey: String?
         var notificationSound: String?
-        var customPrompt: String
+        var customPrompt: String?
         var appLanguage: String
         var openAIModel: String
         var maxHistoryCount: Int
@@ -1784,7 +2591,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     private struct ScheduleItemRequest: Encodable {
         var topic: String
         var difficultyLevel: Int
-        var customPrompt: String
+        var customPrompt: String?
         var openAIModel: String
 
         enum CodingKeys: String, CodingKey {
@@ -1801,7 +2608,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var intervalMinutes: Int
         var enabled: Bool
         var notificationSound: String?
-        var customPrompt: String
+        var customPrompt: String?
         var openAIModel: String
         var maxHistoryCount: Int
 
@@ -1815,6 +2622,22 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
             case openAIModel = "openaiModel"
             case maxHistoryCount
         }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(topic, forKey: .topic)
+            try container.encode(difficultyLevel, forKey: .difficultyLevel)
+            try container.encode(intervalMinutes, forKey: .intervalMinutes)
+            try container.encode(enabled, forKey: .enabled)
+            try container.encodeIfPresent(notificationSound, forKey: .notificationSound)
+            if let customPrompt {
+                try container.encode(customPrompt, forKey: .customPrompt)
+            } else {
+                try container.encodeNil(forKey: .customPrompt)
+            }
+            try container.encode(openAIModel, forKey: .openAIModel)
+            try container.encode(maxHistoryCount, forKey: .maxHistoryCount)
+        }
     }
 
     private struct CreateStudyTopicRequest: Encodable {
@@ -1826,6 +2649,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
 
     private struct AnswerRequest: Encodable {
         var answer: String
+        var sourceLanguage: String
     }
 
     private struct StudyTopicActivationRequest: Encodable {
@@ -1833,6 +2657,10 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     }
 
     private struct GoogleLoginRequest: Encodable {
+        var idToken: String
+    }
+
+    private struct AppleLoginRequest: Encodable {
         var idToken: String
     }
 
@@ -1858,6 +2686,7 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var avatarColorSeed: String?
         var avatarMode: String?
         var avatarConfig: [String: String]?
+        var allowPublicQuestions: Bool?
     }
 
     private struct AvatarUpdateRequest: Encodable {
@@ -1882,12 +2711,32 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
     }
 
     private struct SubmitFeedbackRequest: Encodable {
-        var category: String
-        var message: String
+        var content: String
+    }
+
+    private struct AppleTransactionSyncRequest: Encodable {
+        var signedTransaction: String
+        var environment: String
+        var invoiceNumber: UUID?
+    }
+
+    private struct RevenueCatTransactionConfirmRequest: Encodable {
+        let transactionId: String
+    }
+
+    private struct BillingCheckoutRequest: Encodable {
+        var productId: String
+        var idempotencyKey: String
+    }
+
+    private struct BillingActionRequest: Encodable {
+        var idempotencyKey: String
+        var reason: String?
     }
 
     private struct CommunityCommentRequest: Encodable {
         var body: String
+        var sourceLanguage: String
     }
 
     private struct OpenAIModelDescriptor: Decodable {
@@ -1963,6 +2812,7 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
     var lastSentAt: Date?
     var lastError: String?
     var pendingQuestion: StudyRecord?
+    var latestQuestion: StudyRecord?
     var createdAt: Date
     var updatedAt: Date
 
@@ -1983,6 +2833,7 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
         lastSentAt: Date?,
         lastError: String?,
         pendingQuestion: StudyRecord?,
+        latestQuestion: StudyRecord? = nil,
         createdAt: Date,
         updatedAt: Date
     ) {
@@ -2002,6 +2853,7 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
         self.lastSentAt = lastSentAt
         self.lastError = lastError
         self.pendingQuestion = pendingQuestion
+        self.latestQuestion = latestQuestion
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -2023,6 +2875,7 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
         case lastSentAt
         case lastError
         case pendingQuestion
+        case latestQuestion
         case createdAt
         case updatedAt
     }
@@ -2045,6 +2898,7 @@ struct BackendStudyRoom: Decodable, Equatable, Identifiable {
         lastSentAt = try container.decodeIfPresent(Date.self, forKey: .lastSentAt)
         lastError = try container.decodeIfPresent(String.self, forKey: .lastError)
         pendingQuestion = try container.decodeIfPresent(StudyRecord.self, forKey: .pendingQuestion)
+        latestQuestion = try container.decodeIfPresent(StudyRecord.self, forKey: .latestQuestion)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
     }
@@ -2055,6 +2909,269 @@ struct BackendQuestionQuota: Decodable, Equatable {
     var monthlyLimit: Int
     var remainingCount: Int
     var resetAt: Date
+    var tierCode: String
+    var periodStartedAt: Date?
+    var reservedCount: Int
+    var baseLimit: Int
+    var bonusLimit: Int
+    var anchorType: String
+    var policyVersion: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case usedCount, monthlyLimit, remainingCount, resetAt, tierCode, periodStartedAt
+        case reservedCount, baseLimit, bonusLimit, anchorType, policyVersion
+    }
+
+    init(
+        usedCount: Int,
+        monthlyLimit: Int,
+        remainingCount: Int,
+        resetAt: Date,
+        tierCode: String,
+        periodStartedAt: Date?,
+        reservedCount: Int,
+        baseLimit: Int,
+        bonusLimit: Int,
+        anchorType: String,
+        policyVersion: Int
+    ) {
+        self.usedCount = usedCount
+        self.monthlyLimit = monthlyLimit
+        self.remainingCount = remainingCount
+        self.resetAt = resetAt
+        self.tierCode = tierCode
+        self.periodStartedAt = periodStartedAt
+        self.reservedCount = reservedCount
+        self.baseLimit = baseLimit
+        self.bonusLimit = bonusLimit
+        self.anchorType = anchorType
+        self.policyVersion = policyVersion
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        usedCount = try values.decode(Int.self, forKey: .usedCount)
+        monthlyLimit = try values.decode(Int.self, forKey: .monthlyLimit)
+        remainingCount = try values.decode(Int.self, forKey: .remainingCount)
+        resetAt = try values.decode(Date.self, forKey: .resetAt)
+        tierCode = try values.decodeIfPresent(String.self, forKey: .tierCode) ?? "TIER1"
+        periodStartedAt = try values.decodeIfPresent(Date.self, forKey: .periodStartedAt)
+        reservedCount = try values.decodeIfPresent(Int.self, forKey: .reservedCount) ?? 0
+        baseLimit = try values.decodeIfPresent(Int.self, forKey: .baseLimit) ?? monthlyLimit
+        bonusLimit = try values.decodeIfPresent(Int.self, forKey: .bonusLimit) ?? 0
+        anchorType = try values.decodeIfPresent(String.self, forKey: .anchorType) ?? "ACCOUNT_CREATED"
+        policyVersion = try values.decodeIfPresent(Int.self, forKey: .policyVersion) ?? 1
+    }
+}
+
+struct BackendBillingStatus: Decodable, Equatable {
+    var tierCode: String
+    var source: String
+    var accessStatus: String
+    var renewalStatus: String
+    var productId: String?
+    var startedAt: Date?
+    var expiresAt: Date?
+    var willRenew: Bool
+    var pendingChange: String?
+    var planTransition: BackendBillingPlanTransition?
+    var synchronizedAt: Date
+    var quota: BackendBillingQuotaStatus
+
+    var isEntitlementActive: Bool {
+        accessStatus == "ACTIVE" || accessStatus == "GRACE_PERIOD"
+    }
+}
+
+struct BackendBillingPlanTransition: Decodable, Equatable {
+    var currentTierCode: String
+    var currentProductId: String?
+    var currentPlanEndsAt: Date
+    var nextTierCode: String
+    var nextProductId: String?
+    var nextPlanStartsAt: Date
+}
+
+struct BackendBillingQuotaStatus: Decodable, Equatable {
+    var periodStartedAt: Date
+    var resetAt: Date
+    var anchorType: String
+    var baseLimit: Int
+    var bonusLimit: Int
+    var usedCount: Int
+    var reservedCount: Int
+    var remainingCount: Int
+    var policyVersion: Int
+
+}
+
+struct BackendBillingCatalog: Decodable, Equatable {
+    var appAccountToken: UUID
+    var products: [BackendBillingTierProduct]
+}
+
+struct BackendBillingTierProduct: Decodable, Equatable, Identifiable {
+    var tierCode: String
+    var description: String
+    var monthlyQuestionLimit: Int
+    var productId: String
+    var productType: String
+    var billingPeriod: String?
+    var sortOrder: Int
+
+    var id: String { productId }
+}
+
+struct BackendBillingInvoice: Decodable, Equatable, Identifiable {
+    var id: Int64
+    var invoiceNumber: UUID
+    var type: String? = nil
+    var originalInvoiceId: Int64? = nil
+    var tierCode: String
+    var productId: String
+    var status: String
+    var version: Int64
+    var paymentId: Int64?
+    var transactionId: String?
+    var originalTransactionId: String?
+    var paymentStatus: String?
+    var priceMilliunits: Int64?
+    var currency: String?
+    var purchaseAt: Date?
+    var expiresAt: Date?
+    var createdAt: Date
+    var updatedAt: Date
+    var fulfilledAt: Date? = nil
+    var latestEventType: String? = nil
+
+    var isApplied: Bool {
+        (type ?? "NORMAL") == "NORMAL"
+            && status == "COMPLETED"
+            && paymentStatus == "SETTLED"
+            && fulfilledAt != nil
+            && transactionId != nil
+    }
+
+    var isRefundable: Bool {
+        (type ?? "NORMAL") == "NORMAL"
+            && status == "COMPLETED"
+            && paymentStatus.map { ["SETTLED", "REFUND_DECLINED", "REFUND_REVERSED"].contains($0) } == true
+    }
+
+    var isSubscription: Bool {
+        originalTransactionId != nil
+    }
+
+    var isCancellable: Bool {
+        (type ?? "NORMAL") == "NORMAL" && isSubscription && status == "COMPLETED"
+    }
+
+    var requiresCustomerCenterResolution: Bool {
+        (type ?? "NORMAL") == "NORMAL"
+            && status == "FAILED"
+            && latestEventType == "CANCELLED"
+    }
+}
+
+struct BackendBillingInvoicePage: Decodable, Equatable {
+    var limit: Int
+    var offset: Int
+    var invoices: [BackendBillingInvoice]
+}
+
+private struct BackendBillingInvoiceDetail: Decodable {
+    var invoice: BackendBillingInvoice
+}
+
+struct BackendBillingAction: Decodable, Equatable, Identifiable {
+    var actionId: UUID
+    var actionType: String
+    var status: String
+    var invoiceId: Int64
+    var paymentId: Int64
+    var providerTransactionId: String
+    var providerOriginalTransactionId: String
+    var reason: String?
+    var requestedAt: Date
+    var completedAt: Date?
+    var clientAction: String
+
+    var id: UUID { actionId }
+}
+
+enum QuestionGenerationStatus: String, Codable, Equatable {
+    case queued = "QUEUED"
+    case generating = "GENERATING"
+    case translating = "TRANSLATING"
+    case completed = "COMPLETED"
+    case failed = "FAILED"
+}
+
+enum QuestionGenerationStep: String, Codable, Equatable {
+    case queued = "QUEUED"
+    case generating = "GENERATING"
+    case translating = "TRANSLATING"
+    case completed = "COMPLETED"
+}
+
+struct QuestionGenerationAccepted: Codable, Equatable {
+    var correlationID: String
+    var studyID: String
+    var topicID: String
+    var status: QuestionGenerationStatus
+    var pollAfterMilliseconds: Int
+    var submittedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case correlationID = "correlationId"
+        case studyID = "studyId"
+        case topicID = "topicId"
+        case status
+        case pollAfterMilliseconds = "pollAfterMs"
+        case submittedAt
+    }
+}
+
+struct QuestionGenerationProcessError: Codable, Equatable {
+    var code: String
+    var message: String
+    var retryable: Bool
+}
+
+struct QuestionGenerationProcess: Codable, Equatable {
+    var correlationID: String
+    var status: QuestionGenerationStatus
+    var currentStep: QuestionGenerationStep
+    var terminal: Bool
+    var pollAfterMilliseconds: Int?
+    var questionID: String?
+    var question: StudyRecord?
+    var failedStep: QuestionGenerationStep?
+    var error: QuestionGenerationProcessError?
+    var updatedAt: Date
+    var completedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case correlationID = "correlationId"
+        case status
+        case currentStep
+        case terminal
+        case pollAfterMilliseconds = "pollAfterMs"
+        case questionID = "questionId"
+        case question
+        case failedStep
+        case error
+        case updatedAt
+        case completedAt
+    }
+}
+
+struct PendingQuestionGenerationProcess: Codable, Equatable {
+    var idempotencyKey: String
+    var correlationID: String?
+    var studyID: Int
+    var studyCategoryID: String?
+    var submittedAt: Date
 }
 
 struct BackendRecordsPage: Decodable, Equatable {
@@ -2175,6 +3292,68 @@ struct BackendStatsActivityDay: Decodable, Equatable, Identifiable {
     var id: Date { date }
 }
 
+struct BackendStudyGrowth: Decodable, Equatable {
+    var roots: [BackendStudyGrowthRoot]
+    var nodes: [BackendStudyGrowthNode]
+    var startAt: Date
+    var endAt: Date
+    var generatedAt: Date
+}
+
+struct BackendStudyGrowthRoot: Decodable, Equatable, Identifiable {
+    var studyId: Int
+    var topic: String
+    var activeForQuestions: Bool
+    var currentLevel: Double?
+    var previousLevel: Double?
+    var growth: Double?
+    var answerCount: Int
+    var measuredTopicCount: Int
+    var totalTopicCount: Int
+    var trend: [Double]
+    var trendPoints: [BackendStudyGrowthTrendPoint]? = nil
+    var profile: BackendStudyGrowthProfile?
+
+    var id: Int { studyId }
+}
+
+struct BackendStudyGrowthProfile: Decodable, Equatable {
+    var achievement: Double?
+    var challenge: Double?
+    var completion: Double?
+    var breadth: Double?
+    var depth: Double?
+}
+
+struct BackendStudyGrowthNode: Decodable, Equatable, Identifiable {
+    var studyId: Int
+    var parentStudyId: Int?
+    var rootStudyId: Int
+    var topic: String
+    var sortOrder: Int
+    var depth: Int
+    var childCount: Int
+    var activeForQuestions: Bool
+    var currentLevel: Double?
+    var previousLevel: Double?
+    var growth: Double?
+    var answerCount: Int
+    var measuredTopicCount: Int
+    var totalTopicCount: Int
+    var latestAt: Date?
+    var trend: [Double]
+    var trendPoints: [BackendStudyGrowthTrendPoint]? = nil
+
+    var id: Int { studyId }
+}
+
+struct BackendStudyGrowthTrendPoint: Decodable, Equatable, Identifiable {
+    var measuredAt: Date
+    var level: Double
+
+    var id: Date { measuredAt }
+}
+
 struct CommunityQuestion: Decodable, Equatable, Identifiable {
     var id: String
     var question: String
@@ -2191,6 +3370,7 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
     var commentCount: Int
     var viewCount: Int
     var isLikedByMe: Bool
+    var localization: RecordLocalizationMetadata?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -2209,6 +3389,7 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         case viewCount
         case isLikedByMe
         case likedByMe
+        case localization
     }
 
     init(
@@ -2226,7 +3407,8 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         likeCount: Int = 0,
         commentCount: Int = 0,
         viewCount: Int = 0,
-        isLikedByMe: Bool = false
+        isLikedByMe: Bool = false,
+        localization: RecordLocalizationMetadata? = nil
     ) {
         self.id = id
         self.question = question
@@ -2243,6 +3425,7 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         self.commentCount = commentCount
         self.viewCount = viewCount
         self.isLikedByMe = isLikedByMe
+        self.localization = localization
     }
 
     init(from decoder: Decoder) throws {
@@ -2264,6 +3447,7 @@ struct CommunityQuestion: Decodable, Equatable, Identifiable {
         isLikedByMe = try container.decodeIfPresent(Bool.self, forKey: .isLikedByMe)
             ?? container.decodeIfPresent(Bool.self, forKey: .likedByMe)
             ?? false
+        localization = try container.decodeIfPresent(RecordLocalizationMetadata.self, forKey: .localization)
     }
 }
 
@@ -2294,12 +3478,28 @@ struct CommunityLikeState: Decodable, Equatable {
     }
 }
 
+struct CommunityUserBlockState: Decodable, Equatable {
+    var userID: Int
+    var blocked: Bool
+
+    init(userID: Int, blocked: Bool) {
+        self.userID = userID
+        self.blocked = blocked
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case userID = "userId"
+        case blocked
+    }
+}
+
 struct CommunityQuestionComment: Decodable, Equatable, Identifiable {
     var id: String
     var questionID: String
     var body: String
     var createdAt: Date
     var author: CommunityUserProfile
+    var localization: ContentLocalizationMetadata?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -2307,6 +3507,7 @@ struct CommunityQuestionComment: Decodable, Equatable, Identifiable {
         case body
         case createdAt
         case author
+        case localization
     }
 }
 
@@ -2322,6 +3523,7 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
     var avatarColorSeed: String
     var avatarMode: String
     var avatarConfig: [String: String]?
+    var allowPublicQuestions: Bool = true
     var pageAccess: CommunityPageAccess = .restricted
 
     enum CodingKeys: String, CodingKey {
@@ -2336,6 +3538,7 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
         case avatarColorSeed
         case avatarMode
         case avatarConfig
+        case allowPublicQuestions
         case pageAccess
     }
 
@@ -2351,6 +3554,7 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
         avatarColorSeed: String = "avatar-color-mint",
         avatarMode: String = "LEGACY",
         avatarConfig: [String: String]? = nil,
+        allowPublicQuestions: Bool = true,
         pageAccess: CommunityPageAccess = .restricted
     ) {
         self.id = id
@@ -2364,6 +3568,7 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
         self.avatarColorSeed = avatarColorSeed
         self.avatarMode = avatarMode
         self.avatarConfig = avatarConfig
+        self.allowPublicQuestions = allowPublicQuestions
         self.pageAccess = pageAccess
     }
 
@@ -2381,6 +3586,8 @@ struct CommunityUserProfile: Codable, Equatable, Identifiable {
         avatarMode = try container.decodeIfPresent(String.self, forKey: .avatarMode) ?? "LEGACY"
         avatarConfig = try container.decodeIfPresent([String: String].self, forKey: .avatarConfig)
         pageAccess = try container.decodeIfPresent(CommunityPageAccess.self, forKey: .pageAccess) ?? .restricted
+        allowPublicQuestions = try container.decodeIfPresent(Bool.self, forKey: .allowPublicQuestions)
+            ?? pageAccess.publicQuestions
     }
 }
 
@@ -2407,12 +3614,20 @@ struct CommunityPageAccess: Codable, Equatable {
 
 struct CommunityQuestionsResponse: Decodable, Equatable {
     var questions: [CommunityQuestion]
+    var items: [CommunityFeedItem]
     var totalCount: Int
     var limit: Int
     var offset: Int
 
-    init(questions: [CommunityQuestion] = [], totalCount: Int = 0, limit: Int = 0, offset: Int = 0) {
+    init(
+        questions: [CommunityQuestion] = [],
+        items: [CommunityFeedItem]? = nil,
+        totalCount: Int = 0,
+        limit: Int = 0,
+        offset: Int = 0
+    ) {
         self.questions = questions
+        self.items = items ?? questions.map(CommunityFeedItem.publicQuestion)
         self.totalCount = totalCount
         self.limit = limit
         self.offset = offset
@@ -2420,6 +3635,7 @@ struct CommunityQuestionsResponse: Decodable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case questions
+        case items
         case totalCount
         case limit
         case offset
@@ -2433,9 +3649,74 @@ struct CommunityQuestionsResponse: Decodable, Equatable {
             forKey: .questions,
             expectedCount: totalCount
         )
+        items = try container.decodeIfPresent([CommunityFeedItem].self, forKey: .items)
+            ?? questions.map(CommunityFeedItem.publicQuestion)
         totalCount = max(totalCount, questions.count)
         limit = try container.decodeIfPresent(Int.self, forKey: .limit) ?? questions.count
         offset = try container.decodeIfPresent(Int.self, forKey: .offset) ?? 0
+    }
+}
+
+enum CommunityFeedItem: Decodable, Equatable, Identifiable {
+    case publicQuestion(CommunityQuestion)
+    case advertisement(CommunityNativeAdvertisement)
+
+    var id: String {
+        switch self {
+        case .publicQuestion(let question):
+            return "question-\(question.id)"
+        case .advertisement(let advertisement):
+            return "advertisement-\(advertisement.selectionID)"
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case question
+        case advertisement
+    }
+
+    private enum ItemType: String, Decodable {
+        case publicQuestion = "PUBLIC_QUESTION"
+        case advertisement = "ADVERTISEMENT"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(ItemType.self, forKey: .type) {
+        case .publicQuestion:
+            self = .publicQuestion(try container.decode(CommunityQuestion.self, forKey: .question))
+        case .advertisement:
+            self = .advertisement(
+                try container.decode(CommunityNativeAdvertisement.self, forKey: .advertisement)
+            )
+        }
+    }
+}
+
+struct CommunityNativeAdvertisement: Decodable, Equatable, Identifiable {
+    var selectionID: String
+    var campaignID: String
+    var providerName: String? = nil
+    var disclosureLabel: String
+    var title: String
+    var body: String?
+    var imageURL: String? = nil
+    var affiliateDisclosure: String? = nil
+    var deepLink: String
+
+    var id: String { selectionID }
+
+    enum CodingKeys: String, CodingKey {
+        case selectionID = "selectionId"
+        case campaignID = "campaignId"
+        case providerName
+        case disclosureLabel
+        case title
+        case body
+        case imageURL = "imageUrl"
+        case affiliateDisclosure
+        case deepLink
     }
 }
 
@@ -2698,7 +3979,7 @@ struct BackendStudySettings: Decodable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         topic = try container.decodeIfPresent(String.self, forKey: .topic) ?? ""
         difficultyLevel = try container.decodeIfPresent(Int.self, forKey: .difficultyLevel) ?? 5
-        intervalMinutes = try container.decodeIfPresent(Int.self, forKey: .intervalMinutes) ?? 15
+        intervalMinutes = try container.decode(Int.self, forKey: .intervalMinutes)
         enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
         notificationSound = try container.decodeIfPresent(String.self, forKey: .notificationSound)
         customPrompt = try container.decodeIfPresent(String.self, forKey: .customPrompt) ?? ""
@@ -2900,6 +4181,7 @@ struct BackendAPIError: Decodable, Equatable {
         requiredActions = try? container.decodeIfPresent([String].self, forKey: .requiredActions)
         metadata = try? container.decodeIfPresent(BackendAPIErrorMetadata.self, forKey: .metadata)
     }
+
 }
 
 struct BackendAPIErrorMetadata: Decodable, Equatable {
@@ -2908,7 +4190,6 @@ struct BackendAPIErrorMetadata: Decodable, Equatable {
     var quotaTimeZone: String?
     var remaining: Int64?
     var required: Int64?
-
     var quotaResetDate: Date? {
         guard let quotaResetAt else {
             return nil
@@ -2922,6 +4203,7 @@ struct BackendAPIErrorMetadata: Decodable, Equatable {
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: quotaResetAt)
     }
+
 }
 
 enum BackendTermsAgreementAction: String {
@@ -3146,13 +4428,15 @@ enum RemotePushBackendError: LocalizedError {
 
 }
 
-private extension AppLanguage {
+extension AppLanguage {
     init?(backendCode: String) {
         switch backendCode {
         case "ko":
             self = .korean
         case "en":
             self = .english
+        case "ja":
+            self = .japanese
         default:
             return nil
         }
@@ -3164,6 +4448,32 @@ private extension AppLanguage {
             return "ko"
         case .english:
             return "en"
+        case .japanese:
+            return "ja"
+        }
+    }
+}
+
+enum ContentLanguageRecognizer {
+    static func detect(_ text: String, fallback: AppLanguage) -> String {
+        let candidate = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard candidate.count >= 4 else {
+            return fallback.backendCode
+        }
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(candidate)
+        guard let language = recognizer.dominantLanguage else {
+            return fallback.backendCode
+        }
+        switch language {
+        case .korean:
+            return "ko"
+        case .english:
+            return "en"
+        case .japanese:
+            return "ja"
+        default:
+            return fallback.backendCode
         }
     }
 }

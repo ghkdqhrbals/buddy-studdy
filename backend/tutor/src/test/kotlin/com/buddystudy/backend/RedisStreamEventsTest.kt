@@ -2,17 +2,16 @@ package com.buddystudy.backend
 
 import kotlinx.coroutines.runBlocking
 
-import com.buddystudy.backend.community.adapter.outbound.stream.PublicQuestionViewedEvent
+import com.buddystudy.backend.community.application.model.CommunityQuestionEvent
 import com.buddystudy.backend.study.adapter.outbound.stream.QuestionPushRequestedEvent
-import com.buddystudy.backend.study.adapter.outbound.stream.toRedisStreamFields
-import com.buddystudy.utils.toStringMapWithoutNull
+import com.buddystudy.backend.study.adapter.outbound.stream.toPayload
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant
 
 class RedisStreamEventsTest {
     @Test
-    fun `push event publishes envelope with full payload json`(): Unit = runBlocking {
+    fun `push event creates a typed payload without manual field conversion`(): Unit = runBlocking {
         val event = QuestionPushRequestedEvent(
             recordId = 1,
             studyId = 10,
@@ -29,41 +28,43 @@ class RedisStreamEventsTest {
             eventId = "event-push",
         )
 
-        val fields = event.toRedisStreamFields()
+        val payload = event.toPayload()
 
-        assertThat(fields).containsKeys("eventId", "eventType", "payload")
-        assertThat(fields["eventId"]).isEqualTo("event-push")
-        assertThat(fields["eventType"]).isEqualTo("QUESTION_PUSH_REQUESTED")
-        assertThat(fields["payload"].orEmpty())
-            .contains("\"recordId\":1")
-            .contains("\"studyId\":10")
-            .contains("\"deviceId\":\"device-1\"")
-            .contains("\"question\":\"What is SwiftUI?\"")
-            .contains("\"topic\":\"SwiftUI\"")
-            .contains("\"difficultyLevel\":5")
-            .contains("\"createdAt\":\"1970-01-01T00:02:00Z\"")
-        assertThat(fields).doesNotContainKeys("recordId", "question", "topic")
+        assertThat(payload.recordId).isEqualTo(1)
+        assertThat(payload.studyId).isEqualTo(10)
+        assertThat(payload.deviceId).isEqualTo("device-1")
+        assertThat(payload.question).isEqualTo("What is SwiftUI?")
+        assertThat(payload.topic).isEqualTo("SwiftUI")
+        assertThat(payload.difficultyLevel).isEqualTo(5)
+        assertThat(payload.createdAt).isEqualTo(Instant.ofEpochSecond(120))
     }
 
     @Test
-    fun `view event exposes consistent stream field map`(): Unit = runBlocking {
-        val event = PublicQuestionViewedEvent(
+    fun `view event preserves localization metadata in the outbox payload`() {
+        val event = CommunityQuestionEvent(
+            eventId = "event-1",
             questionId = 10,
             userId = 20,
-            createdAt = Instant.ofEpochSecond(180),
-            eventId = "event-1",
+            translationState = "TRANSLATED",
+            translationLanguage = "ja",
+            translationReason = "EXPLICIT_TL",
+            requestId = "request-1",
+            questionSourceLanguage = "en",
+            questionDisplayLanguage = "ja",
+            answerSourceLanguage = "ko",
+            answerDisplayLanguage = "ja",
+            aiResponseSourceLanguage = "en",
+            aiResponseDisplayLanguage = "ja",
+            occurredAt = Instant.ofEpochSecond(180),
         )
 
-        assertThat(event.toStringMapWithoutNull()).containsExactlyInAnyOrderEntriesOf(
-            mapOf(
-                "eventId" to "event-1",
-                "eventType" to "CONTENT_VIEWED",
-                "questionId" to "10",
-                "userId" to "20",
-                "minuteBucket" to "3",
-                "createdAt" to "1970-01-01T00:03:00Z",
-            )
-        )
+        assertThat(event.eventId).isEqualTo("event-1")
+        assertThat(event.questionId).isEqualTo(10)
+        assertThat(event.translationLanguage).isEqualTo("ja")
+        assertThat(event.questionSourceLanguage).isEqualTo("en")
+        assertThat(event.questionDisplayLanguage).isEqualTo("ja")
+        assertThat(event.answerSourceLanguage).isEqualTo("ko")
+        assertThat(event.aiResponseDisplayLanguage).isEqualTo("ja")
+        assertThat(event.occurredAt).isEqualTo(Instant.ofEpochSecond(180))
     }
-
 }

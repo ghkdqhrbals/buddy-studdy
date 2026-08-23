@@ -12,6 +12,8 @@ import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.auth.domain.entity.DeviceEntity
 import com.buddystudy.auth.domain.entity.UserDeviceEntity
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.account.domain.entity.UserProvider
+import com.buddystudy.account.domain.entity.UserStatus
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 import java.time.Instant
@@ -39,9 +41,9 @@ class AccountSessionManager(
         val user = users.findByProviderAndProviderId("ANONYMOUS", device.deviceId)
             ?: users.save(
                 UserEntity(
-                    provider = "ANONYMOUS",
+                    provider = UserProvider.ANONYMOUS,
                     providerId = device.deviceId,
-                    status = "ANONYMOUS",
+                    status = UserStatus.ANONYMOUS,
                     displayName = "Buddy",
                     avatarColorSeed = "avatar-color-gray",
                     createdAt = now,
@@ -54,6 +56,7 @@ class AccountSessionManager(
     }
 
     suspend fun saveSession(userId: Long, deviceId: String, now: Instant, expiresAt: Instant?): UserDeviceEntity {
+        userDevices.revokeOtherActiveSessionsForDevice(deviceId, userId, now)
         val session = userDevices.findByUserIdAndDeviceId(userId, deviceId)
             ?: UserDeviceEntity(userId = userId, deviceId = deviceId, createdAt = now)
         session.lastLoginAt = now
@@ -77,7 +80,7 @@ class AccountSessionManager(
             }
     }
 
-    private suspend fun UserEntity.toAccountUser() = AccountUser(id = id, status = status)
+    private suspend fun UserEntity.toAccountUser() = AccountUser(id = id, status = status.name)
 
     private suspend fun DeviceEntity.toAccountDevice() = AccountDevice(deviceId = deviceId, userId = userId)
 

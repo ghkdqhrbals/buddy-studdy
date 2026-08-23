@@ -83,7 +83,7 @@
   "timezone": "browser",
   "uid": "buddystudy-logs",
   "title": "BuddyStudy API Logs",
-  "version": 2,
+  "version": 4,
   "panels": [
     {
       "datasource": {
@@ -327,36 +327,45 @@
           },
           "direction": "backward",
           "editorMode": "code",
-          "expr": "sum by (loggedAt, requestId, clientIp, method, path, status, durationMs, errorCode, reason) (count_over_time({container=~\".+\"} |= \"api_exchange\" | regexp `(?P<loggedAt>[0-9]{4}-[0-9]{2}-[0-9]{2}T[^ ]+).*api_exchange \\{\"requestId\":\"(?P<requestId>[^\"]+)\",\"clientIp\":\"(?P<clientIp>[^\"]*)\".*\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"status\":(?P<status>[0-9]+).*\"durationMs\":\"?(?P<durationMs>[0-9.]+).*?(?:\"code\":\"(?P<errorCode>[^\"]+)\")?.*?(?:\"reason\":\"(?P<reason>[^\"]+)\")?` [$__range]))",
+          "expr": "{app=\"buddystudy\"} |= \"api_exchange\" | regexp `api_exchange \\{\"requestId\":\"(?P<requestId>[^\"]+)\",\"clientIp\":\"(?P<clientIp>[^\"]*)\".*\"method\":\"(?P<method>[^\"]+)\".*\"path\":\"(?P<path>[^\"]+)\".*\"status\":(?P<status>[0-9]+).*\"durationMs\":\"?(?P<durationMs>[0-9.]+).*?(?:\"code\":\"(?P<errorCode>[^\"]+)\")?.*?(?:\"reason\":\"(?P<reason>[^\"]+)\")?` | line_format `method={{.method}} path={{.path}} status={{.status}} durationMs={{.durationMs}} errorCode={{.errorCode}} reason={{.reason}} clientIp={{.clientIp}} requestId={{.requestId}}`",
           "maxLines": 1000,
-          "queryType": "instant",
-          "refId": "A",
-          "legendFormat": "{{method}} {{path}}"
+          "queryType": "range",
+          "refId": "A"
         }
       ],
       "title": "API Requests",
       "transformations": [
         {
-          "id": "labelsToFields",
+          "id": "extractFields",
           "options": {
-            "mode": "columns"
+            "source": "Line",
+            "format": "regexp",
+            "regexp": "method=(?<method>\\S+) path=(?<path>\\S+) status=(?<status>\\d+) durationMs=(?<durationMs>[0-9.]+) errorCode=(?<errorCode>.*?) reason=(?<reason>.*?) clientIp=(?<clientIp>\\S*) requestId=(?<requestId>\\S+)",
+            "replace": false,
+            "keepTime": true
           }
-        },
-        {
-          "id": "merge",
-          "options": {}
         },
         {
           "id": "organize",
           "options": {
             "excludeByName": {
-              "Time": true,
+              "Line": true,
+              "NewField": true,
               "Value": true,
               "Value #A": true,
+              "labels": true,
+              "labelTypes": true,
+              "tsNs": true,
+              "id": true,
+              "app": true,
+              "container": true,
+              "host": true,
+              "service_name": true,
+              "stream": true,
               "__name__": true
             },
             "indexByName": {
-              "loggedAt": 0,
+              "Time": 0,
               "method": 1,
               "path": 2,
               "status": 3,
@@ -367,14 +376,13 @@
               "requestId": 8
             },
             "renameByName": {
-              "loggedAt": "time",
-              "Value #A": "count"
+              "Time": "time"
             }
           }
         }
       ],
       "type": "table",
-      "description": "Sentry-style API request list. Click any value in a request row to open logs connected by requestId."
+      "description": "Latest 1,000 API request logs in the selected range. Click any value in a request row to open logs connected by requestId."
     },
     {
       "datasource": {
@@ -437,7 +445,7 @@
           "editorMode": "code",
           "maxLines": 1,
           "queryType": "range",
-          "expr": "{container=~\".+\"} |= \"${requestId:raw}\" |= \"api_exchange\" | regexp `\"request\":(?P<request>\\{.*\\}),\"response\":` | line_format `{{.request}}`",
+          "expr": "{app=\"buddystudy\"} |= \"${requestId:raw}\" |= \"api_exchange\" | regexp `\"request\":(?P<request>\\{.*\\}),\"response\":` | line_format `{{.request}}`",
           "refId": "A"
         }
       ],
@@ -506,7 +514,7 @@
           "editorMode": "code",
           "maxLines": 1,
           "queryType": "range",
-          "expr": "{container=~\".+\"} |= \"${requestId:raw}\" |= \"api_exchange\" | regexp `\"response\":(?P<response>\\{.*\\})\\}$` | line_format `{{.response}}`",
+          "expr": "{app=\"buddystudy\"} |= \"${requestId:raw}\" |= \"api_exchange\" | regexp `\"response\":(?P<response>\\{.*\\})\\}$` | line_format `{{.response}}`",
           "refId": "A"
         }
       ],
@@ -575,7 +583,7 @@
           "editorMode": "code",
           "maxLines": 3,
           "queryType": "range",
-          "expr": "{container=~\".+\"} |= \"${requestId:raw}\" |= \"api_exchange\"",
+          "expr": "{app=\"buddystudy\"} |= \"${requestId:raw}\" |= \"api_exchange\"",
           "refId": "A"
         }
       ],
@@ -642,7 +650,7 @@
           },
           "direction": "backward",
           "editorMode": "code",
-          "expr": "{container=~\".+\"} |= \"${requestId:raw}\" |= \"api_error\"",
+          "expr": "{app=\"buddystudy\"} |= \"${requestId:raw}\" |= \"api_error\"",
           "maxLines": 20,
           "queryType": "range",
           "refId": "A"
@@ -710,7 +718,7 @@
           },
           "direction": "backward",
           "editorMode": "code",
-          "expr": "{container=~\".+\"} |= \"${requestId:raw}\"",
+          "expr": "{app=\"buddystudy\"} |= \"${requestId:raw}\"",
           "maxLines": 500,
           "queryType": "range",
           "refId": "A"

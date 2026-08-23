@@ -1,7 +1,407 @@
+import StoreKit
+import StoreKitTest
 import XCTest
 @testable import StudyMate
 
 final class ArchitecturePolicyTests: XCTestCase {
+    func testRevenueCatRequiresAnApplePublicSDKKey() {
+        XCTAssertTrue(RevenueCatBillingBridge.isValidPublicSDKKey("appl_public_sdk_key"))
+        XCTAssertTrue(RevenueCatBillingBridge.isValidPublicSDKKey("  appl_public_sdk_key\n"))
+        XCTAssertFalse(RevenueCatBillingBridge.isValidPublicSDKKey(nil))
+        XCTAssertFalse(RevenueCatBillingBridge.isValidPublicSDKKey(""))
+        XCTAssertFalse(RevenueCatBillingBridge.isValidPublicSDKKey("$(REVENUECAT_PUBLIC_SDK_KEY)"))
+        XCTAssertFalse(RevenueCatBillingBridge.isValidPublicSDKKey("sk_live_secret"))
+    }
+
+    func testRevenueCatLogoutOnlyTargetsTheSessionBeingReset() {
+        let previous = UUID(uuidString: "6d3a6958-1eed-4a16-8f36-b2bf22bf7c21")!
+        let current = UUID(uuidString: "f9d47348-7b53-41c3-9f06-ef0b6f3c5e22")!
+
+        XCTAssertTrue(
+            RevenueCatBillingBridge.shouldLogOut(
+                currentAppUserID: previous.uuidString.lowercased(),
+                expectedAppAccountToken: previous
+            )
+        )
+        XCTAssertFalse(
+            RevenueCatBillingBridge.shouldLogOut(
+                currentAppUserID: current.uuidString.lowercased(),
+                expectedAppAccountToken: previous
+            )
+        )
+        XCTAssertFalse(
+            RevenueCatBillingBridge.shouldLogOut(
+                currentAppUserID: current.uuidString.lowercased(),
+                expectedAppAccountToken: nil
+            )
+        )
+    }
+
+    func testHomeStudyScopesAreLocalizedForAllSupportedLanguages() {
+        let korean = AppStrings(language: .korean)
+        let english = AppStrings(language: .english)
+        let japanese = AppStrings(language: .japanese)
+
+        XCTAssertEqual(korean.homeScopeAll, "모든 학습들")
+        XCTAssertEqual(korean.homeScopeMy, "내 학습")
+        XCTAssertEqual(korean.homeScopeStudyTree, "내 학습트리")
+        XCTAssertEqual(korean.rootTopic, "루트")
+
+        XCTAssertEqual(english.homeScopeAll, "All Studies")
+        XCTAssertEqual(english.homeScopeMy, "My Studies")
+        XCTAssertEqual(english.homeScopeStudyTree, "My Study Tree")
+        XCTAssertEqual(english.rootTopic, "Root")
+
+        XCTAssertEqual(japanese.homeScopeAll, "すべての学習")
+        XCTAssertEqual(japanese.homeScopeMy, "マイ学習")
+        XCTAssertEqual(japanese.homeScopeStudyTree, "学習ツリー")
+        XCTAssertEqual(japanese.rootTopic, "ルート")
+    }
+
+    func testCommunityFeedDecodesServerOrderedAdvertisementWithDeepLink() throws {
+        let data = Data(
+            """
+            {
+              "questions": [],
+              "items": [
+                {
+                  "type": "ADVERTISEMENT",
+                  "advertisement": {
+                    "selectionId": "selection-1",
+                    "campaignId": "feedback-credit",
+                    "providerName": "쿠팡",
+                    "disclosureLabel": "(광고)",
+                    "title": "의견을 남겨주세요",
+                    "body": "더 나은 공부 경험을 함께 만들어요",
+                    "imageUrl": "https://thumbnail6.coupangcdn.com/example.jpg",
+                    "affiliateDisclosure": "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.",
+                    "deepLink": "https://link.coupang.com/a/example"
+                  }
+                }
+              ],
+              "totalCount": 0,
+              "limit": 20,
+              "offset": 0
+            }
+            """.utf8
+        )
+
+        let response = try JSONDecoder().decode(CommunityQuestionsResponse.self, from: data)
+        guard case .advertisement(let advertisement) = try XCTUnwrap(response.items.first) else {
+            return XCTFail("Expected an advertisement item.")
+        }
+        XCTAssertEqual(advertisement.selectionID, "selection-1")
+        XCTAssertEqual(advertisement.providerName, "쿠팡")
+        XCTAssertEqual(advertisement.imageURL, "https://thumbnail6.coupangcdn.com/example.jpg")
+        XCTAssertTrue(advertisement.affiliateDisclosure?.contains("쿠팡 파트너스") == true)
+        XCTAssertEqual(advertisement.deepLink, "https://link.coupang.com/a/example")
+    }
+
+    func testCommunityAdvertisementOpeningSupportsValidatedExternalDestinations() throws {
+        let root = try repositoryRoot()
+        let source = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Views/MobileRootView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("@Environment(\\.openURL) private var openURL"))
+        XCTAssertTrue(source.contains("if let route = AppRoute(url: url)"))
+        XCTAssertTrue(source.contains("url.scheme?.caseInsensitiveCompare(\"https\") == .orderedSame"))
+        XCTAssertTrue(source.contains("openURL(url)"))
+    }
+
+    func testCommunityAdvertisementSeparatesViewportImpressionFromDestinationOpen() throws {
+        let root = try repositoryRoot()
+        let viewSource = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Views/MobileRootView.swift"),
+            encoding: .utf8
+        )
+        let clientSource = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Services/RemotePushBackendClient.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(viewSource.contains("visibleRatio(frame) >= 0.5"))
+        XCTAssertTrue(viewSource.contains("Task.sleep(for: .seconds(1))"))
+        XCTAssertTrue(viewSource.contains("recordNativeAdvertisementImpression"))
+        XCTAssertTrue(clientSource.contains("selectionID, \"impression\""))
+        XCTAssertTrue(clientSource.contains("selectionID, \"view\""))
+    }
+
+    func testCommunityUserBlockingCopyIsLocalizedInEveryLanguage() {
+        let korean = AppStrings(language: .korean)
+        let english = AppStrings(language: .english)
+        let japanese = AppStrings(language: .japanese)
+
+        XCTAssertEqual(korean.blockUser, "사용자 차단")
+        XCTAssertEqual(korean.blockUserTitle, "이 사용자를 차단할까요?")
+        XCTAssertEqual(korean.blockUserMessage("메이트"), "메이트의 질문과 댓글이 더 이상 표시되지 않습니다.")
+        XCTAssertEqual(korean.userBlocked, "사용자를 차단했습니다.")
+
+        XCTAssertEqual(english.blockUser, "Block User")
+        XCTAssertEqual(english.blockUserTitle, "Block this user?")
+        XCTAssertEqual(english.blockUserMessage("Buddy"), "Questions and comments from Buddy will no longer appear.")
+        XCTAssertEqual(english.userBlocked, "User blocked.")
+
+        XCTAssertEqual(japanese.blockUser, "ユーザーをブロック")
+        XCTAssertEqual(japanese.blockUserTitle, "このユーザーをブロックしますか？")
+        XCTAssertEqual(japanese.blockUserMessage("メイト"), "メイトさんの質問とコメントは今後表示されません。")
+        XCTAssertEqual(japanese.userBlocked, "ユーザーをブロックしました。")
+    }
+
+    func testIOSBundleDeclaresEverySupportedAppLanguage() throws {
+        let root = try repositoryRoot()
+        let infoPlistURL = root.appendingPathComponent("StudyMate/iOSInfo.plist")
+        let data = try Data(contentsOf: infoPlistURL)
+        let plist = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        )
+        let localizations = try XCTUnwrap(plist["CFBundleLocalizations"] as? [String])
+
+        XCTAssertEqual(Set(localizations), Set(["ko", "en", "ja"]))
+    }
+
+    func testAnalyticsConfigurationRequiresMatchingFirebaseApp() {
+        let configured: [String: Any] = [
+            "BUNDLE_ID": "io.github.ghkdqhrbals.StudyMate",
+            "GOOGLE_APP_ID": "1:1234567890:ios:abcdef",
+            "API_KEY": "configured-api-key",
+            "IS_ANALYTICS_ENABLED": false
+        ]
+
+        XCTAssertTrue(
+            AppAnalyticsConfiguration.isUsable(
+                dictionary: configured,
+                bundleIdentifier: "io.github.ghkdqhrbals.StudyMate"
+            )
+        )
+        XCTAssertFalse(
+            AppAnalyticsConfiguration.isUsable(
+                dictionary: configured,
+                bundleIdentifier: "io.github.ghkdqhrbals.Other"
+            )
+        )
+
+        var placeholder = configured
+        placeholder["API_KEY"] = "NOT_CONFIGURED"
+        XCTAssertFalse(
+            AppAnalyticsConfiguration.isUsable(
+                dictionary: placeholder,
+                bundleIdentifier: "io.github.ghkdqhrbals.StudyMate"
+            )
+        )
+    }
+
+    func testAnalyticsConfigurationRejectsRepositoryPlaceholder() throws {
+        let root = try repositoryRoot()
+        let configurationURL = root.appendingPathComponent("StudyMate/GoogleService-Info.plist")
+        let dictionary = try XCTUnwrap(
+            NSDictionary(contentsOf: configurationURL) as? [String: Any]
+        )
+
+        XCTAssertFalse(
+            AppAnalyticsConfiguration.isUsable(
+                dictionary: dictionary,
+                bundleIdentifier: "io.github.ghkdqhrbals.StudyMate"
+            )
+        )
+    }
+
+    func testMaintenanceScreenProvidesHiddenDeveloperBypass() throws {
+        let root = try repositoryRoot()
+        let appFile = root.appendingPathComponent("StudyMate/StudyMateiOSApp.swift")
+        let stateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let appContent = try String(contentsOf: appFile, encoding: .utf8)
+        let stateContent = try String(contentsOf: stateFile, encoding: .utf8)
+
+        XCTAssertTrue(appContent.contains("now.timeIntervalSince(startedAt) <= 2"))
+        XCTAssertTrue(appContent.contains("guard hiddenTapCount >= 5"))
+        XCTAssertTrue(appContent.contains("guard appState.canAccessDeveloperOptions else"))
+        XCTAssertTrue(appContent.contains("await appState.bypassMaintenanceForDeveloper()"))
+        XCTAssertFalse(appContent.contains("MaintenanceDeveloperAccessSheet"))
+        XCTAssertTrue(
+            stateContent.contains(
+                "isServiceUnderMaintenance && !isMaintenanceBypassedForDeveloper"
+            )
+        )
+    }
+
+    func testProfileVersionTapRevealsDeveloperOptionsWithoutPromotionCodeEntry() throws {
+        let root = try repositoryRoot()
+        let mobileRootContent = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Views/MobileRootView.swift"),
+            encoding: .utf8
+        )
+        let appStateContent = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/ViewModels/AppState.swift"),
+            encoding: .utf8
+        )
+        let stringsContent = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Models/StudyModels.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(mobileRootContent.contains("registerDeveloperVersionTap()"))
+        XCTAssertTrue(mobileRootContent.contains(".buttonStyle(.plain)"))
+        XCTAssertFalse(mobileRootContent.contains("promotionCodePlaceholder"))
+        XCTAssertFalse(appStateContent.contains("DeveloperPromotionCodeVerifier"))
+        XCTAssertFalse(appStateContent.contains("redeemDeveloperPromotionCode"))
+        XCTAssertFalse(stringsContent.contains("var promotionCodePlaceholder"))
+    }
+
+    func testFloatingDebugOverlayUsesDedicatedDragHandle() throws {
+        let root = try repositoryRoot()
+        let appContent = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/StudyMateiOSApp.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(appContent.contains("Image(systemName: \"line.3.horizontal\")"))
+        XCTAssertTrue(appContent.contains(".gesture(dragGesture(in: size))"))
+        XCTAssertFalse(appContent.contains(".simultaneousGesture(dragGesture(in: size))"))
+    }
+
+    func testTestFlightKeepsDeveloperDebugPopupBehindDeveloperAccessGate() throws {
+        let root = try repositoryRoot()
+        let appContent = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/StudyMateiOSApp.swift"),
+            encoding: .utf8
+        )
+        let mobileRootContent = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Views/MobileRootView.swift"),
+            encoding: .utf8
+        )
+        let debugControlsContent = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Debug/AppDebugControls.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(appContent.contains("FloatingDebugLogOverlay { [weak window] frame in"))
+        XCTAssertFalse(appContent.contains("#if DEBUG\nprivate enum DebugLogTab"))
+        XCTAssertTrue(
+            mobileRootContent.contains(
+                "appState.requestDebugPanelIfEnabledOrEnableOnDemand()"
+            )
+        )
+        XCTAssertFalse(debugControlsContent.contains("#if DEBUG"))
+        XCTAssertTrue(debugControlsContent.hasPrefix("#if os(iOS)"))
+    }
+
+    func testMaintenanceControlUsesFirebaseRemoteConfigWithoutLegacyStatusPolling() throws {
+        let root = try repositoryRoot()
+        let backendClient = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Services/RemotePushBackendClient.swift"),
+            encoding: .utf8
+        )
+        let appState = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/ViewModels/AppState.swift"),
+            encoding: .utf8
+        )
+        let appControl = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/AppControl.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertFalse(backendClient.contains("monitoring.lowfidev.cloud/status"))
+        XCTAssertFalse(backendClient.contains("fetchServiceAvailability"))
+        XCTAssertFalse(appState.contains("refreshServiceAvailability"))
+        XCTAssertFalse(appState.contains("maintenancePollingTask"))
+        XCTAssertTrue(appControl.contains("addOnConfigUpdateListener"))
+    }
+
+    func testForcedUpdateUsesCompactSharedCardAndBlocksUnderlyingContent() throws {
+        let root = try repositoryRoot()
+        let appContent = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/StudyMateiOSApp.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(
+            appContent.contains(
+                ".allowsHitTesting(appState.appUpdateDecision?.isForced != true)"
+            )
+        )
+        XCTAssertTrue(
+            appContent.contains(
+                ".accessibilityHidden(appState.appUpdateDecision?.isForced == true)"
+            )
+        )
+        XCTAssertTrue(
+            appContent.contains(
+                "Color.black.opacity(decision.isForced ? 0.32 : 0.16)"
+            )
+        )
+        XCTAssertTrue(appContent.contains(".allowsHitTesting(decision.isForced)"))
+        XCTAssertTrue(appContent.contains("private var updateBanner: some View"))
+        XCTAssertTrue(appContent.contains("Image(systemName: \"lock.fill\")"))
+        XCTAssertFalse(appContent.contains("private var forcedUpdateContent"))
+        XCTAssertFalse(appContent.contains("private var optionalUpdateBanner"))
+    }
+
+    func testEveryAppStringProvidesJapaneseCopy() throws {
+        let root = try repositoryRoot()
+        let source = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Models/StudyModels.swift"),
+            encoding: .utf8
+        )
+        let expression = try NSRegularExpression(
+            pattern: #"text\(\s*"(?:\\.|[^"])*"\s*,\s*"((?:\\.|[^"])*)"(?:\s*,\s*"((?:\\.|[^"])*)")?"#,
+            options: [.dotMatchesLineSeparators]
+        )
+        let range = NSRange(source.startIndex..., in: source)
+        var missing: [String] = []
+
+        for match in expression.matches(in: source, range: range) {
+            guard let englishRange = Range(match.range(at: 1), in: source) else {
+                continue
+            }
+            let hasInlineJapanese = match.range(at: 2).location != NSNotFound
+            if hasInlineJapanese {
+                continue
+            }
+            let encodedEnglish = "\"\(source[englishRange])\""
+            let english = try JSONDecoder().decode(String.self, from: Data(encodedEnglish.utf8))
+            if !JapaneseAppStrings.hasTranslation(for: english) {
+                missing.append(english)
+            }
+        }
+
+        XCTAssertTrue(
+            missing.isEmpty,
+            "Every AppStrings entry must provide Japanese copy inline or in JapaneseAppStrings: \(missing)"
+        )
+    }
+
+    func testMarkdownContentRendersAndFallsBackToPlainText() {
+        let source = """
+        **핵심**은 `WHERE` 절입니다.
+
+        - 첫 번째 조건
+        - 두 번째 조건
+        """
+
+        let rendered = MarkdownContent.attributedString(source)
+        let plainText = MarkdownContent.plainText(source)
+
+        XCTAssertFalse(rendered.runs.isEmpty)
+        XCTAssertTrue(plainText.contains("핵심은 WHERE 절입니다."))
+        XCTAssertTrue(plainText.contains("첫 번째 조건"))
+        XCTAssertTrue(plainText.contains("두 번째 조건"))
+        XCTAssertFalse(plainText.contains("**"))
+        XCTAssertFalse(plainText.contains("`"))
+        XCTAssertEqual(MarkdownContent.plainText("일반 문장입니다."), "일반 문장입니다.")
+    }
+
+    func testMarkdownContentBlocksUnsafeLinks() {
+        let rendered = MarkdownContent.attributedString(
+            "[안전](https://example.com) [차단](javascript:alert(1))"
+        )
+        let links = rendered.runs.compactMap(\.link)
+
+        XCTAssertEqual(links.count, 1)
+        XCTAssertEqual(links.first?.scheme, "https")
+    }
+
     func testViewModelsDoNotReadBackendErrorPresentationExtensionsDirectly() throws {
         let root = try repositoryRoot()
         let viewModels = root.appendingPathComponent("StudyMate/ViewModels", isDirectory: true)
@@ -70,6 +470,163 @@ final class ArchitecturePolicyTests: XCTestCase {
             violations.isEmpty,
             "AppState must use BackendIdentityUseCase for backend identity transport calls: \(violations)"
         )
+    }
+
+    func testAllCommunityAuthenticationEntryPointsUseBackendIdentityRecovery() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let functionBoundaries = [
+            ("func signInToCommunity(idToken: String) async {", "func signInToCommunityWithApple"),
+            ("func signInToCommunityWithApple(identityToken: String) async {", "func appleSignInCancelled"),
+            ("func requestEmailVerificationCode(email: String) async -> Bool {", "func signInToCommunity(email:"),
+            ("func signInToCommunity(email: String, password: String", "func signOutFromCommunity"),
+        ]
+
+        for (startMarker, endMarker) in functionBoundaries {
+            let start = try XCTUnwrap(content.range(of: startMarker)?.lowerBound)
+            let end = try XCTUnwrap(content.range(of: endMarker, range: start..<content.endIndex)?.lowerBound)
+            let functionSource = content[start..<end]
+            XCTAssertTrue(
+                functionSource.contains("runCommunityAuthenticationOperation"),
+                "Authentication entry point \(startMarker) must recover a missing backend device and retry once."
+            )
+        }
+    }
+
+    func testStartupAndInitialForegroundRefreshCannotRunConcurrently() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+
+        XCTAssertTrue(content.contains("private var isCompletingStartupTasks = false"))
+        XCTAssertTrue(content.contains("guard !isCompletingStartupTasks else"))
+        XCTAssertTrue(content.contains("isCompletingStartupTasks = true"))
+        XCTAssertTrue(content.contains("isCompletingStartupTasks = false"))
+    }
+
+    func testPostLoginRefreshDoesNotRefetchProfileReturnedByLogin() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let start = try XCTUnwrap(content.range(of: "private func refreshCommunitySignInData(")?.lowerBound)
+        let end = try XCTUnwrap(
+            content.range(of: "func requestEmailVerificationCode", range: start..<content.endIndex)?.lowerBound
+        )
+        let refreshSource = content[start..<end]
+
+        XCTAssertFalse(refreshSource.contains("fetchMyProfile"))
+        XCTAssertTrue(refreshSource.contains("refreshPermissionEvaluations"))
+        XCTAssertTrue(refreshSource.contains("refreshBackendStudyIfPossible"))
+    }
+
+    func testBillingRefreshCoalescesConcurrentCallers() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let start = try XCTUnwrap(content.range(of: "func refreshBilling() async")?.lowerBound)
+        let end = try XCTUnwrap(
+            content.range(of: "private func performBillingRefresh() async", range: start..<content.endIndex)?.lowerBound
+        )
+        let refreshSource = content[start..<end]
+
+        XCTAssertTrue(refreshSource.contains("if let billingRefreshTask"))
+        XCTAssertTrue(refreshSource.contains("await billingRefreshTask.value"))
+    }
+
+    func testBillingHistoryRowsOpenInvoiceDetailsInsteadOfCustomerCenter() throws {
+        let root = try repositoryRoot()
+        let mobileRootFile = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let content = try String(contentsOf: mobileRootFile, encoding: .utf8)
+        let start = try XCTUnwrap(content.range(of: "private struct MobileBillingHistoryView")?.lowerBound)
+        let end = try XCTUnwrap(
+            content.range(of: "private struct MobileBillingInvoiceDetailView", range: start..<content.endIndex)?.lowerBound
+        )
+        let historySource = content[start..<end]
+
+        XCTAssertTrue(historySource.contains("MobileBillingInvoiceDetailView(invoice: invoice)"))
+        XCTAssertFalse(historySource.contains("openCustomerCenter()"))
+    }
+
+    func testBillingUIHasNoUnfilteredRevenueCatCustomerCenterSurface() throws {
+        let root = try repositoryRoot()
+        let mobileRoot = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Views/MobileRootView.swift"),
+            encoding: .utf8
+        )
+        let project = try String(
+            contentsOf: root.appendingPathComponent("StudyMate.xcodeproj/project.pbxproj"),
+            encoding: .utf8
+        )
+
+        XCTAssertFalse(mobileRoot.contains("import RevenueCatUI"))
+        XCTAssertFalse(mobileRoot.contains("CustomerCenterView"))
+        XCTAssertFalse(project.contains("RevenueCatUI"))
+    }
+
+    func testMembershipPurchaseShowsLocalizedRenewalAndLegalDisclosureBeforeAction() throws {
+        let korean = AppStrings(language: .korean).membershipAutoRenewalDisclosure
+        let english = AppStrings(language: .english).membershipAutoRenewalDisclosure
+        let japanese = AppStrings(language: .japanese).membershipAutoRenewalDisclosure
+
+        XCTAssertTrue(korean.contains("24시간"))
+        XCTAssertTrue(korean.contains("매월 자동 갱신"))
+        XCTAssertTrue(english.contains("renews monthly"))
+        XCTAssertTrue(english.contains("24 hours"))
+        XCTAssertTrue(japanese.contains("毎月自動更新"))
+        XCTAssertTrue(japanese.contains("24時間"))
+
+        let root = try repositoryRoot()
+        let source = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Views/MobileRootView.swift"),
+            encoding: .utf8
+        )
+        let start = try XCTUnwrap(source.range(of: "private struct MobileMembershipManagementView")?.lowerBound)
+        let end = try XCTUnwrap(
+            source.range(of: "private struct MembershipProductGroup", range: start..<source.endIndex)?.lowerBound
+        )
+        let membershipSource = source[start..<end]
+        let disclosurePosition = try XCTUnwrap(membershipSource.range(of: "if selectedProduct != nil")?.lowerBound)
+        let purchasePosition = try XCTUnwrap(membershipSource.range(of: "if primaryAction != .current")?.lowerBound)
+
+        XCTAssertLessThan(disclosurePosition, purchasePosition)
+        XCTAssertTrue(membershipSource.contains("Text(strings.membershipAutoRenewalDisclosure)"))
+        XCTAssertTrue(membershipSource.contains("AppLegalLinks.termsOfServiceURL"))
+        XCTAssertTrue(membershipSource.contains("AppLegalLinks.privacyPolicyURL"))
+        XCTAssertTrue(membershipSource.contains("group.products.first?.displayName"))
+        XCTAssertTrue(membershipSource.contains("Text(strings.perMonth)"))
+        XCTAssertTrue(membershipSource.contains("strings.monthlyQuestionAllowanceText"))
+    }
+
+    func testPurchaseRestorationStillReconcilesHistoricalEntitlements() throws {
+        let root = try repositoryRoot()
+        let source = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Services/AppleBillingStore.swift"),
+            encoding: .utf8
+        )
+        let start = try XCTUnwrap(source.range(of: "func restore(")?.lowerBound)
+        let end = try XCTUnwrap(
+            source.range(of: "private static func shouldWaitForRevenueCatWebhook", range: start..<source.endIndex)?.lowerBound
+        )
+        let restoreSource = source[start..<end]
+
+        XCTAssertTrue(restoreSource.contains("Transaction.currentEntitlements"))
+        XCTAssertFalse(restoreSource.contains("MembershipProductPolicy"))
+    }
+
+    func testUnchangedAPNSTokenDoesNotTriggerStartupDataRefreshAgain() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+        let start = try XCTUnwrap(content.range(of: "func registerRemotePushDeviceToken")?.lowerBound)
+        let end = try XCTUnwrap(
+            content.range(of: "private func syncRemotePushScheduleIfPossible", range: start..<content.endIndex)?.lowerBound
+        )
+        let registrationSource = content[start..<end]
+
+        XCTAssertTrue(registrationSource.contains("existingRegistration.apnsToken == token"))
+        XCTAssertTrue(registrationSource.contains("// APNs invokes this callback on every launch"))
+        XCTAssertFalse(registrationSource.contains("reason: \"device-token-existing\""))
     }
 
     func testAppStateDoesNotOwnBackendTransportComposition() throws {
@@ -151,6 +708,41 @@ final class ArchitecturePolicyTests: XCTestCase {
             violations.isEmpty,
             "AppState must use a platform effects provider for app lifecycle effects instead of calling platform APIs directly: \(violations)"
         )
+    }
+
+    func testAppStateCleanupAvoidsActorIsolatedDeinitializerBackDeployment() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+
+        XCTAssertFalse(
+            content.contains("isolated deinit {"),
+            "The Swift back-deployed isolated deinit thunk crashes in the iOS simulator."
+        )
+        XCTAssertFalse(
+            content.contains("MainActor.assumeIsolated"),
+            "A final release can occur off the main queue, so deinit must not assert MainActor isolation."
+        )
+    }
+
+    @MainActor
+    func testAppStateCanDeinitializeAfterFinalReleaseAwayFromMainActor() async {
+        let suiteName = "AppStateDeinitTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let owner = UncheckedAppStateOwner(
+            AppState(settingsStore: SettingsStore(defaults: defaults))
+        )
+        weak var appState = owner.appState
+
+        await Task.detached {
+            owner.appState = nil
+        }.value
+
+        XCTAssertNil(appState)
     }
 
     func testAppStateDoesNotConstructDefaultRuntimeImplementationsDirectly() throws {
@@ -260,7 +852,7 @@ final class ArchitecturePolicyTests: XCTestCase {
         let forbiddenPatterns = [
             "Bundle.main.bundleURL",
             "FileManager.default.temporaryDirectory",
-            "Process()",
+            "= Process()",
             "launchUninstaller(",
             "makeUninstallScript(",
             "shellEscaped(",
@@ -759,6 +1351,7 @@ final class ArchitecturePolicyTests: XCTestCase {
             "settingsStore.replaceBackendStudyRecords(",
             "settingsStore.replaceStudyRecords(",
             "settingsStore.updateStudyRecordAnswer(",
+            "settingsStore.saveSubmittedStudyRecordAnswer(",
             "settingsStore.deleteStudyRecord(",
             "settingsStore.saveStudyRecord(",
             "settingsStore.appendStudyRecord(",
@@ -791,6 +1384,7 @@ final class ArchitecturePolicyTests: XCTestCase {
             "localStudyRecordRepository.loadStudyRecords",
             "localStudyRecordRepository.appendStudyRecord",
             "localStudyRecordRepository.updateStudyRecordAnswer",
+            "localStudyRecordRepository.saveSubmittedAnswer",
             "localStudyRecordRepository.saveStudyRecord",
             "localStudyRecordRepository.deleteStudyRecord",
             "localStudyRecordRepository.clearStudyRecords",
@@ -809,6 +1403,7 @@ final class ArchitecturePolicyTests: XCTestCase {
             "resolvedLocalStudyRecordRepository.loadStudyRecords",
             "resolvedLocalStudyRecordRepository.appendStudyRecord",
             "resolvedLocalStudyRecordRepository.updateStudyRecordAnswer",
+            "resolvedLocalStudyRecordRepository.saveSubmittedAnswer",
             "resolvedLocalStudyRecordRepository.saveStudyRecord",
             "resolvedLocalStudyRecordRepository.deleteStudyRecord",
             "resolvedLocalStudyRecordRepository.clearStudyRecords",
@@ -839,6 +1434,24 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testMobileRootDoesNotContainLegacyOnboardingUI() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+        let forbiddenSymbols = [
+            "MobileOnboardingStep",
+            "MobileOnboardingView",
+            "MobileOnboardingPrimaryButtonStyle",
+            "MobileOnboardingSecondaryButtonStyle",
+        ]
+        let violations = forbiddenSymbols.filter { content.contains($0) }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "The iOS root must enter the app directly without retaining legacy onboarding types or references: \(violations)"
+        )
+    }
+
     func testHomePullToRefreshDoesNotHoldSystemRefreshControlForNetworkLoad() throws {
         let root = try repositoryRoot()
         let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
@@ -856,8 +1469,405 @@ final class ArchitecturePolicyTests: XCTestCase {
         let content = try String(contentsOf: file, encoding: .utf8)
 
         XCTAssertTrue(
-            content.contains("if appState.communityQuestions.isEmpty {\n                if isRefreshingCommunityContent {\n                    MobileHomeRefreshIndicator()"),
+            content.contains("let hasContent = !appState.communityQuestions.isEmpty\n\n            if MobileHomeRefreshPresentationPolicy.showsInitialLoading("),
             "When public questions are empty, the refresh indicator should render in the public-question content slot instead of shifting the fixed title or tab area."
+        )
+        XCTAssertFalse(
+            content.contains("if isRefreshingCommunityContent {\n                    MobileHomeRefreshIndicator()"),
+            "Refreshing cached public questions must not insert a standalone loading row above the existing feed."
+        )
+    }
+
+    func testEveryStudyContextMenuCanOpenTheFullTree() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+        let fullTreeActionCount = content.components(
+            separatedBy: "strings.viewFullStudyTree"
+        ).count - 1
+
+        XCTAssertGreaterThanOrEqual(
+            fullTreeActionCount,
+            2,
+            "Both tree-backed and childless fallback study cards must expose View Full Tree so the user can add a first child topic."
+        )
+        XCTAssertFalse(
+            content.contains("if !snapshot.children(of: snapshot.root.id).isEmpty"),
+            "View Full Tree must not disappear when a root has no child topics."
+        )
+    }
+
+    func testMyStudyListMenusKeepDeletionInsideEditors() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+
+        let topicActions = try XCTUnwrap(
+            content.range(
+                of: "private func topicActions(for room: BackendStudyRoom) -> some View {"
+            )
+        )
+        let rootActions = try XCTUnwrap(
+            content.range(
+                of: "private var rootActions: some View {",
+                range: topicActions.upperBound..<content.endIndex
+            )
+        )
+        let navigationRow = try XCTUnwrap(
+            content.range(
+                of: "private func studyNavigationRow(",
+                range: rootActions.upperBound..<content.endIndex
+            )
+        )
+        let topicMenuSource = String(content[topicActions.lowerBound..<rootActions.lowerBound])
+        let rootMenuSource = String(content[rootActions.lowerBound..<navigationRow.lowerBound])
+
+        for menuSource in [topicMenuSource, rootMenuSource] {
+            XCTAssertTrue(
+                menuSource.contains("Label(strings.editStudyCategory, systemImage: \"pencil\")")
+            )
+            XCTAssertTrue(menuSource.contains("strings.viewFullStudyTree"))
+            XCTAssertFalse(
+                menuSource.contains("strings.deleteStudy"),
+                "My Studies list menus should expose only Edit Study and View Full Tree."
+            )
+        }
+
+        XCTAssertFalse(
+            content.contains("@State private var deletionStudyCategory"),
+            "The My Studies list should not stage direct deletion outside an editor."
+        )
+        XCTAssertTrue(
+            content.contains("struct StudyEditorSheet: View")
+                && content.contains("if onDelete != nil {")
+                && content.contains("Button(strings.deleteStudy, role: .destructive)"),
+            "Root studies and child topics should share one editor with deletion available inside it."
+        )
+
+        let editorStart = try XCTUnwrap(content.range(of: "struct StudyEditorSheet: View"))
+        let editorEnd = try XCTUnwrap(
+            content.range(
+                of: "private struct MobileNotificationRow: View",
+                range: editorStart.upperBound..<content.endIndex
+            )
+        )
+        let editorSource = String(content[editorStart.lowerBound..<editorEnd.lowerBound])
+
+        XCTAssertTrue(
+            editorSource.contains(
+                "Button(strings.deleteStudy, role: .destructive) {\n                            onDelete?()\n                            dismiss()"
+            ),
+            "Study deletion should execute immediately and close the editor."
+        )
+        XCTAssertFalse(
+            editorSource.contains("confirmationDialog")
+                || editorSource.contains("showsDeleteConfirmation"),
+            "The study editor must not show a second destructive confirmation UI."
+        )
+    }
+
+    func testStudyEditorUsesBackendPromptWithoutExposingPromptControls() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+
+        XCTAssertFalse(
+            content.contains("Section(strings.relatedPrompt)")
+                || content.contains("RecommendedPrompt.allCases")
+                || content.contains("TextEditor(text: $customPrompt)"),
+            "Study creation and editing must not expose prompt controls."
+        )
+        XCTAssertTrue(
+            content.contains(
+                "customPrompt: nil,\n                    openAIModel: StudySettings.defaultOpenAIModel"
+            ),
+            "The new-study form should send no prompt override so the backend chooses its default prompt."
+        )
+        XCTAssertTrue(
+            content.contains("struct StudyEditorSheet: View")
+                && !content.contains("struct StudyCategoryEditorSheet: View")
+                && !content.contains("struct StudyTopicLevelSheet: View"),
+            "All study edit entry points should use one shared editor component."
+        )
+
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let appStateContent = try String(contentsOf: appStateFile, encoding: .utf8)
+        XCTAssertTrue(
+            appStateContent.contains(
+                "customPrompt: customPrompt ?? StudySettings.defaultCustomPrompt"
+            ),
+            "New local study state should not inherit a client-level prompt override when the API request uses the backend default."
+        )
+        XCTAssertTrue(
+            appStateContent.contains("customPrompt: category.customPrompt")
+                && appStateContent.contains("openAIModel: category.sanitizedOpenAIModel"),
+            "Editing title or difficulty should preserve hidden prompt and model values."
+        )
+
+        let backendClientFile = root.appendingPathComponent("StudyMate/Services/RemotePushBackendClient.swift")
+        let backendClientContent = try String(contentsOf: backendClientFile, encoding: .utf8)
+        XCTAssertTrue(
+            backendClientContent.contains(
+                "try container.encodeNil(forKey: .customPrompt)"
+            ),
+            "Study creation must encode customPrompt as an explicit JSON null rather than omitting the key."
+        )
+    }
+
+    func testMyStudiesProvidesExplicitConfirmedBulkDeletion() throws {
+        let root = try repositoryRoot()
+        let viewFile = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let viewSource = try String(contentsOf: viewFile, encoding: .utf8)
+        let appStateSource = try String(contentsOf: appStateFile, encoding: .utf8)
+
+        XCTAssertTrue(viewSource.contains("@State private var selectedStudyCategoryIDs = Set<String>()"))
+        XCTAssertTrue(viewSource.contains("homeStudySelectionToolbarButton(strings: strings)"))
+        XCTAssertTrue(viewSource.contains("strings.deleteSelectedStudies(selectedStudyCategoryIDs.count)"))
+        XCTAssertTrue(
+            viewSource.contains("appState.deleteStudyCategories(categoryIDs: selectedStudyCategoryIDs)")
+        )
+        XCTAssertTrue(
+            appStateSource.contains("func deleteStudyCategories(categoryIDs: Set<String>)")
+        )
+    }
+
+    func testSelectedStudyToolbarOffersOnlyEditAndTreeActions() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/StudyView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+
+        XCTAssertTrue(
+            content.contains("toolbarNewQuestionButton(strings: strings)\n            studyOptionsMenu(strings: strings)"),
+            "The selected study toolbar should keep New Question and place a separate More menu to its right."
+        )
+        XCTAssertTrue(
+            content.contains("Label(strings.editStudyCategory, systemImage: \"pencil\")"),
+            "The selected study More menu should expose study editing."
+        )
+        XCTAssertTrue(
+            content.contains("selectedTreeRootID = appState.rootStudyRoom(for: room.id)?.id ?? room.id"),
+            "View Full Tree should resolve a nested topic back to its containing root study."
+        )
+        XCTAssertTrue(
+            content.contains("strings.viewFullStudyTree,"),
+            "The selected study More menu should expose View Full Tree."
+        )
+        XCTAssertFalse(
+            content.contains("@State private var deletionCandidate: BackendStudyRoom?"),
+            "The selected study screen must not offer deletion directly from its More menu."
+        )
+        XCTAssertTrue(
+            content.contains("StudyEditorSheet(")
+                && content.contains("onDelete: {\n                    deleteStudyRoom(room)"),
+            "Topic deletion should remain available inside the study editor."
+        )
+    }
+
+    func testMyStudiesChildTapForwardsTheExactChildIdentifier() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+
+        let handlerStart = try XCTUnwrap(
+            content.range(
+                of: "private func handleStudyOutlineAction("
+            )
+        )
+        let handlerEnd = try XCTUnwrap(
+            content.range(
+                of: "private var communityQuestionSection: some View",
+                range: handlerStart.upperBound..<content.endIndex
+            )
+        )
+        let handlerSource = String(content[handlerStart.lowerBound..<handlerEnd.lowerBound])
+
+        XCTAssertTrue(
+            handlerSource.contains(
+                "case let .openTopic(room):\n            appState.openStudyCategory(String(room.id))"
+            ),
+            "A My Studies child tap must route with that child's study ID, never the containing root ID."
+        )
+        XCTAssertFalse(
+            handlerSource.contains("rootStudyRoom(for: room.id)"),
+            "Opening a topic must not resolve the tapped child back to its root."
+        )
+    }
+
+    func testProfileUsesDedicatedPageAndMembershipSheetUsesCloseAction() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+
+        guard let profileStart = content.range(
+            of: "private struct MobileProfilePage: View"
+        )?.lowerBound,
+        let profileEnd = content.range(
+            of: "private struct MobileProfileEditorView: View",
+            range: profileStart..<content.endIndex
+        )?.lowerBound else {
+            return XCTFail("Profile page boundaries were not found.")
+        }
+        let profileContent = String(content[profileStart..<profileEnd])
+
+        XCTAssertTrue(profileContent.contains(".navigationTitle(strings.profile)"))
+        XCTAssertTrue(profileContent.contains("Button(strings.close)"))
+        XCTAssertFalse(profileContent.contains("Button(strings.done)"))
+    }
+
+    func testSignedOutProfileUsesLoginInsteadOfAvatarDestination() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+
+        guard let profileStart = content.range(
+            of: "private struct MobileProfilePage: View"
+        )?.lowerBound,
+        let editorStart = content.range(
+            of: "private struct MobileProfileEditorView: View",
+            range: profileStart..<content.endIndex
+        )?.lowerBound,
+        let termsStart = content.range(
+            of: "private struct MobileTermsSettingsView: View",
+            range: editorStart..<content.endIndex
+        )?.lowerBound else {
+            return XCTFail("Profile view boundaries were not found.")
+        }
+
+        let profileContent = String(content[profileStart..<editorStart])
+        let editorContent = String(content[editorStart..<termsStart])
+
+        XCTAssertTrue(
+            profileContent.contains("if appState.isCommunitySessionActive")
+                && profileContent.contains("title: strings.avatar")
+                && profileContent.contains("title: strings.communityLogin"),
+            "The profile hub should show Avatar only for a signed-in account and Login otherwise."
+        )
+        XCTAssertTrue(
+            editorContent.contains(
+                "appState.isCommunitySessionActive ? strings.avatar : strings.communityLogin"
+            ),
+            "The signed-out destination should be titled Login rather than Avatar."
+        )
+        XCTAssertTrue(
+            editorContent.contains(
+                "if appState.isCommunitySessionActive {\n                    ToolbarItem(placement: .confirmationAction)"
+            ),
+            "The avatar Save action should only appear after sign-in."
+        )
+    }
+
+    func testChildTopicRecommendationsSupportOrderedBatchSelection() throws {
+        let root = try repositoryRoot()
+        let viewFile = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let viewContent = try String(contentsOf: viewFile, encoding: .utf8)
+        let appStateContent = try String(contentsOf: appStateFile, encoding: .utf8)
+
+        XCTAssertTrue(
+            viewContent.contains("@State private var selectedSuggestions = Set<String>()"),
+            "Recommended child topics should keep a multi-selection set instead of one selected suggestion."
+        )
+        XCTAssertTrue(
+            viewContent.contains("return suggestions.filter(selectedSuggestions.contains)"),
+            "Selected recommendations should preserve the server-provided display order when submitted."
+        )
+        XCTAssertTrue(
+            appStateContent.contains("func addChildStudyCategories("),
+            "AppState should expose one batch-oriented child-topic action for the recommendation sheet."
+        )
+        XCTAssertTrue(
+            appStateContent.contains("refreshAfterCreation: false"),
+            "A recommendation batch should defer per-topic tree refreshes until all selected topics have been attempted."
+        )
+    }
+
+    func testStudyGrowthDetailUsesOneAlwaysExpandedScoreTree() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/StatisticsView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+        let detailStart = try XCTUnwrap(
+            content.range(of: "private struct StudyGrowthDetailView: View")
+        )
+        let detailEnd = try XCTUnwrap(
+            content.range(
+                of: "private struct StudyGrowthTreeItem",
+                range: detailStart.upperBound..<content.endIndex
+            )
+        )
+        let detail = String(content[detailStart.lowerBound..<detailEnd.lowerBound])
+
+        XCTAssertTrue(
+            detail.contains("StudyGrowthTreeCard("),
+            "Study growth detail should present the combined root and individual descendants in one score tree."
+        )
+        XCTAssertTrue(
+            content.contains("StudyTreeLayoutSnapshot(")
+                && content.contains("StudyGrowthScoreTreeNode("),
+            "The statistics tree should reuse the circular My Studies tree layout instead of rendering a depth-indented list."
+        )
+        XCTAssertTrue(
+            detail.contains(".padding(.horizontal, 16)"),
+            "The pushed growth detail should preserve the same horizontal screen padding as the statistics root."
+        )
+        XCTAssertFalse(
+            detail.contains("StudyGrowthAttentionCard("),
+            "Review candidates should be visible in the tree instead of a separate priority card."
+        )
+        XCTAssertFalse(
+            detail.contains("isShowingAllStudies"),
+            "The complete score tree should be visible without another disclosure control."
+        )
+        XCTAssertTrue(
+            content.contains("label: strings.totalLearningShort")
+                && content.contains("label: strings.totalTopicsShort")
+                && content.contains("label: strings.measuredTopicsShort"),
+            "Growth summaries should prioritize total learning and topic counts."
+        )
+        XCTAssertFalse(
+            content.contains("growthCompletionValue(root.profile?.completion)")
+                || content.contains("label: strings.completion"),
+            "Question workflow completion should not be shown as a learning-growth statistic."
+        )
+    }
+
+    func testStudyGrowthNodeDetailPaginatesTopicRecords() throws {
+        let root = try repositoryRoot()
+        let file = root.appendingPathComponent("StudyMate/Views/StatisticsView.swift")
+        let content = try String(contentsOf: file, encoding: .utf8)
+        let detailStart = try XCTUnwrap(
+            content.range(of: "private struct StudyGrowthNodeDetailView: View")
+        )
+        let detailEnd = try XCTUnwrap(
+            content.range(
+                of: "private struct StudyGrowthDeltaLabel",
+                range: detailStart.upperBound..<content.endIndex
+            )
+        )
+        let detail = String(content[detailStart.lowerBound..<detailEnd.lowerBound])
+
+        XCTAssertTrue(
+            detail.contains("LazyVStack")
+                && detail.contains("appState.fetchBackendRecords(")
+                && detail.contains("loadNextPageIfNeeded"),
+            "Selecting a statistics node should show its details and lazily page that node's records."
+        )
+        XCTAssertTrue(
+            detail.contains("HistoryRow(")
+                && detail.contains("selectedRecord = record"),
+            "Topic records should reuse the existing paginated record row."
+        )
+        XCTAssertTrue(
+            content.contains("record.asQuestionBrowseQuestion(author: author)"),
+            "Statistics should project a record into the question-browse presentation model."
+        )
+        XCTAssertTrue(
+            content.contains("CommunityQuestionDetailView("),
+            "Statistics should navigate to the shared question-browse detail."
+        )
+        XCTAssertTrue(
+            content.contains("contentSource: .record(isPublic: record.isPublic)"),
+            "The question-browse detail should retain record privacy behavior."
         )
     }
 
@@ -966,6 +1976,43 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertTrue(
             stringsContent.contains("loginAgreementPrefix"),
             "Legal agreement copy must be localized through AppStrings."
+        )
+    }
+
+    func testRequiredTermsGatePrioritizesAllAgreementsAndKeepsRequiredOnlyChoiceSecondary() throws {
+        let root = try repositoryRoot()
+        let viewFile = root.appendingPathComponent("StudyMate/Views/MobileRootView.swift")
+        let stringsFile = root.appendingPathComponent("StudyMate/Models/StudyModels.swift")
+        let viewContent = try String(contentsOf: viewFile, encoding: .utf8)
+        let stringsContent = try String(contentsOf: stringsFile, encoding: .utf8)
+
+        XCTAssertTrue(
+            viewContent.contains("await agreeTerms(includeMarketing: marketingTerms != nil)"),
+            "The primary terms action must include active marketing consent."
+        )
+        XCTAssertTrue(
+            viewContent.contains("Text(marketingTerms == nil ? strings.agreeAndStart : strings.agreeAllAndStart)"),
+            "The primary terms action must clearly say that it agrees to all available terms."
+        )
+        XCTAssertTrue(
+            viewContent.contains("await agreeTerms(includeMarketing: false)"),
+            "Users must retain a required-terms-only path."
+        )
+        XCTAssertTrue(
+            viewContent.contains("Text(strings.agreeRequiredOnlyAndStart)\n                        .font(.footnote)\n                        .foregroundStyle(.secondary)"),
+            "The required-only path should remain available as a visually secondary action."
+        )
+        XCTAssertFalse(
+            viewContent.contains("Button(strings.nextTime)"),
+            "The required terms gate should start the app through an explicit consent choice instead of a generic later action."
+        )
+        XCTAssertTrue(
+            stringsContent.contains("\"필수 약관만 동의하고 시작하기\""),
+            "The secondary required-only action must use explicit localized consent copy."
+        )
+        XCTAssertTrue(
+            stringsContent.contains("마케팅 정보 수신 동의는 선택입니다."),
+            "The marketing nudge must still state that marketing consent is optional."
         )
     }
 
@@ -1254,8 +2301,83 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertEqual(resetAt, expectedResetAt)
         XCTAssertEqual(response.error.metadata?.quotaPeriod, "MONTHLY")
         XCTAssertEqual(response.error.metadata?.remaining, 0)
-        XCTAssertTrue(resolution.featureMessage?.contains("월간 질문 한도에 도달했습니다.") == true)
+        XCTAssertTrue(resolution.featureMessage?.contains("이번 달 질문 한도에 도달했습니다.") == true)
         XCTAssertTrue(resolution.featureMessage?.contains("다시 사용할 수 있습니다.") == true)
+    }
+
+    func testQuotaErrorIgnoresKoreanServerMessageWhenAppLanguageIsEnglish() throws {
+        let metadata = try JSONDecoder().decode(
+            BackendAPIErrorMetadata.self,
+            from: Data(#"{"quotaResetAt":"2026-08-01T00:00:00Z"}"#.utf8)
+        )
+        let apiError = BackendAPIError(
+            code: "QUOTA_EXCEEDED",
+            numericCode: 305,
+            message: "월간 질문 한도에 도달했습니다.",
+            status: 403,
+            metadata: metadata
+        )
+        let resolution = AppErrorHandlingPolicy.resolve(
+            RemotePushBackendError.httpStatus(403, "", apiError),
+            fallback: "fallback",
+            language: .english
+        )
+
+        XCTAssertTrue(
+            resolution.featureMessage?.hasPrefix("You have reached this month's question limit.") == true
+        )
+        XCTAssertTrue(resolution.featureMessage?.contains("You can create questions again on") == true)
+        XCTAssertFalse(resolution.featureMessage?.contains("월간 질문") ?? true)
+    }
+
+    func testQuotaErrorWithoutResetTimeUsesAppLanguage() {
+        let apiError = BackendAPIError(
+            code: "QUOTA_EXCEEDED",
+            numericCode: 305,
+            message: "월간 질문 한도에 도달했습니다.",
+            status: 403
+        )
+        let resolution = AppErrorHandlingPolicy.resolve(
+            RemotePushBackendError.httpStatus(403, "", apiError),
+            fallback: "fallback",
+            language: .english
+        )
+
+        XCTAssertEqual(
+            resolution.featureMessage,
+            "You have reached this month's question limit."
+        )
+    }
+
+    func testQuestionGenerationKeepsBusyStateUntilPermanentFailureHandlingCompletes() throws {
+        let root = try repositoryRoot()
+        let appStateFile = root.appendingPathComponent("StudyMate/ViewModels/AppState.swift")
+        let content = try String(contentsOf: appStateFile, encoding: .utf8)
+
+        XCTAssertTrue(
+            content.contains("guard !isGeneratingQuestion, questionGenerationPollingTask == nil else"),
+            "A previous polling task must block a rapid second question-generation request."
+        )
+        let marker = "if appErrorHandlingUseCase.isPermanentBackendOperationError(error) {"
+        var searchStart = content.startIndex
+        for _ in 0..<2 {
+            let markerRange = try XCTUnwrap(content.range(of: marker, range: searchStart..<content.endIndex))
+            let blockEnd = content.index(
+                markerRange.upperBound,
+                offsetBy: 500,
+                limitedBy: content.endIndex
+            ) ?? content.endIndex
+            let block = content[markerRange.lowerBound..<blockEnd]
+            let handlerRange = try XCTUnwrap(block.range(of: "await handleQuestionGenerationRequestFailure("))
+            let finishRange = try XCTUnwrap(block.range(of: "finishQuestionGenerationProcess()"))
+
+            XCTAssertLessThan(
+                handlerRange.lowerBound,
+                finishRange.lowerBound,
+                "Permanent failures must be presented before the generation lifecycle is released."
+            )
+            searchStart = markerRange.upperBound
+        }
     }
 
     func testAuthRangeNumericBackendErrorsRequireLoginWithoutPopup() {
@@ -1273,7 +2395,7 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertFalse(resolution.shouldShowPopup)
         XCTAssertTrue(resolution.requiresLogin)
         XCTAssertTrue(resolution.isPageAccessDenied)
-        XCTAssertTrue(resolution.shouldResetBackendIdentity)
+        XCTAssertFalse(resolution.shouldResetBackendIdentity)
         XCTAssertTrue(resolution.shouldClearFeatureMessage)
     }
 
@@ -1292,7 +2414,7 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertFalse(resolution.shouldShowPopup)
         XCTAssertTrue(resolution.requiresLogin)
         XCTAssertTrue(resolution.isPageAccessDenied)
-        XCTAssertTrue(resolution.shouldResetBackendIdentity)
+        XCTAssertFalse(resolution.shouldResetBackendIdentity)
         XCTAssertTrue(resolution.shouldClearFeatureMessage)
     }
 
@@ -1323,6 +2445,79 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertFalse(resolution.isPageAccessDenied)
         XCTAssertFalse(resolution.shouldResetBackendIdentity)
         XCTAssertFalse(resolution.shouldClearFeatureMessage)
+    }
+
+    func testTransientBackendFailuresDoNotExposeHTTPStatusOrServerDetails() {
+        let gatewayError = RemotePushBackendError.httpStatus(502, "", nil)
+        let detailedServiceError = RemotePushBackendError.httpStatus(
+            503,
+            "",
+            BackendAPIError(
+                code: "UPSTREAM_FAILURE",
+                message: "upstream failed with HTTP 503",
+                status: 503
+            )
+        )
+
+        let gatewayResolution = AppErrorHandlingPolicy.resolve(
+            gatewayError,
+            fallback: "잠시 후 다시 시도해 주세요.",
+            language: .korean
+        )
+        let detailedResolution = AppErrorHandlingPolicy.resolve(
+            detailedServiceError,
+            fallback: "잠시 후 다시 시도해 주세요.",
+            language: .korean
+        )
+
+        XCTAssertEqual(gatewayResolution.featureMessage, "잠시 후 다시 시도해 주세요.")
+        XCTAssertEqual(detailedResolution.featureMessage, "잠시 후 다시 시도해 주세요.")
+        XCTAssertFalse(gatewayResolution.featureMessage?.contains("502") ?? true)
+        XCTAssertFalse(detailedResolution.featureMessage?.contains("503") ?? true)
+    }
+
+    func testEmailDeliveryFailureUsesEmailSpecificLocalizedFallback() {
+        let apiError = BackendAPIError(
+            code: "EMAIL_DELIVERY_FAILED",
+            message: "이메일을 전송하지 못했습니다.",
+            status: 503
+        )
+        let error = RemotePushBackendError.httpStatus(503, "", apiError)
+        let strings = AppStrings(language: .korean)
+
+        let resolution = AppErrorHandlingPolicy.resolve(
+            error,
+            fallback: strings.emailVerificationSendFailed,
+            language: .korean
+        )
+
+        XCTAssertEqual(
+            resolution.featureMessage,
+            "인증코드를 보내지 못했습니다. 잠시 후 다시 시도하세요."
+        )
+        XCTAssertNotEqual(resolution.featureMessage, strings.communityRequestFailed)
+    }
+
+    func testInvalidBackendResponseUsesSafeLocalizedFallback() {
+        let koreanResolution = AppErrorHandlingPolicy.resolve(
+            RemotePushBackendError.invalidResponse,
+            fallback: "",
+            language: .korean
+        )
+        let englishResolution = AppErrorHandlingPolicy.resolve(
+            RemotePushBackendError.invalidResponse,
+            fallback: "",
+            language: .english
+        )
+
+        XCTAssertEqual(
+            koreanResolution.featureMessage,
+            "서버 응답을 확인할 수 없습니다. 잠시 후 다시 시도하세요."
+        )
+        XCTAssertEqual(
+            englishResolution.featureMessage,
+            "The server response could not be read. Please try again shortly."
+        )
     }
 
     func testEmailVerificationRequirementStaysInVerificationFlow() {
@@ -1422,6 +2617,15 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertEqual(state.questionID, "25")
         XCTAssertEqual(state.likeCount, 3)
         XCTAssertTrue(state.isLikedByMe)
+    }
+
+    func testCommunityUserBlockStateDecodesBackendFieldNames() throws {
+        let payload = Data(#"{"userId":42,"blocked":true}"#.utf8)
+
+        let state = try JSONDecoder().decode(CommunityUserBlockState.self, from: payload)
+
+        XCTAssertEqual(state.userID, 42)
+        XCTAssertTrue(state.blocked)
     }
 
     func testNotificationPageDecodesBackendReadFieldName() throws {
@@ -1607,6 +2811,27 @@ final class ArchitecturePolicyTests: XCTestCase {
         )
     }
 
+    func testLogoutUnregistersDevicePushAndLoginRegistersAgain() throws {
+        let root = try repositoryRoot()
+        let appState = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/ViewModels/AppState.swift"),
+            encoding: .utf8
+        )
+        let notificationService = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Services/NotificationService.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(appState.contains("notificationService.deactivateRemoteNotificationsForLogout()"))
+        XCTAssertTrue(
+            appState.contains("requestAuthorizationIfNeeded(\n                language: self.settings.appLanguage")
+        )
+        XCTAssertTrue(notificationService.contains("UIApplication.shared.unregisterForRemoteNotifications()"))
+        XCTAssertTrue(notificationService.contains("center.removeAllPendingNotificationRequests()"))
+        XCTAssertTrue(notificationService.contains("center.removeAllDeliveredNotifications()"))
+        XCTAssertTrue(notificationService.contains("guard appState.isCommunitySessionActive else"))
+    }
+
     func testNotificationPayloadDoesNotConsumeUnknownTypeAsHomeRoute() {
         let payload: [AnyHashable: Any] = [
             "type": "cloudkit-query",
@@ -1615,6 +2840,123 @@ final class ArchitecturePolicyTests: XCTestCase {
 
         XCTAssertNil(StudyNotificationPayload.appRoute(from: payload))
         XCTAssertEqual(StudyNotificationPayload.questionCreatedAt(from: payload), 100.25)
+    }
+
+    func testAdminHomeMessagePayloadCreatesAnnouncementFromAPSAlert() {
+        let payload: [AnyHashable: Any] = [
+            "aps": [
+                "alert": [
+                    "title": "피드백 크레딧을 드렸어요",
+                    "body": "소중한 의견 감사합니다."
+                ]
+            ],
+            "deepLink": "buddystudy://home/message",
+            "notificationId": "91"
+        ]
+
+        XCTAssertEqual(
+            StudyNotificationPayload.homeAnnouncement(from: payload),
+            HomeAnnouncement(
+                notificationID: "91",
+                title: "피드백 크레딧을 드렸어요",
+                message: "소중한 의견 감사합니다."
+            )
+        )
+    }
+
+    func testAdminNotificationListItemCreatesHomeAnnouncementOnlyForMessageDestination() {
+        let popup = BackendAppNotification(
+            id: "91",
+            type: "ADMIN_MESSAGE",
+            title: "안내",
+            body: "**무료 크레딧**을 추가했습니다.",
+            deepLink: "buddystudy://home/message",
+            isRead: false,
+            createdAt: Date()
+        )
+        let routed = BackendAppNotification(
+            id: "92",
+            type: "ADMIN_MESSAGE",
+            title: "통계 안내",
+            body: "통계를 확인해 주세요.",
+            deepLink: "buddystudy://statistics",
+            isRead: false,
+            createdAt: Date()
+        )
+
+        XCTAssertEqual(
+            HomeAnnouncement(notification: popup),
+            HomeAnnouncement(
+                notificationID: "91",
+                title: "안내",
+                message: "**무료 크레딧**을 추가했습니다."
+            )
+        )
+        XCTAssertNil(HomeAnnouncement(notification: routed))
+        XCTAssertEqual(NotificationRouteResolver.route(for: routed), .statistics)
+    }
+
+    func testExplicitNotificationTapIsNavigationIntentRegardlessOfActivationTiming() {
+        XCTAssertTrue(
+            StudyNotificationRouting.shouldOpenStudyImmediately(
+                actionIdentifier: UNNotificationDefaultActionIdentifier
+            )
+        )
+        XCTAssertFalse(
+            StudyNotificationRouting.shouldOpenStudyImmediately(
+                actionIdentifier: StudyNotificationAction.reply
+            )
+        )
+        XCTAssertFalse(
+            StudyNotificationRouting.shouldOpenStudyImmediately(
+                actionIdentifier: UNNotificationDismissActionIdentifier
+            )
+        )
+    }
+
+    @MainActor
+    func testNotificationRouteUsesNotificationsTabAndSingleRouteRequest() {
+        let suiteName = "NotificationRouteTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let appState = AppState(settingsStore: SettingsStore(defaults: defaults))
+
+        XCTAssertTrue(
+            appState.openRouteFromNotification(
+                .recordDetail(recordID: "record-56")
+            )
+        )
+        XCTAssertEqual(appState.mobileVisibleTab, .notifications)
+        XCTAssertEqual(
+            appState.appRouteRequest?.route,
+            .recordDetail(recordID: "record-56")
+        )
+        XCTAssertEqual(
+            appState.appRouteRequest?.presentation,
+            .notificationInbox
+        )
+    }
+
+    func testNotificationDelegateIsInstalledDuringApplicationLaunch() throws {
+        let root = try repositoryRoot()
+        let appContent = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/StudyMateiOSApp.swift"),
+            encoding: .utf8
+        )
+        let launchMethod = try XCTUnwrap(
+            appContent.range(
+                of: "didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil"
+            )
+        )
+        let launchBody = appContent[launchMethod.lowerBound...]
+        let delegateRegistration = try XCTUnwrap(
+            launchBody.range(of: "StudyNotificationDelegate.shared.register()")
+        )
+        let launchReturn = try XCTUnwrap(launchBody.range(of: "return true"))
+
+        XCTAssertLessThan(delegateRegistration.lowerBound, launchReturn.lowerBound)
     }
 
     func testAPIValidationDecodesBackendValidFieldName() throws {
@@ -1677,6 +3019,113 @@ final class ArchitecturePolicyTests: XCTestCase {
         }
     }
 
+    func testDevelopmentStoreKitCatalogMatchesServerOwnedProductCatalog() throws {
+        let root = try repositoryRoot()
+        let storeKitData = try Data(contentsOf: root.appendingPathComponent("StudyMateDev.storekit"))
+        let appStoreData = try Data(
+            contentsOf: root.appendingPathComponent("app-store/billing/subscriptions.json")
+        )
+        let storeKit = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: storeKitData) as? [String: Any]
+        )
+        let appStore = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: appStoreData) as? [String: Any]
+        )
+        let groups = try XCTUnwrap(storeKit["subscriptionGroups"] as? [[String: Any]])
+        let subscriptions = groups.flatMap { $0["subscriptions"] as? [[String: Any]] ?? [] }
+        let configuredProducts = Dictionary(
+            uniqueKeysWithValues: try subscriptions.map { subscription in
+                (
+                    try XCTUnwrap(subscription["productID"] as? String),
+                    try XCTUnwrap(subscription["displayPrice"] as? String)
+                )
+            }
+        )
+        let products = try XCTUnwrap(appStore["products"] as? [[String: Any]])
+        let serverProducts = Dictionary(
+            uniqueKeysWithValues: try products.map { product in
+                (
+                    try XCTUnwrap(product["productId"] as? String),
+                    try XCTUnwrap(product["customerPrice"] as? String)
+                )
+            }
+        )
+
+        XCTAssertEqual(configuredProducts, serverProducts)
+
+        let scheme = try String(
+            contentsOf: root.appendingPathComponent(
+                "StudyMate.xcodeproj/xcshareddata/xcschemes/StudyMateiOS.xcscheme"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(scheme.contains("../../StudyMateDev.storekit"))
+        XCTAssertTrue(scheme.contains("BUDDYSTUDY_BACKEND_BASE_URL"))
+        XCTAssertTrue(scheme.contains("https://lowfidev.cloud"))
+    }
+
+    @MainActor
+    func testDevelopmentLaunchBackendOverridesPersistedProductionSelection() {
+        let configuration = BackendBaseURLConfiguration(
+            isDebuggingEnabled: false,
+            debugBackendBaseURL: "",
+            launchBackendBaseURL: "https://lowfidev.cloud"
+        )
+
+        XCTAssertEqual(configuration.effectiveBaseURL.absoluteString, "https://lowfidev.cloud")
+    }
+
+    @MainActor
+    func testLegacyDevelopmentAPIHostMigratesToRootHost() {
+        let configuration = BackendBaseURLConfiguration(
+            isDebuggingEnabled: true,
+            debugBackendBaseURL: "https://api.lowfidev.cloud",
+            launchBackendBaseURL: nil
+        )
+
+        XCTAssertEqual(configuration.normalizedDebugBackendBaseURL, "https://lowfidev.cloud")
+        XCTAssertEqual(configuration.effectiveBaseURL.absoluteString, "https://lowfidev.cloud")
+    }
+
+    @MainActor
+    func testReleaseConfigurationUsesBundledProductionBackend() {
+        let configuration = BackendBaseURLConfiguration(
+            isDebuggingEnabled: false,
+            debugBackendBaseURL: "https://lowfidev.cloud",
+            bundledBackendBaseURL: "https://api.ghkdqhrbals.org",
+            launchBackendBaseURL: nil
+        )
+
+        XCTAssertEqual(configuration.effectiveBaseURL.absoluteString, "https://api.ghkdqhrbals.org")
+    }
+
+    @MainActor
+    func testUnlockedDebugSelectionOverridesBundledProductionBackend() {
+        let configuration = BackendBaseURLConfiguration(
+            isDebuggingEnabled: true,
+            debugBackendBaseURL: "https://lowfidev.cloud",
+            bundledBackendBaseURL: "https://api.ghkdqhrbals.org",
+            launchBackendBaseURL: nil
+        )
+
+        XCTAssertEqual(configuration.effectiveBaseURL.absoluteString, "https://lowfidev.cloud")
+    }
+
+    func testDevelopmentStoreKitConfigurationLoadsAllPaidProducts() async throws {
+        let session = try SKTestSession(configurationFileNamed: "StudyMateDev")
+        session.disableDialogs = true
+        session.clearTransactions()
+        let expectedProductIDs: Set<String> = [
+            "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+            "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+        ]
+
+        let products = try await Product.products(for: expectedProductIDs)
+
+        XCTAssertEqual(Set(products.map(\.id)), expectedProductIDs)
+        XCTAssertTrue(products.allSatisfy { $0.type == .autoRenewable })
+    }
+
     private func repositoryRoot() throws -> URL {
         var current = URL(fileURLWithPath: #filePath)
         while current.path != "/" {
@@ -1707,6 +3156,14 @@ final class ArchitecturePolicyTests: XCTestCase {
             let values = try url.resourceValues(forKeys: [.isRegularFileKey])
             return values.isRegularFile == true ? url : nil
         }
+    }
+}
+
+private final class UncheckedAppStateOwner: @unchecked Sendable {
+    var appState: AppState?
+
+    init(_ appState: AppState) {
+        self.appState = appState
     }
 }
 

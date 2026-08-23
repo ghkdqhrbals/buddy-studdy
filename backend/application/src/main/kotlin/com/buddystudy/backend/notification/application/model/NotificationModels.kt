@@ -32,10 +32,10 @@ data class NotificationMutationResponse(val ok: Boolean = true)
 fun AppNotificationEntity.toResponse(): AppNotificationResponse =
     AppNotificationResponse(
         id = id.toString(),
-        type = type,
+        type = type.name,
         title = title,
         body = body,
-        threadType = threadType,
+        threadType = threadType?.databaseValue,
         threadId = threadId,
         deepLink = deepLink,
         isRead = readAt != null,

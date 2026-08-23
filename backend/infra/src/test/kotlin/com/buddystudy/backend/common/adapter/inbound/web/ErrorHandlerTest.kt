@@ -7,17 +7,21 @@ import com.buddystudy.backend.common.application.error.ApiRuntimeException
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.boot.test.system.CapturedOutput
 import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.context.support.StaticMessageSource
 import org.springframework.core.task.TaskRejectedException
+import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest
 import org.springframework.mock.web.server.MockServerWebExchange
 import org.springframework.web.reactive.resource.NoResourceFoundException
+import org.springframework.web.server.MethodNotAllowedException
+import reactor.netty.channel.AbortedException
 import java.net.URI
 import java.util.Locale
 
@@ -34,9 +38,12 @@ class ErrorHandlerTest {
         addMessage("error.internal.server_error", Locale.KOREA, "Internal backend error.")
         addMessage("error.internal.server_error", Locale.KOREAN, "Internal backend error.")
         addMessage("error.validation", Locale.ENGLISH, "Invalid request.")
+        addMessage("error.request.method_not_allowed", Locale.ENGLISH, "Request method is not supported.")
         addMessage("error.server.busy", Locale.ENGLISH, "Server is temporarily busy.")
     }
-    private val handler = ErrorHandler(ApiErrorResponseFactory(messageSource))
+    private val responseFactory = ApiErrorResponseFactory(messageSource)
+    private val handler = ErrorHandler(responseFactory, ApiLoggingPolicy("detailed"))
+    private val compactHandler = ErrorHandler(responseFactory, ApiLoggingPolicy("compact"))
     private val mapper = ObjectMapper().registerKotlinModule().findAndRegisterModules()
 
     @Test
@@ -75,6 +82,67 @@ class ErrorHandlerTest {
     }
 
     @Test
+    fun `nested linkage root cause is logged with searchable cause and origin`(output: CapturedOutput) = runBlocking {
+        val exchange = exchange(
+            method = "POST",
+            path = "/api/v1/studies/2/questions",
+            requestId = "req-linkage",
+        )
+        val rootCause = ExceptionInInitializerError("jOOQ SQLDataType initialization failed").apply {
+            stackTrace = arrayOf(StackTraceElement("org.jooq.impl.DSL", "using", "DSL.java", 918))
+        }
+        val error = NoClassDefFoundError("Could not initialize class org.jooq.impl.DefaultDSLContext").apply {
+            initCause(rootCause)
+        }
+        val translated = IllegalStateException("jOOQ runtime initialization failed.", error)
+
+        val response = handler.fallback(translated, exchange)
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR)
+        val json = mapper.valueToTree<com.fasterxml.jackson.databind.JsonNode>(response.body)
+        assertThat(json["error"]["requestId"].asText()).isEqualTo("req-linkage")
+        assertThat(json["error"]["reason"].asText())
+            .contains("IllegalStateException: jOOQ runtime initialization failed.")
+            .contains("ExceptionInInitializerError: jOOQ SQLDataType initialization failed")
+        assertThat(output.all).contains("requestId=req-linkage")
+        assertThat(output.all).contains("path=/api/v1/studies/2/questions")
+        assertThat(output.all).contains("exceptionType=IllegalStateException")
+        assertThat(output.all).contains("rootCauseType=ExceptionInInitializerError")
+        assertThat(output.all).contains("origin=org.jooq.impl.DSL.using(DSL.java:918)")
+    }
+
+    @Test
+    fun `compact error log omits request identity and full stack trace`(output: CapturedOutput) = runBlocking {
+        val exchange = exchange(
+            method = "POST",
+            path = "/api/v1/devices/register",
+            requestId = "req-compact",
+            forwardedFor = "203.0.113.10",
+        )
+        val error = IllegalStateException("jwt init failed")
+
+        compactHandler.fallback(error, exchange)
+
+        assertThat(output.all).contains(
+            "api_error method=POST path=/api/v1/devices/register status=500 code=INTERNAL_SERVER_ERROR",
+        )
+        assertThat(output.all).contains("cause=IllegalStateException:jwt init failed")
+        assertThat(output.all).doesNotContain("requestId=req-compact")
+        assertThat(output.all).doesNotContain("clientIp=203.0.113.10")
+        assertThat(output.all).doesNotContain("\tat ")
+    }
+
+    @Test
+    fun `client disconnect bypasses internal server error handling`(output: CapturedOutput) {
+        val exchange = exchange("GET", "/api/v1/studies", "req-disconnected")
+        val error = AbortedException(IllegalStateException("connection closed"))
+
+        assertThatThrownBy { handler.fallback(error, exchange) }
+            .isSameAs(error)
+        assertThat(output.all).doesNotContain("api_error")
+    }
+
+    @Test
     fun `api runtime exception response uses request locale and omits reason`(): Unit = runBlocking {
         val exchange = MockServerWebExchange.from(
             MockServerHttpRequest.get("/api/v1/records")
@@ -102,6 +170,22 @@ class ErrorHandlerTest {
         assertThat(response.headers.contentType).isEqualTo(MediaType.APPLICATION_JSON)
         val serialized = mapper.writeValueAsString(response.body)
         assertThat(serialized).contains("\"errorCode\":\"RESOURCE_NOT_FOUND\"")
+    }
+
+    @Test
+    fun `unsupported request method remains 405 without an error log`(output: CapturedOutput): Unit = runBlocking {
+        val exchange = exchange("GET", "/api/v1/admin/users/733/notifications", "req-method")
+        val error = MethodNotAllowedException(HttpMethod.GET, listOf(HttpMethod.POST))
+
+        val response = handler.methodNotAllowed(error, exchange)
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED)
+        assertThat(response.headers.allow).containsExactly(HttpMethod.POST)
+        val json = mapper.valueToTree<com.fasterxml.jackson.databind.JsonNode>(response.body)
+        assertThat(json["error"]["errorCode"].asText()).isEqualTo(ApiErrorCode.METHOD_NOT_ALLOWED.name)
+        assertThat(json["error"]["code"].asInt()).isEqualTo(ApiErrorCode.METHOD_NOT_ALLOWED.code)
+        assertThat(json["error"]["message"].asText()).isEqualTo("Request method is not supported.")
+        assertThat(output.all).doesNotContain("api_error")
     }
 
     @Test
@@ -139,4 +223,5 @@ class ErrorHandlerTest {
             it.attributes[RequestLoggingFilter.REQUEST_ID_ATTRIBUTE] = requestId
         }
     }
+
 }

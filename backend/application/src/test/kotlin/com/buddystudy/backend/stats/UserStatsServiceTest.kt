@@ -10,6 +10,7 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.stats.domain.entity.UserStatsEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -173,6 +174,45 @@ class UserStatsServiceTest {
             .sumOf { it.responseCount }
         assertThat(response.monthAnswerCount).isEqualTo(expectedMonthAnswerCount)
         assertThat(userStats.findByUserCalls).isEqualTo(1)
+    }
+
+    @Test
+    fun `activity topic order is stable when response counts are tied`(): Unit = runBlocking {
+        val today = LocalDate.now(java.time.ZoneOffset.UTC)
+        userStats.rows += UserStatsEntity(
+            userId = 7,
+            statDate = today,
+            topicKey = "zulu",
+            topic = "Zulu",
+            difficultyLevel = 5,
+            responseCount = 2,
+            scoreCount = 2,
+            scoreSum = 160,
+            bestScore = 90,
+            correctCount = 2,
+            latestAt = Instant.now(),
+        )
+        userStats.rows += UserStatsEntity(
+            userId = 7,
+            statDate = today,
+            topicKey = "alpha",
+            topic = "Alpha",
+            difficultyLevel = 5,
+            responseCount = 2,
+            scoreCount = 2,
+            scoreSum = 160,
+            bestScore = 90,
+            correctCount = 2,
+            latestAt = Instant.now(),
+        )
+
+        val response = service.activity(
+            principal,
+            startAt = today.atStartOfDay().toInstant(java.time.ZoneOffset.UTC),
+            endAt = today.plusDays(1).atStartOfDay().toInstant(java.time.ZoneOffset.UTC),
+        )
+
+        assertThat(response.days.single().topics).containsExactly("Alpha", "Zulu")
     }
 
     @Test
@@ -379,7 +419,7 @@ class UserStatsServiceTest {
         topic = topic,
         difficultyLevel = difficultyLevel,
         scheduledFor = Instant.parse(answeredAt),
-        status = "graded",
+        status = QuestionStatus.GRADED,
         answer = "Answer",
         score = score,
         correct = correct,
@@ -514,7 +554,7 @@ class UserStatsServiceTest {
         override suspend fun findPublicAnsweredById(id: Long): QuestionEntity? = null
         override suspend fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = emptyList()
         override suspend fun softDelete(id: Long, userId: Long, now: Instant): Int = 0
-        override suspend fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int = 0
+        override suspend fun softDeleteByUserId(userId: Long, now: Instant): Int = 0
         override suspend fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int = 0
     }
 

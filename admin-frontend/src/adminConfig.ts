@@ -45,10 +45,14 @@ export const sections: Array<{ key: SectionKey; label: string; metrics: string[]
   { key: "learning", label: "Learning", metrics: ["question_created_count", "answer_submitted_count", "answer_rate", "question_to_answer_latency"] },
   { key: "notifications", label: "Notifications", metrics: ["push_open_rate"] },
   { key: "quota", label: "Quota", metrics: ["quota_used_count"] },
-  { key: "operations", label: "Operations", metrics: [] },
+  { key: "advertising", label: "Advertising", metrics: [] },
+  { key: "app_updates", label: "App updates", metrics: [] },
+  { key: "operations", label: "Batch Jobs", metrics: [] },
 ];
 
 export const JOB_PAGE_SIZE = 10;
+export const JOB_STATUS_PAGE_SIZE = 10;
+export const BATCH_JOBS_MONITOR_URL = "https://monitoring.lowfidev.cloud/jobs.html";
 
 export const sectionPaths: Record<SectionKey, string> = {
   overview: "/home",
@@ -56,5 +60,7 @@ export const sectionPaths: Record<SectionKey, string> = {
   learning: "/analytics/learning",
   notifications: "/analytics/notifications",
   quota: "/analytics/quota",
+  advertising: "/advertising/campaigns",
+  app_updates: "/app-updates",
   operations: "/operations/scheduler-runs",
 };

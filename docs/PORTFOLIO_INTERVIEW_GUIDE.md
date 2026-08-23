@@ -31,11 +31,11 @@ The backend uses a multi-module hexagonal structure:
 - `tutor`: executable composition root.
 
 Question and grading writes are transactional. Events that must reach Redis are
-first appended to an outbox in the same R2DBC transaction. A polling dispatcher
-claims rows with `FOR UPDATE SKIP LOCKED`, publishes with an idempotency key, and
-retries with a lease and exponential backoff. This gives at-least-once delivery
-without pretending that Redis publication and MySQL commit are one atomic
-operation.
+first appended to an outbox in the same R2DBC transaction. After commit, the
+application immediately claims and publishes each row. A recovery scheduler
+uses the same fenced claim and publication flow for failures and abandoned
+claims. This gives at-least-once delivery without pretending that Redis
+publication and MySQL commit are one atomic operation.
 
 For performance, I compared MVC/JDBC and WebFlux/R2DBC under the same CPU, heap,
 database fixture, and 10-connection pool at 1,000-3,000 requested RPS. The
@@ -363,10 +363,11 @@ must become cheaper before pool tuning.
 
 ### “How do you prevent event loss?”
 
-The event is written to a MySQL outbox in the business transaction. A
-dispatcher publishes it later. This prevents the business row from committing
-without a durable publication intent. Delivery is at-least-once, so consumers
-deduplicate.
+The event is written to a MySQL outbox in the business transaction. The
+application publishes it immediately after commit, while a scheduler recovers
+failed or abandoned rows through the same flow. This prevents the business row
+from committing without a durable publication intent. Delivery is at-least-once,
+so consumers deduplicate.
 
 ### “Why Redis Streams instead of Kafka?”
 

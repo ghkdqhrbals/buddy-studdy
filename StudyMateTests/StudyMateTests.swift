@@ -135,7 +135,7 @@ final class StudyMateTests: XCTestCase {
         XCTAssertNil(loginPresentation.inlineMessage)
         XCTAssertFalse(loginPresentation.shouldShowPopup)
         XCTAssertTrue(loginPresentation.requiresLogin)
-        XCTAssertTrue(loginPresentation.shouldResetBackendIdentity)
+        XCTAssertFalse(loginPresentation.shouldResetBackendIdentity)
 
         let validationError = Self.backendError(
             code: "RECORD_NOT_FOUND",
@@ -216,6 +216,24 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(notificationsPage.totalCount, 0)
     }
 
+    func testCommunityProfileDecodesPublicQuestionPreference() throws {
+        let payload = Data(
+            """
+            {
+              "id": 4,
+              "displayName": "Jamma",
+              "bio": "",
+              "avatarUrl": null,
+              "allowPublicQuestions": false
+            }
+            """.utf8
+        )
+
+        let profile = try JSONDecoder().decode(CommunityUserProfile.self, from: payload)
+
+        XCTAssertFalse(profile.allowPublicQuestions)
+    }
+
     func testAppErrorHandlingNormalizesDecodingErrorsWithoutPopup() {
         struct RequiredBodyPayload: Decodable {
             let body: String
@@ -288,7 +306,72 @@ final class StudyMateTests: XCTestCase {
         XCTAssertNil(resolution.featureMessage)
         XCTAssertFalse(resolution.shouldShowPopup)
         XCTAssertTrue(resolution.requiresLogin)
-        XCTAssertTrue(resolution.shouldResetBackendIdentity)
+        XCTAssertFalse(resolution.shouldResetBackendIdentity)
+    }
+
+    func testBackendIdentityRecoverySeparatesAccessTokenAndDeviceCredentials() {
+        let accessTokenError = Self.backendError(code: "AUTH_INVALID_ACCESS_TOKEN", status: 401)
+        let deviceCredentialsError = Self.backendError(code: "AUTH_INVALID_DEVICE_CREDENTIALS", status: 401)
+        let emailCredentialsError = Self.backendError(
+            code: "AUTH_INVALID_EMAIL_CREDENTIALS",
+            status: 401,
+            message: "이메일 또는 비밀번호가 올바르지 않습니다."
+        )
+
+        XCTAssertTrue(BackendErrorPresentationPolicy.shouldRefreshBackendAccessToken(after: accessTokenError))
+        XCTAssertFalse(BackendErrorPresentationPolicy.shouldResetBackendIdentity(after: accessTokenError))
+        XCTAssertFalse(BackendErrorPresentationPolicy.shouldRefreshBackendAccessToken(after: deviceCredentialsError))
+        XCTAssertTrue(BackendErrorPresentationPolicy.shouldResetBackendIdentity(after: deviceCredentialsError))
+        XCTAssertFalse(BackendErrorPresentationPolicy.shouldRefreshBackendAccessToken(after: emailCredentialsError))
+        XCTAssertFalse(BackendErrorPresentationPolicy.shouldResetBackendIdentity(after: emailCredentialsError))
+
+        let resolution = AppErrorHandlingPolicy.resolve(emailCredentialsError, fallback: "fallback")
+        XCTAssertEqual(resolution.featureMessage, "이메일 또는 비밀번호가 올바르지 않습니다.")
+        XCTAssertFalse(resolution.requiresLogin)
+        XCTAssertFalse(resolution.shouldShowPopup)
+        XCTAssertFalse(resolution.isPageAccessDenied)
+    }
+
+    @MainActor
+    func testEmailLoginRecoversInvalidDeviceCredentialsAndRetriesOnce() async {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        store.saveRemotePushRegistration(
+            RemotePushRegistration(
+                deviceID: "stale-device",
+                clientSecret: "stale-secret",
+                apnsToken: "push-token",
+                accessToken: "stale-access-token",
+                accessTokenExpiresAt: Date().addingTimeInterval(3600)
+            )
+        )
+        let backend = FakeRemotePushBackendClient()
+        backend.registration = RemotePushRegistration(
+            deviceID: "fresh-device",
+            clientSecret: "fresh-secret",
+            apnsToken: ""
+        )
+        backend.emailLoginErrors = [
+            Self.backendError(code: "AUTH_INVALID_DEVICE_CREDENTIALS", status: 401)
+        ]
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
+
+        let result = await appState.signInToCommunity(
+            email: "tester@example.com",
+            password: "password"
+        )
+
+        XCTAssertEqual(result, .signedIn)
+        XCTAssertEqual(backend.emailLoginRegistrations.map(\.deviceID), ["stale-device", "fresh-device"])
+        XCTAssertEqual(backend.registeredAPNSTokens, ["push-token"])
+        XCTAssertEqual(store.loadRemotePushRegistration()?.deviceID, "fresh-device")
+        XCTAssertEqual(store.loadRemotePushRegistration()?.accessToken, "email-access-token")
+        XCTAssertTrue(appState.isCommunitySignedIn)
     }
 
     func testBackendAPIErrorUsesDescriptionWhenMessageIsMissing() throws {
@@ -343,7 +426,8 @@ final class StudyMateTests: XCTestCase {
             registration: backendClient.registration,
             limit: 500,
             offset: 0,
-            query: ""
+            query: "",
+            language: .english
         )
         _ = try await useCase.createQuestion(
             registration: backendClient.registration,
@@ -370,6 +454,7 @@ final class StudyMateTests: XCTestCase {
             registration: backendClient.registration,
             notificationID: "notification-1"
         )
+        try await useCase.markAllRead(registration: backendClient.registration)
         try await useCase.deleteNotification(
             registration: backendClient.registration,
             notificationID: "notification-2"
@@ -381,6 +466,7 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(backendClient.fetchNotificationsRequests.first?.offset, 10)
         XCTAssertEqual(backendClient.fetchNotificationUnreadCountCallCount, 1)
         XCTAssertEqual(backendClient.markedNotificationIDs, ["notification-1"])
+        XCTAssertEqual(backendClient.markAllNotificationsReadCallCount, 1)
         XCTAssertEqual(backendClient.deletedNotificationIDs, ["notification-2"])
         XCTAssertEqual(backendClient.deleteAllNotificationsCallCount, 1)
     }
@@ -488,6 +574,11 @@ final class StudyMateTests: XCTestCase {
             recordID: "record-1",
             answer: "answer"
         )
+        _ = try await useCase.fetchAnswerGradingProcess(
+            registration: backendClient.registration,
+            correlationID: "grading-1",
+            afterEventID: 7
+        )
         _ = try await useCase.saveRecordAnswer(
             registration: backendClient.registration,
             recordID: "record-2",
@@ -503,6 +594,8 @@ final class StudyMateTests: XCTestCase {
 
         XCTAssertEqual(backendClient.fetchRecordsRequests.map(\.query), ["queue"])
         XCTAssertEqual(backendClient.gradedAnswers, ["answer"])
+        XCTAssertEqual(backendClient.answerGradingProcessRequests.map(\.correlationID), ["grading-1"])
+        XCTAssertEqual(backendClient.answerGradingProcessRequests.map(\.afterEventID), [7])
         XCTAssertEqual(backendClient.savedRecordAnswers, ["record-2:draft"])
         XCTAssertEqual(backendClient.updatedRecordPublicity, ["record-3:false"])
         XCTAssertEqual(backendClient.deletedRecordIDs, ["record-4"])
@@ -725,6 +818,8 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(components.queryItemValue("query"), "Swift concurrency")
         XCTAssertEqual(components.queryItemValue("limit"), "100")
         XCTAssertEqual(components.queryItemValue("offset"), "0")
+        XCTAssertEqual(components.queryItemValue("tl"), "ko")
+        XCTAssertNil(components.queryItemValue("language"))
     }
 
     @MainActor
@@ -747,6 +842,27 @@ final class StudyMateTests: XCTestCase {
         XCTAssertNil(components.queryItemValue("query"))
         XCTAssertEqual(components.queryItemValue("limit"), "15")
         XCTAssertEqual(components.queryItemValue("offset"), "20")
+        XCTAssertEqual(components.queryItemValue("tl"), "ko")
+        XCTAssertNil(components.queryItemValue("language"))
+    }
+
+    @MainActor
+    func testPublicQuestionDetailUsesTargetLanguageQuery() async throws {
+        let recorder = HTTPRequestRecorder()
+        let client = makeBackendClient(recorder: recorder)
+        let registration = RemotePushRegistration(deviceID: "device-1", clientSecret: "secret-1", apnsToken: "")
+
+        _ = try await client.fetchPublicQuestion(
+            registration: registration,
+            questionID: "42",
+            language: .english
+        )
+
+        let request = try XCTUnwrap(recorder.requests.single)
+        XCTAssertEqual(request.url?.path, "/api/v1/public/questions/42")
+        let components = try XCTUnwrap(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false))
+        XCTAssertEqual(components.queryItemValue("tl"), "en")
+        XCTAssertNil(components.queryItemValue("language"))
     }
 
     func testRecordDeepLinksResolveToRecordDetailRoutes() throws {
@@ -780,15 +896,85 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(StudyNotificationPayload.backendRecordID(from: recordIDPayload), "record-999")
     }
 
-    func testStudyDateDisplayFormatterUsesShortDateAfterSevenDays() {
+    func testStudyDateDisplayFormatterUsesAppLanguageForShortDateAfterSevenDays() {
         let formatter = ISO8601DateFormatter()
         let referenceDate = formatter.date(from: "2026-06-08T00:00:00Z")!
         let oldDate = formatter.date(from: "2026-06-01T00:00:00Z")!
 
-        XCTAssertEqual(
-            StudyDateDisplayFormatter.relativeOrShortDateString(for: oldDate, relativeTo: referenceDate),
-            "26.6.1"
+        let korean = StudyDateDisplayFormatter.relativeOrShortDateString(
+            for: oldDate,
+            relativeTo: referenceDate,
+            language: .korean
         )
+        let english = StudyDateDisplayFormatter.relativeOrShortDateString(
+            for: oldDate,
+            relativeTo: referenceDate,
+            language: .english
+        )
+
+        XCTAssertNotEqual(korean, english)
+        XCTAssertTrue(korean.contains("6"))
+        XCTAssertTrue(english.contains("6"))
+    }
+
+    func testNotificationTitlesAreLocalizedByNotificationKind() {
+        let korean = AppStrings(language: .korean)
+        let english = AppStrings(language: .english)
+
+        XCTAssertEqual(
+            korean.notificationTitle(type: "STUDY_QUESTION", threadType: "study_question", fallback: "BuddyStudy"),
+            "새 질문 도착"
+        )
+        XCTAssertEqual(
+            english.notificationTitle(type: "STUDY_QUESTION", threadType: "study_question", fallback: "BuddyStudy"),
+            "New Question"
+        )
+        XCTAssertEqual(
+            korean.notificationTitle(type: "THREAD_ACTIVITY", threadType: "question", fallback: "새 댓글"),
+            "댓글"
+        )
+        XCTAssertEqual(
+            english.notificationTitle(type: "THREAD_ACTIVITY", threadType: "question", fallback: "New comment"),
+            "Comment"
+        )
+    }
+
+    func testBillingStringsIncludeJapaneseUserFacingCopy() {
+        let japanese = AppStrings(language: .japanese)
+
+        XCTAssertEqual(japanese.membershipPlans, "メンバーシップ")
+        XCTAssertEqual(japanese.restorePurchases, "購入を復元")
+        XCTAssertEqual(japanese.requestRefund, "返金をリクエスト")
+        XCTAssertEqual(japanese.billingPurchased, "メンバーシップが有効になりました。")
+    }
+
+    func testInvoiceActionsFollowServerStateProjection() {
+        let base = BackendBillingInvoice(
+            id: 41,
+            invoiceNumber: UUID(uuidString: "9f041446-e898-4ef7-974d-91ac70e1a89b")!,
+            tierCode: "TIER3",
+            productId: "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+            status: "FULFILLED",
+            version: 4,
+            paymentId: 87,
+            transactionId: "2000000812345678",
+            originalTransactionId: "2000000712345678",
+            paymentStatus: "SETTLED",
+            priceMilliunits: 9_900_000_000,
+            currency: "KRW",
+            purchaseAt: Date(timeIntervalSince1970: 1_785_744_720),
+            expiresAt: Date(timeIntervalSince1970: 1_788_422_720),
+            createdAt: Date(timeIntervalSince1970: 1_785_744_721),
+            updatedAt: Date(timeIntervalSince1970: 1_785_744_722)
+        )
+
+        XCTAssertTrue(base.isRefundable)
+        XCTAssertTrue(base.isCancellable)
+
+        var pendingRefund = base
+        pendingRefund.status = "REFUND_PENDING"
+        XCTAssertFalse(pendingRefund.isRefundable)
+        XCTAssertFalse(pendingRefund.isCancellable)
     }
 
     func testGradedStudyRecordAdaptsToCommunityQuestionDetailModel() throws {
@@ -832,7 +1018,7 @@ final class StudyMateTests: XCTestCase {
     }
 
     @MainActor
-    func testDebuggingModeStaysEnabledWithoutDeveloperAccess() async throws {
+    func testDeveloperCodeUnlocksDebuggingWhileSignedOutAndPersistsOnDevice() async throws {
         let suiteName = "StudyMateTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer {
@@ -841,31 +1027,28 @@ final class StudyMateTests: XCTestCase {
 
         let store = SettingsStore(defaults: defaults)
         let backend = FakeRemotePushBackendClient()
-        let accessToken = Self.jwt(
-            payload: [
-                "device_id": backend.registration.deviceID,
-                "is_anonymous": false,
-                "status": "ACTIVE"
-            ]
-        )
-        store.saveRemotePushRegistration(
-            RemotePushRegistration(
-                deviceID: backend.registration.deviceID,
-                clientSecret: backend.registration.clientSecret,
-                apnsToken: "",
-                accessToken: accessToken,
-                accessTokenExpiresAt: Date().addingTimeInterval(3600)
-            )
-        )
         store.saveIsDebuggingEnabled(true)
         let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
 
-        XCTAssertTrue(appState.isDebuggingEnabled)
+        XCTAssertFalse(appState.isDebuggingEnabled)
+        XCTAssertFalse(appState.canAccessDeveloperOptions)
+        XCTAssertFalse(appState.isCommunitySessionActive)
 
-        await appState.refreshPageAccess(reason: "test")
-
+        let invalidCodeAccepted = await appState.redeemDeveloperPromotionCode("NOPE-NOPE-NOPE-NOPE")
+        XCTAssertFalse(invalidCodeAccepted)
+        XCTAssertFalse(appState.canAccessDeveloperOptions)
+        let developerCodeAccepted = await appState.redeemDeveloperPromotionCode("QAQA-QAQA-QAQA-QAQA")
+        XCTAssertTrue(developerCodeAccepted)
+        XCTAssertTrue(appState.canAccessDeveloperOptions)
+        XCTAssertTrue(appState.canShowDebugPopup)
         XCTAssertTrue(appState.isDebuggingEnabled)
         XCTAssertTrue(store.loadIsDebuggingEnabled())
+        XCTAssertTrue(store.loadIsDeveloperAccessUnlocked())
+
+        let restoredAppState = AppState(settingsStore: store, remotePushBackendClient: backend)
+        XCTAssertTrue(restoredAppState.canAccessDeveloperOptions)
+        XCTAssertTrue(restoredAppState.canShowDebugPopup)
+        XCTAssertTrue(restoredAppState.isDebuggingEnabled)
     }
 
     @MainActor
@@ -1423,6 +1606,7 @@ final class StudyMateTests: XCTestCase {
 
         XCTAssertEqual(backend.fetchSettingsCallCount, 1)
         XCTAssertEqual(appState.settings.studyCategories.map(\.title), ["Redis", "Kafka"])
+        XCTAssertEqual(appState.settings.intervalMinutes, 30)
         XCTAssertEqual(appState.settings.selectedStudyCategoryID, secondCategory.id)
         XCTAssertEqual(appState.studyCategoriesForDisplay.map(\.title), ["Redis", "Kafka"])
         XCTAssertEqual(store.loadSettings().studyCategories.map(\.title), ["Redis", "Kafka"])
@@ -1955,7 +2139,10 @@ final class StudyMateTests: XCTestCase {
         store.saveIsRunning(true)
         store.saveQuestion(activeQuestion)
         store.appendStudyRecord(question: activeQuestion, settings: settings)
-        store.updateStudyRecordAnswer(question: activeQuestion, answer: "작성 중인 답변")
+        store.saveAnswerDraft(
+            "작성 중인 답변",
+            recordID: store.loadStudyRecords()[0].id
+        )
         store.saveLastAnswer("작성 중인 답변")
 
         let backend = FakeRemotePushBackendClient()
@@ -2191,7 +2378,10 @@ final class StudyMateTests: XCTestCase {
         store.saveSettings(localSettings)
         store.saveQuestion(localQuestion)
         store.appendStudyRecord(question: localQuestion, settings: localSettings)
-        store.updateStudyRecordAnswer(question: localQuestion, answer: "로컬 작성 중")
+        store.saveAnswerDraft(
+            "로컬 작성 중",
+            recordID: store.loadStudyRecords()[0].id
+        )
         store.saveLastAnswer("로컬 작성 중")
 
         let remoteState = CloudSyncState(
@@ -3485,9 +3675,12 @@ final class StudyMateTests: XCTestCase {
             createdAt: Date()
         )
         store.appendStudyRecord(question: question, settings: settings)
-        store.updateStudyRecordAnswer(question: question, answer: "프로세스는 자원을 갖고 스레드는 실행 흐름입니다.")
 
         let record = store.loadStudyRecords()[0]
+        store.saveAnswerDraft(
+            "프로세스는 자원을 갖고 스레드는 실행 흐름입니다.",
+            recordID: record.id
+        )
         let appState = AppState(settingsStore: store)
 
         appState.selectStudyRecord(record)
@@ -3495,8 +3688,52 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(appState.selectedTab, .study)
         XCTAssertEqual(appState.currentQuestion?.question, question.question)
         XCTAssertEqual(appState.lastAnswer, "프로세스는 자원을 갖고 스레드는 실행 흐름입니다.")
+        XCTAssertNil(store.loadStudyRecords()[0].answer)
         XCTAssertNil(appState.gradingResult)
         XCTAssertEqual(appState.pendingStudyRecords.count, 1)
+    }
+
+    @MainActor
+    func testAutosavingStudyRoomDraftDoesNotPromoteItToSubmittedAnswer() {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let settings = StudySettings(
+            topic: "운영체제",
+            difficulty: .intermediate,
+            customPrompt: "짧게",
+            intervalMinutes: 15
+        )
+        let question = QuestionItem(
+            question: "프로세스와 스레드의 차이는?",
+            expectedAnswerHint: nil,
+            createdAt: Date()
+        )
+        store.appendStudyRecord(question: question, settings: settings)
+        let record = store.loadStudyRecords()[0]
+        let appState = AppState(settingsStore: store)
+
+        appState.updateAnswer(
+            "작성 중인 답변은 아직 제출된 답변이 아닙니다.",
+            for: record
+        )
+        appState.flushPendingAnswerDraftSave()
+
+        let persistedRecord = store.loadStudyRecords()[0]
+        XCTAssertNil(persistedRecord.answer)
+        XCTAssertEqual(
+            store.loadAnswerDraft(recordID: record.id),
+            "작성 중인 답변은 아직 제출된 답변이 아닙니다."
+        )
+        XCTAssertEqual(
+            appState.answerDraft(for: persistedRecord),
+            "작성 중인 답변은 아직 제출된 답변이 아닙니다."
+        )
+        XCTAssertTrue(StudyAnswerPresentationPolicy.shouldShowEditor(for: persistedRecord))
     }
 
     @MainActor
@@ -3543,6 +3780,165 @@ final class StudyMateTests: XCTestCase {
         XCTAssertEqual(appState.lastAnswer, "TCP는 연결형이고 UDP는 비연결형입니다.")
         XCTAssertEqual(store.loadStudyRecords().first?.answer, "TCP는 연결형이고 UDP는 비연결형입니다.")
         XCTAssertEqual(store.loadStudyRecords().first?.gradingResult?.score, 88)
+    }
+
+    @MainActor
+    func testGradeStudyRoomAnswerKeepsGradingResultVisible() async {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let settings = StudySettings(
+            topic: "운영체제",
+            difficulty: .intermediate,
+            customPrompt: "짧게",
+            intervalMinutes: 15
+        )
+        store.saveSettings(settings)
+        let question = QuestionItem(
+            question: "프로세스와 스레드의 차이는?",
+            expectedAnswerHint: nil,
+            createdAt: Date()
+        )
+        store.appendStudyRecord(question: question, settings: settings)
+        let record = store.loadStudyRecords()[0]
+
+        let backend = FakeRemotePushBackendClient()
+        backend.gradeRecordResult = StudyRecord(
+            id: record.id,
+            question: question,
+            answer: "프로세스는 자원을 소유하고 스레드는 실행 흐름입니다.",
+            gradingResult: GradingResult(
+                score: 92,
+                isCorrect: true,
+                feedback: "핵심을 잘 설명했습니다.",
+                explanation: "프로세스와 스레드의 자원 소유 관계가 정확합니다."
+            ),
+            topic: settings.topic,
+            difficulty: settings.difficulty,
+            answeredAt: Date()
+        )
+        let appState = AppState(settingsStore: store, remotePushBackendClient: backend)
+
+        await appState.gradeStudyRoomRecord(
+            record,
+            answer: "프로세스는 자원을 소유하고 스레드는 실행 흐름입니다."
+        )
+
+        let displayedRecord = appState.studyRoomRecordForDisplay(
+            categoryID: appState.settings.selectedStudyCategoryID
+        )
+        XCTAssertEqual(displayedRecord?.id, record.id)
+        XCTAssertEqual(displayedRecord?.gradingResult?.score, 92)
+        XCTAssertEqual(appState.currentQuestion, question)
+        XCTAssertEqual(appState.gradingResult?.score, 92)
+        XCTAssertEqual(appState.lastAnswer, "프로세스는 자원을 소유하고 스레드는 실행 흐름입니다.")
+    }
+
+    @MainActor
+    func testGradeRecordPollsByCorrelationIDAndAdvancesEventCursor() async {
+        let suiteName = "StudyMateTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let backend = FakeRemotePushBackendClient()
+        store.saveRemotePushRegistration(backend.registration)
+        let submittedAt = Date(timeIntervalSince1970: 1_000)
+        let question = QuestionItem(
+            question: "이벤트 기반 채점의 장점은?",
+            expectedAnswerHint: nil,
+            createdAt: submittedAt
+        )
+        let record = StudyRecord(
+            id: "record-77",
+            question: question,
+            topic: "분산 시스템",
+            difficulty: .intermediate
+        )
+        backend.gradeRecordResult = StudyRecord(
+            id: record.id,
+            question: question,
+            answer: "장애 복구와 느슨한 결합입니다.",
+            topic: record.topic,
+            difficulty: record.difficulty,
+            gradingRequestID: "grading-77",
+            gradingStatus: .queued
+        )
+        backend.answerGradingProcesses = [
+            AnswerGradingProcess(
+                correlationID: "grading-77",
+                recordID: record.id,
+                status: .analyzingEvidence,
+                terminal: false,
+                pollAfterMilliseconds: 250,
+                events: [
+                    AnswerGradingProgressEvent(
+                        id: 4,
+                        recordID: record.id,
+                        correlationID: "grading-77",
+                        status: .analyzingEvidence,
+                        errorMessage: nil,
+                        occurredAt: submittedAt
+                    )
+                ],
+                errorMessage: nil,
+                updatedAt: submittedAt
+            ),
+            AnswerGradingProcess(
+                correlationID: "grading-77",
+                recordID: record.id,
+                status: .completed,
+                terminal: true,
+                pollAfterMilliseconds: nil,
+                events: [
+                    AnswerGradingProgressEvent(
+                        id: 5,
+                        recordID: record.id,
+                        correlationID: "grading-77",
+                        status: .completed,
+                        errorMessage: nil,
+                        occurredAt: submittedAt.addingTimeInterval(1)
+                    )
+                ],
+                errorMessage: nil,
+                updatedAt: submittedAt.addingTimeInterval(1)
+            )
+        ]
+        backend.fetchRecordResult = StudyRecord(
+            id: record.id,
+            question: question,
+            answer: "장애 복구와 느슨한 결합입니다.",
+            gradingResult: GradingResult(
+                score: 91,
+                isCorrect: true,
+                feedback: "핵심을 설명했습니다.",
+                explanation: "처리 단계 분리와 재시도가 가능합니다."
+            ),
+            topic: record.topic,
+            difficulty: record.difficulty,
+            answeredAt: submittedAt.addingTimeInterval(1),
+            gradingRequestID: "grading-77",
+            gradingStatus: .completed
+        )
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: backend,
+            appSleepProvider: ImmediateAppSleepProvider()
+        )
+
+        await appState.gradeRecord(record, answer: "장애 복구와 느슨한 결합입니다.")
+
+        XCTAssertEqual(backend.answerGradingProcessRequests.count, 2)
+        XCTAssertEqual(backend.answerGradingProcessRequests.map(\.correlationID), ["grading-77", "grading-77"])
+        XCTAssertEqual(backend.answerGradingProcessRequests.map(\.afterEventID), [0, 4])
+        XCTAssertEqual(backend.fetchedRecordIDs, [record.id])
+        XCTAssertEqual(appState.gradingResult?.score, 91)
     }
 
     @MainActor
@@ -4611,6 +5007,9 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var gradeRecordCallCount = 0
     var gradedAnswers: [String] = []
     var gradeRecordResult: StudyRecord?
+    var fetchRecordResult: StudyRecord?
+    var answerGradingProcesses: [AnswerGradingProcess] = []
+    var answerGradingProcessRequests: [(correlationID: String, afterEventID: Int64)] = []
     var savedRecordAnswers: [String] = []
     var skippedRecordIDs: [String] = []
     var deletedRecordIDs: [String] = []
@@ -4628,6 +5027,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var fetchNotificationsRequests: [(limit: Int, offset: Int)] = []
     var fetchNotificationUnreadCountCallCount = 0
     var markedNotificationIDs: [String] = []
+    var markAllNotificationsReadCallCount = 0
     var deletedNotificationIDs: [String] = []
     var deleteAllNotificationsCallCount = 0
     var markNotificationReadErrors: [Error] = []
@@ -4644,6 +5044,8 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var googleLoginIDTokens: [String] = []
     var emailVerificationRequests: [String] = []
     var emailLoginRequests: [(email: String, password: String, verificationCode: String?)] = []
+    var emailLoginRegistrations: [RemotePushRegistration] = []
+    var emailLoginErrors: [Error] = []
     var fetchMyProfileCallCount = 0
     var fetchAvatarCatalogCallCount = 0
     var updatedProfileDisplayNames: [String] = []
@@ -4658,6 +5060,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
     var bootstrapAccessTokenError: Error?
     var fetchedSettings: BackendStudySettings?
     func registerDevice(
+        installationIdentifier: String,
         apnsToken: String?,
         language: AppLanguage,
         timezone: String,
@@ -4756,6 +5159,10 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
             throw markNotificationReadErrors.removeFirst()
         }
         markedNotificationIDs.append(notificationID)
+    }
+
+    func markAllNotificationsRead(registration: RemotePushRegistration) async throws {
+        markAllNotificationsReadCallCount += 1
     }
 
     func deleteNotification(registration: RemotePushRegistration, notificationID: String) async throws {
@@ -4879,7 +5286,8 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         registration: RemotePushRegistration,
         limit: Int,
         offset: Int,
-        query: String
+        query: String,
+        language: AppLanguage
     ) async throws -> BackendStudyPage {
         fetchStudyCallCount += 1
         BackendStudyPage(
@@ -4981,6 +5389,21 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         BackendStatsActivity(days: [], streakDays: 0, monthAnswerCount: 0, generatedAt: Date())
     }
 
+    func fetchStudyGrowth(
+        registration: RemotePushRegistration,
+        startAt: Date?,
+        endAt: Date?
+    ) async throws -> BackendStudyGrowth {
+        let now = Date()
+        return BackendStudyGrowth(
+            roots: [],
+            nodes: [],
+            startAt: startAt ?? now.addingTimeInterval(-90 * 24 * 60 * 60),
+            endAt: endAt ?? now,
+            generatedAt: now
+        )
+    }
+
     func fetchPublicQuestions(
         registration: RemotePushRegistration,
         query: String?,
@@ -5058,6 +5481,10 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         verificationCode: String?
     ) async throws -> CommunityLoginResult {
         emailLoginRequests.append((email: email, password: password, verificationCode: verificationCode))
+        emailLoginRegistrations.append(registration)
+        if !emailLoginErrors.isEmpty {
+            throw emailLoginErrors.removeFirst()
+        }
         let updatedRegistration = RemotePushRegistration(
             deviceID: registration.deviceID,
             clientSecret: registration.clientSecret,
@@ -5117,7 +5544,8 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         avatarSymbolName: String?,
         avatarColorSeed: String?,
         avatarMode: String?,
-        avatarConfig: [String: String]?
+        avatarConfig: [String: String]?,
+        allowPublicQuestions: Bool?
     ) async throws -> CommunityUserProfile {
         if let displayName {
             updatedProfileDisplayNames.append(displayName)
@@ -5130,7 +5558,8 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
             avatarSymbolName: avatarSymbolName ?? "pixel-buddy",
             avatarColorSeed: avatarColorSeed ?? "avatar-color-mint",
             avatarMode: avatarMode ?? "LEGACY",
-            avatarConfig: avatarConfig
+            avatarConfig: avatarConfig,
+            allowPublicQuestions: allowPublicQuestions ?? true
         )
     }
 
@@ -5245,6 +5674,27 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         )
     }
 
+    func fetchAnswerGradingProcess(
+        registration: RemotePushRegistration,
+        correlationID: String,
+        afterEventID: Int64
+    ) async throws -> AnswerGradingProcess {
+        answerGradingProcessRequests.append((correlationID, afterEventID))
+        if !answerGradingProcesses.isEmpty {
+            return answerGradingProcesses.removeFirst()
+        }
+        return AnswerGradingProcess(
+            correlationID: correlationID,
+            recordID: "record-1",
+            status: .completed,
+            terminal: true,
+            pollAfterMilliseconds: nil,
+            events: [],
+            errorMessage: nil,
+            updatedAt: Date()
+        )
+    }
+
     func saveRecordAnswer(
         registration: RemotePushRegistration,
         recordID: String,
@@ -5316,6 +5766,9 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         recordID: String
     ) async throws -> StudyRecord {
         fetchedRecordIDs.append(recordID)
+        if let fetchRecordResult {
+            return fetchRecordResult
+        }
         let category = StudyCategory(title: "Fetched", difficulty: .beginner)
         return StudyRecord(
             id: recordID,
@@ -5324,6 +5777,10 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
             difficulty: category.difficulty
         )
     }
+}
+
+private struct ImmediateAppSleepProvider: AppSleepProviding {
+    func sleep(nanoseconds: UInt64) async throws {}
 }
 
 private final class URLRequestRecorder: @unchecked Sendable {
@@ -5402,7 +5859,26 @@ private func makeBackendClient(recorder: HTTPRequestRecorder) -> RemotePushBacke
         recorder.append(request)
         let url = request.url ?? URL(string: "https://example.test")!
         let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
-        let body = #"{"questions":[],"totalCount":0,"limit":20,"offset":0}"#.data(using: .utf8)!
+        let body: Data
+        if url.path.hasPrefix("/api/v1/public/questions/") {
+            body = #"""
+            {
+              "id": "42",
+              "question": "Translated question",
+              "topic": "Translated topic",
+              "difficultyLevel": 5,
+              "status": "graded",
+              "source": "scheduled",
+              "createdAt": "2026-07-28T00:00:00Z",
+              "likeCount": 0,
+              "commentCount": 0,
+              "viewCount": 0,
+              "likedByMe": false
+            }
+            """#.data(using: .utf8)!
+        } else {
+            body = #"{"questions":[],"totalCount":0,"limit":20,"offset":0}"#.data(using: .utf8)!
+        }
         return (response, body)
     }
     return RemotePushBackendClient(

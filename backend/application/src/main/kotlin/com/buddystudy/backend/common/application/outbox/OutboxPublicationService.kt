@@ -1,0 +1,159 @@
+package com.buddystudy.backend.common.application.outbox
+
+import com.buddystudy.backend.config.BuddyStudyProperties
+import kotlinx.coroutines.CancellationException
+import org.slf4j.LoggerFactory
+import org.springframework.stereotype.Service
+import java.time.Duration
+import java.time.Instant
+
+@Service
+class OutboxPublicationService(
+    private val properties: BuddyStudyProperties,
+    private val domainOutbox: RedisEventOutboxPort,
+    private val domainPublisher: DomainEventPublishPort,
+) : PublishOutboxUseCase, RecoverOutboxUseCase {
+    private val log = LoggerFactory.getLogger(javaClass)
+
+    override suspend fun publishNow(references: Collection<OutboxReference>): OutboxPublishSummary {
+        if (!properties.streams.enabled || references.isEmpty()) return EMPTY_SUMMARY
+        val now = Instant.now()
+        val outcomes = references.distinct().map { reference ->
+            runCatching {
+                publishReference(reference, now)
+            }.getOrElse { error ->
+                log.warn(
+                    "outbox_immediate_publish_failed type={} outboxId={} error={}",
+                    reference.type,
+                    reference.id,
+                    error.message,
+                )
+                PublishOutcome.NOT_CLAIMED
+            }
+        }
+        return outcomes.toSummary()
+    }
+
+    private suspend fun publishReference(reference: OutboxReference, now: Instant): PublishOutcome =
+        domainOutbox.claim(reference.id, now, now.minus(CLAIM_LEASE))
+            ?.let { publishDomain(it) }
+            ?: PublishOutcome.NOT_CLAIMED
+
+    override suspend fun recoverPending(): OutboxPublishSummary {
+        if (!properties.streams.enabled) return EMPTY_SUMMARY
+        val now = Instant.now()
+        val staleBefore = now.minus(CLAIM_LEASE)
+        val claimFailures = mutableListOf<Throwable>()
+        val domainEvents = try {
+            domainOutbox.claimBatch(now, staleBefore, BATCH_SIZE)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            log.error("redis_outbox_recovery_claim_failed", error)
+            claimFailures += error
+            emptyList()
+        }
+        val outcomes = domainEvents.map { event ->
+            runCatching { publishDomain(event) }
+                .onFailure { log.warn("redis_outbox_recovery_publish_failed outboxId={} error={}", event.id, it.message) }
+                .getOrDefault(PublishOutcome.NOT_CLAIMED)
+        }
+        if (claimFailures.isNotEmpty()) {
+            throw OutboxRecoveryClaimException(claimFailures)
+        }
+        return outcomes.toSummary()
+    }
+
+    private suspend fun publishDomain(event: ClaimedRedisOutboxEvent): PublishOutcome {
+        val publishedAt = Instant.now()
+        return runCatching {
+            require(event.payloadVersion == SUPPORTED_PAYLOAD_VERSION) {
+                "Unsupported outbox payload version: ${event.payloadVersion}"
+            }
+            domainPublisher.publish(event)
+        }.fold(
+            onSuccess = { publication ->
+                if (domainOutbox.markPublished(event.id, event.claimToken, publication, publishedAt)) {
+                    log.info(
+                        "redis_outbox_published outboxId={} eventId={} eventType={} streamKey={} redisRecordId={} attempts={} ageMs={}",
+                        event.id,
+                        event.eventId,
+                        event.eventType,
+                        publication.streamKey,
+                        publication.recordId,
+                        event.attempts,
+                        Duration.between(event.createdAt, publishedAt).toMillis(),
+                    )
+                    PublishOutcome.PUBLISHED
+                } else {
+                    log.warn("redis_outbox_publish_fence_lost outboxId={} eventId={}", event.id, event.eventId)
+                    PublishOutcome.NOT_CLAIMED
+                }
+            },
+            onFailure = { error -> retryDomain(event, error, publishedAt) },
+        )
+    }
+
+    private suspend fun retryDomain(
+        event: ClaimedRedisOutboxEvent,
+        error: Throwable,
+        failedAt: Instant,
+    ): PublishOutcome {
+        val attempts = event.attempts + 1
+        val nextAttemptAt = failedAt.plusSeconds(retryDelaySeconds(attempts))
+        val updated = domainOutbox.markRetry(
+            id = event.id,
+            claimToken = event.claimToken,
+            attempts = attempts,
+            nextAttemptAt = nextAttemptAt,
+            error = error.message ?: error.javaClass.simpleName,
+            updatedAt = failedAt,
+        )
+        log.warn(
+            "redis_outbox_retry_scheduled outboxId={} eventId={} attempts={} nextAttemptAt={} fenced={} error={}",
+            event.id,
+            event.eventId,
+            attempts,
+            nextAttemptAt,
+            updated,
+            error.message,
+        )
+        return if (updated) PublishOutcome.RETRY_SCHEDULED else PublishOutcome.NOT_CLAIMED
+    }
+
+    private fun retryDelaySeconds(attempts: Int): Long =
+        (1L shl attempts.coerceIn(0, MAX_BACKOFF_EXPONENT)).coerceAtMost(MAX_RETRY_DELAY_SECONDS)
+
+    private fun List<PublishOutcome>.toSummary(): OutboxPublishSummary =
+        OutboxPublishSummary(
+            attempted = count { it != PublishOutcome.NOT_CLAIMED },
+            published = count { it == PublishOutcome.PUBLISHED },
+            retryScheduled = count { it == PublishOutcome.RETRY_SCHEDULED },
+        )
+
+    private enum class PublishOutcome {
+        PUBLISHED,
+        RETRY_SCHEDULED,
+        NOT_CLAIMED,
+    }
+
+    private companion object {
+        val EMPTY_SUMMARY = OutboxPublishSummary(0, 0, 0)
+        val CLAIM_LEASE: Duration = Duration.ofMinutes(2)
+        const val BATCH_SIZE = 100
+        const val SUPPORTED_PAYLOAD_VERSION = 1
+        const val MAX_BACKOFF_EXPONENT = 8
+        const val MAX_RETRY_DELAY_SECONDS = 300L
+    }
+}
+
+internal class OutboxRecoveryClaimException(
+    failures: List<Throwable>,
+) : IllegalStateException(
+    "Failed to claim ${failures.size} outbox source(s).",
+    failures.first(),
+) {
+    init {
+        failures.drop(1).forEach(::addSuppressed)
+    }
+}

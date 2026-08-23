@@ -32,14 +32,19 @@ export function MetricsDashboard({ series, metricKeys, jobs, operationsHrefForPa
         ))}
       </div>
 
+      <div className="chart-panel dashboard-trend-panel">
+        <div className="panel-header trend-panel-header">
+          <div>
+            <h2>Trends</h2>
+            <p>Move across the chart to compare each day in the selected range.</p>
+          </div>
+          <span>{chartSeries.length} metrics</span>
+        </div>
+        <MultiLineChart series={chartSeries} />
+      </div>
+
       <div className="dashboard-grid">
         <div className="primary-column">
-          <div className="chart-panel">
-            <div className="panel-header">
-              <h2>Trends</h2>
-            </div>
-            <MultiLineChart series={chartSeries} />
-          </div>
           <OperationsPanel
             page={{ runs: jobs.slice(0, 5), totalCount: jobs.length, limit: 5, offset: 0 }}
             onRetry={() => {}}
@@ -104,7 +109,14 @@ function QuotaPanel({ series }: { series?: AdminMetricSeries }) {
   return (
     <section className="side-panel quota-panel">
       <h2>Quota</h2>
-      <div className="quota-meter" aria-label={`Quota used ${ratio}%`}>
+      <div
+        className="quota-meter"
+        role="progressbar"
+        aria-label="Quota used"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={ratio}
+      >
         {ratio > 0 ? <span style={{ width: `${ratio}%` }} /> : null}
       </div>
       <div className="quota-value">
@@ -122,7 +134,7 @@ function FailedJobs({ jobs }: { jobs: ScheduledJobRun[] }) {
       {jobs.length === 0 ? <p className="muted-line">None</p> : null}
       {jobs.map((job) => (
         <div className="failed-job" key={job.id}>
-          <strong>{job.jobName}</strong>
+          <strong>{job.displayName || job.jobName}</strong>
           <span>{formatDateTime(job.startedAt)}</span>
           <small>{job.errorMessage ?? job.summary ?? "Failed"}</small>
         </div>

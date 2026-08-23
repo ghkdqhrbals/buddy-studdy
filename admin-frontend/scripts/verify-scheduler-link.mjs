@@ -5,6 +5,8 @@ import process from "node:process";
 const root = path.resolve(import.meta.dirname, "..");
 const appSource = fs.readFileSync(path.join(root, "src", "App.tsx"), "utf8");
 const apiSource = fs.readFileSync(path.join(root, "src", "api.ts"), "utf8");
+const configSource = fs.readFileSync(path.join(root, "src", "adminConfig.ts"), "utf8");
+const operationsSource = fs.readFileSync(path.join(root, "src", "OperationsPanel.tsx"), "utf8");
 
 const checks = [
   {
@@ -46,6 +48,26 @@ const checks = [
   {
     ok: /returnTo=/.test(appSource) && /safeReturnPath/.test(appSource),
     message: "Login redirects must preserve a safe return path for scheduler alert links.",
+  },
+  {
+    ok: /BATCH_JOBS_MONITOR_URL\s*=\s*"https:\/\/monitoring\.lowfidev\.cloud\/jobs\.html"/.test(configSource),
+    message: "Operations must use the production Batch Jobs monitor URL.",
+  },
+  {
+    ok: /\{\s*key:\s*"operations",\s*label:\s*"Batch Jobs"/.test(configSource),
+    message: "The admin primary navigation must expose Batch Jobs by name.",
+  },
+  {
+    ok: /href=\{BATCH_JOBS_MONITOR_URL\}/.test(operationsSource)
+      && /target="_blank"/.test(operationsSource)
+      && /rel="noopener noreferrer"/.test(operationsSource)
+      && /in a new tab/.test(operationsSource),
+    message: "Operations must expose an accessible, safe external Batch Jobs link.",
+  },
+  {
+    ok: /jobs\/statuses\?\$\{params\}/.test(apiSource)
+      && /limit:\s*String\(limit\),\s*offset:\s*String\(offset\)/.test(apiSource),
+    message: "Admin scheduler statuses must use bounded server pagination.",
   },
 ];
 

@@ -1,17 +1,23 @@
 package com.buddystudy.backend.study.application.port.outbound
 
+import com.buddystudy.backend.common.application.quota.MonthlyQuestionQuotaPolicy
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
 import com.buddystudy.study.domain.entity.StudyEntity
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import java.time.Instant
-import java.time.YearMonth
 
 interface StudyPort {
     suspend fun save(entity: StudyEntity): StudyEntity
     suspend fun deleteByIdAndUserId(id: Long, userId: Long): Long
     suspend fun findFirstByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity?
+    suspend fun findFirstRootByUserIdOrderByUpdatedAtDesc(userId: Long): StudyEntity? =
+        findAllByUserId(userId)
+            .asSequence()
+            .filter { it.parentStudyId == null }
+            .maxWithOrNull(compareBy<StudyEntity> { it.updatedAt }.thenBy { it.id })
     suspend fun findByIdAndUserId(id: Long, userId: Long): StudyEntity?
     suspend fun findByUserIdAndParentStudyIdAndTopic(userId: Long, parentStudyId: Long?, topic: String): StudyEntity?
     suspend fun findByUserIdAndTopic(userId: Long, topic: String): StudyEntity?
@@ -33,10 +39,47 @@ interface StudyTopicSuggestionPort {
     ): List<String>
 }
 
+data class SystemTopicCatalogCandidate(
+    val topic: String,
+    val sortOrder: Int,
+)
+
+interface SystemTopicCatalogPort {
+    suspend fun findChildren(
+        rootTopicKey: String,
+        parentPathKey: String,
+        language: String,
+        depth: Int,
+        limit: Int,
+    ): List<SystemTopicCatalogCandidate>
+
+    suspend fun saveChildren(
+        rootTopicKey: String,
+        parentPathKey: String,
+        language: String,
+        depth: Int,
+        topics: List<String>,
+        now: Instant,
+    )
+}
+
 interface QuestionPort {
     suspend fun save(entity: QuestionEntity): QuestionEntity
     suspend fun findQuestionById(id: Long): QuestionEntity?
+    suspend fun findStalledGradings(cutoff: Instant, limit: Int): List<QuestionEntity> = emptyList()
+    suspend fun failStalledGrading(
+        id: Long,
+        requestId: String,
+        cutoff: Instant,
+        error: String,
+        now: Instant,
+    ): Boolean = false
+    suspend fun updateGradingLastEventId(id: Long, requestId: String, eventId: Long): Boolean = false
     suspend fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity?
+    suspend fun findByGradingRequestIdAndUserIdAndDeletedAtIsNull(
+        gradingRequestId: String,
+        userId: Long,
+    ): QuestionEntity? = null
     suspend fun lockByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? =
         findByIdAndUserIdAndDeletedAtIsNull(id, userId)
     suspend fun findGradedByUser(userId: Long, pageable: Pageable): Page<QuestionEntity>
@@ -47,22 +90,84 @@ interface QuestionPort {
     suspend fun findPendingByUser(userId: Long, pageable: Pageable): Page<QuestionEntity>
     suspend fun findPendingByStudyId(studyId: Long, pageable: Pageable): Page<QuestionEntity>
     suspend fun findLatestPendingByStudyIds(studyIds: Collection<Long>): List<QuestionEntity>
+    suspend fun findLatestPendingByStudyIdsAndLanguage(studyIds: Collection<Long>, language: String): List<QuestionEntity> =
+        findLatestPendingByStudyIds(studyIds)
+    suspend fun findLatestCompletedByStudyIdAndUserId(studyId: Long, userId: Long): QuestionEntity? = null
+    suspend fun findLatestStatusByStudyId(studyId: Long): QuestionStatus? = null
+    suspend fun findLatestStatusesByStudyIds(studyIds: Collection<Long>): Map<Long, QuestionStatus> = emptyMap()
     suspend fun findVisibleByUser(userId: Long, includePending: Boolean, pageable: Pageable): Page<QuestionEntity>
+    suspend fun findVisibleByUserAndLanguage(
+        userId: Long,
+        includePending: Boolean,
+        language: String,
+        pageable: Pageable,
+    ): Page<QuestionEntity> = findVisibleByUser(userId, includePending, pageable)
     suspend fun findVisibleByUserAndQuery(userId: Long, includePending: Boolean, query: String, pageable: Pageable): Page<QuestionEntity>
+    suspend fun findVisibleByUserAndLanguageAndQuery(
+        userId: Long,
+        includePending: Boolean,
+        language: String,
+        query: String,
+        pageable: Pageable,
+    ): Page<QuestionEntity> = findVisibleByUserAndQuery(userId, includePending, query, pageable)
+    suspend fun findVisibleByUserAndStudyId(
+        userId: Long,
+        includePending: Boolean,
+        studyId: Long,
+        query: String?,
+        pageable: Pageable,
+    ): Page<QuestionEntity> = Page.empty(pageable)
     suspend fun findRecentQuestionTextsByStudyIdAndTopic(studyId: Long, topic: String, pageable: Pageable): List<String>
+    suspend fun findRecentQuestionTextsByStudyIdAndTopicAndLanguage(
+        studyId: Long,
+        topic: String,
+        language: String,
+        pageable: Pageable,
+    ): List<String> = findRecentQuestionTextsByStudyIdAndTopic(studyId, topic, pageable)
     suspend fun findRecentQuestionTextsByUserIdAndTopic(userId: Long, topic: String, pageable: Pageable): List<String>
+    suspend fun findRecentQuestionTextsByUserIdAndTopicAndLanguage(
+        userId: Long,
+        topic: String,
+        language: String,
+        pageable: Pageable,
+    ): List<String> = findRecentQuestionTextsByUserIdAndTopic(userId, topic, pageable)
     suspend fun countPendingForStudy(studyId: Long): Long
+    suspend fun countPendingForStudyAndLanguage(studyId: Long, language: String): Long =
+        countPendingForStudy(studyId)
     suspend fun countPendingByStudyIds(studyIds: Collection<Long>): Map<Long, Long>
+    suspend fun countPendingByStudyIdsAndLanguage(studyIds: Collection<Long>, language: String): Map<Long, Long> =
+        countPendingByStudyIds(studyIds)
     suspend fun findPublicAnswered(pageable: Pageable): Page<QuestionEntity>
+    suspend fun findPublicAnsweredVisibleTo(viewerUserId: Long?, pageable: Pageable): Page<QuestionEntity> =
+        if (viewerUserId == null) {
+            findPublicAnswered(pageable)
+        } else {
+            error("The question persistence adapter must implement blocked-author visibility filtering.")
+        }
+    suspend fun findPublicAnsweredByLanguage(language: String, pageable: Pageable): Page<QuestionEntity> =
+        findPublicAnswered(pageable)
     suspend fun findPublicAnsweredByTopic(topic: String, pageable: Pageable): Page<QuestionEntity>
     suspend fun findPublicAnsweredByQuery(query: String, pageable: Pageable): Page<QuestionEntity>
+    suspend fun findPublicAnsweredByLanguageAndQuery(language: String, query: String, pageable: Pageable): Page<QuestionEntity> =
+        findPublicAnsweredByQuery(query, pageable)
+    suspend fun findPublicAnsweredByLanguageAndQueryVisibleTo(
+        viewerUserId: Long?,
+        language: String,
+        query: String,
+        pageable: Pageable,
+    ): Page<QuestionEntity> = if (viewerUserId == null) {
+        findPublicAnsweredByLanguageAndQuery(language, query, pageable)
+    } else {
+        error("The question persistence adapter must implement blocked-author visibility filtering.")
+    }
     suspend fun findPublicAnsweredById(id: Long): QuestionEntity?
+    suspend fun findPublicAnsweredByIdAndLanguage(id: Long, language: String): QuestionEntity? =
+        findPublicAnsweredById(id)
     suspend fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity>
     suspend fun softDelete(id: Long, userId: Long, now: Instant): Int
-    suspend fun softDeleteByStudyId(studyId: Long, userId: Long, now: Instant): Int
-    suspend fun softDeleteByStudySubtree(rootStudyId: Long, userId: Long, now: Instant): Int =
-        softDeleteByStudyId(rootStudyId, userId, now)
+    suspend fun softDeleteByUserId(userId: Long, now: Instant): Int
     suspend fun softDeleteByUserIdAndTopic(userId: Long, topic: String, now: Instant): Int
+    suspend fun deleteGeneratedForRollback(id: Long, userId: Long): Int = 0
 }
 
 interface QuestionStatsPort {
@@ -73,6 +178,7 @@ interface QuestionStatsPort {
     suspend fun incrementLike(questionId: Long, delta: Int, now: Instant): Int
     suspend fun incrementComment(questionId: Long, delta: Int, now: Instant): Int
     suspend fun setLikeCount(questionId: Long, count: Int, now: Instant): Int
+    suspend fun deleteByQuestionId(questionId: Long): Int = 0
 }
 
 data class QuestionEmbeddingCandidate(
@@ -121,6 +227,7 @@ interface QuestionCoveragePort {
     suspend fun ensureCoverage(studyId: Long, topic: String, concepts: List<CoverageConceptBlueprint>)
     suspend fun selectNext(studyId: Long): QuestionCoverageSelection?
     suspend fun markAsked(selection: QuestionCoverageSelection, now: Instant)
+    suspend fun rollbackAsked(conceptId: Long, angleKey: String, now: Instant) = Unit
     suspend fun markAnswered(conceptId: Long, angleKey: String, score: Int, correct: Boolean, now: Instant)
 }
 
@@ -133,11 +240,41 @@ data class QuestionQuotaStatus(
     val tierCode: String,
     val usedCount: Int,
     val monthlyQuestionLimit: Int,
+    val reservedCount: Int = 0,
+    val baseLimit: Int = monthlyQuestionLimit,
+    val bonusLimit: Int = 0,
+    val periodStartedAt: Instant? = null,
+    val resetAt: Instant? = null,
+    val anchorType: String = "ACCOUNT_CREATED",
+    val policyVersion: Int = MonthlyQuestionQuotaPolicy.VERSION,
 )
 
 interface QuestionMembershipPort {
     suspend fun activePlanForUser(userId: Long): QuestionMembershipPlan?
-    suspend fun quotaStatusForUser(userId: Long, yearMonth: YearMonth): QuestionQuotaStatus?
-    suspend fun tryConsumeMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, limit: Int, now: Instant): Boolean
-    suspend fun refundMonthlySystemQuestion(userId: Long, yearMonth: YearMonth, now: Instant)
+    suspend fun quotaStatusForUser(userId: Long, at: Instant): QuestionQuotaStatus?
+    suspend fun tryConsumeMonthlySystemQuestion(userId: Long, periodStartedAt: Instant, limit: Int, now: Instant): Boolean
+    suspend fun refundMonthlySystemQuestion(userId: Long, periodStartedAt: Instant, now: Instant)
+
+    suspend fun reserveMonthlySystemQuestion(
+        userId: Long,
+        periodStartedAt: Instant,
+        reservationKey: String,
+        correlationId: String,
+        now: Instant,
+    ): Boolean = tryConsumeMonthlySystemQuestion(
+        userId,
+        periodStartedAt,
+        quotaStatusForUser(userId, now)?.monthlyQuestionLimit ?: 0,
+        now,
+    )
+
+    suspend fun commitMonthlySystemQuestion(reservationKey: String, now: Instant) = Unit
+
+    suspend fun releaseMonthlySystemQuestion(
+        userId: Long,
+        periodStartedAt: Instant,
+        reservationKey: String,
+        reason: String?,
+        now: Instant,
+    ) = refundMonthlySystemQuestion(userId, periodStartedAt, now)
 }

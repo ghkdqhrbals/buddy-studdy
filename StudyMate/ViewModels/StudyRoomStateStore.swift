@@ -1,5 +1,39 @@
 import Foundation
 
+enum StudyRoomDisplayPolicy {
+    static func rootCategories(
+        from categories: [StudyCategory],
+        rooms: [BackendStudyRoom]
+    ) -> [StudyCategory] {
+        let rootIDs = Set(
+            rooms
+                .filter { $0.parentStudyId == nil }
+                .map { String($0.id) }
+        )
+        return categories.filter { rootIDs.contains($0.id) }
+    }
+
+    static func rootRoomID(
+        containing studyID: Int?,
+        rooms: [BackendStudyRoom]
+    ) -> Int? {
+        guard var currentID = studyID else {
+            return nil
+        }
+
+        let roomsByID = Dictionary(uniqueKeysWithValues: rooms.map { ($0.id, $0) })
+        var visited = Set<Int>()
+        while visited.insert(currentID).inserted,
+              let room = roomsByID[currentID] {
+            guard let parentStudyID = room.parentStudyId else {
+                return room.id
+            }
+            currentID = parentStudyID
+        }
+        return nil
+    }
+}
+
 struct StudyRoomStateStore {
     private(set) var rooms: [BackendStudyRoom] = []
 
@@ -16,6 +50,14 @@ struct StudyRoomStateStore {
     }
 
     func pendingQuestionCount(for category: StudyCategory) -> Int? {
+        if let studyID = Int(category.id) {
+            guard let room = rooms.first(where: { $0.id == studyID }) else {
+                return nil
+            }
+
+            return Self.isPendingQuestion(room.pendingQuestion) ? 1 : 0
+        }
+
         let categoryKey = Self.normalizedText(category.title)
         let matchingRooms = rooms.filter { Self.normalizedText($0.topic) == categoryKey }
 
@@ -27,18 +69,17 @@ struct StudyRoomStateStore {
     }
 
     func room(categoryID: String?, settings: StudySettings) -> BackendStudyRoom? {
-        if let categoryID,
-           let studyID = Int(categoryID),
-           let room = rooms.first(where: { $0.id == studyID }) {
-            return room
-        }
+        if let categoryID {
+            if let studyID = Int(categoryID) {
+                return rooms.first(where: { $0.id == studyID })
+            }
 
-        if let categoryID,
-           let category = settings.category(for: categoryID),
-           let room = rooms.first(where: {
-               Self.normalizedText($0.topic) == Self.normalizedText(category.title)
-           }) {
-            return room
+            guard let category = settings.category(for: categoryID) else {
+                return nil
+            }
+            return rooms.first {
+                Self.normalizedText($0.topic) == Self.normalizedText(category.title)
+            }
         }
 
         if let selectedCategoryID = settings.selectedStudyCategoryID,
@@ -52,13 +93,15 @@ struct StudyRoomStateStore {
 
     mutating func refreshPendingQuestions(from records: [StudyRecord]) {
         rooms = rooms.map { room in
-            guard let pendingQuestion = room.pendingQuestion,
-                  let refreshedRecord = records.first(where: { $0.id == pendingQuestion.id }) else {
-                return room
-            }
-
             var nextRoom = room
-            nextRoom.pendingQuestion = refreshedRecord
+            if let pendingQuestion = room.pendingQuestion,
+               let refreshedRecord = records.first(where: { $0.id == pendingQuestion.id }) {
+                nextRoom.pendingQuestion = refreshedRecord
+            }
+            if let latestQuestion = room.latestQuestion,
+               let refreshedRecord = records.first(where: { $0.id == latestQuestion.id }) {
+                nextRoom.latestQuestion = refreshedRecord
+            }
             return nextRoom
         }
     }
@@ -94,7 +137,12 @@ struct StudyRoomStateStore {
             }
 
             var nextRoom = room
-            nextRoom.pendingQuestion = record
+            if Self.isPendingQuestion(record) {
+                nextRoom.pendingQuestion = record
+            } else {
+                nextRoom.pendingQuestion = nil
+                nextRoom.latestQuestion = record
+            }
             return nextRoom
         }
     }
@@ -103,14 +151,24 @@ struct StudyRoomStateStore {
         var didApply = false
         rooms = rooms.map { room in
             let matchesExistingQuestion = room.pendingQuestion?.id == record.id
-            let matchesTopic = Self.normalizedText(room.topic) == Self.normalizedText(record.topic)
-            guard matchesExistingQuestion || matchesTopic else {
+            let matchesTargetStudy: Bool
+            if let studyID = record.studyID {
+                matchesTargetStudy = room.id == studyID
+            } else {
+                matchesTargetStudy = Self.normalizedText(room.topic) == Self.normalizedText(record.topic)
+            }
+            guard matchesExistingQuestion || matchesTargetStudy else {
                 return room
             }
 
             var nextRoom = room
             if Self.isPendingQuestion(record) || matchesExistingQuestion {
-                nextRoom.pendingQuestion = record
+                if Self.isPendingQuestion(record) {
+                    nextRoom.pendingQuestion = record
+                } else {
+                    nextRoom.pendingQuestion = nil
+                    nextRoom.latestQuestion = record
+                }
                 didApply = true
             }
             return nextRoom
@@ -128,6 +186,10 @@ struct StudyRoomStateStore {
             nextRoom.pendingQuestion = nil
             return nextRoom
         }
+    }
+
+    func containsPendingQuestion(recordID: String) -> Bool {
+        rooms.contains { $0.pendingQuestion?.id == recordID }
     }
 
     private static func isPendingQuestion(_ record: StudyRecord?) -> Bool {

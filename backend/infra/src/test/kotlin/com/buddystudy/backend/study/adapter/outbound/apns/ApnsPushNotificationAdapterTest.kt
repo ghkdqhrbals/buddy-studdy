@@ -7,14 +7,34 @@ import com.buddystudy.backend.study.application.port.outbound.ApnsAlert
 import com.buddystudy.backend.study.application.port.outbound.ApnsAps
 import com.buddystudy.backend.study.application.port.outbound.ApnsQuestionMessage
 import com.buddystudy.backend.study.application.port.outbound.ApnsQuestionPayload
+import com.buddystudy.backend.common.application.json.JsonMapperProvider
+import com.buddystudy.backend.test.testExternalApiHistoryRecorder
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import java.security.KeyPairGenerator
+import java.security.spec.ECGenParameterSpec
 import java.time.Duration
+import java.time.Instant
+import java.util.Base64
 
 class ApnsPushNotificationAdapterTest {
     @Test
+    fun `provider token is reused until its refresh interval expires`() {
+        val adapter = adapter(apnsProperties())
+        val issuedAt = Instant.parse("2030-01-01T00:00:00Z")
+
+        val first = adapter.providerToken(issuedAt)
+        val beforeRefresh = adapter.providerToken(issuedAt.plus(Duration.ofMinutes(49)))
+        val refreshed = adapter.providerToken(issuedAt.plus(Duration.ofMinutes(50)))
+
+        assertThat(beforeRefresh).isEqualTo(first)
+        assertThat(refreshed).isNotEqualTo(first)
+    }
+
+    @Test
     fun `apns request timeout is five seconds`(): Unit = runBlocking {
-        val adapter = ApnsPushNotificationAdapter(BuddyStudyProperties())
+        val adapter = adapter()
 
         val request = adapter.buildRequest(
             message = ApnsQuestionMessage(
@@ -38,7 +58,7 @@ class ApnsPushNotificationAdapterTest {
 
     @Test
     fun `apns payload includes unread badge when provided`(): Unit = runBlocking {
-        val adapter = ApnsPushNotificationAdapter(BuddyStudyProperties())
+        val adapter = adapter()
 
         val body = adapter.buildPayloadJson(
             ApnsQuestionMessage(
@@ -62,7 +82,7 @@ class ApnsPushNotificationAdapterTest {
 
     @Test
     fun `apns payload includes notification id when provided`(): Unit = runBlocking {
-        val adapter = ApnsPushNotificationAdapter(BuddyStudyProperties())
+        val adapter = adapter()
 
         val body = adapter.buildPayloadJson(
             ApnsQuestionMessage(
@@ -84,4 +104,100 @@ class ApnsPushNotificationAdapterTest {
 
         assertThat(body).contains(""""notificationId":"99"""")
     }
+
+    @Test
+    fun `oversized APNs body is truncated by encoded byte size while navigation metadata is retained`() {
+        val adapter = adapter()
+        val oversizedBody = """긴 질문 😀 "인용" \ 경로
+            |""".trimMargin().repeat(1_000)
+
+        val body = adapter.buildPayloadJson(
+            ApnsQuestionMessage(
+                recordId = "10",
+                notificationId = "99",
+                topic = "Swift",
+                token = "apns-token",
+                environment = "production",
+                payload = ApnsQuestionPayload(
+                    aps = ApnsAps(
+                        alert = ApnsAlert("새 질문 도착", oversizedBody),
+                        sound = "default",
+                    ),
+                    deepLink = "buddystudy://records/10",
+                    notificationId = "99",
+                ),
+            ),
+        )
+
+        val json = JsonMapperProvider.mapper.readTree(body)
+        assertThat(body.toByteArray(Charsets.UTF_8).size).isLessThanOrEqualTo(4_096)
+        assertThat(json.path("deepLink").asText()).isEqualTo("buddystudy://records/10")
+        assertThat(json.path("notificationId").asText()).isEqualTo("99")
+        assertThat(json.path("aps").path("alert").path("body").asText()).endsWith("…")
+        assertThat(json.path("aps").path("alert").path("body").asText()).doesNotContain("\uFFFD")
+    }
+
+    @Test
+    fun `oversized APNs title is also truncated when body compaction is insufficient`() {
+        val adapter = adapter()
+
+        val body = adapter.buildPayloadJson(
+            ApnsQuestionMessage(
+                recordId = "10",
+                topic = "Swift",
+                token = "apns-token",
+                environment = "production",
+                payload = ApnsQuestionPayload(
+                    aps = ApnsAps(
+                        alert = ApnsAlert("알림 제목 😀".repeat(1_000), "질문"),
+                        sound = "default",
+                    ),
+                    deepLink = "buddystudy://records/10",
+                ),
+            ),
+        )
+
+        val json = JsonMapperProvider.mapper.readTree(body)
+        assertThat(body.toByteArray(Charsets.UTF_8).size).isLessThanOrEqualTo(4_096)
+        assertThat(json.path("aps").path("alert").path("title").asText()).endsWith("…")
+        assertThat(json.path("aps").path("alert").path("title").asText()).doesNotContain("\uFFFD")
+    }
+
+    @Test
+    fun `missing APNs token is a delivery failure`(): Unit = runBlocking {
+        val adapter = adapter()
+        val message = ApnsQuestionMessage(
+            recordId = "10",
+            topic = "Swift",
+            token = "",
+            environment = "sandbox",
+            payload = ApnsQuestionPayload(
+                aps = ApnsAps(
+                    alert = ApnsAlert("BuddyStudy", "Question?"),
+                    sound = "default",
+                ),
+                deepLink = "buddystudy://records/10",
+            ),
+        )
+
+        assertThatThrownBy {
+            runBlocking { adapter.sendQuestion(message) }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("APNs token is missing")
+    }
+
+    private fun apnsProperties(): BuddyStudyProperties {
+        val keyPairGenerator = KeyPairGenerator.getInstance("EC")
+        keyPairGenerator.initialize(ECGenParameterSpec("secp256r1"))
+        val encodedPrivateKey = Base64.getMimeEncoder(64, "\n".toByteArray())
+            .encodeToString(keyPairGenerator.generateKeyPair().private.encoded)
+        return BuddyStudyProperties().apply {
+            apns.teamId = "TEAM123456"
+            apns.keyId = "KEY1234567"
+            apns.authKeyP8 = "-----BEGIN PRIVATE KEY-----\n$encodedPrivateKey\n-----END PRIVATE KEY-----"
+        }
+    }
+
+    private fun adapter(properties: BuddyStudyProperties = BuddyStudyProperties()) =
+        ApnsPushNotificationAdapter(properties, testExternalApiHistoryRecorder())
 }

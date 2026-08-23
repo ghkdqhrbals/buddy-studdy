@@ -28,7 +28,7 @@ counts caused by other users.
 ```mermaid
 flowchart LR
   A["Like or comment request"] --> B["Source-of-truth table"]
-  B --> C["Redis Stream Coordinator event or DB fallback event"]
+  B --> C["Redis Stream event or DB fallback event"]
   C --> D["Aggregation worker"]
   D --> E["question_stats"]
   E --> F["Public list cache, TTL 7s"]
@@ -43,8 +43,8 @@ flowchart LR
 
 - `question_likes`: current like state, unique by `(question_id, user_id)`.
 - `question_comments`: current comment state, with `deleted_at` for soft delete.
-- Redis Stream Coordinator stream: primary append-only reaction change queue in production.
-- `question_reaction_events`: DB append-only fallback when Redis Stream Coordinator is unavailable or disabled.
+- Redis Stream: primary append-only reaction change queue in production.
+- `question_reaction_events`: DB append-only fallback when Redis Streams are unavailable or disabled.
 - `aggregation_checkpoints`: stores the last processed reaction event ID.
 - `question_stats`: materialized read model for `like_count` and
   `comment_count`.
@@ -82,12 +82,12 @@ For likes:
 ```text
 PUT /like
 -> insert question_likes if not exists
--> publish LIKE_CHANGED to Redis Stream Coordinator when stream mode is active
+-> publish LIKE_CHANGED to Redis Streams when stream mode is active
 -> otherwise append LIKE_CREATED DB fallback event only when insert succeeds
 
 DELETE /like
 -> delete question_likes if exists
--> publish LIKE_CHANGED to Redis Stream Coordinator when stream mode is active
+-> publish LIKE_CHANGED to Redis Streams when stream mode is active
 -> otherwise append LIKE_REMOVED DB fallback event only when delete succeeds
 ```
 
@@ -96,11 +96,11 @@ For comments:
 ```text
 POST /comments
 -> insert question_comments
--> publish COMMENT_CHANGED to Redis Stream Coordinator when stream mode is active
+-> publish COMMENT_CHANGED to Redis Streams when stream mode is active
 -> otherwise append COMMENT_CREATED DB fallback event
 ```
 
-In Redis Stream Coordinator mode, the database source-of-truth write commits
+In Redis Streams mode, the database source-of-truth write commits
 first, then the app publishes a small change event keyed by `questionId`. If the
 publish fails, the API path falls back to reconciling `question_stats` for that
 question from `question_likes` and `question_comments`.

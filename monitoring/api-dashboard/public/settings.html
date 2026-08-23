@@ -4,92 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BuddyStudy Monitoring Settings</title>
-    <script src="/nav-bootstrap.js?v=2026072507"></script>
-    <link rel="stylesheet" href="/styles.css?v=2026072602" />
+    <script src="/nav-bootstrap.js?v=2026072704"></script>
+    <link rel="stylesheet" href="/react/manage.css?v=2026073103" />
   </head>
   <body>
-    <div class="app-shell">
-      <aside class="side-nav" aria-label="Monitoring navigation"></aside>
-
-      <main class="content-shell">
-        <header class="topbar">
-          <div>
-            <h1>Settings</h1>
-            <p>Personalize this browser's monitoring workspace</p>
-          </div>
-        </header>
-
-        <form id="monitoringSettingsForm" class="settings-layout">
-          <section class="settings-section" aria-labelledby="navigationSettingsTitle">
-            <header>
-              <h2 id="navigationSettingsTitle">Navigation</h2>
-              <p>Choose how the left navigation opens in this browser.</p>
-            </header>
-            <label class="settings-row">
-              <span>
-                <strong>Default navigation</strong>
-                <small>Remember the last state or always open at a fixed width.</small>
-              </span>
-              <select id="navigationMode">
-                <option value="remember">Remember last state</option>
-                <option value="expanded">Always expanded</option>
-                <option value="compact">Always compact</option>
-              </select>
-            </label>
-          </section>
-
-          <section class="settings-section" aria-labelledby="auditSettingsTitle">
-            <header>
-              <h2 id="auditSettingsTitle">Access history</h2>
-              <p>Set the default view for monitoring access records.</p>
-            </header>
-            <label class="settings-row">
-              <span>
-                <strong>Default time range</strong>
-                <small>Applied when Access & Audit opens.</small>
-              </span>
-              <select id="auditDefaultRange">
-                <option value="900000">Last 15 minutes</option>
-                <option value="3600000">Last 1 hour</option>
-                <option value="21600000">Last 6 hours</option>
-                <option value="86400000">Last 24 hours</option>
-              </select>
-            </label>
-            <label class="settings-row">
-              <span>
-                <strong>Auto refresh</strong>
-                <small>Refresh access records without reloading the page.</small>
-              </span>
-              <select id="auditRefreshSeconds">
-                <option value="0">Off</option>
-                <option value="15">Every 15 seconds</option>
-                <option value="30">Every 30 seconds</option>
-                <option value="60">Every 1 minute</option>
-              </select>
-            </label>
-            <label class="settings-row">
-              <span>
-                <strong>Rows per page</strong>
-                <small>Controls the density of the access journal.</small>
-              </span>
-              <select id="auditPageSize">
-                <option value="25">25 rows</option>
-                <option value="50">50 rows</option>
-                <option value="100">100 rows</option>
-              </select>
-            </label>
-          </section>
-
-          <div class="settings-actions">
-            <span id="settingsStatus" class="status-message" aria-live="polite"></span>
-            <button id="resetSettingsButton" type="button" class="secondary-button">Reset defaults</button>
-            <button type="submit">Save settings</button>
-          </div>
-        </form>
-      </main>
-    </div>
-
-    <script type="module" src="/shell.js?v=2026072602"></script>
-    <script type="module" src="/settings.js?v=2026072501"></script>
+    <div id="monitoring-react-root"></div>
+    <script type="module" src="/react/manage.js?v=2026073103"></script>
   </body>
 </html>

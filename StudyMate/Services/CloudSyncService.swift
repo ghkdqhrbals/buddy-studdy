@@ -174,7 +174,7 @@ final class CloudSyncService: CloudSyncServiceProtocol {
     ) -> CKSubscription.NotificationInfo {
         let strings = AppStrings(language: language)
         let info = CKSubscription.NotificationInfo()
-        info.title = strings.notificationTitle
+        info.title = strings.newQuestionNotificationTitle
         info.alertBody = strings.cloudQuestionPushBody
         info.category = StudyNotificationAction.category
         info.shouldSendContentAvailable = true

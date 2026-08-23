@@ -25,6 +25,9 @@ import java.time.LocalDate
 @TestPropertySource(
     properties = [
         "buddystudy.scheduler.enabled=false",
+        "buddystudy.billing.recovery.enabled=false",
+        "buddystudy.billing.reconciliation.enabled=false",
+        "buddystudy.billing.event-projector.enabled=false",
         "buddystudy.streams.enabled=false",
         "buddystudy.crypto.master-key=test-master-key",
         "buddystudy.auth.jwt-secret=test-jwt-secret",
@@ -45,7 +48,9 @@ class AdminSchedulerStatusIntegrationTest : MySqlIntegrationTestSupport() {
     @BeforeEach
     fun setUpSchema(): Unit = runBlocking {
         databaseClient.sql("delete from scheduled_job_runs").fetch().rowsUpdated().awaitSingle()
-        databaseClient.sql("delete from scheduled_jobs").fetch().rowsUpdated().awaitSingle()
+        databaseClient.sql(
+            "delete from scheduled_jobs where job_name in ('question-schedule', 'user-stats-refresh')",
+        ).fetch().rowsUpdated().awaitSingle()
         databaseClient.sql("delete from admin_daily_metrics").fetch().rowsUpdated().awaitSingle()
         databaseClient.sql(
             """
@@ -108,19 +113,54 @@ class AdminSchedulerStatusIntegrationTest : MySqlIntegrationTestSupport() {
     fun `admin can inspect scheduler statuses through HTTP`(): Unit = runBlocking {
         val token = loginAdmin()
 
-        val response = get("/api/v1/admin/jobs/statuses", token)
+        val response = get("/api/v1/admin/jobs/statuses?limit=100&offset=0", token)
 
         assertThat(response.statusCode()).isEqualTo(200)
         val body = response.json()
-        assertThat(body["jobs"]).hasSize(2)
+        assertThat(body["jobs"].size()).isGreaterThanOrEqualTo(2)
+        assertThat(body["totalCount"].asLong()).isGreaterThanOrEqualTo(2)
+        assertThat(body["limit"].asInt()).isEqualTo(100)
+        assertThat(body["offset"].asInt()).isEqualTo(0)
         val questionSchedule = body["jobs"].first { it["jobName"].asText() == "question-schedule" }
         val statsRefresh = body["jobs"].first { it["jobName"].asText() == "user-stats-refresh" }
+        assertThat(questionSchedule["displayName"].asText()).isEqualTo("Scheduled question dispatch")
+        assertThat(questionSchedule["description"].asText()).isNotBlank()
+        assertThat(questionSchedule["monitored"].asBoolean()).isTrue()
         assertThat(questionSchedule["enabled"].asBoolean()).isTrue()
         assertThat(questionSchedule["stale"].asBoolean()).isFalse()
         assertThat(questionSchedule["latestRun"]["status"].asText()).isEqualTo("SUCCESS")
         assertThat(statsRefresh["stale"].asBoolean()).isTrue()
         assertThat(statsRefresh["latestRun"]["status"].asText()).isEqualTo("FAILED")
         assertThat(statsRefresh["latestRun"]["errorMessage"].asText()).isEqualTo("aggregation failed")
+    }
+
+    @Test
+    fun `admin can page scheduler statuses through HTTP`(): Unit = runBlocking {
+        val token = loginAdmin()
+
+        val firstPage = get("/api/v1/admin/jobs/statuses?limit=1&offset=0", token)
+        val secondPage = get("/api/v1/admin/jobs/statuses?limit=1&offset=1", token)
+
+        assertThat(firstPage.statusCode()).isEqualTo(200)
+        assertThat(secondPage.statusCode()).isEqualTo(200)
+        assertThat(firstPage.json()["jobs"]).hasSize(1)
+        assertThat(secondPage.json()["jobs"]).hasSize(1)
+        assertThat(firstPage.json()["totalCount"].asLong()).isEqualTo(secondPage.json()["totalCount"].asLong())
+        assertThat(firstPage.json()["jobs"][0]["jobName"].asText())
+            .isNotEqualTo(secondPage.json()["jobs"][0]["jobName"].asText())
+    }
+
+    @Test
+    fun `scheduler statuses without page parameters preserve the full legacy response`(): Unit = runBlocking {
+        val token = loginAdmin()
+
+        val response = get("/api/v1/admin/jobs/statuses", token)
+
+        assertThat(response.statusCode()).isEqualTo(200)
+        val body = response.json()
+        assertThat(body["jobs"].size().toLong()).isEqualTo(body["totalCount"].asLong())
+        assertThat(body["limit"].asInt()).isEqualTo(body["jobs"].size())
+        assertThat(body["offset"].asInt()).isZero()
     }
 
     @Test
@@ -153,6 +193,7 @@ class AdminSchedulerStatusIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(body["totalCount"].asLong()).isEqualTo(1)
         assertThat(body["runs"][0]["id"].asLong()).isEqualTo(olderRunId)
         assertThat(body["runs"][0]["jobName"].asText()).isEqualTo("question-schedule")
+        assertThat(body["runs"][0]["displayName"].asText()).isEqualTo("Scheduled question dispatch")
     }
 
     @Test
@@ -195,7 +236,7 @@ class AdminSchedulerStatusIntegrationTest : MySqlIntegrationTestSupport() {
             .fetch().rowsUpdated().awaitSingle()
         val token = loginAdmin()
 
-        val response = get("/api/v1/admin/jobs/statuses", token)
+        val response = get("/api/v1/admin/jobs/statuses?limit=100&offset=0", token)
 
         assertThat(response.statusCode()).isEqualTo(200)
         val missing = response.json()["jobs"].first { it["jobName"].asText() == "user-stats-refresh" }

@@ -34,6 +34,10 @@ struct RemoteNotificationsRepository: NotificationsRepository {
         )
     }
 
+    func markAllRead(registration: RemotePushRegistration) async throws {
+        try await backendClient.markAllNotificationsRead(registration: registration)
+    }
+
     func deleteNotification(
         registration: RemotePushRegistration,
         notificationID: String

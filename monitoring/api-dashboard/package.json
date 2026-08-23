@@ -4,7 +4,20 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "vite build",
     "codex:log-search": "node scripts/codex-log-search.mjs",
+    "dev": "vite --host 127.0.0.1",
+    "pretest": "npm run build",
     "test": "node --test"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.90.5",
+    "lucide-react": "^0.468.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.1.0",
+    "vite": "^7.2.2"
   }
 }

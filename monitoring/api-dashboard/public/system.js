@@ -24,8 +24,8 @@ import {
   toDateTimeLocalValue,
 } from "./metrics.js?v=2026072501";
 
-const RUNTIME_QUERY = '{container=~"buddystudy-backend.*"} |= "runtime_metrics "';
-const RUNTIME_FAILURE_QUERY = '{container=~"buddystudy-backend.*"} |= "runtime_metrics_collection_failed"';
+const RUNTIME_QUERY = '{app="buddystudy"} |= "runtime_metrics "';
+const RUNTIME_FAILURE_QUERY = '{app="buddystudy"} |= "runtime_metrics_collection_failed"';
 const COLORS = {
   blue: "#2563eb",
   red: "#c7354a",

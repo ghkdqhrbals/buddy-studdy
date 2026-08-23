@@ -58,10 +58,20 @@ class AdminAnalyticsSourceAdapter(
         ).bind("previousStart", previousStart).bind("start", start).bind("end", end)
             .map { row, _ -> (row.get(0) as Number).toLong() }.one().awaitSingleOrNull() ?: 0
 
-    private suspend fun quotaUsed(date: LocalDate): Long =
-        client.sql("select coalesce(sum(system_question_count), 0) from user_monthly_question_usage where usage_month = :yearMonth")
-            .bind("yearMonth", date.toString().take(7))
-            .map { row, _ -> (row.get(0) as Number).toLong() }.one().awaitSingleOrNull() ?: 0
+    private suspend fun quotaUsed(date: LocalDate): Long {
+        val at = date.plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC).minusNanos(1)
+        return client.sql(
+            """
+            select coalesce(sum(committed_delta), 0) as quota_used
+            from user_quota_history
+            where affected_period_started_at <= :at
+              and affected_period_ends_at > :at
+              and occurred_at <= :at
+            """.trimIndent(),
+        ).bind("at", at)
+            .map { row, _ -> (row.get("quota_used") as Number).toLong().coerceAtLeast(0) }
+            .one().awaitSingleOrNull() ?: 0L
+    }
 
     private fun point(date: LocalDate, key: String, value: Long) = AdminDailyMetricPoint(date, key, null, value.toDouble(), value)
     private fun ratio(numerator: Long, denominator: Long) = if (denominator <= 0) 0.0 else numerator.toDouble() / denominator

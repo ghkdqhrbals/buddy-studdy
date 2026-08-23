@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 final class SettingsStore {
     static let maxLogCount = 1000
@@ -12,6 +13,7 @@ final class SettingsStore {
         static let gradingResult = "gradingResult"
         static let lastAnswer = "lastAnswer"
         static let answerDraftsByRecordID = "answerDraftsByRecordID"
+        static let pendingQuestionGenerationProcess = "pendingQuestionGenerationProcess"
         static let isRunning = "isRunning"
         static let hasExplicitRunningPreference = "hasExplicitRunningPreference"
         static let apiKey = "openAIAPIKey"
@@ -21,6 +23,8 @@ final class SettingsStore {
         static let appLogs = "appLogs"
         static let isDebuggingEnabled = "isDebuggingEnabled"
         static let debugBackendBaseURL = "debugBackendBaseURL"
+        static let isDeveloperAccessUnlocked = "isDeveloperAccessUnlocked"
+        static let developerAccessBuildIdentifier = "developerAccessBuildIdentifier"
         static let hasCompletedOnboarding = "hasCompletedOnboarding"
         static let isCloudSyncEnabled = "isCloudSyncEnabled"
         static let isCommunitySignedIn = "isCommunitySignedIn"
@@ -34,16 +38,34 @@ final class SettingsStore {
         static let deletedStudyRecordMarkers = "deletedStudyRecordMarkers"
         static let studyRecordsClearedAt = "studyRecordsClearedAt"
         static let remotePushRegistration = "remotePushRegistration"
+        static let backendInstallationIdentifierFallback = "backendInstallationIdentifier"
         static let studyTreeNodeOffsetsPrefix = "studyTreeNodeOffsets"
+        static let studyTreeViewportPrefix = "studyTreeViewport"
+        static let dismissedOptionalAppControlCampaignID = "dismissedOptionalAppControlCampaignID"
+    }
+
+    private enum KeychainAccount {
+        static let remotePushRegistration = "backend-registration"
+        static let installationIdentifier = "backend-installation-id"
     }
 
     private let defaults: UserDefaults
     private let recordStore: StudyRecordStorage
+    private let usesSecureBackendIdentityStorage: Bool
+    private let preferredAppLanguageProvider: () -> AppLanguage
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    init(defaults: UserDefaults = .standard, recordDatabaseURL: URL? = nil) {
+    init(
+        defaults: UserDefaults = .standard,
+        recordDatabaseURL: URL? = nil,
+        usesSecureBackendIdentityStorage: Bool? = nil,
+        preferredAppLanguageProvider: @escaping () -> AppLanguage = { .systemPreferred }
+    ) {
         self.defaults = defaults
+        self.usesSecureBackendIdentityStorage = usesSecureBackendIdentityStorage
+            ?? (defaults === UserDefaults.standard)
+        self.preferredAppLanguageProvider = preferredAppLanguageProvider
         Self.removeLegacyRecordDatabaseIfNeeded(defaults: defaults, databaseURL: recordDatabaseURL)
         self.recordStore = Self.makeRecordStore(defaults: defaults, databaseURL: recordDatabaseURL)
         encoder.dateEncodingStrategy = .iso8601
@@ -70,10 +92,55 @@ final class SettingsStore {
         "\(Keys.studyTreeNodeOffsetsPrefix).\(rootStudyID)"
     }
 
+    func loadStudyTreeViewport(rootStudyID: Int) -> StudyTreeViewportState {
+        guard let data = defaults.data(forKey: studyTreeViewportKey(rootStudyID)),
+              let viewport = try? decoder.decode(StudyTreeViewportState.self, from: data) else {
+            return .default
+        }
+        return sanitizedStudyTreeViewport(viewport)
+    }
+
+    func hasStudyTreeViewport(rootStudyID: Int) -> Bool {
+        guard let data = defaults.data(forKey: studyTreeViewportKey(rootStudyID)) else {
+            return false
+        }
+        return (try? decoder.decode(StudyTreeViewportState.self, from: data)) != nil
+    }
+
+    func saveStudyTreeViewport(_ viewport: StudyTreeViewportState, rootStudyID: Int) {
+        guard let data = try? encoder.encode(sanitizedStudyTreeViewport(viewport)) else {
+            return
+        }
+        defaults.set(data, forKey: studyTreeViewportKey(rootStudyID))
+    }
+
+    private func studyTreeViewportKey(_ rootStudyID: Int) -> String {
+        "\(Keys.studyTreeViewportPrefix).\(rootStudyID)"
+    }
+
+    private func sanitizedStudyTreeViewport(_ viewport: StudyTreeViewportState) -> StudyTreeViewportState {
+        StudyTreeViewportState(
+            zoomScale: viewport.zoomScale.isFinite
+                ? min(
+                    max(viewport.zoomScale, StudyTreeViewportPolicy.minimumZoomScale),
+                    StudyTreeViewportPolicy.maximumZoomScale
+                )
+                : 1,
+            contentOffsetX: viewport.contentOffsetX.isFinite ? max(0, viewport.contentOffsetX) : 0,
+            contentOffsetY: viewport.contentOffsetY.isFinite ? max(0, viewport.contentOffsetY) : 0,
+            canvasAlignmentX: viewport.canvasAlignmentX.map {
+                $0.isFinite ? max(0, $0) : 0
+            },
+            canvasAlignmentY: viewport.canvasAlignmentY.map {
+                $0.isFinite ? max(0, $0) : 0
+            }
+        )
+    }
+
     func loadSettings() -> StudySettings {
         guard let data = defaults.data(forKey: Keys.settings),
               let settings = try? decoder.decode(StudySettings.self, from: data) else {
-            return .default
+            return StudySettings.initial(for: preferredAppLanguageProvider())
         }
 
         return StudySettings(
@@ -111,7 +178,21 @@ final class SettingsStore {
         if let data = try? encoder.encode(sanitizedSettings) {
             defaults.set(data, forKey: Keys.settings)
         }
-        trimStudyRecords(to: sanitizedSettings.sanitizedMaxHistoryCount)
+    }
+
+    func loadDismissedOptionalAppControlCampaignID() -> Int64? {
+        guard let value = defaults.object(forKey: Keys.dismissedOptionalAppControlCampaignID) as? NSNumber else {
+            return nil
+        }
+        return value.int64Value
+    }
+
+    func saveDismissedOptionalAppControlCampaignID(_ campaignID: Int64?) {
+        if let campaignID {
+            defaults.set(NSNumber(value: campaignID), forKey: Keys.dismissedOptionalAppControlCampaignID)
+        } else {
+            defaults.removeObject(forKey: Keys.dismissedOptionalAppControlCampaignID)
+        }
     }
 
     func loadQuestion() -> QuestionItem? {
@@ -124,6 +205,17 @@ final class SettingsStore {
 
     func saveQuestion(_ question: QuestionItem?) {
         saveOptional(question, forKey: Keys.currentQuestion)
+    }
+
+    func loadPendingQuestionGenerationProcess() -> PendingQuestionGenerationProcess? {
+        guard let data = defaults.data(forKey: Keys.pendingQuestionGenerationProcess) else {
+            return nil
+        }
+        return try? decoder.decode(PendingQuestionGenerationProcess.self, from: data)
+    }
+
+    func savePendingQuestionGenerationProcess(_ process: PendingQuestionGenerationProcess?) {
+        saveOptional(process, forKey: Keys.pendingQuestionGenerationProcess)
     }
 
     func loadQuestionHistory() -> [QuestionItem] {
@@ -160,7 +252,7 @@ final class SettingsStore {
         let clearedAt = loadStudyRecordsClearedAt()
 
         return recordStore
-            .load(limit: loadSettings().sanitizedMaxHistoryCount)
+            .load(limit: recordStore.count)
             .filter {
                 !Self.isStudyRecordDeleted($0, markers: deletedMarkers, clearedAt: clearedAt)
             }
@@ -173,7 +265,6 @@ final class SettingsStore {
             difficulty: settings.difficulty
         )
         recordStore.append(record)
-        recordStore.trim(to: loadSettings().sanitizedMaxHistoryCount)
     }
 
     func updateStudyRecord(question: QuestionItem, answer: String, gradingResult: GradingResult) {
@@ -188,10 +279,13 @@ final class SettingsStore {
         record.answeredAt = Date()
 
         recordStore.save(record)
-        recordStore.trim(to: loadSettings().sanitizedMaxHistoryCount)
     }
 
-    func updateStudyRecordAnswer(question: QuestionItem, answer: String, onlyIfUngraded: Bool = false) {
+    func saveSubmittedStudyRecordAnswer(
+        question: QuestionItem,
+        answer: String,
+        onlyIfUngraded: Bool = false
+    ) {
         if var record = recordStore.find(question: question) {
             guard !onlyIfUngraded || record.gradingResult == nil else {
                 return
@@ -208,12 +302,10 @@ final class SettingsStore {
             recordStore.append(record)
         }
 
-        recordStore.trim(to: loadSettings().sanitizedMaxHistoryCount)
     }
 
     func saveStudyRecord(_ record: StudyRecord) {
         recordStore.save(record)
-        recordStore.trim(to: loadSettings().sanitizedMaxHistoryCount)
     }
 
     func deleteStudyRecord(_ record: StudyRecord) {
@@ -241,13 +333,13 @@ final class SettingsStore {
         let filteredRecords = records.filter {
             !Self.isStudyRecordDeleted($0, markers: deletedMarkers, clearedAt: clearedAt)
         }
-        recordStore.replaceAll(Array(filteredRecords.suffix(loadSettings().sanitizedMaxHistoryCount)))
+        recordStore.replaceAll(filteredRecords)
     }
 
     func replaceBackendStudyRecords(_ records: [StudyRecord]) {
         saveDeletedStudyRecordMarkers([])
         saveStudyRecordsClearedAt(nil)
-        recordStore.replaceAll(Array(records.suffix(loadSettings().sanitizedMaxHistoryCount)))
+        recordStore.replaceAll(records)
     }
 
     func loadDeletedStudyRecordMarkers() -> [DeletedStudyRecordMarker] {
@@ -327,10 +419,6 @@ final class SettingsStore {
 
     nonisolated static func normalizedQuestionText(_ question: String) -> String {
         StudyRecordIdentityPolicy.normalizedQuestionText(question)
-    }
-
-    private func trimStudyRecords(to limit: Int) {
-        recordStore.trim(to: limit)
     }
 
     func loadGradingResult() -> GradingResult? {
@@ -456,22 +544,130 @@ final class SettingsStore {
     }
 
     func loadRemotePushRegistration() -> RemotePushRegistration? {
-        guard let data = defaults.data(forKey: Keys.remotePushRegistration) else {
-            return nil
+        if let data = keychainData(account: KeychainAccount.remotePushRegistration),
+           let registration = try? decoder.decode(RemotePushRegistration.self, from: data) {
+            return registration
         }
 
-        return try? decoder.decode(RemotePushRegistration.self, from: data)
+        guard let legacyData = defaults.data(forKey: Keys.remotePushRegistration),
+              let registration = try? decoder.decode(RemotePushRegistration.self, from: legacyData) else {
+            return nil
+        }
+        if saveKeychainData(legacyData, account: KeychainAccount.remotePushRegistration) {
+            defaults.removeObject(forKey: Keys.remotePushRegistration)
+        }
+        return registration
     }
 
     func saveRemotePushRegistration(_ registration: RemotePushRegistration?) {
         guard let registration else {
+            deleteKeychainData(account: KeychainAccount.remotePushRegistration)
             defaults.removeObject(forKey: Keys.remotePushRegistration)
             return
         }
 
         if let data = try? encoder.encode(registration) {
-            defaults.set(data, forKey: Keys.remotePushRegistration)
+            if saveKeychainData(data, account: KeychainAccount.remotePushRegistration) {
+                defaults.removeObject(forKey: Keys.remotePushRegistration)
+            } else {
+                deleteKeychainData(account: KeychainAccount.remotePushRegistration)
+                defaults.set(data, forKey: Keys.remotePushRegistration)
+            }
         }
+    }
+
+    func loadOrCreateBackendInstallationIdentifier() -> String {
+        if let data = keychainData(account: KeychainAccount.installationIdentifier),
+           let value = String(data: data, encoding: .utf8),
+           value.count >= 32 {
+            return value
+        }
+
+        if let fallback = defaults.string(forKey: Keys.backendInstallationIdentifierFallback),
+           fallback.count >= 32 {
+            if saveKeychainData(Data(fallback.utf8), account: KeychainAccount.installationIdentifier) {
+                defaults.removeObject(forKey: Keys.backendInstallationIdentifierFallback)
+            }
+            return fallback
+        }
+
+        var randomBytes = [UInt8](repeating: 0, count: 32)
+        let identifier: String
+        if SecRandomCopyBytes(kSecRandomDefault, randomBytes.count, &randomBytes) == errSecSuccess {
+            identifier = Data(randomBytes)
+                .base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+                .replacingOccurrences(of: "=", with: "")
+        } else {
+            identifier = "\(UUID().uuidString)\(UUID().uuidString)"
+        }
+
+        if saveKeychainData(Data(identifier.utf8), account: KeychainAccount.installationIdentifier) {
+            defaults.removeObject(forKey: Keys.backendInstallationIdentifierFallback)
+        } else {
+            defaults.set(identifier, forKey: Keys.backendInstallationIdentifierFallback)
+        }
+        return identifier
+    }
+
+    private var backendIdentityKeychainService: String {
+        "\(Bundle.main.bundleIdentifier ?? "io.github.ghkdqhrbals.StudyMate").backend-identity"
+    }
+
+    private func keychainData(account: String) -> Data? {
+        guard usesSecureBackendIdentityStorage else {
+            return nil
+        }
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: backendIdentityKeychainService,
+            kSecAttrAccount: account,
+            kSecReturnData: true,
+            kSecMatchLimit: kSecMatchLimitOne
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else {
+            return nil
+        }
+        return result as? Data
+    }
+
+    @discardableResult
+    private func saveKeychainData(_ data: Data, account: String) -> Bool {
+        guard usesSecureBackendIdentityStorage else {
+            return false
+        }
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: backendIdentityKeychainService,
+            kSecAttrAccount: account
+        ]
+        let update: [CFString: Any] = [kSecValueData: data]
+        let updateStatus = SecItemUpdate(query as CFDictionary, update as CFDictionary)
+        if updateStatus == errSecSuccess {
+            return true
+        }
+        guard updateStatus == errSecItemNotFound else {
+            return false
+        }
+
+        var insert = query
+        insert[kSecValueData] = data
+        insert[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        return SecItemAdd(insert as CFDictionary, nil) == errSecSuccess
+    }
+
+    private func deleteKeychainData(account: String) {
+        guard usesSecureBackendIdentityStorage else {
+            return
+        }
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: backendIdentityKeychainService,
+            kSecAttrAccount: account
+        ]
+        SecItemDelete(query as CFDictionary)
     }
 
     func loadIsDebuggingEnabled() -> Bool {
@@ -492,6 +688,31 @@ final class SettingsStore {
             defaults.removeObject(forKey: Keys.debugBackendBaseURL)
         } else {
             defaults.set(trimmedURL, forKey: Keys.debugBackendBaseURL)
+        }
+    }
+
+    func loadIsDeveloperAccessUnlocked() -> Bool {
+        defaults.bool(forKey: Keys.isDeveloperAccessUnlocked)
+    }
+
+    func saveDeveloperAccessUnlocked(_ isUnlocked: Bool) {
+        defaults.set(isUnlocked, forKey: Keys.isDeveloperAccessUnlocked)
+        if !isUnlocked {
+            defaults.removeObject(forKey: Keys.developerAccessBuildIdentifier)
+        }
+    }
+
+    func loadDeveloperAccessBuildIdentifier() -> String? {
+        defaults.string(forKey: Keys.developerAccessBuildIdentifier)
+    }
+
+    func saveDeveloperAccessBuildIdentifier(_ buildIdentifier: String?) {
+        let trimmedIdentifier = buildIdentifier?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmedIdentifier, !trimmedIdentifier.isEmpty {
+            defaults.set(trimmedIdentifier, forKey: Keys.developerAccessBuildIdentifier)
+        } else {
+            defaults.removeObject(forKey: Keys.developerAccessBuildIdentifier)
         }
     }
 
@@ -677,7 +898,7 @@ final class SettingsStore {
         }
 
         if recordStore.count == 0 {
-            recordStore.replaceAll(Array(records.suffix(loadSettings().sanitizedMaxHistoryCount)))
+            recordStore.replaceAll(records)
         }
 
         defaults.removeObject(forKey: Keys.studyRecords)

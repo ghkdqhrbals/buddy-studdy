@@ -23,7 +23,7 @@ On the Mac Kubernetes target, `~/.cloudflared/config.yaml` should match
 `deploy/cloudflared/lowfidev-config.yaml` and define these ingress routes:
 
 ```text
-api.lowfidev.cloud   -> http://localhost:30080
+lowfidev.cloud       -> http://localhost:30080
 db.lowfidev.cloud    -> tcp://localhost:30432
 redis.lowfidev.cloud -> tcp://localhost:30379
 ```
@@ -41,7 +41,7 @@ In BuddyStudy on iPhone:
 
 1. Open Settings.
 2. Enable Debugging Mode.
-3. Paste the Cloudflare HTTPS URL into Debug API URL. For the shared dev stack, use `https://api.lowfidev.cloud`.
+3. Paste the Cloudflare HTTPS URL into Debug API URL. For the shared dev stack, use `https://lowfidev.cloud`.
 4. Tap Save.
 
 After saving, every backend API request made by the app uses the debug URL until Debugging Mode is turned off.

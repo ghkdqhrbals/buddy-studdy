@@ -22,7 +22,6 @@ TABLE_ORDER = [
     "question_embeddings",
     "study_question_coverage",
     "study_question_jobs",
-    "question_push_outbox",
     "app_notifications",
     "reports",
     "roles",

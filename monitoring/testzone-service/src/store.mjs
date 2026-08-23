@@ -95,6 +95,7 @@ function defaultState() {
       updatedAt: now(),
     }],
     runs: [],
+    deployments: [],
   };
 }
 
@@ -122,6 +123,10 @@ export class TestZoneStore {
     }
     await this.migrateScripts();
     await this.migrateRunMetadata();
+    if (!Array.isArray(this.state.deployments)) {
+      this.state.deployments = [];
+      await this.persist();
+    }
     return this;
   }
 
@@ -172,6 +177,20 @@ export class TestZoneStore {
       }
       if (!Object.hasOwn(run, "live")) {
         run.live = null;
+        changed = true;
+      }
+      if (!Object.hasOwn(run, "metricsWarning")) {
+        run.metricsWarning = null;
+        changed = true;
+      }
+      if (
+        run.status === "failed"
+        && run.summary
+        && String(run.error || "").startsWith("InfluxDB write failed")
+      ) {
+        run.status = "completed";
+        run.metricsWarning = run.error;
+        run.error = null;
         changed = true;
       }
     }
@@ -227,7 +246,8 @@ export class TestZoneStore {
       createdAt: timestamp,
       updatedAt: timestamp,
     };
-    await fs.writeFile(this.scriptPath(script.id), input.code || DEFAULT_SCRIPT, { mode: 0o600 });
+    const code = typeof input.code === "string" ? input.code : DEFAULT_SCRIPT;
+    await fs.writeFile(this.scriptPath(script.id), code, { mode: 0o600 });
     this.state.scripts.unshift(script);
     await this.persist();
     return this.getScript(script.id);
@@ -320,6 +340,7 @@ export class TestZoneStore {
       finishedAt: null,
       summary: null,
       error: null,
+      metricsWarning: null,
       logTail: [],
       live: null,
     };
@@ -369,5 +390,62 @@ export class TestZoneStore {
     await fs.rm(this.runPath(id), { recursive: true, force: true });
     await this.persist();
     return run;
+  }
+
+  listDeployments({ limit = 20, offset = 0, service = "", status = "" } = {}) {
+    const normalizedService = String(service).trim().toLowerCase();
+    const normalizedStatus = String(status).trim().toUpperCase();
+    const values = this.state.deployments.filter((deployment) => (
+      (!normalizedService || deployment.service.toLowerCase() === normalizedService)
+      && (!normalizedStatus || deployment.status === normalizedStatus)
+    ));
+    const since = Date.now() - 24 * 60 * 60 * 1000;
+    const activeStatuses = new Set(["QUEUED", "RUNNING"]);
+    const current = this.state.deployments.find((deployment) => activeStatuses.has(deployment.status))
+      || this.state.deployments[0]
+      || null;
+    return {
+      items: structuredClone(values.slice(offset, offset + limit)),
+      totalCount: values.length,
+      summary: {
+        activeCount: this.state.deployments.filter(
+          (deployment) => activeStatuses.has(deployment.status),
+        ).length,
+        succeeded24h: this.state.deployments.filter(
+          (deployment) => deployment.status === "SUCCEEDED"
+            && Date.parse(deployment.startedAt) >= since,
+        ).length,
+        failed24h: this.state.deployments.filter(
+          (deployment) => deployment.status === "FAILED"
+            && Date.parse(deployment.startedAt) >= since,
+        ).length,
+        current: current ? structuredClone(current) : null,
+      },
+    };
+  }
+
+  deployment(id) {
+    const deployment = this.state.deployments.find((entry) => entry.id === id);
+    return deployment ? structuredClone(deployment) : null;
+  }
+
+  async upsertDeployment(input) {
+    const timestamp = now();
+    const existing = this.state.deployments.find((entry) => entry.id === input.id);
+    if (existing) {
+      Object.assign(existing, input, { updatedAt: timestamp });
+    } else {
+      this.state.deployments.unshift({
+        ...input,
+        createdAt: input.createdAt || timestamp,
+        updatedAt: timestamp,
+      });
+    }
+    this.state.deployments.sort((left, right) => (
+      Date.parse(right.startedAt || right.createdAt) - Date.parse(left.startedAt || left.createdAt)
+    ));
+    this.state.deployments = this.state.deployments.slice(0, 500);
+    await this.persist();
+    return this.deployment(input.id);
   }
 }

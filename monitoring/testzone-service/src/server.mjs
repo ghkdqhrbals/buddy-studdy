@@ -1,4 +1,5 @@
 import http from "node:http";
+import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.mjs";
 import { ComponentManager } from "./components.mjs";
@@ -12,6 +13,7 @@ import {
 
 const MAX_BODY_BYTES = 1_000_000;
 const RUN_HISTORY_PAGE_SIZE = 10;
+const DEPLOYMENT_STATUSES = new Set(["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"]);
 
 function sendJson(response, status, body) {
   const payload = JSON.stringify(body);
@@ -49,6 +51,61 @@ function requireText(value, name, maximum = 200) {
 function routeMatch(pathname, pattern) {
   const match = pathname.match(pattern);
   return match ? match.slice(1).map(decodeURIComponent) : null;
+}
+
+function positiveInteger(value, fallback, maximum = 100) {
+  const parsed = Number.parseInt(value ?? "", 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return Math.min(parsed, maximum);
+}
+
+function authorizedBearer(request, expectedToken) {
+  if (!expectedToken) return false;
+  const authorization = String(request.headers.authorization || "");
+  const supplied = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+  const expected = Buffer.from(expectedToken);
+  const actual = Buffer.from(supplied);
+  return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+}
+
+function optionalText(value, maximum = 500) {
+  const text = String(value ?? "").trim();
+  return text ? text.slice(0, maximum) : null;
+}
+
+function deploymentEvent(body) {
+  const status = requireText(body.status, "Deployment status", 20).toUpperCase();
+  if (!DEPLOYMENT_STATUSES.has(status)) {
+    throw new ValidationError(`Deployment status must be one of: ${[...DEPLOYMENT_STATUSES].join(", ")}.`);
+  }
+  const startedAt = optionalText(body.startedAt, 40) || new Date().toISOString();
+  const finishedAt = optionalText(body.finishedAt, 40);
+  if (Number.isNaN(Date.parse(startedAt)) || (finishedAt && Number.isNaN(Date.parse(finishedAt)))) {
+    throw new ValidationError("Deployment timestamps must be valid ISO-8601 values.");
+  }
+  return {
+    id: requireText(body.id, "Deployment ID", 240),
+    service: requireText(body.service, "Deployment service", 80),
+    environment: optionalText(body.environment, 40) || "production",
+    status,
+    phase: optionalText(body.phase, 80),
+    image: optionalText(body.image, 500),
+    runtime: optionalText(body.runtime, 40),
+    sourceRepository: optionalText(body.sourceRepository, 200),
+    sourceSha: optionalText(body.sourceSha, 80),
+    sourceRunId: optionalText(body.sourceRunId, 80),
+    deployRepository: optionalText(body.deployRepository, 200),
+    deployRunId: optionalText(body.deployRunId, 80),
+    deployUrl: optionalText(body.deployUrl, 1000),
+    actor: optionalText(body.actor, 120),
+    startedAt,
+    finishedAt,
+    durationMs: Number.isFinite(Number(body.durationMs)) ? Math.max(0, Number(body.durationMs)) : null,
+    message: optionalText(body.message, 1000),
+    metadata: body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)
+      ? body.metadata
+      : {},
+  };
 }
 
 function publicRun(run, config) {
@@ -128,6 +185,34 @@ export async function createTestZoneServer(dependencies = {}) {
         });
       }
 
+      if (request.method === "POST" && pathname === "/api/deployments/events") {
+        if (!config.deploymentIngestToken) {
+          return sendJson(response, 503, { error: "Deployment event ingestion is not configured." });
+        }
+        if (!authorizedBearer(request, config.deploymentIngestToken)) {
+          return sendJson(response, 401, { error: "Invalid deployment event credential." });
+        }
+        const deployment = await store.upsertDeployment(deploymentEvent(await readJson(request)));
+        return sendJson(response, 202, { deployment });
+      }
+      if (request.method === "GET" && pathname === "/api/deployments") {
+        const limit = positiveInteger(requestUrl.searchParams.get("limit"), 20, 100);
+        const offset = positiveInteger(requestUrl.searchParams.get("offset"), 0, 100_000);
+        return sendJson(response, 200, store.listDeployments({
+          limit,
+          offset,
+          service: requestUrl.searchParams.get("service") || "",
+          status: requestUrl.searchParams.get("status") || "",
+        }));
+      }
+      let match = routeMatch(pathname, /^\/api\/deployments\/([^/]+)$/);
+      if (match && request.method === "GET") {
+        const deployment = store.deployment(match[0]);
+        return deployment
+          ? sendJson(response, 200, { deployment })
+          : sendJson(response, 404, { error: "Deployment not found." });
+      }
+
       if (request.method === "GET" && pathname === "/api/projects") {
         return sendJson(response, 200, { projects: store.snapshot().projects });
       }
@@ -138,7 +223,7 @@ export async function createTestZoneServer(dependencies = {}) {
         });
         return sendJson(response, 201, { project });
       }
-      let match = routeMatch(pathname, /^\/api\/projects\/([^/]+)$/);
+      match = routeMatch(pathname, /^\/api\/projects\/([^/]+)$/);
       if (match && request.method === "PATCH") {
         const body = await readJson(request);
         const project = await store.updateProject(match[0], {
@@ -171,16 +256,11 @@ export async function createTestZoneServer(dependencies = {}) {
         if (!store.state.projects.some((entry) => entry.id === body.projectId)) {
           return sendJson(response, 404, { error: "Project not found." });
         }
-        validateScript(body.code || "", {
-          maxVus: config.maxVus,
-          maxTargetRps: config.maxTargetRps,
-          maxDurationSeconds: config.maxDurationSeconds,
-        });
         const script = await store.createScript({
           projectId: body.projectId,
           name: requireText(body.name, "Script name"),
           description: String(body.description || "").slice(0, 500),
-          code: body.code,
+          code: typeof body.code === "string" ? body.code : "",
         });
         return sendJson(response, 201, { script });
       }
@@ -191,13 +271,6 @@ export async function createTestZoneServer(dependencies = {}) {
       }
       if (match && request.method === "PATCH") {
         const body = await readJson(request);
-        if (typeof body.code === "string") {
-          validateScript(body.code, {
-            maxVus: config.maxVus,
-            maxTargetRps: config.maxTargetRps,
-            maxDurationSeconds: config.maxDurationSeconds,
-          });
-        }
         const script = await store.updateScript(match[0], {
           name: body.name ? requireText(body.name, "Script name") : undefined,
           description: body.description,

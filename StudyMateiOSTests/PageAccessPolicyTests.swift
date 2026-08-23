@@ -1,7 +1,1040 @@
 import XCTest
 @testable import StudyMate
 
+final class BillingLocalizationTests: XCTestCase {
+    func testMembershipAndBillingLabelsAreLocalizedInJapanese() {
+        let strings = AppStrings(language: .japanese)
+
+        XCTAssertEqual(strings.membershipAndBilling, "メンバーシップと支払い")
+        XCTAssertEqual(strings.membershipManagement, "メンバーシップ管理")
+        XCTAssertEqual(strings.membershipTierName("TIER1"), "ティア1")
+        XCTAssertEqual(strings.membershipTierName("TIER2"), "ティア2")
+        XCTAssertEqual(AppStrings(language: .korean).membershipTierName("TIER1"), "티어 1")
+        XCTAssertEqual(AppStrings(language: .english).membershipTierName("TIER1"), "Tier 1")
+        XCTAssertEqual(strings.monthlyQuestionAllowanceText(300), "毎月300問")
+        XCTAssertEqual(AppStrings(language: .korean).monthlyQuestionAllowanceText(300), "매월 질문 300개")
+        XCTAssertEqual(AppStrings(language: .english).monthlyQuestionAllowanceText(300), "300 questions each month")
+        XCTAssertEqual(strings.noRestorablePurchases, "復元できる有効な購入はありません。")
+    }
+
+    func testRestoreCandidateSelectsLatestActiveMonthlyEntitlement() {
+        let accountToken = UUID(uuidString: "7ec4cbca-03d2-45e6-91c9-e5e8931b4e52")!
+        let now = Date(timeIntervalSince1970: 1_786_000_000)
+        let candidates = [
+            StoreKitRestoreCandidate(
+                transactionID: 11,
+                originalTransactionID: 1,
+                productID: "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+                appAccountToken: accountToken,
+                purchaseDate: now.addingTimeInterval(-7_200),
+                expirationDate: now.addingTimeInterval(86_400),
+                revocationDate: nil
+            ),
+            StoreKitRestoreCandidate(
+                transactionID: 12,
+                originalTransactionID: 1,
+                productID: "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                appAccountToken: accountToken,
+                purchaseDate: now.addingTimeInterval(-3_600),
+                expirationDate: now.addingTimeInterval(172_800),
+                revocationDate: nil
+            ),
+        ]
+
+        let selected = StoreKitRestoreCandidateSelector.latestActiveMonthly(
+            from: candidates,
+            appAccountToken: accountToken,
+            now: now
+        )
+
+        XCTAssertEqual(selected?.transactionID, 12)
+    }
+
+    func testRestoreCandidateRejectsWrongAccountExpiredRevokedAndAnnualTransactions() {
+        let accountToken = UUID(uuidString: "7ec4cbca-03d2-45e6-91c9-e5e8931b4e52")!
+        let otherToken = UUID(uuidString: "c832dca9-77f6-46d1-bd76-76f8874403a5")!
+        let now = Date(timeIntervalSince1970: 1_786_000_000)
+        let candidates = [
+            StoreKitRestoreCandidate(
+                transactionID: 21,
+                originalTransactionID: 2,
+                productID: "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+                appAccountToken: otherToken,
+                purchaseDate: now,
+                expirationDate: now.addingTimeInterval(86_400),
+                revocationDate: nil
+            ),
+            StoreKitRestoreCandidate(
+                transactionID: 22,
+                originalTransactionID: 3,
+                productID: "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+                appAccountToken: accountToken,
+                purchaseDate: now,
+                expirationDate: now.addingTimeInterval(-1),
+                revocationDate: nil
+            ),
+            StoreKitRestoreCandidate(
+                transactionID: 23,
+                originalTransactionID: 4,
+                productID: "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                appAccountToken: accountToken,
+                purchaseDate: now,
+                expirationDate: now.addingTimeInterval(86_400),
+                revocationDate: now
+            ),
+            StoreKitRestoreCandidate(
+                transactionID: 24,
+                originalTransactionID: 5,
+                productID: "io.github.ghkdqhrbals.StudyMate.tier3.yearly",
+                appAccountToken: accountToken,
+                purchaseDate: now,
+                expirationDate: now.addingTimeInterval(86_400),
+                revocationDate: nil
+            ),
+        ]
+
+        XCTAssertNil(StoreKitRestoreCandidateSelector.latestActiveMonthly(
+            from: candidates,
+            appAccountToken: accountToken,
+            now: now
+        ))
+    }
+
+    func testMembershipCatalogOnlyOffersMonthlyProducts() {
+        let products = [
+            BackendBillingTierProduct(
+                tierCode: "TIER2",
+                description: "Monthly",
+                monthlyQuestionLimit: 300,
+                productId: "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+                productType: "AUTO_RENEWABLE_SUBSCRIPTION",
+                billingPeriod: "P1M",
+                sortOrder: 20
+            ),
+            BackendBillingTierProduct(
+                tierCode: "TIER2",
+                description: "Legacy annual",
+                monthlyQuestionLimit: 300,
+                productId: "io.github.ghkdqhrbals.StudyMate.tier2.yearly",
+                productType: "AUTO_RENEWABLE_SUBSCRIPTION",
+                billingPeriod: "P1Y",
+                sortOrder: 21
+            ),
+            BackendBillingTierProduct(
+                tierCode: "TIER3",
+                description: "Legacy annual with stale period metadata",
+                monthlyQuestionLimit: 1_000,
+                productId: "io.github.ghkdqhrbals.StudyMate.tier3.yearly",
+                productType: "AUTO_RENEWABLE_SUBSCRIPTION",
+                billingPeriod: "P1M",
+                sortOrder: 29
+            ),
+            BackendBillingTierProduct(
+                tierCode: "TIER3",
+                description: "Monthly",
+                monthlyQuestionLimit: 1_000,
+                productId: "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+                productType: "AUTO_RENEWABLE_SUBSCRIPTION",
+                billingPeriod: "p1m",
+                sortOrder: 30
+            ),
+            BackendBillingTierProduct(
+                tierCode: "TIER3",
+                description: "Unknown monthly product",
+                monthlyQuestionLimit: 1_000,
+                productId: "io.github.ghkdqhrbals.StudyMate.tier3.monthly.promo",
+                productType: "AUTO_RENEWABLE_SUBSCRIPTION",
+                billingPeriod: "P1M",
+                sortOrder: 31
+            ),
+        ]
+
+        XCTAssertEqual(
+            MembershipProductPolicy.monthlyProducts(products).map(\.productId),
+            [
+                "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+                "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+            ]
+        )
+        XCTAssertEqual(
+            MembershipProductPolicy.purchasableMonthlyProductIDs,
+            [
+                "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+                "io.github.ghkdqhrbals.StudyMate.tier3.monthly",
+            ]
+        )
+        XCTAssertEqual(
+            MembershipProductPolicy.retiredAnnualProductIDs,
+            [
+                "io.github.ghkdqhrbals.StudyMate.tier2.yearly",
+                "io.github.ghkdqhrbals.StudyMate.tier3.yearly",
+            ]
+        )
+    }
+
+    func testMembershipActionDistinguishesCurrentChangeAndDowngrade() {
+        XCTAssertEqual(
+            MembershipPlanActionPolicy.resolve(
+                activeProductID: nil,
+                activeMonthlyLimit: nil,
+                selectedProductID: "tier2.monthly",
+                selectedMonthlyLimit: 300
+            ),
+            .subscribe
+        )
+        XCTAssertEqual(
+            MembershipPlanActionPolicy.resolve(
+                activeProductID: "tier2.monthly",
+                activeMonthlyLimit: 300,
+                selectedProductID: "tier2.monthly",
+                selectedMonthlyLimit: 300
+            ),
+            .current
+        )
+        XCTAssertEqual(
+            MembershipPlanActionPolicy.resolve(
+                activeProductID: "tier2.monthly",
+                activeMonthlyLimit: 300,
+                selectedProductID: "tier3.monthly",
+                selectedMonthlyLimit: 1_000
+            ),
+            .change
+        )
+        XCTAssertEqual(
+            MembershipPlanActionPolicy.resolve(
+                activeProductID: "tier3.monthly",
+                activeMonthlyLimit: 1_000,
+                selectedProductID: "tier2.monthly",
+                selectedMonthlyLimit: 300
+            ),
+            .downgrade
+        )
+    }
+
+    func testOnlyLatestMembershipRefreshMayReplaceDisplayedTier() {
+        var order = MembershipRefreshOrder()
+        let olderBillingRequest = order.issue()
+        let newerQuotaRequest = order.issue()
+
+        XCTAssertFalse(order.isLatest(olderBillingRequest))
+        XCTAssertTrue(order.isLatest(newerQuotaRequest))
+
+        order.invalidatePendingRequests()
+        XCTAssertFalse(order.isLatest(newerQuotaRequest))
+    }
+
+    func testBackendBillingStatusDecodesAuthoritativeEntitlementAndQuota() throws {
+        let payload = """
+        {
+          "tierCode": "TIER2",
+          "source": "APP_STORE",
+          "accessStatus": "ACTIVE",
+          "renewalStatus": "CANCELED",
+          "productId": "io.github.ghkdqhrbals.StudyMate.tier2.monthly",
+          "startedAt": "2026-08-01T00:00:00Z",
+          "expiresAt": "2026-09-01T00:00:00Z",
+          "willRenew": false,
+          "pendingChange": null,
+          "synchronizedAt": "2026-08-05T00:00:00Z",
+          "quota": {
+            "periodStartedAt": "2026-08-01T00:00:00Z",
+            "resetAt": "2026-09-01T00:00:00Z",
+            "anchorType": "FIRST_PAID",
+            "baseLimit": 300,
+            "bonusLimit": 20,
+            "usedCount": 41,
+            "reservedCount": 1,
+            "remainingCount": 278,
+            "policyVersion": 2
+          }
+        }
+        """.data(using: .utf8)!
+
+        let status = try RemotePushBackendClient.makeDecoder().decode(BackendBillingStatus.self, from: payload)
+
+        XCTAssertEqual(status.tierCode, "TIER2")
+        XCTAssertTrue(status.isEntitlementActive)
+        XCTAssertFalse(status.willRenew)
+        XCTAssertEqual(status.renewalStatus, "CANCELED")
+        XCTAssertEqual(status.quota.usedCount, 41)
+        XCTAssertEqual(status.quota.reservedCount, 1)
+        XCTAssertEqual(status.quota.remainingCount, 278)
+        XCTAssertEqual(status.quota.anchorType, "FIRST_PAID")
+    }
+
+    func testBackendBillingStatusTreatsGracePeriodAsActiveButExpiredAsInactive() throws {
+        func decode(accessStatus: String) throws -> BackendBillingStatus {
+            let payload = """
+            {
+              "tierCode": "TIER2",
+              "source": "APP_STORE",
+              "accessStatus": "\(accessStatus)",
+              "renewalStatus": "BILLING_RETRY",
+              "willRenew": true,
+              "synchronizedAt": "2026-08-05T00:00:00Z",
+              "quota": {
+                "periodStartedAt": "2026-08-01T00:00:00Z",
+                "resetAt": "2026-09-01T00:00:00Z",
+                "anchorType": "FIRST_PAID",
+                "baseLimit": 300,
+                "bonusLimit": 0,
+                "usedCount": 0,
+                "reservedCount": 0,
+                "remainingCount": 300,
+                "policyVersion": 2
+              }
+            }
+            """.data(using: .utf8)!
+            return try RemotePushBackendClient.makeDecoder().decode(BackendBillingStatus.self, from: payload)
+        }
+
+        XCTAssertTrue(try decode(accessStatus: "GRACE_PERIOD").isEntitlementActive)
+        XCTAssertFalse(try decode(accessStatus: "EXPIRED").isEntitlementActive)
+    }
+
+    func testMembershipTimelineUsesBackendScheduledPlanDates() throws {
+        let payload = """
+        {
+          "tierCode": "TIER3",
+          "source": "APP_STORE",
+          "accessStatus": "ACTIVE",
+          "renewalStatus": "WILL_RENEW",
+          "productId": "tier3.monthly",
+          "startedAt": "2026-08-06T00:00:00Z",
+          "expiresAt": "2026-09-06T00:00:00Z",
+          "willRenew": true,
+          "pendingChange": "tier2.monthly",
+          "planTransition": {
+            "currentTierCode": "TIER3",
+            "currentProductId": "tier3.monthly",
+            "currentPlanEndsAt": "2026-09-06T00:00:00Z",
+            "nextTierCode": "TIER2",
+            "nextProductId": "tier2.monthly",
+            "nextPlanStartsAt": "2026-09-06T00:00:00Z"
+          },
+          "synchronizedAt": "2026-08-06T01:00:00Z",
+          "quota": {
+            "periodStartedAt": "2026-08-06T00:00:00Z",
+            "resetAt": "2026-09-06T00:00:00Z",
+            "anchorType": "FIRST_PAID",
+            "baseLimit": 1000,
+            "bonusLimit": 0,
+            "usedCount": 20,
+            "reservedCount": 0,
+            "remainingCount": 980,
+            "policyVersion": 2
+          }
+        }
+        """.data(using: .utf8)!
+        let status = try RemotePushBackendClient.makeDecoder().decode(BackendBillingStatus.self, from: payload)
+
+        let schedule = try XCTUnwrap(
+            MembershipPlanTimelinePolicy.resolve(
+                status: status,
+                catalogProducts: [],
+                at: try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-08-06T01:00:00Z"))
+            )
+        )
+        guard case .change(let timeline) = schedule else {
+            return XCTFail("Expected a scheduled plan change")
+        }
+
+        XCTAssertEqual(timeline.currentTierCode, "TIER3")
+        XCTAssertEqual(timeline.nextTierCode, "TIER2")
+        XCTAssertEqual(timeline.currentPlanEndsAt, timeline.nextPlanStartsAt)
+    }
+
+    func testMembershipTimelineDoesNotPresentAnUpgradeAsFutureDated() throws {
+        let payload = """
+        {
+          "tierCode": "TIER2",
+          "source": "APP_STORE",
+          "accessStatus": "ACTIVE",
+          "renewalStatus": "WILL_RENEW",
+          "productId": "tier2.monthly",
+          "expiresAt": "2026-09-06T12:34:00Z",
+          "willRenew": true,
+          "pendingChange": "tier3.monthly",
+          "planTransition": {
+            "currentTierCode": "TIER2",
+            "currentProductId": "tier2.monthly",
+            "currentPlanEndsAt": "2026-09-06T12:34:00Z",
+            "nextTierCode": "TIER3",
+            "nextProductId": "tier3.monthly",
+            "nextPlanStartsAt": "2026-09-06T12:34:00Z"
+          },
+          "synchronizedAt": "2026-08-06T01:00:00Z",
+          "quota": {
+            "periodStartedAt": "2026-08-06T00:00:00Z",
+            "resetAt": "2026-09-06T00:00:00Z",
+            "anchorType": "FIRST_PAID",
+            "baseLimit": 300,
+            "bonusLimit": 0,
+            "usedCount": 20,
+            "reservedCount": 0,
+            "remainingCount": 280,
+            "policyVersion": 3
+          }
+        }
+        """.data(using: .utf8)!
+        let status = try RemotePushBackendClient.makeDecoder().decode(BackendBillingStatus.self, from: payload)
+        let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-08-06T01:00:00Z"))
+
+        XCTAssertNil(MembershipPlanTimelinePolicy.resolve(status: status, catalogProducts: [], at: now))
+    }
+
+    func testMembershipTimelineShowsOnlyExpiryForCancelledSubscription() throws {
+        let payload = """
+        {
+          "tierCode": "TIER2",
+          "source": "APP_STORE",
+          "accessStatus": "ACTIVE",
+          "renewalStatus": "CANCELED",
+          "productId": "tier2.monthly",
+          "expiresAt": "2026-09-06T00:00:00Z",
+          "willRenew": false,
+          "pendingChange": null,
+          "synchronizedAt": "2026-08-06T01:00:00Z",
+          "quota": {
+            "periodStartedAt": "2026-08-06T00:00:00Z",
+            "resetAt": "2026-09-06T00:00:00Z",
+            "anchorType": "FIRST_PAID",
+            "baseLimit": 300,
+            "bonusLimit": 0,
+            "usedCount": 0,
+            "reservedCount": 0,
+            "remainingCount": 300,
+            "policyVersion": 2
+          }
+        }
+        """.data(using: .utf8)!
+        let status = try RemotePushBackendClient.makeDecoder().decode(BackendBillingStatus.self, from: payload)
+
+        let schedule = try XCTUnwrap(
+            MembershipPlanTimelinePolicy.resolve(
+                status: status,
+                catalogProducts: [],
+                at: try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-08-06T01:00:00Z"))
+            )
+        )
+        guard case .expiration(let currentTierCode, let expiresAt) = schedule else {
+            return XCTFail("Expected a subscription expiration schedule")
+        }
+
+        XCTAssertEqual(currentTierCode, "TIER2")
+        XCTAssertEqual(expiresAt, try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-09-06T00:00:00Z")))
+    }
+
+    func testCancelledSubscriptionIgnoresStaleDowngradeFields() throws {
+        let payload = """
+        {
+          "tierCode": "TIER3",
+          "source": "APP_STORE",
+          "accessStatus": "ACTIVE",
+          "renewalStatus": "CANCELED",
+          "productId": "tier3.monthly",
+          "expiresAt": "2026-09-06T00:00:00Z",
+          "willRenew": false,
+          "pendingChange": "tier2.monthly",
+          "planTransition": {
+            "currentTierCode": "TIER3",
+            "currentProductId": "tier3.monthly",
+            "currentPlanEndsAt": "2026-09-06T00:00:00Z",
+            "nextTierCode": "TIER2",
+            "nextProductId": "tier2.monthly",
+            "nextPlanStartsAt": "2026-09-06T00:00:00Z"
+          },
+          "synchronizedAt": "2026-08-06T01:00:00Z",
+          "quota": {
+            "periodStartedAt": "2026-08-06T00:00:00Z",
+            "resetAt": "2026-09-06T00:00:00Z",
+            "anchorType": "FIRST_PAID",
+            "baseLimit": 1000,
+            "bonusLimit": 0,
+            "usedCount": 0,
+            "reservedCount": 0,
+            "remainingCount": 1000,
+            "policyVersion": 3
+          }
+        }
+        """.data(using: .utf8)!
+        let status = try RemotePushBackendClient.makeDecoder().decode(BackendBillingStatus.self, from: payload)
+        let schedule = try XCTUnwrap(
+            MembershipPlanTimelinePolicy.resolve(
+                status: status,
+                catalogProducts: [],
+                at: try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-08-06T01:00:00Z"))
+            )
+        )
+
+        guard case .expiration(let currentTierCode, let expiresAt) = schedule else {
+            return XCTFail("Cancellation must override stale plan-change fields")
+        }
+        XCTAssertEqual(currentTierCode, "TIER3")
+        XCTAssertEqual(expiresAt, try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-09-06T00:00:00Z")))
+    }
+
+    func testMembershipTimelineHidesAnAlreadyEffectiveTransition() throws {
+        let payload = """
+        {
+          "tierCode": "TIER3",
+          "source": "APP_STORE",
+          "accessStatus": "GRACE_PERIOD",
+          "renewalStatus": "WILL_RENEW",
+          "productId": "tier3.monthly",
+          "expiresAt": "2026-08-09T08:19:00Z",
+          "willRenew": true,
+          "pendingChange": "tier2.monthly",
+          "planTransition": {
+            "currentTierCode": "TIER3",
+            "currentProductId": "tier3.monthly",
+            "currentPlanEndsAt": "2026-08-09T08:19:00Z",
+            "nextTierCode": "TIER2",
+            "nextProductId": "tier2.monthly",
+            "nextPlanStartsAt": "2026-08-09T08:19:00Z"
+          },
+          "synchronizedAt": "2026-08-09T08:20:00Z",
+          "quota": {
+            "periodStartedAt": "2026-08-04T06:30:00Z",
+            "resetAt": "2026-09-04T06:30:00Z",
+            "anchorType": "FIRST_PAID",
+            "baseLimit": 1000,
+            "bonusLimit": 0,
+            "usedCount": 25,
+            "reservedCount": 0,
+            "remainingCount": 975,
+            "policyVersion": 3
+          }
+        }
+        """.data(using: .utf8)!
+        let status = try RemotePushBackendClient.makeDecoder().decode(BackendBillingStatus.self, from: payload)
+        let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-08-09T08:20:00Z"))
+
+        XCTAssertNil(MembershipPlanTimelinePolicy.resolve(status: status, catalogProducts: [], at: now))
+    }
+}
+
+final class CommunityQuestionResultPresentationTests: XCTestCase {
+    func testKeepsValidScoreAndDifficulty() {
+        let presentation = CommunityQuestionResultPresentation(score: 94, difficulty: 4)
+
+        XCTAssertEqual(presentation.score, 94)
+        XCTAssertEqual(presentation.difficulty, 4)
+    }
+
+    func testClampsScoreAndDifficultyToDisplayedRanges() {
+        XCTAssertEqual(
+            CommunityQuestionResultPresentation(score: 101, difficulty: 0),
+            CommunityQuestionResultPresentation(score: 100, difficulty: 1)
+        )
+        XCTAssertEqual(
+            CommunityQuestionResultPresentation(score: -1, difficulty: 11),
+            CommunityQuestionResultPresentation(score: 0, difficulty: 10)
+        )
+    }
+
+    func testCompactResultCopyIncludesScoreAndDifficultyInEveryLanguage() {
+        XCTAssertEqual(
+            AppStrings(language: .korean).communityQuestionResult(score: 8, difficulty: 2),
+            "8점 · 난이도 2"
+        )
+        XCTAssertEqual(
+            AppStrings(language: .english).communityQuestionResult(score: 8, difficulty: 2),
+            "8 pts · Difficulty 2"
+        )
+        XCTAssertEqual(
+            AppStrings(language: .japanese).communityQuestionResult(score: 8, difficulty: 2),
+            "8点 · 難易度 2"
+        )
+    }
+}
+
+final class CommunityQuestionActionPolicyTests: XCTestCase {
+    func testOwnerCanManageWithoutReportingOwnQuestion() {
+        let policy = CommunityQuestionActionPolicy(isSignedIn: true, isOwner: true)
+
+        XCTAssertTrue(policy.canManage)
+        XCTAssertFalse(policy.canReport)
+        XCTAssertFalse(policy.canBlock)
+    }
+
+    func testSignedInViewerCanReportAnotherUsersQuestion() {
+        let policy = CommunityQuestionActionPolicy(isSignedIn: true, isOwner: false)
+
+        XCTAssertFalse(policy.canManage)
+        XCTAssertTrue(policy.canReport)
+        XCTAssertTrue(policy.canBlock)
+    }
+
+    func testGuestOnlyGetsTheOpenAction() {
+        let policy = CommunityQuestionActionPolicy(isSignedIn: false, isOwner: false)
+
+        XCTAssertFalse(policy.canManage)
+        XCTAssertFalse(policy.canReport)
+        XCTAssertFalse(policy.canBlock)
+    }
+}
+
+@MainActor
+final class CommunityFeedBlockingTests: XCTestCase {
+    func testNotInterestedAdvertisementStaysHiddenAcrossFeedRefresh() throws {
+        let data = Data(
+            """
+            {
+              "questions": [],
+              "items": [{
+                "type": "ADVERTISEMENT",
+                "advertisement": {
+                  "selectionId": "selection-1",
+                  "campaignId": "coupang-lamp",
+                  "providerName": "쿠팡",
+                  "disclosureLabel": "(광고)",
+                  "title": "집중 조명",
+                  "imageUrl": "https://thumbnail6.coupangcdn.com/example.jpg",
+                  "affiliateDisclosure": "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.",
+                  "deepLink": "https://link.coupang.com/a/example"
+                }
+              }],
+              "totalCount": 0,
+              "limit": 20,
+              "offset": 0
+            }
+            """.utf8
+        )
+        let response = try JSONDecoder().decode(CommunityQuestionsResponse.self, from: data)
+        var state = CommunityFeedStateStore()
+
+        state.applyPage(response, offset: 0, reset: true)
+        state.hideAdvertisement(campaignID: "coupang-lamp")
+        state.applyPage(response, offset: 0, reset: true)
+
+        XCTAssertTrue(state.items.isEmpty)
+
+        state.restoreAdvertisement(campaignID: "coupang-lamp")
+
+        XCTAssertEqual(state.items.count, 1)
+
+        state.hideAdvertisement(campaignID: "coupang-lamp")
+        state.confirmHiddenAdvertisement(campaignID: "coupang-lamp")
+        state.restoreAdvertisement(campaignID: "coupang-lamp")
+
+        XCTAssertTrue(state.items.isEmpty)
+    }
+
+    func testHiddenAuthorIsRemovedAndCannotReturnFromAnotherPage() {
+        let blockedAuthor = CommunityUserProfile(
+            id: 42,
+            displayName: "Blocked",
+            bio: "",
+            avatarURL: nil
+        )
+        let visibleAuthor = CommunityUserProfile(
+            id: 77,
+            displayName: "Visible",
+            bio: "",
+            avatarURL: nil
+        )
+        var state = CommunityFeedStateStore()
+        let blockedQuestion = question(id: "blocked-1", author: blockedAuthor)
+        let visibleQuestion = question(id: "visible-1", author: visibleAuthor)
+
+        state.applyPage(
+            CommunityQuestionsResponse(
+                questions: [blockedQuestion, visibleQuestion],
+                totalCount: 2,
+                limit: 20,
+                offset: 0
+            ),
+            offset: 0,
+            reset: true
+        )
+        state.hideAuthor(userID: blockedAuthor.id)
+
+        XCTAssertEqual(state.questions.map(\.id), [visibleQuestion.id])
+        XCTAssertEqual(state.totalCount, 1)
+        XCTAssertEqual(state.offset, 0)
+        XCTAssertTrue(state.isAuthorHidden(blockedAuthor.id))
+
+        state.applyPage(
+            CommunityQuestionsResponse(
+                questions: [blockedQuestion, visibleQuestion],
+                totalCount: 2,
+                limit: 20,
+                offset: 0
+            ),
+            offset: 0,
+            reset: true
+        )
+
+        XCTAssertEqual(state.questions.map(\.id), [visibleQuestion.id])
+        XCTAssertEqual(state.totalCount, 1)
+    }
+
+    func testHiddenAuthorRewindsToPageBoundaryWithoutSkippingShiftedQuestion() {
+        let blockedAuthor = CommunityUserProfile(
+            id: 42,
+            displayName: "Blocked",
+            bio: "",
+            avatarURL: nil
+        )
+        let visibleAuthor = CommunityUserProfile(
+            id: 77,
+            displayName: "Visible",
+            bio: "",
+            avatarURL: nil
+        )
+        let originalQuestions = (0..<60).map { index in
+            question(
+                id: "question-\(index)",
+                author: index == 5 ? blockedAuthor : visibleAuthor
+            )
+        }
+        var state = CommunityFeedStateStore()
+
+        state.applyPage(
+            CommunityQuestionsResponse(
+                questions: Array(originalQuestions[0..<20]),
+                totalCount: originalQuestions.count,
+                limit: 20,
+                offset: 0
+            ),
+            offset: 0,
+            reset: true
+        )
+        state.applyPage(
+            CommunityQuestionsResponse(
+                questions: Array(originalQuestions[20..<40]),
+                totalCount: originalQuestions.count,
+                limit: 20,
+                offset: 20
+            ),
+            offset: 20,
+            reset: false
+        )
+
+        state.hideAuthor(userID: blockedAuthor.id)
+
+        XCTAssertEqual(state.offset, 20)
+        XCTAssertEqual(state.offset % 20, 0)
+
+        let serverVisibleQuestions = originalQuestions.filter { $0.author?.id != blockedAuthor.id }
+        state.applyPage(
+            CommunityQuestionsResponse(
+                questions: Array(serverVisibleQuestions[20..<40]),
+                totalCount: serverVisibleQuestions.count,
+                limit: 20,
+                offset: 20
+            ),
+            offset: state.offset,
+            reset: false
+        )
+
+        let expectedIDs = serverVisibleQuestions.prefix(40).map(\.id)
+        let actualIDs = state.questions.map(\.id)
+        XCTAssertEqual(actualIDs, expectedIDs)
+        XCTAssertEqual(Set(actualIDs).count, actualIDs.count)
+        XCTAssertEqual(state.offset, 40)
+    }
+
+    private func question(id: String, author: CommunityUserProfile) -> CommunityQuestion {
+        CommunityQuestion(
+            id: id,
+            question: "Question",
+            answer: "Answer",
+            gradingResult: nil,
+            topic: "Topic",
+            difficultyLevel: 5,
+            status: "graded",
+            source: "study",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            answeredAt: Date(timeIntervalSince1970: 1_700_000_060),
+            author: author
+        )
+    }
+}
+
+final class MobileHomeRefreshPresentationPolicyTests: XCTestCase {
+    func testShowsLoadingOnlyWhenTheInitialContentIsEmpty() {
+        XCTAssertTrue(
+            MobileHomeRefreshPresentationPolicy.showsInitialLoading(
+                hasContent: false,
+                isRefreshing: true
+            )
+        )
+        XCTAssertFalse(
+            MobileHomeRefreshPresentationPolicy.showsInitialLoading(
+                hasContent: true,
+                isRefreshing: true
+            )
+        )
+    }
+
+    func testDoesNotShowLoadingWhenThereIsNoRefreshInFlight() {
+        XCTAssertFalse(
+            MobileHomeRefreshPresentationPolicy.showsInitialLoading(
+                hasContent: false,
+                isRefreshing: false
+            )
+        )
+    }
+}
+
+final class MobileHomeStudyPresentationPolicyTests: XCTestCase {
+    func testCachedCategoriesDoNotRenderAsRootStudiesWithoutBackendRooms() {
+        let root = StudyCategory(id: "11", title: "Message Queue")
+        let child = StudyCategory(id: "12", title: "Retry and Dead Letter Queue")
+
+        XCTAssertEqual(
+            StudyRoomDisplayPolicy.rootCategories(
+                from: [root, child],
+                rooms: []
+            ),
+            []
+        )
+    }
+
+    func testOnlyBackendRootRoomsRenderAsRootStudies() {
+        let root = StudyCategory(id: "11", title: "Message Queue")
+        let child = StudyCategory(id: "12", title: "Retry and Dead Letter Queue")
+        let rooms = [
+            backendRoom(id: 11, topic: root.title, parentStudyId: nil),
+            backendRoom(id: 12, topic: child.title, parentStudyId: 11),
+        ]
+
+        XCTAssertEqual(
+            StudyRoomDisplayPolicy.rootCategories(
+                from: [root, child],
+                rooms: rooms
+            ),
+            [root]
+        )
+    }
+
+    func testSelectedChildResolvesToItsRootStudy() {
+        let rooms = [
+            backendRoom(id: 11, topic: "Message Queue", parentStudyId: nil),
+            backendRoom(id: 12, topic: "Retry", parentStudyId: 11),
+            backendRoom(id: 13, topic: "Dead Letter Queue", parentStudyId: 12),
+        ]
+
+        XCTAssertEqual(
+            StudyRoomDisplayPolicy.rootRoomID(containing: 13, rooms: rooms),
+            11
+        )
+    }
+
+    func testBrokenStudyHierarchyDoesNotResolveARoot() {
+        let rooms = [
+            backendRoom(id: 12, topic: "Retry", parentStudyId: 99),
+        ]
+
+        XCTAssertNil(
+            StudyRoomDisplayPolicy.rootRoomID(containing: 12, rooms: rooms)
+        )
+    }
+
+    func testStudyPresentationShowsLoadingFailureAndContentWithoutFlatFallback() {
+        XCTAssertEqual(
+            MobileHomeStudyPresentationPolicy.resolve(
+                hasContent: false,
+                loadState: .idle
+            ),
+            .loading
+        )
+        XCTAssertEqual(
+            MobileHomeStudyPresentationPolicy.resolve(
+                hasContent: false,
+                loadState: .failed
+            ),
+            .loadFailure
+        )
+        XCTAssertEqual(
+            MobileHomeStudyPresentationPolicy.resolve(
+                hasContent: true,
+                loadState: .failed
+            ),
+            .content
+        )
+    }
+
+    func testStudyLoadFailureCopyIsLocalizedForEverySupportedLanguage() {
+        XCTAssertEqual(AppStrings(language: .korean).unableToLoadStudies, "학습을 불러오지 못했습니다")
+        XCTAssertEqual(AppStrings(language: .english).unableToLoadStudies, "Couldn’t load your studies")
+        XCTAssertEqual(AppStrings(language: .japanese).unableToLoadStudies, "学習を読み込めませんでした")
+    }
+
+    private func backendRoom(
+        id: Int,
+        topic: String,
+        parentStudyId: Int?
+    ) -> BackendStudyRoom {
+        BackendStudyRoom(
+            id: id,
+            topic: topic,
+            parentStudyId: parentStudyId,
+            sortOrder: 0,
+            difficultyLevel: 5,
+            intervalMinutes: 60,
+            enabled: true,
+            activeForQuestions: true,
+            notificationSound: "default",
+            customPrompt: "",
+            openAIModel: StudySettings.defaultOpenAIModel,
+            maxHistoryCount: 100,
+            nextDueAt: nil,
+            lastSentAt: nil,
+            lastError: nil,
+            pendingQuestion: nil,
+            createdAt: Date(timeIntervalSince1970: 1),
+            updatedAt: Date(timeIntervalSince1970: 1)
+        )
+    }
+}
+
 final class PageAccessPolicyTests: XCTestCase {
+    @MainActor
+    func testNotificationStudyListRouteUsesExistingHomeMyStudiesScreen() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let appState = AppState(settingsStore: SettingsStore(defaults: defaults))
+
+        XCTAssertTrue(appState.openRouteFromNotification(.studyList))
+
+        XCTAssertEqual(appState.mobileVisibleTab, .home)
+        XCTAssertEqual(appState.appRouteRequest?.route, .studyList)
+        XCTAssertEqual(appState.appRouteRequest?.presentation, .direct)
+        XCTAssertNil(appState.homeStudyRoute)
+    }
+
+    @MainActor
+    func testNotificationHomeRouteDoesNotCreateNestedStudyListDestination() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let appState = AppState(settingsStore: SettingsStore(defaults: defaults))
+
+        XCTAssertTrue(appState.openRouteFromNotification(.home))
+
+        XCTAssertEqual(appState.mobileVisibleTab, .home)
+        XCTAssertNil(appState.appRouteRequest)
+        XCTAssertNil(appState.homeStudyRoute)
+    }
+
+    func testAppLanguageResolvesSupportedPreferredLanguagesInOrder() {
+        XCTAssertEqual(AppLanguage.preferred(from: ["ko-KR"]), .korean)
+        XCTAssertEqual(AppLanguage.preferred(from: ["en-GB"]), .english)
+        XCTAssertEqual(AppLanguage.preferred(from: ["ja-JP"]), .japanese)
+        XCTAssertEqual(AppLanguage.preferred(from: ["fr-FR", "ja-JP"]), .japanese)
+        XCTAssertEqual(AppLanguage.preferred(from: ["zh-Hans"]), .english)
+    }
+
+    func testFreshSettingsUseCurrentSystemLanguageBeforeFirstAppStateLaunch() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let firstStore = SettingsStore(
+            defaults: defaults,
+            preferredAppLanguageProvider: { .japanese }
+        )
+        let initialSettings = firstStore.loadSettings()
+
+        XCTAssertEqual(initialSettings.appLanguage, .japanese)
+        XCTAssertEqual(initialSettings.language, .japanese)
+        XCTAssertEqual(initialSettings.topic, StudySettings.fallbackTopicJapanese)
+        XCTAssertFalse(firstStore.loadHasCompletedOnboarding())
+
+        let relaunchedStore = SettingsStore(
+            defaults: defaults,
+            preferredAppLanguageProvider: { .english }
+        )
+        XCTAssertEqual(relaunchedStore.loadSettings().appLanguage, .english)
+        XCTAssertFalse(relaunchedStore.loadHasCompletedOnboarding())
+    }
+
+    func testLegacyStoredSettingsCountAsCompletedOnboarding() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        store.saveSettings(.initial(for: .korean))
+
+        XCTAssertTrue(store.loadHasCompletedOnboarding())
+    }
+
+    @MainActor
+    func testFreshAppStateEntersHomeWithoutCreatingAnInitialStudy() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(
+            defaults: defaults,
+            preferredAppLanguageProvider: { .japanese }
+        )
+        let appState = AppState(settingsStore: store)
+
+        XCTAssertTrue(appState.hasCompletedOnboarding)
+        XCTAssertEqual(appState.settings.appLanguage, .japanese)
+        XCTAssertTrue(appState.settings.studyCategories.isEmpty)
+        XCTAssertEqual(appState.mobileVisibleTab, .home)
+        XCTAssertTrue(store.loadHasCompletedOnboarding())
+        XCTAssertEqual(store.loadSettings().appLanguage, .japanese)
+        XCTAssertTrue(store.loadSettings().studyCategories.isEmpty)
+    }
+
+    func testSavedAppLanguageOverridesCurrentSystemPreference() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(
+            defaults: defaults,
+            preferredAppLanguageProvider: { .japanese }
+        )
+        store.saveSettings(.initial(for: .korean))
+
+        let relaunchedStore = SettingsStore(
+            defaults: defaults,
+            preferredAppLanguageProvider: { .english }
+        )
+        XCTAssertEqual(relaunchedStore.loadSettings().appLanguage, .korean)
+    }
+
+    @MainActor
+    func testViewIndependentLoadFinishesAfterCallingTaskIsCancelled() async {
+        var didFinish = false
+
+        let callingTask = Task { @MainActor in
+            await AppActionRunner().runViewIndependent {
+                try? await Task.sleep(nanoseconds: 20_000_000)
+                didFinish = true
+            }
+        }
+
+        await Task.yield()
+        callingTask.cancel()
+        await callingTask.value
+
+        XCTAssertTrue(didFinish)
+    }
+
     func testLoginGateUsesAuthoritativeSignedInState() {
         XCTAssertFalse(
             PageAccessPolicy.shouldShowLoginGate(
@@ -14,6 +1047,15 @@ final class PageAccessPolicyTests: XCTestCase {
                 for: .records,
                 isSignedIn: false
             )
+        )
+    }
+
+    func testGuestSettingsHideAccountBackedPreferences() {
+        XCTAssertFalse(
+            SettingsAccessPolicy.canEditAccountBackedPreferences(isSignedIn: false)
+        )
+        XCTAssertTrue(
+            SettingsAccessPolicy.canEditAccountBackedPreferences(isSignedIn: true)
         )
     }
 
@@ -74,5 +1116,1157 @@ final class PageAccessPolicyTests: XCTestCase {
         XCTAssertTrue(resolution.requiresTermsAgreement)
         XCTAssertFalse(resolution.requiresLogin)
         XCTAssertNil(resolution.featureMessage)
+    }
+
+    func testPendingQuestionConflictUsesDedicatedErrorCode() throws {
+        let payload = """
+        {
+          "error": {
+            "errorCode": "STUDY_PENDING_QUESTION_EXISTS",
+            "code": 501,
+            "message": "이 주제에 답변 대기 중인 질문이 있습니다.",
+            "requestId": "request-pending",
+            "status": 409
+          }
+        }
+        """
+        let envelope = try JSONDecoder().decode(
+            BackendAPIErrorResponse.self,
+            from: Data(payload.utf8)
+        )
+        let error = RemotePushBackendError.httpStatus(409, payload, envelope.error)
+
+        let resolution = AppErrorHandlingPolicy.resolve(error, fallback: "")
+
+        XCTAssertTrue(resolution.isPendingQuestionConflict)
+    }
+
+    func testLegacyValidationErrorStillRecognizesPendingQuestionConflict() throws {
+        let payload = """
+        {
+          "error": {
+            "errorCode": "VALIDATION_ERROR",
+            "code": 500,
+            "message": "요청 값이 올바르지 않습니다.",
+            "debugDescription": "A pending question already exists for this study.",
+            "requestId": "request-legacy",
+            "status": 409
+          }
+        }
+        """
+        let envelope = try JSONDecoder().decode(
+            BackendAPIErrorResponse.self,
+            from: Data(payload.utf8)
+        )
+        let error = RemotePushBackendError.httpStatus(409, payload, envelope.error)
+
+        let resolution = AppErrorHandlingPolicy.resolve(error, fallback: "")
+
+        XCTAssertTrue(resolution.isPendingQuestionConflict)
+    }
+}
+
+final class DeveloperAccessPolicyTests: XCTestCase {
+    func testHiddenDeveloperUnlockIsLimitedToDebugAndTestFlight() {
+        XCTAssertTrue(
+            AppDistributionContext(
+                isTestFlight: false,
+                buildIdentifier: "1.1.0(80)",
+                isDebugBuild: true
+            ).allowsHiddenDeveloperUnlock
+        )
+        XCTAssertTrue(
+            AppDistributionContext(
+                isTestFlight: true,
+                buildIdentifier: "1.1.0(80)",
+                isDebugBuild: false
+            ).allowsHiddenDeveloperUnlock
+        )
+        XCTAssertFalse(
+            AppDistributionContext(
+                isTestFlight: false,
+                buildIdentifier: "1.1.0(80)",
+                isDebugBuild: false
+            ).allowsHiddenDeveloperUnlock
+        )
+    }
+
+    func testFiveRapidVersionTapsUnlockAndExpiredWindowRestarts() {
+        var tracker = RapidDeveloperUnlockTapTracker()
+        let startedAt = Date(timeIntervalSince1970: 1_000)
+
+        for offset in 0..<4 {
+            XCTAssertFalse(
+                tracker.registerTap(
+                    at: startedAt.addingTimeInterval(Double(offset) * 0.25)
+                )
+            )
+        }
+        XCTAssertTrue(tracker.registerTap(at: startedAt.addingTimeInterval(1)))
+        XCTAssertFalse(tracker.registerTap(at: startedAt.addingTimeInterval(4)))
+        XCTAssertEqual(tracker.tapCount, 1)
+    }
+
+    func testDebugOverlayOffsetAccumulatesAndClampsToVisibleBounds() {
+        XCTAssertEqual(
+            DebugOverlayPositionPolicy.offsetAfterDrag(
+                committed: CGSize(width: 12, height: 74),
+                translation: CGSize(width: 500, height: -500),
+                containerSize: CGSize(width: 390, height: 844),
+                panelSize: CGSize(width: 300, height: 64),
+                margin: 12
+            ),
+            CGSize(width: 78, height: 12)
+        )
+    }
+
+    func testDebugOverlayMoveButtonCyclesBetweenVisibleCorners() {
+        let container = CGSize(width: 390, height: 844)
+        let panel = CGSize(width: 300, height: 64)
+        let topLeft = CGSize(width: 12, height: 12)
+
+        let topRight = DebugOverlayPositionPolicy.nextCornerOffset(
+            current: topLeft,
+            containerSize: container,
+            panelSize: panel,
+            margin: 12
+        )
+        let bottomRight = DebugOverlayPositionPolicy.nextCornerOffset(
+            current: topRight,
+            containerSize: container,
+            panelSize: panel,
+            margin: 12
+        )
+
+        XCTAssertEqual(topRight, CGSize(width: 78, height: 12))
+        XCTAssertEqual(bottomRight, CGSize(width: 78, height: 768))
+    }
+
+    func testDebugOverlayCapturesTouchesOnlyInsideItsVisiblePanel() {
+        let panelFrame = CGRect(x: 42, y: 100, width: 300, height: 64)
+
+        XCTAssertTrue(
+            DebugOverlayHitTestPolicy.captures(
+                point: CGPoint(x: 100, y: 120),
+                interactiveFrame: panelFrame
+            )
+        )
+        XCTAssertFalse(
+            DebugOverlayHitTestPolicy.captures(
+                point: CGPoint(x: 20, y: 120),
+                interactiveFrame: panelFrame
+            )
+        )
+        XCTAssertFalse(
+            DebugOverlayHitTestPolicy.captures(
+                point: CGPoint(x: 100, y: 120),
+                interactiveFrame: .null
+            )
+        )
+    }
+
+    @MainActor
+    func testTestFlightStartsNewBuildWithDeveloperModeDisabled() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        store.saveDeveloperAccessUnlocked(true)
+        store.saveIsDebuggingEnabled(true)
+        store.saveDeveloperAccessBuildIdentifier("1.0.9(56)")
+        let currentBuild = AppDistributionContext(
+            isTestFlight: true,
+            buildIdentifier: "1.1.0(57)",
+            isDebugBuild: false
+        )
+        let appState = AppState(
+            settingsStore: store,
+            appDistributionContext: currentBuild
+        )
+
+        XCTAssertFalse(appState.canAccessDeveloperOptions)
+        XCTAssertFalse(appState.canShowDebugPopup)
+        XCTAssertFalse(appState.isAPIDebugPanelPresented)
+        XCTAssertFalse(appState.isDebuggingEnabled)
+        XCTAssertFalse(store.loadIsDeveloperAccessUnlocked())
+        XCTAssertFalse(store.loadIsDebuggingEnabled())
+        XCTAssertEqual(store.loadDeveloperAccessBuildIdentifier(), "1.1.0(57)")
+
+        XCTAssertTrue(appState.unlockDeveloperAccessFromVersionGesture())
+        store.saveIsDebuggingEnabled(true)
+        let sameBuild = AppState(
+            settingsStore: store,
+            appDistributionContext: currentBuild
+        )
+        XCTAssertTrue(sameBuild.canAccessDeveloperOptions)
+        XCTAssertTrue(sameBuild.canShowDebugPopup)
+        XCTAssertTrue(sameBuild.isDebuggingEnabled)
+
+        let nextBuild = AppState(
+            settingsStore: store,
+            appDistributionContext: AppDistributionContext(
+                isTestFlight: true,
+                buildIdentifier: "1.1.1(58)",
+                isDebugBuild: false
+            )
+        )
+        XCTAssertFalse(nextBuild.canAccessDeveloperOptions)
+        XCTAssertFalse(nextBuild.canShowDebugPopup)
+        XCTAssertFalse(nextBuild.isDebuggingEnabled)
+        XCTAssertFalse(store.loadIsDeveloperAccessUnlocked())
+        XCTAssertFalse(store.loadIsDebuggingEnabled())
+        XCTAssertEqual(store.loadDeveloperAccessBuildIdentifier(), "1.1.1(58)")
+    }
+
+    @MainActor
+    func testAppStoreBuildRejectsVersionGestureUnlock() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let appState = AppState(
+            settingsStore: store,
+            appDistributionContext: AppDistributionContext(
+                isTestFlight: false,
+                buildIdentifier: "1.1.0(80)",
+                isDebugBuild: false
+            )
+        )
+
+        XCTAssertFalse(appState.unlockDeveloperAccessFromVersionGesture())
+        XCTAssertFalse(appState.canAccessDeveloperOptions)
+        XCTAssertFalse(store.loadIsDeveloperAccessUnlocked())
+        XCTAssertNil(store.loadDeveloperAccessBuildIdentifier())
+    }
+}
+
+final class NotificationStateStoreTests: XCTestCase {
+    @MainActor
+    func testMarkAllReadUpdatesEveryLoadedNotificationAndUnreadCount() {
+        let readAt = Date(timeIntervalSince1970: 100)
+        var store = NotificationStateStore(
+            notifications: [
+                BackendAppNotification(
+                    id: "unread",
+                    type: "QUESTION",
+                    title: "새 질문",
+                    body: "질문 본문",
+                    isRead: false,
+                    createdAt: Date(timeIntervalSince1970: 1)
+                ),
+                BackendAppNotification(
+                    id: "already-read",
+                    type: "QUESTION",
+                    title: "읽은 질문",
+                    body: "질문 본문",
+                    isRead: true,
+                    createdAt: Date(timeIntervalSince1970: 2),
+                    readAt: Date(timeIntervalSince1970: 50)
+                ),
+            ],
+            unreadCount: 1,
+            totalCount: 2
+        )
+
+        store.markAllRead(at: readAt)
+
+        XCTAssertEqual(store.unreadCount, 0)
+        XCTAssertTrue(store.notifications.allSatisfy(\.isRead))
+        XCTAssertEqual(store.notifications[0].readAt, readAt)
+        XCTAssertEqual(store.notifications[1].readAt, Date(timeIntervalSince1970: 50))
+    }
+}
+
+final class StudyRoomStateStoreTests: XCTestCase {
+    @MainActor
+    func testPendingStudyRecordIsSelectedPerTopicStudy() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let swiftCategory = StudyCategory(id: "11", title: "Swift", difficulty: .level5)
+        let kotlinCategory = StudyCategory(id: "12", title: "Kotlin", difficulty: .level6)
+        store.saveSettings(
+            StudySettings(
+                topic: swiftCategory.title,
+                difficulty: swiftCategory.difficulty,
+                customPrompt: "",
+                intervalMinutes: 30,
+                studyCategories: [swiftCategory, kotlinCategory],
+                selectedStudyCategoryID: swiftCategory.id
+            )
+        )
+        store.replaceStudyRecords([
+            StudyRecord(
+                id: "swift-question",
+                studyID: 11,
+                question: QuestionItem(
+                    question: "What is actor isolation?",
+                    expectedAnswerHint: nil,
+                    createdAt: Date(timeIntervalSince1970: 11)
+                ),
+                topic: swiftCategory.title,
+                difficulty: swiftCategory.difficulty
+            ),
+            StudyRecord(
+                id: "kotlin-question",
+                studyID: 12,
+                question: QuestionItem(
+                    question: "What is structured concurrency?",
+                    expectedAnswerHint: nil,
+                    createdAt: Date(timeIntervalSince1970: 12)
+                ),
+                topic: kotlinCategory.title,
+                difficulty: kotlinCategory.difficulty
+            )
+        ])
+        let appState = AppState(settingsStore: store)
+
+        XCTAssertEqual(appState.pendingStudyRecord(categoryID: swiftCategory.id)?.id, "swift-question")
+        XCTAssertEqual(appState.pendingStudyRecord(categoryID: kotlinCategory.id)?.id, "kotlin-question")
+    }
+
+    func testBackendPendingQuestionCanBeClearedWithoutLocalRecordCacheEntry() {
+        let record = StudyRecord(
+            id: "record-42",
+            question: QuestionItem(
+                question: "What does SKIP LOCKED do?",
+                expectedAnswerHint: nil,
+                createdAt: Date(timeIntervalSince1970: 42)
+            ),
+            topic: "Database",
+            difficulty: .intermediate
+        )
+        let room = BackendStudyRoom(
+            id: 19,
+            topic: "Database",
+            difficultyLevel: 5,
+            intervalMinutes: 30,
+            enabled: true,
+            notificationSound: nil,
+            customPrompt: "",
+            openAIModel: "gpt-5.4",
+            maxHistoryCount: 100,
+            nextDueAt: nil,
+            lastSentAt: nil,
+            lastError: nil,
+            pendingQuestion: record,
+            createdAt: Date(timeIntervalSince1970: 1),
+            updatedAt: Date(timeIntervalSince1970: 1)
+        )
+        var state = StudyRoomStateStore()
+        state.replace(with: [room])
+
+        XCTAssertTrue(state.containsPendingQuestion(recordID: record.id))
+
+        state.clearPendingQuestion(recordID: record.id)
+
+        XCTAssertFalse(state.containsPendingQuestion(recordID: record.id))
+        XCTAssertEqual(state.pendingQuestionCount, 0)
+    }
+
+    func testPendingQuestionCountUsesStudyIDWhenTopicsAreEqual() {
+        let pendingRecord = StudyRecord(
+            id: "record-11",
+            studyID: 11,
+            question: QuestionItem(
+                question: "Root question",
+                expectedAnswerHint: nil,
+                createdAt: Date(timeIntervalSince1970: 11)
+            ),
+            topic: "Redis",
+            difficulty: .intermediate
+        )
+        var state = StudyRoomStateStore()
+        state.replace(with: [
+            backendRoom(id: 11, topic: "Redis", pendingQuestion: pendingRecord),
+            backendRoom(id: 12, topic: "Redis", pendingQuestion: nil)
+        ])
+
+        XCTAssertEqual(
+            state.pendingQuestionCount(for: StudyCategory(id: "11", title: "Redis")),
+            1
+        )
+        XCTAssertEqual(
+            state.pendingQuestionCount(for: StudyCategory(id: "12", title: "Redis")),
+            0
+        )
+    }
+
+    func testExplicitMissingNumericStudyIDDoesNotFallBackToSelectedRoot() {
+        let root = StudyCategory(id: "11", title: "Redis")
+        let settings = StudySettings(
+            topic: root.title,
+            difficulty: .level5,
+            customPrompt: "",
+            intervalMinutes: 30,
+            studyCategories: [root],
+            selectedStudyCategoryID: root.id
+        )
+        var state = StudyRoomStateStore()
+        state.replace(with: [
+            backendRoom(id: 11, topic: root.title, pendingQuestion: nil)
+        ])
+
+        XCTAssertNil(
+            state.room(categoryID: "999", settings: settings),
+            "An explicit missing child ID must not silently resolve to the selected root study."
+        )
+        XCTAssertEqual(
+            state.room(categoryID: nil, settings: settings)?.id,
+            11,
+            "The selected-root fallback remains valid only when no explicit study ID was requested."
+        )
+    }
+
+    func testIncomingRecordOnlyUpdatesItsStudyID() {
+        let record = StudyRecord(
+            id: "record-12",
+            studyID: 12,
+            question: QuestionItem(
+                question: "Child question",
+                expectedAnswerHint: nil,
+                createdAt: Date(timeIntervalSince1970: 12)
+            ),
+            topic: "Redis",
+            difficulty: .intermediate
+        )
+        var state = StudyRoomStateStore()
+        state.replace(with: [
+            backendRoom(id: 11, topic: "Redis", pendingQuestion: nil),
+            backendRoom(id: 12, topic: "Redis", pendingQuestion: nil)
+        ])
+
+        XCTAssertTrue(state.applyIncomingRecord(record))
+        XCTAssertNil(state.rooms.first(where: { $0.id == 11 })?.pendingQuestion)
+        XCTAssertEqual(state.rooms.first(where: { $0.id == 12 })?.pendingQuestion?.id, record.id)
+    }
+
+    @MainActor
+    func testPendingLimitDoesNotFallBackFromRootToChildStudy() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        let root = StudyCategory(id: "11", title: "Redis", difficulty: .level5)
+        let child = StudyCategory(id: "12", title: "Redis Streams", difficulty: .level5)
+        store.saveSettings(
+            StudySettings(
+                topic: child.title,
+                difficulty: root.difficulty,
+                customPrompt: "",
+                intervalMinutes: 30,
+                studyCategories: [root, child],
+                selectedStudyCategoryID: root.id
+            )
+        )
+        store.replaceStudyRecords([
+            StudyRecord(
+                id: "root-question",
+                studyID: 11,
+                question: QuestionItem(
+                    question: "Root question",
+                    expectedAnswerHint: nil,
+                    createdAt: Date(timeIntervalSince1970: 11)
+                ),
+                topic: root.title,
+                difficulty: root.difficulty
+            )
+        ])
+        let appState = AppState(settingsStore: store)
+
+        XCTAssertTrue(appState.hasReachedPendingQuestionLimit(categoryID: root.id))
+        XCTAssertFalse(appState.hasReachedPendingQuestionLimit(categoryID: child.id))
+        XCTAssertNil(appState.pendingStudyRecord(categoryID: child.id))
+    }
+
+    private func backendRoom(
+        id: Int,
+        topic: String,
+        pendingQuestion: StudyRecord?
+    ) -> BackendStudyRoom {
+        BackendStudyRoom(
+            id: id,
+            topic: topic,
+            difficultyLevel: 5,
+            intervalMinutes: 30,
+            enabled: true,
+            notificationSound: nil,
+            customPrompt: "",
+            openAIModel: "gpt-5.4",
+            maxHistoryCount: 100,
+            nextDueAt: nil,
+            lastSentAt: nil,
+            lastError: nil,
+            pendingQuestion: pendingQuestion,
+            createdAt: Date(timeIntervalSince1970: 1),
+            updatedAt: Date(timeIntervalSince1970: 1)
+        )
+    }
+}
+
+final class StudyTreeViewportPersistenceTests: XCTestCase {
+    func testViewportPersistsPerRootStudyAndSanitizesValues() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = SettingsStore(defaults: defaults)
+        XCTAssertFalse(store.hasStudyTreeViewport(rootStudyID: 7))
+        store.saveStudyTreeViewport(
+            StudyTreeViewportState(
+                zoomScale: 1.45,
+                contentOffsetX: 180,
+                contentOffsetY: 96,
+                canvasAlignmentX: 24,
+                canvasAlignmentY: 80
+            ),
+            rootStudyID: 7
+        )
+        XCTAssertTrue(store.hasStudyTreeViewport(rootStudyID: 7))
+
+        XCTAssertEqual(
+            store.loadStudyTreeViewport(rootStudyID: 7),
+            StudyTreeViewportState(
+                zoomScale: 1.45,
+                contentOffsetX: 180,
+                contentOffsetY: 96,
+                canvasAlignmentX: 24,
+                canvasAlignmentY: 80
+            )
+        )
+        XCTAssertEqual(store.loadStudyTreeViewport(rootStudyID: 8), .default)
+
+        store.saveStudyTreeViewport(
+            StudyTreeViewportState(
+                zoomScale: 4,
+                contentOffsetX: -20,
+                contentOffsetY: .infinity,
+                canvasAlignmentX: -.infinity,
+                canvasAlignmentY: .infinity
+            ),
+            rootStudyID: 9
+        )
+        XCTAssertEqual(
+            store.loadStudyTreeViewport(rootStudyID: 9),
+            StudyTreeViewportState(
+                zoomScale: 1.8,
+                contentOffsetX: 0,
+                contentOffsetY: 0,
+                canvasAlignmentX: 0,
+                canvasAlignmentY: 0
+            )
+        )
+    }
+}
+
+final class StudyTreeLayoutPolicyTests: XCTestCase {
+    func testNodeLevelProgressUsesClampedTenPointScale() {
+        XCTAssertEqual(StudyTreeNodeStylePolicy.levelFillFraction(1), 0.1)
+        XCTAssertEqual(StudyTreeNodeStylePolicy.levelFillFraction(5), 0.5)
+        XCTAssertEqual(StudyTreeNodeStylePolicy.levelFillFraction(10), 1)
+        XCTAssertEqual(StudyTreeNodeStylePolicy.levelText(0), "1/10")
+        XCTAssertEqual(StudyTreeNodeStylePolicy.levelText(3), "3/10")
+        XCTAssertEqual(StudyTreeNodeStylePolicy.levelText(11), "10/10")
+    }
+
+    func testCanvasExpandsToIncludeMovedNodesAndRecoversInvalidValues() {
+        let baseCenters = [7: CGPoint(x: 100, y: 100)]
+
+        XCTAssertEqual(
+            StudyTreeCanvasPolicy.expandedLayout(
+                baseCenters: baseCenters,
+                nodeOffsets: [7: CGSize(width: 1_000, height: -1_000)],
+                baseCanvasSize: CGSize(width: 320, height: 320),
+                nodeSize: CGSize(width: 112, height: 112)
+            ),
+            StudyTreeCanvasLayout(
+                size: CGSize(width: 1_164, height: 1_284),
+                translation: CGSize(width: 0, height: 964)
+            )
+        )
+        XCTAssertEqual(
+            StudyTreeCanvasPolicy.expandedLayout(
+                baseCenters: baseCenters,
+                nodeOffsets: [7: CGSize(width: 100_000, height: 100_000)],
+                baseCanvasSize: CGSize(width: 320, height: 320),
+                nodeSize: CGSize(width: 112, height: 112)
+            ),
+            StudyTreeCanvasLayout(
+                size: CGSize(width: 100_164, height: 100_164),
+                translation: .zero
+            )
+        )
+        XCTAssertEqual(
+            StudyTreeCanvasPolicy.sanitizedOffset(
+                CGSize(width: CGFloat.infinity, height: CGFloat.nan)
+            ),
+            .zero
+        )
+    }
+
+    func testInitialFitStopsAsSoonAsTheUserMovesTheTree() {
+        let viewportSize = CGSize(width: 390, height: 700)
+
+        XCTAssertTrue(
+            StudyTreeViewportPolicy.shouldApplyInitialFit(
+                isRequested: true,
+                hasApplied: false,
+                hasUserInteracted: false,
+                hasFinishedRefresh: true,
+                viewportSize: viewportSize
+            )
+        )
+        XCTAssertFalse(
+            StudyTreeViewportPolicy.shouldApplyInitialFit(
+                isRequested: true,
+                hasApplied: false,
+                hasUserInteracted: true,
+                hasFinishedRefresh: true,
+                viewportSize: viewportSize
+            )
+        )
+    }
+
+    func testScrollOffsetPreservesSafeAreaInsetAtLogicalOrigin() {
+        let leadingInset = CGSize(width: 0, height: 116)
+
+        XCTAssertEqual(
+            StudyTreeViewportPolicy.normalizedContentOffset(
+                rawContentOffset: CGPoint(x: 0, y: -116),
+                leadingInset: leadingInset
+            ),
+            .zero
+        )
+        XCTAssertEqual(
+            StudyTreeViewportPolicy.rawContentOffset(
+                normalizedContentOffset: .zero,
+                leadingInset: leadingInset
+            ),
+            CGPoint(x: 0, y: -116)
+        )
+        XCTAssertEqual(
+            StudyTreeViewportPolicy.maximumNormalizedContentOffset(
+                contentSize: CGSize(width: 390, height: 800),
+                viewportSize: CGSize(width: 390, height: 700),
+                totalInset: CGSize(width: 0, height: 116)
+            ),
+            CGPoint(x: 0, y: 216)
+        )
+    }
+
+    func testNewNodesMoveAsideFromExistingNodesAtTheSameLevel() {
+        let baseCenters = [
+            1: CGPoint(x: 100, y: 100),
+            2: CGPoint(x: 254, y: 100),
+            3: CGPoint(x: 408, y: 100),
+            4: CGPoint(x: 408, y: 286)
+        ]
+        let offsets = StudyTreeCanvasPolicy.offsetsPlacingNewNodesWithoutSameLevelOverlap(
+            newRoomIDs: [3, 4],
+            baseCenters: baseCenters,
+            nodeOffsets: [1: CGSize(width: 308, height: 0)],
+            nodeSize: CGSize(width: 112, height: 112)
+        )
+
+        XCTAssertEqual(offsets[3], CGSize(width: 128, height: 0))
+        XCTAssertEqual(offsets[4], .zero)
+        XCTAssertEqual(offsets[1], CGSize(width: 308, height: 0))
+    }
+
+    func testTreeEdgesPointFromParentTowardChild() throws {
+        let geometry = try XCTUnwrap(
+            StudyTreeEdgePolicy.directionalGeometry(
+                parent: CGPoint(x: 100, y: 100),
+                child: CGPoint(x: 100, y: 286),
+                nodeRadius: 60
+            )
+        )
+
+        XCTAssertEqual(geometry.start, CGPoint(x: 100, y: 160))
+        XCTAssertEqual(geometry.end, CGPoint(x: 100, y: 226))
+        XCTAssertEqual(geometry.arrowLeft, CGPoint(x: 95, y: 216))
+        XCTAssertEqual(geometry.arrowRight, CGPoint(x: 105, y: 216))
+    }
+
+    func testStudySubtreeDeletesChildrenBeforeTheirParent() {
+        let parentByRoomID = [
+            2: 1,
+            3: 2,
+            4: 1,
+            9: 8
+        ]
+        let subtree = StudyTreeDeletionPolicy.subtreeIDs(
+            rootIDs: [1],
+            parentByRoomID: parentByRoomID
+        )
+
+        XCTAssertEqual(subtree, [1, 2, 3, 4])
+        XCTAssertEqual(
+            StudyTreeDeletionPolicy.childFirstDeletionOrder(
+                studyIDs: subtree,
+                parentByRoomID: parentByRoomID
+            ),
+            [3, 2, 4, 1]
+        )
+    }
+
+    func testInitialZoomFitsEntireCanvasWithoutEnlargingSmallTrees() {
+        XCTAssertEqual(
+            StudyTreeViewportPolicy.fittedZoomScale(
+                canvasSize: CGSize(width: 1_000, height: 500),
+                viewportSize: CGSize(width: 400, height: 300),
+                padding: 20
+            ),
+            0.36,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            StudyTreeViewportPolicy.fittedZoomScale(
+                canvasSize: CGSize(width: 200, height: 200),
+                viewportSize: CGSize(width: 400, height: 500)
+            ),
+            1
+        )
+    }
+
+    func testZoomKeepsGestureAnchorStationary() {
+        XCTAssertEqual(
+            StudyTreeViewportPolicy.contentOffsetPreservingAnchor(
+                startOffset: CGPoint(x: 100, y: 50),
+                anchor: CGPoint(x: 200, y: 300),
+                canvasSize: CGSize(width: 1_000, height: 800),
+                viewportSize: CGSize(width: 400, height: 600),
+                startAlignmentInset: .zero,
+                targetAlignmentInset: .zero,
+                startScale: 1,
+                targetScale: 2
+            ),
+            CGPoint(x: 400, y: 400)
+        )
+        XCTAssertEqual(
+            StudyTreeViewportPolicy.contentOffsetPreservingAnchor(
+                startOffset: .zero,
+                anchor: CGPoint(x: 200, y: 300),
+                canvasSize: CGSize(width: 1_000, height: 1_000),
+                viewportSize: CGSize(width: 400, height: 600),
+                startAlignmentInset: .zero,
+                targetAlignmentInset: .zero,
+                startScale: 1,
+                targetScale: 0.5
+            ),
+            .zero
+        )
+    }
+
+    func testZoomCrossingViewportBoundaryKeepsCenteredCanvasStable() {
+        let canvasSize = CGSize(width: 200, height: 200)
+        let viewportSize = CGSize(width: 400, height: 600)
+        let viewportCenter = CGPoint(x: 200, y: 300)
+        let centeredInset = StudyTreeViewportPolicy.centeredCanvasAlignmentInset(
+            canvasSize: canvasSize,
+            viewportSize: viewportSize,
+            zoomScale: 1
+        )
+
+        let zoomedInOffset = StudyTreeViewportPolicy.contentOffsetPreservingAnchor(
+            startOffset: .zero,
+            anchor: viewportCenter,
+            canvasSize: canvasSize,
+            viewportSize: viewportSize,
+            startAlignmentInset: centeredInset,
+            targetAlignmentInset: .zero,
+            startScale: 1,
+            targetScale: 3
+        )
+        XCTAssertEqual(zoomedInOffset, CGPoint(x: 100, y: 0))
+
+        XCTAssertEqual(
+            StudyTreeViewportPolicy.contentOffsetPreservingAnchor(
+                startOffset: zoomedInOffset,
+                anchor: viewportCenter,
+                canvasSize: canvasSize,
+                viewportSize: viewportSize,
+                startAlignmentInset: .zero,
+                targetAlignmentInset: centeredInset,
+                startScale: 3,
+                targetScale: 1
+            ),
+            .zero
+        )
+    }
+
+    func testFiveHundredDragUpdatesNeverTeleportTheTree() {
+        let baseCenters = [
+            1: CGPoint(x: 100, y: 100),
+            2: CGPoint(x: 260, y: 100)
+        ]
+        let baseCanvasSize = CGSize(width: 320, height: 320)
+        let nodeSize = CGSize(width: 112, height: 112)
+        let zoomScale: CGFloat = 0.75
+        let fixedAlignmentInset = CGSize(width: 35, height: 90)
+        let startViewportOffset = CGPoint(x: 40, y: 30)
+        let startLayout = StudyTreeCanvasPolicy.expandedLayout(
+            baseCenters: baseCenters,
+            nodeOffsets: [:],
+            baseCanvasSize: baseCanvasSize,
+            nodeSize: nodeSize
+        )
+        let stationaryNodeStart = CGPoint(
+            x: (baseCenters[2]!.x + startLayout.translation.width) * zoomScale
+                + fixedAlignmentInset.width
+                - startViewportOffset.x,
+            y: (baseCenters[2]!.y + startLayout.translation.height) * zoomScale
+                + fixedAlignmentInset.height
+                - startViewportOffset.y
+        )
+        let draggedNodeStart = CGPoint(
+            x: (baseCenters[1]!.x + startLayout.translation.width) * zoomScale
+                + fixedAlignmentInset.width
+                - startViewportOffset.x,
+            y: (baseCenters[1]!.y + startLayout.translation.height) * zoomScale
+                + fixedAlignmentInset.height
+                - startViewportOffset.y
+        )
+
+        for step in 0...500 {
+            let progress = CGFloat(step) / 500
+            let triangularProgress = progress <= 0.5
+                ? progress * 2
+                : (1 - progress) * 2
+            let draggedOffset = CGSize(
+                width: -1_200 * triangularProgress,
+                height: -800 * triangularProgress
+            )
+            let layout = StudyTreeCanvasPolicy.expandedLayout(
+                baseCenters: baseCenters,
+                nodeOffsets: [1: draggedOffset],
+                baseCanvasSize: baseCanvasSize,
+                nodeSize: nodeSize
+            )
+            let compensation =
+                StudyTreeViewportPolicy.compensationPreservingCanvasTranslation(
+                    startOffset: startViewportOffset,
+                    startAlignmentInset: fixedAlignmentInset,
+                    startCanvasTranslation: startLayout.translation,
+                    targetCanvasTranslation: layout.translation,
+                    zoomScale: zoomScale
+                )
+            let viewportOffset = compensation.viewportOffset
+            let alignmentInset = compensation.alignmentInset
+            let stationaryNode = CGPoint(
+                x: (baseCenters[2]!.x + layout.translation.width) * zoomScale
+                    + alignmentInset.width
+                    - viewportOffset.x,
+                y: (baseCenters[2]!.y + layout.translation.height) * zoomScale
+                    + alignmentInset.height
+                    - viewportOffset.y
+            )
+            let draggedNode = CGPoint(
+                x: (
+                    baseCenters[1]!.x
+                        + draggedOffset.width
+                        + layout.translation.width
+                ) * zoomScale
+                    + alignmentInset.width
+                    - viewportOffset.x,
+                y: (
+                    baseCenters[1]!.y
+                        + draggedOffset.height
+                        + layout.translation.height
+                ) * zoomScale
+                    + alignmentInset.height
+                    - viewportOffset.y
+            )
+
+            XCTAssertEqual(stationaryNode.x, stationaryNodeStart.x, accuracy: 0.0001)
+            XCTAssertEqual(stationaryNode.y, stationaryNodeStart.y, accuracy: 0.0001)
+            XCTAssertEqual(
+                draggedNode.x,
+                draggedNodeStart.x + draggedOffset.width * zoomScale,
+                accuracy: 0.0001
+            )
+            XCTAssertEqual(
+                draggedNode.y,
+                draggedNodeStart.y + draggedOffset.height * zoomScale,
+                accuracy: 0.0001
+            )
+        }
+    }
+
+    func testFiveHundredInwardDragUpdatesNeverTeleportTheTree() {
+        let baseCenters = [
+            1: CGPoint(x: 100, y: 100),
+            2: CGPoint(x: 260, y: 100)
+        ]
+        let initialDraggedOffset = CGSize(width: -1_200, height: -800)
+        let baseCanvasSize = CGSize(width: 320, height: 320)
+        let nodeSize = CGSize(width: 112, height: 112)
+        let zoomScale: CGFloat = 0.75
+        let startAlignmentInset = CGSize(width: 35, height: 90)
+        let startViewportOffset = CGPoint.zero
+        let startLayout = StudyTreeCanvasPolicy.expandedLayout(
+            baseCenters: baseCenters,
+            nodeOffsets: [1: initialDraggedOffset],
+            baseCanvasSize: baseCanvasSize,
+            nodeSize: nodeSize
+        )
+        let stationaryNodeStart = CGPoint(
+            x: (baseCenters[2]!.x + startLayout.translation.width) * zoomScale
+                + startAlignmentInset.width,
+            y: (baseCenters[2]!.y + startLayout.translation.height) * zoomScale
+                + startAlignmentInset.height
+        )
+        let draggedNodeStart = CGPoint(
+            x: (
+                baseCenters[1]!.x
+                    + initialDraggedOffset.width
+                    + startLayout.translation.width
+            ) * zoomScale
+                + startAlignmentInset.width,
+            y: (
+                baseCenters[1]!.y
+                    + initialDraggedOffset.height
+                    + startLayout.translation.height
+            ) * zoomScale
+                + startAlignmentInset.height
+        )
+
+        for step in 0...500 {
+            let progress = CGFloat(step) / 500
+            let draggedOffset = CGSize(
+                width: initialDraggedOffset.width * (1 - progress),
+                height: initialDraggedOffset.height * (1 - progress)
+            )
+            let layout = StudyTreeCanvasPolicy.expandedLayout(
+                baseCenters: baseCenters,
+                nodeOffsets: [1: draggedOffset],
+                baseCanvasSize: baseCanvasSize,
+                nodeSize: nodeSize
+            )
+            let compensation =
+                StudyTreeViewportPolicy.compensationPreservingCanvasTranslation(
+                    startOffset: startViewportOffset,
+                    startAlignmentInset: startAlignmentInset,
+                    startCanvasTranslation: startLayout.translation,
+                    targetCanvasTranslation: layout.translation,
+                    zoomScale: zoomScale
+                )
+            let stationaryNode = CGPoint(
+                x: (baseCenters[2]!.x + layout.translation.width) * zoomScale
+                    + compensation.alignmentInset.width
+                    - compensation.viewportOffset.x,
+                y: (baseCenters[2]!.y + layout.translation.height) * zoomScale
+                    + compensation.alignmentInset.height
+                    - compensation.viewportOffset.y
+            )
+            let draggedNode = CGPoint(
+                x: (
+                    baseCenters[1]!.x
+                        + draggedOffset.width
+                        + layout.translation.width
+                ) * zoomScale
+                    + compensation.alignmentInset.width
+                    - compensation.viewportOffset.x,
+                y: (
+                    baseCenters[1]!.y
+                        + draggedOffset.height
+                        + layout.translation.height
+                ) * zoomScale
+                    + compensation.alignmentInset.height
+                    - compensation.viewportOffset.y
+            )
+
+            XCTAssertEqual(stationaryNode.x, stationaryNodeStart.x, accuracy: 0.0001)
+            XCTAssertEqual(stationaryNode.y, stationaryNodeStart.y, accuracy: 0.0001)
+            XCTAssertEqual(
+                draggedNode.x,
+                draggedNodeStart.x
+                    + (draggedOffset.width - initialDraggedOffset.width) * zoomScale,
+                accuracy: 0.0001
+            )
+            XCTAssertEqual(
+                draggedNode.y,
+                draggedNodeStart.y
+                    + (draggedOffset.height - initialDraggedOffset.height) * zoomScale,
+                accuracy: 0.0001
+            )
+        }
+    }
+}
+
+final class StudyOutlinePolicyTests: XCTestCase {
+    func testTopicPreviewIsBoundedForLongTrees() {
+        XCTAssertEqual(StudyOutlinePolicy.visibleCount(totalTopicCount: 0), 0)
+        XCTAssertEqual(StudyOutlinePolicy.visibleCount(totalTopicCount: 2), 2)
+        XCTAssertEqual(StudyOutlinePolicy.visibleCount(totalTopicCount: 12), 5)
+        XCTAssertEqual(StudyOutlinePolicy.remainingCount(totalTopicCount: 2), 0)
+        XCTAssertEqual(StudyOutlinePolicy.remainingCount(totalTopicCount: 12), 7)
+    }
+
+    func testAncestorPathSupportsDeepTreesWithoutGrowingIndentation() {
+        let parentByID = [
+            2: 1,
+            3: 2,
+            4: 3,
+            5: 4,
+            6: 5,
+            7: 6
+        ]
+
+        XCTAssertEqual(
+            StudyOutlinePolicy.ancestorPath(
+                rootID: 1,
+                targetID: 7,
+                parentByID: parentByID
+            ),
+            [1, 2, 3, 4, 5, 6, 7]
+        )
+        XCTAssertEqual(
+            StudyOutlinePolicy.ancestorPath(
+                rootID: 1,
+                targetID: 99,
+                parentByID: parentByID
+            ),
+            [1]
+        )
+    }
+}
+
+final class RecordsPaginationTests: XCTestCase {
+    func testStudyRecordsAreNotTrimmedByLegacyHistoryPreference() {
+        let suiteName = "StudyMateiOSTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let databaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("StudyMateiOSTests-\(UUID().uuidString).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+
+        let store = SettingsStore(defaults: defaults, recordDatabaseURL: databaseURL)
+        let settings = StudySettings(
+            topic: "운영체제",
+            difficulty: .intermediate,
+            customPrompt: "짧게",
+            intervalMinutes: 15,
+            maxHistoryCount: 10
+        )
+
+        store.saveSettings(settings)
+        for index in 1...12 {
+            store.appendStudyRecord(
+                question: QuestionItem(
+                    question: "Question \(index)",
+                    expectedAnswerHint: nil,
+                    createdAt: Date()
+                ),
+                settings: settings
+            )
+        }
+
+        let records = store.loadStudyRecords()
+
+        XCTAssertEqual(records.count, 12)
+        XCTAssertEqual(records.first?.question.question, "Question 1")
+    }
+
+    @MainActor
+    func testRecordsStateTracksBackendPagesWithoutTreatingPageSizeAsRetention() {
+        var state = RecordsStateStore()
+        let firstRecords = (1...30).map { index in
+            StudyRecord(
+                id: "\(index)",
+                question: QuestionItem(
+                    question: "Question \(index)",
+                    expectedAnswerHint: nil,
+                    createdAt: Date()
+                ),
+                gradingResult: GradingResult(
+                    score: 80,
+                    isCorrect: true,
+                    feedback: "좋아요.",
+                    explanation: "핵심을 설명했습니다."
+                ),
+                topic: "Swift",
+                difficulty: .level5
+            )
+        }
+        let firstPage = BackendRecordsPage(
+            records: firstRecords,
+            totalCount: 75,
+            limit: 30,
+            offset: 0
+        )
+
+        XCTAssertTrue(state.beginPageLoad())
+        state.applyPage(firstPage, reset: true)
+        state.finishPageLoad()
+
+        XCTAssertEqual(state.totalCount, 75)
+        XCTAssertEqual(state.loadedBackendCount, 30)
+        XCTAssertTrue(state.canLoadMore)
+
+        let finalPage = BackendRecordsPage(
+            records: Array(firstRecords.prefix(15)),
+            totalCount: 75,
+            limit: 30,
+            offset: 60
+        )
+        XCTAssertTrue(state.beginPageLoad())
+        state.applyPage(finalPage, reset: false)
+        state.finishPageLoad()
+
+        XCTAssertEqual(state.loadedBackendCount, 75)
+        XCTAssertFalse(state.canLoadMore)
+
+        state.removeLoadedBackendRecord(firstRecords[0])
+
+        XCTAssertEqual(state.totalCount, 74)
+        XCTAssertEqual(state.loadedBackendCount, 74)
+    }
+
+    @MainActor
+    func testDeletingLoadedSearchResultUpdatesSearchPagination() throws {
+        var state = SearchStateStore()
+        let record = StudyRecord(
+            id: "42",
+            question: QuestionItem(
+                question: "검색 결과",
+                expectedAnswerHint: nil,
+                createdAt: Date()
+            ),
+            topic: "Swift",
+            difficulty: .level5
+        )
+        let requestID = try XCTUnwrap(state.beginRecordPage(query: "Swift", reset: true))
+        state.applyRecordPage(
+            BackendRecordsPage(records: [record], totalCount: 4, limit: 30, offset: 0),
+            query: "Swift",
+            reset: true,
+            requestID: requestID
+        )
+        state.finishRecordPage(query: "Swift", requestID: requestID)
+
+        state.removeRecordResult(id: record.id)
+
+        XCTAssertTrue(state.recordResults?.isEmpty == true)
+        XCTAssertEqual(state.recordTotalCount, 3)
+        XCTAssertEqual(state.recordLoadedCount, 0)
+        XCTAssertTrue(state.canLoadMoreRecordResults)
     }
 }

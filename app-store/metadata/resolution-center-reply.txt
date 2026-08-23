@@ -1,0 +1,31 @@
+Hello App Review,
+
+Thank you for reviewing BuddyStudy 1.1.0. Here is all requested information.
+
+1. COMPLETE PHYSICAL-DEVICE VIDEO
+Attached video: {{ATTACHED_VIDEO_FILENAME}}
+This unedited physical-iPhone video uses the latest public iOS available on the recording date. Starting on the Home Screen, it launches BuddyStudy and shows disposable email registration/code/deletion; OTP-free demo login; AI study/grading/results; report/block; subscription disclosures; Apple's purchase sheet then cancellation; and the notification prompt.
+
+2. TESTED DEVICES AND OS VERSIONS
+{{ACTUALLY_TESTED_DEVICE_MODELS_AND_IOS_VERSIONS}}
+This lists every physical model, exact OS version, and selected build tested. No unlisted device is claimed.
+
+3. FUNCTIONS, AUDIENCE, PROBLEM, AND VALUE
+BuddyStudy helps students and self-directed learners age 14+ practice active recall. It creates short questions for a selected topic/difficulty, grades answers, saves records, and shows topic progress to identify weak areas.
+
+4. SETUP AND ACCESS
+Active email demo credentials are in App Review Information. Demo login needs no OTP, invitation, membership, sample file, or special hardware; new email registration separately needs its delivered code. Accept Privacy if prompted. Paths: Home > My Studies for AI study; Records/Statistics for results; Home > All Studies for public content, Report, and Block; Profile > Membership & Billing for subscriptions; Settings > Account Settings > Delete Account. Apple, Google, and email login are visible.
+
+5. EXTERNAL SERVICES, TOOLS, AND PLATFORMS
+AWS Seoul hosts the API, data, and operator-managed LibreTranslate; Cloudflare provides DNS/TLS/proxy/security; OpenAI provides questions, grading, feedback, suggestions, and translation fallback; Apple provides sign-in, subscriptions, and APNs; RevenueCat provides products, purchase/restore, Customer Center, and subscription sync; Google provides sign-in, registration email verification, Firebase Analytics/Remote Config; Sentry provides masked diagnostics.
+
+6. REGIONAL DIFFERENCES
+Features and subscription benefits are consistent in all offered regions. UI/content display is localized in Korean, English, and Japanese. Only storefront price, currency, and tax presentation varies.
+
+7. REGULATED INDUSTRIES OR PROTECTED THIRD-PARTY MATERIAL
+Not applicable. This general study aid is not a regulated professional service, and AI output makes no legally significant decisions. It has no licensed catalog or protected third-party access. Questions/comments are UGC; Terms prohibit infringement. Users can report content and block an author, hiding that content.
+
+8. IN-APP PURCHASES AND PURCHASE LOCATION
+Tier 2 is a one-month auto-renewable subscription with 300 AI questions per monthly quota period; Tier 3 has 1,000. One generated question uses one allowance; study/topic creation does not. Path: Home > Profile > Membership & Billing > Manage membership > Tier 2/3 > Get Tier/Switch to Tier. Each offer shows title, localized price, one-month duration, allowance, renewal disclosure, Terms, Privacy, Restore, and purchase/change control. It opens Apple's purchase sheet; the video cancels before purchase. Manage Subscription appears only for active subscribers. Apple handles payments, renewals, cancellations, and refunds.
+
+Please let us know if more information would help.

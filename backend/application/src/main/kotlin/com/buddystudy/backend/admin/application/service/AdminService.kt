@@ -6,7 +6,6 @@ import com.buddystudy.backend.config.BuddyStudyProperties
 import com.buddystudy.backend.admin.application.model.APIStatusResponse
 import com.buddystudy.backend.admin.application.model.APIValidationResponse
 import com.buddystudy.backend.admin.application.model.OpenAIModelOptionResponse
-import com.buddystudy.backend.auth.application.port.outbound.UserPort
 import com.buddystudy.backend.study.application.port.outbound.StudyPort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -14,7 +13,6 @@ import org.springframework.transaction.annotation.Transactional
 @Service
 class AdminService(
     private val properties: BuddyStudyProperties,
-    private val users: UserPort,
     private val studies: StudyPort,
 ) : AdminUseCase {
     override suspend fun models() = listOf(
@@ -25,9 +23,8 @@ class AdminService(
 
     @Transactional(readOnly = true)
     override suspend fun apiStatus(principal: Principal): APIStatusResponse {
-        val user = users.findById(principal.userId)
         val fallbackStudy = studies.findFirstByUserIdOrderByUpdatedAtDesc(principal.userId)
-        return APIStatusResponse(!user?.openaiApiKeyCipher.isNullOrBlank(), fallbackStudy?.openaiModel ?: properties.openai.model)
+        return APIStatusResponse(properties.openai.userContentApiKey.isNotBlank(), fallbackStudy?.openaiModel ?: properties.openai.model)
     }
 
     @Transactional(readOnly = true)

@@ -44,6 +44,8 @@ enum OpenAIClient {
             return "한국어로 질문해."
         case .english:
             return "Ask the question in English."
+        case .japanese:
+            return "質問は自然な日本語で作成してください。"
         }
     }
 

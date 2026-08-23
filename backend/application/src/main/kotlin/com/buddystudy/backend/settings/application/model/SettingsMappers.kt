@@ -12,7 +12,7 @@ fun StudyEntity?.toSettings(user: UserEntity?) = this?.let {
         enabled = it.enabled,
         notificationSound = it.notificationSound,
         customPrompt = it.customPrompt,
-        appLanguage = user?.appLanguage ?: "ko",
+        appLanguage = user?.appLanguage?.databaseValue ?: "ko",
         openaiModel = it.openaiModel,
         maxHistoryCount = it.maxHistoryCount,
         openaiKeyConfigured = !user?.openaiApiKeyCipher.isNullOrBlank(),
@@ -20,6 +20,6 @@ fun StudyEntity?.toSettings(user: UserEntity?) = this?.let {
         lastError = it.lastError,
     )
 } ?: StudySettingsResponse(
-    appLanguage = user?.appLanguage ?: "ko",
+    appLanguage = user?.appLanguage?.databaseValue ?: "ko",
     openaiKeyConfigured = !user?.openaiApiKeyCipher.isNullOrBlank(),
 )

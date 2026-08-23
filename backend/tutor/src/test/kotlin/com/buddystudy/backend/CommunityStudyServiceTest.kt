@@ -1,5 +1,9 @@
 package com.buddystudy.backend
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.single
 import kotlinx.coroutines.flow.toList
@@ -10,9 +14,12 @@ import com.buddystudy.backend.auth.adapter.outbound.persistence.UserRepository
 import com.buddystudy.backend.common.application.error.ApiErrorCode
 import com.buddystudy.backend.common.application.error.ApiException
 import com.buddystudy.backend.community.adapter.outbound.persistence.QuestionCommentRepository
+import com.buddystudy.backend.community.adapter.outbound.persistence.FeedbackRepository
 import com.buddystudy.backend.community.adapter.outbound.persistence.QuestionLikeRepository
 import com.buddystudy.backend.community.adapter.outbound.persistence.ReportRepository
+import com.buddystudy.backend.community.adapter.outbound.persistence.UserBlockRepository
 import com.buddystudy.backend.community.application.port.inbound.ReportQuestionCommand
+import com.buddystudy.backend.community.application.port.inbound.SubmitFeedbackCommand
 import com.buddystudy.backend.community.application.service.CommunityService
 import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionRepository
 import com.buddystudy.backend.study.adapter.outbound.persistence.StudyRepository
@@ -20,9 +27,15 @@ import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.service.StudySyncService
 import com.buddystudy.backend.study.application.service.StudyService
 import com.buddystudy.account.domain.entity.UserEntity
+import com.buddystudy.account.domain.entity.UserProvider
+import com.buddystudy.account.domain.entity.UserStatus
+import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.community.domain.entity.QuestionLikeEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.AnswerGradingStatus
+import com.buddystudy.study.domain.entity.QuestionSource
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
+import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.StudyEntity
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -55,6 +68,8 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var likes: QuestionLikeRepository
     @Autowired lateinit var comments: QuestionCommentRepository
     @Autowired lateinit var reports: ReportRepository
+    @Autowired lateinit var feedbacks: FeedbackRepository
+    @Autowired lateinit var userBlocks: UserBlockRepository
 
     private lateinit var author: UserEntity
     private lateinit var viewer: UserEntity
@@ -65,7 +80,9 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
     @BeforeEach
     fun setUp() = runBlocking {
         listOf(
+            "feedbacks",
             "reports",
+            "user_blocks",
             "question_comments",
             "question_likes",
             "question_stats",
@@ -109,6 +126,42 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
 
         assertThat(response.totalCount).isEqualTo(2)
         assertThat(response.questions.map { it.id }).containsExactly(newest.id.toString(), older.id.toString())
+    }
+
+    @Test
+    fun `public questions include saved answers when grading has no score`(): Unit = runBlocking {
+        val failedGrading = answeredPublicQuestion(
+            author,
+            "Async grading",
+            createdAt = now.plusSeconds(1),
+            score = null,
+            gradingStatus = "FAILED",
+        )
+        pendingPublicQuestion(author, "No answer", createdAt = now)
+
+        val response = community.getPublicQuestions(null, null, language = "ko", limit = 10, offset = 0)
+
+        assertThat(response.totalCount).isEqualTo(1)
+        val result = response.questions.single()
+        assertThat(result.id).isEqualTo(failedGrading.id.toString())
+        assertThat(result.answer).isEqualTo("Answer for Async grading")
+        assertThat(result.gradingResult).isNull()
+    }
+
+    @Test
+    fun `public detail allows saved answer when grading has no score`(): Unit = runBlocking {
+        val failedGrading = answeredPublicQuestion(
+            author,
+            "Async grading",
+            score = null,
+            gradingStatus = "FAILED",
+        )
+
+        val response = community.getPublicQuestion(principal, failedGrading.id, language = "ko")
+
+        assertThat(response.id).isEqualTo(failedGrading.id.toString())
+        assertThat(response.answer).isEqualTo("Answer for Async grading")
+        assertThat(response.gradingResult).isNull()
     }
 
     @Test
@@ -265,6 +318,109 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
+    fun `blocked users disappear from public questions details and comments until unblocked`(): Unit = runBlocking {
+        val blockedQuestion = answeredPublicQuestion(author, topic = "Blocked author", createdAt = now.plusSeconds(2))
+        hiddenAuthor.allowPublicQuestions = true
+        users.save(hiddenAuthor)
+        val visibleQuestion = answeredPublicQuestion(hiddenAuthor, topic = "Visible author", createdAt = now.plusSeconds(1))
+        comments.save(
+            QuestionCommentEntity(
+                questionId = visibleQuestion.id,
+                userId = author.id,
+                body = "blocked comment",
+                createdAt = now,
+                updatedAt = now,
+            ),
+        )
+        comments.save(
+            QuestionCommentEntity(
+                questionId = visibleQuestion.id,
+                userId = hiddenAuthor.id,
+                body = "visible comment",
+                createdAt = now.plusSeconds(1),
+                updatedAt = now.plusSeconds(1),
+            ),
+        )
+
+        community.setUserBlocked(principal, author.id, blocked = true)
+
+        val page = community.getPublicQuestions(
+            principal = principal,
+            query = null,
+            language = "ko",
+            limit = 1,
+            offset = 0,
+        )
+        val commentPage = community.getComments(
+            id = visibleQuestion.id,
+            limit = 1,
+            offset = 0,
+            principal = principal,
+        )
+
+        assertThat(page.questions.map { it.id }).containsExactly(visibleQuestion.id.toString())
+        assertThat(page.totalCount).isEqualTo(1)
+        assertThat(commentPage.comments.map { it.body }).containsExactly("visible comment")
+        assertThat(commentPage.totalCount).isEqualTo(1)
+        assertRecordNotFound { community.getPublicQuestion(principal, blockedQuestion.id, language = "ko") }
+        assertRecordNotFound {
+            community.getComments(
+                id = blockedQuestion.id,
+                language = "ko",
+                limit = 1,
+                offset = 0,
+                principal = principal,
+            )
+        }
+        assertThat(userBlocks.existsByBlockerUserIdAndBlockedUserId(viewer.id, author.id)).isTrue()
+
+        community.setUserBlocked(principal, author.id, blocked = false)
+
+        assertThat(community.getPublicQuestion(principal, blockedQuestion.id, language = "ko").id)
+            .isEqualTo(blockedQuestion.id.toString())
+        assertThat(
+            community.getComments(
+                id = visibleQuestion.id,
+                limit = 20,
+                offset = 0,
+                principal = principal,
+            ).comments.map { it.body },
+        ).containsExactly("blocked comment", "visible comment")
+        assertThat(userBlocks.existsByBlockerUserIdAndBlockedUserId(viewer.id, author.id)).isFalse()
+    }
+
+    @Test
+    fun `concurrent duplicate block requests create one relationship`(): Unit = runBlocking {
+        val responses = coroutineScope {
+            List(8) {
+                async(Dispatchers.Default) {
+                    community.setUserBlocked(principal, author.id, blocked = true)
+                }
+            }.awaitAll()
+        }
+
+        assertThat(responses).allMatch { it.blocked && it.userId == author.id }
+        assertThat(userBlocks.count()).isEqualTo(1)
+    }
+
+    @Test
+    fun `feedback is trimmed and stored independently from reports`(): Unit = runBlocking {
+        val response = community.submitFeedback(
+            principal = principal,
+            deviceId = null,
+            command = SubmitFeedbackCommand("  검색 결과 정렬을 개선해 주세요.  "),
+        )
+
+        val feedback = feedbacks.findAll().single()
+        assertThat(response.id).isEqualTo(feedback.id)
+        assertThat(response.createdAt).isEqualTo(feedback.createdAt)
+        assertThat(feedback.userId).isEqualTo(viewer.id)
+        assertThat(feedback.deviceId).isEqualTo(principal.deviceId)
+        assertThat(feedback.content).isEqualTo("검색 결과 정렬을 개선해 주세요.")
+        assertThat(reports.count()).isZero()
+    }
+
+    @Test
     fun `records exclude pending questions while pending endpoint returns them`(): Unit = runBlocking {
         val graded = answeredPublicQuestion(viewer, "SwiftUI")
         val pending = pendingPublicQuestion(viewer, "Kotlin")
@@ -317,10 +473,10 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
 
     private fun user(providerId: String, name: String, allowPublic: Boolean): UserEntity =
         UserEntity(
-            provider = "EMAIL",
+            provider = UserProvider.EMAIL,
             providerId = "$providerId@example.com",
             email = "$providerId@example.com",
-            status = "ACTIVE",
+            status = UserStatus.ACTIVE,
             displayName = name,
             allowPublicQuestions = allowPublic,
             createdAt = now,
@@ -333,6 +489,8 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
         createdAt: Instant = now,
         publicQuestion: Boolean = true,
         deletedAt: Instant? = null,
+        score: Int? = 91,
+        gradingStatus: String? = null,
     ): QuestionEntity =
         questions.save(
             QuestionEntity(
@@ -344,15 +502,16 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
                 difficultyLevel = 6,
                 scheduledFor = createdAt,
                 sentAt = createdAt,
-                status = "graded",
+                status = QuestionStatus.GRADED,
                 answer = "Answer for $topic",
-                score = 91,
-                correct = true,
-                feedback = "Good",
-                explanation = "Because",
+                score = score,
+                correct = score?.let { true },
+                feedback = score?.let { "Good" },
+                explanation = score?.let { "Because" },
                 answeredAt = createdAt.plusSeconds(30),
-                gradedAt = createdAt.plusSeconds(40),
-                source = "manual",
+                gradedAt = score?.let { createdAt.plusSeconds(40) },
+                gradingStatus = gradingStatus?.let(AnswerGradingStatus::valueOf),
+                source = QuestionSource.MANUAL,
                 publicQuestion = publicQuestion,
                 deletedAt = deletedAt,
                 createdAt = createdAt,
@@ -370,8 +529,8 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
                 difficultyLevel = 4,
                 scheduledFor = createdAt,
                 sentAt = createdAt,
-                status = "ungraded",
-                source = "scheduled",
+                status = QuestionStatus.UNGRADED,
+                source = QuestionSource.SCHEDULED,
                 publicQuestion = true,
                 createdAt = createdAt,
                 updatedAt = createdAt,

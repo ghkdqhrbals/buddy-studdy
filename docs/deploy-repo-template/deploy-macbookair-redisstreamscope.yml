@@ -1,0 +1,90 @@
+name: Deploy RedisStreamScope on MacBook Air
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_ref:
+        description: Immutable RedisStreamScope image reference
+        required: true
+        default: ghcr.io/ghkdqhrbals/redisstreamscope@sha256:fe0b881f071a70c896bb9dda84a00c79343100a4748f9dd0b968574bf7e99a98
+        type: string
+
+concurrency:
+  group: deploy-macbookair-redisstreamscope
+  cancel-in-progress: false
+
+jobs:
+  deploy_redisstreamscope:
+    name: Deploy RedisStreamScope Module
+    runs-on: [self-hosted, macOS, ARM64, macbook-air, buddystudy]
+    timeout-minutes: 10
+
+    steps:
+      - name: Deploy RedisStreamScope runtime
+        env:
+          IMAGE_REF: ${{ inputs.image_ref }}
+          REDIS_HOST: ${{ secrets.RSC_REDIS_HOST }}
+          REDIS_PASSWORD: ${{ secrets.RSC_REDIS_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${REDIS_HOST}" ]; then
+            echo "Missing GitHub Actions secret: RSC_REDIS_HOST" >&2
+            exit 1
+          fi
+          if [ -z "${REDIS_PASSWORD}" ]; then
+            echo "Missing GitHub Actions secret: RSC_REDIS_PASSWORD" >&2
+            exit 1
+          fi
+          if [[ "${IMAGE_REF}" != ghcr.io/ghkdqhrbals/redisstreamscope@sha256:* ]]; then
+            echo "image_ref must be an immutable ghcr.io/ghkdqhrbals/redisstreamscope digest." >&2
+            exit 1
+          fi
+
+          public_docker_config="$(mktemp -d)"
+          cleanup() {
+            rm -f "${public_docker_config}/config.json"
+            rmdir "${public_docker_config}"
+          }
+          trap cleanup EXIT
+          printf '{"auths":{}}\n' > "${public_docker_config}/config.json"
+          docker --config "${public_docker_config}" pull "${IMAGE_REF}"
+          cleanup
+          trap - EXIT
+
+          docker network create buddystudy-monitoring >/dev/null 2>&1 || true
+          docker volume create buddystudy-redisstreamscope-data >/dev/null
+
+          docker rm -f buddystudy-redisstreamscope-gateway >/dev/null 2>&1 || true
+          docker rm -f buddystudy-redisstreamscope >/dev/null 2>&1 || true
+
+          docker run -d \
+            --name buddystudy-redisstreamscope \
+            --network buddystudy-monitoring \
+            --restart unless-stopped \
+            --log-driver local \
+            --log-opt max-size=10m \
+            --log-opt max-file=3 \
+            --log-opt compress=true \
+            --memory 256m \
+            -e SECURE_COOKIES=true \
+            -e SESSION_TTL=12h \
+            -e REDIS_ID=buddystudy-production \
+            -e "REDIS_NAME=BuddyStudy Production" \
+            -e REDIS_MODE=standalone \
+            -e "REDIS_HOST=${REDIS_HOST}" \
+            -e "REDIS_PASSWORD=${REDIS_PASSWORD}" \
+            -e REDIS_KEY_PATTERN='*' \
+            -v buddystudy-redisstreamscope-data:/data \
+            "${IMAGE_REF}"
+
+          {
+            echo "### RedisStreamScope deployment submitted"
+            echo
+            echo "- Image: \`${IMAGE_REF}\`"
+            echo "- Network: private \`buddystudy-monitoring\`"
+            echo "- Data: Docker volume \`buddystudy-redisstreamscope-data\`"
+            echo "- Public gateway: existing \`buddystudy-api-dashboard\` Nginx"
+            echo "- Authentication: RedisStreamScope session auth"
+            echo "- Runtime health is owned by monitoring, not this deploy workflow."
+          } >> "${GITHUB_STEP_SUMMARY}"

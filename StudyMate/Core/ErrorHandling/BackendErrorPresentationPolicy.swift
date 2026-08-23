@@ -9,6 +9,7 @@ struct BackendErrorPresentation: Equatable {
     var requiresEmailVerification: Bool
     var requiresTermsAgreement: Bool
     var isQuotaExceeded: Bool
+    var isPendingQuestionConflict: Bool
     var shouldResetBackendIdentity: Bool
 }
 
@@ -32,11 +33,12 @@ enum BackendErrorPresentationPolicy {
                 requiresEmailVerification: false,
                 requiresTermsAgreement: false,
                 isQuotaExceeded: false,
+                isPendingQuestionConflict: false,
                 shouldResetBackendIdentity: false
             )
         }
 
-        let message = fallbackMessage(for: error, fallback: fallback)
+        let message = fallbackMessage(for: error, fallback: fallback, language: language)
         return BackendErrorPresentation(
             message: message,
             inlineMessage: message,
@@ -46,6 +48,7 @@ enum BackendErrorPresentationPolicy {
             requiresEmailVerification: false,
             requiresTermsAgreement: false,
             isQuotaExceeded: false,
+            isPendingQuestionConflict: false,
             shouldResetBackendIdentity: false
         )
     }
@@ -71,8 +74,37 @@ enum BackendErrorPresentationPolicy {
             requiresEmailVerification: requiresEmailVerification,
             requiresTermsAgreement: requiresTermsAgreement,
             isQuotaExceeded: error.backendCode == "QUOTA_EXCEEDED",
+            isPendingQuestionConflict: isPendingQuestionConflict(error),
             shouldResetBackendIdentity: shouldResetBackendIdentity
         )
+    }
+
+    static func isPendingQuestionConflict(_ error: Error) -> Bool {
+        guard let backendError = error as? RemotePushBackendError else {
+            return false
+        }
+
+        switch backendError {
+        case .httpStatus(_, let body, let apiError):
+            if apiError?.code == "STUDY_PENDING_QUESTION_EXISTS" {
+                return true
+            }
+
+            guard apiError?.code == "VALIDATION_ERROR" else {
+                return false
+            }
+            let diagnostic = [
+                apiError?.debugDescription,
+                apiError?.description,
+                body
+            ]
+                .compactMap { $0 }
+                .joined(separator: " ")
+                .lowercased()
+            return diagnostic.contains("pending question already exists")
+        case .invalidResponse:
+            return false
+        }
     }
 
     static func isAPIKeyError(_ error: Error) -> Bool {
@@ -98,6 +130,19 @@ enum BackendErrorPresentationPolicy {
         (error as? RemotePushBackendError)?.backendCode == "DEVICE_NOT_FOUND"
     }
 
+    static func isBackendRecordNotFound(_ error: Error) -> Bool {
+        guard let backendError = error as? RemotePushBackendError else {
+            return false
+        }
+
+        switch backendError {
+        case .httpStatus(let status, _, let apiError):
+            return status == 404 || apiError?.code == "RECORD_NOT_FOUND"
+        case .invalidResponse:
+            return false
+        }
+    }
+
     static func isUnauthorizedBackendError(_ error: Error) -> Bool {
         guard let backendError = error as? RemotePushBackendError else {
             return false
@@ -119,16 +164,30 @@ enum BackendErrorPresentationPolicy {
         }
 
         switch backendError {
-        case .httpStatus(let status, _, let apiError):
+        case .httpStatus(_, _, let apiError):
             let code = apiError?.code
-            return status == 401
-                || code == "AUTH_ACCESS_TOKEN_REQUIRED"
-                || code == "AUTH_INVALID_ACCESS_TOKEN"
-                || code == "AUTH_DEVICE_CREDENTIALS_REQUIRED"
+            return code == "AUTH_DEVICE_CREDENTIALS_REQUIRED"
                 || code == "AUTH_INVALID_DEVICE_CREDENTIALS"
                 || code == "AUTH_DEVICE_MISMATCH"
                 || code == "DEVICE_NOT_FOUND"
-                || isAuthNumericCode(apiError?.numericCode)
+        case .invalidResponse:
+            return false
+        }
+    }
+
+    static func shouldRefreshBackendAccessToken(after error: Error) -> Bool {
+        guard let backendError = error as? RemotePushBackendError else {
+            return false
+        }
+
+        switch backendError {
+        case .httpStatus(let status, _, let apiError):
+            guard !shouldResetBackendIdentity(after: error) else {
+                return false
+            }
+            return status == 401
+                || apiError?.code == "AUTH_ACCESS_TOKEN_REQUIRED"
+                || apiError?.code == "AUTH_INVALID_ACCESS_TOKEN"
         case .invalidResponse:
             return false
         }
@@ -137,6 +196,9 @@ enum BackendErrorPresentationPolicy {
     static func requiresLogin(_ error: RemotePushBackendError) -> Bool {
         switch error {
         case .httpStatus(let statusCode, _, let apiError):
+            if apiError?.code == "AUTH_INVALID_EMAIL_CREDENTIALS" {
+                return false
+            }
             if statusCode == 401 {
                 return true
             }
@@ -149,6 +211,9 @@ enum BackendErrorPresentationPolicy {
     static func isPageAccessDenied(_ error: RemotePushBackendError) -> Bool {
         switch error {
         case .httpStatus(let statusCode, _, let apiError):
+            if apiError?.code == "AUTH_INVALID_EMAIL_CREDENTIALS" {
+                return false
+            }
             return statusCode == 401
                 || requiresLogin(error)
                 || apiError?.code == "PAGE_ACCESS_DENIED"
@@ -213,6 +278,9 @@ enum BackendErrorPresentationPolicy {
     static func shouldShowInlineError(for error: RemotePushBackendError) -> Bool {
         switch error {
         case .httpStatus(let statusCode, _, let apiError):
+            if apiError?.code == "AUTH_INVALID_EMAIL_CREDENTIALS" {
+                return true
+            }
             if statusCode == 401 {
                 return false
             }
@@ -234,29 +302,46 @@ enum BackendErrorPresentationPolicy {
         language: AppLanguage? = nil
     ) -> String {
         switch error {
-        case .httpStatus(_, _, let apiError):
+        case .httpStatus(let statusCode, _, let apiError):
+            if isTransientInfrastructureStatus(statusCode) {
+                return nonemptyFallback(
+                    fallback,
+                    defaultMessage: transientServiceMessage(language: language)
+                )
+            }
+
+            if apiError?.code == "QUOTA_EXCEEDED",
+               let language {
+                let strings = AppStrings(language: language)
+                if let resetAt = apiError?.metadata?.quotaResetDate {
+                    return strings.monthlyQuotaExceededMessage(resetAt: resetAt)
+                }
+                return strings.monthlyQuotaReached
+            }
+
             if let message = apiError?.message.trimmingCharacters(in: .whitespacesAndNewlines),
                !message.isEmpty {
-                if apiError?.code == "QUOTA_EXCEEDED",
-                   let language,
-                   let resetAt = apiError?.metadata?.quotaResetDate {
-                    return AppStrings(language: language).monthlyQuotaExceededMessage(
-                        serverMessage: message,
-                        resetAt: resetAt
-                    )
-                }
                 return message
             }
         case .invalidResponse:
-            break
+            return nonemptyFallback(
+                fallback,
+                defaultMessage: invalidResponseMessage(language: language)
+            )
         }
 
-        let localized = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-        return localized.isEmpty ? fallback : localized
+        return nonemptyFallback(
+            fallback,
+            defaultMessage: transientServiceMessage(language: language)
+        )
     }
 
     static func shouldClearFeatureMessage(for error: Error) -> Bool {
         isCancellationLike(error)
+    }
+
+    static func isPermanentBackendOperationError(_ error: Error) -> Bool {
+        error is RemotePushBackendError || error is DecodingError
     }
 
     static func diagnosticDescription(for error: Error) -> String {
@@ -291,9 +376,26 @@ enum BackendErrorPresentationPolicy {
         }
     }
 
-    private static func fallbackMessage(for error: Error, fallback: String) -> String {
+    private static func fallbackMessage(
+        for error: Error,
+        fallback: String,
+        language: AppLanguage?
+    ) -> String {
+        let strings = AppStrings(language: language ?? .korean)
+
         if error is DecodingError {
-            return "응답 데이터를 읽을 수 없습니다. 잠시 후 다시 시도하세요."
+            return strings.responseDataUnreadable
+        }
+
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost, .cannotFindHost, .cannotConnectToHost:
+                return strings.networkUnavailableRetry
+            case .timedOut:
+                return strings.requestTimedOutRetry
+            default:
+                break
+            }
         }
 
         let localized = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -301,6 +403,23 @@ enum BackendErrorPresentationPolicy {
             return fallback
         }
         return localized
+    }
+
+    private static func isTransientInfrastructureStatus(_ statusCode: Int) -> Bool {
+        statusCode == 408 || statusCode == 429 || (500...599).contains(statusCode)
+    }
+
+    private static func nonemptyFallback(_ fallback: String, defaultMessage: String) -> String {
+        let trimmedFallback = fallback.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedFallback.isEmpty ? defaultMessage : trimmedFallback
+    }
+
+    private static func transientServiceMessage(language: AppLanguage?) -> String {
+        AppStrings(language: language ?? .korean).serviceTemporarilyUnavailable
+    }
+
+    private static func invalidResponseMessage(language: AppLanguage?) -> String {
+        AppStrings(language: language ?? .korean).invalidServerResponse
     }
 
     private static func decodingDiagnostic(
@@ -352,7 +471,10 @@ enum BackendErrorPresentationPolicy {
     }
 
     private static func suppressesUserMessage(_ apiError: BackendAPIError) -> Bool {
-        suppressedPopupCodes.contains(apiError.code) ||
+        if apiError.code == "AUTH_INVALID_EMAIL_CREDENTIALS" {
+            return false
+        }
+        return suppressedPopupCodes.contains(apiError.code) ||
             isAuthNumericCode(apiError.numericCode)
     }
 

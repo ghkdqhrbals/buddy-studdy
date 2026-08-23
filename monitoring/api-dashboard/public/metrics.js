@@ -108,8 +108,9 @@ export function formatMilliseconds(value) {
 }
 
 export function formatDurationSeconds(value) {
+  if (value == null || (typeof value === "string" && value.trim() === "")) return "-";
   const total = Number(value);
-  if (!Number.isFinite(total)) return "-";
+  if (!Number.isFinite(total) || total < 0) return "-";
   const days = Math.floor(total / 86_400);
   const hours = Math.floor((total % 86_400) / 3_600);
   const minutes = Math.floor((total % 3_600) / 60);
@@ -165,7 +166,7 @@ export function formatLogqlDuration(ms) {
 }
 
 export function buildRequestRateQuery(window) {
-  return `sum(rate(({container=~"buddystudy-backend.*"} |= "api_exchange ")[${window}]))`;
+  return `sum(rate(({app="buddystudy"} |= "api_exchange ")[${window}]))`;
 }
 
 export function buildErrorRateQuery(window) {
@@ -181,7 +182,7 @@ export function buildLatencyQuantileQuery(quantile, window) {
   if (!Number.isFinite(value) || value <= 0 || value >= 1) {
     throw new Error("Latency quantile must be between 0 and 1");
   }
-  return `max(quantile_over_time(${value}, {container=~"buddystudy-backend.*"} |= "api_exchange " | json | __error__ = "" | unwrap durationMs [${window}]))`;
+  return `max(quantile_over_time(${value}, {app="buddystudy"} |= "api_exchange " | pattern "<_> api_exchange <payload>" | line_format "{{.payload}}" | json | __error__ = "" | unwrap durationMs [${window}]))`;
 }
 
 export function ratioPoints(numerator, denominator, multiplier = 100) {
@@ -212,5 +213,5 @@ export function percentagePoints(samples, numeratorField, denominatorField) {
 }
 
 function buildStatusClassRateQuery(minimum, maximumExclusive, window) {
-  return `sum(rate(({container=~"buddystudy-backend.*"} |= "api_exchange " | json | __error__ = "" | status >= ${minimum} and status < ${maximumExclusive})[${window}]))`;
+  return `sum(rate(({app="buddystudy"} |= "api_exchange " | pattern "<_> api_exchange <payload>" | line_format "{{.payload}}" | json | __error__ = "" | status >= ${minimum} and status < ${maximumExclusive})[${window}]))`;
 }

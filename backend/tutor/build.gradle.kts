@@ -14,6 +14,24 @@ tasks.named<org.springframework.boot.gradle.tasks.aot.ProcessAot>("processAot") 
             "spring.r2dbc.url" to "r2dbc:mysql://localhost:3306/buddystudy?serverZoneId=UTC",
             "spring.r2dbc.username" to "buddystudy",
             "spring.r2dbc.password" to "aot-build-only",
+            "buddystudy.mcp.enabled" to "true",
+            "SMTP_HOST" to "smtp.aot.invalid",
+            "SMTP_PORT" to "587",
+            "SMTP_USERNAME" to "aot@invalid.example",
+            "SMTP_PASSWORD" to "aot-build-only",
+            "SMTP_FROM" to "BuddyStudy <aot@invalid.example>",
+        ),
+    )
+}
+
+tasks.named<org.springframework.boot.gradle.tasks.aot.ProcessTestAot>("processTestAot") {
+    systemProperties(
+        mapOf(
+            "SMTP_HOST" to "smtp.test.invalid",
+            "SMTP_PORT" to "587",
+            "SMTP_USERNAME" to "test@invalid.example",
+            "SMTP_PASSWORD" to "test-only",
+            "SMTP_FROM" to "BuddyStudy <test@invalid.example>",
         ),
     )
 }
@@ -49,6 +67,10 @@ tasks.named("generateResourcesConfigFile") {
     dependsOn("patchNativeReachabilityMetadata")
 }
 
+tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
+    archiveFileName.set("buddystudy-backend.jar")
+}
+
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(25)
@@ -58,7 +80,8 @@ java {
 dependencyManagement {
     imports {
         mavenBom("io.awspring.cloud:spring-cloud-aws-dependencies:4.0.2")
-        mavenBom("org.springframework.ai:spring-ai-bom:2.0.0")
+        mavenBom("org.springframework.ai:spring-ai-bom:2.0.1")
+        mavenBom("io.modelcontextprotocol.sdk:mcp-bom:2.0.1")
     }
 }
 
@@ -78,6 +101,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework:spring-aop")
     implementation("org.aspectj:aspectjweaver")
+    implementation("org.springframework.ai:mcp-spring-webflux")
+    implementation("io.modelcontextprotocol.sdk:mcp-json-jackson2")
     implementation("org.springdoc:springdoc-openapi-starter-webflux-ui:3.0.3")
     implementation("org.flywaydb:flyway-core")
     implementation("com.mysql:mysql-connector-j")
@@ -92,6 +117,7 @@ dependencies {
     runtimeOnly("org.flywaydb:flyway-mysql")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("org.jooq:jooq:3.21.6")
     testImplementation("io.r2dbc:r2dbc-h2")
     testImplementation("org.testcontainers:junit-jupiter:1.21.3")
     testImplementation("org.testcontainers:mysql:1.21.3")
@@ -105,6 +131,9 @@ kotlin {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    // The tutor suite boots several distinct Spring contexts. Keep the worker from
+    // exhausting the default 512 MiB heap during the full integration-test run.
+    maxHeapSize = "1g"
 }
 
 jacoco {
@@ -126,6 +155,7 @@ graalvmNative {
             buildArgs.add("--no-fallback")
             buildArgs.add("--parallelism=2")
             buildArgs.add("-Ob")
+            buildArgs.add("-J-Xmx12g")
         }
     }
 }

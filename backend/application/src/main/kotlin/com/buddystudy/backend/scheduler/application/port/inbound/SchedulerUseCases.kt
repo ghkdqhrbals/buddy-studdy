@@ -7,6 +7,10 @@ import com.buddystudy.backend.scheduler.application.model.ScheduledJobStatusResp
 
 interface ManagedJob {
     val name: String
+    val displayName: String
+        get() = name
+    val description: String
+        get() = ""
     suspend fun run(): String?
 }
 
@@ -20,5 +24,5 @@ interface ManagedJobExecutionUseCase {
 
     suspend fun findRuns(jobName: String? = null, runId: Long? = null, limit: Int = 10, offset: Int = 0): ScheduledJobRunPageResponse
 
-    suspend fun findStatuses(): ScheduledJobStatusResponse
+    suspend fun findStatuses(limit: Int? = null, offset: Int = 0): ScheduledJobStatusResponse
 }

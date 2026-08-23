@@ -1,0 +1,40 @@
+name: Diagnose MacBook Air Docker RCA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diagnose-macbookair-docker-rca
+  cancel-in-progress: false
+
+jobs:
+  submit_docker_rca_snapshot:
+    name: Submit Read-Only Docker RCA Snapshot
+    runs-on: [self-hosted, macOS, ARM64, macbook-air, buddystudy]
+    timeout-minutes: 8
+
+    steps:
+      - name: Checkout audited RCA helper
+        uses: actions/checkout@v4
+
+      - name: Submit bounded read-only Docker RCA snapshot
+        env:
+          RCA_REPORT: ${{ runner.temp }}/macbookair-docker-rca-${{ github.run_id }}-${{ github.run_attempt }}.json
+        run: |
+          set -euo pipefail
+          umask 077
+          exec python3 scripts/diagnose_macbookair_docker_rca.py collect \
+            --report "${RCA_REPORT}"
+
+      - name: Render sanitized Docker RCA snapshot
+        if: ${{ always() }}
+        env:
+          RCA_REPORT: ${{ runner.temp }}/macbookair-docker-rca-${{ github.run_id }}-${{ github.run_attempt }}.json
+        run: |
+          set -euo pipefail
+          exec python3 scripts/diagnose_macbookair_docker_rca.py render-summary \
+            --report "${RCA_REPORT}" \
+            --status '${{ job.status }}' >> "${GITHUB_STEP_SUMMARY}"

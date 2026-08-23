@@ -29,6 +29,7 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import jakarta.validation.Valid
@@ -56,7 +57,7 @@ class StudyController(
 
     @Operation(
         summary = "Fetch my studies",
-        description = "Returns the authenticated user's study rooms. Each study can include one pendingQuestion for the current unanswered study-room question. Record history is intentionally split into /api/v1/records.",
+        description = "Returns the authenticated user's study rooms. Each study can include one pendingQuestion with its persisted answer and grading request state, allowing clients to restore a submitted answer after reopening the room. Record history is intentionally split into /api/v1/records.",
     )
     @ApiResponses(
         ApiResponse(responseCode = "200", description = "Study rooms returned."),
@@ -70,8 +71,28 @@ class StudyController(
         @RequestParam(defaultValue = "0") offset: Int,
         @Parameter(description = "Optional DB-backed study search query.", example = "Swift")
         @RequestParam(required = false) query: String?,
+        @Parameter(description = "Question language code.", example = "ko")
+        @RequestParam(defaultValue = "ko") language: String,
         authentication: Authentication,
-    ): StudyPageResponse = study.study(limit, offset, query, authentication)
+    ): StudyPageResponse = study.study(limit, offset, query, language, authentication)
+
+    @Operation(
+        summary = "Fetch one study",
+        description = "Returns one owned study with its latest pending question and latest completed question. Clients should prefer pendingQuestion and fall back to latestQuestion.",
+    )
+    @ApiResponses(
+        ApiResponse(responseCode = "200", description = "Study returned."),
+        ApiResponse(responseCode = "401", description = "Authentication required."),
+        ApiResponse(responseCode = "404", description = "Study not found or not owned by the caller."),
+    )
+    @GetMapping("/studies/{studyId}")
+    suspend fun studyDetail(
+        @PathVariable studyId: Long,
+        @RequestParam(required = false) tl: String?,
+        @Parameter(description = "Deprecated response language alias.", deprecated = true)
+        @RequestParam(required = false) language: String?,
+        authentication: Authentication,
+    ): StudyRoomResponse = study.study(studyId, resolveTargetLanguage(tl, language), authentication)
 
     @Operation(
         summary = "Create a study",
@@ -108,7 +129,10 @@ class StudyController(
         authentication: Authentication,
     ): StudyRoomResponse = study.createStudyTopic(parentStudyId, body, authentication)
 
-    @Operation(summary = "Delete a study", description = "Deletes one study room owned by the authenticated user and removes its related questions from active records/search.")
+    @Operation(
+        summary = "Delete a study subtree",
+        description = "Deletes the owned study and all descendant topics. Existing records remain available and keep their public visibility until explicitly deleted through the records API.",
+    )
     @ApiResponses(
         ApiResponse(responseCode = "204", description = "Study deleted."),
         ApiResponse(responseCode = "401", description = "Authentication required."),
@@ -122,12 +146,12 @@ class StudyController(
         authentication: Authentication,
     ): ResponseEntity<Unit> = study.deleteStudy(studyId, authentication)
 
-    @Operation(summary = "Recommend child study topics", description = "Uses the system tutor model to recommend non-duplicate child topics for the selected tree node.")
+    @Operation(summary = "Recommend child study topics", description = "Reuses the system topic catalog first, generates and stores missing suggestions when needed, and supports up to 10 children through depth 5.")
     @PostMapping("/studies/{studyId}/topic-suggestions")
     @RequirePermission(Permissions.STUDY_CREATE)
     suspend fun suggestStudyTopics(
         @PathVariable studyId: Long,
-        @RequestParam(defaultValue = "4") count: Int,
+        @RequestParam(defaultValue = "10") count: Int,
         authentication: Authentication,
     ) = study.suggestStudyTopics(studyId, count, authentication)
 
@@ -156,11 +180,15 @@ class StudyController(
         @RequestParam(defaultValue = "0") offset: Int,
         @Parameter(description = "Optional DB-backed record search query.", example = "actor")
         @RequestParam(required = false) query: String?,
-        @Parameter(description = "Response/search language code.", example = "ko")
-        @RequestParam(defaultValue = "ko") language: String,
+        @Parameter(description = "Optional study-tree node ID. When present, only records generated for that topic node are returned.", example = "42")
+        @RequestParam(required = false) studyId: Long?,
+        @RequestParam(required = false) tl: String?,
+        @Parameter(description = "Deprecated response/search language alias.", example = "ko", deprecated = true)
+        @RequestParam(required = false) language: String?,
+        @RequestParam(defaultValue = "localized") view: String,
         authentication: Authentication,
     ): RecordsPageResponse =
-        study.records(limit, offset, query, language, authentication)
+        study.records(limit, offset, query, studyId, resolveTargetLanguage(tl, language), view, authentication)
 
     @Operation(summary = "Clear all my records", description = "Reserved endpoint for deleting all records owned by the authenticated user.")
     @ApiResponses(
@@ -182,10 +210,12 @@ class StudyController(
     suspend fun record(
         @Parameter(description = "Record/question id.", example = "42")
         @PathVariable id: Long,
-        @Parameter(description = "Response language code.", example = "ko")
-        @RequestParam(defaultValue = "ko") language: String,
+        @RequestParam(required = false) tl: String?,
+        @Parameter(description = "Deprecated response language alias.", example = "ko", deprecated = true)
+        @RequestParam(required = false) language: String?,
+        @RequestParam(defaultValue = "localized") view: String,
         authentication: Authentication,
-    ): StudyRecordResponse = study.record(id, language, authentication)
+    ): StudyRecordResponse = study.record(id, resolveTargetLanguage(tl, language), view, authentication)
 
     @Operation(summary = "Save a draft answer", description = "Stores the current answer text without grading. Used for preserving user drafts while the study room remains open.")
     @PatchMapping("/records/{id}/answer")
@@ -197,10 +227,11 @@ class StudyController(
         authentication: Authentication,
     ): StudyRecordResponse = study.saveAnswer(id, body, authentication)
 
-    @Operation(summary = "Submit an answer for grading", description = "Submits the answer, asks the tutor model to grade it, and returns the updated record with score, correctness, feedback, and explanation.")
+    @Operation(summary = "Submit an answer for grading", description = "Persists the immutable answer, changes questionStatus to GRADING, and queues asynchronous grading. The response contains correlationId, gradingLastEventId, and the legacy gradingRequestId alias.")
     @ApiResponses(
-        ApiResponse(responseCode = "200", description = "Answer graded."),
+        ApiResponse(responseCode = "202", description = "Answer accepted for grading."),
         ApiResponse(responseCode = "401", description = "Authentication required."),
+        ApiResponse(responseCode = "409", description = "An answer has already been submitted."),
         ApiResponse(responseCode = "404", description = "Record not found or not owned by the user."),
     )
     @PostMapping("/records/{id}/answer")
@@ -210,7 +241,19 @@ class StudyController(
         @PathVariable id: Long,
         @RequestBody body: AnswerRequest,
         authentication: Authentication,
-    ): StudyRecordResponse = study.grade(id, body, authentication)
+    ): ResponseEntity<StudyRecordResponse> = study.grade(id, body, authentication)
+
+    @Operation(
+        summary = "Fetch answer grading status",
+        description = "Returns the current process state and durable events after the supplied cursor. Poll again after pollAfterMs until terminal is true.",
+    )
+    @GetMapping("/answer-processes/{correlationId}")
+    @RequirePermission(Permissions.RECORD_UPDATE)
+    suspend fun answerGradingProcess(
+        @PathVariable correlationId: String,
+        @RequestParam(defaultValue = "0") after: Long,
+        authentication: Authentication,
+    ) = study.answerGradingProcess(correlationId, after, authentication)
 
     @Operation(summary = "Skip a question", description = "Marks an ungraded question as skipped and removes it from the active study-room question state.")
     @PostMapping("/records/{id}/skip")
@@ -275,19 +318,45 @@ class StudyController(
     ): StatsActivityResponse =
         study.statsActivity(startAt, endAt, authentication)
 
-    @Operation(summary = "Create a new study question", description = "Creates one new question for the requested study room. The backend enforces the per-study pending-question limit and uses the user's stored OpenAI settings.")
+    @Operation(
+        summary = "Fetch study-tree growth",
+        description = "Returns root-study growth summaries, normalized radar profiles, and flat tree nodes. Growth compares non-overlapping recent and previous answer windows and keeps activation separate from growth.",
+    )
+    @GetMapping("/stats/studies")
+    suspend fun studyGrowth(
+        @Parameter(description = "Optional inclusive UTC start timestamp. Defaults to 90 days before endAt.")
+        @RequestParam(required = false) startAt: Instant?,
+        @Parameter(description = "Optional exclusive UTC end timestamp. Defaults to now.")
+        @RequestParam(required = false) endAt: Instant?,
+        authentication: Authentication,
+    ) = study.studyGrowth(startAt, endAt, authentication)
+
+    @Operation(summary = "Request a new study question", description = "Queues question generation and immediately returns a correlation id for polling.")
     @PostMapping("/studies/{studyId}/questions")
     suspend fun createQuestion(
         @Parameter(description = "Study room id.", example = "42")
         @PathVariable studyId: Long,
+        @RequestHeader("Idempotency-Key") idempotencyKey: String,
         authentication: Authentication,
-    ): StudyRecordResponse = study.createQuestion(studyId, authentication)
+    ) = study.createQuestion(studyId, idempotencyKey, authentication)
+
+    @Operation(summary = "Fetch question generation status")
+    @GetMapping("/question-processes/{correlationId}")
+    suspend fun questionProcess(
+        @PathVariable correlationId: String,
+        authentication: Authentication,
+    ) = study.questionProcess(correlationId, authentication)
 
     @Operation(
         summary = "Fetch my monthly question quota",
-        description = "Returns only the current usage, monthly allowance, remaining count, and next reset time. Membership tier details are intentionally not exposed to the app.",
+        description = "Returns the current tier, quota period, base and bonus limits, committed and reserved usage, remaining count, and next reset time.",
     )
     @GetMapping("/questions/quota")
     suspend fun questionQuota(authentication: Authentication) =
         study.questionQuota(authentication)
 }
+
+internal fun resolveTargetLanguage(tl: String?, legacyLanguage: String?): String =
+    tl?.trim()?.takeIf(String::isNotEmpty)
+        ?: legacyLanguage?.trim()?.takeIf(String::isNotEmpty)
+        ?: "ko"

@@ -1,0 +1,5 @@
+{
+  "en-US": "App Review candidate build. This build connects to the BuddyStudy production API. Please test sign-up and sign-in, question generation and grading, records and topic statistics, public-content reporting and blocking, account deletion, notifications, and subscription purchase-sheet presentation. Do not delete the permanent review account; use a disposable account for deletion testing.",
+  "ko": "App Store 심사용 후보 빌드입니다. BuddyStudy 운영 API에 연결됩니다. 회원가입과 로그인, 문제 생성 및 채점, 기록과 주제별 통계, 공개 콘텐츠 신고 및 차단, 계정 삭제, 알림, 구독 구매 시트 표시를 확인해 주세요. 영구 심사용 계정은 삭제하지 말고 계정 삭제 테스트에는 일회용 계정을 사용해 주세요.",
+  "ja": "App Store審査用の候補ビルドです。BuddyStudyの本番APIに接続します。新規登録・ログイン、問題生成と採点、記録とトピック別統計、公開コンテンツの報告・ブロック、アカウント削除、通知、サブスクリプション購入シートの表示を確認してください。常設の審査用アカウントは削除せず、アカウント削除のテストには使い捨てアカウントを使用してください。"
+}

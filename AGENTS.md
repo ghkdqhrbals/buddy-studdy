@@ -6,8 +6,9 @@ BuddyStudy is a SwiftUI iOS app. It generates short study questions with OpenAI,
 
 Read these first:
 
-- `docs/PRD.md`
-- `docs/ARCHITECTURE.md`
+- [Product requirements](docs/PRD.md)
+- [System architecture](docs/ARCHITECTURE.md)
+- [Billing and RevenueCat flow](docs/BILLING.md)
 
 ## Working Rules
 
@@ -39,6 +40,18 @@ Read these first:
 - Adapters must implement outbound or controller-facing `*Port` contracts and may depend on `*UseCase` contracts.
 - Controllers must depend on controller-facing `*Port` contracts, not direct `*UseCase` contracts.
 - Non-use-case helpers must not be named `*Service`; use names such as `*Provider`, `*Manager`, `*Adapter`, `*Publisher`, or `*Resolver`.
+
+## Redis Stream Naming Rules
+
+- Every Redis Stream key must follow exactly `{domain}.{entity-or-dto}.{action}.{version}`.
+- Use four dot-separated segments only. Write each segment in lowercase kebab-case when it contains multiple words, and write the version as `v1`, `v2`, and so on.
+- The first segment is the bounded-context domain, such as `community`, `study`, `billing`, or `notification`.
+- The second segment is the business entity or the concrete payload DTO concept. Never use generic placeholders such as `domain`, `event`, `message`, or `data`.
+- The third segment is a base-form action that describes why the payload is published, such as `request`, `generate`, `grade`, `reconcile`, or `notify`. Do not encode transport, implementation, status, or a past-tense event name in this segment.
+- A stream owns one stable payload contract. If the DTO or business purpose differs, create a separately named stream instead of publishing unrelated event types into a catch-all stream.
+- Examples: `community.question.request.v1`, `billing.subscription.reconcile.v1`, `study.answer.grade.v1`.
+- Invalid examples: `billing.domain.event.v1`, `billing.events.v1`, `study.answer-grading.requested.v1`.
+- Consumer-group and consumer names are operational identifiers and are not part of the four-segment stream-key contract.
 
 ## Storage
 

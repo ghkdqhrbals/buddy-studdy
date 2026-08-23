@@ -21,6 +21,9 @@ spring:
       moderation: none
   profiles:
     default: dev
+    group:
+      dev-aws:
+        - dev
   r2dbc:
     url: ${R2DBC_DATABASE_URL:r2dbc:mysql://localhost:3306/buddystudy?serverZoneId=UTC}
     username: ${DATABASE_USERNAME:}
@@ -45,29 +48,33 @@ spring:
       password: ${REDIS_PASSWORD:}
       ssl:
         enabled: ${REDIS_SSL:false}
-  mail:
-    host: ${email.google.smtpHost:${SMTP_HOST:smtp.gmail.com}}
-    port: ${email.google.smtpPort:${SMTP_PORT:587}}
-    username: ${email.google.smtpUsername:${SMTP_USERNAME:}}
-    password: ${email.google.smtpPassword:${SMTP_PASSWORD:}}
-    properties:
-      mail:
-        smtp:
-          auth: true
-          starttls:
-            enable: true
-            required: true
-          connectiontimeout: 5000
-          timeout: 5000
-          writetimeout: 5000
-
 management:
   endpoints:
     web:
       exposure:
         include: health,info
 
+sentry:
+  dsn: ${SENTRY_DSN:}
+  environment: ${SENTRY_ENVIRONMENT:${SPRING_PROFILES_ACTIVE:development}}
+  release: ${SENTRY_RELEASE:}
+  in-app-packages:
+    - com.buddystudy.backend
+  send-default-pii: false
+  traces-sample-rate: 0.0
+  logging:
+    minimum-event-level: error
+    minimum-breadcrumb-level: info
+
 buddystudy:
+  mcp:
+    enabled: ${MCP_SERVER_ENABLED:false}
+    allowed-origins: ${MCP_ALLOWED_ORIGINS:}
+    allowed-hosts: ${MCP_ALLOWED_HOSTS:api.ghkdqhrbals.org,api.lowfidev.cloud,lowfidev.cloud,localhost:*,127.0.0.1:*}
+    request-timeout-seconds: ${MCP_REQUEST_TIMEOUT_SECONDS:30}
+  logging:
+    api:
+      detail: ${API_LOG_DETAIL:detailed}
   auth:
     jwt-secret: ${AUTH_JWT_SECRET:${BACKEND_MASTER_KEY:dev-buddystudy-secret-must-be-overridden}}
     access-token-days: ${ACCESS_TOKEN_DAYS:90}
@@ -81,22 +88,105 @@ buddystudy:
     processing-timeout-seconds: ${SCHEDULER_PROCESSING_TIMEOUT_SECONDS:300}
     worker-id: ${SCHEDULER_WORKER_ID:}
   openai:
-    api-key: ${OPENAI_API_KEY:}
+    user-content-api-key: ${OPENAI_API_KEY_USER:${OPENAI_USER_CONTENT_API_KEY:${OPENAI_API_KEY:}}}
+    system-api-key: ${OPENAI_API_KEY_SYSTEM:${OPENAI_SYSTEM_API_KEY:}}
     model: ${OPENAI_MODEL:gpt-5.4}
+    system-model: ${OPENAI_SYSTEM_MODEL:gpt-5.4}
+    grading-policy: ${OPENAI_GRADING_POLICY:}
+    grading-policy-version: ${OPENAI_GRADING_POLICY_VERSION:ai-judge-v1}
+    grading-min-confidence: ${OPENAI_GRADING_MIN_CONFIDENCE:0.72}
+    grading-response-style: ${OPENAI_GRADING_RESPONSE_STYLE:structured-brief-v1}
+    request-timeout-seconds: ${OPENAI_REQUEST_TIMEOUT_SECONDS:60}
+    request-max-retries: ${OPENAI_REQUEST_MAX_RETRIES:1}
+    grading-timeout-seconds: ${OPENAI_GRADING_TIMEOUT_SECONDS:240}
   apns:
-    team-id: ${notificatoin.push.apns.team-id:${APNS_TEAM_ID:}}
-    key-id: ${notificatoin.push.apns.key-id:${APNS_KEY_ID:}}
-    auth-key-p8: ${notificatoin.push.apns.private-key:${APNS_AUTH_KEY_P8:${APNS_AUTH_KEY_BASE64:}}}
-    bundle-id: ${notificatoin.push.apns.bundle-id:${APNS_BUNDLE_ID:io.github.ghkdqhrbals.StudyMate}}
+    team-id: ${APNS_TEAM_ID:${notificatoin.push.apns.team-id:}}
+    key-id: ${APNS_KEY_ID:${notificatoin.push.apns.key-id:}}
+    auth-key-p8: ${APNS_AUTH_KEY_P8:${APNS_AUTH_KEY_BASE64:${notificatoin.push.apns.private-key:}}}
+    bundle-id: ${APNS_BUNDLE_ID:${notificatoin.push.apns.bundle-id:io.github.ghkdqhrbals.StudyMate}}
+  billing:
+    apple:
+      bundle-id: ${APPLE_IAP_BUNDLE_ID:${APNS_BUNDLE_ID:io.github.ghkdqhrbals.StudyMate}}
+      app-apple-id: ${APPLE_IAP_APP_APPLE_ID:6774108938}
+      root-certificates-base64: ${APPLE_IAP_ROOT_CERTIFICATES_BASE64:}
+      enable-online-checks: ${APPLE_IAP_ENABLE_ONLINE_CHECKS:true}
+      allow-xcode-environment: ${APPLE_IAP_ALLOW_XCODE_ENVIRONMENT:false}
+    revenue-cat:
+      webhook-signing-secret: ${REVENUECAT_WEBHOOK_SIGNING_SECRET:}
+      project-id: ${REVENUECAT_PROJECT_ID:}
+      app-id: ${REVENUECAT_APP_ID:}
+      server-api-key: ${REVENUECAT_SERVER_API_KEY:}
+      api-base-url: ${REVENUECAT_API_BASE_URL:https://api.revenuecat.com/v2}
+      connect-timeout-ms: ${REVENUECAT_CONNECT_TIMEOUT_MS:3000}
+      read-timeout-ms: ${REVENUECAT_READ_TIMEOUT_MS:5000}
+      max-retries: ${REVENUECAT_MAX_RETRIES:3}
+      allow-test-store: ${REVENUECAT_ALLOW_TEST_STORE:false}
+    recovery:
+      enabled: ${BILLING_RECOVERY_ENABLED:true}
+      poll-ms: ${BILLING_RECOVERY_POLL_MS:5000}
+      initial-delay-ms: ${BILLING_RECOVERY_INITIAL_DELAY_MS:5000}
+    reconciliation:
+      enabled: ${BILLING_RECONCILIATION_ENABLED:true}
+      poll-ms: ${BILLING_RECONCILIATION_POLL_MS:900000}
+      initial-delay-ms: ${BILLING_RECONCILIATION_INITIAL_DELAY_MS:60000}
+    event-projector:
+      enabled: ${BILLING_EVENT_PROJECTOR_ENABLED:true}
+      poll-ms: ${BILLING_EVENT_PROJECTOR_POLL_MS:1000}
+      initial-delay-ms: ${BILLING_EVENT_PROJECTOR_INITIAL_DELAY_MS:1000}
+  quota:
+    rollover:
+      enabled: ${USER_QUOTA_ROLLOVER_ENABLED:true}
+      poll-ms: ${USER_QUOTA_ROLLOVER_POLL_MS:60000}
+      initial-delay-ms: ${USER_QUOTA_ROLLOVER_INITIAL_DELAY_MS:10000}
+      batch-size: ${USER_QUOTA_ROLLOVER_BATCH_SIZE:200}
+      max-batches-per-run: ${USER_QUOTA_ROLLOVER_MAX_BATCHES_PER_RUN:10}
   streams:
-    enabled: ${REACTION_STREAM_ENABLED:true}
-    key: ${BUDDYSTUDY_STREAMS_KEY:buddystudy-events-v1}
-    max-len: ${REACTION_STREAM_XADD_MAX_LEN:100000}
-    view-queue-capacity: ${VIEW_EVENT_QUEUE_CAPACITY:20000}
-    view-publisher-concurrency: ${VIEW_EVENT_PUBLISHER_CONCURRENCY:4}
+    enabled: ${BUDDYSTUDY_STREAMS_ENABLED:true}
+    notification-requested-key: ${BUDDYSTUDY_NOTIFICATION_REQUESTED_STREAM_KEY:notification.message.requested.v1}
+    account-withdrawn-key: ${BUDDYSTUDY_ACCOUNT_WITHDRAWN_STREAM_KEY:identity.account.withdrawn.v1}
+    answer-grading-requested-key: ${BUDDYSTUDY_ANSWER_GRADING_REQUESTED_STREAM_KEY:study.answer-grading.requested.v1}
+    question-generation-requested-key: ${BUDDYSTUDY_QUESTION_GENERATION_REQUESTED_STREAM_KEY:study.question-generation.requested.v1}
+    question-generation-rollback-requested-key: ${BUDDYSTUDY_QUESTION_GENERATION_ROLLBACK_REQUESTED_STREAM_KEY:study.question-generation.rollback-requested.v1}
+    question-generated-key: ${BUDDYSTUDY_QUESTION_GENERATED_STREAM_KEY:study.question.generated.v1}
+    content-translation-requested-key: ${BUDDYSTUDY_CONTENT_TRANSLATION_REQUESTED_STREAM_KEY:localization.content-translation.requested.v1}
+    question-push-requested-key: ${BUDDYSTUDY_QUESTION_PUSH_REQUESTED_STREAM_KEY:notification.question-push.requested.v1}
+    question-viewed-key: ${BUDDYSTUDY_QUESTION_VIEWED_STREAM_KEY:community.question.viewed.v1}
+    native-ad-view-key: ${BUDDYSTUDY_NATIVE_AD_VIEW_STREAM_KEY:community.native-ad.view.v1}
+    question-liked-key: ${BUDDYSTUDY_QUESTION_LIKED_STREAM_KEY:community.question.liked.v1}
+    question-unliked-key: ${BUDDYSTUDY_QUESTION_UNLIKED_STREAM_KEY:community.question.unliked.v1}
+    question-commented-key: ${BUDDYSTUDY_QUESTION_COMMENTED_STREAM_KEY:community.question.commented.v1}
+    question-comment-deleted-key: ${BUDDYSTUDY_QUESTION_COMMENT_DELETED_STREAM_KEY:community.question.comment-deleted.v1}
+    notification-requested-max-len: ${BUDDYSTUDY_NOTIFICATION_REQUESTED_STREAM_MAX_LEN:1000}
+    account-withdrawn-max-len: ${BUDDYSTUDY_ACCOUNT_WITHDRAWN_STREAM_MAX_LEN:1000}
+    answer-grading-requested-max-len: ${BUDDYSTUDY_ANSWER_GRADING_REQUESTED_STREAM_MAX_LEN:1000}
+    question-generation-requested-max-len: ${BUDDYSTUDY_QUESTION_GENERATION_REQUESTED_STREAM_MAX_LEN:1000}
+    question-generation-rollback-requested-max-len: ${BUDDYSTUDY_QUESTION_GENERATION_ROLLBACK_REQUESTED_STREAM_MAX_LEN:1000}
+    question-generated-max-len: ${BUDDYSTUDY_QUESTION_GENERATED_STREAM_MAX_LEN:1000}
+    content-translation-requested-max-len: ${BUDDYSTUDY_CONTENT_TRANSLATION_REQUESTED_STREAM_MAX_LEN:1000}
+    question-push-requested-max-len: ${BUDDYSTUDY_QUESTION_PUSH_REQUESTED_STREAM_MAX_LEN:1000}
+    question-viewed-max-len: ${BUDDYSTUDY_QUESTION_VIEWED_STREAM_MAX_LEN:1000}
+    native-ad-view-max-len: ${BUDDYSTUDY_NATIVE_AD_VIEW_STREAM_MAX_LEN:1000}
+    question-liked-max-len: ${BUDDYSTUDY_QUESTION_LIKED_STREAM_MAX_LEN:1000}
+    question-unliked-max-len: ${BUDDYSTUDY_QUESTION_UNLIKED_STREAM_MAX_LEN:1000}
+    question-commented-max-len: ${BUDDYSTUDY_QUESTION_COMMENTED_STREAM_MAX_LEN:1000}
+    question-comment-deleted-max-len: ${BUDDYSTUDY_QUESTION_COMMENT_DELETED_STREAM_MAX_LEN:1000}
+    push-consumer-concurrency: ${PUSH_CONSUMER_CONCURRENCY:10}
   email:
     verification-ttl-seconds: ${EMAIL_VERIFICATION_TTL_SECONDS:180}
-    from: ${email.google.smtpFrom:${SMTP_FROM:${email.google.smtpUsername:${SMTP_USERNAME:}}}}
+    host: ${SMTP_HOST:smtp.gmail.com}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    from: ${SMTP_FROM:${SMTP_USERNAME:}}
+  translation:
+    base-url: ${BUDDYSTUDY_TRANSLATION_BASE_URL:http://localhost:5001}
+    supported-languages: ${BUDDYSTUDY_TRANSLATION_SUPPORTED_LANGUAGES:ko,en,ja}
+    provider-order: ${BUDDYSTUDY_TRANSLATION_PROVIDER_ORDER:libretranslate,openai}
+    timeout-ms: ${BUDDYSTUDY_TRANSLATION_TIMEOUT_MS:5000}
+    api-key: ${BUDDYSTUDY_TRANSLATION_API_KEY:}
+    backfill-enabled: ${BUDDYSTUDY_TRANSLATION_BACKFILL_ENABLED:true}
+    backfill-batch-size: ${BUDDYSTUDY_TRANSLATION_BACKFILL_BATCH_SIZE:20}
+    backfill-poll-ms: ${BUDDYSTUDY_TRANSLATION_BACKFILL_POLL_MS:60000}
   profile-photo:
     directory: ${PROFILE_PHOTO_DIRECTORY:/app/profile-photos}
     public-base-url: ${PROFILE_PHOTO_PUBLIC_BASE_URL:https://api.ghkdqhrbals.org}
@@ -107,25 +197,27 @@ buddystudy:
     username: ${ADMIN_USERNAME:admin}
     password: ${ADMIN_PASSWORD:admin}
     token-hours: ${ADMIN_TOKEN_HOURS:12}
+  firebase:
+    remote-config:
+      project-id: ${FIREBASE_PROJECT_ID:}
+      service-account-json-base64: ${FIREBASE_SERVICE_ACCOUNT_JSON_BASE64:}
+      parameter-key: ${FIREBASE_REMOTE_CONFIG_PARAMETER_KEY:ios_app_control_v1}
   monitoring:
-    slack-webhook-url: ${SLACK_WEBHOOK_URL:}
+    billing-lifecycle:
+      enabled: ${MONITORING_BILLING_LIFECYCLE_ENABLED:true}
+      interval-ms: ${MONITORING_BILLING_LIFECYCLE_INTERVAL_MS:300000}
+      initial-delay-ms: ${MONITORING_BILLING_LIFECYCLE_INITIAL_DELAY_MS:60000}
     environment-name: ${MONITORING_ENVIRONMENT_NAME:${SPRING_PROFILES_ACTIVE:production}}
     service-name: ${MONITORING_SERVICE_NAME:BuddyStudy backend}
-    admin-base-url: ${MONITORING_ADMIN_BASE_URL:}
-    slack-timeout-ms: ${MONITORING_SLACK_TIMEOUT_MS:5000}
-    scheduler-failure-alert-repeat-seconds: ${MONITORING_SCHEDULER_FAILURE_ALERT_REPEAT_SECONDS:300}
     scheduler-readiness-enabled: ${MONITORING_SCHEDULER_READINESS_ENABLED:true}
     scheduler-stale-threshold-minutes: ${MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES:15}
     scheduler-startup-grace-minutes: ${MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES:15}
-    scheduler-monitored-jobs: ${MONITORING_SCHEDULER_MONITORED_JOBS:question-schedule,question-push-outbox-dispatch,user-stats-refresh,admin-analytics-recent}
+    scheduler-monitored-jobs: ${MONITORING_SCHEDULER_MONITORED_JOBS:question-schedule,user-quota-rollover,event-outbox-dispatch,user-stats-refresh,answer-grading-watchdog,billing-fulfillment-recovery,billing-subscription-event-projector}
     runtime-metrics:
       enabled: ${RUNTIME_METRICS_ENABLED:true}
       interval-ms: ${RUNTIME_METRICS_INTERVAL_MS:30000}
       initial-delay-ms: ${RUNTIME_METRICS_INITIAL_DELAY_MS:30000}
   analytics:
-    enabled: ${ADMIN_ANALYTICS_ENABLED:true}
-    recent-days: ${ADMIN_ANALYTICS_RECENT_DAYS:2}
-    correction-days: ${ADMIN_ANALYTICS_CORRECTION_DAYS:30}
     datasource:
       url: ${ADMIN_ANALYTICS_DATABASE_URL:}
       username: ${ADMIN_ANALYTICS_DATABASE_USERNAME:${DATABASE_USERNAME:}}

@@ -25,7 +25,7 @@ const els = {
   emptyTemplate: document.querySelector("#emptyTemplate"),
 };
 
-const DEFAULT_QUERY = '{container=~".+"} |= "api_exchange"';
+const DEFAULT_QUERY = '{app="buddystudy"} |= "api_exchange"';
 
 function ns(ms) {
   return (BigInt(ms) * 1_000_000n).toString();

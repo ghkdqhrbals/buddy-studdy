@@ -8,28 +8,41 @@ import com.buddystudy.backend.auth.application.permission.Roles
 import com.buddystudy.backend.auth.application.port.outbound.RoleAssignmentPort
 import com.buddystudy.backend.study.application.port.outbound.GeneratedQuestion
 import com.buddystudy.backend.study.application.port.outbound.GradedAnswer
+import com.buddystudy.backend.study.application.port.outbound.GradingPromptPreviewPort
 import com.buddystudy.backend.study.application.port.outbound.OpenAIPort
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.backend.study.application.prompt.QuestionGenerationPrompt
+import com.buddystudy.backend.study.application.prompt.QuestionPromptDefaults
 import com.buddystudy.backend.stats.application.port.inbound.RefreshUserStatsUseCase
 import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionRepository
 import com.buddystudy.backend.study.adapter.outbound.persistence.QuestionStatsRepository
 import com.buddystudy.backend.study.adapter.outbound.persistence.StudyRepository
 import com.buddystudy.backend.study.adapter.outbound.persistence.UserMembershipTierRepository
+import com.buddystudy.backend.community.adapter.outbound.persistence.QuestionCommentRepository
+import com.buddystudy.backend.localization.application.model.ContentTranslationResult
+import com.buddystudy.backend.localization.application.model.LocalizableContentType
+import com.buddystudy.backend.localization.application.port.ContentLocalizationPort
+import com.buddystudy.backend.localization.application.policy.ContentSourceHashPolicy
 import com.buddystudy.account.domain.entity.UserMembershipTierEntity
+import com.buddystudy.account.domain.entity.UserProvider
+import com.buddystudy.account.domain.entity.UserStatus
 import com.buddystudy.study.domain.entity.QuestionEntity
+import com.buddystudy.study.domain.entity.QuestionSource
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
+import com.buddystudy.study.domain.entity.QuestionStatus
 import com.buddystudy.study.domain.entity.StudyEntity
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.mockito.Mockito
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.context.annotation.Bean
+import org.springframework.data.domain.Pageable
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.test.context.TestPropertySource
 import java.net.URI
@@ -45,7 +58,8 @@ import java.time.Instant
         "buddystudy.streams.enabled=false",
         "buddystudy.crypto.master-key=test-master-key",
         "buddystudy.auth.jwt-secret=test-jwt-secret",
-        "buddystudy.openai.api-key=test-openai-key",
+        "buddystudy.openai.user-content-api-key=test-user-content-openai-key",
+        "buddystudy.openai.system-api-key=test-system-openai-key",
         "spring.main.allow-bean-definition-overriding=true",
     ]
 )
@@ -60,6 +74,8 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var refreshUserStats: RefreshUserStatsUseCase
     @Autowired lateinit var databaseClient: DatabaseClient
     @Autowired lateinit var membershipTiers: UserMembershipTierRepository
+    @Autowired lateinit var contentLocalizations: ContentLocalizationPort
+    @Autowired lateinit var comments: QuestionCommentRepository
     @LocalServerPort var port: Int = 0
 
     private val client = HttpClient.newHttpClient()
@@ -80,6 +96,93 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
+    fun `latest failed or graded question permits another question while in-progress latest question blocks it`(): Unit =
+        runBlocking {
+            val owner = registerActiveUser("latest-question-status")
+            val study = createStudy(owner, "Latest status")
+            val base = Instant.parse("2026-08-03T00:00:00Z")
+            questions.save(
+                QuestionEntity(
+                    deviceId = owner.deviceId,
+                    userId = study.userId,
+                    studyId = study.id,
+                    question = "Older pending question",
+                    topic = study.topic,
+                    status = QuestionStatus.UNGRADED,
+                    createdAt = base,
+                    updatedAt = base,
+                ),
+            )
+            questions.save(
+                QuestionEntity(
+                    deviceId = owner.deviceId,
+                    userId = study.userId,
+                    studyId = study.id,
+                    question = "Latest failed question",
+                    topic = study.topic,
+                    status = QuestionStatus.FAILED,
+                    gradingStatus = com.buddystudy.study.domain.entity.AnswerGradingStatus.FAILED,
+                    createdAt = base.plusSeconds(1),
+                    updatedAt = base.plusSeconds(1),
+                ),
+            )
+
+            assertThat(questions.findLatestStatusByStudyId(study.id)).isEqualTo(QuestionStatus.FAILED)
+            assertThat(questions.countPendingForStudy(study.id)).isZero()
+
+            questions.save(
+                QuestionEntity(
+                    deviceId = owner.deviceId,
+                    userId = study.userId,
+                    studyId = study.id,
+                    question = "Latest grading question",
+                    topic = study.topic,
+                    status = QuestionStatus.GRADING,
+                    createdAt = base.plusSeconds(2),
+                    updatedAt = base.plusSeconds(2),
+                ),
+            )
+
+            assertThat(questions.findLatestStatusByStudyId(study.id)).isEqualTo(QuestionStatus.GRADING)
+            assertThat(questions.countPendingForStudy(study.id)).isEqualTo(1)
+        }
+
+    @Test
+    fun `all studies exposes only successfully graded questions`(): Unit = runBlocking {
+        val owner = registerActiveUser("public-graded-only")
+        val study = createStudy(owner, "Public status")
+        val graded = questions.save(
+            gradedQuestion(
+                deviceId = owner.deviceId,
+                userId = study.userId,
+                studyId = study.id,
+                topic = study.topic,
+                question = "Successfully graded",
+                createdAt = Instant.parse("2026-08-03T00:00:00Z"),
+                publicQuestion = true,
+            ),
+        )
+        questions.save(
+            gradedQuestion(
+                deviceId = owner.deviceId,
+                userId = study.userId,
+                studyId = study.id,
+                topic = study.topic,
+                question = "Failed grading",
+                createdAt = Instant.parse("2026-08-03T00:00:01Z"),
+                publicQuestion = true,
+            ).apply {
+                status = QuestionStatus.FAILED
+                gradingStatus = com.buddystudy.study.domain.entity.AnswerGradingStatus.FAILED
+            },
+        )
+
+        val page = questions.findPublicAnswered(Pageable.ofSize(20))
+
+        assertThat(page.content.map(QuestionEntity::id)).containsExactly(graded.id)
+    }
+
+    @Test
     fun `study endpoint returns my studies while records endpoint returns only completed records`(): Unit = runBlocking {
         val registration = postJson(
             "/api/v1/devices/register",
@@ -87,7 +190,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
             {
               "apnsToken": "test-token",
               "platform": "ios",
-              "apnsEnvironment": "development",
+              "apnsEnvironment": "sandbox",
               "language": "ko",
               "timezone": "Asia/Seoul"
             }
@@ -154,8 +257,8 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
                 difficultyLevel = 2,
                 scheduledFor = Instant.parse("2026-06-09T00:00:00Z"),
                 sentAt = Instant.parse("2026-06-09T00:00:00Z"),
-                status = "ungraded",
-                source = "scheduled",
+                status = QuestionStatus.UNGRADED,
+                source = QuestionSource.SCHEDULED,
                 publicQuestion = false,
                 createdAt = Instant.parse("2026-06-09T00:00:00Z"),
                 updatedAt = Instant.parse("2026-06-09T00:00:00Z"),
@@ -172,7 +275,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
                 difficultyLevel = 2,
                 scheduledFor = Instant.parse("2026-06-09T01:00:00Z"),
                 sentAt = Instant.parse("2026-06-09T01:00:00Z"),
-                status = "graded",
+                status = QuestionStatus.GRADED,
                 answer = "랭킹처럼 score가 필요한 목록에 씁니다.",
                 score = 88,
                 correct = true,
@@ -180,7 +283,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
                 explanation = "score 기반 정렬이 핵심입니다.",
                 answeredAt = Instant.parse("2026-06-09T01:01:00Z"),
                 gradedAt = Instant.parse("2026-06-09T01:01:10Z"),
-                source = "manual",
+                source = QuestionSource.MANUAL,
                 publicQuestion = true,
                 createdAt = Instant.parse("2026-06-09T01:00:00Z"),
                 updatedAt = Instant.parse("2026-06-09T01:01:10Z"),
@@ -197,9 +300,9 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
                 difficultyLevel = 2,
                 scheduledFor = Instant.parse("2026-06-09T01:30:00Z"),
                 sentAt = Instant.parse("2026-06-09T01:30:00Z"),
-                status = "skipped",
+                status = QuestionStatus.SKIPPED,
                 skippedAt = Instant.parse("2026-06-09T01:31:00Z"),
-                source = "manual",
+                source = QuestionSource.MANUAL,
                 publicQuestion = true,
                 createdAt = Instant.parse("2026-06-09T01:30:00Z"),
                 updatedAt = Instant.parse("2026-06-09T01:31:00Z"),
@@ -216,7 +319,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
                 difficultyLevel = 6,
                 scheduledFor = Instant.parse("2026-06-09T02:00:00Z"),
                 sentAt = Instant.parse("2026-06-09T02:00:00Z"),
-                status = "graded",
+                status = QuestionStatus.GRADED,
                 answer = "뷰가 소유하는 observable object를 유지할 때 씁니다.",
                 score = 92,
                 correct = true,
@@ -224,7 +327,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
                 explanation = "StateObject is retained by the view lifecycle.",
                 answeredAt = Instant.parse("2026-06-09T02:01:00Z"),
                 gradedAt = Instant.parse("2026-06-09T02:01:10Z"),
-                source = "manual",
+                source = QuestionSource.MANUAL,
                 publicQuestion = true,
                 createdAt = Instant.parse("2026-06-09T02:00:00Z"),
                 updatedAt = Instant.parse("2026-06-09T02:01:10Z"),
@@ -237,9 +340,20 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
             .json()
         assertThat(studyPage["studies"]).hasSize(2)
         assertThat(studyPage["studies"].map { it["topic"].asText() }).contains(study.topic, swiftTopic)
-        val pendingStudyNode = studyPage["studies"].first { it["pendingQuestion"]["id"].asText() == pending.id.toString() }
+        val pendingStudyNode = studyPage["studies"].first {
+            it.path("pendingQuestion").path("id").asText() == pending.id.toString()
+        }
         assertThat(pendingStudyNode["pendingQuestion"]["topic"].asText()).isEqualTo("Redis")
         assertThat(pendingStudyNode["pendingQuestion"]["question"]["question"].asText()).isEqualTo("Redis의 Stream이 무엇인지 설명하세요.")
+
+        val studyDetail = getJson("/api/v1/studies/${study.id}?tl=ko", accessToken, deviceId, clientSecret)
+            .also { assertThat(it.statusCode()).isEqualTo(200) }
+            .json()
+        assertThat(studyDetail["id"].asLong()).isEqualTo(study.id)
+        assertThat(studyDetail["pendingQuestion"]["id"].asText()).isEqualTo(pending.id.toString())
+        assertThat(studyDetail["latestQuestion"]["id"].asText()).isEqualTo(graded.id.toString())
+        assertThat(studyDetail["latestQuestion"]["answer"].asText()).isEqualTo("랭킹처럼 score가 필요한 목록에 씁니다.")
+        assertThat(studyDetail["latestQuestion"]["gradingResult"]["feedback"].asText()).isEqualTo("좋습니다.")
 
         val searchedStudies = getJson("/api/v1/studies?limit=100&offset=0&query=swift", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
@@ -283,7 +397,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         val apiStatus = getJson("/api/v1/api", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
-        assertThat(apiStatus["openaiKeyConfigured"].asBoolean()).isFalse()
+        assertThat(apiStatus["openaiKeyConfigured"].asBoolean()).isTrue()
 
         refreshUserStats.refreshAll(Instant.parse("2026-06-09T03:00:00Z"))
 
@@ -321,7 +435,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
             {
               "apnsToken": "test-token-create-study",
               "platform": "ios",
-              "apnsEnvironment": "development",
+              "apnsEnvironment": "sandbox",
               "language": "ko",
               "timezone": "Asia/Seoul"
             }
@@ -331,6 +445,18 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         val clientSecret = registration["clientSecret"].asText()
         val accessToken = registration["accessToken"].asText()
         activateRegisteredUser(deviceId)
+        membershipTiers.save(
+            UserMembershipTierEntity(
+                tierCode = "TIER1",
+                monthlyQuestionLimit = 0,
+                description = "No question quota for study creation regression.",
+            ),
+        )
+
+        val exhaustedQuota = getJson("/api/v1/questions/quota", accessToken, deviceId, clientSecret)
+            .also { assertThat(it.statusCode()).isEqualTo(200) }
+            .json()
+        assertThat(exhaustedQuota["remainingCount"].asInt()).isZero()
 
         val created = postJson(
             "/api/v1/studies",
@@ -339,7 +465,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
               "topic": "Kotlin Architecture",
               "difficultyLevel": 7,
               "intervalMinutes": 30,
-              "customPrompt": "Ask practical backend architecture questions.",
+              "customPrompt": null,
               "openaiModel": "gpt-5.4",
               "maxHistoryCount": 300
             }
@@ -352,6 +478,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(created["topic"].asText()).isEqualTo("Kotlin Architecture")
         assertThat(created["difficultyLevel"].asInt()).isEqualTo(7)
         assertThat(created["intervalMinutes"].asInt()).isEqualTo(30)
+        assertThat(created["customPrompt"].asText()).isEqualTo(QuestionPromptDefaults.DEFAULT)
         assertThat(created["pendingQuestion"].isNull).isTrue()
 
         val updated = postJson(
@@ -398,6 +525,23 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(child["activeForQuestions"].asBoolean()).isTrue()
         assertThat(questions.countPendingForStudy(created["id"].asLong())).isZero()
 
+        val retriedChild = postJson(
+            "/api/v1/studies/${created["id"].asLong()}/topics",
+            """
+            {
+              "topic": "  kotlin   coroutines ",
+              "difficultyLevel": 6,
+              "sortOrder": 1,
+              "activeForQuestions": true
+            }
+            """.trimIndent(),
+            accessToken,
+            deviceId,
+            clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+
+        assertThat(retriedChild["id"].asLong()).isEqualTo(child["id"].asLong())
+
         val studyPage = getJson("/api/v1/studies?limit=100&offset=0", accessToken, deviceId, clientSecret)
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
@@ -405,22 +549,120 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(studyPage["studies"].map { it["id"].asLong() })
             .containsExactlyInAnyOrder(created["id"].asLong(), child["id"].asLong())
 
-        val question = postJson(
+        val quotaDenied = postJson(
             "/api/v1/studies/${child["id"].asLong()}/questions",
             "",
             accessToken,
             deviceId,
             clientSecret,
-        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
-        assertThat(question["topic"].asText()).isEqualTo("Kotlin Coroutines")
-        assertThat(question["question"]["question"].asText()).isEqualTo("Generated question for Kotlin Coroutines")
+            idempotencyKey = "create-study-question-quota-denied",
+        )
+        assertThat(quotaDenied.statusCode()).isEqualTo(403)
+        assertThat(quotaDenied.json()["error"]["errorCode"].asText()).isEqualTo("QUOTA_EXCEEDED")
 
-        val pendingQuestionCount = questions.countPendingForStudy(created["id"].asLong())
-        assertThat(pendingQuestionCount).isEqualTo(1)
+        membershipTiers.save(
+            UserMembershipTierEntity(
+                tierCode = "TIER1",
+                monthlyQuestionLimit = 30,
+                description = "Integration test default tier.",
+            ),
+        )
+
+        val accepted = postJson(
+            "/api/v1/studies/${child["id"].asLong()}/questions",
+            "",
+            accessToken,
+            deviceId,
+            clientSecret,
+            idempotencyKey = "create-study-question-1",
+        ).also { assertThat(it.statusCode()).isEqualTo(202) }.json()
+        assertThat(accepted["status"].asText()).isEqualTo("QUEUED")
+        assertThat(accepted["correlationId"].asText()).isNotBlank()
+
+        val process = getJson(
+            "/api/v1/question-processes/${accepted["correlationId"].asText()}",
+            accessToken,
+            deviceId,
+            clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        assertThat(process["status"].asText()).isEqualTo("QUEUED")
+        assertThat(process["terminal"].asBoolean()).isFalse()
+
+        assertThat(questions.countPendingForStudy(child["id"].asLong())).isZero()
+        assertThat(questions.countPendingForStudy(created["id"].asLong())).isZero()
+    }
+
+    @Test
+    fun `deleting a study subtree preserves records until the record is explicitly deleted`(): Unit = runBlocking {
+        val owner = registerActiveUser("study-record-lifecycle")
+        val root = createStudy(owner, "Lifecycle Archive")
+        val child = postJson(
+            "/api/v1/studies/${root.id}/topics",
+            """
+            {
+              "topic": "Lifecycle Child",
+              "difficultyLevel": 4,
+              "sortOrder": 1,
+              "activeForQuestions": true
+            }
+            """.trimIndent(),
+            owner.accessToken,
+            owner.deviceId,
+            owner.clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        val childId = child["id"].asLong()
+        val record = questions.save(
+            gradedQuestion(
+                deviceId = owner.deviceId,
+                userId = root.userId,
+                studyId = childId,
+                topic = "Lifecycle Child",
+                question = "Explain the lifecycle archive boundary.",
+                createdAt = Instant.parse("2026-08-06T00:00:00Z"),
+            ),
+        )
+
+        delete("/api/v1/studies/${root.id}", owner)
+            .also { assertThat(it.statusCode()).isEqualTo(204) }
+
+        assertThat(studies.findById(root.id)).isNull()
+        assertThat(studies.findById(childId)).isNull()
+        assertThat(questions.findById(record.id)?.studyId).isNull()
+
+        val records = getJson(
+            "/api/v1/records?limit=100&offset=0&query=lifecycle",
+            owner.accessToken,
+            owner.deviceId,
+            owner.clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        assertThat(records["records"].map { it["id"].asText() }).contains(record.id.toString())
+
+        val publicQuestions = get("/api/v1/public/questions?limit=20&offset=0&query=lifecycle")
+            .also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        assertThat(publicQuestions["questions"].map { it["id"].asText() }).contains(record.id.toString())
+
+        delete("/api/v1/records/${record.id}", owner)
+            .also { assertThat(it.statusCode()).isEqualTo(204) }
+
+        val recordsAfterDeletion = getJson(
+            "/api/v1/records?limit=100&offset=0&query=lifecycle",
+            owner.accessToken,
+            owner.deviceId,
+            owner.clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        assertThat(recordsAfterDeletion["records"].map { it["id"].asText() }).doesNotContain(record.id.toString())
+
+        val publicAfterDeletion = get("/api/v1/public/questions?limit=20&offset=0&query=lifecycle")
+            .also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        assertThat(publicAfterDeletion["questions"].map { it["id"].asText() }).doesNotContain(record.id.toString())
     }
 
     @TestConfiguration
     class OpenAITestConfig {
+        @Bean
+        fun gradingPromptPreviewPort(): GradingPromptPreviewPort =
+            Mockito.mock(GradingPromptPreviewPort::class.java)
+
         @Bean("openAIClient")
         fun openAIClient(): OpenAIPort = object : OpenAIPort {
             override suspend fun validate(apiKey: String) = Unit
@@ -536,6 +778,38 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
                 publicQuestion = true,
             )
         )
+        val sourceHashes = ContentSourceHashPolicy.recordHashes(publicQuestion)
+        contentLocalizations.ensureRecordPending(
+            publicQuestion,
+            "en",
+            sourceHashes,
+            publicQuestion.updatedAt,
+            publicQuestion.updatedAt.minusSeconds(300),
+        )
+        contentLocalizations.saveQuestionReady(
+            question = publicQuestion,
+            targetLanguage = "en",
+            sourceHash = sourceHashes.question,
+            result = ContentTranslationResult(
+                fields = mapOf(
+                    "topic" to "Public Boundary Topic",
+                    "question" to "Translated public boundary question",
+                    "hint" to "Translated public boundary hint",
+                ),
+                provider = "test",
+            ),
+            now = publicQuestion.updatedAt,
+        )
+        contentLocalizations.saveAnswerReady(
+            question = publicQuestion,
+            targetLanguage = "en",
+            sourceHash = sourceHashes.answer!!,
+            result = ContentTranslationResult(
+                fields = mapOf("answer" to "Translated public boundary answer"),
+                provider = "test",
+            ),
+            now = publicQuestion.updatedAt,
+        )
         stats.save(QuestionStatsEntity(questionId = publicQuestion.id, likeCount = 9, commentCount = 3, viewCount = 14))
 
         val list = get("/api/v1/public/questions?query=boundary")
@@ -551,22 +825,257 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         assertThat(listed["commentCount"].asInt()).isEqualTo(3)
         assertThat(listed["viewCount"].asInt()).isEqualTo(14)
 
-        val detail = get("/api/v1/public/questions/${publicQuestion.id}")
+        val translatedList = get("/api/v1/public/questions?query=boundary&tl=en")
+            .also { assertThat(it.statusCode()).isEqualTo(200) }
+            .json()
+        assertThat(translatedList["questions"]).hasSize(1)
+        assertThat(translatedList["questions"][0]["topic"].asText()).isEqualTo("Public Boundary Topic")
+        assertThat(translatedList["questions"][0]["question"].asText()).isEqualTo("Translated public boundary question")
+        assertThat(translatedList["questions"][0]["answer"].asText()).isEqualTo("Translated public boundary answer")
+
+        val detail = get("/api/v1/public/questions/${publicQuestion.id}?tl=en")
             .also { assertThat(it.statusCode()).isEqualTo(200) }
             .json()
         assertThat(detail["id"].asText()).isEqualTo(publicQuestion.id.toString())
         assertThat(detail["likedByMe"].asBoolean()).isFalse()
+        assertThat(detail["topic"].asText()).isEqualTo("Public Boundary Topic")
+        assertThat(detail["question"].asText()).isEqualTo("Translated public boundary question")
+        assertThat(detail["answer"].asText()).isEqualTo("Translated public boundary answer")
+
+        val ownerDetail = getJson(
+            "/api/v1/public/questions/${publicQuestion.id}?tl=en",
+            owner.accessToken,
+            owner.deviceId,
+            owner.clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        assertThat(ownerDetail["question"].asText()).isEqualTo("Translated public boundary question")
+        assertThat(ownerDetail["answer"].asText()).isEqualTo("Translated public boundary answer")
+        assertThat(ownerDetail["localization"]["answer"]["translationState"].asText()).isEqualTo("TRANSLATED")
+        assertThat(ownerDetail["localization"]["answer"]["translationReason"].asText()).isEqualTo("EXPLICIT_TL")
+
+        val ownerRecord = getJson(
+            "/api/v1/records/${publicQuestion.id}?tl=en",
+            owner.accessToken,
+            owner.deviceId,
+            owner.clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        assertThat(ownerRecord["question"]["question"].asText()).isEqualTo("Translated public boundary question")
+        assertThat(ownerRecord["answer"].asText()).isEqualTo("Translated public boundary answer")
+        assertThat(ownerRecord["localization"]["answer"]["translationState"].asText()).isEqualTo("TRANSLATED")
+        assertThat(ownerRecord["localization"]["answer"]["translationReason"].asText()).isEqualTo("EXPLICIT_TL")
+
+        val legacyDetail = get("/api/v1/public/questions/${publicQuestion.id}?language=en")
+            .also { assertThat(it.statusCode()).isEqualTo(200) }
+            .json()
+        assertThat(legacyDetail["question"].asText()).isEqualTo("Translated public boundary question")
 
         assertAuthRequired(putJson("/api/v1/public/questions/${publicQuestion.id}/like", ""))
         assertAuthRequired(postJson("/api/v1/public/questions/${publicQuestion.id}/comments", """{"body":"hello"}"""))
         assertAuthRequired(postJson("/api/v1/public/questions/${publicQuestion.id}/report", """{"reason":"spam"}"""))
     }
 
-    private fun postJson(path: String, body: String, bearerToken: String? = null, deviceId: String? = null, clientSecret: String? = null): HttpResponse<String> =
-        request("POST", path, body, bearerToken, deviceId, clientSecret)
+    @Test
+    fun `authenticated user can create and immediately read a public question comment`(): Unit = runBlocking {
+        val owner = registerActiveUser("comment-owner")
+        val commenter = registerActiveUser("comment-author")
+        val study = createStudy(owner, "Comment Flow")
+        val publicQuestion = questions.save(
+            gradedQuestion(
+                deviceId = owner.deviceId,
+                userId = study.userId,
+                studyId = study.id,
+                topic = "Comment Flow",
+                question = "Can this question receive comments?",
+                createdAt = Instant.parse("2026-06-09T06:00:00Z"),
+                publicQuestion = true,
+            )
+        )
+
+        val blank = postJson(
+            "/api/v1/public/questions/${publicQuestion.id}/comments",
+            """{"body":"   "}""",
+            commenter.accessToken,
+            commenter.deviceId,
+            commenter.clientSecret,
+        )
+        assertThat(blank.statusCode()).isEqualTo(422)
+
+        val created = postJson(
+            "/api/v1/public/questions/${publicQuestion.id}/comments",
+            """{"body":"The comment should be returned immediately."}""",
+            commenter.accessToken,
+            commenter.deviceId,
+            commenter.clientSecret,
+        )
+        assertThat(created.statusCode()).isEqualTo(200)
+        val createdBody = created.json()
+        assertThat(createdBody["questionId"].asText()).isEqualTo(publicQuestion.id.toString())
+        assertThat(createdBody["body"].asText()).isEqualTo("The comment should be returned immediately.")
+        assertThat(createdBody["author"]["id"].asLong()).isPositive()
+        assertThat(createdBody["createdAt"].asText()).isNotBlank()
+
+        val listed = getJson(
+            "/api/v1/public/questions/${publicQuestion.id}/comments?limit=30&offset=0",
+            commenter.accessToken,
+            commenter.deviceId,
+            commenter.clientSecret,
+        )
+        assertThat(listed.statusCode()).isEqualTo(200)
+        assertThat(listed.json()["comments"]).hasSize(1)
+        assertThat(listed.json()["comments"][0]["id"].asText()).isEqualTo(createdBody["id"].asText())
+        assertThat(listed.json()["totalCount"].asInt()).isEqualTo(1)
+    }
+
+    @Test
+    fun `stale failed content translation receives one new durable request token`(): Unit = runBlocking {
+        val owner = registerActiveUser("translation-retry-owner")
+        val study = createStudy(owner, "Translation Retry")
+        val question = questions.save(
+            gradedQuestion(
+                deviceId = owner.deviceId,
+                userId = study.userId,
+                studyId = study.id,
+                topic = "Translation Retry",
+                question = "번역 재시도를 설명하세요.",
+                createdAt = Instant.parse("2026-06-09T06:00:00Z"),
+            )
+        )
+        val hashes = ContentSourceHashPolicy.recordHashes(question)
+        val firstRequestedAt = Instant.parse("2026-06-09T06:01:00Z")
+
+        val first = contentLocalizations.ensureRecordPending(
+            question,
+            "en",
+            hashes,
+            firstRequestedAt,
+            firstRequestedAt.minusSeconds(300),
+        )
+        val duplicate = contentLocalizations.ensureRecordPending(
+            question,
+            "en",
+            hashes,
+            firstRequestedAt.plusSeconds(60),
+            firstRequestedAt.minusSeconds(240),
+        )
+
+        assertThat(first).hasSize(3)
+        assertThat(duplicate).isEmpty()
+
+        databaseClient.sql(
+            """
+            update question_localizations
+            set status = 'FAILED', error = 'provider unavailable', updated_at = :failedAt
+            where question_id = :questionId and target_language = 'en'
+            """.trimIndent(),
+        )
+            .bind("failedAt", firstRequestedAt)
+            .bind("questionId", question.id)
+            .fetch().rowsUpdated().awaitSingle()
+
+        val retry = contentLocalizations.ensureRecordPending(
+            question,
+            "en",
+            hashes,
+            firstRequestedAt.plusSeconds(301),
+            firstRequestedAt.plusSeconds(1),
+        )
+
+        val firstQuestion = first.single { it.contentType == LocalizableContentType.QUESTION }
+        val retriedQuestion = retry.single { it.contentType == LocalizableContentType.QUESTION }
+        assertThat(retriedQuestion.requestToken).isNotEqualTo(firstQuestion.requestToken)
+        assertThat(contentLocalizations.record(question.id, "en").question?.status).isEqualTo("PENDING")
+    }
+
+    @Test
+    fun `comment keeps its original text and reads translation from comment localizations`(): Unit = runBlocking {
+        val owner = registerActiveUser("localized-comment-owner")
+        val commenter = registerActiveUser("localized-comment-author")
+        val viewer = registerActiveUser("localized-comment-viewer")
+        val study = createStudy(owner, "Localized Comment")
+        val publicQuestion = questions.save(
+            gradedQuestion(
+                deviceId = owner.deviceId,
+                userId = study.userId,
+                studyId = study.id,
+                topic = "Localized Comment",
+                question = "Can comments be translated independently?",
+                createdAt = Instant.parse("2026-06-09T06:30:00Z"),
+            )
+        )
+
+        val created = postJson(
+            "/api/v1/public/questions/${publicQuestion.id}/comments",
+            """{"body":"원문 댓글입니다.","sourceLanguage":"ko"}""",
+            commenter.accessToken,
+            commenter.deviceId,
+            commenter.clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()
+        val comment = comments.findById(created["id"].asLong())!!
+        val sourceHash = ContentSourceHashPolicy.sha256(comment.body)
+        contentLocalizations.ensureCommentPending(
+            comment,
+            "en",
+            sourceHash,
+            comment.updatedAt,
+            comment.updatedAt.minusSeconds(300),
+        )
+        contentLocalizations.saveCommentReady(
+            comment = comment,
+            targetLanguage = "en",
+            sourceHash = sourceHash,
+            result = ContentTranslationResult(
+                fields = mapOf("body" to "This is the original comment."),
+                provider = "test",
+            ),
+            now = comment.updatedAt,
+        )
+
+        val authorView = getJson(
+            "/api/v1/public/questions/${publicQuestion.id}/comments?tl=en",
+            commenter.accessToken,
+            commenter.deviceId,
+            commenter.clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()["comments"][0]
+        assertThat(authorView["body"].asText()).isEqualTo("원문 댓글입니다.")
+        assertThat(authorView["localization"]["displayLanguage"].asText()).isEqualTo("ko")
+        assertThat(authorView["localization"]["translationState"].asText()).isEqualTo("ORIGINAL")
+        assertThat(authorView["localization"]["translationReason"].asText()).isEqualTo("AUTHOR_ORIGINAL")
+
+        val localized = getJson(
+            "/api/v1/public/questions/${publicQuestion.id}/comments?tl=en",
+            viewer.accessToken,
+            viewer.deviceId,
+            viewer.clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()["comments"][0]
+        assertThat(localized["body"].asText()).isEqualTo("This is the original comment.")
+        assertThat(localized["localization"]["sourceLanguage"].asText()).isEqualTo("ko")
+        assertThat(localized["localization"]["displayLanguage"].asText()).isEqualTo("en")
+
+        val original = getJson(
+            "/api/v1/public/questions/${publicQuestion.id}/comments?tl=en&view=original",
+            commenter.accessToken,
+            commenter.deviceId,
+            commenter.clientSecret,
+        ).also { assertThat(it.statusCode()).isEqualTo(200) }.json()["comments"][0]
+        assertThat(original["body"].asText()).isEqualTo("원문 댓글입니다.")
+        assertThat(original["localization"]["displayLanguage"].asText()).isEqualTo("ko")
+    }
+
+    private fun postJson(
+        path: String,
+        body: String,
+        bearerToken: String? = null,
+        deviceId: String? = null,
+        clientSecret: String? = null,
+        idempotencyKey: String? = null,
+    ): HttpResponse<String> =
+        request("POST", path, body, bearerToken, deviceId, clientSecret, idempotencyKey)
 
     private fun putJson(path: String, body: String, bearerToken: String? = null, deviceId: String? = null, clientSecret: String? = null): HttpResponse<String> =
         request("PUT", path, body, bearerToken, deviceId, clientSecret)
+
+    private fun delete(path: String, auth: AuthHeaders): HttpResponse<String> =
+        request("DELETE", path, "", auth.accessToken, auth.deviceId, auth.clientSecret)
 
     private fun get(path: String): HttpResponse<String> =
         client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port$path")).GET().build(), HttpResponse.BodyHandlers.ofString())
@@ -577,10 +1086,21 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         return client.send(builder.build(), HttpResponse.BodyHandlers.ofString())
     }
 
-    private fun request(method: String, path: String, body: String, bearerToken: String?, deviceId: String?, clientSecret: String?): HttpResponse<String> {
+    private fun request(
+        method: String,
+        path: String,
+        body: String,
+        bearerToken: String?,
+        deviceId: String?,
+        clientSecret: String?,
+        idempotencyKey: String? = null,
+    ): HttpResponse<String> {
         val builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:$port$path"))
             .header("Content-Type", "application/json")
             .method(method, HttpRequest.BodyPublishers.ofString(body))
+        if (!idempotencyKey.isNullOrBlank()) {
+            builder.header("Idempotency-Key", idempotencyKey)
+        }
         addAuthHeaders(builder, bearerToken, deviceId, clientSecret)
         return client.send(builder.build(), HttpResponse.BodyHandlers.ofString())
     }
@@ -604,7 +1124,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
             {
               "apnsToken": "test-token-$label",
               "platform": "ios",
-              "apnsEnvironment": "development",
+              "apnsEnvironment": "sandbox",
               "language": "ko",
               "timezone": "Asia/Seoul"
             }
@@ -621,8 +1141,8 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         registerDevice(label).also { activateRegisteredUser(it.deviceId) }
 
     private suspend fun activateRegisteredUser(deviceId: String) {
-        val user = users.findByProviderAndProviderId("ANONYMOUS", deviceId) ?: return
-        user.status = "ACTIVE"
+        val user = users.findByProviderAndProviderId(UserProvider.ANONYMOUS, deviceId) ?: return
+        user.status = UserStatus.ACTIVE
         users.save(user)
         roles.grantRoleIfMissing(user.id, Roles.REGISTERED_USER)
         databaseClient.sql(
@@ -696,7 +1216,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         difficultyLevel = 3,
         scheduledFor = createdAt,
         sentAt = createdAt,
-        status = "graded",
+        status = QuestionStatus.GRADED,
         answer = "Answer for $topic",
         score = 87,
         correct = true,
@@ -704,7 +1224,7 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         explanation = "Because",
         answeredAt = createdAt.plusSeconds(30),
         gradedAt = createdAt.plusSeconds(40),
-        source = "manual",
+        source = QuestionSource.MANUAL,
         publicQuestion = publicQuestion,
         createdAt = createdAt,
         updatedAt = createdAt,
@@ -727,8 +1247,8 @@ class StudyApiIntegrationTest : MySqlIntegrationTestSupport() {
         difficultyLevel = 3,
         scheduledFor = createdAt,
         sentAt = createdAt,
-        status = "ungraded",
-        source = "scheduled",
+        status = QuestionStatus.UNGRADED,
+        source = QuestionSource.SCHEDULED,
         publicQuestion = true,
         createdAt = createdAt,
         updatedAt = createdAt,

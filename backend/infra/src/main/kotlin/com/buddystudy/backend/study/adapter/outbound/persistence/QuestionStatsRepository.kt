@@ -90,4 +90,8 @@ class QuestionStatsPersistenceAdapter(
     override suspend fun incrementLike(questionId: Long, delta: Int, now: Instant) = repository.incrementLike(questionId, delta, now)
     override suspend fun incrementComment(questionId: Long, delta: Int, now: Instant) = repository.incrementComment(questionId, delta, now)
     override suspend fun setLikeCount(questionId: Long, count: Int, now: Instant) = repository.setLikeCount(questionId, count, now)
+    override suspend fun deleteByQuestionId(questionId: Long): Int =
+        databaseClient.sql("delete from question_stats where question_id = :questionId")
+            .bind("questionId", questionId)
+            .fetch().rowsUpdated().awaitSingle().toInt()
 }

@@ -10,7 +10,18 @@ data:
   ADMIN_ANALYTICS_DATABASE_URL: jdbc:mysql://buddystudy-mysql:3306/buddystudy_aggregation?serverTimezone=UTC
   ADMIN_ANALYTICS_DATABASE_USERNAME: buddystudy
   APP_PORT: "8080"
-  BUDDYSTUDY_STREAMS_KEY: buddystudy-events-v1
+  BUDDYSTUDY_NOTIFICATION_REQUESTED_STREAM_KEY: notification.message.requested.v1
+  BUDDYSTUDY_ACCOUNT_WITHDRAWN_STREAM_KEY: identity.account.withdrawn.v1
+  BUDDYSTUDY_ANSWER_GRADING_REQUESTED_STREAM_KEY: study.answer-grading.requested.v1
+  BUDDYSTUDY_QUESTION_GENERATION_REQUESTED_STREAM_KEY: study.question-generation.requested.v1
+  BUDDYSTUDY_QUESTION_GENERATED_STREAM_KEY: study.question.generated.v1
+  BUDDYSTUDY_CONTENT_TRANSLATION_REQUESTED_STREAM_KEY: localization.content-translation.requested.v1
+  BUDDYSTUDY_QUESTION_PUSH_REQUESTED_STREAM_KEY: notification.question-push.requested.v1
+  BUDDYSTUDY_QUESTION_VIEWED_STREAM_KEY: community.question.viewed.v1
+  BUDDYSTUDY_QUESTION_LIKED_STREAM_KEY: community.question.liked.v1
+  BUDDYSTUDY_QUESTION_UNLIKED_STREAM_KEY: community.question.unliked.v1
+  BUDDYSTUDY_QUESTION_COMMENTED_STREAM_KEY: community.question.commented.v1
+  BUDDYSTUDY_QUESTION_COMMENT_DELETED_STREAM_KEY: community.question.comment-deleted.v1
   BUDDYSTUDY_TRANSLATION_BASE_URL: http://buddystudy-libretranslate:5000
   DATABASE_URL: jdbc:mysql://buddystudy-mysql:3306/buddystudy?serverTimezone=UTC
   DATABASE_USERNAME: buddystudy
@@ -19,16 +30,17 @@ data:
   FLYWAY_LOCATIONS: classpath:db/migration-mysql
   GOOGLE_IOS_CLIENT_ID: 328281669925-evuebplih3vir99daj4lapj1javqsmsr.apps.googleusercontent.com
   MAX_PENDING_PER_STUDY: "1"
+  MCP_SERVER_ENABLED: "false"
   MONITORING_ADMIN_BASE_URL: https://api.ghkdqhrbals.org/admin
   MONITORING_ENVIRONMENT_NAME: development
   MONITORING_SCHEDULER_FAILURE_ALERT_REPEAT_SECONDS: "300"
-  MONITORING_SCHEDULER_MONITORED_JOBS: question-schedule,question-push-outbox-dispatch,user-stats-refresh,admin-analytics-recent
+  MONITORING_SCHEDULER_MONITORED_JOBS: question-schedule,event-outbox-dispatch,user-stats-refresh,answer-grading-watchdog
   MONITORING_SCHEDULER_READINESS_ENABLED: "true"
   MONITORING_SCHEDULER_STALE_THRESHOLD_MINUTES: "15"
   MONITORING_SCHEDULER_STARTUP_GRACE_MINUTES: "15"
   MONITORING_SERVICE_NAME: BuddyStudy backend
   R2DBC_DATABASE_URL: r2dbc:mysql://buddystudy-mysql:3306/buddystudy?serverZoneId=UTC
-  REACTION_STREAM_ENABLED: "true"
+  BUDDYSTUDY_STREAMS_ENABLED: "true"
   REDIS_HOST: buddystudy-redis
   REDIS_PORT: "6379"
   REDIS_SSL: "false"
@@ -395,12 +407,14 @@ spec:
       containers:
       - env:
         - name: LT_LOAD_ONLY
-          value: en,ko
+          value: en,ko,ja
         - name: LT_DISABLE_WEB_UI
           value: "true"
-        - name: LT_WORKERS
+        - name: LT_THREADS
           value: "1"
-        image: libretranslate/libretranslate:latest
+        - name: LT_UPDATE_MODELS
+          value: "true"
+        image: libretranslate/libretranslate:v1.9.6@sha256:1de2d7056bb8ad607a412f4563d9abe324ff632b43b5be9428bcc8e213aebb32
         imagePullPolicy: IfNotPresent
         name: libretranslate
         ports:

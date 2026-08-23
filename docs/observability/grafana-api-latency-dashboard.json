@@ -902,14 +902,14 @@
       {
         "current": {
           "selected": false,
-          "text": "{container=~\".+\"}",
-          "value": "{container=~\".+\"}"
+          "text": "{app=\"buddystudy\"}",
+          "value": "{app=\"buddystudy\"}"
         },
         "hide": 0,
         "label": "Label Selector",
         "name": "labelSelector",
         "options": [],
-        "query": "{container=~\".+\"}",
+        "query": "{app=\"buddystudy\"}",
         "skipUrlSync": false,
         "type": "textbox"
       },
@@ -968,5 +968,5 @@
   "timezone": "browser",
   "title": "BuddyStudy API Performance",
   "uid": "buddystudy-api-latency",
-  "version": 6
+  "version": 7
 }

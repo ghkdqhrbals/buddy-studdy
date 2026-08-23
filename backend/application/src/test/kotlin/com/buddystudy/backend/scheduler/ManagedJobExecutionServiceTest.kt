@@ -8,57 +8,51 @@ import com.buddystudy.backend.scheduler.application.model.JobTriggerType
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobRun
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobRunPageResponse
 import com.buddystudy.backend.scheduler.application.model.ScheduledJobSnapshot
+import com.buddystudy.backend.scheduler.application.model.ScheduledJobSnapshotPage
 import com.buddystudy.backend.scheduler.application.port.inbound.ManagedJob
 import com.buddystudy.backend.scheduler.application.port.outbound.JobLockPort
-import com.buddystudy.backend.scheduler.application.port.outbound.ScheduledJobAlertPort
 import com.buddystudy.backend.scheduler.application.port.outbound.ScheduledJobRunPort
 import com.buddystudy.backend.scheduler.application.service.ManagedJobExecutionService
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import java.time.Instant
 
+@ExtendWith(OutputCaptureExtension::class)
 class ManagedJobExecutionServiceTest {
     private val runs = FakeScheduledJobRunPort()
     private val locks = FakeJobLockPort()
-    private val alerts = FakeScheduledJobAlertPort()
     private val properties = BuddyStudyProperties(
         monitoring = BuddyStudyProperties.Monitoring(
             schedulerStaleThresholdMinutes = 15,
             schedulerMonitoredJobs = listOf("question-schedule", "user-stats-refresh"),
         ),
     )
-    private val service = ManagedJobExecutionService(runs, locks, alerts, properties)
+    private val service = ManagedJobExecutionService(runs, locks, properties)
 
     @Test
     fun `execute records successful job run`(): Unit = runBlocking {
-        val result = service.execute(FakeJob("admin-analytics-recent") { "rows=18" }, JobTriggerType.SCHEDULED)
+        val result = service.execute(FakeJob("event-outbox-dispatch") { "published=18" }, JobTriggerType.SCHEDULED)
 
         assertThat(result.status).isEqualTo(JobRunStatus.SUCCESS)
-        assertThat(result.summary).isEqualTo("rows=18")
+        assertThat(result.summary).isEqualTo("published=18")
         assertThat(runs.rows.single().status).isEqualTo(JobRunStatus.SUCCESS)
         assertThat(runs.rows.single().durationMs).isNotNull()
     }
 
     @Test
-    fun `execute records failed job run without throwing`(): Unit = runBlocking {
+    fun `execute records failed job and emits one ERROR with the throwable`(output: CapturedOutput): Unit = runBlocking {
         val result = service.execute(FakeJob("user-stats-refresh") { error("boom") }, JobTriggerType.SCHEDULED)
 
         assertThat(result.status).isEqualTo(JobRunStatus.FAILED)
         assertThat(result.errorMessage).contains("boom")
         assertThat(runs.rows.single().status).isEqualTo(JobRunStatus.FAILED)
-        assertThat(alerts.failedRuns).containsExactly(result)
-    }
-
-    @Test
-    fun `execute records failed job run even when alert delivery fails`(): Unit = runBlocking {
-        alerts.error = IllegalStateException("slack unavailable")
-
-        val result = service.execute(FakeJob("user-stats-refresh") { error("boom") }, JobTriggerType.SCHEDULED)
-
-        assertThat(result.status).isEqualTo(JobRunStatus.FAILED)
-        assertThat(result.errorMessage).contains("boom")
-        assertThat(runs.rows.single().status).isEqualTo(JobRunStatus.FAILED)
-        assertThat(locks.released).containsExactly("user-stats-refresh")
+        assertThat(output.out).contains("ERROR")
+        assertThat(output.out).contains("scheduled_job_failed jobName=user-stats-refresh")
+        assertThat(output.out).contains("errorType=java.lang.IllegalStateException error=boom")
+        assertThat(output.out).contains("\tat ")
     }
 
     @Test
@@ -97,7 +91,7 @@ class ManagedJobExecutionServiceTest {
     }
 
     @Test
-    fun `execute skips locked job without running work or sending alerts`(): Unit = runBlocking {
+    fun `execute skips locked job without running work`(): Unit = runBlocking {
         locks.acquired = false
         var executed = false
 
@@ -106,14 +100,13 @@ class ManagedJobExecutionServiceTest {
         assertThat(executed).isFalse()
         assertThat(result.status).isEqualTo(JobRunStatus.SKIPPED)
         assertThat(result.errorMessage).isEqualTo("Job lock was not acquired.")
-        assertThat(alerts.failedRuns).isEmpty()
         assertThat(locks.released).isEmpty()
     }
 
     @Test
     fun `retry keeps retry source run id`(): Unit = runBlocking {
         val result = service.execute(
-            FakeJob("admin-analytics-correction") { "corrected" },
+            FakeJob("user-stats-refresh") { "refreshed" },
             JobTriggerType.RETRY,
             retryOfRunId = 42,
             createdBy = "admin",
@@ -257,6 +250,136 @@ class ManagedJobExecutionServiceTest {
         assertThat(status.stale).isTrue()
     }
 
+    @Test
+    fun `find statuses returns unmonitored registered jobs with operator metadata`(): Unit = runBlocking {
+        val maintenance = object : ManagedJob {
+            override val name = "maintenance-cleanup"
+            override val displayName = "Maintenance cleanup"
+            override val description = "Removes expired temporary data."
+            override suspend fun run(): String = "deleted=0"
+        }
+        runs.snapshots += ScheduledJobSnapshot(
+            jobName = maintenance.name,
+            enabled = true,
+            scheduleType = "MANUAL",
+            scheduleValue = "operator-triggered",
+            latestRun = null,
+        )
+        val serviceWithCatalog = ManagedJobExecutionService(runs, locks, properties, listOf(maintenance))
+
+        val response = serviceWithCatalog.findStatuses()
+
+        val status = response.jobs.single { it.jobName == maintenance.name }
+        assertThat(status.displayName).isEqualTo(maintenance.displayName)
+        assertThat(status.description).isEqualTo(maintenance.description)
+        assertThat(status.monitored).isFalse()
+        assertThat(status.stale).isFalse()
+    }
+
+    @Test
+    fun `find statuses returns only the requested page and preserves total count`(): Unit = runBlocking {
+        runs.snapshots += listOf(
+            ScheduledJobSnapshot("alpha", true, "CRON", "0 0 * * * *", latestRun = null),
+            ScheduledJobSnapshot("beta", true, "CRON", "0 5 * * * *", latestRun = null),
+            ScheduledJobSnapshot("gamma", true, "CRON", "0 10 * * * *", latestRun = null),
+        )
+        val unmonitoredProperties = BuddyStudyProperties(
+            monitoring = BuddyStudyProperties.Monitoring(schedulerMonitoredJobs = emptyList()),
+        )
+        val pagedService = ManagedJobExecutionService(runs, locks, unmonitoredProperties)
+
+        val response = pagedService.findStatuses(limit = 1, offset = 1)
+
+        assertThat(response.jobs.map { it.jobName }).containsExactly("beta")
+        assertThat(response.totalCount).isEqualTo(3)
+        assertThat(response.limit).isEqualTo(1)
+        assertThat(response.offset).isEqualTo(1)
+    }
+
+    @Test
+    fun `find statuses pages missing monitored jobs after seeded jobs`(): Unit = runBlocking {
+        runs.snapshots += ScheduledJobSnapshot(
+            jobName = "question-schedule",
+            enabled = true,
+            scheduleType = "FIXED_DELAY",
+            scheduleValue = "30s",
+            latestRun = null,
+        )
+
+        val response = service.findStatuses(limit = 1, offset = 1)
+
+        assertThat(response.jobs.map { it.jobName }).containsExactly("user-stats-refresh")
+        assertThat(response.totalCount).isEqualTo(2)
+    }
+
+    @Test
+    fun `find statuses fills a page across the seeded and missing monitored boundary`(): Unit = runBlocking {
+        runs.snapshots += listOf(
+            ScheduledJobSnapshot("alpha", true, "CRON", "0 0 * * * *", latestRun = null),
+            ScheduledJobSnapshot("beta", true, "CRON", "0 5 * * * *", latestRun = null),
+        )
+        val boundaryProperties = BuddyStudyProperties(
+            monitoring = BuddyStudyProperties.Monitoring(
+                schedulerMonitoredJobs = listOf("missing-first", "missing-second"),
+            ),
+        )
+        val boundaryService = ManagedJobExecutionService(runs, locks, boundaryProperties)
+
+        val response = boundaryService.findStatuses(limit = 3, offset = 1)
+
+        assertThat(response.jobs.map { it.jobName })
+            .containsExactly("beta", "missing-first", "missing-second")
+        assertThat(response.totalCount).isEqualTo(4)
+        assertThat(response.limit).isEqualTo(3)
+        assertThat(response.offset).isEqualTo(1)
+    }
+
+    @Test
+    fun `find statuses without a limit preserves the legacy full-list response`(): Unit = runBlocking {
+        runs.snapshots += (0 until 12).map { index ->
+            ScheduledJobSnapshot(
+                jobName = "job-${index.toString().padStart(2, '0')}",
+                enabled = true,
+                scheduleType = "CRON",
+                scheduleValue = "0 $index * * * *",
+                latestRun = null,
+            )
+        }
+        val unmonitoredProperties = BuddyStudyProperties(
+            monitoring = BuddyStudyProperties.Monitoring(schedulerMonitoredJobs = emptyList()),
+        )
+        val legacyService = ManagedJobExecutionService(runs, locks, unmonitoredProperties)
+
+        val response = legacyService.findStatuses()
+
+        assertThat(response.jobs).hasSize(12)
+        assertThat(response.totalCount).isEqualTo(12)
+        assertThat(response.limit).isEqualTo(12)
+        assertThat(runs.lastSnapshotLimit).isEqualTo(Int.MAX_VALUE)
+    }
+
+    @Test
+    fun `find runs decorates registered jobs with their operator display name`(): Unit = runBlocking {
+        val maintenance = object : ManagedJob {
+            override val name = "maintenance-cleanup"
+            override val displayName = "Maintenance cleanup"
+            override suspend fun run(): String = "deleted=0"
+        }
+        runs.rows += ScheduledJobRun(
+            id = 81,
+            jobName = maintenance.name,
+            triggerType = JobTriggerType.SCHEDULED,
+            status = JobRunStatus.SUCCESS,
+            startedAt = Instant.now(),
+        )
+        val serviceWithCatalog = ManagedJobExecutionService(runs, locks, properties, listOf(maintenance))
+
+        val response = serviceWithCatalog.findRuns(limit = 10, offset = 0)
+
+        assertThat(response.runs.single().displayName).isEqualTo(maintenance.displayName)
+        assertThat(response.totalCount).isEqualTo(1)
+    }
+
     private class FakeJob(
         override val name: String,
         private val block: () -> String,
@@ -275,21 +398,12 @@ class ManagedJobExecutionServiceTest {
         }
     }
 
-    private class FakeScheduledJobAlertPort : ScheduledJobAlertPort {
-        val failedRuns = mutableListOf<ScheduledJobRun>()
-        var error: RuntimeException? = null
-
-        override suspend fun notifyFailed(run: ScheduledJobRun) {
-            error?.let { throw it }
-            failedRuns += run
-        }
-    }
-
     private class FakeScheduledJobRunPort : ScheduledJobRunPort {
         val enabled = mutableMapOf<String, Boolean>()
         val rows = mutableListOf<ScheduledJobRun>()
         val snapshots = mutableListOf<ScheduledJobSnapshot>()
         var startError: RuntimeException? = null
+        var lastSnapshotLimit: Int? = null
         private var nextId = 1L
 
         override suspend fun isEnabled(jobName: String): Boolean = enabled[jobName] ?: true
@@ -329,7 +443,18 @@ class ManagedJobExecutionServiceTest {
             return ScheduledJobRunPageResponse(filtered.drop(offset).take(limit), filtered.size.toLong(), limit, offset)
         }
 
-        override suspend fun findSnapshots(jobNames: List<String>): List<ScheduledJobSnapshot> =
-            snapshots.filter { jobNames.isEmpty() || it.jobName in jobNames }
+        override suspend fun findSnapshotPage(limit: Int, offset: Int): ScheduledJobSnapshotPage {
+            lastSnapshotLimit = limit
+            val ordered = snapshots.sortedBy { it.jobName }
+            return ScheduledJobSnapshotPage(
+                snapshots = ordered.drop(offset).take(limit),
+                totalCount = ordered.size.toLong(),
+                limit = limit,
+                offset = offset,
+            )
+        }
+
+        override suspend fun findExistingJobNames(jobNames: List<String>): Set<String> =
+            snapshots.map { it.jobName }.filterTo(mutableSetOf()) { it in jobNames }
     }
 }

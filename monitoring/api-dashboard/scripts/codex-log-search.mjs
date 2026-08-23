@@ -12,7 +12,7 @@ import {
 const DEFAULT_LIMIT = 20;
 const DEFAULT_RANGE_MS = 60 * 60 * 1000;
 const DEFAULT_DASHBOARD_URL = "https://grafana.lowfidev.cloud";
-const API_EXCHANGE_QUERY = '{container=~".+"} |= "api_exchange"';
+const API_EXCHANGE_QUERY = '{app="buddystudy"} |= "api_exchange"';
 
 main().catch((error) => {
   console.error(error.message);
@@ -147,7 +147,7 @@ function compareByTime(a, b, sort) {
 
 async function loadDetails(lokiBaseUrl, request) {
   const requestMs = Number(BigInt(request.nanoseconds) / 1_000_000n);
-  const values = await lokiQueryRange(lokiBaseUrl, `{container=~".+"} |= "${request.requestId}"`, {
+  const values = await lokiQueryRange(lokiBaseUrl, `{app="buddystudy"} |= "${request.requestId}"`, {
     startNs: ns(requestMs - 10 * 60 * 1000),
     endNs: ns(requestMs + 10 * 60 * 1000),
     limit: 200,
@@ -173,6 +173,12 @@ function renderSlackResponse({ options, range, sort, dashboardUrl, requests, sel
     return `- ${request.time} ${request.method} ${request.path} status=${request.status || "-"} duration=${durationLabel(request.durationMs)} ${tone} requestId=${request.requestId}`;
   });
   const error = detail?.errors?.[0];
+  const errorCause = error?.exceptionType
+    ? `${error.exceptionType}${error.exceptionMessage && error.exceptionMessage !== "-" ? `: ${error.exceptionMessage}` : ""}`
+    : "";
+  const rootCause = error?.rootCauseType && error.rootCauseType !== error.exceptionType
+    ? `${error.rootCauseType}${error.rootCauseMessage && error.rootCauseMessage !== "-" ? `: ${error.rootCauseMessage}` : ""}`
+    : "";
   const connectedLogs = detail?.logs?.filter((log) => log.message !== selected?.rawLine).slice(0, 6) ?? [];
   return [
     "*BuddyStudy API log search*",
@@ -183,6 +189,9 @@ function renderSlackResponse({ options, range, sort, dashboardUrl, requests, sel
     "",
     selected ? `*Selected*: ${selected.method} ${selected.path} status=${selected.status || "-"} duration=${durationLabel(selected.durationMs)} requestId=${selected.requestId}` : "*Selected*: none",
     error ? `*Error*: ${error.code || "-"} ${error.message || ""}` : "*Error*: none",
+    errorCause ? `*Exception*: ${errorCause}` : "",
+    rootCause ? `*Root cause*: ${rootCause}` : "",
+    error?.origin ? `*Origin*: ${error.origin}` : "",
     error?.stack ? `\`\`\`\n${truncate(error.stack, 1800)}\n\`\`\`` : "",
     "*Recent matches*",
     rows.length ? rows.join("\n") : "- no matching api_exchange logs",

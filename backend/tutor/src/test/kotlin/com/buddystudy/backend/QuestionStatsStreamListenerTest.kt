@@ -1,19 +1,18 @@
 package com.buddystudy.backend
 
-import kotlinx.coroutines.runBlocking
-
 import com.buddystudy.backend.community.adapter.inbound.stream.QuestionStatsStreamEventHandler
-import com.buddystudy.backend.community.adapter.outbound.stream.PublicQuestionReactionRedisStreamPublisher
-import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishOperations
-import com.buddystudy.backend.common.adapter.outbound.redis.RedisStreamPublishedMessage
-import com.buddystudy.backend.config.BuddyStudyProperties
+import com.buddystudy.backend.community.application.model.CommunityQuestionEvent
 import com.buddystudy.backend.study.application.port.outbound.QuestionStatsPort
 import com.buddystudy.study.domain.entity.QuestionStatsEntity
+import kotlinx.coroutines.reactive.awaitSingle
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.test.context.TestPropertySource
+import java.time.Instant
 
 @SpringBootTest
 @TestPropertySource(
@@ -27,83 +26,62 @@ import org.springframework.test.context.TestPropertySource
 class QuestionStatsStreamListenerTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var handler: QuestionStatsStreamEventHandler
     @Autowired lateinit var stats: QuestionStatsPort
+    @Autowired lateinit var database: DatabaseClient
 
     @Test
-    fun `view events increment question view count`(): Unit = runBlocking {
+    fun `view events increment question view count exactly once per event id`(): Unit = runBlocking {
         stats.save(QuestionStatsEntity(questionId = 101))
 
-        handler.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "questionId" to "101"))
-        handler.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "questionId" to "101"))
+        handler.processViewEvent(event("view-1", 101), STREAM_KEY)
+        handler.processViewEvent(event("view-2", 101), STREAM_KEY)
+        handler.processViewEvent(event("view-2", 101), STREAM_KEY)
 
         assertThat(stats.findById(101)!!.viewCount).isEqualTo(2)
     }
 
     @Test
-    fun `published view fields are consumable by stats listener`(): Unit = runBlocking {
-        stats.save(QuestionStatsEntity(questionId = 606))
-        val viewPublisher = RecordingPublisher()
-        val publisher = reactionPublisher(viewPublisher)
-
-        assertThat(publisher.publishViewed(606, 10)).isTrue()
-        assertThat(publisher.publishViewed(606, null)).isTrue()
-
-        viewPublisher.requests.forEach { handler.processViewEvent(it.fields) }
-
-        val updated = stats.findById(606)!!
-        assertThat(updated.viewCount).isEqualTo(2)
-        assertThat(updated.likeCount).isZero()
-        assertThat(updated.commentCount).isZero()
-    }
-
-    @Test
     fun `view event creates stats row when stats row is missing`(): Unit = runBlocking {
-        handler.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "questionId" to "707"))
+        handler.processViewEvent(event("view-3", 707), STREAM_KEY)
 
         assertThat(stats.findById(707)!!.viewCount).isEqualTo(1)
     }
 
     @Test
-    fun `view event accepts record id fallback`(): Unit = runBlocking {
-        stats.save(QuestionStatsEntity(questionId = 404))
+    fun `reaction events are retained as idempotent inbox history without changing source of truth counts`(): Unit =
+        runBlocking {
+            stats.save(QuestionStatsEntity(questionId = 808, likeCount = 4, commentCount = 2))
+            val reaction = event("like-1", 808)
 
-        handler.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "recordId" to "404"))
+            handler.processReactionEvent(reaction, "community.question.liked.v1", LIKE_GROUP, "QUESTION_LIKED")
+            handler.processReactionEvent(reaction, "community.question.liked.v1", LIKE_GROUP, "QUESTION_LIKED")
 
-        assertThat(stats.findById(404)!!.viewCount).isEqualTo(1)
-    }
-
-    @Test
-    fun `invalid view ids are ignored`(): Unit = runBlocking {
-        stats.save(QuestionStatsEntity(questionId = 505, likeCount = 2, commentCount = 3, viewCount = 4))
-
-        handler.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED", "questionId" to "not-a-number"))
-        handler.processViewEvent(mapOf("eventType" to "CONTENT_VIEWED"))
-
-        val updated = stats.findById(505)!!
-        assertThat(updated.likeCount).isEqualTo(2)
-        assertThat(updated.commentCount).isEqualTo(3)
-        assertThat(updated.viewCount).isEqualTo(4)
-    }
-
-    private fun reactionPublisher(
-        viewPublisher: RedisStreamPublishOperations,
-    ): PublicQuestionReactionRedisStreamPublisher {
-        val properties = BuddyStudyProperties().apply {
-            streams.enabled = true
+            val row = stats.findById(808)!!
+            assertThat(row.likeCount).isEqualTo(4)
+            assertThat(row.commentCount).isEqualTo(2)
+            val inboxStatus = database.sql(
+                """
+                select status
+                from stream_consumer_inbox
+                where event_id = :eventId and consumer_group = :consumerGroup
+                """.trimIndent(),
+            )
+                .bind("eventId", reaction.eventId)
+                .bind("consumerGroup", LIKE_GROUP)
+                .map { row, _ -> row.get("status", String::class.java)!! }
+                .one()
+                .awaitSingle()
+            assertThat(inboxStatus).isEqualTo("SUCCEEDED")
         }
-        return PublicQuestionReactionRedisStreamPublisher(properties, viewPublisher)
-    }
 
-    private data class PublishRequest(
-        val streamKey: String,
-        val fields: Map<String, String>,
+    private fun event(eventId: String, questionId: Long) = CommunityQuestionEvent(
+        eventId = eventId,
+        questionId = questionId,
+        userId = null,
+        occurredAt = Instant.parse("2026-07-30T00:00:00Z"),
     )
 
-    private class RecordingPublisher : RedisStreamPublishOperations {
-        val requests = mutableListOf<PublishRequest>()
-
-        override suspend fun publish(streamKey: String, fields: Map<String, String>): RedisStreamPublishedMessage {
-            requests += PublishRequest(streamKey, fields)
-            return RedisStreamPublishedMessage(streamKey, "record-1")
-        }
+    private companion object {
+        const val STREAM_KEY = "community.question.viewed.v1"
+        const val LIKE_GROUP = "bs-backend-like"
     }
 }

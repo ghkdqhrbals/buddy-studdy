@@ -4,13 +4,14 @@ import com.buddystudy.backend.auth.application.permission.PermissionRequirementO
 import com.buddystudy.backend.auth.application.permission.PermissionRequirementType
 import com.buddystudy.backend.auth.application.port.outbound.*
 import com.buddystudy.backend.common.application.error.ApiErrorCode
+import com.buddystudy.backend.common.application.quota.MonthlyQuotaWindow
 import io.r2dbc.spi.Row
 import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.stereotype.Component
 import java.time.Instant
-import java.time.YearMonth
+import java.time.LocalDateTime
 import java.time.ZoneOffset
 
 @Component
@@ -120,8 +121,8 @@ class PermissionPolicyPersistenceAdapter(
         spec.fetch().rowsUpdated().awaitSingle()
     }
 
-    override suspend fun isEnabled(userId: Long?, deviceId: String, key: String): Boolean =
-        client.sql(
+    override suspend fun isEnabled(userId: Long?, deviceId: String, key: String): Boolean {
+        val storedPreference = client.sql(
             """
             select enabled from notification_preferences
             where preference_key = :key and (
@@ -131,27 +132,55 @@ class PermissionPolicyPersistenceAdapter(
         ).bind("key", key).bind("deviceId", deviceId)
             .bindNullable("userId", userId, Long::class.javaObjectType)
             .map { row, _ -> row.get("enabled", java.lang.Boolean::class.java)!!.booleanValue() }
-            .one().awaitSingleOrNull() == true
+            .one().awaitSingleOrNull()
+        return storedPreference ?: defaultNotificationPreference(userId, key)
+    }
 
-    override suspend fun remaining(userId: Long, key: String, now: Instant): Long {
-        if (key != "monthly_question") return 0
-        val yearMonth = YearMonth.from(now.atZone(ZoneOffset.UTC)).toString()
-        return client.sql(
+    override suspend fun status(userId: Long, key: String, now: Instant): PermissionQuotaStatus {
+        val quota = client.sql(
             """
-            select greatest(coalesce(t.monthly_question_limit, 0) - coalesce(u.system_question_count, 0), 0) as remaining
-            from users usr
-            left join user_membership_tiers t on t.tier_code = coalesce((
-                select m.tier from user_memberships m
-                where m.user_id = usr.id and m.status = 'ACTIVE'
-                  and (m.expires_at is null or m.expires_at > :now)
-                order by m.updated_at desc, m.id desc limit 1
-            ), 'TIER1')
-            left join user_monthly_question_usage u on u.user_id = usr.id and u.usage_month = :yearMonth
-            where usr.id = :userId
+            select u.created_at,
+                   q.anchor_at, q.period_started_at, q.period_ends_at,
+                   q.base_limit, q.bonus_limit, q.committed_count, q.reserved_count,
+                   coalesce(free_tier.monthly_question_limit, 30) as free_limit
+            from users u
+            left join user_quota q on q.user_id = u.id
+            left join user_membership_tiers free_tier on free_tier.tier_code = 'TIER1'
+            where u.id = :userId
             """.trimIndent(),
-        ).bind("now", now).bind("yearMonth", yearMonth).bind("userId", userId)
-            .map { row, _ -> (row.get("remaining") as Number).toLong() }
-            .one().awaitSingleOrNull() ?: 0L
+        ).bind("userId", userId)
+            .map { row, _ ->
+                PermissionQuotaRow(
+                    accountCreatedAt = row.get("created_at", LocalDateTime::class.java)?.toInstant(ZoneOffset.UTC) ?: now,
+                    anchorAt = row.get("anchor_at", LocalDateTime::class.java)?.toInstant(ZoneOffset.UTC),
+                    storedPeriodStartedAt = row.get("period_started_at", LocalDateTime::class.java)?.toInstant(ZoneOffset.UTC),
+                    storedPeriodEndsAt = row.get("period_ends_at", LocalDateTime::class.java)?.toInstant(ZoneOffset.UTC),
+                    baseLimit = (row.get("base_limit") as? Number)?.toLong(),
+                    bonusLimit = (row.get("bonus_limit") as? Number)?.toLong() ?: 0,
+                    committedCount = (row.get("committed_count") as? Number)?.toLong() ?: 0,
+                    reservedCount = (row.get("reserved_count") as? Number)?.toLong() ?: 0,
+                    freeLimit = (row.get("free_limit") as Number).toLong(),
+                )
+            }
+            .one()
+            .awaitSingleOrNull()
+            ?: return PermissionQuotaStatus(0, now, now)
+        val period = MonthlyQuotaWindow.periodAt(quota.anchorAt ?: quota.accountCreatedAt, now)
+        if (key != "monthly_question") {
+            return PermissionQuotaStatus(0, period.startedAt, period.resetAt)
+        }
+        // The reservation path performs the transactional rollover. This pre-check computes the
+        // same effective result so a delayed scheduler can never block the first request of a period.
+        val isStoredCurrent = quota.storedPeriodStartedAt == period.startedAt &&
+            quota.storedPeriodEndsAt == period.resetAt
+        val remaining = if (quota.baseLimit == null) {
+            quota.freeLimit
+        } else if (!isStoredCurrent) {
+            quota.baseLimit
+        } else {
+            (quota.baseLimit + quota.bonusLimit - quota.committedCount - quota.reservedCount).coerceAtLeast(0)
+        }
+        return PermissionQuotaStatus(remaining, period.startedAt, period.resetAt)
     }
 
     override suspend fun isVerified(userId: Long): Boolean =
@@ -185,4 +214,21 @@ class PermissionPolicyPersistenceAdapter(
 
     private fun <T : Any> DatabaseClient.GenericExecuteSpec.bindNullable(name: String, value: T?, type: Class<T>) =
         if (value == null) bindNull(name, type) else bind(name, value)
+
+    private data class PermissionQuotaRow(
+        val accountCreatedAt: Instant,
+        val anchorAt: Instant?,
+        val storedPeriodStartedAt: Instant?,
+        val storedPeriodEndsAt: Instant?,
+        val baseLimit: Long?,
+        val bonusLimit: Long,
+        val committedCount: Long,
+        val reservedCount: Long,
+        val freeLimit: Long,
+    )
+
+    internal companion object {
+        fun defaultNotificationPreference(userId: Long?, key: String): Boolean =
+            userId != null && key == "question_notification"
+    }
 }

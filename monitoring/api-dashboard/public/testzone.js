@@ -1029,7 +1029,12 @@ function renderSelectedRun() {
   elements.runDetailScenarioCount.textContent = scenarios.length.toLocaleString();
   elements.runDetailDuration.textContent = run.options?.duration || "-";
   elements.runDetailScriptButton.textContent = run.scriptName || "Run script";
-  elements.runDetailStatus.textContent = run.error ? `${run.status}: ${run.error}` : run.status;
+  const runStatusDetails = run.error
+    ? `${run.status}: ${run.error}`
+    : run.metricsWarning
+      ? `${run.status} · Metrics warning: ${run.metricsWarning}`
+      : run.status;
+  elements.runDetailStatus.textContent = runStatusDetails;
   renderScenarioPlan(run);
   renderScenarioFilter(run);
   renderScenarioSummary(run);

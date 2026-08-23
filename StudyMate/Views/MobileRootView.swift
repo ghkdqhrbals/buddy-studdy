@@ -1,6 +1,8 @@
 import SwiftUI
 #if os(iOS)
+import AuthenticationServices
 import SafariServices
+import StoreKit
 import UIKit
 #endif
 
@@ -13,8 +15,10 @@ struct MobileRootView: View {
         let strings = appState.strings
 
         Group {
-            if !appState.hasCompletedOnboarding {
-                MobileOnboardingView()
+            if appState.isMembershipScreenshotFixtureEnabled {
+                NavigationStack {
+                    MobileMembershipManagementView()
+                }
             } else {
                 TabView(selection: selectedMobileTab) {
                     NavigationStack {
@@ -26,7 +30,10 @@ struct MobileRootView: View {
                                    let studyID = Int(categoryID) {
                                     MobileStudyTreeView(rootStudyID: studyID)
                                 } else {
-                                    StudyView(preferredCategoryID: route.categoryID)
+                                    StudyView(
+                                        preferredCategoryID: route.categoryID,
+                                        isContentPrepared: route.isContentPrepared
+                                    )
                                         .padding(.horizontal, 16)
                                         .mobileTabTitle(studyScreenTitle(for: route))
                                 }
@@ -112,30 +119,62 @@ struct MobileRootView: View {
                     .tag(AppTab.statistics)
 
                     NavigationStack {
-                        MobileSettingsView()
+                        MobileNotificationsTab()
                     }
                     .tabItem {
-                        Label(strings.tabSettings, systemImage: "gearshape.fill")
+                        Label(strings.notifications, systemImage: "bell.fill")
                     }
-                    .tag(AppTab.settings)
+                    .badge(appState.notificationUnreadCount)
+                    .tag(AppTab.notifications)
                 }
                 .background(Color(.systemBackground))
                 .onAppear {
                     appState.normalizeSelectedTabForMobile()
                 }
-                #if DEBUG
                 .background {
                     AppDebugSettingsTabLongPressBridge {
                         appState.requestDebugPanelIfEnabledOrEnableOnDemand()
                     }
                     .frame(width: 0, height: 0)
                 }
-                #endif
             }
         }
         .fullScreenCover(isPresented: $appState.isRequiredTermsGatePresented) {
             MobileRequiredTermsGateSheet()
                 .environmentObject(appState)
+        }
+        .sheet(item: $appState.homeAnnouncement) { announcement in
+            MobileHomeAnnouncementSheet(announcement: announcement)
+                .environmentObject(appState)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+        }
+        .onAppear {
+            AppAnalytics.setLanguage(appState.settings.appLanguage)
+            AppAnalytics.setSignedIn(appState.isCommunitySessionActive)
+            trackCurrentScreen()
+        }
+        .onChange(of: appState.hasCompletedOnboarding) { _, _ in
+            trackCurrentScreen()
+        }
+        .onChange(of: appState.mobileVisibleTab) { _, _ in
+            trackCurrentScreen()
+        }
+        .onChange(of: appState.shouldShowRecordsLoginPage) { _, _ in
+            guard appState.mobileVisibleTab == .records else {
+                return
+            }
+            trackCurrentScreen()
+        }
+        .onChange(of: appState.shouldShowStatisticsLoginPage) { _, _ in
+            guard appState.mobileVisibleTab == .statistics else {
+                return
+            }
+            trackCurrentScreen()
+        }
+        .onChange(of: appState.isCommunitySessionActive) { _, isSignedIn in
+            AppAnalytics.setSignedIn(isSignedIn)
         }
     }
 
@@ -149,12 +188,91 @@ struct MobileRootView: View {
     }
 
     private func studyScreenTitle(for route: HomeStudyRoute) -> String {
+        if let room = appState.backendStudyRoom(categoryID: route.categoryID) {
+            return appState.strings.homePath(room.topic)
+        }
+
         if let categoryID = route.categoryID,
            let category = appState.settings.category(for: categoryID) {
             return appState.strings.homePath(category.title)
         }
 
         return appState.strings.tabStudy
+    }
+
+    private func trackCurrentScreen() {
+        guard appState.hasCompletedOnboarding else {
+            AppAnalytics.screen(.onboarding)
+            return
+        }
+
+        switch appState.mobileVisibleTab {
+        case .home:
+            AppAnalytics.screen(.home)
+        case .study:
+            AppAnalytics.screen(.studyRoom)
+        case .settings:
+            AppAnalytics.screen(.settings)
+        case .records:
+            AppAnalytics.screen(
+                appState.shouldShowRecordsLoginPage ? .recordsLogin : .records
+            )
+        case .statistics:
+            AppAnalytics.screen(
+                appState.shouldShowStatisticsLoginPage ? .statisticsLogin : .statistics
+            )
+        case .notifications:
+            AppAnalytics.screen(.notifications)
+        }
+    }
+}
+
+private struct MobileNotificationsTab: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var isPresented = true
+    @State private var forwardedRoute: NotificationForwardRoute?
+
+    var body: some View {
+        MobileNotificationsView(
+            isPresented: $isPresented,
+            forwardedRoute: $forwardedRoute
+        )
+        .padding(.horizontal, 16)
+        .mobileTabTitle(appState.strings.notificationInbox)
+        .onChange(of: isPresented) { _, newValue in
+            guard !newValue else {
+                return
+            }
+            isPresented = true
+            appState.setSelectedTab(.home)
+        }
+        .onAppear {
+            handleNotificationRouteRequest(appState.appRouteRequest)
+        }
+        .onChange(of: appState.appRouteRequest) { _, request in
+            handleNotificationRouteRequest(request)
+        }
+    }
+
+    private func handleNotificationRouteRequest(_ request: AppRouteRequest?) {
+        guard let request,
+              request.presentation == .notificationInbox,
+              appState.mobileVisibleTab == .notifications else {
+            return
+        }
+
+        if request.route == .home || request.route == .studyList {
+            forwardedRoute = nil
+            appState.appRouteRequest = nil
+            appState.openRoute(request.route)
+            return
+        }
+
+        forwardedRoute = NotificationForwardRoute(route: request.route)
+        appState.appRouteRequest = nil
+        appState.logRemoteNotificationEvent(
+            "push_destination_presented route=\(request.route), tab=notifications"
+        )
     }
 }
 
@@ -735,20 +853,20 @@ private struct MobileRequiredTermsGateSheet: View {
                     requiredGateRow(
                         title: termsTitle(strings.termsOfService, required: true),
                         isChecked: true,
-                        url: termsOfService?.url ?? AppLegalLinks.termsOfServiceURL(language: appState.settings.appLanguage)
+                        url: AppLegalLinks.termsOfServiceURL(language: appState.settings.appLanguage)
                     )
                     Divider().padding(.leading, 34)
                     requiredGateRow(
                         title: termsTitle(strings.privacyPolicy, required: true),
                         isChecked: true,
-                        url: privacyPolicy?.url ?? AppLegalLinks.privacyPolicyURL(language: appState.settings.appLanguage)
+                        url: AppLegalLinks.privacyPolicyURL(language: appState.settings.appLanguage)
                     )
-                    if let marketingTerms {
+                    if marketingTerms != nil {
                         Divider().padding(.leading, 34)
                         requiredGateRow(
                             title: termsTitle(strings.marketingNotifications, required: false),
                             isChecked: marketingAgreed,
-                            url: marketingTerms.url,
+                            url: AppLegalLinks.marketingNotificationURL(language: appState.settings.appLanguage),
                             togglesSelection: true
                         )
                     }
@@ -761,7 +879,7 @@ private struct MobileRequiredTermsGateSheet: View {
 
                 Button {
                     Task {
-                        await agreeRequiredTerms()
+                        await agreeTerms(includeMarketing: marketingTerms != nil)
                     }
                 } label: {
                     HStack {
@@ -770,7 +888,7 @@ private struct MobileRequiredTermsGateSheet: View {
                             ProgressView()
                                 .tint(.white)
                         } else {
-                            Text(strings.agreeAllAndStart)
+                            Text(marketingTerms == nil ? strings.agreeAndStart : strings.agreeAllAndStart)
                                 .font(.headline.weight(.bold))
                         }
                         Spacer()
@@ -782,13 +900,18 @@ private struct MobileRequiredTermsGateSheet: View {
                 .buttonStyle(.plain)
                 .disabled(isSavingAgreements)
 
-                Button(strings.nextTime) {
-                    appState.isRequiredTermsGatePresented = false
-                    dismiss()
+                Button {
+                    Task {
+                        await agreeTerms(includeMarketing: false)
+                    }
+                } label: {
+                    Text(strings.agreeRequiredOnlyAndStart)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity)
+                .buttonStyle(.plain)
+                .disabled(isSavingAgreements)
             }
             .padding(24)
             .navigationTitle(strings.operatingTerms)
@@ -850,7 +973,7 @@ private struct MobileRequiredTermsGateSheet: View {
     }
 
     @MainActor
-    private func agreeRequiredTerms() async {
+    private func agreeTerms(includeMarketing: Bool) async {
         guard !isSavingAgreements else {
             return
         }
@@ -865,7 +988,7 @@ private struct MobileRequiredTermsGateSheet: View {
                 return
             }
         }
-        if marketingAgreed {
+        if includeMarketing, marketingTerms != nil {
             guard await appState.saveTermsAgreement(
                 type: .marketingNotification,
                 isAgreed: true,
@@ -873,6 +996,7 @@ private struct MobileRequiredTermsGateSheet: View {
             ) else {
                 return
             }
+            marketingAgreed = true
         }
         appState.isRequiredTermsGatePresented = false
         dismiss()
@@ -897,12 +1021,18 @@ private struct MobileLoginPage: View {
             Spacer(minLength: 0)
 
             VStack(spacing: 10) {
+                BuddySignInWithAppleButton()
+
                 Button {
                     appState.signInToCommunity()
                 } label: {
-                    SignInButtonLabel(title: strings.signInWithGoogle, isPrimary: true)
+                    SignInButtonLabel(
+                        title: strings.signInWithGoogle,
+                        isPrimary: true,
+                        provider: .google
+                    )
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(SignInPressButtonStyle())
             }
             .padding(.bottom, 18)
 
@@ -911,7 +1041,7 @@ private struct MobileLoginPage: View {
             } label: {
                 SignInButtonLabel(title: strings.signInWithEmail, isPrimary: false)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(SignInPressButtonStyle())
             .padding(.bottom, 34)
 
             loginAgreement
@@ -921,6 +1051,7 @@ private struct MobileLoginPage: View {
         .navigationTitle(strings.communityLogin)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            AppAnalytics.screen(.login)
             appState.logMobileAuthView("mobile_login_page_appear", reason: "MobileLoginPage")
         }
         .onChange(of: appState.isCommunitySessionActive) { _, isSignedIn in
@@ -974,6 +1105,7 @@ private struct MobileLoginLogo: View {
             .resizable()
             .scaledToFit()
             .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
             .accessibilityHidden(true)
     }
 }
@@ -985,42 +1117,78 @@ private struct CommunityQuestionRoute: Identifiable, Hashable {
 private struct NotificationForwardRoute: Identifiable, Hashable {
     let id = UUID()
     var route: AppRoute
+
+    init?(route: AppRoute) {
+        guard route != .home,
+              route != .studyList else {
+            return nil
+        }
+        self.route = route
+    }
 }
 
-private enum MobileHomeFeedItem: Identifiable {
-    case question(CommunityQuestion)
-    case feedbackPrompt
+enum MobileHomeRefreshPresentationPolicy {
+    static func showsInitialLoading(hasContent: Bool, isRefreshing: Bool) -> Bool {
+        !hasContent && isRefreshing
+    }
+}
 
-    var id: String {
-        switch self {
-        case .question(let question):
-            return "question-\(question.id)"
-        case .feedbackPrompt:
-            return "feedback-prompt"
+enum MobileHomeStudyPresentation: Equatable {
+    case loading
+    case content
+    case loadFailure
+    case empty
+}
+
+enum MobileHomeStudyPresentationPolicy {
+    static func resolve(
+        hasContent: Bool,
+        loadState: BackendStudyLoadState
+    ) -> MobileHomeStudyPresentation {
+        if hasContent {
+            return .content
+        }
+
+        switch loadState {
+        case .idle, .loading:
+            return .loading
+        case .failed:
+            return .loadFailure
+        case .loaded:
+            return .empty
         }
     }
 }
 
 private struct MobileHomeView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.openURL) private var openURL
     @State private var selectedHomeScope: HomeFeedScope = .all
-    @State private var editMode: EditMode = .inactive
+    @State private var isSelectingStudies = false
+    @State private var selectedStudyCategoryIDs = Set<String>()
+    @State private var showsSelectedStudiesDeleteConfirmation = false
     @State private var hasLoadedCommunityQuestions = false
     @State private var editingStudyCategory: StudyCategory?
+    @State private var editingStudyRoom: BackendStudyRoom?
     @State private var isAddingStudyCategory = false
     @State private var selectedCommunityQuestionRoute: CommunityQuestionRoute?
     @State private var notificationForwardRoute: NotificationForwardRoute?
     @State private var isHomeLoginPagePresented = false
     @State private var isShowingNotifications = false
     @State private var isShowingProfileSettings = false
+    @State private var isShowingSettings = false
     @State private var isShowingFeedback = false
     @State private var isShowingEmailSignIn = false
+    @State private var pendingCommunityQuestionDeletion: CommunityQuestion?
+    @State private var pendingCommunityQuestionReport: CommunityQuestion?
+    @State private var pendingCommunityUserBlock: CommunityUserProfile?
     @State private var isSearchVisible = false
     @State private var homeStudySearchText = ""
     @State private var submittedHomeStudySearchText = ""
     @State private var searchFocusTask: Task<Void, Never>?
     @State private var homeRefreshTask: Task<Void, Never>?
     @State private var refreshingHomeScope: HomeFeedScope?
+    @State private var selectedHomeTreeRootID: String?
     @FocusState private var isSearchFocused: Bool
 
     private var strings: AppStrings {
@@ -1034,10 +1202,10 @@ private struct MobileHomeView: View {
     private var activeSearchText: Binding<String> {
         Binding(
             get: {
-                selectedHomeScope == .my ? homeStudySearchText : appState.communitySearchText
+                selectedHomeScope.isPersonal ? homeStudySearchText : appState.communitySearchText
             },
             set: { newValue in
-                if selectedHomeScope == .my {
+                if selectedHomeScope.isPersonal {
                     homeStudySearchText = newValue
                 } else {
                     appState.communitySearchText = newValue
@@ -1052,31 +1220,119 @@ private struct MobileHomeView: View {
 
     private var filteredStudyCategories: [StudyCategory] {
         let query = trimmedHomeStudySearchText
-        if !query.isEmpty,
-           query == submittedHomeStudySearchText,
-           let searchResults = appState.homeStudySearchResults {
-            return searchResults.filter { category in
-                appState.backendStudyRoom(categoryID: category.id)?.parentStudyId == nil
-            }
-        }
-
         let categories = appState.rootStudyCategoriesForDisplay
         guard !query.isEmpty else {
             return categories
         }
 
+        let matchingBackendRootIDs: Set<Int>
+        if query == submittedHomeStudySearchText,
+           let searchResults = appState.homeStudySearchResults {
+            matchingBackendRootIDs = Set(
+                searchResults.compactMap { category in
+                    guard let room = appState.backendStudyRoom(categoryID: category.id) else {
+                        return nil
+                    }
+                    return appState.rootStudyRoom(for: room.id)?.id
+                }
+            )
+        } else {
+            matchingBackendRootIDs = []
+        }
+
         return categories.filter { category in
-            category.matchesHomeSearch(query, appLanguage: strings.language)
+            categoryMatchesHomeSearch(category, query: query)
+                || (Int(category.id).map { matchingBackendRootIDs.contains($0) } ?? false)
         }
     }
 
-    private var communityFeedItems: [MobileHomeFeedItem] {
-        var items = appState.communityQuestions.map(MobileHomeFeedItem.question)
-        guard items.count >= 4 else {
-            return items
+    private func categoryMatchesHomeSearch(_ category: StudyCategory, query: String) -> Bool {
+        if category.matchesHomeSearch(query, appLanguage: strings.language) {
+            return true
         }
-        items.insert(.feedbackPrompt, at: 4)
-        return items
+
+        guard let rootStudyID = Int(category.id) else {
+            return false
+        }
+
+        return flattenedStudyTopics(rootStudyID: rootStudyID).contains { item in
+            item.room.topic.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private func studyOutlineSnapshot(for category: StudyCategory) -> MobileHomeStudyOutlineSnapshot? {
+        guard let rootStudyID = Int(category.id),
+              let rootRoom = appState.backendStudyRoom(id: rootStudyID) else {
+            return nil
+        }
+
+        let allTopics = flattenedStudyTopics(rootStudyID: rootStudyID)
+        let query = trimmedHomeStudySearchText
+        let searchResults: [BackendStudyRoom]?
+        if query.isEmpty || rootRoom.topic.localizedCaseInsensitiveContains(query) {
+            searchResults = nil
+        } else {
+            searchResults = allTopics.compactMap {
+                $0.room.topic.localizedCaseInsensitiveContains(query)
+                    ? $0.room
+                    : nil
+            }
+        }
+        let rooms = [rootRoom] + allTopics.map(\.room)
+        let childrenByParent = Dictionary(
+            grouping: allTopics.map(\.room),
+            by: { $0.parentStudyId ?? rootStudyID }
+        ).mapValues { children in
+            children.sorted {
+                if $0.sortOrder == $1.sortOrder {
+                    return $0.id < $1.id
+                }
+                return $0.sortOrder < $1.sortOrder
+            }
+        }
+
+        return MobileHomeStudyOutlineSnapshot(
+            root: rootRoom,
+            roomsByID: Dictionary(uniqueKeysWithValues: rooms.map { ($0.id, $0) }),
+            childrenByParent: childrenByParent,
+            parentByID: Dictionary(
+                uniqueKeysWithValues: allTopics.compactMap { item in
+                    item.room.parentStudyId.map { (item.room.id, $0) }
+                }
+            ),
+            searchQuery: query,
+            searchResults: searchResults
+        )
+    }
+
+    private func flattenedStudyTopics(rootStudyID: Int) -> [MobileHomeStudyTopicItem] {
+        let childrenByParent = Dictionary(
+            grouping: appState.backendStudyRooms.filter { $0.parentStudyId != nil },
+            by: { $0.parentStudyId ?? 0 }
+        )
+        var result: [MobileHomeStudyTopicItem] = []
+        var visited = Set<Int>([rootStudyID])
+
+        func appendChildren(parentID: Int) {
+            let children = (childrenByParent[parentID] ?? []).sorted {
+                if $0.sortOrder == $1.sortOrder {
+                    return $0.id < $1.id
+                }
+                return $0.sortOrder < $1.sortOrder
+            }
+
+            for child in children where visited.insert(child.id).inserted {
+                result.append(MobileHomeStudyTopicItem(room: child))
+                appendChildren(parentID: child.id)
+            }
+        }
+
+        appendChildren(parentID: rootStudyID)
+        return result
+    }
+
+    private var communityFeedItems: [CommunityFeedItem] {
+        appState.communityFeedItems
     }
 
     private var isRefreshingSelectedHomeScope: Bool {
@@ -1084,7 +1340,7 @@ private struct MobileHomeView: View {
     }
 
     private var isRefreshingMyStudyContent: Bool {
-        selectedHomeScope == .my && isRefreshingSelectedHomeScope
+        selectedHomeScope.isPersonal && isRefreshingSelectedHomeScope
     }
 
     private var isRefreshingCommunityContent: Bool {
@@ -1096,17 +1352,24 @@ private struct MobileHomeView: View {
             homeTitleHeader
             homeScopePickerHeader
 
-            List {
-                homeContentSection
+            if isSelectingStudies {
+                myStudySelectionBar
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .refreshable {
-                startHomeRefresh()
+
+            if selectedHomeScope == .tree, appState.isCommunitySessionActive {
+                homeStudyTreeGraph
+            } else {
+                List {
+                    homeContentSection
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .refreshable {
+                    startHomeRefresh()
+                }
             }
         }
         .background(Color(.systemBackground))
-        .environment(\.editMode, $editMode)
         .navigationTitle("")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -1129,6 +1392,9 @@ private struct MobileHomeView: View {
             MobileLoginPage()
                 .padding(.horizontal, 16)
         }
+        .navigationDestination(isPresented: $isShowingSettings) {
+            MobileSettingsView()
+        }
         .navigationDestination(isPresented: $isShowingFeedback) {
             MobileFeedbackView()
         }
@@ -1136,14 +1402,14 @@ private struct MobileHomeView: View {
             #if os(iOS)
             if #available(iOS 26.0, *) {
                 ToolbarItem(placement: .topBarLeading) {
-                    if !isHomeSearchActive {
+                    if !isHomeSearchActive && !isSelectingStudies {
                         profileToolbarControl
                     }
                 }
                 .sharedBackgroundVisibility(.hidden)
             } else {
                 ToolbarItem(placement: .topBarLeading) {
-                    if !isHomeSearchActive {
+                    if !isHomeSearchActive && !isSelectingStudies {
                         profileToolbarControl
                     }
                 }
@@ -1157,17 +1423,19 @@ private struct MobileHomeView: View {
                     .sharedBackgroundVisibility(.hidden)
                 }
 
-                if !isHomeSearchActive {
+                if shouldShowStudySelectionToolbarButton {
                     ToolbarItem(placement: .topBarTrailing) {
-                        notificationToolbarButton(strings: strings)
+                        homeStudySelectionToolbarButton(strings: strings)
                     }
                     .sharedBackgroundVisibility(.hidden)
                 }
 
-                ToolbarItem(placement: .topBarTrailing) {
-                    homeToolbarSearchControl(strings: strings)
+                if !isSelectingStudies {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        homeToolbarSearchControl(strings: strings)
+                    }
+                    .sharedBackgroundVisibility(isHomeSearchActive ? .hidden : .automatic)
                 }
-                .sharedBackgroundVisibility(isHomeSearchActive ? .hidden : .automatic)
             } else {
                 if shouldShowHomeAddToolbarButton {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -1175,14 +1443,16 @@ private struct MobileHomeView: View {
                     }
                 }
 
-                if !isHomeSearchActive {
+                if shouldShowStudySelectionToolbarButton {
                     ToolbarItem(placement: .topBarTrailing) {
-                        notificationToolbarButton(strings: strings)
+                        homeStudySelectionToolbarButton(strings: strings)
                     }
                 }
 
-                ToolbarItem(placement: .topBarTrailing) {
-                    homeToolbarSearchControl(strings: strings)
+                if !isSelectingStudies {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        homeToolbarSearchControl(strings: strings)
+                    }
                 }
             }
             #else
@@ -1213,16 +1483,19 @@ private struct MobileHomeView: View {
         .onChange(of: selectedHomeScope) { _, newScope in
             appState.logMobileAuthView(
                 "mobile_home_scope_change",
-                page: newScope == .my ? .myStudies : .publicQuestions,
+                page: newScope.isPersonal ? .myStudies : .publicQuestions,
                 reason: "selectedHomeScope",
                 extra: ["scope=\(String(describing: newScope))"]
             )
             if newScope == .all {
-                editMode = .inactive
+                endStudySelection()
                 Task {
                     await loadCommunityQuestionsIfNeeded(userInitiated: false)
                 }
             } else if appState.isCommunitySessionActive {
+                if newScope != .my {
+                    endStudySelection()
+                }
                 Task {
                     await appState.refreshQuestionQuota()
                 }
@@ -1236,6 +1509,7 @@ private struct MobileHomeView: View {
             )
             hasLoadedCommunityQuestions = false
             guard isSignedIn else {
+                endStudySelection()
                 return
             }
 
@@ -1254,6 +1528,9 @@ private struct MobileHomeView: View {
                 appState.clearBackendStudySearchResults()
             }
         }
+        .onChange(of: appState.rootStudyCategoriesForDisplay.map(\.id)) { _, categoryIDs in
+            selectedStudyCategoryIDs.formIntersection(categoryIDs)
+        }
         .onDisappear {
             searchFocusTask?.cancel()
             searchFocusTask = nil
@@ -1261,8 +1538,8 @@ private struct MobileHomeView: View {
                 closeHomeSearch(clearText: false)
             }
         }
-        .sheet(isPresented: $isShowingProfileSettings) {
-            MobileProfileSettingsSheet()
+        .navigationDestination(isPresented: $isShowingProfileSettings) {
+            MobileProfilePage()
         }
         .sheet(isPresented: $isShowingEmailSignIn) {
             EmailSignInSheet {
@@ -1271,23 +1548,122 @@ private struct MobileHomeView: View {
             .environmentObject(appState)
         }
         .sheet(isPresented: $isAddingStudyCategory) {
-            StudyCategoryEditorSheet(category: nil, strings: strings, onDelete: nil) { title, difficulty, prompt, model in
-                appState.addStudyCategory(title, difficulty: difficulty, customPrompt: prompt, openAIModel: model)
-            }
-        }
-        .sheet(item: $editingStudyCategory) { category in
-            StudyCategoryEditorSheet(category: category, strings: strings, onDelete: {
-                appState.deleteStudyCategory(id: category.id)
-            }) { title, difficulty, prompt, model in
-                appState.updateStudyCategory(
-                    id: category.id,
-                    title: title,
+            StudyEditorSheet(
+                navigationTitle: strings.newStudyCategory,
+                initialTitle: "",
+                initialDifficulty: .beginner,
+                strings: strings
+            ) { title, difficulty, _ in
+                appState.addStudyCategory(
+                    title,
                     difficulty: difficulty,
-                    customPrompt: prompt,
-                    openAIModel: model
+                    customPrompt: nil,
+                    openAIModel: StudySettings.defaultOpenAIModel
                 )
             }
         }
+        .sheet(item: $editingStudyCategory) { category in
+            StudyEditorSheet(
+                navigationTitle: strings.editStudyCategory,
+                initialTitle: category.title,
+                initialDifficulty: category.difficulty,
+                strings: strings,
+                onDelete: {
+                    appState.deleteStudyCategory(id: category.id)
+                }
+            ) { title, difficulty, _ in
+                appState.updateStudyCategory(
+                    id: category.id,
+                    title: title,
+                    difficulty: difficulty
+                )
+            }
+        }
+        .sheet(item: $editingStudyRoom) { room in
+            StudyEditorSheet(
+                navigationTitle: strings.editStudyCategory,
+                initialTitle: room.topic,
+                initialDifficulty: Difficulty(level: room.difficultyLevel),
+                initialQuestionRotationEnabled: room.activeForQuestions,
+                strings: strings,
+                onDelete: {
+                    appState.deleteStudyCategory(id: String(room.id))
+                }
+            ) { title, difficulty, questionRotationEnabled in
+                appState.updateStudyTreeCategory(
+                    roomID: room.id,
+                    title: title,
+                    difficulty: difficulty
+                )
+                if let questionRotationEnabled,
+                   questionRotationEnabled != room.activeForQuestions {
+                    appState.setStudyTopicActive(
+                        studyID: room.id,
+                        active: questionRotationEnabled
+                    )
+                }
+            }
+        }
+        .confirmationDialog(
+            strings.deleteSelectedStudies(selectedStudyCategoryIDs.count),
+            isPresented: $showsSelectedStudiesDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(strings.deleteSelectedStudiesAction, role: .destructive) {
+                appState.deleteStudyCategories(categoryIDs: selectedStudyCategoryIDs)
+                endStudySelection()
+            }
+            Button(strings.cancel, role: .cancel) {}
+        }
+        .confirmationDialog(
+            strings.deleteQuestionConfirmation,
+            isPresented: Binding(
+                get: { pendingCommunityQuestionDeletion != nil },
+                set: { if !$0 { pendingCommunityQuestionDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(strings.deleteQuestion, role: .destructive) {
+                if let question = pendingCommunityQuestionDeletion {
+                    deleteOwnedCommunityQuestion(question)
+                }
+                pendingCommunityQuestionDeletion = nil
+            }
+            Button(strings.cancel, role: .cancel) {
+                pendingCommunityQuestionDeletion = nil
+            }
+        }
+        .confirmationDialog(
+            strings.reportQuestionConfirmation,
+            isPresented: Binding(
+                get: { pendingCommunityQuestionReport != nil },
+                set: { if !$0 { pendingCommunityQuestionReport = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(strings.reportQuestion, role: .destructive) {
+                if let question = pendingCommunityQuestionReport {
+                    reportCommunityQuestion(question)
+                }
+                pendingCommunityQuestionReport = nil
+            }
+            Button(strings.cancel, role: .cancel) {
+                pendingCommunityQuestionReport = nil
+            }
+        }
+        .modifier(
+            MobileCommunityUserBlockAlertModifier(
+                appState: appState,
+                user: $pendingCommunityUserBlock,
+                strings: strings
+            )
+        )
+        .modifier(
+            MobileStudyOpeningErrorAlertModifier(
+                appState: appState,
+                strings: strings
+            )
+        )
         .navigationDestination(item: $selectedCommunityQuestionRoute) { route in
             NotificationCommunityQuestionDestination(questionID: route.id)
         }
@@ -1299,10 +1675,16 @@ private struct MobileHomeView: View {
         }
 
         if request.presentation == .notificationInbox {
-            if request.route == .home {
+            guard appState.mobileVisibleTab == .home else {
+                return
+            }
+            if request.route == .home || request.route == .studyList {
                 notificationForwardRoute = nil
                 isShowingNotifications = false
                 appState.appRouteRequest = nil
+                if request.route == .studyList {
+                    selectedHomeScope = .my
+                }
                 return
             }
             notificationForwardRoute = NotificationForwardRoute(route: request.route)
@@ -1314,6 +1696,8 @@ private struct MobileHomeView: View {
         switch request.route {
         case .profile:
             isShowingProfileSettings = true
+        case .settings, .settingsOpenAI:
+            isShowingSettings = true
         case .studyList:
             selectedHomeScope = .my
         case .publicQuestions:
@@ -1328,6 +1712,8 @@ private struct MobileHomeView: View {
                 await loadCommunityQuestionsIfNeeded(userInitiated: false)
                 selectedCommunityQuestionRoute = CommunityQuestionRoute(id: id)
             }
+        case .feedback:
+            isShowingFeedback = true
         default:
             break
         }
@@ -1356,7 +1742,7 @@ private struct MobileHomeView: View {
 
     @ViewBuilder
     private var homeContentSection: some View {
-        if selectedHomeScope == .my, !appState.isCommunitySessionActive {
+        if selectedHomeScope.isPersonal, !appState.isCommunitySessionActive {
             myStudyLoginSection
                 .onAppear {
                     appState.logMobileAuthView(
@@ -1366,7 +1752,7 @@ private struct MobileHomeView: View {
                     )
                 }
         } else if selectedHomeScope == .my {
-            myStudySection
+            myStudyOutlineSection
                 .onAppear {
                     appState.logMobileAuthView(
                         "mobile_render_protected_content",
@@ -1374,6 +1760,8 @@ private struct MobileHomeView: View {
                         reason: "home-my-study"
                     )
                 }
+        } else if selectedHomeScope == .tree {
+            EmptyView()
         } else {
             communityQuestionSection
                 .onAppear {
@@ -1400,38 +1788,11 @@ private struct MobileHomeView: View {
         }
     }
 
-    private var myStudySection: some View {
+    private var myStudyOutlineSection: some View {
         Section {
-            if filteredStudyCategories.isEmpty {
-                if isRefreshingMyStudyContent {
-                    MobileHomeRefreshIndicator()
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, 34)
-                        .listRowSeparator(.hidden)
-                } else {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(strings.noMatchingTopics)
-                            .font(.subheadline.weight(.semibold))
-
-                        Text(strings.noMatchingTopicsDescription)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 8)
-                }
-            } else {
-                if isRefreshingMyStudyContent {
-                    MobileHomeRefreshIndicator()
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, 8)
-                        .listRowSeparator(.hidden)
-                }
-
+            personalStudyEmptyOrLoadingContent {
                 ForEach(filteredStudyCategories) { category in
                     myStudyCategoryRow(category)
-                        .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
                 }
                 .onMove { offsets, destination in
                     guard trimmedHomeStudySearchText.isEmpty else {
@@ -1444,57 +1805,272 @@ private struct MobileHomeView: View {
         }
     }
 
-    @ViewBuilder
-    private func myStudyCategoryRow(_ category: StudyCategory) -> some View {
-        if editMode.isEditing {
-            MobileHomeCategoryRow(
-                category: category,
-                hasPendingQuestion: appState.pendingQuestionCount(for: category) > 0,
-                strings: strings
-            )
-        } else {
+    private var myStudySelectionBar: some View {
+        HStack(spacing: 14) {
+            Text(strings.selectedStudyCount(selectedStudyCategoryIDs.count))
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+
             Button {
-                appState.openStudyTree(category.id)
+                toggleAllVisibleStudies()
             } label: {
-                MobileHomeCategoryRow(
-                    category: category,
-                    hasPendingQuestion: appState.pendingQuestionCount(for: category) > 0,
-                    strings: strings
+                Image(
+                    systemName: areAllVisibleStudiesSelected
+                        ? "checkmark.circle.fill"
+                        : "checkmark.circle"
                 )
+                    .font(.body.weight(.semibold))
             }
             .buttonStyle(.plain)
-            .contextMenu {
-                Button {
-                    editingStudyCategory = category
-                } label: {
-                    Label(strings.edit, systemImage: "pencil")
-                }
+            .accessibilityLabel(areAllVisibleStudiesSelected ? strings.deselectAll : strings.selectAll)
+
+            Button(role: .destructive) {
+                showsSelectedStudiesDeleteConfirmation = true
+            } label: {
+                Image(systemName: "trash")
+                    .font(.body.weight(.semibold))
             }
+            .buttonStyle(.plain)
+            .disabled(selectedStudyCategoryIDs.isEmpty)
+            .accessibilityLabel(strings.deleteSelectedStudiesAction)
+
+            Button {
+                endStudySelection()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.body.weight(.semibold))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(strings.cancel)
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 10)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+
+    @ViewBuilder
+    private var homeStudyTreeGraph: some View {
+        if let category = selectedHomeTreeCategory,
+           let rootStudyID = Int(category.id) {
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    Text(strings.currentStudyCategory)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Spacer(minLength: 0)
+
+                    Menu {
+                        ForEach(filteredStudyCategories) { option in
+                            Button {
+                                selectedHomeTreeRootID = option.id
+                            } label: {
+                                if option.id == category.id {
+                                    Label(option.title, systemImage: "checkmark")
+                                } else {
+                                    Text(option.title)
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(category.title)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 36)
+                        .background(Color(.secondarySystemBackground), in: Capsule())
+                    }
+                    .accessibilityLabel(strings.currentStudyCategory)
+                    .accessibilityValue(category.title)
+                }
+                .padding(.horizontal, 2)
+                .padding(.vertical, 8)
+
+                Divider()
+
+                MobileStudyTreeView(
+                    rootStudyID: rootStudyID,
+                    isEmbeddedInHome: true
+                )
+                .id(rootStudyID)
+            }
+            .onAppear {
+                selectedHomeTreeRootID = category.id
+                appState.logMobileAuthView(
+                    "mobile_render_protected_content",
+                    page: .myStudies,
+                    reason: "home-my-study-tree"
+                )
+            }
+        } else if MobileHomeRefreshPresentationPolicy.showsInitialLoading(
+            hasContent: selectedHomeTreeCategory != nil,
+            isRefreshing: isRefreshingMyStudyContent
+        ) {
+            MobileHomeRefreshIndicator()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(strings.noMatchingTopics)
+                    .font(.subheadline.weight(.semibold))
+
+                Text(strings.noMatchingTopicsDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(.top, 18)
+        }
+    }
+
+    private var selectedHomeTreeCategory: StudyCategory? {
+        if let selectedHomeTreeRootID,
+           let selected = filteredStudyCategories.first(where: { $0.id == selectedHomeTreeRootID }) {
+            return selected
+        }
+        return filteredStudyCategories.first
+    }
+
+    @ViewBuilder
+    private func personalStudyEmptyOrLoadingContent<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let hasContent = !filteredStudyCategories.isEmpty
+
+        switch MobileHomeStudyPresentationPolicy.resolve(
+            hasContent: hasContent,
+            loadState: appState.backendStudyLoadState
+        ) {
+        case .loading:
+            MobileHomeRefreshIndicator()
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 34)
+                .listRowSeparator(.hidden)
+        case .loadFailure:
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(strings.unableToLoadStudies)
+                        .font(.subheadline.weight(.semibold))
+
+                    Text(strings.studyLoadRetryDescription)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button(strings.retry) {
+                    startHomeRefresh()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+            .padding(.vertical, 8)
+            .listRowSeparator(.hidden)
+        case .empty:
+            VStack(alignment: .leading, spacing: 4) {
+                Text(strings.noMatchingTopics)
+                    .font(.subheadline.weight(.semibold))
+
+                Text(strings.noMatchingTopicsDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 8)
+        case .content:
+            content()
+        }
+    }
+
+    @ViewBuilder
+    private func myStudyCategoryRow(_ category: StudyCategory) -> some View {
+        if isSelectingStudies {
+            Button {
+                toggleStudySelection(category.id)
+            } label: {
+                HStack(spacing: 10) {
+                    Image(
+                        systemName: selectedStudyCategoryIDs.contains(category.id)
+                            ? "checkmark.circle.fill"
+                            : "circle"
+                    )
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(
+                        selectedStudyCategoryIDs.contains(category.id)
+                            ? Color.accentColor
+                            : Color.secondary
+                    )
+
+                    MobileHomeCategoryRow(
+                        category: category,
+                        hasPendingQuestion: appState.pendingQuestionCount(for: category) > 0,
+                        strings: strings,
+                        showsDisclosureIndicator: false
+                    )
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        } else {
+            if let snapshot = studyOutlineSnapshot(for: category) {
+                MobileHomeStudyOutlineRow(
+                    snapshot: snapshot,
+                    strings: strings,
+                    openingStudyID: appState.openingStudyCategoryID.flatMap(Int.init),
+                    pendingQuestionCount: { room in
+                        appState.pendingQuestionCount(categoryID: String(room.id))
+                    },
+                    onAction: { action in
+                        handleStudyOutlineAction(action, category: category)
+                    }
+                )
+            }
+        }
+    }
+
+    private func handleStudyOutlineAction(
+        _ action: MobileHomeStudyOutlineAction,
+        category: StudyCategory
+    ) {
+        switch action {
+        case let .openTopic(room):
+            appState.openStudyCategory(String(room.id))
+        case let .configureTopic(room):
+            editingStudyRoom = room
+        case .configureRoot:
+            editingStudyCategory = category
+        case .openTree:
+            appState.openStudyTree(category.id)
         }
     }
 
     private var communityQuestionSection: some View {
         Section {
-            if appState.communityQuestions.isEmpty {
-                if isRefreshingCommunityContent {
-                    MobileHomeRefreshIndicator()
-                        .frame(maxWidth: .infinity, minHeight: 320)
-                        .listRowInsets(EdgeInsets(top: 18, leading: 0, bottom: 18, trailing: 0))
-                        .listRowSeparator(.hidden)
-                } else {
-                    MobileCommunityEmptyState(strings: strings)
-                        .frame(maxWidth: .infinity, minHeight: 320)
-                        .listRowInsets(EdgeInsets(top: 18, leading: 0, bottom: 18, trailing: 0))
-                        .listRowSeparator(.hidden)
-                }
-            } else {
-                if isRefreshingCommunityContent {
-                    MobileHomeRefreshIndicator()
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, 8)
-                        .listRowSeparator(.hidden)
-                }
+            let hasContent = !appState.communityQuestions.isEmpty
 
+            if MobileHomeRefreshPresentationPolicy.showsInitialLoading(
+                hasContent: hasContent,
+                isRefreshing: isRefreshingCommunityContent
+            ) {
+                MobileHomeRefreshIndicator()
+                    .frame(maxWidth: .infinity, minHeight: 320)
+                    .listRowInsets(EdgeInsets(top: 18, leading: 0, bottom: 18, trailing: 0))
+                    .listRowSeparator(.hidden)
+            } else if !hasContent {
+                MobileCommunityEmptyState(strings: strings)
+                    .frame(maxWidth: .infinity, minHeight: 320)
+                    .listRowInsets(EdgeInsets(top: 18, leading: 0, bottom: 18, trailing: 0))
+                    .listRowSeparator(.hidden)
+            } else {
                 ForEach(communityFeedItems) { item in
                     communityFeedRow(item)
                 }
@@ -1515,45 +2091,192 @@ private struct MobileHomeView: View {
     }
 
     @ViewBuilder
-    private func communityFeedRow(_ item: MobileHomeFeedItem) -> some View {
+    private func communityFeedRow(_ item: CommunityFeedItem) -> some View {
         switch item {
-        case .question(let question):
+        case .publicQuestion(let question):
             communityQuestionRow(question)
-        case .feedbackPrompt:
-            Button {
-                isShowingFeedback = true
-            } label: {
-                MobileFeedbackPromptRow(strings: strings)
+        case .advertisement(let advertisement):
+            HStack(alignment: .top, spacing: 2) {
+                Button {
+                    openCommunityAdvertisement(advertisement)
+                } label: {
+                    MobileNativeAdvertisementRow(advertisement: advertisement, strings: strings)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Menu {
+                    Button {
+                        Task {
+                            await appState.suppressNativeAdvertisement(
+                                selectionID: advertisement.selectionID,
+                                campaignID: advertisement.campaignID
+                            )
+                        }
+                    } label: {
+                        Label(strings.advertisementNotInterested, systemImage: "eye.slash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
             }
-            .buttonStyle(.plain)
-            .listRowSeparator(.hidden)
+            .background {
+                MobileNativeAdvertisementImpressionReporter {
+                    await appState.recordNativeAdvertisementImpression(
+                        selectionID: advertisement.selectionID
+                    )
+                }
+            }
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 10))
+            .listRowBackground(Color.clear)
+            .contextMenu {
+                Button {
+                    Task {
+                        await appState.suppressNativeAdvertisement(
+                            selectionID: advertisement.selectionID,
+                            campaignID: advertisement.campaignID
+                        )
+                    }
+                } label: {
+                    Label(strings.advertisementNotInterested, systemImage: "eye.slash")
+                }
+            }
+        }
+    }
+
+    private func openCommunityAdvertisement(_ advertisement: CommunityNativeAdvertisement) {
+        guard let url = URL(string: advertisement.deepLink) else {
+            return
+        }
+        Task {
+            await appState.recordNativeAdvertisementView(selectionID: advertisement.selectionID)
+        }
+        if let route = AppRoute(url: url) {
+            _ = appState.openRoute(route)
+        } else if url.scheme?.caseInsensitiveCompare("https") == .orderedSame {
+            openURL(url)
         }
     }
 
     private func communityQuestionRow(_ question: CommunityQuestion) -> some View {
-        Button {
-            selectedCommunityQuestionRoute = CommunityQuestionRoute(id: question.id)
-        } label: {
-            MobileCommunityQuestionRow(question: question)
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            if appState.isCommunitySessionActive {
-                Button(role: .destructive) {
-                    Task {
-                        await appState.reportCommunityQuestion(
-                            question,
-                            reason: strings.reportReasonInappropriate
-                        )
-                    }
-                } label: {
-                    Label(strings.report, systemImage: "exclamationmark.bubble")
-                }
+        HStack(alignment: .top, spacing: 2) {
+            Button {
+                openCommunityQuestion(question)
+            } label: {
+                MobileCommunityQuestionRow(question: question, strings: strings)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            communityQuestionActionsMenu(question)
+        }
+        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 10))
+        .listRowBackground(Color.clear)
+        .contextMenu {
+            communityQuestionActions(question)
         }
         .onAppear {
             appState.shouldLoadNextCommunityQuestion(after: question.id)
         }
+    }
+
+    private func communityQuestionActionsMenu(_ question: CommunityQuestion) -> some View {
+        Menu {
+            communityQuestionActions(question)
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(strings.questionActions)
+    }
+
+    @ViewBuilder
+    private func communityQuestionActions(_ question: CommunityQuestion) -> some View {
+        Button {
+            openCommunityQuestion(question)
+        } label: {
+            Label(strings.openQuestion, systemImage: "arrow.up.right")
+        }
+
+        let policy = communityQuestionActionPolicy(question)
+        if policy.canManage {
+            Button {
+                makeOwnedCommunityQuestionPrivate(question)
+            } label: {
+                Label(strings.makeQuestionPrivate, systemImage: "lock.fill")
+            }
+
+            Button(role: .destructive) {
+                pendingCommunityQuestionDeletion = question
+            } label: {
+                Label(strings.deleteQuestion, systemImage: "trash")
+            }
+        } else if policy.canReport {
+            if let author = question.author, policy.canBlock {
+                Button(role: .destructive) {
+                    pendingCommunityUserBlock = author
+                } label: {
+                    Label(strings.blockUser, systemImage: "person.crop.circle.badge.xmark")
+                }
+            }
+
+            Button(role: .destructive) {
+                pendingCommunityQuestionReport = question
+            } label: {
+                Label(strings.reportQuestion, systemImage: "exclamationmark.bubble")
+            }
+        }
+    }
+
+    private func communityQuestionActionPolicy(_ question: CommunityQuestion) -> CommunityQuestionActionPolicy {
+        CommunityQuestionActionPolicy(
+            isSignedIn: appState.isCommunitySessionActive,
+            isOwner: question.author.map { appState.isCurrentCommunityUser(id: $0.id) } ?? false
+        )
+    }
+
+    private func openCommunityQuestion(_ question: CommunityQuestion) {
+        selectedCommunityQuestionRoute = CommunityQuestionRoute(id: question.id)
+    }
+
+    private func makeOwnedCommunityQuestionPrivate(_ question: CommunityQuestion) {
+        Task {
+            guard let record = await recordForCommunityQuestionAction(question) else { return }
+            appState.updateStudyRecordPublicity(record, isPublic: false)
+        }
+    }
+
+    private func deleteOwnedCommunityQuestion(_ question: CommunityQuestion) {
+        Task {
+            guard let record = await recordForCommunityQuestionAction(question) else { return }
+            appState.deleteStudyRecord(record)
+        }
+    }
+
+    private func reportCommunityQuestion(_ question: CommunityQuestion) {
+        Task {
+            await appState.reportCommunityQuestion(
+                question,
+                reason: strings.reportReasonInappropriate
+            )
+        }
+    }
+
+    private func recordForCommunityQuestionAction(_ question: CommunityQuestion) async -> StudyRecord? {
+        if let record = appState.studyRecords.first(where: { $0.id == question.id }) {
+            return record
+        }
+        return await appState.loadStudyRecordDetail(recordID: question.id)
     }
 
     private var isHomeSearchActive: Bool {
@@ -1561,7 +2284,18 @@ private struct MobileHomeView: View {
     }
 
     private var shouldShowHomeAddToolbarButton: Bool {
-        !isHomeSearchActive && selectedHomeScope == .my && appState.isCommunitySessionActive
+        !isHomeSearchActive
+            && !isSelectingStudies
+            && selectedHomeScope.isPersonal
+            && appState.isCommunitySessionActive
+    }
+
+    private var shouldShowStudySelectionToolbarButton: Bool {
+        !isHomeSearchActive
+            && !isSelectingStudies
+            && selectedHomeScope == .my
+            && appState.isCommunitySessionActive
+            && !filteredStudyCategories.isEmpty
     }
 
     private var profileToolbarControl: some View {
@@ -1636,7 +2370,7 @@ private struct MobileHomeView: View {
     @ViewBuilder
     private func homeToolbarItems(strings: AppStrings) -> some View {
         HStack(spacing: 16) {
-            if selectedHomeScope == .my, appState.isCommunitySessionActive {
+            if selectedHomeScope.isPersonal, appState.isCommunitySessionActive {
                 Button {
                     isAddingStudyCategory = true
                 } label: {
@@ -1645,8 +2379,6 @@ private struct MobileHomeView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(strings.newStudyCategory)
             }
-
-            notificationToolbarButton(strings: strings)
 
             Button {
                 showHomeSearch()
@@ -1679,26 +2411,56 @@ private struct MobileHomeView: View {
         .accessibilityLabel(strings.newStudyCategory)
     }
 
-    private func notificationToolbarButton(strings: AppStrings) -> some View {
+    private func homeStudySelectionToolbarButton(strings: AppStrings) -> some View {
         Button {
-            isShowingNotifications = true
+            beginStudySelection()
         } label: {
-            ZStack(alignment: .topTrailing) {
-                MobileToolbarIconButtonLabel(systemName: "bell.fill")
-
-                if appState.notificationUnreadCount > 0 {
-                    Text(appState.notificationUnreadCount > 99 ? "99+" : "\(appState.notificationUnreadCount)")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 5)
-                        .frame(minWidth: 18, minHeight: 18)
-                        .background(Color.red, in: Capsule())
-                        .offset(x: 7, y: -5)
-                }
-            }
+            MobileToolbarIconButtonLabel(systemName: "checkmark.circle")
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(strings.notificationInbox)
+        .accessibilityLabel(strings.selectStudies)
+    }
+
+    @MainActor
+    private func beginStudySelection() {
+        selectedStudyCategoryIDs.removeAll()
+        withAnimation(.easeInOut(duration: 0.18)) {
+            isSelectingStudies = true
+        }
+    }
+
+    @MainActor
+    private func endStudySelection() {
+        showsSelectedStudiesDeleteConfirmation = false
+        selectedStudyCategoryIDs.removeAll()
+        withAnimation(.easeInOut(duration: 0.18)) {
+            isSelectingStudies = false
+        }
+    }
+
+    private func toggleStudySelection(_ categoryID: String) {
+        if selectedStudyCategoryIDs.contains(categoryID) {
+            selectedStudyCategoryIDs.remove(categoryID)
+        } else {
+            selectedStudyCategoryIDs.insert(categoryID)
+        }
+    }
+
+    private var visibleStudyCategoryIDs: Set<String> {
+        Set(filteredStudyCategories.map(\.id))
+    }
+
+    private var areAllVisibleStudiesSelected: Bool {
+        !visibleStudyCategoryIDs.isEmpty
+            && visibleStudyCategoryIDs.isSubset(of: selectedStudyCategoryIDs)
+    }
+
+    private func toggleAllVisibleStudies() {
+        if areAllVisibleStudiesSelected {
+            selectedStudyCategoryIDs.subtract(visibleStudyCategoryIDs)
+        } else {
+            selectedStudyCategoryIDs.formUnion(visibleStudyCategoryIDs)
+        }
     }
 
     @MainActor
@@ -1732,7 +2494,7 @@ private struct MobileHomeView: View {
         if clearText {
             setActiveSearchText("")
             submittedHomeStudySearchText = ""
-            if selectedHomeScope == .my {
+            if selectedHomeScope.isPersonal {
                 appState.clearBackendStudySearchResults()
             }
         }
@@ -1744,7 +2506,7 @@ private struct MobileHomeView: View {
 
     @MainActor
     private func setActiveSearchText(_ value: String) {
-        if selectedHomeScope == .my {
+        if selectedHomeScope.isPersonal {
             homeStudySearchText = value
         } else {
             appState.communitySearchText = value
@@ -1774,7 +2536,7 @@ private struct MobileHomeView: View {
     @MainActor
     private func refreshHomeData(for scope: HomeFeedScope) async {
         switch scope {
-        case .my:
+        case .my, .tree:
             await appState.refreshVisibleData()
         case .all:
             hasLoadedCommunityQuestions = true
@@ -1804,7 +2566,7 @@ private struct MobileHomeView: View {
             Task {
                 await appState.loadCommunityQuestions(reset: true, userInitiated: true)
             }
-        case .my:
+        case .my, .tree:
             let query = trimmedHomeStudySearchText
             submittedHomeStudySearchText = query
             guard !query.isEmpty else {
@@ -1819,18 +2581,87 @@ private struct MobileHomeView: View {
     }
 }
 
+private struct MobileCommunityUserBlockAlertModifier: ViewModifier {
+    @ObservedObject var appState: AppState
+    @Binding var user: CommunityUserProfile?
+    let strings: AppStrings
+
+    private var isPresented: Binding<Bool> {
+        Binding(
+            get: { user != nil },
+            set: { if !$0 { user = nil } }
+        )
+    }
+
+    func body(content: Content) -> some View {
+        content.alert(
+            strings.blockUserTitle,
+            isPresented: isPresented,
+            presenting: user
+        ) { selectedUser in
+            Button(strings.cancel, role: .cancel) {
+                user = nil
+            }
+            Button(strings.blockUser, role: .destructive) {
+                user = nil
+                Task {
+                    await appState.blockCommunityUser(selectedUser)
+                }
+            }
+        } message: { selectedUser in
+            Text(strings.blockUserMessage(selectedUser.displayName))
+        }
+    }
+}
+
+private struct MobileStudyOpeningErrorAlertModifier: ViewModifier {
+    @ObservedObject var appState: AppState
+    let strings: AppStrings
+
+    private var isPresented: Binding<Bool> {
+        Binding(
+            get: { appState.studyOpeningErrorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    appState.dismissStudyOpeningError()
+                }
+            }
+        )
+    }
+
+    func body(content: Content) -> some View {
+        content.alert(
+            strings.unableToOpenStudy,
+            isPresented: isPresented
+        ) {
+            Button(strings.done, role: .cancel) {
+                appState.dismissStudyOpeningError()
+            }
+        } message: {
+            Text(appState.studyOpeningErrorMessage ?? strings.unableToOpenStudyDescription)
+        }
+    }
+}
+
 private enum HomeFeedScope: String, CaseIterable, Identifiable {
     case all
     case my
+    case tree
 
     var id: String {
         rawValue
+    }
+
+    var isPersonal: Bool {
+        self != .all
     }
 
     func title(strings: AppStrings) -> String {
         switch self {
         case .my:
             strings.homeScopeMy
+        case .tree:
+            strings.homeScopeStudyTree
         case .all:
             strings.homeScopeAll
         }
@@ -1879,9 +2710,17 @@ private struct MobileNotificationsView: View {
                 ForEach(appState.notifications) { notification in
                     Button {
                         let route = appState.notificationLandingCoordinator.routeForNotificationListSelection(notification)
-                        if route == .home {
+                        if let announcement = HomeAnnouncement(notification: notification) {
+                            appState.presentHomeAnnouncement(announcement)
                             forwardedRoute = nil
                             isPresented = false
+                        } else if route == .home {
+                            forwardedRoute = nil
+                            isPresented = false
+                        } else if route == .studyList {
+                            forwardedRoute = nil
+                            isPresented = false
+                            appState.openRoute(route)
                         } else {
                             forwardedRoute = NotificationForwardRoute(route: route)
                         }
@@ -1892,7 +2731,11 @@ private struct MobileNotificationsView: View {
                             await appState.markNotificationRead(notification)
                         }
                     } label: {
-                        MobileNotificationRow(notification: notification, referenceDate: openedAt)
+                        MobileNotificationRow(
+                            notification: notification,
+                            referenceDate: openedAt,
+                            strings: strings
+                        )
                     }
                     .buttonStyle(.plain)
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -1933,6 +2776,15 @@ private struct MobileNotificationsView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    Button {
+                        Task {
+                            await appState.markAllNotificationsRead()
+                        }
+                    } label: {
+                        Label(strings.markAllNotificationsRead, systemImage: "checkmark.circle")
+                    }
+                    .disabled(appState.notificationUnreadCount == 0)
+
                     Button(role: .destructive) {
                         Task {
                             await appState.deleteAllNotifications()
@@ -1950,6 +2802,74 @@ private struct MobileNotificationsView: View {
                 }
             }
         }
+    }
+}
+
+private struct MobileHomeAnnouncementSheet: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    var announcement: HomeAnnouncement
+
+    private var strings: AppStrings {
+        appState.strings
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "bell.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 30, height: 30)
+                    .background(Color.accentColor.opacity(0.1), in: Circle())
+                    .accessibilityHidden(true)
+
+                Text("BuddyStudy")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Spacer(minLength: 12)
+
+                Button {
+                    close()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 34, height: 34)
+                        .background(Color(.tertiarySystemFill), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(strings.done)
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 18)
+
+            Text(announcement.title)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 24)
+                .padding(.top, 18)
+                .padding(.bottom, 12)
+
+            ScrollView {
+                MarkdownMessageText(markdown: announcement.message, fillsWidth: true)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 32)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .background(Color(.systemBackground))
+        .accessibilityElement(children: .contain)
+    }
+
+    private func close() {
+        appState.dismissHomeAnnouncement()
+        dismiss()
     }
 }
 
@@ -1980,7 +2900,7 @@ private struct NotificationRouteDestination: View {
         case .publicQuestions:
             NotificationPublicQuestionsDestination()
         case .studyList:
-            NotificationStudyListDestination()
+            EmptyView()
         case .statistics:
             StatisticsView()
                 .padding(.horizontal, 16)
@@ -1991,9 +2911,11 @@ private struct NotificationRouteDestination: View {
                 .navigationTitle(strings.tabSettings)
                 .navigationBarTitleDisplayMode(.inline)
         case .profile:
-            MobileProfileSettingsSheet()
+            MobileProfilePage()
+        case .feedback:
+            MobileFeedbackView()
         case .home:
-            NotificationStudyListDestination()
+            EmptyView()
         }
     }
 
@@ -2008,9 +2930,10 @@ private struct NotificationRouteDestination: View {
 
 private struct NotificationRecordDestination: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
     var recordID: String
     @State private var loadedRecord: StudyRecord?
-    @State private var isLoading = true
+    @State private var loadState = NotificationRecordLoadState.loading
 
     private var strings: AppStrings {
         appState.strings
@@ -2024,15 +2947,8 @@ private struct NotificationRecordDestination: View {
         Group {
             if let record {
                 recordContent(record)
-            } else if isLoading {
-                ProgressView()
-                    .frame(maxWidth: .infinity, minHeight: 260, alignment: .center)
             } else {
-                ContentUnavailableView(
-                    strings.notificationQuestionMissingTitle,
-                    systemImage: "trash",
-                    description: Text(strings.notificationQuestionUnavailableHelp)
-                )
+                loadStateContent
             }
         }
         .navigationTitle(strings.recordDetail)
@@ -2044,24 +2960,95 @@ private struct NotificationRecordDestination: View {
 
     @ViewBuilder
     private func recordContent(_ record: StudyRecord) -> some View {
-        StudyRecordDetailView(record: record)
+        StudyRecordDetailView(
+            record: record,
+            refreshesRecordOnAppear: false,
+            onSkip: {
+                appState.skipPendingQuestion(record, shouldOpenNextQuestion: false)
+                dismiss()
+            }
+        )
             .padding(.horizontal, 16)
     }
 
-    private func loadRecordIfNeeded() async {
-        guard record == nil else {
+    @ViewBuilder
+    private var loadStateContent: some View {
+        switch loadState {
+        case .loading:
+            VStack(spacing: 12) {
+                ProgressView()
+                Text(strings.openingNotificationQuestion)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 260, alignment: .center)
+        case .unavailable:
+            ContentUnavailableView(
+                strings.notificationQuestionMissingTitle,
+                systemImage: "trash",
+                description: Text(strings.notificationQuestionUnavailableHelp)
+            )
+        case .failed:
+            ContentUnavailableView {
+                Label(strings.notificationQuestionMissingTitle, systemImage: "arrow.clockwise")
+            } description: {
+                Text(strings.notificationLoadRetryDescription)
+            } actions: {
+                Button(strings.retry) {
+                    Task {
+                        await loadRecordIfNeeded(force: true)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    private func loadRecordIfNeeded(force: Bool = false) async {
+        if !force, record != nil {
+            appState.logRemoteNotificationEvent(
+                "push_record_destination_used_cache recordID=\(recordID)"
+            )
             return
         }
 
-        isLoading = true
-        defer { isLoading = false }
+        loadState = .loading
 
         do {
-            loadedRecord = try await appState.fetchBackendNotificationRecord(recordID: recordID)
+            let fetched = try await appState.fetchBackendNotificationRecord(recordID: recordID)
+            try Task.checkCancellation()
+            loadedRecord = fetched
+            appState.logRemoteNotificationEvent(
+                "push_record_destination_loaded recordID=\(recordID)"
+            )
+        } catch is CancellationError {
+            appState.logRemoteNotificationEvent(
+                "push_record_destination_cancelled recordID=\(recordID)"
+            )
         } catch {
-            await appState.refreshBackendRecords()
+            if appState.isBackendRecordNotFound(error) {
+                loadState = .unavailable
+                await appState.removeNotifications(forRecordID: recordID)
+                appState.logRemoteNotificationEvent(
+                    "push_record_destination_unavailable recordID=\(recordID)",
+                    isWarning: true
+                )
+            } else {
+                loadState = .failed
+                appState.logRemoteNotificationEvent(
+                    "push_record_destination_failed recordID=\(recordID), error=\(error.localizedDescription)",
+                    isWarning: true
+                )
+            }
         }
     }
+
+}
+
+private enum NotificationRecordLoadState {
+    case loading
+    case unavailable
+    case failed
 }
 
 private struct NotificationCommunityQuestionDestination: View {
@@ -2127,7 +3114,7 @@ private struct NotificationPublicQuestionsDestination: View {
                     Button {
                         selectedQuestionRoute = CommunityQuestionRoute(id: question.id)
                     } label: {
-                        MobileCommunityQuestionRow(question: question)
+                        MobileCommunityQuestionRow(question: question, strings: strings)
                     }
                     .buttonStyle(.plain)
                 }
@@ -2152,20 +3139,13 @@ private struct NotificationPublicQuestionsDestination: View {
     }
 }
 
-private enum StudyTreeDirection: String, CaseIterable, Identifiable {
-    case vertical
-    case horizontal
-
-    var id: String { rawValue }
-}
-
-private struct StudyTreePlacement: Identifiable {
+struct StudyTreePlacement: Identifiable {
     var room: BackendStudyRoom
     var center: CGPoint
     var id: Int { room.id }
 }
 
-private struct StudyTreeEdge: Identifiable {
+struct StudyTreeEdge: Identifiable {
     var parentID: Int
     var childID: Int
     var parent: CGPoint
@@ -2173,17 +3153,18 @@ private struct StudyTreeEdge: Identifiable {
     var id = UUID()
 }
 
-private struct StudyTreeLayoutSnapshot {
+struct StudyTreeLayoutSnapshot {
     static let nodeSize = CGSize(width: 112, height: 112)
     private static let margin: CGFloat = 44
     private static let siblingSpacing: CGFloat = 42
     private static let levelSpacing: CGFloat = 74
 
     var placements: [StudyTreePlacement]
+    var centerByRoomID: [Int: CGPoint]
     var edges: [StudyTreeEdge]
     var size: CGSize
 
-    init(root: BackendStudyRoom, rooms: [BackendStudyRoom], direction: StudyTreeDirection) {
+    init(root: BackendStudyRoom, rooms: [BackendStudyRoom]) {
         let roomByID = Dictionary(uniqueKeysWithValues: rooms.map { ($0.id, $0) })
         let childrenByParent = Dictionary(
             grouping: rooms.filter { $0.parentStudyId != nil },
@@ -2211,18 +3192,16 @@ private struct StudyTreeLayoutSnapshot {
 
         let maxDepth = logicalPositions.values.map(\.y).max() ?? 0
         let maxLeaf = logicalPositions.values.map(\.x).max() ?? 0
-        let verticalWidth = (maxLeaf + 1) * (Self.nodeSize.width + Self.siblingSpacing) - Self.siblingSpacing + Self.margin * 2
+        let contentWidth = (maxLeaf + 1) * (Self.nodeSize.width + Self.siblingSpacing) - Self.siblingSpacing + Self.margin * 2
         let verticalHeight = (maxDepth + 1) * (Self.nodeSize.height + Self.levelSpacing) - Self.levelSpacing + Self.margin * 2
 
         func renderedCenter(_ point: CGPoint) -> CGPoint {
-            let verticalPoint = CGPoint(
-                x: Self.margin + Self.nodeSize.width / 2 + point.x * (Self.nodeSize.width + Self.siblingSpacing),
+            CGPoint(
+                x: Self.margin
+                    + Self.nodeSize.width / 2
+                    + point.x * (Self.nodeSize.width + Self.siblingSpacing),
                 y: Self.margin + Self.nodeSize.height / 2 + point.y * (Self.nodeSize.height + Self.levelSpacing)
             )
-            guard direction == .horizontal else {
-                return verticalPoint
-            }
-            return CGPoint(x: verticalPoint.y, y: verticalPoint.x)
         }
 
         placements = logicalPositions.compactMap { id, point in
@@ -2237,6 +3216,9 @@ private struct StudyTreeLayoutSnapshot {
             }
             return $0.center.y < $1.center.y
         }
+        centerByRoomID = Dictionary(
+            uniqueKeysWithValues: placements.map { ($0.id, $0.center) }
+        )
 
         edges = logicalPositions.flatMap { parentID, parentPoint in
             (childrenByParent[parentID] ?? []).compactMap { child in
@@ -2252,9 +3234,7 @@ private struct StudyTreeLayoutSnapshot {
             }
         }
 
-        size = direction == .vertical
-            ? CGSize(width: max(verticalWidth, 320), height: max(verticalHeight, 320))
-            : CGSize(width: max(verticalHeight, 320), height: max(verticalWidth, 320))
+        size = CGSize(width: contentWidth, height: verticalHeight)
     }
 
     private static func assignLogicalPosition(
@@ -2294,9 +3274,44 @@ private struct StudyTreeLayoutSnapshot {
     }
 }
 
+enum StudyTreeConnector {
+    static func draw(
+        _ geometry: StudyTreeDirectionalEdgeGeometry,
+        color: Color = .secondary,
+        in context: inout GraphicsContext
+    ) {
+        var path = Path()
+        path.move(to: geometry.start)
+        let midpoint = (geometry.start.y + geometry.end.y) / 2
+        path.addCurve(
+            to: geometry.end,
+            control1: CGPoint(x: geometry.start.x, y: midpoint),
+            control2: CGPoint(x: geometry.end.x, y: midpoint)
+        )
+
+        context.stroke(
+            path,
+            with: .color(color.opacity(0.48)),
+            style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round)
+        )
+
+        var arrow = Path()
+        arrow.move(to: geometry.end)
+        arrow.addLine(to: geometry.arrowLeft)
+        arrow.addLine(to: geometry.arrowRight)
+        arrow.closeSubpath()
+        context.fill(arrow, with: .color(color.opacity(0.48)))
+    }
+}
+
 private enum StudyTopicAddMode: String {
     case recommendation
     case manual
+}
+
+private enum StudyTreeSelectionMode {
+    case activation
+    case deletion
 }
 
 private struct StudyTopicAddRequest: Identifiable {
@@ -2305,21 +3320,42 @@ private struct StudyTopicAddRequest: Identifiable {
     var mode: StudyTopicAddMode
 }
 
-private struct MobileStudyTreeView: View {
+private struct StudyTopicAddOutcome {
+    var addedTopics: [String]
+    var failedTopics: [String]
+}
+
+struct MobileStudyTreeView: View {
     @EnvironmentObject private var appState: AppState
-    @State private var direction: StudyTreeDirection = .vertical
     @State private var addRequest: StudyTopicAddRequest?
     @State private var editingRoom: BackendStudyRoom?
     @State private var selectedRoomID: Int?
     @State private var selectedRoomIDs = Set<Int>()
     @State private var nodeOffsets: [Int: CGSize] = [:]
     @State private var dragStartOffsets: [Int: CGSize] = [:]
+    @State private var dragStartCanvasTranslations: [Int: CGSize] = [:]
+    @State private var dragStartViewportOffsets: [Int: CGPoint] = [:]
+    @State private var dragStartCanvasAlignmentInsets: [Int: CGSize] = [:]
     @State private var zoomScale: CGFloat = 1
     @State private var zoomStartScale: CGFloat = 1
-    @State private var isSelectionMode = false
+    @State private var zoomStartViewportOffset: CGPoint = .zero
+    @State private var zoomStartCanvasAlignmentInset: CGSize = .zero
+    @State private var isZoomGestureActive = false
+    @State private var viewportOffset: CGPoint = .zero
+    @State private var treeViewportSize: CGSize = .zero
+    @State private var canvasAlignmentInset: CGSize = .zero
+    @State private var hasLoadedTreeState = false
+    @State private var hasFinishedInitialRefresh = false
+    @State private var hasAppliedInitialViewportFit = false
+    @State private var hasUserInteractedWithTree = false
+    @State private var shouldFitInitialViewport = false
+    @State private var isPreparingInitialViewport = true
+    @State private var selectionMode: StudyTreeSelectionMode?
     @State private var showsDeleteConfirmation = false
+    @State private var deletionCandidate: BackendStudyRoom?
 
     var rootStudyID: Int
+    var isEmbeddedInHome = false
 
     private var strings: AppStrings {
         appState.strings
@@ -2329,155 +3365,170 @@ private struct MobileStudyTreeView: View {
         appState.backendStudyRoom(id: rootStudyID)
     }
 
+    private var isSelectionMode: Bool {
+        selectionMode != nil
+    }
+
     private var snapshot: StudyTreeLayoutSnapshot? {
         guard let root else {
             return nil
         }
         return StudyTreeLayoutSnapshot(
             root: root,
-            rooms: appState.backendStudyRooms,
-            direction: direction
+            rooms: appState.backendStudyRooms
         )
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                if isSelectionMode {
+            if isSelectionMode {
+                HStack(spacing: 10) {
                     Text(strings.selectedTopicCount(selectedRoomIDs.count))
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Button(strings.done) {
-                        endSelection()
+                        completeSelection()
                     }
-                } else {
-                    Picker("", selection: $direction) {
-                        Text(strings.treeVertical).tag(StudyTreeDirection.vertical)
-                        Text(strings.treeHorizontal).tag(StudyTreeDirection.horizontal)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(maxWidth: 220)
-
-                    Spacer()
-
-                    Button {
-                        changeZoom(by: -0.15)
-                    } label: {
-                        Image(systemName: "minus.magnifyingglass")
-                    }
-                    .disabled(zoomScale <= 0.6)
-
-                    Button {
-                        changeZoom(by: 0.15)
-                    } label: {
-                        Image(systemName: "plus.magnifyingglass")
-                    }
-                    .disabled(zoomScale >= 1.8)
-
-                    Menu {
-                        Button {
-                            isSelectionMode = true
-                        } label: {
-                            Label(strings.selectTopics, systemImage: "checkmark.circle")
-                        }
-                        Button {
-                            withAnimation(.snappy) {
-                                nodeOffsets = [:]
-                                zoomScale = 1
-                                zoomStartScale = 1
-                            }
-                            saveNodeOffsets()
-                        } label: {
-                            Label(strings.resetTreeLayout, systemImage: "arrow.counterclockwise")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .frame(width: 30, height: 30)
-                    }
+                    .disabled(selectionMode == .deletion && selectedRoomIDs.isEmpty)
                 }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(Color(.secondarySystemBackground))
             }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(Color(.secondarySystemBackground))
 
             if let snapshot {
-                ZStack(alignment: .bottom) {
-                    ScrollView([.horizontal, .vertical]) {
-                        ZStack(alignment: .topLeading) {
-                            Canvas { context, _ in
-                                for edge in snapshot.edges {
-                                    let parent = edge.parent.adding(nodeOffsets[edge.parentID] ?? .zero)
-                                    let child = edge.child.adding(nodeOffsets[edge.childID] ?? .zero)
-                                    var path = Path()
-                                    path.move(to: parent)
-                                    if direction == .vertical {
-                                        let midpoint = (parent.y + child.y) / 2
-                                        path.addCurve(
-                                            to: child,
-                                            control1: CGPoint(x: parent.x, y: midpoint),
-                                            control2: CGPoint(x: child.x, y: midpoint)
+                GeometryReader { geometry in
+                    let canvasLayout = expandedCanvasLayout(for: snapshot)
+                    let scaledCanvasSize = CGSize(
+                        width: canvasLayout.size.width * zoomScale,
+                        height: canvasLayout.size.height * zoomScale
+                    )
+                    ZStack(alignment: .bottom) {
+                        ScrollView([.horizontal, .vertical]) {
+                            ZStack(alignment: .topLeading) {
+                                ZStack(alignment: .topLeading) {
+                                    Canvas { context, _ in
+                                        for edge in snapshot.edges {
+                                            let parent = edge.parent.adding(
+                                                renderedNodeOffset(
+                                                    for: edge.parentID,
+                                                    canvasLayout: canvasLayout
+                                                )
+                                            )
+                                            let child = edge.child.adding(
+                                                renderedNodeOffset(
+                                                    for: edge.childID,
+                                                    canvasLayout: canvasLayout
+                                                )
+                                            )
+                                            guard let geometry = StudyTreeEdgePolicy.directionalGeometry(
+                                                parent: parent,
+                                                child: child,
+                                                nodeRadius: StudyTreeLayoutSnapshot.nodeSize.width / 2 + 4
+                                            ) else {
+                                                continue
+                                            }
+                                            StudyTreeConnector.draw(
+                                                geometry,
+                                                in: &context
+                                            )
+                                        }
+                                    }
+
+                                    ForEach(snapshot.placements) { placement in
+                                        StudyTreeNode(
+                                            room: placement.room,
+                                            strings: strings,
+                                            hasPendingQuestion:
+                                                appState.pendingQuestionCount(
+                                                    categoryID: String(placement.room.id)
+                                                ) > 0,
+                                            isSelectionMode: isSelectionMode,
+                                            isSelected: selectedRoomIDs.contains(placement.room.id),
+                                            onOpen: { selectedRoomID = placement.room.id },
+                                            onSelect: { toggleSelection(placement.room.id) },
+                                            onAddRecommendedChild: {
+                                                addRequest = StudyTopicAddRequest(
+                                                    parent: placement.room,
+                                                    mode: .recommendation
+                                                )
+                                            },
+                                            onAddManualChild: {
+                                                addRequest = StudyTopicAddRequest(
+                                                    parent: placement.room,
+                                                    mode: .manual
+                                                )
+                                            },
+                                            onEdit: { editingRoom = placement.room },
+                                            onDelete: { deletionCandidate = placement.room }
                                         )
-                                    } else {
-                                        let midpoint = (parent.x + child.x) / 2
-                                        path.addCurve(
-                                            to: child,
-                                            control1: CGPoint(x: midpoint, y: parent.y),
-                                            control2: CGPoint(x: midpoint, y: child.y)
+                                        .position(placement.center)
+                                        .offset(
+                                            renderedNodeOffset(
+                                                for: placement.room.id,
+                                                canvasLayout: canvasLayout
+                                            )
+                                        )
+                                        .highPriorityGesture(
+                                            nodeDragGesture(for: placement.room.id, in: snapshot)
                                         )
                                     }
-                                    context.stroke(path, with: .color(Color.secondary.opacity(0.32)), lineWidth: 1.5)
                                 }
-                            }
-
-                            ForEach(snapshot.placements) { placement in
-                                StudyTreeNode(
-                                    room: placement.room,
-                                    strings: strings,
-                                    isSelectionMode: isSelectionMode,
-                                    isSelected: selectedRoomIDs.contains(placement.room.id),
-                                    onOpen: { selectedRoomID = placement.room.id },
-                                    onSelect: { toggleSelection(placement.room.id) },
-                                    onAddRecommendedChild: {
-                                        addRequest = StudyTopicAddRequest(
-                                            parent: placement.room,
-                                            mode: .recommendation
-                                        )
-                                    },
-                                    onAddManualChild: {
-                                        addRequest = StudyTopicAddRequest(
-                                            parent: placement.room,
-                                            mode: .manual
-                                        )
-                                    },
-                                    onToggleActive: {
-                                        appState.setStudyTopicActive(
-                                            studyID: placement.room.id,
-                                            active: !placement.room.activeForQuestions
-                                        )
-                                    },
-                                    onEdit: { editingRoom = placement.room }
+                                .frame(width: canvasLayout.size.width, height: canvasLayout.size.height)
+                                .scaleEffect(zoomScale, anchor: .topLeading)
+                                .frame(
+                                    width: scaledCanvasSize.width,
+                                    height: scaledCanvasSize.height,
+                                    alignment: .topLeading
                                 )
-                                .position(placement.center)
-                                .offset(nodeOffsets[placement.room.id] ?? .zero)
-                                .simultaneousGesture(nodeDragGesture(for: placement.room.id))
+                                .offset(
+                                    x: canvasAlignmentInset.width,
+                                    y: canvasAlignmentInset.height
+                                )
+                            }
+                            .frame(
+                                width: max(
+                                    geometry.size.width,
+                                    scaledCanvasSize.width + canvasAlignmentInset.width
+                                ),
+                                height: max(
+                                    geometry.size.height,
+                                    scaledCanvasSize.height + canvasAlignmentInset.height
+                                ),
+                                alignment: .topLeading
+                            )
+                            .background {
+                                StudyTreeScrollViewportBridge(
+                                    contentOffset: viewportOffset,
+                                    isReportingEnabled:
+                                        dragStartOffsets.isEmpty
+                                            && !isZoomGestureActive
+                                ) { offset in
+                                    viewportOffset = offset
+                                } onContentOffsetSettled: { offset in
+                                    saveViewport(contentOffset: offset)
+                                }
+                                .frame(width: 0, height: 0)
+                                .allowsHitTesting(false)
                             }
                         }
-                        .frame(width: snapshot.size.width, height: snapshot.size.height)
-                        .scaleEffect(zoomScale, anchor: .topLeading)
-                        .frame(
-                            width: snapshot.size.width * zoomScale,
-                            height: snapshot.size.height * zoomScale,
-                            alignment: .topLeading
-                        )
-                    }
-                    .simultaneousGesture(zoomGesture)
+                        .scrollDisabled(!dragStartOffsets.isEmpty)
+                        .opacity(isPreparingInitialViewport ? 0 : 1)
+                        .allowsHitTesting(!isPreparingInitialViewport)
+                        .simultaneousGesture(viewportPanGesture)
+                        .simultaneousGesture(zoomGesture)
 
-                    if isSelectionMode {
-                        selectionBar
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 12)
+                        if isPreparingInitialViewport {
+                            ProgressView()
+                                .controlSize(.regular)
+                        }
+                    }
+                    .onAppear {
+                        updateTreeViewportSize(geometry.size, snapshot: snapshot)
+                    }
+                    .onChange(of: geometry.size) { _, newSize in
+                        updateTreeViewportSize(newSize, snapshot: snapshot)
                     }
                 }
             } else {
@@ -2487,8 +3538,30 @@ private struct MobileStudyTreeView: View {
             }
         }
         .background(Color(.systemBackground))
-        .navigationTitle(strings.studyTree)
+        .navigationTitle(isEmbeddedInHome ? "" : strings.studyTree)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if !isEmbeddedInHome {
+                ToolbarItem(placement: .principal) {
+                    Text(strings.studyTree)
+                        .font(.headline)
+                }
+                if #available(iOS 26.0, *) {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        if !isSelectionMode {
+                            treeOptionsMenu
+                        }
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                } else {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        if !isSelectionMode {
+                            treeOptionsMenu
+                        }
+                    }
+                }
+            }
+        }
         .navigationDestination(item: $selectedRoomID) { roomID in
             if let room = appState.backendStudyRoom(id: roomID) {
                 StudyView(preferredCategoryID: String(room.id))
@@ -2501,34 +3574,53 @@ private struct MobileStudyTreeView: View {
                 parent: request.parent,
                 strings: strings,
                 initialMode: request.mode
-            ) { title, difficulty in
-                await appState.addChildStudyCategory(
-                    title,
-                    parentStudyID: request.parent.id,
+            ) { titles, difficulty in
+                await addChildStudyTopics(
+                    titles,
                     difficulty: difficulty,
-                    customPrompt: StudySettings.defaultCustomPrompt,
-                    openAIModel: request.parent.openAIModel
+                    parent: request.parent
                 )
             }
             .environmentObject(appState)
         }
         .sheet(item: $editingRoom) { room in
-            StudyTopicLevelSheet(
-                room: room,
+            StudyEditorSheet(
+                navigationTitle: strings.editStudyCategory,
+                initialTitle: room.topic,
+                initialDifficulty: Difficulty(level: room.difficultyLevel),
+                initialQuestionRotationEnabled: room.activeForQuestions,
                 strings: strings,
                 onDelete: {
                     appState.deleteStudyCategory(id: String(room.id))
                 }
-            ) { difficulty in
+            ) { title, difficulty, questionRotationEnabled in
                 appState.updateStudyTreeCategory(
                     roomID: room.id,
+                    title: title,
                     difficulty: difficulty
                 )
+                if let questionRotationEnabled,
+                   questionRotationEnabled != room.activeForQuestions {
+                    appState.setStudyTopicActive(
+                        studyID: room.id,
+                        active: questionRotationEnabled
+                    )
+                }
             }
         }
+        .onAppear {
+            AppAnalytics.screen(.studyTree)
+        }
         .task {
-            loadNodeOffsets()
+            loadTreeState()
             await appState.refreshVisibleData()
+            hasFinishedInitialRefresh = true
+            guard let snapshot else {
+                isPreparingInitialViewport = false
+                return
+            }
+            sanitizeNodeOffsets(for: snapshot)
+            fitInitialViewportIfNeeded(for: snapshot)
         }
         .confirmationDialog(
             strings.deleteSelectedTopics,
@@ -2541,73 +3633,157 @@ private struct MobileStudyTreeView: View {
             }
             Button(strings.cancel, role: .cancel) {}
         }
+        .confirmationDialog(
+            deletionCandidate.map { strings.deleteStudySubtree($0.topic) } ?? strings.deleteStudy,
+            isPresented: Binding(
+                get: { deletionCandidate != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        deletionCandidate = nil
+                    }
+                }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let deletionCandidate {
+                Button(strings.deleteStudy, role: .destructive) {
+                    appState.deleteStudyCategory(id: String(deletionCandidate.id))
+                    self.deletionCandidate = nil
+                }
+            }
+            Button(strings.cancel, role: .cancel) {
+                deletionCandidate = nil
+            }
+        }
     }
 
-    private var selectionBar: some View {
-        HStack(spacing: 0) {
+    private var treeOptionsMenu: some View {
+        Menu {
             Button {
-                appState.setStudyTopicsActive(studyIDs: selectedRoomIDs, active: true)
-                endSelection()
+                beginSelection(.activation)
             } label: {
-                Label(strings.enableQuestions, systemImage: "checkmark.circle")
-                    .frame(maxWidth: .infinity)
-            }
-            Button {
-                appState.setStudyTopicsActive(studyIDs: selectedRoomIDs, active: false)
-                endSelection()
-            } label: {
-                Label(strings.disableQuestions, systemImage: "pause.circle")
-                    .frame(maxWidth: .infinity)
+                Label(strings.activateTopics, systemImage: "checkmark.circle")
             }
             Button(role: .destructive) {
-                showsDeleteConfirmation = true
+                beginSelection(.deletion)
             } label: {
-                Image(systemName: "trash")
-                    .frame(width: 52)
+                Label(strings.deleteTopics, systemImage: "trash")
             }
+            Button {
+                resetTreeLayout()
+            } label: {
+                Label(strings.resetTreeLayout, systemImage: "arrow.counterclockwise")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .frame(width: 28, height: 28)
         }
-        .font(.subheadline.weight(.semibold))
-        .padding(.vertical, 12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
-        }
-        .disabled(selectedRoomIDs.isEmpty)
+        .buttonStyle(.plain)
+        .accessibilityLabel(strings.more)
     }
 
     private var zoomGesture: some Gesture {
         MagnifyGesture()
             .onChanged { value in
-                zoomScale = min(max(zoomStartScale * value.magnification, 0.6), 1.8)
+                cancelPendingInitialViewportFit()
+                if !isZoomGestureActive {
+                    isZoomGestureActive = true
+                    zoomStartScale = zoomScale
+                    zoomStartViewportOffset = viewportOffset
+                    zoomStartCanvasAlignmentInset = canvasAlignmentInset
+                }
+                let nextScale = min(
+                    max(
+                        zoomStartScale * value.magnification,
+                        StudyTreeViewportPolicy.minimumZoomScale
+                    ),
+                    StudyTreeViewportPolicy.maximumZoomScale
+                )
+                let anchor = CGPoint(
+                    x: value.startAnchor.x * treeViewportSize.width,
+                    y: value.startAnchor.y * treeViewportSize.height
+                )
+                let canvasSize = snapshot.map {
+                    expandedCanvasLayout(for: $0).size
+                } ?? treeViewportSize
+                let targetAlignmentInset =
+                    StudyTreeViewportPolicy.centeredCanvasAlignmentInset(
+                        canvasSize: canvasSize,
+                        viewportSize: treeViewportSize,
+                        zoomScale: nextScale
+                    )
+                viewportOffset = StudyTreeViewportPolicy.contentOffsetPreservingAnchor(
+                    startOffset: zoomStartViewportOffset,
+                    anchor: anchor,
+                    canvasSize: canvasSize,
+                    viewportSize: treeViewportSize,
+                    startAlignmentInset: zoomStartCanvasAlignmentInset,
+                    targetAlignmentInset: targetAlignmentInset,
+                    startScale: zoomStartScale,
+                    targetScale: nextScale
+                )
+                canvasAlignmentInset = targetAlignmentInset
+                zoomScale = nextScale
             }
             .onEnded { _ in
+                isZoomGestureActive = false
                 zoomStartScale = zoomScale
+                zoomStartViewportOffset = viewportOffset
+                saveViewport()
             }
     }
 
-    private func nodeDragGesture(for roomID: Int) -> some Gesture {
-        DragGesture(minimumDistance: 8)
+    private var viewportPanGesture: some Gesture {
+        DragGesture(minimumDistance: 3)
+            .onChanged { _ in
+                cancelPendingInitialViewportFit()
+            }
+    }
+
+    private func nodeDragGesture(
+        for roomID: Int,
+        in snapshot: StudyTreeLayoutSnapshot
+    ) -> some Gesture {
+        DragGesture(minimumDistance: 8, coordinateSpace: .global)
             .onChanged { value in
                 guard !isSelectionMode else { return }
-                let initial = dragStartOffsets[roomID] ?? nodeOffsets[roomID] ?? .zero
+                cancelPendingInitialViewportFit()
+                let initial = dragStartOffsets[roomID]
+                    ?? StudyTreeCanvasPolicy.sanitizedOffset(nodeOffsets[roomID] ?? .zero)
+                if dragStartOffsets[roomID] == nil {
+                    let startLayout = expandedCanvasLayout(for: snapshot)
+                    dragStartCanvasTranslations[roomID] = startLayout.translation
+                    dragStartViewportOffsets[roomID] = viewportOffset
+                    dragStartCanvasAlignmentInsets[roomID] = canvasAlignmentInset
+                }
                 dragStartOffsets[roomID] = initial
-                nodeOffsets[roomID] = CGSize(
+                let proposedOffset = CGSize(
                     width: initial.width + value.translation.width / zoomScale,
                     height: initial.height + value.translation.height / zoomScale
                 )
+                nodeOffsets[roomID] = StudyTreeCanvasPolicy.sanitizedOffset(proposedOffset)
+                let expandedLayout = expandedCanvasLayout(for: snapshot)
+                let compensation = StudyTreeViewportPolicy
+                    .compensationPreservingCanvasTranslation(
+                        startOffset: dragStartViewportOffsets[roomID] ?? viewportOffset,
+                        startAlignmentInset:
+                            dragStartCanvasAlignmentInsets[roomID] ?? canvasAlignmentInset,
+                        startCanvasTranslation:
+                            dragStartCanvasTranslations[roomID] ?? expandedLayout.translation,
+                        targetCanvasTranslation: expandedLayout.translation,
+                        zoomScale: zoomScale
+                    )
+                viewportOffset = compensation.viewportOffset
+                canvasAlignmentInset = compensation.alignmentInset
             }
             .onEnded { _ in
                 dragStartOffsets[roomID] = nil
+                dragStartCanvasTranslations[roomID] = nil
+                dragStartViewportOffsets[roomID] = nil
+                dragStartCanvasAlignmentInsets[roomID] = nil
                 saveNodeOffsets()
+                saveViewport()
             }
-    }
-
-    private func changeZoom(by delta: CGFloat) {
-        withAnimation(.snappy) {
-            zoomScale = min(max(zoomScale + delta, 0.6), 1.8)
-            zoomStartScale = zoomScale
-        }
     }
 
     private func toggleSelection(_ roomID: Int) {
@@ -2618,43 +3794,529 @@ private struct MobileStudyTreeView: View {
         }
     }
 
+    private func completeSelection() {
+        switch selectionMode {
+        case .activation:
+            saveTopicActivationSelection()
+        case .deletion:
+            showsDeleteConfirmation = true
+        case nil:
+            break
+        }
+    }
+
+    private func beginSelection(_ mode: StudyTreeSelectionMode) {
+        selectionMode = mode
+        switch mode {
+        case .activation:
+            selectedRoomIDs = Set(
+                snapshot?.placements.compactMap { placement in
+                    placement.room.activeForQuestions ? placement.room.id : nil
+                } ?? []
+            )
+        case .deletion:
+            selectedRoomIDs = []
+        }
+    }
+
+    private func saveTopicActivationSelection() {
+        guard let snapshot else {
+            endSelection()
+            return
+        }
+        let activeRoomIDs = Set(
+            snapshot.placements.compactMap { placement in
+                placement.room.activeForQuestions ? placement.room.id : nil
+            }
+        )
+        appState.setStudyTopicsActive(
+            studyIDs: selectedRoomIDs.subtracting(activeRoomIDs),
+            active: true
+        )
+        appState.setStudyTopicsActive(
+            studyIDs: activeRoomIDs.subtracting(selectedRoomIDs),
+            active: false
+        )
+        endSelection()
+    }
+
+    private func addChildStudyTopics(
+        _ titles: [String],
+        difficulty: Difficulty,
+        parent: BackendStudyRoom
+    ) async -> StudyTopicAddOutcome {
+        let existingRoomIDs = Set(snapshot?.placements.map(\.id) ?? [])
+        let addedTopics = await appState.addChildStudyCategories(
+            titles,
+            parentStudyID: parent.id,
+            difficulty: difficulty,
+            customPrompt: StudySettings.defaultCustomPrompt,
+            openAIModel: parent.openAIModel
+        )
+        let addedTopicSet = Set(addedTopics)
+        let outcome = StudyTopicAddOutcome(
+            addedTopics: addedTopics,
+            failedTopics: titles.filter { !addedTopicSet.contains($0) }
+        )
+        guard !addedTopics.isEmpty, let updatedSnapshot = snapshot else {
+            return outcome
+        }
+
+        let updatedRoomIDs = Set(updatedSnapshot.placements.map(\.id))
+        let newRoomIDs = updatedRoomIDs.subtracting(existingRoomIDs)
+        guard !newRoomIDs.isEmpty else {
+            return outcome
+        }
+        nodeOffsets = StudyTreeCanvasPolicy.offsetsPlacingNewNodesWithoutSameLevelOverlap(
+            newRoomIDs: newRoomIDs,
+            baseCenters: updatedSnapshot.centerByRoomID,
+            nodeOffsets: nodeOffsets,
+            nodeSize: StudyTreeLayoutSnapshot.nodeSize
+        )
+        saveNodeOffsets()
+        return outcome
+    }
+
     private func endSelection() {
-        isSelectionMode = false
+        selectionMode = nil
         selectedRoomIDs = []
     }
 
-    private func loadNodeOffsets() {
+    private func resetTreeLayout() {
+        guard let snapshot else {
+            nodeOffsets = [:]
+            saveNodeOffsets()
+            return
+        }
+
+        cancelPendingInitialViewportFit()
+        withAnimation(.snappy) {
+            nodeOffsets = [:]
+            applyFittedViewport(for: snapshot)
+        }
+        saveNodeOffsets()
+        saveViewport()
+    }
+
+    private func loadTreeState() {
+        guard !hasLoadedTreeState else {
+            return
+        }
         nodeOffsets = appState.loadStudyTreeNodeOffsets(rootStudyID: rootStudyID)
+        let viewport = appState.loadStudyTreeViewport(rootStudyID: rootStudyID)
+        let needsInitialFit = !appState.hasStudyTreeViewport(rootStudyID: rootStudyID)
+            || viewport.canvasAlignmentX == nil
+            || viewport.canvasAlignmentY == nil
+        shouldFitInitialViewport = needsInitialFit
+        isPreparingInitialViewport = needsInitialFit
+        zoomScale = viewport.zoomScale
+        zoomStartScale = viewport.zoomScale
+        viewportOffset = CGPoint(
+            x: viewport.contentOffsetX,
+            y: viewport.contentOffsetY
+        )
+        zoomStartViewportOffset = viewportOffset
+        canvasAlignmentInset = needsInitialFit
+            ? .zero
+            : CGSize(
+                width: viewport.canvasAlignmentX ?? 0,
+                height: viewport.canvasAlignmentY ?? 0
+            )
+        hasLoadedTreeState = true
+    }
+
+    private func expandedCanvasLayout(
+        for snapshot: StudyTreeLayoutSnapshot
+    ) -> StudyTreeCanvasLayout {
+        StudyTreeCanvasPolicy.expandedLayout(
+            baseCenters: snapshot.centerByRoomID,
+            nodeOffsets: nodeOffsets,
+            baseCanvasSize: snapshot.size,
+            nodeSize: StudyTreeLayoutSnapshot.nodeSize
+        )
+    }
+
+    private func renderedNodeOffset(
+        for roomID: Int,
+        canvasLayout: StudyTreeCanvasLayout
+    ) -> CGSize {
+        let nodeOffset = StudyTreeCanvasPolicy.sanitizedOffset(nodeOffsets[roomID] ?? .zero)
+        return CGSize(
+            width: nodeOffset.width + canvasLayout.translation.width,
+            height: nodeOffset.height + canvasLayout.translation.height
+        )
+    }
+
+    private func sanitizeNodeOffsets(for snapshot: StudyTreeLayoutSnapshot) {
+        let sanitizedOffsets = nodeOffsets.reduce(into: [Int: CGSize]()) { result, entry in
+            guard snapshot.centerByRoomID[entry.key] != nil else {
+                return
+            }
+            result[entry.key] = StudyTreeCanvasPolicy.sanitizedOffset(entry.value)
+        }
+        guard sanitizedOffsets != nodeOffsets else {
+            return
+        }
+        nodeOffsets = sanitizedOffsets
+        saveNodeOffsets()
+    }
+
+    private func updateTreeViewportSize(
+        _ size: CGSize,
+        snapshot: StudyTreeLayoutSnapshot
+    ) {
+        guard size.width > 0, size.height > 0 else {
+            return
+        }
+        treeViewportSize = size
+        fitInitialViewportIfNeeded(for: snapshot)
+    }
+
+    private func fitInitialViewportIfNeeded(for snapshot: StudyTreeLayoutSnapshot) {
+        guard StudyTreeViewportPolicy.shouldApplyInitialFit(
+            isRequested: shouldFitInitialViewport,
+            hasApplied: hasAppliedInitialViewportFit,
+            hasUserInteracted: hasUserInteractedWithTree,
+            hasFinishedRefresh: hasFinishedInitialRefresh,
+            viewportSize: treeViewportSize
+        ) else {
+            return
+        }
+        hasAppliedInitialViewportFit = true
+        shouldFitInitialViewport = false
+        applyFittedViewport(for: snapshot)
+        saveViewport()
+        withAnimation(.easeOut(duration: 0.2)) {
+            isPreparingInitialViewport = false
+        }
+    }
+
+    private func cancelPendingInitialViewportFit() {
+        hasUserInteractedWithTree = true
+        shouldFitInitialViewport = false
+        isPreparingInitialViewport = false
+    }
+
+    private func applyFittedViewport(for snapshot: StudyTreeLayoutSnapshot) {
+        let canvasLayout = expandedCanvasLayout(for: snapshot)
+        let fittedScale = StudyTreeViewportPolicy.fittedZoomScale(
+            canvasSize: canvasLayout.size,
+            viewportSize: treeViewportSize
+        )
+        zoomScale = fittedScale
+        zoomStartScale = fittedScale
+        canvasAlignmentInset = StudyTreeViewportPolicy.centeredCanvasAlignmentInset(
+            canvasSize: canvasLayout.size,
+            viewportSize: treeViewportSize,
+            zoomScale: fittedScale
+        )
+        zoomStartCanvasAlignmentInset = canvasAlignmentInset
+        viewportOffset = .zero
+        zoomStartViewportOffset = .zero
     }
 
     private func saveNodeOffsets() {
         appState.saveStudyTreeNodeOffsets(nodeOffsets, rootStudyID: rootStudyID)
+    }
+
+    private func saveViewport(contentOffset: CGPoint? = nil) {
+        guard hasLoadedTreeState, !shouldFitInitialViewport else {
+            return
+        }
+        let contentOffset = contentOffset ?? viewportOffset
+        appState.saveStudyTreeViewport(
+            StudyTreeViewportState(
+                zoomScale: zoomScale,
+                contentOffsetX: contentOffset.x,
+                contentOffsetY: contentOffset.y,
+                canvasAlignmentX: canvasAlignmentInset.width,
+                canvasAlignmentY: canvasAlignmentInset.height
+            ),
+            rootStudyID: rootStudyID
+        )
+    }
+}
+
+private struct StudyTreeScrollViewportBridge: UIViewRepresentable {
+    var contentOffset: CGPoint
+    var isReportingEnabled: Bool
+    var onContentOffsetChange: (CGPoint) -> Void
+    var onContentOffsetSettled: (CGPoint) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            isReportingEnabled: isReportingEnabled,
+            onContentOffsetChange: onContentOffsetChange,
+            onContentOffsetSettled: onContentOffsetSettled
+        )
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = false
+        context.coordinator.update(
+            from: view,
+            contentOffset: contentOffset,
+            isReportingEnabled: isReportingEnabled,
+            onContentOffsetChange: onContentOffsetChange,
+            onContentOffsetSettled: onContentOffsetSettled
+        )
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        context.coordinator.update(
+            from: view,
+            contentOffset: contentOffset,
+            isReportingEnabled: isReportingEnabled,
+            onContentOffsetChange: onContentOffsetChange,
+            onContentOffsetSettled: onContentOffsetSettled
+        )
+    }
+
+    static func dismantleUIView(_ view: UIView, coordinator: Coordinator) {
+        coordinator.detach()
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        private weak var scrollView: UIScrollView?
+        private var scrollCompletionTask: Task<Void, Never>?
+        private var retryTask: Task<Void, Never>?
+        private var requestedContentOffset: CGPoint = .zero
+        private var onContentOffsetChange: (CGPoint) -> Void
+        private var onContentOffsetSettled: (CGPoint) -> Void
+        private var isApplyingContentOffset = false
+        private var isReportingEnabled: Bool
+        private var requiresNewPanBeforeReporting = false
+        private var retryCount = 0
+
+        init(
+            isReportingEnabled: Bool,
+            onContentOffsetChange: @escaping (CGPoint) -> Void,
+            onContentOffsetSettled: @escaping (CGPoint) -> Void
+        ) {
+            self.isReportingEnabled = isReportingEnabled
+            self.onContentOffsetChange = onContentOffsetChange
+            self.onContentOffsetSettled = onContentOffsetSettled
+            super.init()
+        }
+
+        func update(
+            from view: UIView,
+            contentOffset: CGPoint,
+            isReportingEnabled: Bool,
+            onContentOffsetChange: @escaping (CGPoint) -> Void,
+            onContentOffsetSettled: @escaping (CGPoint) -> Void
+        ) {
+            requestedContentOffset = CGPoint(
+                x: max(0, contentOffset.x),
+                y: max(0, contentOffset.y)
+            )
+            self.isReportingEnabled = isReportingEnabled
+            if !isReportingEnabled {
+                scrollCompletionTask?.cancel()
+                requiresNewPanBeforeReporting = true
+            }
+            self.onContentOffsetChange = onContentOffsetChange
+            self.onContentOffsetSettled = onContentOffsetSettled
+            attachIfNeeded(from: view)
+            applyRequestedContentOffset(from: view)
+        }
+
+        func detach() {
+            scrollCompletionTask?.cancel()
+            retryTask?.cancel()
+            scrollView?.panGestureRecognizer.removeTarget(
+                self,
+                action: #selector(handlePanGesture(_:))
+            )
+            scrollView = nil
+        }
+
+        private func attachIfNeeded(from view: UIView) {
+            guard scrollView == nil,
+                  let scrollView = view.studyTreeEnclosingScrollView() else {
+                return
+            }
+
+            self.scrollView = scrollView
+            scrollView.panGestureRecognizer.addTarget(
+                self,
+                action: #selector(handlePanGesture(_:))
+            )
+        }
+
+        private func applyRequestedContentOffset(from view: UIView) {
+            guard let scrollView = scrollView ?? view.studyTreeEnclosingScrollView() else {
+                scheduleRetry(from: view)
+                return
+            }
+
+            if self.scrollView == nil {
+                attachIfNeeded(from: view)
+            }
+
+            guard scrollView.contentSize.width > 0,
+                  scrollView.contentSize.height > 0 else {
+                scheduleRetry(from: view)
+                return
+            }
+
+            retryCount = 0
+            let leadingInset = CGSize(
+                width: scrollView.adjustedContentInset.left,
+                height: scrollView.adjustedContentInset.top
+            )
+            let maximumOffset =
+                StudyTreeViewportPolicy.maximumNormalizedContentOffset(
+                    contentSize: scrollView.contentSize,
+                    viewportSize: scrollView.bounds.size,
+                    totalInset: CGSize(
+                        width: scrollView.adjustedContentInset.left
+                            + scrollView.adjustedContentInset.right,
+                        height: scrollView.adjustedContentInset.top
+                            + scrollView.adjustedContentInset.bottom
+                    )
+                )
+            let clampedNormalizedOffset = CGPoint(
+                x: min(requestedContentOffset.x, maximumOffset.x),
+                y: min(requestedContentOffset.y, maximumOffset.y)
+            )
+            let rawTargetOffset = StudyTreeViewportPolicy.rawContentOffset(
+                normalizedContentOffset: clampedNormalizedOffset,
+                leadingInset: leadingInset
+            )
+            guard abs(scrollView.contentOffset.x - rawTargetOffset.x) > 0.5
+                    || abs(scrollView.contentOffset.y - rawTargetOffset.y) > 0.5 else {
+                return
+            }
+
+            isApplyingContentOffset = true
+            scrollView.setContentOffset(rawTargetOffset, animated: false)
+            isApplyingContentOffset = false
+        }
+
+        private func scheduleRetry(from view: UIView) {
+            guard retryCount < 12, retryTask == nil else {
+                return
+            }
+            retryCount += 1
+            retryTask = Task { @MainActor [weak self, weak view] in
+                try? await Task.sleep(for: .milliseconds(50))
+                guard let self, let view, !Task.isCancelled else {
+                    return
+                }
+                self.retryTask = nil
+                self.attachIfNeeded(from: view)
+                self.applyRequestedContentOffset(from: view)
+            }
+        }
+
+        @objc
+        private func handlePanGesture(_ gesture: UIPanGestureRecognizer) {
+            guard let scrollView,
+                  isReportingEnabled else {
+                return
+            }
+
+            switch gesture.state {
+            case .began:
+                scrollCompletionTask?.cancel()
+                requiresNewPanBeforeReporting = false
+                reportCurrentContentOffset(from: scrollView)
+            case .changed:
+                guard !requiresNewPanBeforeReporting else {
+                    return
+                }
+                reportCurrentContentOffset(from: scrollView)
+            case .ended, .cancelled:
+                guard !requiresNewPanBeforeReporting else {
+                    return
+                }
+                trackScrollCompletion(from: scrollView)
+            default:
+                break
+            }
+        }
+
+        private func reportCurrentContentOffset(from scrollView: UIScrollView) {
+            guard !isApplyingContentOffset,
+                  isReportingEnabled,
+                  !requiresNewPanBeforeReporting else {
+                return
+            }
+            let reportedContentOffset =
+                StudyTreeViewportPolicy.normalizedContentOffset(
+                    rawContentOffset: scrollView.contentOffset,
+                    leadingInset: CGSize(
+                        width: scrollView.adjustedContentInset.left,
+                        height: scrollView.adjustedContentInset.top
+                    )
+                )
+            requestedContentOffset = reportedContentOffset
+            onContentOffsetChange(reportedContentOffset)
+        }
+
+        private func trackScrollCompletion(from scrollView: UIScrollView) {
+            scrollCompletionTask?.cancel()
+            scrollCompletionTask = Task { @MainActor [weak self, weak scrollView] in
+                try? await Task.sleep(for: .milliseconds(16))
+                guard let self, let scrollView, !Task.isCancelled else {
+                    return
+                }
+                repeat {
+                    self.reportCurrentContentOffset(from: scrollView)
+                    guard scrollView.isDecelerating else {
+                        break
+                    }
+                    try? await Task.sleep(for: .milliseconds(16))
+                } while !Task.isCancelled
+
+                guard !Task.isCancelled,
+                      self.isReportingEnabled,
+                      !self.requiresNewPanBeforeReporting else {
+                    return
+                }
+                self.onContentOffsetSettled(self.requestedContentOffset)
+            }
+        }
+    }
+}
+
+private extension UIView {
+    func studyTreeEnclosingScrollView() -> UIScrollView? {
+        var current = superview
+        while let view = current {
+            if let scrollView = view as? UIScrollView {
+                return scrollView
+            }
+            current = view.superview
+        }
+        return nil
     }
 }
 
 private struct StudyTreeNode: View {
     var room: BackendStudyRoom
     var strings: AppStrings
+    var hasPendingQuestion: Bool
     var isSelectionMode: Bool
     var isSelected: Bool
     var onOpen: () -> Void
     var onSelect: () -> Void
     var onAddRecommendedChild: () -> Void
     var onAddManualChild: () -> Void
-    var onToggleActive: () -> Void
     var onEdit: () -> Void
+    var onDelete: () -> Void
 
-    private var levelColor: Color {
-        switch room.difficultyLevel {
-        case 1...3:
-            return Color.blue
-        case 4...6:
-            return Color.green
-        case 7...8:
-            return Color.orange
-        default:
-            return Color.purple
-        }
+    private var levelProgressColor: Color {
+        room.activeForQuestions ? Color.green : Color.secondary.opacity(0.6)
+    }
+
+    private var levelFillFraction: CGFloat {
+        StudyTreeNodeStylePolicy.levelFillFraction(room.difficultyLevel)
     }
 
     var body: some View {
@@ -2668,10 +4330,10 @@ private struct StudyTreeNode: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
 
-                Text("Lv \(room.difficultyLevel)")
+                Text(StudyTreeNodeStylePolicy.levelText(room.difficultyLevel))
                     .font(.caption2.weight(.bold))
                     .monospacedDigit()
-                    .foregroundStyle(levelColor)
+                    .foregroundStyle(room.activeForQuestions ? Color.green : Color.secondary)
             }
             .padding(12)
             .frame(
@@ -2679,24 +4341,44 @@ private struct StudyTreeNode: View {
                 height: StudyTreeLayoutSnapshot.nodeSize.height,
                 alignment: .center
             )
-            .background(levelColor.opacity(0.1), in: Circle())
+            .background {
+                Circle()
+                    .fill(Color(.secondarySystemBackground))
+            }
             .overlay {
                 Circle()
-                    .stroke(
-                        isSelected ? Color.accentColor : levelColor.opacity(0.42),
-                        lineWidth: isSelected ? 3 : 1.5
-                    )
+                    .strokeBorder(Color.secondary.opacity(0.22), lineWidth: 2.5)
             }
+            .overlay {
+                Circle()
+                    .trim(from: 0, to: levelFillFraction)
+                    .stroke(
+                        levelProgressColor,
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+                    .padding(1.5)
+            }
+            .overlay {
+                if isSelected {
+                    Circle()
+                        .strokeBorder(Color.accentColor, lineWidth: 3)
+                        .padding(-4)
+                }
+            }
+            .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .contentShape(.contextMenuPreview, Circle())
         .contextMenu {
-            Button(strings.editStudyCategory, action: onEdit)
-            Button(strings.recommendSubstudy, action: onAddRecommendedChild)
-            Button(strings.addTopicManually, action: onAddManualChild)
-            Button(
-                room.activeForQuestions ? strings.questionTopicInactive : strings.questionTopicActive,
-                action: onToggleActive
-            )
+            if !isSelectionMode {
+                Button(action: onEdit) {
+                    Label(strings.editStudyCategory, systemImage: "pencil")
+                }
+                Button(role: .destructive, action: onDelete) {
+                    Label(strings.deleteStudy, systemImage: "trash")
+                }
+            }
         }
         .overlay(alignment: .topLeading) {
             if isSelectionMode {
@@ -2705,15 +4387,24 @@ private struct StudyTreeNode: View {
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                     .background(Color(.systemBackground), in: Circle())
                     .offset(x: -3, y: -3)
-            } else {
-                Circle()
-                    .fill(room.activeForQuestions ? Color.accentColor : Color.secondary.opacity(0.3))
-                    .frame(width: 10, height: 10)
-                    .background(Color(.systemBackground), in: Circle())
-                    .offset(x: 3, y: 3)
             }
         }
         .overlay(alignment: .topTrailing) {
+            if !isSelectionMode, hasPendingQuestion {
+                Text("1")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 22, height: 22)
+                    .background(Color.red, in: Circle())
+                    .overlay {
+                        Circle()
+                            .stroke(Color(.systemBackground), lineWidth: 2)
+                    }
+                    .offset(x: 5, y: -5)
+                    .accessibilityLabel(strings.pendingQuestionCount(1))
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
             if !isSelectionMode {
                 Menu {
                     Button(action: onAddRecommendedChild) {
@@ -2729,13 +4420,15 @@ private struct StudyTreeNode: View {
                         .background(Color(.systemBackground), in: Circle())
                 }
                 .accessibilityLabel(strings.addSubstudy)
-                .offset(x: 4, y: -4)
+                .offset(x: 4, y: 4)
             }
         }
         .frame(
             width: StudyTreeLayoutSnapshot.nodeSize.width,
             height: StudyTreeLayoutSnapshot.nodeSize.height
         )
+        .accessibilityAction(named: strings.editStudyCategory, onEdit)
+        .accessibilityAction(named: strings.deleteStudy, onDelete)
     }
 }
 
@@ -2752,13 +4445,13 @@ private struct StudyTopicAddSheet: View {
     var parent: BackendStudyRoom
     var strings: AppStrings
     var initialMode: StudyTopicAddMode
-    var onAdd: (String, Difficulty) async -> Bool
+    var onAdd: ([String], Difficulty) async -> StudyTopicAddOutcome
 
     @State private var suggestions: [String] = []
     @State private var difficultyLevel: Double
     @State private var manualTopic = ""
     @State private var mode: StudyTopicAddMode
-    @State private var selectedSuggestion: String?
+    @State private var selectedSuggestions = Set<String>()
     @State private var isLoading = true
     @State private var isSaving = false
     @State private var inlineMessage: String?
@@ -2767,7 +4460,7 @@ private struct StudyTopicAddSheet: View {
         parent: BackendStudyRoom,
         strings: AppStrings,
         initialMode: StudyTopicAddMode,
-        onAdd: @escaping (String, Difficulty) async -> Bool
+        onAdd: @escaping ([String], Difficulty) async -> StudyTopicAddOutcome
     ) {
         self.parent = parent
         self.strings = strings
@@ -2779,98 +4472,92 @@ private struct StudyTopicAddSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 18) {
-                VStack(spacing: 4) {
-                    Text(strings.addSubstudy)
-                        .font(.headline)
-                    Text(parent.topic)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+            ScrollView {
+                VStack(spacing: 18) {
+                    VStack(spacing: 4) {
+                        Text(strings.addSubstudy)
+                            .font(.headline)
+                        Text(parent.topic)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
 
-                Picker("", selection: $mode) {
-                    Text(strings.recommendSubstudy).tag(StudyTopicAddMode.recommendation)
-                    Text(strings.addTopicManually).tag(StudyTopicAddMode.manual)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                    Picker("", selection: $mode) {
+                        Text(strings.recommendSubstudyTab)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                            .tag(StudyTopicAddMode.recommendation)
+                        Text(strings.addTopicManually)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                            .tag(StudyTopicAddMode.manual)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
 
-                Group {
-                    if mode == .recommendation {
-                        recommendationPicker
-                    } else {
-                        HStack(spacing: 8) {
+                    Group {
+                        if mode == .recommendation {
+                            recommendationPicker
+                        } else {
                             TextField(strings.studyTopic, text: $manualTopic)
                                 .textInputAutocapitalization(.sentences)
                                 .submitLabel(.done)
                                 .onSubmit {
-                                    guard !selectedTopic.isEmpty, !isSaving else { return }
-                                    add(selectedTopic)
+                                    guard !selectedTopics.isEmpty, !isSaving else { return }
+                                    add(selectedTopics)
                                 }
-
-                            Button {
-                                add(selectedTopic)
-                            } label: {
-                                if isSaving {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                        .frame(width: 34, height: 34)
-                                } else {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 15, weight: .bold))
-                                        .foregroundStyle(.white)
-                                        .frame(width: 34, height: 34)
-                                        .background(Color.accentColor, in: Circle())
-                                }
+                            .padding(.horizontal, 14)
+                            .frame(height: 50)
+                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
                             }
-                            .buttonStyle(.plain)
-                            .disabled(selectedTopic.isEmpty || isSaving)
-                            .accessibilityLabel(strings.addSubstudy)
-                        }
-                        .padding(.leading, 14)
-                        .padding(.trailing, 7)
-                        .frame(height: 50)
-                        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
                         }
                     }
-                }
-                .frame(maxWidth: .infinity, minHeight: 112, alignment: .top)
+                    .frame(maxWidth: .infinity, minHeight: 112, alignment: .top)
 
-                VStack(spacing: 8) {
-                    HStack {
-                        Text(strings.difficulty)
-                            .font(.subheadline.weight(.semibold))
-                        Spacer()
-                        Text("\(resolvedDifficulty) · \(Difficulty(level: resolvedDifficulty).displayName(language: strings.language))")
-                            .font(.subheadline)
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
+                    VStack(spacing: 8) {
+                        HStack {
+                            Text(strings.difficulty)
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Text("\(resolvedDifficulty) · \(Difficulty(level: resolvedDifficulty).displayName(language: strings.language))")
+                                .font(.subheadline)
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                        }
+                        Slider(value: $difficultyLevel, in: 1...10, step: 1)
+                        if mode == .recommendation, selectedTopics.count > 1 {
+                            Text(strings.sharedDifficultyDescription(selectedTopics.count))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
-                    Slider(value: $difficultyLevel, in: 1...10, step: 1)
-                }
 
-                if let inlineMessage {
-                    Text(inlineMessage)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                    if let inlineMessage {
+                        Text(inlineMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
-                if mode == .recommendation {
                     Button {
-                        add(selectedTopic)
+                        add(selectedTopics)
                     } label: {
                         HStack(spacing: 8) {
                             if isSaving {
                                 ProgressView()
                                     .tint(.white)
                             }
-                            Text(strings.addSubstudy)
+                            Text(
+                                mode == .recommendation
+                                    ? strings.addSelectedSubstudies(selectedTopics.count)
+                                    : strings.addSubstudy
+                            )
                                 .fontWeight(.semibold)
                         }
                         .frame(maxWidth: .infinity)
@@ -2878,10 +4565,11 @@ private struct StudyTopicAddSheet: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .buttonBorderShape(.roundedRectangle(radius: 8))
-                    .disabled(selectedTopic.isEmpty || isSaving)
+                    .disabled(selectedTopics.isEmpty || isSaving)
                 }
+                .padding(20)
             }
-            .padding(20)
+            .scrollDismissesKeyboard(.interactively)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(strings.cancel) {
@@ -2904,19 +4592,20 @@ private struct StudyTopicAddSheet: View {
             }
             .interactiveDismissDisabled(isSaving)
         }
-        .presentationDetents([.height(430), .large])
+        .presentationDetents([.height(520), .large])
     }
 
     private var resolvedDifficulty: Int {
         min(max(Int(difficultyLevel.rounded()), 1), 10)
     }
 
-    private var selectedTopic: String {
+    private var selectedTopics: [String] {
         switch mode {
         case .recommendation:
-            return selectedSuggestion ?? ""
+            return suggestions.filter(selectedSuggestions.contains)
         case .manual:
-            return manualTopic.trimmingCharacters(in: .whitespacesAndNewlines)
+            let topic = manualTopic.trimmingCharacters(in: .whitespacesAndNewlines)
+            return topic.isEmpty ? [] : [topic]
         }
     }
 
@@ -2927,23 +4616,50 @@ private struct StudyTopicAddSheet: View {
                 .frame(maxWidth: .infinity, minHeight: 100)
         } else if suggestions.isEmpty {
             VStack(spacing: 10) {
-                Text(strings.recommendedTopicsEmpty)
+                Text(
+                    appState.studyTreeDepth(for: parent.id) >= 5
+                        ? strings.studyTopicDepthLimit
+                        : strings.recommendedTopicsEmpty
+                )
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                Button(strings.retry) {
-                    Task { await loadSuggestions() }
+                if appState.studyTreeDepth(for: parent.id) < 5 {
+                    Button(strings.retry) {
+                        Task { await loadSuggestions() }
+                    }
+                    .buttonStyle(.bordered)
                 }
-                .buttonStyle(.bordered)
             }
             .frame(maxWidth: .infinity, minHeight: 100)
         } else {
             VStack(spacing: 8) {
                 HStack {
-                    Text(strings.recommendSubstudy)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(strings.recommendSubstudy)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(strings.selectedTopicCount(selectedSuggestions.count))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                     Spacer()
+                    Button(
+                        selectedSuggestions.count == suggestions.count
+                            ? strings.deselectAll
+                            : strings.selectAll
+                    ) {
+                        if selectedSuggestions.count == suggestions.count {
+                            selectedSuggestions.removeAll()
+                        } else {
+                            selectedSuggestions = Set(suggestions)
+                        }
+                        inlineMessage = nil
+                    }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.plain)
+                    .disabled(isSaving)
+
                     Button {
                         Task { await loadSuggestions() }
                     } label: {
@@ -2962,24 +4678,34 @@ private struct StudyTopicAddSheet: View {
                     ],
                     spacing: 8
                 ) {
-                    ForEach(suggestions.prefix(4), id: \.self) { topic in
-                        let isSelected = selectedSuggestion == topic
+                    ForEach(suggestions.prefix(10), id: \.self) { topic in
+                        let isSelected = selectedSuggestions.contains(topic)
                         Button {
-                            selectedSuggestion = topic
+                            if isSelected {
+                                selectedSuggestions.remove(topic)
+                            } else {
+                                selectedSuggestions.insert(topic)
+                            }
                             inlineMessage = nil
                         } label: {
-                            HStack(spacing: 6) {
+                            HStack(alignment: .top, spacing: 6) {
                                 Text(topic)
                                     .font(.subheadline.weight(.medium))
                                     .foregroundStyle(.primary)
-                                    .lineLimit(2)
+                                    .lineLimit(3)
+                                    .truncationMode(.tail)
                                     .multilineTextAlignment(.leading)
-                                Spacer(minLength: 2)
+                                    .allowsTightening(true)
+                                    .minimumScaleFactor(0.85)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .fixedSize(horizontal: false, vertical: true)
                                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                                    .fixedSize()
                             }
                             .padding(.horizontal, 10)
-                            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
                             .background(
                                 isSelected
                                     ? Color.accentColor.opacity(0.08)
@@ -2995,6 +4721,7 @@ private struct StudyTopicAddSheet: View {
                             }
                         }
                         .buttonStyle(.plain)
+                        .disabled(isSaving)
                     }
                 }
             }
@@ -3004,23 +4731,39 @@ private struct StudyTopicAddSheet: View {
     private func loadSuggestions() async {
         isLoading = true
         inlineMessage = nil
-        suggestions = await appState.suggestChildStudyTopics(parentStudyID: parent.id)
-        selectedSuggestion = suggestions.first
+        let loadedSuggestions = await appState.suggestChildStudyTopics(parentStudyID: parent.id)
+        let retainedSelection = selectedSuggestions.intersection(loadedSuggestions)
+        suggestions = loadedSuggestions
+        selectedSuggestions = retainedSelection.isEmpty
+            ? Set(loadedSuggestions.prefix(1))
+            : retainedSelection
         isLoading = false
     }
 
-    private func add(_ rawTopic: String) {
-        let topic = rawTopic.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !topic.isEmpty else {
+    private func add(_ rawTopics: [String]) {
+        var normalizedTopics = Set<String>()
+        let topics = rawTopics.compactMap { rawTopic -> String? in
+            let topic = rawTopic.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !topic.isEmpty else {
+                return nil
+            }
+            let normalized = normalizedTopic(topic)
+            guard normalizedTopics.insert(normalized).inserted else {
+                return nil
+            }
+            return topic
+        }
+        guard !topics.isEmpty else {
             return
         }
-        let normalized = topic.lowercased().filter { !$0.isWhitespace }
-        let alreadyExists = appState.backendStudyRooms.contains {
-            $0.topic.trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased()
-                .filter { !$0.isWhitespace } == normalized
+
+        let existingTopics = Set(
+            appState.backendStudyRooms.map { normalizedTopic($0.topic) }
+        )
+        let newTopics = topics.filter {
+            !existingTopics.contains(normalizedTopic($0))
         }
-        guard !alreadyExists else {
+        guard !newTopics.isEmpty else {
             inlineMessage = strings.duplicateStudyTopic
             return
         }
@@ -3028,47 +4771,77 @@ private struct StudyTopicAddSheet: View {
         isSaving = true
         inlineMessage = nil
         Task {
-            let saved = await onAdd(topic, Difficulty(level: resolvedDifficulty))
+            let outcome = await onAdd(
+                newTopics,
+                Difficulty(level: resolvedDifficulty)
+            )
             isSaving = false
-            if saved {
+            if outcome.failedTopics.isEmpty {
                 dismiss()
             } else {
-                inlineMessage = strings.addStudyTopicFailed
+                suggestions.removeAll {
+                    outcome.addedTopics.contains($0)
+                }
+                selectedSuggestions = Set(outcome.failedTopics)
+                inlineMessage = strings.partialSubstudyAddFailure(
+                    added: outcome.addedTopics.count,
+                    failed: outcome.failedTopics.count
+                )
             }
         }
     }
+
+    private func normalizedTopic(_ topic: String) -> String {
+        topic
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .filter { !$0.isWhitespace }
+    }
 }
 
-private struct StudyTopicLevelSheet: View {
+struct StudyEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
 
-    var room: BackendStudyRoom
+    var navigationTitle: String
+    var initialQuestionRotationEnabled: Bool?
     var strings: AppStrings
-    var onDelete: () -> Void
-    var onSave: (Difficulty) -> Void
+    var onDelete: (() -> Void)?
+    var onSave: (String, Difficulty, Bool?) -> Void
 
+    @State private var title: String
     @State private var difficultyLevel: Double
-    @State private var showsDeleteConfirmation = false
+    @State private var isQuestionRotationEnabled: Bool
 
     init(
-        room: BackendStudyRoom,
+        navigationTitle: String,
+        initialTitle: String,
+        initialDifficulty: Difficulty,
+        initialQuestionRotationEnabled: Bool? = nil,
         strings: AppStrings,
-        onDelete: @escaping () -> Void,
-        onSave: @escaping (Difficulty) -> Void
+        onDelete: (() -> Void)? = nil,
+        onSave: @escaping (String, Difficulty, Bool?) -> Void
     ) {
-        self.room = room
+        self.navigationTitle = navigationTitle
+        self.initialQuestionRotationEnabled = initialQuestionRotationEnabled
         self.strings = strings
         self.onDelete = onDelete
         self.onSave = onSave
-        _difficultyLevel = State(initialValue: Double(room.difficultyLevel))
+        _title = State(initialValue: initialTitle)
+        _difficultyLevel = State(initialValue: Double(initialDifficulty.level))
+        _isQuestionRotationEnabled = State(
+            initialValue: initialQuestionRotationEnabled ?? false
+        )
+    }
+
+    private var canSave: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    Text(room.topic)
-                        .font(.headline)
+                Section(strings.studySettings) {
+                    TextField(strings.studyTopic, text: $title)
 
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
@@ -3078,22 +4851,41 @@ private struct StudyTopicLevelSheet: View {
                                 .fontWeight(.semibold)
                         }
                         Slider(value: $difficultyLevel, in: 1...10, step: 1)
+
+                        HStack {
+                            Text("1")
+                            Spacer()
+                            Text("10")
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     }
                 }
 
-                Section {
-                    Text(strings.questionRotationHelp)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                if initialQuestionRotationEnabled != nil {
+                    Section {
+                        Toggle(
+                            strings.questionTopicToggle,
+                            isOn: $isQuestionRotationEnabled
+                        )
+
+                        Text(strings.questionRotationHelp)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
-                Section {
-                    Button(strings.deleteStudy, role: .destructive) {
-                        showsDeleteConfirmation = true
+                if onDelete != nil {
+                    Section {
+                        Button(strings.deleteStudy, role: .destructive) {
+                            onDelete?()
+                            dismiss()
+                        }
                     }
                 }
             }
-            .navigationTitle(strings.editStudyCategory)
+            .keyboardDoneToolbar(strings.done)
+            .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -3103,17 +4895,17 @@ private struct StudyTopicLevelSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(strings.save) {
-                        onSave(Difficulty(level: resolvedDifficulty))
+                        onSave(
+                            title.trimmingCharacters(in: .whitespacesAndNewlines),
+                            Difficulty(level: resolvedDifficulty),
+                            initialQuestionRotationEnabled == nil
+                                ? nil
+                                : isQuestionRotationEnabled
+                        )
                         dismiss()
                     }
+                    .disabled(!canSave)
                 }
-            }
-            .confirmationDialog(strings.deleteStudy, isPresented: $showsDeleteConfirmation) {
-                Button(strings.deleteStudy, role: .destructive) {
-                    onDelete()
-                    dismiss()
-                }
-                Button(strings.cancel, role: .cancel) {}
             }
         }
     }
@@ -3123,38 +4915,10 @@ private struct StudyTopicLevelSheet: View {
     }
 }
 
-private struct NotificationStudyListDestination: View {
-    @EnvironmentObject private var appState: AppState
-
-    private var strings: AppStrings {
-        appState.strings
-    }
-
-    var body: some View {
-        List(appState.studyCategoriesForDisplay) { category in
-            NavigationLink {
-                StudyView(preferredCategoryID: category.id)
-                    .padding(.horizontal, 16)
-                    .navigationTitle(category.title)
-                    .navigationBarTitleDisplayMode(.inline)
-            } label: {
-                MobileHomeCategoryRow(
-                    category: category,
-                    hasPendingQuestion: appState.pendingQuestionCount(for: category) > 0,
-                    strings: strings
-                )
-            }
-        }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .navigationTitle(strings.tabStudy)
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
 private struct MobileNotificationRow: View {
     var notification: BackendAppNotification
     var referenceDate: Date
+    var strings: AppStrings
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -3165,20 +4929,32 @@ private struct MobileNotificationRow: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(notification.title)
+                    Text(
+                        strings.notificationTitle(
+                            type: notification.type,
+                            threadType: notification.threadType,
+                            fallback: notification.title
+                        )
+                    )
                         .font(.body.weight(notification.isRead ? .semibold : .bold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
 
                     Spacer(minLength: 8)
 
-                    Text(StudyDateDisplayFormatter.relativeOrShortDateString(for: notification.createdAt, relativeTo: referenceDate))
+                    Text(
+                        StudyDateDisplayFormatter.relativeOrShortDateString(
+                            for: notification.createdAt,
+                            relativeTo: referenceDate,
+                            language: strings.language
+                        )
+                    )
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
 
-                Text(notification.body)
+                Text(MarkdownContent.plainText(notification.body))
                     .font(.subheadline)
                     .foregroundStyle(notification.isRead ? .secondary : .primary)
                     .lineLimit(3)
@@ -4330,9 +6106,11 @@ extension Color {
     }
 }
 
-private struct MobileProfileSettingsSheet: View {
+private struct MobileProfilePage: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
+    @State private var isMembershipManagementPresented = false
+    @State private var developerUnlockTapTracker = RapidDeveloperUnlockTapTracker()
 
     private var strings: AppStrings {
         appState.strings
@@ -4347,79 +6125,182 @@ private struct MobileProfileSettingsSheet: View {
         return parts.isEmpty ? "-" : parts.joined(separator: " ")
     }
 
+    private var membershipTierName: String {
+        strings.membershipTierName(activeMembershipTierCode)
+    }
+
+    private var activeMembershipTierCode: String {
+        appState.billingStatus?.tierCode ?? appState.questionQuota?.tierCode ?? "TIER1"
+    }
+
     var body: some View {
-        NavigationStack {
+        List {
             if appState.isCommunitySessionActive {
-                List {
-                    Section {
-                        NavigationLink {
-                            MobileProfileEditorView()
+                Section {
+                    if let quota = appState.questionQuota {
+                        Button {
+                            isMembershipManagementPresented = true
                         } label: {
-                            profileDestinationLabel(
-                                title: strings.profile,
-                                subtitle: appState.communityProfile?.displayName,
-                                systemImage: "person.crop.circle"
+                            MonthlyQuestionQuotaSummary(
+                                quota: quota,
+                                strings: strings,
+                                title: membershipTierName,
+                                showsDisclosureIndicator: true,
+                                isCompact: true
                             )
+                            .padding(.vertical, 2)
                         }
-
-                        NavigationLink {
-                            MobileQuestionUsageView()
-                        } label: {
-                            profileDestinationLabel(
-                                title: strings.usage,
-                                subtitle: nil,
-                                systemImage: "chart.bar"
-                            )
-                        }
-                    }
-
-                    Section {
-                        NavigationLink {
-                            MobileNotificationSettingsView()
-                        } label: {
-                            profileDestinationLabel(
-                                title: strings.notificationSettings,
-                                subtitle: nil,
-                                systemImage: "bell"
-                            )
-                        }
-
-                        NavigationLink {
-                            MobileTermsSettingsView()
-                        } label: {
-                            profileDestinationLabel(
-                                title: strings.operatingTerms,
-                                subtitle: nil,
-                                systemImage: "doc.text"
-                            )
-                        }
-                    }
-
-                    Section {
-                        HStack {
-                            Text(strings.appVersion)
-                            Spacer()
-                            Text(appVersionText)
+                        .buttonStyle(.plain)
+                    } else {
+                        HStack(spacing: 9) {
+                            ProgressView()
+                            Text(strings.loading)
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
+                        .frame(minHeight: 36)
                     }
                 }
-                .navigationTitle(strings.profile)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(strings.done) {
-                            dismiss()
-                        }
+            }
+
+            Section {
+                if appState.isCommunitySessionActive {
+                    NavigationLink {
+                        MobileProfileEditorView()
+                    } label: {
+                        profileDestinationLabel(
+                            title: strings.avatar,
+                            subtitle: appState.communityProfile?.displayName,
+                            systemImage: "person.crop.circle"
+                        )
+                    }
+                } else {
+                    NavigationLink {
+                        MobileProfileEditorView()
+                    } label: {
+                        profileDestinationLabel(
+                            title: strings.communityLogin,
+                            subtitle: nil,
+                            systemImage: "person.crop.circle.badge.plus"
+                        )
                     }
                 }
-                .task {
-                    await appState.loadCommunityProfile()
+
+                NavigationLink {
+                    MobileSettingsView()
+                } label: {
+                    profileDestinationLabel(
+                        title: strings.tabSettings,
+                        subtitle: nil,
+                        systemImage: "gearshape"
+                    )
                 }
-            } else {
-                MobileProfileEditorView()
+            }
+
+            if appState.isCommunitySessionActive {
+                Section(strings.membershipAndBilling) {
+                    NavigationLink {
+                        MobileMembershipManagementView()
+                    } label: {
+                        profileDestinationLabel(
+                            title: strings.membershipManagement,
+                            subtitle: nil,
+                            systemImage: "creditcard"
+                        )
+                    }
+
+                    NavigationLink {
+                        MobileBillingHistoryView()
+                    } label: {
+                        profileDestinationLabel(
+                            title: strings.billingHistory,
+                            subtitle: nil,
+                            systemImage: "list.bullet.rectangle"
+                        )
+                    }
+                }
+            }
+
+            if appState.isCommunitySessionActive {
+                Section {
+                    NavigationLink {
+                        MobileNotificationSettingsView()
+                    } label: {
+                        profileDestinationLabel(
+                            title: strings.notificationSettings,
+                            subtitle: nil,
+                            systemImage: "bell"
+                        )
+                    }
+
+                    NavigationLink {
+                        MobileTermsSettingsView()
+                    } label: {
+                        profileDestinationLabel(
+                            title: strings.operatingTerms,
+                            subtitle: nil,
+                            systemImage: "doc.text"
+                        )
+                    }
+                }
+            }
+
+            Section {
+                Button {
+                    registerDeveloperVersionTap()
+                } label: {
+                    HStack {
+                        Text(strings.appVersion)
+                        Spacer()
+                        Text(appVersionText)
+                            .foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+
+            if appState.isCommunitySessionActive {
+                Section {
+                    Button(role: .destructive) {
+                        appState.signOutFromCommunity()
+                        dismiss()
+                    } label: {
+                        Text(strings.communityLogout)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
             }
         }
+        .navigationTitle(strings.profile)
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            if appState.isCommunitySessionActive {
+                async let billingRefresh: Void = appState.refreshBilling()
+                async let profileRefresh: Void = appState.loadCommunityProfile()
+                _ = await (billingRefresh, profileRefresh)
+            }
+        }
+        .sheet(isPresented: $isMembershipManagementPresented) {
+            NavigationStack {
+                MobileMembershipManagementView()
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(strings.close) {
+                                isMembershipManagementPresented = false
+                            }
+                        }
+                    }
+            }
+            .presentationDragIndicator(.visible)
+        }
+    }
+
+    private func registerDeveloperVersionTap() {
+        guard developerUnlockTapTracker.registerTap(at: Date()) else {
+            return
+        }
+        appState.unlockDeveloperAccessFromVersionGesture()
     }
 
     private func profileDestinationLabel(
@@ -4448,7 +6329,676 @@ private struct MobileProfileSettingsSheet: View {
     }
 }
 
-private struct MobileQuestionUsageView: View {
+private struct MonthlyQuestionQuotaSummary: View {
+    var quota: BackendQuestionQuota
+    var strings: AppStrings
+    var membershipName: String? = nil
+    var title: String? = nil
+    var showsDisclosureIndicator = false
+    var isCompact = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: isCompact ? 8 : 14) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title ?? strings.monthlyQuestionQuota)
+                    .font(isCompact ? .subheadline.weight(.semibold) : .headline)
+
+                Spacer(minLength: 12)
+
+                Text(strings.monthlyQuotaUsage(
+                    remaining: quota.remainingCount,
+                    limit: quota.monthlyLimit
+                ))
+                .font(isCompact ? .caption.weight(.semibold) : .subheadline.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(quota.remainingCount == 0 ? Color.orange : Color.secondary)
+
+                if showsDisclosureIndicator {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            ProgressView(
+                value: Double(quota.usedCount),
+                total: Double(max(quota.monthlyLimit, 1))
+            )
+            .tint(quota.remainingCount == 0 ? .orange : .accentColor)
+
+            if isCompact {
+                Text(strings.monthlyQuotaReset(quota.resetAt))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(strings.monthlyQuotaReset(quota.resetAt))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    Spacer(minLength: 8)
+
+                    if let membershipName {
+                        Text(membershipName)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct MobileMembershipManagementView: View {
+    @EnvironmentObject private var appState: AppState
+    @StateObject private var billingStore = AppleBillingStore()
+    @State private var billingNotice: String?
+    @State private var isBillingRecoveryPresented = false
+    @State private var isSubscriptionManagementPresented = false
+    @State private var selectedTierCode: String?
+    @State private var purchaseTask: Task<Void, Never>?
+
+    private var strings: AppStrings {
+        appState.strings
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 20) {
+                membershipSummary
+
+                if let membershipSchedule {
+                    membershipScheduleView(membershipSchedule)
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    if appState.billingCatalog != nil {
+                        if billingStore.isLoading {
+                            loadingRow
+                                .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
+                        } else {
+                            membershipPicker
+                        }
+                    } else if appState.isLoadingBilling {
+                        loadingRow
+                            .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
+                    }
+
+                    if selectedProduct != nil {
+                        subscriptionDisclosure
+                    }
+
+                    if let message = billingStore.errorMessage {
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    if primaryAction != .current {
+                        Button {
+                            guard let catalog = appState.billingCatalog,
+                                  let product = selectedProduct else { return }
+                            purchase(product, appAccountToken: catalog.appAccountToken)
+                        } label: {
+                            HStack(spacing: 10) {
+                                if billingStore.processingProductID != nil {
+                                    ProgressView()
+                                        .tint(Color(.systemBackground))
+                                }
+                                Text(primaryActionTitle)
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                            .foregroundStyle(Color(.systemBackground))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(
+                                Color.primary,
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            )
+                            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(selectedProduct == nil || billingStore.processingProductID != nil)
+                        .opacity(selectedProduct == nil ? 0.45 : 1)
+                    }
+
+                    if primaryAction == .downgrade {
+                        Text(strings.downgradeMembershipNotice)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else if activeProductID != nil, selectedProduct?.id != activeProductID {
+                        Text(strings.membershipChangePending)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack(spacing: 20) {
+                        if activeProductID != nil {
+                            Button(strings.manageSubscription) {
+                                cancelSubscription()
+                            }
+                        }
+
+                        if let catalog = appState.billingCatalog {
+                            Button(strings.restorePurchases) {
+                                restorePurchases(appAccountToken: catalog.appAccountToken)
+                            }
+                            .disabled(billingStore.processingProductID != nil)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 32, alignment: .center)
+                }
+
+                if let message = appState.billingErrorMessage {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle(strings.membershipManagement)
+        .navigationBarTitleDisplayMode(.inline)
+        .manageSubscriptionsSheet(isPresented: $isSubscriptionManagementPresented)
+        .onChange(of: isSubscriptionManagementPresented) { _, isPresented in
+            guard !isPresented else { return }
+            Task {
+                await synchronizeMembershipData()
+            }
+        }
+        .task {
+            await loadMembershipScreen()
+        }
+        .refreshable {
+            await synchronizeMembershipData()
+        }
+        .onDisappear {
+            purchaseTask?.cancel()
+            purchaseTask = nil
+        }
+        .alert(
+            strings.errorPopupTitle,
+            isPresented: Binding(
+                get: { billingNotice != nil },
+                set: { if !$0 { billingNotice = nil } }
+            )
+        ) {
+            Button(strings.close, role: .cancel) {}
+        } message: {
+            Text(billingNotice ?? "")
+        }
+        .alert(strings.billingRecoveryTitle, isPresented: $isBillingRecoveryPresented) {
+            Button(strings.restorePurchases) {
+                guard let appAccountToken = appState.billingCatalog?.appAccountToken else {
+                    billingNotice = strings.customerCenterUnavailable
+                    return
+                }
+                restorePurchases(appAccountToken: appAccountToken)
+            }
+            Button(strings.close, role: .cancel) {}
+        } message: {
+            Text(strings.billingRecoveryMessage)
+        }
+    }
+
+    private var membershipSchedule: MembershipPlanSchedule? {
+        guard let status = appState.billingStatus else { return nil }
+        return MembershipPlanTimelinePolicy.resolve(
+            status: status,
+            catalogProducts: appState.billingCatalog?.products ?? []
+        )
+    }
+
+    @ViewBuilder
+    private func membershipScheduleView(_ schedule: MembershipPlanSchedule) -> some View {
+        switch schedule {
+        case .change(let transition):
+            membershipTimeline(transition)
+        case .expiration(let currentTierCode, let expiresAt):
+            membershipExpirationTimeline(currentTierCode: currentTierCode, expiresAt: expiresAt)
+        }
+    }
+
+    private func membershipTimeline(_ transition: MembershipPlanTransition) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(strings.membershipChangeSchedule)
+                .font(.subheadline.weight(.semibold))
+
+            VStack(alignment: .leading, spacing: 0) {
+                membershipTimelineRow(
+                    label: strings.currentPlanPeriod,
+                    tierCode: transition.currentTierCode,
+                    dateText: strings.membershipAvailableUntil(transition.currentPlanEndsAt),
+                    isCurrent: true
+                )
+
+                Rectangle()
+                    .fill(Color.accentColor.opacity(0.32))
+                    .frame(width: 2, height: 18)
+                    .padding(.leading, 5)
+
+                membershipTimelineRow(
+                    label: strings.nextPlanPeriod,
+                    tierCode: transition.nextTierCode,
+                    dateText: strings.membershipStartsOn(transition.nextPlanStartsAt),
+                    isCurrent: false
+                )
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func membershipExpirationTimeline(currentTierCode: String, expiresAt: Date) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(strings.membershipExpirationSchedule)
+                .font(.subheadline.weight(.semibold))
+
+            membershipTimelineRow(
+                label: strings.currentPlanPeriod,
+                tierCode: currentTierCode,
+                dateText: strings.membershipAvailableUntil(expiresAt),
+                isCurrent: true
+            )
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func membershipTimelineRow(
+        label: String,
+        tierCode: String,
+        dateText: String,
+        isCurrent: Bool
+    ) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Circle()
+                .fill(isCurrent ? Color.accentColor : Color(.secondarySystemGroupedBackground))
+                .overlay {
+                    Circle()
+                        .stroke(Color.accentColor, lineWidth: 2)
+                }
+                .frame(width: 12, height: 12)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(strings.membershipTierName(tierCode))
+                    .font(.body.weight(.semibold))
+            }
+
+            Spacer(minLength: 12)
+
+            Text(dateText)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private var loadingRow: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+            Text(strings.loading)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var membershipSummary: some View {
+        Group {
+            if let quota = appState.questionQuota {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(strings.membershipTierName(activeTierCode))
+                                .font(.headline)
+                            Text(strings.monthlyQuestionAllowanceText(quota.monthlyLimit))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer(minLength: 12)
+
+                        HStack(alignment: .firstTextBaseline, spacing: 3) {
+                            Text(quota.remainingCount.formatted())
+                                .font(.title3.weight(.semibold))
+                                .monospacedDigit()
+                            Text(strings.remainingQuestions)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    ProgressView(
+                        value: Double(quota.usedCount),
+                        total: Double(max(quota.monthlyLimit, 1))
+                    )
+                    .tint(quota.remainingCount == 0 ? .orange : .accentColor)
+
+                    Text(strings.monthlyQuotaReset(quota.resetAt))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                loadingRow
+                    .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var membershipPicker: some View {
+        if membershipGroups.isEmpty {
+            Text(strings.membershipPlansUnavailable)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
+                .background(Color(.secondarySystemGroupedBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        } else {
+            VStack(spacing: 0) {
+                ForEach(Array(membershipGroups.enumerated()), id: \.element.id) { index, group in
+                    Button {
+                        selectedTierCode = group.tierCode
+                    } label: {
+                        membershipRow(group)
+                    }
+                    .buttonStyle(.plain)
+
+                    if index < membershipGroups.count - 1 {
+                        Divider()
+                            .padding(.leading, 52)
+                    }
+                }
+            }
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+    }
+
+    private var subscriptionDisclosure: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(strings.membershipAutoRenewalDisclosure)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 16) {
+                Link(
+                    strings.termsOfService,
+                    destination: AppLegalLinks.termsOfServiceURL(language: appState.settings.appLanguage)
+                )
+                Link(
+                    strings.privacyPolicy,
+                    destination: AppLegalLinks.privacyPolicyURL(language: appState.settings.appLanguage)
+                )
+            }
+            .font(.caption.weight(.semibold))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func membershipRow(_ group: MembershipProductGroup) -> some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .stroke(
+                        selectedTierCode == group.tierCode ? Color.accentColor : Color.secondary.opacity(0.45),
+                        lineWidth: 1.5
+                    )
+                    .frame(width: 22, height: 22)
+                if selectedTierCode == group.tierCode {
+                    Circle()
+                        .fill(Color.accentColor)
+                        .frame(width: 12, height: 12)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 7) {
+                    Text(group.products.first?.displayName ?? strings.membershipTierName(group.tierCode))
+                        .font(.body.weight(.semibold))
+                    if activeTierCode == group.tierCode,
+                       appState.billingStatus?.isEntitlementActive == true {
+                        Text(strings.activeMembership)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text(strings.monthlyQuestionAllowanceText(group.monthlyQuestionLimit))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 10)
+
+            if let product = group.products.first {
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text(product.displayPrice)
+                        .font(.body.weight(.semibold))
+                        .monospacedDigit()
+                    Text(strings.perMonth)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 70)
+        .contentShape(Rectangle())
+    }
+
+    private var membershipGroups: [MembershipProductGroup] {
+        Dictionary(grouping: billingStore.products, by: \.tier.tierCode)
+            .map { tierCode, products in
+                MembershipProductGroup(
+                    tierCode: tierCode,
+                    monthlyQuestionLimit: products.first?.tier.monthlyQuestionLimit ?? 0,
+                    products: products.sorted { $0.tier.sortOrder < $1.tier.sortOrder }
+                )
+            }
+            .sorted {
+                ($0.products.first?.tier.sortOrder ?? 0) < ($1.products.first?.tier.sortOrder ?? 0)
+            }
+    }
+
+    private var selectedProduct: AppleBillingStore.TierProduct? {
+        guard let selectedTierCode else { return nil }
+        return billingStore.products.first { $0.tier.tierCode == selectedTierCode }
+    }
+
+    private var activeTierCode: String {
+        appState.billingStatus?.tierCode ?? appState.questionQuota?.tierCode ?? "TIER1"
+    }
+
+    private var activeProductID: String? {
+        guard appState.billingStatus?.isEntitlementActive == true else { return nil }
+        return appState.billingStatus?.productId
+    }
+
+    private var activeProduct: AppleBillingStore.TierProduct? {
+        guard let activeProductID else { return nil }
+        return billingStore.products.first { $0.id == activeProductID }
+    }
+
+    private var primaryActionTitle: String {
+        switch primaryAction {
+        case .subscribe:
+            return strings.startMembership(selectedTierCode ?? "TIER2")
+        case .current:
+            return strings.currentMembership
+        case .change, .downgrade:
+            return strings.changeMembership(to: selectedTierCode ?? activeTierCode)
+        }
+    }
+
+    private var primaryAction: MembershipPrimaryAction {
+        purchaseAction(for: selectedProduct)
+    }
+
+    private func purchaseAction(
+        for tierProduct: AppleBillingStore.TierProduct?
+    ) -> MembershipPrimaryAction {
+        if appState.billingStatus?.isEntitlementActive == true,
+           tierProduct?.tier.tierCode == activeTierCode {
+            return .current
+        }
+        return MembershipPlanActionPolicy.resolve(
+            activeProductID: activeProductID,
+            activeMonthlyLimit: appState.billingStatus?.quota.baseLimit,
+            selectedProductID: tierProduct?.id,
+            selectedMonthlyLimit: tierProduct?.tier.monthlyQuestionLimit
+        )
+    }
+
+
+    private func purchase(
+        _ tierProduct: AppleBillingStore.TierProduct,
+        appAccountToken: UUID
+    ) {
+        purchaseTask?.cancel()
+        purchaseTask = Task {
+            do {
+                let outcome = try await billingStore.purchase(
+                    tierProduct,
+                    appAccountToken: appAccountToken,
+                    resolveActionAfterSynchronization: {
+                        await appState.refreshBilling()
+                        return purchaseAction(for: tierProduct)
+                    },
+                    prepareCheckout: appState.createAppleBillingCheckout,
+                    confirmRevenueCat: appState.confirmRevenueCatBillingTransaction,
+                    synchronize: appState.syncAppleBillingTransaction,
+                    waitForFulfillment: appState.waitForRevenueCatBillingFulfillment,
+                    abandonCheckout: appState.abandonAppleBillingCheckout
+                )
+                switch outcome {
+                case .purchased:
+                    await refreshMembershipData()
+                    billingNotice = strings.billingPurchased
+                case .alreadyCurrent:
+                    await refreshMembershipData()
+                    billingNotice = strings.currentMembership
+                case .pending:
+                    billingNotice = strings.billingPending
+                    await refreshMembershipData()
+                case .changeScheduled:
+                    await refreshMembershipData()
+                    billingNotice = strings.membershipDowngradeScheduled
+                case .cancelled:
+                    break
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                await appState.refreshBilling()
+                if let billingError = error as? AppleBillingStoreError,
+                   case .membershipApplicationIncomplete = billingError {
+                    isBillingRecoveryPresented = true
+                } else {
+                    billingNotice = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func restorePurchases(appAccountToken: UUID) {
+        Task {
+            do {
+                _ = try await billingStore.restore(
+                    appAccountToken: appAccountToken,
+                    synchronize: appState.syncAppleBillingTransaction
+                )
+                await appState.refreshBilling()
+                await refreshMembershipData()
+                billingNotice = strings.billingRestored
+            } catch {
+                billingNotice = billingRestoreMessage(for: error)
+            }
+        }
+    }
+
+    private func billingRestoreMessage(for error: Error) -> String {
+        if let billingError = error as? AppleBillingStoreError,
+           case .noRestorablePurchases = billingError {
+            return strings.noRestorablePurchases
+        }
+        return BackendErrorPresentationPolicy.presentation(
+            for: error,
+            fallback: strings.billingRestoreFailed,
+            language: appState.settings.appLanguage
+        ).message
+    }
+
+    private func refreshMembershipData() async {
+        await appState.refreshBilling()
+        guard let catalog = appState.billingCatalog else { return }
+        await billingStore.load(catalog: catalog)
+        initializeSelection()
+    }
+
+    private func loadMembershipScreen() async {
+        guard let cachedCatalog = appState.billingCatalog else {
+            await refreshMembershipData()
+            return
+        }
+
+        async let billingRefresh: Void = appState.refreshBilling()
+        await billingStore.load(catalog: cachedCatalog)
+        initializeSelection()
+        await billingRefresh
+
+        guard let refreshedCatalog = appState.billingCatalog,
+              refreshedCatalog != cachedCatalog else {
+            return
+        }
+        await billingStore.load(catalog: refreshedCatalog)
+        initializeSelection()
+    }
+
+    private func synchronizeMembershipData() async {
+        await appState.reconcileBillingSubscription()
+        await refreshMembershipData()
+    }
+
+    private func initializeSelection() {
+        if let activeProduct {
+            selectedTierCode = activeProduct.tier.tierCode
+            return
+        }
+        if selectedTierCode == nil {
+            selectedTierCode = membershipGroups.first?.tierCode
+        }
+    }
+
+    private func cancelSubscription() {
+        isSubscriptionManagementPresented = true
+    }
+}
+
+private struct MembershipProductGroup: Identifiable {
+    var tierCode: String
+    var monthlyQuestionLimit: Int
+    var products: [AppleBillingStore.TierProduct]
+
+    var id: String { tierCode }
+}
+
+private struct MobileBillingHistoryView: View {
     @EnvironmentObject private var appState: AppState
 
     private var strings: AppStrings {
@@ -4457,49 +7007,423 @@ private struct MobileQuestionUsageView: View {
 
     var body: some View {
         List {
-            Section {
-                if let quota = appState.questionQuota {
-                    VStack(alignment: .leading, spacing: 14) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(strings.monthlyQuestionQuota)
-                                .font(.headline)
-
-                            Spacer(minLength: 12)
-
-                            Text(strings.monthlyQuotaUsage(
-                                remaining: quota.remainingCount,
-                                limit: quota.monthlyLimit
-                            ))
-                            .font(.subheadline.weight(.semibold))
-                            .monospacedDigit()
-                            .foregroundStyle(quota.remainingCount == 0 ? Color.orange : Color.secondary)
+            if appState.isLoadingBilling && appState.billingInvoices.isEmpty {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text(strings.loading)
+                        .foregroundStyle(.secondary)
+                }
+            } else if appState.billingInvoices.isEmpty {
+                Text(strings.noBillingHistory)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(invoiceSections) { section in
+                    Section(section.title) {
+                        ForEach(section.invoices) { invoice in
+                            invoiceRow(invoice)
                         }
-
-                        ProgressView(
-                            value: Double(quota.usedCount),
-                            total: Double(max(quota.monthlyLimit, 1))
-                        )
-                        .tint(quota.remainingCount == 0 ? .orange : .accentColor)
-
-                        Text(strings.monthlyQuotaReset(quota.resetAt))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
                     }
-                    .padding(.vertical, 6)
-                } else {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                        Text(strings.loading)
-                            .foregroundStyle(.secondary)
+                }
+            }
+
+            if let message = appState.billingErrorMessage {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle(strings.billingHistory)
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await appState.refreshBilling()
+        }
+        .refreshable {
+            await appState.refreshBilling()
+        }
+    }
+
+    private func invoiceRow(_ invoice: BackendBillingInvoice) -> some View {
+        NavigationLink {
+            MobileBillingInvoiceDetailView(invoice: invoice)
+        } label: {
+            invoiceRowContent(invoice)
+        }
+    }
+
+    private func invoiceRowContent(_ invoice: BackendBillingInvoice) -> some View {
+        let display = BillingInvoiceDisplay(invoice: invoice, strings: strings)
+        return HStack(spacing: 12) {
+            Circle()
+                .fill(display.statusColor)
+                .frame(width: 8, height: 8)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(display.title)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Text(display.shortDate(invoice.purchaseAt ?? invoice.createdAt))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if invoice.requiresCustomerCenterResolution {
+                    Text(strings.cancelledPurchaseGuidance)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+
+            Spacer(minLength: 12)
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(display.amount)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .monospacedDigit()
+
+                Text(display.statusText)
+                    .font(.caption)
+                    .foregroundStyle(display.statusColor)
+            }
+        }
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
+    }
+
+    private var invoiceSections: [BillingInvoiceSection] {
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: appState.billingInvoices) { invoice in
+            let date = invoice.purchaseAt ?? invoice.createdAt
+            return calendar.date(from: calendar.dateComponents([.year, .month], from: date)) ?? date
+        }
+        return grouped
+            .map { month, invoices in
+                BillingInvoiceSection(
+                    month: month,
+                    invoices: invoices.sorted {
+                        ($0.purchaseAt ?? $0.createdAt) > ($1.purchaseAt ?? $1.createdAt)
+                    }
+                )
+            }
+            .sorted { $0.month > $1.month }
+    }
+
+}
+
+private struct MobileBillingInvoiceDetailView: View {
+    @EnvironmentObject private var appState: AppState
+    @StateObject private var billingStore = AppleBillingStore()
+    @State private var billingNotice: String?
+    @State private var isSubmittingRefund = false
+    @State private var isSubscriptionManagementPresented = false
+    @State private var isRefundRequestPresented = false
+    @State private var refundTransactionID: StoreKit.Transaction.ID = 0
+
+    let invoice: BackendBillingInvoice
+
+    private var strings: AppStrings { appState.strings }
+    private var display: BillingInvoiceDisplay { BillingInvoiceDisplay(invoice: invoice, strings: strings) }
+    private var offersPurchaseManagement: Bool {
+        invoice.requiresCustomerCenterResolution || invoice.isRefundable || invoice.isCancellable
+    }
+
+    var body: some View {
+        List {
+            Section {
+                LabeledContent(strings.membershipPlans, value: display.title)
+                LabeledContent(strings.billingStatus, value: display.statusText)
+                LabeledContent(strings.billingAmount, value: display.amount)
+                LabeledContent(strings.billingDate, value: display.fullDate(invoice.purchaseAt ?? invoice.createdAt))
+                if let expiresAt = invoice.expiresAt {
+                    LabeledContent(strings.billingExpiresAt, value: display.fullDate(expiresAt))
+                }
+            }
+
+            Section {
+                BillingReferenceRow(title: strings.billingInvoiceNumber, value: invoice.invoiceNumber.uuidString)
+                if let transactionID = invoice.transactionId {
+                    BillingReferenceRow(title: strings.billingTransactionID, value: transactionID)
+                }
+            }
+
+            if offersPurchaseManagement {
+                Section {
+                    if invoice.isCancellable {
+                        Button {
+                            openSubscriptionManagement()
+                        } label: {
+                            Label(strings.cancelSubscription, systemImage: "calendar.badge.minus")
+                        }
+                    }
+
+                    if invoice.isRefundable, invoice.paymentId != nil, invoice.transactionId != nil {
+                        Button {
+                            requestRefund()
+                        } label: {
+                            HStack {
+                                Label(strings.requestRefund, systemImage: "arrow.uturn.backward.circle")
+                                if isSubmittingRefund {
+                                    Spacer()
+                                    ProgressView()
+                                }
+                            }
+                        }
+                        .disabled(isSubmittingRefund)
+                    }
+
+                    if invoice.requiresCustomerCenterResolution {
+                        Button {
+                            restorePurchase()
+                        } label: {
+                            Label(strings.restorePurchases, systemImage: "arrow.clockwise")
+                        }
+                    }
+                } footer: {
+                    if invoice.requiresCustomerCenterResolution {
+                        Text(strings.cancelledPurchaseGuidance)
                     }
                 }
             }
         }
-        .navigationTitle(strings.usage)
+        .navigationTitle(strings.billingDetails)
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await appState.refreshQuestionQuota()
+        .manageSubscriptionsSheet(isPresented: $isSubscriptionManagementPresented)
+        .refundRequestSheet(
+            for: refundTransactionID,
+            isPresented: $isRefundRequestPresented,
+            onDismiss: handleRefundRequestResult
+        )
+        .onChange(of: isSubscriptionManagementPresented) { _, isPresented in
+            guard !isPresented else { return }
+            Task {
+                await appState.reconcileBillingSubscription()
+                await appState.refreshBilling()
+            }
         }
+        .alert(
+            strings.errorPopupTitle,
+            isPresented: Binding(
+                get: { billingNotice != nil },
+                set: { if !$0 { billingNotice = nil } }
+            )
+        ) {
+            Button(strings.close, role: .cancel) {}
+        } message: {
+            Text(billingNotice ?? "")
+        }
+    }
+
+    private func restorePurchase() {
+        Task {
+            guard let appAccountToken = appState.billingCatalog?.appAccountToken else {
+                billingNotice = strings.customerCenterUnavailable
+                return
+            }
+            do {
+                _ = try await billingStore.restore(
+                    appAccountToken: appAccountToken,
+                    synchronize: appState.syncAppleBillingTransaction
+                )
+                await appState.reconcileBillingSubscription()
+                await appState.refreshBilling()
+                billingNotice = strings.billingRestored
+            } catch {
+                billingNotice = billingRestoreMessage(for: error)
+            }
+        }
+    }
+
+    private func billingRestoreMessage(for error: Error) -> String {
+        if let billingError = error as? AppleBillingStoreError,
+           case .noRestorablePurchases = billingError {
+            return strings.noRestorablePurchases
+        }
+        return BackendErrorPresentationPolicy.presentation(
+            for: error,
+            fallback: strings.billingRestoreFailed,
+            language: appState.settings.appLanguage
+        ).message
+    }
+
+    private func openSubscriptionManagement() {
+        isSubscriptionManagementPresented = true
+    }
+
+    private func requestRefund() {
+        Task {
+            guard !isSubmittingRefund,
+                  let transactionID = invoice.transactionId,
+                  invoice.paymentId != nil,
+                  let appAccountToken = appState.billingCatalog?.appAccountToken else {
+                billingNotice = strings.refundRequestUnavailable
+                return
+            }
+            isSubmittingRefund = true
+            do {
+                refundTransactionID = try await billingStore.refundTransactionID(
+                    transactionID: transactionID,
+                    productID: invoice.productId,
+                    appAccountToken: appAccountToken
+                )
+                isRefundRequestPresented = true
+            } catch {
+                isSubmittingRefund = false
+                appState.logBillingEvent(
+                    "환불 대상 StoreKit 거래 확인 실패. invoiceID=\(invoice.id), "
+                        + "transactionID=\(transactionID), error=\(error.localizedDescription)",
+                    isError: true
+                )
+                billingNotice = strings.refundRequestUnavailable
+            }
+        }
+    }
+
+    private func handleRefundRequestResult(
+        _ result: Result<StoreKit.Transaction.RefundRequestStatus, StoreKit.Transaction.RefundRequestError>
+    ) {
+        isSubmittingRefund = false
+        switch result {
+        case .success(.success):
+            billingNotice = strings.refundSubmitted
+            guard let paymentID = invoice.paymentId else { return }
+            Task {
+                // Apple's accepted request is authoritative. The webhook can reconcile billing
+                // state if this best-effort local tracking request is unavailable.
+                _ = try? await appState.requestBillingRefund(paymentID: paymentID)
+            }
+        case .success(.userCancelled):
+            break
+        case .failure(.duplicateRequest):
+            billingNotice = strings.refundSubmitted
+        case .failure(let error):
+            appState.logBillingEvent(
+                "StoreKit 환불 요청 화면 실패. invoiceID=\(invoice.id), "
+                    + "transactionID=\(invoice.transactionId ?? "-") error=\(error.localizedDescription)",
+                isError: true
+            )
+            billingNotice = strings.refundRequestUnavailable
+        @unknown default:
+            appState.logBillingEvent(
+                "StoreKit 환불 요청 결과를 해석할 수 없습니다. invoiceID=\(invoice.id), "
+                    + "transactionID=\(invoice.transactionId ?? "-")",
+                isError: true
+            )
+            billingNotice = strings.refundRequestUnavailable
+        }
+    }
+}
+
+private struct BillingReferenceRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.footnote.monospaced())
+                .textSelection(.enabled)
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+private struct BillingInvoiceDisplay {
+    let invoice: BackendBillingInvoice
+    let strings: AppStrings
+
+    var title: String {
+        invoice.type == "REFUND" ? invoiceTypeText("REFUND") : strings.membershipTierName(invoice.tierCode)
+    }
+
+    var amount: String {
+        guard let raw = invoice.priceMilliunits, let currency = invoice.currency else { return "-" }
+        let sign: Decimal = invoice.type == "REFUND" ? -1 : 1
+        return (sign * Decimal(raw) / 1_000_000).formatted(.currency(code: currency))
+    }
+
+    var statusText: String {
+        statusText(invoice.requiresCustomerCenterResolution ? "CANCELLED" : invoice.status)
+    }
+
+    var statusColor: Color {
+        if invoice.requiresCustomerCenterResolution { return .secondary }
+        let status = invoice.status
+        if ["COMPLETED", "FULFILLED", "REFUNDED"].contains(status) { return .green }
+        if ["FAILED", "REFUND_DECLINED", "COMPENSATION_REQUIRED"].contains(status) { return .red }
+        if ["WAITING", "PENDING_PAYMENT", "FULFILLMENT_PENDING", "REFUND_PENDING"].contains(status) {
+            return .orange
+        }
+        return .secondary
+    }
+
+    func shortDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = strings.language.locale
+        formatter.setLocalizedDateFormatFromTemplate("MMM d, HH:mm")
+        return formatter.string(from: date)
+    }
+
+    func fullDate(_ date: Date) -> String {
+        date.formatted(
+            Date.FormatStyle(date: .long, time: .shortened)
+                .locale(strings.language.locale)
+        )
+    }
+
+    private func invoiceTypeText(_ type: String) -> String {
+        switch (strings.language, type) {
+        case (.korean, "REFUND"): return "환불"
+        case (.english, "REFUND"): return "Refund"
+        case (.japanese, "REFUND"): return "返金"
+        default: return type
+        }
+    }
+
+    private func statusText(_ status: String) -> String {
+        let korean = [
+            "WAITING": "처리 중", "COMPLETED": "완료",
+            "PENDING_PAYMENT": "결제 대기", "PAYMENT_VERIFIED": "결제 확인", "FULFILLMENT_PENDING": "적용 중",
+            "FULFILLED": "적용 완료", "CANCELLATION_REQUESTED": "취소 요청", "CANCELLED": "취소됨",
+            "REFUND_REQUESTED": "환불 요청", "REFUND_PENDING": "환불 심사 중", "REFUNDED": "환불 완료",
+            "REFUND_DECLINED": "환불 거절", "REFUND_REVERSED": "환불 취소", "COMPENSATION_REQUIRED": "환불 조치 필요",
+            "FAILED": "실패", "EXPIRED": "만료"
+        ]
+        let english = [
+            "WAITING": "Processing", "COMPLETED": "Completed",
+            "PENDING_PAYMENT": "Payment pending", "PAYMENT_VERIFIED": "Payment verified", "FULFILLMENT_PENDING": "Activating",
+            "FULFILLED": "Active", "CANCELLATION_REQUESTED": "Cancellation requested", "CANCELLED": "Cancelled",
+            "REFUND_REQUESTED": "Refund requested", "REFUND_PENDING": "Refund pending", "REFUNDED": "Refunded",
+            "REFUND_DECLINED": "Refund declined", "REFUND_REVERSED": "Refund reversed", "COMPENSATION_REQUIRED": "Refund action required",
+            "FAILED": "Failed", "EXPIRED": "Expired"
+        ]
+        let japanese = [
+            "WAITING": "処理中", "COMPLETED": "完了",
+            "PENDING_PAYMENT": "支払い待ち", "PAYMENT_VERIFIED": "支払い確認済み", "FULFILLMENT_PENDING": "適用中",
+            "FULFILLED": "有効", "CANCELLATION_REQUESTED": "キャンセル申請中", "CANCELLED": "キャンセル済み",
+            "REFUND_REQUESTED": "返金申請中", "REFUND_PENDING": "返金審査中", "REFUNDED": "返金済み",
+            "REFUND_DECLINED": "返金却下", "REFUND_REVERSED": "返金取消", "COMPENSATION_REQUIRED": "返金対応が必要",
+            "FAILED": "失敗", "EXPIRED": "期限切れ"
+        ]
+        switch strings.language {
+        case .korean: return korean[status] ?? status
+        case .english: return english[status] ?? status
+        case .japanese: return japanese[status] ?? status
+        }
+    }
+}
+
+private struct BillingInvoiceSection: Identifiable {
+    var month: Date
+    var invoices: [BackendBillingInvoice]
+
+    var id: Date { month }
+
+    var title: String {
+        month.formatted(.dateTime.year().month(.wide))
     }
 }
 
@@ -4509,7 +7433,6 @@ private struct MobileProfileEditorView: View {
     @State private var profileDisplayName = ""
     @State private var draftAvatarSymbolName = BuddyStudyAvatar.symbolName
     @State private var draftAvatarColorSeed = "avatar-color-sage"
-    @State private var allowPublicQuestionsAccess = true
     @State private var isShowingEmailSignIn = false
     @State private var isLoadingProfileDraft = false
     @State private var wasSignedInWhenOpened = false
@@ -4529,14 +7452,12 @@ private struct MobileProfileEditorView: View {
 
         let profile = appState.communityProfile
         let currentDisplayName = profile?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let currentPublicQuestions = profile?.pageAccess.publicQuestions ?? true
         let currentAvatar = ProfileAvatarOption.canonicalName(
             for: profile?.avatarSymbolName ?? appState.profileAvatarSymbolName
         )
         let currentColor = profile?.avatarColorSeed ?? appState.profileAvatarColorSeed
 
         return trimmedProfileDisplayName != currentDisplayName
-            || allowPublicQuestionsAccess != currentPublicQuestions
             || draftAvatarSymbolName != currentAvatar
             || draftAvatarColorSeed != currentColor
     }
@@ -4546,23 +7467,6 @@ private struct MobileProfileEditorView: View {
             && !appState.isUpdatingCommunityProfile
             && !trimmedProfileDisplayName.isEmpty
             && hasProfileChanges
-    }
-
-    private var profileAccountText: String {
-        guard let profile = appState.communityProfile else {
-            return ""
-        }
-
-        switch profile.provider.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
-        case "EMAIL":
-            let email = profile.email.trimmingCharacters(in: .whitespacesAndNewlines)
-            return email.isEmpty ? "Email" : email
-        case "GOOGLE":
-            return "Google"
-        default:
-            let provider = profile.provider.trimmingCharacters(in: .whitespacesAndNewlines)
-            return provider.isEmpty ? profile.displayName : provider.capitalized
-        }
     }
 
     var body: some View {
@@ -4630,46 +7534,12 @@ private struct MobileProfileEditorView: View {
                                 .padding(.horizontal, 12)
                                 .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
-                            if !profileAccountText.isEmpty {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "person.crop.circle.badge.checkmark")
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(strings.profileAccount)
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                        Text(profileAccountText)
-                                            .font(.subheadline.weight(.semibold))
-                                            .foregroundStyle(.primary)
-                                            .lineLimit(1)
-                                    }
-                                }
-                                .padding(.vertical, 9)
-                                .padding(.horizontal, 13)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                                .background(Color.secondary.opacity(0.06), in: Capsule())
-                            }
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                     }
                     .listRowBackground(Color.clear)
 
-                    Section {
-                        Toggle(strings.publicQuestionsPage, isOn: $allowPublicQuestionsAccess)
-                    } footer: {
-                        Text(strings.publicQuestionsPageHelp)
-                    }
-
-                    Section {
-                        Button(role: .destructive) {
-                            appState.signOutFromCommunity()
-                            dismiss()
-                        } label: {
-                            Text(strings.communityLogout)
-                        }
-                    }
                 } else {
                     Section {
                         VStack(alignment: .leading, spacing: 10) {
@@ -4677,54 +7547,61 @@ private struct MobileProfileEditorView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
 
+                            BuddySignInWithAppleButton()
+
                             Button {
                                 appState.signInToCommunity()
                             } label: {
-                                SignInButtonLabel(title: strings.signInWithGoogle, isPrimary: true)
+                                SignInButtonLabel(
+                                    title: strings.signInWithGoogle,
+                                    isPrimary: true,
+                                    provider: .google
+                                )
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(SignInPressButtonStyle())
 
                             Button {
                                 isShowingEmailSignIn = true
                             } label: {
                                 SignInButtonLabel(title: strings.signInWithEmail, isPrimary: false)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(SignInPressButtonStyle())
                         }
                         .padding(.vertical, 6)
                     }
                 }
             }
             .keyboardDoneToolbar(strings.done)
-            .navigationTitle(strings.profile)
+            .navigationTitle(
+                appState.isCommunitySessionActive ? strings.avatar : strings.communityLogin
+            )
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        guard appState.isCommunitySessionActive else {
-                            dismiss()
-                            return
+                if appState.isCommunitySessionActive {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button {
+                            Task {
+                                let didUpdate = await appState.updateCommunityProfile(
+                                    displayName: trimmedProfileDisplayName,
+                                    avatarSymbolName: draftAvatarSymbolName,
+                                    avatarColorSeed: draftAvatarColorSeed,
+                                    avatarMode: "PIXEL",
+                                    avatarConfig: nil
+                                )
+                                if didUpdate {
+                                    dismiss()
+                                }
+                            }
+                        } label: {
+                            if appState.isUpdatingCommunityProfile {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Text(strings.save)
+                            }
                         }
-
-                        Task {
-                            await appState.updateCommunityProfile(
-                                displayName: trimmedProfileDisplayName,
-                                avatarSymbolName: draftAvatarSymbolName,
-                                avatarColorSeed: draftAvatarColorSeed,
-                                avatarMode: "PIXEL",
-                                avatarConfig: nil
-                            )
-                            dismiss()
-                        }
-                    } label: {
-                        if appState.isUpdatingCommunityProfile {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Text(profileConfirmationTitle(strings: strings))
-                        }
+                        .disabled(!canSaveProfile)
                     }
-                    .disabled(appState.isCommunitySessionActive ? !canSaveProfile : appState.isUpdatingCommunityProfile)
                 }
             }
             .onAppear {
@@ -4732,7 +7609,7 @@ private struct MobileProfileEditorView: View {
                 appState.logMobileAuthView(
                     "mobile_profile_sheet_appear",
                     page: .profile,
-                    reason: "MobileProfileSettingsSheet",
+                    reason: "MobileProfilePage",
                     extra: ["hasProfile=\(appState.communityProfile != nil)"]
                 )
                 resetDraftProfile()
@@ -4761,7 +7638,6 @@ private struct MobileProfileEditorView: View {
                 }
 
                 profileDisplayName = profile.displayName
-                allowPublicQuestionsAccess = profile.pageAccess.publicQuestions
                 draftAvatarSymbolName = ProfileAvatarOption.canonicalName(for: profile.avatarSymbolName)
                 draftAvatarColorSeed = profile.avatarColorSeed
             }
@@ -4769,7 +7645,7 @@ private struct MobileProfileEditorView: View {
                 appState.logMobileAuthView(
                     "mobile_profile_session_change",
                     page: .profile,
-                    reason: "MobileProfileSettingsSheet",
+                    reason: "MobileProfilePage",
                     extra: ["isSignedIn=\(isSignedIn)"]
                 )
                 if isSignedIn, !wasSignedInWhenOpened {
@@ -4787,20 +7663,11 @@ private struct MobileProfileEditorView: View {
 
     private func resetDraftProfile() {
         profileDisplayName = appState.communityProfile?.displayName ?? ""
-        allowPublicQuestionsAccess = appState.communityProfile?.pageAccess.publicQuestions ?? true
         draftAvatarSymbolName = ProfileAvatarOption.canonicalName(
             for: appState.communityProfile?.avatarSymbolName ?? appState.profileAvatarSymbolName
         )
         let savedColor = appState.communityProfile?.avatarColorSeed ?? appState.profileAvatarColorSeed
         draftAvatarColorSeed = savedColor.isEmpty ? "avatar-color-sage" : savedColor
-    }
-
-    private func profileConfirmationTitle(strings: AppStrings) -> String {
-        guard appState.isCommunitySessionActive else {
-            return strings.done
-        }
-
-        return strings.save
     }
 
     private func avatarChoice(symbolName: String, colorSeed: String, isSelected: Bool) -> some View {
@@ -4955,7 +7822,7 @@ private struct MobileTermsSettingsView: View {
             Spacer(minLength: 8)
 
             Button(strings.details) {
-                legalWebRoute = MobileLegalWebRoute(url: term.url)
+                legalWebRoute = MobileLegalWebRoute(url: localizedURL(for: term.type))
             }
             .font(.subheadline.weight(.semibold))
             .buttonStyle(.borderless)
@@ -5016,6 +7883,17 @@ private struct MobileTermsSettingsView: View {
                 mutable: true,
                 agreed: false
             )
+        }
+    }
+
+    private func localizedURL(for type: BackendTermsType) -> URL {
+        switch type {
+        case .termsOfService:
+            AppLegalLinks.termsOfServiceURL(language: appState.settings.appLanguage)
+        case .privacyPolicy:
+            AppLegalLinks.privacyPolicyURL(language: appState.settings.appLanguage)
+        case .marketingNotification:
+            AppLegalLinks.marketingNotificationURL(language: appState.settings.appLanguage)
         }
     }
 
@@ -5629,16 +8507,57 @@ private extension Color {
     }
 }
 
+private enum SignInProvider {
+    case apple
+    case google
+}
+
+private struct SignInPressButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .signInPressEffect(isPressed: configuration.isPressed)
+    }
+}
+
+private struct SignInPressEffect: ViewModifier {
+    var isPressed: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(isPressed ? 0.98 : 1)
+            .opacity(isPressed ? 0.82 : 1)
+            .animation(.easeOut(duration: 0.12), value: isPressed)
+    }
+}
+
+private extension View {
+    func signInPressEffect(isPressed: Bool) -> some View {
+        modifier(SignInPressEffect(isPressed: isPressed))
+    }
+}
+
 private struct SignInButtonLabel: View {
     var title: String
     var isPrimary: Bool
+    var provider: SignInProvider? = nil
 
     var body: some View {
         let buttonShape = RoundedRectangle(cornerRadius: 24, style: .continuous)
 
-        Text(title)
-            .font(.body.weight(.semibold))
-            .lineLimit(1)
+        ZStack {
+            Text(title)
+                .font(.body.weight(.semibold))
+                .lineLimit(1)
+                .padding(.horizontal, provider == nil ? 0 : 34)
+
+            if let provider {
+                HStack {
+                    providerMark(provider)
+                        .frame(width: 24, height: 24)
+                    Spacer()
+                }
+            }
+        }
             .frame(maxWidth: .infinity)
             .frame(minHeight: 58)
             .padding(.horizontal, 18)
@@ -5653,7 +8572,135 @@ private struct SignInButtonLabel: View {
             .contentShape(buttonShape)
             .foregroundStyle(isPrimary ? Color(UIColor.systemBackground) : Color.primary)
     }
+
+    @ViewBuilder
+    private func providerMark(_ provider: SignInProvider) -> some View {
+        switch provider {
+        case .apple:
+            Image(systemName: "apple.logo")
+                .font(.system(size: 20, weight: .semibold))
+        case .google:
+            Text("G")
+                .font(.system(size: 19, weight: .bold, design: .rounded))
+        }
+    }
 }
+
+#if os(iOS)
+private struct BuddySignInWithAppleButton: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var authorizationCoordinator = AppleSignInAuthorizationCoordinator()
+    @State private var isAuthorizing = false
+
+    var body: some View {
+        Button {
+            guard !isAuthorizing else {
+                return
+            }
+            isAuthorizing = true
+            Task { @MainActor in
+                defer {
+                    isAuthorizing = false
+                }
+                do {
+                    let identityToken = try await authorizationCoordinator.requestIdentityToken()
+                    await appState.signInToCommunityWithApple(identityToken: identityToken)
+                } catch let authorizationError as ASAuthorizationError
+                    where authorizationError.code == .canceled {
+                    appState.appleSignInCancelled()
+                } catch {
+                    appState.appleSignInFailed(error)
+                }
+            }
+        } label: {
+            SignInButtonLabel(
+                title: appState.strings.signInWithApple,
+                isPrimary: true,
+                provider: .apple
+            )
+        }
+        .buttonStyle(SignInPressButtonStyle())
+        .disabled(isAuthorizing)
+        .accessibilityLabel(appState.strings.signInWithApple)
+    }
+}
+
+@MainActor
+private final class AppleSignInAuthorizationCoordinator: NSObject,
+    ASAuthorizationControllerDelegate,
+    ASAuthorizationControllerPresentationContextProviding {
+    private var continuation: CheckedContinuation<String, Error>?
+    private var authorizationController: ASAuthorizationController?
+
+    func requestIdentityToken() async throws -> String {
+        guard continuation == nil else {
+            throw AppleSignInAuthorizationError.requestAlreadyInProgress
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+            let request = ASAuthorizationAppleIDProvider().createRequest()
+            request.requestedScopes = [.email]
+            let controller = ASAuthorizationController(authorizationRequests: [request])
+            controller.delegate = self
+            controller.presentationContextProvider = self
+            authorizationController = controller
+            controller.performRequests()
+        }
+    }
+
+    func authorizationController(
+        controller: ASAuthorizationController,
+        didCompleteWithAuthorization authorization: ASAuthorization
+    ) {
+        guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+              let tokenData = credential.identityToken,
+              let identityToken = String(data: tokenData, encoding: .utf8) else {
+            finish(.failure(AppleSignInAuthorizationError.missingIdentityToken))
+            return
+        }
+
+        finish(.success(identityToken))
+    }
+
+    func authorizationController(
+        controller: ASAuthorizationController,
+        didCompleteWithError error: Error
+    ) {
+        finish(.failure(error))
+    }
+
+    func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow) ?? ASPresentationAnchor()
+    }
+
+    private func finish(_ result: Result<String, Error>) {
+        guard let continuation else {
+            return
+        }
+        self.continuation = nil
+        authorizationController = nil
+        continuation.resume(with: result)
+    }
+}
+
+private enum AppleSignInAuthorizationError: LocalizedError {
+    case requestAlreadyInProgress
+    case missingIdentityToken
+
+    var errorDescription: String? {
+        switch self {
+        case .requestAlreadyInProgress:
+            "An Apple sign-in request is already in progress."
+        case .missingIdentityToken:
+            "Apple did not return an identity token."
+        }
+    }
+}
+#endif
 
 private extension StudyCategory {
     func matchesHomeSearch(_ rawQuery: String, appLanguage: AppLanguage) -> Bool {
@@ -5702,10 +8749,709 @@ private struct MobileCommunityEmptyState: View {
     }
 }
 
+private struct MobileHomeStudyTopicItem {
+    var room: BackendStudyRoom
+}
+
+private enum MobileHomeStudyOutlineAction {
+    case openTopic(BackendStudyRoom)
+    case configureTopic(BackendStudyRoom)
+    case configureRoot
+    case openTree
+}
+
+private enum MobileStudyHierarchyPosition {
+    case root(continues: Bool)
+    case child(isLast: Bool)
+}
+
+private struct MobileHomeStudyOutlineSnapshot {
+    var root: BackendStudyRoom
+    var roomsByID: [Int: BackendStudyRoom]
+    var childrenByParent: [Int: [BackendStudyRoom]]
+    var parentByID: [Int: Int]
+    var searchQuery: String
+    var searchResults: [BackendStudyRoom]?
+
+    func room(id: Int) -> BackendStudyRoom? {
+        roomsByID[id]
+    }
+
+    func children(of roomID: Int) -> [BackendStudyRoom] {
+        childrenByParent[roomID] ?? []
+    }
+
+    func path(to roomID: Int) -> [BackendStudyRoom] {
+        StudyOutlinePolicy.ancestorPath(
+            rootID: root.id,
+            targetID: roomID,
+            parentByID: parentByID
+        ).compactMap { roomsByID[$0] }
+    }
+}
+
+private struct MobileHomeStudyOutlineRow: View {
+    private enum GroupPosition {
+        case standalone
+        case top
+        case middle
+        case bottom
+    }
+
+    var snapshot: MobileHomeStudyOutlineSnapshot
+    var strings: AppStrings
+    var openingStudyID: Int?
+    var pendingQuestionCount: (BackendStudyRoom) -> Int
+    var onAction: (MobileHomeStudyOutlineAction) -> Void
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+    @State private var currentBranchID: Int?
+    @State private var isExpanded = true
+    @State private var isChangingBranch = false
+    @State private var isBranchContentRevealed = true
+    @State private var branchTransitionDirection = 1.0
+    @State private var branchUnlockTask: Task<Void, Never>?
+
+    private var currentBranch: BackendStudyRoom {
+        currentBranchID.flatMap(snapshot.room(id:)) ?? snapshot.root
+    }
+
+    private var currentPath: [BackendStudyRoom] {
+        snapshot.path(to: currentBranch.id)
+    }
+
+    private var currentChildren: [BackendStudyRoom] {
+        snapshot.children(of: currentBranch.id)
+    }
+
+    private var visibleChildren: [BackendStudyRoom] {
+        Array(currentChildren.prefix(StudyOutlinePolicy.childPreviewLimit))
+    }
+
+    private var hasRootChildren: Bool {
+        !snapshot.children(of: snapshot.root.id).isEmpty
+    }
+
+    @ViewBuilder
+    var body: some View {
+        studyCard(
+            position: isExpanded && hasRootChildren ? .top : .standalone
+        ) {
+            studyNavigationRow(
+                room: snapshot.root,
+                isRoot: true,
+                isChildListExpanded: isExpanded,
+                onOpenChildren: {
+                    isExpanded.toggle()
+                }
+            )
+        }
+        .onChange(of: snapshot.searchQuery) {
+            branchUnlockTask?.cancel()
+            isBranchContentRevealed = true
+            isChangingBranch = false
+            currentBranchID = nil
+        }
+        .onDisappear {
+            branchUnlockTask?.cancel()
+        }
+
+        if isExpanded && hasRootChildren {
+            if let searchResults = snapshot.searchResults {
+                searchResultRows(searchResults)
+            } else {
+                branchRows
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var branchRows: some View {
+        studyCard(position: .middle) {
+            VStack(spacing: 0) {
+                Divider()
+                    .padding(.leading, 14)
+
+                branchPathHeader
+            }
+        }
+
+        ForEach(Array(visibleChildren.enumerated()), id: \.element.id) { index, room in
+            studyCard(
+                position: index == visibleChildren.indices.last ? .bottom : .middle
+            ) {
+                VStack(spacing: 0) {
+                    Divider()
+                        .padding(.leading, 50)
+
+                    studyNavigationRow(
+                        room: room,
+                        isRoot: false,
+                        isLastSibling: index == visibleChildren.indices.last,
+                        onOpenChildren: snapshot.children(of: room.id).isEmpty
+                            ? nil
+                            : {
+                                replaceBranch(with: room.id, direction: 1)
+                            }
+                    )
+                }
+            }
+            .opacity(isBranchContentRevealed ? 1 : 0.72)
+            .offset(
+                x: isBranchContentRevealed
+                    ? 0
+                    : branchTransitionDirection * 8
+            )
+            .animation(
+                .easeOut(duration: 0.18).delay(Double(index) * 0.025),
+                value: isBranchContentRevealed
+            )
+            .allowsHitTesting(!isChangingBranch)
+        }
+    }
+
+    @ViewBuilder
+    private func studyCard<Content: View>(
+        position: GroupPosition,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let topRadius: CGFloat = position == .standalone || position == .top ? 18 : 0
+        let bottomRadius: CGFloat = position == .standalone || position == .bottom ? 18 : 0
+        let shape = UnevenRoundedRectangle(
+            topLeadingRadius: topRadius,
+            bottomLeadingRadius: bottomRadius,
+            bottomTrailingRadius: bottomRadius,
+            topTrailingRadius: topRadius,
+            style: .continuous
+        )
+
+        content()
+            .background(
+                Color(.secondarySystemBackground),
+                in: shape
+            )
+            .clipShape(shape)
+            .overlay {
+                shape
+                    .stroke(Color.primary.opacity(0.04), lineWidth: 1)
+            }
+            .contentShape(shape)
+            .listRowInsets(
+                EdgeInsets(
+                    top: position == .standalone || position == .top ? 6 : 0,
+                    leading: 0,
+                    bottom: position == .standalone || position == .bottom ? 6 : 0,
+                    trailing: 0
+                )
+            )
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+    }
+
+    private var branchPathHeader: some View {
+        HStack(spacing: 10) {
+            MobileStudyHierarchyContinuation()
+                .frame(width: 30)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(currentPath.map(\.topic).joined(separator: "  ›  "))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+
+                Text(strings.childTopics)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                "\(currentPath.map(\.topic).joined(separator: ", ")), \(strings.childTopics)"
+            )
+
+            if currentBranch.id != snapshot.root.id {
+                Button {
+                    let parentID = snapshot.parentByID[currentBranch.id]
+                        .flatMap(snapshot.room(id:))?.id
+                    replaceBranch(with: parentID, direction: -1)
+                } label: {
+                    Label(strings.moveToParentTopic, systemImage: "chevron.left")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(Color(.tertiarySystemFill), in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .frame(minHeight: 48)
+        .opacity(isBranchContentRevealed ? 1 : 0.78)
+        .offset(
+            x: isBranchContentRevealed
+                ? 0
+                : branchTransitionDirection * 6
+        )
+        .animation(
+            .easeOut(duration: 0.16),
+            value: isBranchContentRevealed
+        )
+    }
+
+    @ViewBuilder
+    private func searchResultRows(_ results: [BackendStudyRoom]) -> some View {
+        let visibleResults = Array(results.prefix(StudyOutlinePolicy.childPreviewLimit))
+
+        ForEach(Array(visibleResults.enumerated()), id: \.element.id) { index, room in
+            studyCard(
+                position: index == visibleResults.indices.last ? .bottom : .middle
+            ) {
+                VStack(spacing: 0) {
+                    Divider()
+                        .padding(.leading, 50)
+
+                    Button {
+                        onAction(.openTopic(room))
+                    } label: {
+                        studyDestinationContent(
+                            room: room,
+                            isRoot: false,
+                            childCount: snapshot.children(of: room.id).count,
+                            showsDisclosure: true,
+                            hierarchyPosition: .child(
+                                isLast: index == visibleResults.indices.last
+                            ),
+                            ancestorPath: snapshot.path(to: room.id)
+                                .dropLast()
+                                .map(\.topic)
+                                .joined(separator: "  ›  ")
+                        )
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isOpening(room))
+                    .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .contextMenu {
+                        topicActions(for: room)
+                    }
+                    .accessibilityAction(named: strings.editStudyCategory) {
+                        onAction(.configureTopic(room))
+                    }
+                    .accessibilityAction(named: strings.viewFullStudyTree) {
+                        onAction(.openTree)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func topicActions(for room: BackendStudyRoom) -> some View {
+        Button {
+            onAction(.configureTopic(room))
+        } label: {
+            Label(strings.editStudyCategory, systemImage: "pencil")
+        }
+
+        Button {
+            onAction(.openTree)
+        } label: {
+            Label(
+                strings.viewFullStudyTree,
+                systemImage: "point.3.connected.trianglepath.dotted"
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var rootActions: some View {
+        Button {
+            onAction(.configureRoot)
+        } label: {
+            Label(strings.editStudyCategory, systemImage: "pencil")
+        }
+
+        Button {
+            onAction(.openTree)
+        } label: {
+            Label(
+                strings.viewFullStudyTree,
+                systemImage: "point.3.connected.trianglepath.dotted"
+            )
+        }
+    }
+
+    private func studyNavigationRow(
+        room: BackendStudyRoom,
+        isRoot: Bool,
+        isLastSibling: Bool = false,
+        isChildListExpanded: Bool? = nil,
+        onOpenChildren: (() -> Void)?
+    ) -> some View {
+        let childCount = snapshot.children(of: room.id).count
+
+        return HStack(spacing: 8) {
+            studyDestinationButton(
+                room: room,
+                isRoot: isRoot,
+                childCount: childCount,
+                hierarchyPosition: isRoot
+                    ? .root(continues: isChildListExpanded == true && childCount > 0)
+                    : .child(isLast: isLastSibling)
+            )
+
+            if childCount > 0, let onOpenChildren {
+                let childNavigationButton = Button(action: onOpenChildren) {
+                    childTopicActionLabel(
+                        childCount: childCount,
+                        isExpanded: isChildListExpanded
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 70)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+                .layoutPriority(1)
+
+                if isRoot {
+                    childNavigationButton
+                        .contextMenu {
+                            rootActions
+                        }
+                } else {
+                    childNavigationButton
+                        .contextMenu {
+                            topicActions(for: room)
+                        }
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(minHeight: isRoot ? 70 : 64)
+    }
+
+    @ViewBuilder
+    private func studyDestinationButton(
+        room: BackendStudyRoom,
+        isRoot: Bool,
+        childCount: Int,
+        hierarchyPosition: MobileStudyHierarchyPosition
+    ) -> some View {
+        let button = Button {
+            onAction(.openTopic(room))
+        } label: {
+            studyDestinationContent(
+                room: room,
+                isRoot: isRoot,
+                childCount: childCount,
+                showsDisclosure: childCount == 0,
+                hierarchyPosition: hierarchyPosition
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isOpening(room))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+
+        if isRoot {
+            button
+                .contentShape(
+                    .contextMenuPreview,
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
+                .contextMenu {
+                    rootActions
+                }
+                .accessibilityAction(named: strings.editStudyCategory) {
+                    onAction(.configureRoot)
+                }
+                .accessibilityAction(named: strings.viewFullStudyTree) {
+                    onAction(.openTree)
+                }
+        } else {
+            button
+                .contentShape(
+                    .contextMenuPreview,
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
+                .contextMenu {
+                    topicActions(for: room)
+                }
+                .accessibilityAction(named: strings.editStudyCategory) {
+                    onAction(.configureTopic(room))
+                }
+                .accessibilityAction(named: strings.viewFullStudyTree) {
+                    onAction(.openTree)
+                }
+        }
+    }
+
+    private func studyDestinationContent(
+        room: BackendStudyRoom,
+        isRoot: Bool,
+        childCount: Int,
+        showsDisclosure: Bool,
+        hierarchyPosition: MobileStudyHierarchyPosition,
+        ancestorPath: String? = nil
+    ) -> some View {
+        let pendingCount = pendingQuestionCount(room)
+        let levelText = StudyTreeNodeStylePolicy.levelText(room.difficultyLevel)
+        let isOpening = isOpening(room)
+
+        return HStack(spacing: 12) {
+            MobileStudyHierarchyMarker(
+                position: hierarchyPosition,
+                isActive: room.activeForQuestions,
+                strings: strings
+            )
+            .frame(width: 30)
+
+            VStack(alignment: .leading, spacing: 3) {
+                if let ancestorPath, !ancestorPath.isEmpty {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.turn.down.right")
+                            .font(.caption2.weight(.semibold))
+
+                        Text(ancestorPath)
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                    }
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                }
+
+                Text(room.topic)
+                    .font(isRoot ? .body.weight(.semibold) : .subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 5) {
+                    if !isRoot {
+                        Text(levelText)
+                            .font(.caption.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(
+                                room.activeForQuestions ? Color.green : Color.secondary
+                            )
+
+                        Text("·")
+                            .foregroundStyle(.tertiary)
+                    }
+
+                    HStack(spacing: 3) {
+                        Text(strings.studyAction)
+
+                        Image(systemName: "arrow.up.right")
+                    }
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if pendingCount > 0 {
+                Text("\(pendingCount)")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(minWidth: 22, minHeight: 22)
+                    .background(Color.red, in: Circle())
+                    .accessibilityLabel(strings.pendingQuestionCount(pendingCount))
+            }
+
+            Group {
+                if isOpening {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.secondary)
+                } else if showsDisclosure {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                } else {
+                    Color.clear
+                }
+            }
+            .frame(width: 16, height: 16)
+            .accessibilityHidden(true)
+        }
+        .frame(minHeight: isRoot ? 70 : 64)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(room.topic)
+        .accessibilityValue(
+            isOpening
+                ? strings.loading
+                : childCount > 0
+                    ? "\(isRoot ? "" : "\(levelText), ")\(strings.childTopicCount(childCount))"
+                    : "\(isRoot ? "" : "\(levelText), ")\(strings.openStudyPage)"
+        )
+    }
+
+    private func replaceBranch(with roomID: Int?, direction: Double) {
+        guard !isChangingBranch else {
+            return
+        }
+
+        branchUnlockTask?.cancel()
+        isChangingBranch = true
+
+        if accessibilityReduceMotion {
+            currentBranchID = roomID
+            isBranchContentRevealed = true
+            isChangingBranch = false
+            return
+        }
+
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            branchTransitionDirection = direction
+            isBranchContentRevealed = false
+            currentBranchID = roomID
+        }
+
+        branchUnlockTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(16))
+            guard !Task.isCancelled else {
+                return
+            }
+
+            isBranchContentRevealed = true
+            try? await Task.sleep(for: .milliseconds(240))
+            guard !Task.isCancelled else {
+                return
+            }
+
+            isChangingBranch = false
+        }
+    }
+
+    private func isOpening(_ room: BackendStudyRoom) -> Bool {
+        openingStudyID == room.id
+    }
+
+    private func childTopicActionLabel(
+        childCount: Int,
+        isExpanded: Bool?
+    ) -> some View {
+        HStack(spacing: 4) {
+            Text(strings.childTopicAction(childCount))
+                .lineLimit(1)
+
+            Image(systemName: isExpanded == true ? "chevron.up" : "chevron.down")
+        }
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color(.tertiarySystemFill), in: Capsule())
+        .accessibilityLabel(
+            isExpanded.map {
+                $0 ? strings.collapseStudyTopics : strings.expandStudyTopics
+            } ?? strings.childTopicCount(childCount)
+        )
+    }
+}
+
+private struct MobileStudyHierarchyContinuation: View {
+    var body: some View {
+        GeometryReader { proxy in
+            Path { path in
+                path.move(to: CGPoint(x: 8, y: 0))
+                path.addLine(to: CGPoint(x: 8, y: proxy.size.height))
+            }
+            .stroke(
+                Color.secondary.opacity(0.28),
+                style: StrokeStyle(lineWidth: 1.5, lineCap: .round)
+            )
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct MobileStudyHierarchyMarker: View {
+    var position: MobileStudyHierarchyPosition
+    var isActive: Bool
+    var strings: AppStrings
+
+    var body: some View {
+        GeometryReader { proxy in
+            let centerY = proxy.size.height / 2
+            let trunkX: CGFloat = 8
+            let childX: CGFloat = 24
+            let lineColor = Color.secondary.opacity(0.28)
+
+            ZStack(alignment: .topLeading) {
+                Path { path in
+                    switch position {
+                    case let .root(continues):
+                        if continues {
+                            path.move(to: CGPoint(x: trunkX, y: centerY))
+                            path.addLine(to: CGPoint(x: trunkX, y: proxy.size.height))
+                        }
+                    case let .child(isLast):
+                        path.move(to: CGPoint(x: trunkX, y: 0))
+                        path.addLine(
+                            to: CGPoint(
+                                x: trunkX,
+                                y: isLast ? centerY : proxy.size.height
+                            )
+                        )
+                        path.move(to: CGPoint(x: trunkX, y: centerY))
+                        path.addLine(to: CGPoint(x: childX, y: centerY))
+                    }
+                }
+                .stroke(
+                    lineColor,
+                    style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
+                )
+
+                Circle()
+                    .fill(
+                        isActive
+                            ? Color.green
+                            : Color.secondary.opacity(0.5)
+                    )
+                    .frame(
+                        width: isRoot ? 12 : 9,
+                        height: isRoot ? 12 : 9
+                    )
+                    .overlay {
+                        Circle()
+                            .stroke(
+                                isActive
+                                    ? Color.green.opacity(0.18)
+                                    : Color.secondary.opacity(0.12),
+                                lineWidth: isRoot ? 5 : 3
+                            )
+                    }
+                    .position(
+                        x: isRoot ? trunkX : childX,
+                        y: centerY
+                    )
+            }
+        }
+        .accessibilityLabel(isActive ? strings.questionTopicActive : strings.questionTopicInactive)
+    }
+
+    private var isRoot: Bool {
+        if case .root = position {
+            return true
+        }
+        return false
+    }
+}
+
 private struct MobileHomeCategoryRow: View {
     var category: StudyCategory
     var hasPendingQuestion: Bool
     var strings: AppStrings
+    var showsDisclosureIndicator = true
 
     var body: some View {
         HStack(spacing: 14) {
@@ -5714,11 +9460,6 @@ private struct MobileHomeCategoryRow: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                     .font(.body.weight(.semibold))
-
-                Text(category.difficulty.displayName(language: strings.language))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -5734,9 +9475,11 @@ private struct MobileHomeCategoryRow: View {
                 .accessibilityLabel(strings.pendingQuestionLimitTitle)
             }
 
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
+            if showsDisclosureIndicator {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
         }
         .padding(14)
         .frame(minHeight: 70)
@@ -5750,204 +9493,195 @@ private struct MobileHomeCategoryRow: View {
 
 }
 
-private struct StudyCategoryEditorSheet: View {
-    var category: StudyCategory?
-    var strings: AppStrings
-    var onDelete: (() -> Void)?
-    var onSave: (String, Difficulty, String, String) -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var title: String
-    @State private var difficultyLevel: Double
-    @State private var customPrompt: String
-    @State private var showsDeleteConfirmation = false
-
-    init(
-        category: StudyCategory?,
-        strings: AppStrings,
-        onDelete: (() -> Void)? = nil,
-        onSave: @escaping (String, Difficulty, String, String) -> Void
-    ) {
-        self.category = category
-        self.strings = strings
-        self.onDelete = onDelete
-        self.onSave = onSave
-        _title = State(initialValue: category?.title ?? "")
-        _difficultyLevel = State(initialValue: Double((category?.difficulty ?? .beginner).level))
-        _customPrompt = State(initialValue: category?.customPrompt ?? StudySettings.defaultCustomPrompt)
-    }
-
-    private var canSave: Bool {
-        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section(strings.studySettings) {
-                    TextField(strings.studyTopic, text: $title)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text(strings.difficulty)
-                            Spacer()
-                            Text(Difficulty(level: resolvedDifficultyLevel).displayName(language: strings.language))
-                                .fontWeight(.semibold)
-                                .monospacedDigit()
-                        }
-
-                        Slider(value: $difficultyLevel, in: 1...10, step: 1)
-
-                        HStack {
-                            Text("1")
-                            Spacer()
-                            Text("10")
-                        }
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    }
-                }
-
-                Section(strings.relatedPrompt) {
-                    Menu {
-                        ForEach(RecommendedPrompt.allCases) { prompt in
-                            Button(prompt.title(language: strings.language)) {
-                                customPrompt = prompt.text(language: strings.language)
-                            }
-                        }
-                    } label: {
-                        Text(strings.recommendedPrompt)
-                    }
-
-                    TextEditor(text: $customPrompt)
-                        .frame(minHeight: 130)
-                }
-
-                if onDelete != nil {
-                    Section {
-                        Button(role: .destructive) {
-                            showsDeleteConfirmation = true
-                        } label: {
-                            Text(strings.deleteStudy)
-                        }
-                    }
-                }
-            }
-            .keyboardDoneToolbar(strings.done)
-            .navigationTitle(category == nil ? strings.newStudyCategory : strings.editStudyCategory)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(strings.cancel) {
-                        dismiss()
-                    }
-                }
-
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(strings.save) {
-                        onSave(title, Difficulty(level: resolvedDifficultyLevel), customPrompt, category?.sanitizedOpenAIModel ?? StudySettings.defaultOpenAIModel)
-                        dismiss()
-                    }
-                    .disabled(!canSave)
-                }
-            }
-            .confirmationDialog(strings.deleteStudy, isPresented: $showsDeleteConfirmation) {
-                Button(strings.deleteStudy, role: .destructive) {
-                    onDelete?()
-                    dismiss()
-                }
-                Button(strings.cancel, role: .cancel) {}
-            }
-        }
-    }
-
-    private var resolvedDifficultyLevel: Int {
-        min(max(Int(difficultyLevel.rounded()), 1), 10)
-    }
-}
-
-private struct MobileFeedbackPromptRow: View {
+private struct MobileNativeAdvertisementRow: View {
+    var advertisement: CommunityNativeAdvertisement
     var strings: AppStrings
 
     var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "text.bubble")
-                .font(.title3.weight(.medium))
-                .foregroundStyle(.tint)
-                .frame(width: 34, height: 34)
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .top, spacing: 12) {
+                advertisementImage
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(strings.feedbackPromptTitle)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                Text(strings.feedbackPromptBody)
-                    .font(.subheadline)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 7) {
+                        Text(providerName)
+                            .fontWeight(.semibold)
+                        Text(advertisement.disclosureLabel)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.12), in: Capsule())
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                    Text(advertisement.title)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+
+                    if let body = advertisement.body,
+                       !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(body)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+                    }
+                }
+            }
+
+            if let disclosure = affiliateDisclosure {
+                Text(disclosure)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-
-            Spacer(minLength: 8)
-
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private var advertisementImage: some View {
+        if let value = advertisement.imageURL,
+           let url = URL(string: value) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                case .empty:
+                    ProgressView().controlSize(.small)
+                case .failure:
+                    advertisementImagePlaceholder
+                @unknown default:
+                    advertisementImagePlaceholder
+                }
+            }
+            .frame(width: 92, height: 92)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        } else {
+            advertisementImagePlaceholder
+                .frame(width: 92, height: 92)
+        }
+    }
+
+    private var advertisementImagePlaceholder: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color(.secondarySystemBackground))
+            .overlay {
+                Image(systemName: "cart")
+                    .font(.title3)
+                    .foregroundStyle(.tertiary)
+            }
+    }
+
+    private var affiliateDisclosure: String? {
+        if let value = advertisement.affiliateDisclosure?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !value.isEmpty {
+            return value
+        }
+        return isCoupangAdvertisement ? strings.advertisementAffiliateDisclosure : nil
+    }
+
+    private var providerName: String {
+        if let value = advertisement.providerName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !value.isEmpty {
+            return value
+        }
+        return isCoupangAdvertisement ? strings.advertisementProviderCoupang : "BuddyStudy"
+    }
+
+    private var isCoupangAdvertisement: Bool {
+        guard let url = URL(string: advertisement.deepLink),
+              url.scheme?.caseInsensitiveCompare("https") == .orderedSame else {
+            return false
+        }
+        return ["coupang.com", "www.coupang.com", "link.coupang.com"]
+            .contains(url.host?.lowercased() ?? "")
     }
 }
 
-private enum MobileFeedbackCategory: String, CaseIterable, Identifiable {
-    case general = "GENERAL"
-    case bug = "BUG"
-    case feature = "FEATURE"
+private struct MobileNativeAdvertisementImpressionReporter: View {
+    var onImpression: @MainActor () async -> Void
 
-    var id: String { rawValue }
+    @State private var pendingReport: Task<Void, Never>?
+    @State private var hasReported = false
 
-    func title(strings: AppStrings) -> String {
-        switch self {
-        case .general:
-            return strings.feedbackCategoryGeneral
-        case .bug:
-            return strings.feedbackCategoryBug
-        case .feature:
-            return strings.feedbackCategoryFeature
+    var body: some View {
+        GeometryReader { proxy in
+            let frame = proxy.frame(in: .global)
+            Color.clear
+                .onAppear {
+                    updateVisibility(frame)
+                }
+                .onChange(of: frame) { _, newFrame in
+                    updateVisibility(newFrame)
+                }
+                .onDisappear {
+                    pendingReport?.cancel()
+                    pendingReport = nil
+                }
         }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    @MainActor
+    private func updateVisibility(_ frame: CGRect) {
+        guard !hasReported else { return }
+        guard visibleRatio(frame) >= 0.5 else {
+            pendingReport?.cancel()
+            pendingReport = nil
+            return
+        }
+        guard pendingReport == nil else { return }
+        pendingReport = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                hasReported = true
+                pendingReport = nil
+                await onImpression()
+            } catch {
+                pendingReport = nil
+            }
+        }
+    }
+
+    private func visibleRatio(_ frame: CGRect) -> CGFloat {
+        guard frame.width > 0, frame.height > 0 else { return 0 }
+        let visibleFrame = frame.intersection(UIScreen.main.bounds)
+        guard !visibleFrame.isNull, !visibleFrame.isEmpty else { return 0 }
+        return (visibleFrame.width * visibleFrame.height) / (frame.width * frame.height)
     }
 }
 
 private struct MobileFeedbackView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
-    @State private var category: MobileFeedbackCategory = .general
-    @State private var message = ""
+    @State private var content = ""
     @State private var isSubmitting = false
 
     private var strings: AppStrings { appState.strings }
-    private var normalizedMessage: String {
-        message.trimmingCharacters(in: .whitespacesAndNewlines)
+    private var normalizedContent: String {
+        content.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var body: some View {
         Form {
-            Section(strings.feedbackCategory) {
-                Picker(strings.feedbackCategory, selection: $category) {
-                    ForEach(MobileFeedbackCategory.allCases) { category in
-                        Text(category.title(strings: strings)).tag(category)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-
             Section(strings.feedbackMessage) {
                 ZStack(alignment: .topLeading) {
-                    if normalizedMessage.isEmpty {
+                    if normalizedContent.isEmpty {
                         Text(strings.feedbackMessagePlaceholder)
                             .foregroundStyle(.tertiary)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 8)
                             .allowsHitTesting(false)
                     }
-                    TextEditor(text: $message)
+                    TextEditor(text: $content)
                         .frame(minHeight: 180)
                 }
             }
@@ -5967,22 +9701,19 @@ private struct MobileFeedbackView: View {
                         Text(strings.feedbackSubmit)
                     }
                 }
-                .disabled(isSubmitting || normalizedMessage.count < 2)
+                .disabled(isSubmitting || normalizedContent.count < 2)
             }
         }
     }
 
     private func submit() {
-        let submittedMessage = normalizedMessage
-        guard submittedMessage.count >= 2 else {
+        let submittedContent = normalizedContent
+        guard submittedContent.count >= 2 else {
             return
         }
         isSubmitting = true
         Task {
-            let submitted = await appState.submitAppFeedback(
-                category: category.rawValue,
-                message: submittedMessage
-            )
+            let submitted = await appState.submitAppFeedback(content: submittedContent)
             isSubmitting = false
             if submitted {
                 dismiss()
@@ -5993,37 +9724,70 @@ private struct MobileFeedbackView: View {
 
 private struct MobileCommunityQuestionRow: View {
     var question: CommunityQuestion
+    var strings: AppStrings
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             CommunityQuestionTopMeta(question: question)
 
-            Text(question.question)
+            Text(MarkdownContent.plainText(question.question))
                 .font(.body.weight(.medium))
                 .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(2)
+                .truncationMode(.tail)
 
-            CommunityQuestionStatsMeta(question: question)
+            CommunityQuestionStatsMeta(question: question, strings: strings)
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+enum CommunityQuestionDetailContentSource: Equatable {
+    case community
+    case record(isPublic: Bool)
+
+    var showsCommunityInteractions: Bool {
+        switch self {
+        case .community:
+            true
+        case let .record(isPublic):
+            isPublic
+        }
     }
 }
 
 struct CommunityQuestionDetailView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
     var question: CommunityQuestion
+    var contentSource: CommunityQuestionDetailContentSource
     @State private var displayQuestion: CommunityQuestion
     @State private var comments: [CommunityQuestionComment] = []
     @State private var commentsTotalCount = 0
-    @State private var isLoadingComments = false
+    @State private var hasLoadedComments = false
     @State private var commentDraft = ""
     @State private var isSendingComment = false
     @State private var deletingCommentIDs: Set<String> = []
+    @State private var isShowingOriginal = false
+    @State private var isShowingDeleteConfirmation = false
+    @State private var isShowingReportConfirmation = false
+    @State private var userToBlock: CommunityUserProfile?
+    @State private var originalAvailable: Bool
     @FocusState private var isCommentInputFocused: Bool
 
-    init(question: CommunityQuestion) {
+    init(
+        question: CommunityQuestion,
+        contentSource: CommunityQuestionDetailContentSource = .community
+    ) {
         self.question = question
+        self.contentSource = contentSource
         _displayQuestion = State(initialValue: question)
+        _commentsTotalCount = State(initialValue: question.commentCount)
+        _originalAvailable = State(
+            initialValue: question.localization?.containsTranslation == true ||
+                question.localization?.question.originalAvailable == true
+        )
     }
 
     private var strings: AppStrings {
@@ -6031,7 +9795,7 @@ struct CommunityQuestionDetailView: View {
     }
 
     private var canWriteCommunityReaction: Bool {
-        appState.isCommunitySessionActive
+        contentSource.showsCommunityInteractions && appState.isCommunitySessionActive
     }
 
     var body: some View {
@@ -6039,17 +9803,19 @@ struct CommunityQuestionDetailView: View {
             VStack(alignment: .leading, spacing: 16) {
                 communityQuestionMeta
 
+                localizationControl
+
                 CommunityMessageBubble(role: .question) {
-                    Text(displayQuestion.question)
+                    MarkdownMessageText(markdown: displayQuestion.question)
                         .font(.body)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
+                        .tint(.accentColor)
                         .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 if let answer = displayQuestion.answer?.trimmingCharacters(in: .whitespacesAndNewlines),
                    !answer.isEmpty {
-                    CommunityAnswerMessage(answer: answer, author: displayQuestion.author)
+                    CommunityAnswerMessage(answer: answer)
                 }
 
                 if let gradingResult = displayQuestion.gradingResult {
@@ -6062,21 +9828,23 @@ struct CommunityQuestionDetailView: View {
                                     .font(.headline)
                             }
 
-                            Text(gradingResult.feedback)
+                            MarkdownMessageText(markdown: gradingResult.feedback)
                                 .font(.body)
 
-                            Text(gradingResult.explanation)
+                            MarkdownMessageText(markdown: gradingResult.explanation)
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
                     }
                 }
 
-                communityActions
+                if contentSource.showsCommunityInteractions {
+                    communityActions
 
-                Divider()
+                    Divider()
 
-                commentsSection
+                    commentsSection
+                }
             }
             .padding(16)
         }
@@ -6084,6 +9852,50 @@ struct CommunityQuestionDetailView: View {
         .navigationTitle(strings.communityQuestion)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if contentSource == .community && appState.isCommunitySessionActive {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        let policy = CommunityQuestionActionPolicy(
+                            isSignedIn: appState.isCommunitySessionActive,
+                            isOwner: displayQuestion.author.map {
+                                appState.isCurrentCommunityUser(id: $0.id)
+                            } ?? false
+                        )
+
+                        if policy.canManage {
+                            Button {
+                                makeQuestionPrivate()
+                            } label: {
+                                Label(strings.makeQuestionPrivate, systemImage: "lock.fill")
+                            }
+
+                            Button(role: .destructive) {
+                                isShowingDeleteConfirmation = true
+                            } label: {
+                                Label(strings.deleteQuestion, systemImage: "trash")
+                            }
+                        } else if policy.canReport {
+                            if let author = displayQuestion.author, policy.canBlock {
+                                Button(role: .destructive) {
+                                    userToBlock = author
+                                } label: {
+                                    Label(strings.blockUser, systemImage: "person.crop.circle.badge.xmark")
+                                }
+                            }
+
+                            Button(role: .destructive) {
+                                isShowingReportConfirmation = true
+                            } label: {
+                                Label(strings.reportQuestion, systemImage: "exclamationmark.bubble")
+                            }
+                        }
+                    } label: {
+                        MobileToolbarIconButtonLabel(systemName: "ellipsis")
+                    }
+                    .accessibilityLabel(strings.more)
+                }
+            }
+
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
                 Button(strings.done) {
@@ -6091,9 +9903,56 @@ struct CommunityQuestionDetailView: View {
                 }
             }
         }
+        .confirmationDialog(
+            strings.deleteQuestionConfirmation,
+            isPresented: $isShowingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(strings.deleteQuestion, role: .destructive) {
+                deleteQuestion()
+            }
+            Button(strings.cancel, role: .cancel) {}
+        }
+        .confirmationDialog(
+            strings.reportQuestionConfirmation,
+            isPresented: $isShowingReportConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(strings.reportQuestion, role: .destructive) {
+                Task {
+                    await appState.reportCommunityQuestion(
+                        displayQuestion,
+                        reason: strings.reportReasonInappropriate
+                    )
+                }
+            }
+            Button(strings.cancel, role: .cancel) {}
+        }
+        .alert(
+            strings.blockUserTitle,
+            isPresented: Binding(
+                get: { userToBlock != nil },
+                set: { if !$0 { userToBlock = nil } }
+            ),
+            presenting: userToBlock
+        ) { user in
+            Button(strings.cancel, role: .cancel) {
+                userToBlock = nil
+            }
+            Button(strings.blockUser, role: .destructive) {
+                userToBlock = nil
+                blockUser(user)
+            }
+        } message: { user in
+            Text(strings.blockUserMessage(user.displayName))
+        }
         .task(id: displayQuestion.id) {
-            await loadQuestionDetail()
-            await loadComments()
+            if contentSource.showsCommunityInteractions {
+                applyCachedComments()
+            }
+            async let questionLoad: Void = loadQuestionDetail()
+            async let commentsLoad: Void = loadCommentsIfAvailable()
+            _ = await (questionLoad, commentsLoad)
         }
     }
 
@@ -6120,7 +9979,14 @@ struct CommunityQuestionDetailView: View {
                     Text(displayQuestion.topic.isEmpty ? "Swift" : displayQuestion.topic)
                         .lineLimit(1)
 
-                    Text("Lv.\(displayQuestion.difficultyLevel)")
+                    CommunityQuestionDifficultyScale(
+                        difficulty: displayQuestion.difficultyLevel,
+                        dotSize: 4,
+                        spacing: 3
+                    )
+
+                    Text("\(min(max(displayQuestion.difficultyLevel, 1), 10))")
+                        .monospacedDigit()
                         .fixedSize(horizontal: true, vertical: false)
 
                     if let answeredAt = displayQuestion.answeredAt {
@@ -6137,6 +10003,29 @@ struct CommunityQuestionDetailView: View {
                 Spacer(minLength: 0)
             }
         }
+    }
+
+    private func makeQuestionPrivate() {
+        Task {
+            guard let record = await recordForQuestionAction() else { return }
+            appState.updateStudyRecordPublicity(record, isPublic: false)
+            dismiss()
+        }
+    }
+
+    private func deleteQuestion() {
+        Task {
+            guard let record = await recordForQuestionAction() else { return }
+            appState.deleteStudyRecord(record)
+            dismiss()
+        }
+    }
+
+    private func recordForQuestionAction() async -> StudyRecord? {
+        if let record = appState.studyRecords.first(where: { $0.id == displayQuestion.id }) {
+            return record
+        }
+        return await appState.loadStudyRecordDetail(recordID: displayQuestion.id)
     }
 
     private var communityActions: some View {
@@ -6167,15 +10056,33 @@ struct CommunityQuestionDetailView: View {
         }
     }
 
+    @ViewBuilder
+    private var localizationControl: some View {
+        if originalAvailable || isShowingOriginal {
+            HStack(spacing: 6) {
+                if !isShowingOriginal {
+                    Text(strings.translatedIntoLanguage)
+                        .foregroundStyle(.secondary)
+                    Text("·")
+                        .foregroundStyle(.tertiary)
+                }
+                Button(isShowingOriginal ? strings.showTranslation : strings.showOriginal) {
+                    Task { await switchContentView() }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
+            }
+            .font(.caption.weight(.medium))
+            .accessibilityElement(children: .combine)
+        }
+    }
+
     private var commentsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(strings.comments)
                 .font(.headline)
 
-            if isLoadingComments && comments.isEmpty {
-                ProgressView()
-                    .frame(maxWidth: .infinity, alignment: .center)
-            } else if comments.isEmpty {
+            if hasLoadedComments && comments.isEmpty {
                 Text(strings.noComments)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -6190,6 +10097,16 @@ struct CommunityQuestionDetailView: View {
                         deleteTitle: strings.clear
                     ) {
                         deleteComment(comment)
+                    }
+                    .contextMenu {
+                        if canWriteCommunityReaction,
+                           !appState.isCurrentCommunityUser(id: comment.author.id) {
+                            Button(role: .destructive) {
+                                userToBlock = comment.author
+                            } label: {
+                                Label(strings.blockUser, systemImage: "person.crop.circle.badge.xmark")
+                            }
+                        }
                     }
                 }
             }
@@ -6244,6 +10161,24 @@ struct CommunityQuestionDetailView: View {
         return true
     }
 
+    private func blockUser(_ user: CommunityUserProfile) {
+        Task {
+            guard await appState.blockCommunityUser(user) else {
+                return
+            }
+
+            let previousCount = comments.count
+            comments.removeAll { $0.author.id == user.id }
+            let removedCount = previousCount - comments.count
+            commentsTotalCount = max(0, commentsTotalCount - removedCount)
+            displayQuestion.commentCount = commentsTotalCount
+
+            if displayQuestion.author?.id == user.id {
+                dismiss()
+            }
+        }
+    }
+
     private func toggleLike() {
         guard canWriteCommunityReaction else {
             return
@@ -6273,22 +10208,115 @@ struct CommunityQuestionDetailView: View {
     }
 
     private func loadComments() async {
-        isLoadingComments = true
-        defer { isLoadingComments = false }
-        guard let response = await appState.loadCommunityQuestionComments(questionID: displayQuestion.id) else {
+        guard let response = await appState.loadCommunityQuestionComments(
+            questionID: displayQuestion.id,
+            refresh: true
+        ) else {
             return
         }
 
+        applyComments(response)
+        guard response.comments.contains(where: { $0.localization?.isPending == true }) else {
+            return
+        }
+        for delay in [1, 2, 4] {
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled,
+                  let retried = await appState.loadCommunityQuestionComments(
+                    questionID: displayQuestion.id,
+                    refresh: true
+                  ) else {
+                return
+            }
+            applyComments(retried)
+            if !retried.comments.contains(where: { $0.localization?.isPending == true }) {
+                return
+            }
+        }
+    }
+
+    private func loadCommentsIfAvailable() async {
+        guard contentSource.showsCommunityInteractions else {
+            hasLoadedComments = true
+            return
+        }
+        await loadComments()
+    }
+
+    private func applyCachedComments() {
+        guard let response = appState.cachedCommunityQuestionComments(questionID: displayQuestion.id) else {
+            return
+        }
+        applyComments(response)
+    }
+
+    private func applyComments(_ response: CommunityCommentsResponse) {
         comments = response.comments
         commentsTotalCount = response.totalCount
         displayQuestion.commentCount = response.totalCount
+        hasLoadedComments = true
     }
 
     private func loadQuestionDetail() async {
-        guard let question = await appState.loadCommunityQuestionDetail(questionID: displayQuestion.id) else {
+        guard let question = await loadQuestion(view: .localized) else {
             return
         }
         displayQuestion = question
+        originalAvailable = originalAvailable ||
+            question.localization?.containsTranslation == true ||
+            question.localization?.question.originalAvailable == true
+        guard question.localization?.containsPendingTranslation == true else {
+            return
+        }
+        for delay in [1, 2, 4] {
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled,
+                  let retried = await loadQuestion(view: .localized) else {
+                return
+            }
+            displayQuestion = retried
+            originalAvailable = originalAvailable || retried.localization?.containsTranslation == true
+            if retried.localization?.containsPendingTranslation != true {
+                return
+            }
+        }
+    }
+
+    private func switchContentView() async {
+        let target: LocalizedContentView = isShowingOriginal ? .localized : .original
+        guard let loaded = await loadQuestion(view: target) else {
+            return
+        }
+        displayQuestion = loaded
+        if contentSource.showsCommunityInteractions {
+            if let response = await appState.loadCommunityQuestionComments(
+                questionID: loaded.id,
+                refresh: true,
+                view: target
+            ) {
+                applyComments(response)
+            }
+        }
+        isShowingOriginal = target == .original
+        originalAvailable = true
+    }
+
+    private func loadQuestion(view: LocalizedContentView) async -> CommunityQuestion? {
+        switch contentSource {
+        case .community:
+            return await appState.loadCommunityQuestionDetail(
+                questionID: displayQuestion.id,
+                view: view
+            )
+        case .record:
+            guard let record = await appState.loadStudyRecordDetail(
+                recordID: displayQuestion.id,
+                view: view
+            ) else {
+                return nil
+            }
+            return record.asQuestionBrowseQuestion(author: displayQuestion.author)
+        }
     }
 
     private func sendComment() {
@@ -6409,41 +10437,22 @@ private struct CommunityCommentRow: View {
 
 private struct CommunityAnswerMessage: View {
     var answer: String
-    var author: CommunityUserProfile?
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
+        HStack(alignment: .bottom) {
             Spacer(minLength: 24)
 
-            Text(answer)
-                .font(.body)
-                .foregroundStyle(.white)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .multilineTextAlignment(.leading)
-                .padding(.vertical, 11)
-                .padding(.horizontal, 12)
-                .frame(maxWidth: 260, alignment: .leading)
-                .background(CommunityMessageBubbleRole.answer.foregroundBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-
-            if let author {
-                VStack(spacing: 3) {
-                    HomeProfileAvatar(
-                        symbolName: author.avatarSymbolName,
-                        displayName: author.displayName,
-                        colorSeed: author.avatarColorSeed,
-                        size: 34
-                    )
-
-                    Text(author.displayName)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                }
-                .frame(width: 42)
-                .accessibilityElement(children: .combine)
+            CompactMessageLayout(maximumWidth: 260) {
+                MarkdownMessageText(markdown: answer, fillsWidth: false)
+                    .font(.body)
+                    .foregroundStyle(.white)
+                    .tint(.white)
+                    .textSelection(.enabled)
+                    .multilineTextAlignment(.leading)
+                    .padding(.vertical, 11)
+                    .padding(.horizontal, 12)
+                    .background(CommunityMessageBubbleRole.answer.foregroundBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -6467,20 +10476,20 @@ private enum CommunityMessageBubbleRole: Equatable {
     var foregroundBackground: Color {
         switch self {
         case .question:
-            Color.green.opacity(0.92)
+            ConversationBubblePalette.incomingBackground
         case .answer:
-            Color.accentColor
+            Color.green.opacity(0.92)
         case .feedback:
-            Color.secondary.opacity(0.06)
+            ConversationBubblePalette.incomingBackground
         }
     }
 
     var borderColor: Color {
         switch self {
-        case .question, .answer:
+        case .answer:
             Color.clear
-        case .feedback:
-            Color.secondary.opacity(0.12)
+        case .question, .feedback:
+            ConversationBubblePalette.incomingBorder
         }
     }
 }
@@ -6528,163 +10537,88 @@ private extension View {
     }
 }
 
-private struct MobileOnboardingView: View {
-    @EnvironmentObject private var appState: AppState
-    @State private var language: AppLanguage = .korean
-    @State private var topic = ""
-    @State private var difficultyLevel = Difficulty.beginner.level
-    @State private var intervalMinutes = 15
-    @State private var isCompleting = false
-
-    private var strings: AppStrings {
-        AppStrings(language: language)
-    }
-
-    private var canStart: Bool {
-        !isCompleting
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Text(strings.onboardingSubtitle)
-                }
-
-                Section(strings.onboardingLanguage) {
-                    Picker(strings.appLanguage, selection: $language) {
-                        ForEach(AppLanguage.allCases) { language in
-                            Text(language.displayName).tag(language)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                }
-
-                Section(strings.onboardingStudySetup) {
-                    TextField(strings.studyTopic, text: $topic)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text(strings.difficulty)
-                            Spacer()
-                            Text(Difficulty(level: difficultyLevel).displayName(language: language))
-                                .fontWeight(.semibold)
-                                .monospacedDigit()
-                        }
-
-                        Slider(
-                            value: Binding(
-                                get: { Double(difficultyLevel) },
-                                set: { difficultyLevel = min(max(Int($0.rounded()), 1), 10) }
-                            ),
-                            in: 1...10,
-                            step: 1
-                        )
-
-                        HStack {
-                            Text("1")
-                            Spacer()
-                            Text("10")
-                        }
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    }
-
-                    Stepper(
-                        strings.questionInterval(minutes: intervalMinutes),
-                        value: $intervalMinutes,
-                        in: 1...240
-                    )
-                }
-            }
-            .keyboardDoneToolbar(strings.done)
-            .navigationTitle(strings.onboardingTitle)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(strings.onboardingSkip) {
-                        appState.skipOnboarding()
-                    }
-                }
-
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task {
-                            isCompleting = true
-                            await appState.completeOnboarding(settings: pendingSettings)
-                            isCompleting = false
-                        }
-                    } label: {
-                        if isCompleting || appState.isValidatingAPIKey {
-                            ProgressView()
-                        } else {
-                            Text(strings.onboardingStart)
-                        }
-                    }
-                    .disabled(!canStart)
-                }
-            }
-                .onAppear {
-                language = appState.settings.appLanguage
-                let fallbackTopic = StudySettings.fallbackTopic(for: language)
-                topic = appState.settings.topic.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    ? fallbackTopic
-                    : appState.settings.topic
-                difficultyLevel = appState.settings.difficulty.level
-                intervalMinutes = appState.settings.sanitizedIntervalMinutes
-            }
-        }
-    }
-
-    private var pendingSettings: StudySettings {
-        let resolvedTopic = topic.trimmingCharacters(in: .whitespacesAndNewlines)
-            .isEmpty ? StudySettings.fallbackTopic(for: language) : topic.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        return StudySettings(
-            topic: resolvedTopic,
-            difficulty: Difficulty(level: difficultyLevel),
-            appLanguage: language,
-            language: language.studyLanguage,
-            openAIModel: appState.settings.sanitizedOpenAIModel,
-            notificationSound: appState.settings.notificationSound,
-            customPrompt: appState.settings.customPrompt,
-            intervalMinutes: intervalMinutes,
-            maxHistoryCount: appState.settings.sanitizedMaxHistoryCount,
-            studyCategories: [
-                StudyCategory(
-                    title: resolvedTopic,
-                    difficulty: Difficulty(level: difficultyLevel),
-                    customPrompt: appState.settings.customPrompt
-                )
-            ],
-            selectedStudyCategoryID: nil
-        )
-    }
-}
-
 private struct MobileSettingsView: View {
     @EnvironmentObject private var appState: AppState
 
-    private static let feedbackURL = URL(string: "mailto:ghkdqhrbals@gmail.com?subject=BuddyStudy%20Feedback")!
     private static let kofiTipURL = URL(string: "https://ko-fi.com/gyumin")!
 
     var body: some View {
         let strings = appState.settingsEditorStrings
+        let canEditAccountPreferences = SettingsAccessPolicy.canEditAccountBackedPreferences(
+            isSignedIn: appState.isCommunitySessionActive
+        )
 
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 18) {
-                MobileSettingsCard(
-                    title: strings.learningRhythmSettings,
-                    systemImage: "timer"
-                ) {
-                    Stepper(
-                        value: $appState.draftSettings.intervalMinutes,
-                        in: 1...240
+                if appState.isCommunitySessionActive {
+                    MobileSettingsCard(
+                        title: strings.accountSettings,
+                        systemImage: "person.crop.circle.badge.gearshape"
                     ) {
-                        MobileSettingsRow(
-                            systemImage: "clock.arrow.2.circlepath",
-                            title: strings.studySettings,
-                            value: strings.questionInterval(minutes: appState.draftSettings.sanitizedIntervalMinutes)
+                        NavigationLink {
+                            MobileAccountSettingsView()
+                        } label: {
+                            MobileSettingsRow(
+                                systemImage: "person.crop.circle.badge.gearshape",
+                                title: strings.accountSettings,
+                                value: strings.accountSettingsHelp,
+                                showsChevron: true
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                if appState.isCommunitySessionActive {
+                    MobileSettingsCard(
+                        title: strings.publicQuestionsPage,
+                        systemImage: "person.2"
+                    ) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle(
+                                isOn: Binding(
+                                    get: {
+                                        appState.communityProfile?.allowPublicQuestions ?? true
+                                    },
+                                    set: { allowed in
+                                        Task {
+                                            await appState.setPublicQuestionsAllowed(allowed)
+                                        }
+                                    }
+                                )
+                            ) {
+                                Text(strings.publicQuestionsPage)
+                                    .font(.body.weight(.medium))
+                            }
+
+                            Text(strings.publicQuestionsPageHelp)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .disabled(
+                            appState.communityProfile == nil ||
+                                appState.isUpdatingCommunityProfile
                         )
+                    }
+                }
+
+                if canEditAccountPreferences {
+                    MobileSettingsCard(
+                        title: strings.learningRhythmSettings,
+                        systemImage: "timer"
+                    ) {
+                        Stepper(
+                            value: $appState.draftSettings.intervalMinutes,
+                            in: 1...240
+                        ) {
+                            MobileSettingsRow(
+                                systemImage: "clock.arrow.2.circlepath",
+                                title: strings.studySettings,
+                                value: strings.questionInterval(minutes: appState.draftSettings.sanitizedIntervalMinutes)
+                            )
+                        }
                     }
                 }
 
@@ -6713,94 +10647,102 @@ private struct MobileSettingsView: View {
                     }
                     .buttonStyle(.plain)
 
-                    Divider()
-
-                    Button {
-                        appState.openSystemNotificationSettings()
-                    } label: {
-                        MobileSettingsRow(
-                            systemImage: "bell.badge",
-                            title: strings.notifications,
-                            value: strings.openNotificationSettings,
-                            showsChevron: true
-                        )
-                    }
-                    .buttonStyle(.plain)
-
-                    Divider()
-
-                    Menu {
-                        ForEach(NotificationSoundOption.allCases) { sound in
-                            Button {
-                                appState.setDraftNotificationSound(sound)
-                            } label: {
-                                if appState.draftSettings.notificationSound == sound {
-                                    Label(
-                                        sound.displayName(language: appState.draftSettings.appLanguage),
-                                        systemImage: "checkmark"
-                                    )
-                                } else {
-                                    Text(sound.displayName(language: appState.draftSettings.appLanguage))
-                                }
-                            }
-                        }
-                    } label: {
-                        MobileSettingsRow(
-                            systemImage: "speaker.wave.2.fill",
-                            title: strings.notificationSound,
-                            value: appState.draftSettings.notificationSound.displayName(language: appState.draftSettings.appLanguage)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                MobileSettingsCard(
-                    title: strings.developerOptions,
-                    systemImage: "hammer"
-                ) {
-                    Toggle(isOn: Binding(
-                            get: { appState.isDebuggingEnabled },
-                            set: { appState.setDebuggingEnabled($0) }
-                        )) {
-                        MobileSettingsRow(
-                            systemImage: "ladybug.fill",
-                            title: strings.debuggingMode,
-                            value: appState.isDebuggingEnabled ? strings.enabledStatus : strings.disabledStatus
-                        )
-                    }
-                    .tint(.green)
-
-                    if appState.isDebuggingEnabled {
+                    if canEditAccountPreferences {
                         Divider()
 
-                        VStack(alignment: .leading, spacing: 6) {
-                            TextField(
-                                strings.debugBackendBaseURL,
-                                text: $appState.draftDebugBackendBaseURL,
-                                prompt: Text(strings.debugBackendBaseURLPlaceholder)
+                        Button {
+                            appState.openSystemNotificationSettings()
+                        } label: {
+                            MobileSettingsRow(
+                                systemImage: "bell.badge",
+                                title: strings.notifications,
+                                value: strings.openNotificationSettings,
+                                showsChevron: true
                             )
-                            #if os(iOS)
-                            .keyboardType(.URL)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            #endif
+                        }
+                        .buttonStyle(.plain)
 
-                            if !appState.isDraftDebugBackendBaseURLValid {
-                                Text(strings.debugBackendBaseURLInvalid)
-                                    .font(.caption)
-                                    .foregroundStyle(.red)
+                        Divider()
+
+                        Menu {
+                            ForEach(NotificationSoundOption.allCases) { sound in
+                                Button {
+                                    appState.setDraftNotificationSound(sound)
+                                } label: {
+                                    if appState.draftSettings.notificationSound == sound {
+                                        Label(
+                                            sound.displayName(language: appState.draftSettings.appLanguage),
+                                            systemImage: "checkmark"
+                                        )
+                                    } else {
+                                        Text(sound.displayName(language: appState.draftSettings.appLanguage))
+                                    }
+                                }
                             }
+                        } label: {
+                            MobileSettingsRow(
+                                systemImage: "speaker.wave.2.fill",
+                                title: strings.notificationSound,
+                                value: appState.draftSettings.notificationSound.displayName(language: appState.draftSettings.appLanguage)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
 
-                            Text(strings.debugBackendBaseURLHelp)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                if appState.canAccessDeveloperOptions {
+                    MobileSettingsCard(
+                        title: strings.developerOptions,
+                        systemImage: "hammer"
+                    ) {
+                        Toggle(isOn: Binding(
+                                get: { appState.isDebuggingEnabled },
+                                set: { appState.setDebuggingEnabled($0) }
+                            )) {
+                            MobileSettingsRow(
+                                systemImage: "ladybug.fill",
+                                title: strings.debuggingMode,
+                                value: appState.isDebuggingEnabled ? strings.enabledStatus : strings.disabledStatus
+                            )
+                        }
+                        .tint(.green)
+
+                        if appState.isDebuggingEnabled {
+                            Divider()
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                TextField(
+                                    strings.debugBackendBaseURL,
+                                    text: $appState.draftDebugBackendBaseURL,
+                                    prompt: Text(strings.debugBackendBaseURLPlaceholder)
+                                )
+                                #if os(iOS)
+                                .keyboardType(.URL)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                #endif
+
+                                if !appState.isDraftDebugBackendBaseURLValid {
+                                    Text(strings.debugBackendBaseURLInvalid)
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                }
+
+                                Text(strings.debugBackendBaseURLHelp)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                     }
                 }
 
                 HStack(spacing: 14) {
-                    Link(strings.feedbackLink, destination: Self.feedbackURL)
+                    NavigationLink {
+                        MobileFeedbackView()
+                    } label: {
+                        Text(strings.feedbackLink)
+                    }
 
                     Text("·")
                         .foregroundStyle(.tertiary)
@@ -6844,7 +10786,11 @@ private struct MobileSettingsView: View {
         .onAppear {
             appState.beginSettingsEditing()
             Task {
-                await appState.loadBackendSettingsForEditing()
+                async let settingsLoad: Void = appState.loadBackendSettingsForEditing()
+                async let featureAccessLoad: Void = appState.refreshDeveloperFeatureAccess(
+                    reason: "settings"
+                )
+                _ = await (settingsLoad, featureAccessLoad)
             }
         }
         .onDisappear {
@@ -6869,6 +10815,82 @@ private struct MobileSettingsView: View {
         .buttonStyle(.plain)
         .disabled(appState.isValidatingAPIKey)
     }
+
+}
+
+private struct MobileAccountSettingsView: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    @State private var isShowingWithdrawalConfirmation = false
+    @State private var isSubscriptionManagementPresented = false
+
+    private var strings: AppStrings { appState.strings }
+
+    private var accountLabel: String {
+        guard let profile = appState.communityProfile else {
+            return strings.profileRequestFailed
+        }
+        let email = profile.email.trimmingCharacters(in: .whitespacesAndNewlines)
+        return email.isEmpty ? profile.displayName : email
+    }
+
+    var body: some View {
+        List {
+            Section(strings.profileAccount) {
+                Text(accountLabel)
+            }
+
+            Section {
+                Button(role: .destructive) {
+                    isShowingWithdrawalConfirmation = true
+                } label: {
+                    HStack {
+                        Text(strings.deleteAccount)
+                        Spacer()
+                        if appState.isWithdrawingCommunityAccount {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                    }
+                }
+                .disabled(appState.isWithdrawingCommunityAccount)
+            } footer: {
+                Text(strings.deleteAccountNotice)
+            }
+        }
+        .navigationTitle(strings.accountSettings)
+        .navigationBarTitleDisplayMode(.inline)
+        .manageSubscriptionsSheet(isPresented: $isSubscriptionManagementPresented)
+        .onChange(of: isSubscriptionManagementPresented) { _, isPresented in
+            guard !isPresented else { return }
+            Task {
+                await appState.reconcileBillingSubscription()
+                await appState.refreshBilling()
+            }
+        }
+        .alert(strings.deleteAccount, isPresented: $isShowingWithdrawalConfirmation) {
+            Button(strings.cancel, role: .cancel) {}
+            if appState.billingStatus?.willRenew == true {
+                Button(strings.manageSubscription) {
+                    isSubscriptionManagementPresented = true
+                }
+            }
+            Button(strings.deleteAccount, role: .destructive) {
+                Task {
+                    if await appState.withdrawCommunityAccount() {
+                        dismiss()
+                    }
+                }
+            }
+        } message: {
+            Text(
+                appState.billingStatus?.willRenew == true
+                    ? strings.deleteAccountActiveSubscriptionWarning
+                    : strings.deleteAccountConfirmMessage
+            )
+        }
+    }
+
 }
 
 private struct MobileSettingsCard<Content: View>: View {

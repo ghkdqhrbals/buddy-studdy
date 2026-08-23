@@ -16,14 +16,14 @@ class HealthController(
 ) {
     @Operation(
         summary = "Health check",
-        description = "Returns a lightweight health response for load balancers and local diagnostics. Runtime monitoring must use the Cloudflare Health Monitor Worker with /api/v1/health/readiness, not GitHub Actions.",
+        description = "Returns a lightweight health response for load balancers and local diagnostics. Runtime alerting belongs to Grafana, not GitHub Actions.",
     )
     @GetMapping("/health", "/api/v1/health")
     fun health() = HealthResponse()
 
     @Operation(
         summary = "Readiness check",
-        description = "Checks required backend dependencies and scheduler freshness for external Slack monitoring.",
+        description = "Checks required backend dependencies and scheduler freshness for observability diagnostics.",
     )
     @GetMapping("/health/readiness", "/api/v1/health/readiness")
     suspend fun readiness(): ResponseEntity<ReadinessResponse> {

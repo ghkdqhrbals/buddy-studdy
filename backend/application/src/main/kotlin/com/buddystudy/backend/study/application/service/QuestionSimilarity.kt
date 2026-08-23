@@ -1,7 +1,6 @@
 package com.buddystudy.backend.study.application.service
 
 import com.buddystudy.backend.study.application.port.outbound.QuestionEmbeddingCandidate
-import com.buddystudy.backend.study.application.port.outbound.GeneratedQuestion
 import org.springframework.stereotype.Component
 import kotlin.math.sqrt
 
@@ -10,14 +9,6 @@ data class QuestionSimilarityMatch(
     val question: String,
     val similarity: Double,
 )
-
-data class GeneratedQuestionWithEmbedding(
-    val generated: GeneratedQuestion,
-    val embedding: List<Float>,
-) {
-    val question: String get() = generated.question
-    val hint: String? get() = generated.hint
-}
 
 @Component
 class QuestionSimilarityPolicy {

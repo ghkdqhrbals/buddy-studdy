@@ -1,5 +1,6 @@
 package com.buddystudy.backend.auth.application.service
 
+import com.buddystudy.account.domain.entity.UserStatus
 import com.buddystudy.backend.auth.Principal
 import com.buddystudy.backend.auth.application.model.NotificationPreferenceCommand
 import com.buddystudy.backend.auth.application.model.NotificationPreferenceResponse
@@ -188,9 +189,9 @@ class PermissionPolicyService(
     private suspend fun activateUserIfRequiredTermsAreAgreed(principal: Principal) {
         if (principal.anonymous) return
         val user = users.findById(principal.userId) ?: return
-        if (user.status != "PENDING_TERMS") return
+        if (user.status != UserStatus.PENDING_TERMS) return
         if (!terms.hasRequiredAgreements(user.id, principal.deviceId, Instant.now())) return
-        user.status = "ACTIVE"
+        user.status = UserStatus.ACTIVE
         user.updatedAt = Instant.now()
         users.save(user)
     }

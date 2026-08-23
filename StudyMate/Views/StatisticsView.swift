@@ -3,11 +3,85 @@ import SwiftUI
 import UIKit
 #endif
 
+enum StudyGrowthPeriod: String, CaseIterable, Identifiable {
+    case last30Days
+    case last90Days
+    case lastYear
+
+    var id: String { rawValue }
+
+    func title(strings: AppStrings) -> String {
+        switch self {
+        case .last30Days:
+            strings.last30Days
+        case .last90Days:
+            strings.last90Days
+        case .lastYear:
+            strings.lastYear
+        }
+    }
+
+    func bounds(now: Date = Date()) -> (startAt: Date, endAt: Date) {
+        let days: Int
+        switch self {
+        case .last30Days:
+            days = 30
+        case .last90Days:
+            days = 90
+        case .lastYear:
+            days = 365
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        let today = calendar.startOfDay(for: now)
+        return (
+            calendar.date(byAdding: .day, value: -(days - 1), to: today)
+                ?? today.addingTimeInterval(-Double(days - 1) * 86_400),
+            calendar.date(byAdding: .day, value: 1, to: today)
+                ?? today.addingTimeInterval(86_400)
+        )
+    }
+}
+
+enum StatisticsAutoRefreshPolicy {
+    static let minimumInterval: TimeInterval = 60
+
+    static func shouldRefresh(lastRefreshAt: Date?, now: Date = Date()) -> Bool {
+        guard let lastRefreshAt else {
+            return true
+        }
+        return now.timeIntervalSince(lastRefreshAt) >= minimumInterval
+    }
+}
+
+enum StatsTopicFocusPolicy {
+    static func topTopic(from topics: [String]) -> String? {
+        var counts: [String: Int] = [:]
+        topics.forEach { counts[$0, default: 0] += 1 }
+        return counts
+            .sorted { lhs, rhs in
+                if lhs.value != rhs.value {
+                    return lhs.value > rhs.value
+                }
+                return lhs.key.compare(
+                    rhs.key,
+                    options: [.caseInsensitive, .diacriticInsensitive],
+                    locale: Locale(identifier: "en_US_POSIX")
+                ) == .orderedAscending
+            }
+            .first?
+            .key
+    }
+}
+
 struct StatisticsView: View {
     @EnvironmentObject private var appState: AppState
     @State private var selectedRecord: StudyRecord?
     @State private var topicPage = 0
     @State private var selectedActivityYear = Calendar.current.component(.year, from: Date())
+    @State private var selectedGrowthPeriod: StudyGrowthPeriod = .last90Days
+    @State private var isShowingGrowthHelp = false
+    @State private var lastAutomaticRefreshAt: Date?
 
     private static let topicPageSize = 8
 
@@ -55,6 +129,19 @@ struct StatisticsView: View {
             }
     }
 
+    private var displayedStudyGrowth: BackendStudyGrowth? {
+        if let growth = appState.backendStudyGrowth {
+            return growth
+        }
+        let bounds = selectedGrowthPeriod.bounds()
+        return LegacyStudyGrowthProjection.make(
+            rooms: appState.backendStudyRooms,
+            records: visibleStatRecords,
+            startAt: bounds.startAt,
+            endAt: bounds.endAt
+        )
+    }
+
     private var activityYearOptions: [Int] {
         let calendar = Calendar.current
         let currentYear = calendar.component(.year, from: Date())
@@ -68,6 +155,7 @@ struct StatisticsView: View {
         let count = responseCount
         let pageCount = topicPageCount
         let years = activityYearOptions
+        let studyGrowth = displayedStudyGrowth
 
         VStack(spacing: 0) {
             MobileRootLargeTitle(strings.tabStatistics)
@@ -107,30 +195,65 @@ struct StatisticsView: View {
                     } else {
                         StatsOverviewSection(
                             topics: topicStats,
+                            studyGrowth: studyGrowth,
                             activity: appState.backendStatsActivity,
                             isActivityLoading: appState.isBackendStatsActivityLoading,
                             selectedYear: selectedActivityYear,
                             strings: strings
                         )
 
-                        Text(strings.topicGrowthOverview)
-                            .font(.title3.weight(.bold))
-                            .padding(.top, 4)
-
-                        TopicBrowserSection(
-                            stats: pagedTopicStats,
-                            currentPage: boundedTopicPage,
-                            pageCount: pageCount,
-                            strings: strings,
-                            onPreviousPage: {
-                                topicPage = max(boundedTopicPage - 1, 0)
-                                loadStats()
-                            },
-                            onNextPage: {
-                                topicPage = min(boundedTopicPage + 1, topicPageCount - 1)
-                                loadStats()
-                            }
+                        StudyGrowthPeriodPicker(
+                            selection: $selectedGrowthPeriod,
+                            strings: strings
                         )
+
+                        HStack(spacing: 7) {
+                            Text(strings.studyGrowth)
+                                .font(.title3.weight(.bold))
+
+                            Button {
+                                isShowingGrowthHelp = true
+                            } label: {
+                                Image(systemName: "questionmark.circle")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(strings.growthCalculationHelp)
+
+                            Spacer()
+                        }
+                        .padding(.top, 2)
+
+                        if appState.isBackendStudyGrowthLoading && studyGrowth == nil {
+                            ProgressView()
+                                .controlSize(.small)
+                                .frame(maxWidth: .infinity, minHeight: 180)
+                        } else if let growth = studyGrowth {
+                            StudyGrowthRootSection(growth: growth, strings: strings)
+                        } else {
+                            TopicBrowserSection(
+                                stats: pagedTopicStats,
+                                currentPage: boundedTopicPage,
+                                pageCount: pageCount,
+                                strings: strings,
+                                onPreviousPage: {
+                                    topicPage = max(boundedTopicPage - 1, 0)
+                                    loadStats()
+                                },
+                                onNextPage: {
+                                    topicPage = min(boundedTopicPage + 1, topicPageCount - 1)
+                                    loadStats()
+                                }
+                            )
+                        }
+
+                        if let growthError = appState.backendStudyGrowthErrorMessage,
+                           appState.backendStudyGrowth != nil {
+                            Text(growthError)
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
                     }
                 }
                 .padding(.top, 8)
@@ -148,11 +271,21 @@ struct StatisticsView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .recordDetailPresentation(selectedRecord: $selectedRecord, strings: strings)
+        .questionBrowseRecordPresentation(
+            selectedRecord: $selectedRecord,
+            strings: strings,
+            author: appState.communityProfile
+        )
+        .sheet(isPresented: $isShowingGrowthHelp) {
+            StudyGrowthHelpView(strings: strings)
+        }
         .onChange(of: selectedActivityYear) {
             resetTopicPaging()
             loadStats()
             loadActivity()
+        }
+        .onChange(of: selectedGrowthPeriod) {
+            loadStudyGrowth()
         }
         .onChange(of: appState.backendAccessState.user.createdAt) {
             let years = activityYearOptions
@@ -164,9 +297,21 @@ struct StatisticsView: View {
             if let newest = activityYearOptions.first, !activityYearOptions.contains(selectedActivityYear) {
                 selectedActivityYear = newest
             }
-            loadStats()
-            loadActivity()
+            loadStatisticsIfNeeded()
         }
+    }
+
+    private func loadStatisticsIfNeeded(now: Date = Date()) {
+        guard StatisticsAutoRefreshPolicy.shouldRefresh(
+            lastRefreshAt: lastAutomaticRefreshAt,
+            now: now
+        ) else {
+            return
+        }
+        lastAutomaticRefreshAt = now
+        loadStats()
+        loadActivity()
+        loadStudyGrowth()
     }
 
     private func loadStats() {
@@ -183,6 +328,13 @@ struct StatisticsView: View {
         let bounds = activityYearBounds(for: selectedActivityYear)
         Task {
             await appState.fetchBackendStatsActivity(startAt: bounds.startAt, endAt: bounds.endAt)
+        }
+    }
+
+    private func loadStudyGrowth() {
+        let bounds = selectedGrowthPeriod.bounds()
+        Task {
+            await appState.fetchBackendStudyGrowth(startAt: bounds.startAt, endAt: bounds.endAt)
         }
     }
 
@@ -217,6 +369,11 @@ struct StatisticsView: View {
             offset: max(topicPage * Self.topicPageSize, 0)
         )
         await appState.fetchBackendStatsActivity(startAt: bounds.startAt, endAt: bounds.endAt)
+        let growthBounds = selectedGrowthPeriod.bounds()
+        await appState.fetchBackendStudyGrowth(
+            startAt: growthBounds.startAt,
+            endAt: growthBounds.endAt
+        )
     }
 
     private func resetTopicPaging() {
@@ -245,21 +402,27 @@ struct StatisticsView: View {
 
 private extension View {
     @ViewBuilder
-    func recordDetailPresentation(selectedRecord: Binding<StudyRecord?>, strings: AppStrings) -> some View {
+    func questionBrowseRecordPresentation(
+        selectedRecord: Binding<StudyRecord?>,
+        strings: AppStrings,
+        author: CommunityUserProfile?
+    ) -> some View {
         #if os(iOS)
-        sheet(item: selectedRecord) { record in
-            NavigationStack {
-                StudyRecordDetailView(record: record)
-                    .padding()
-                    .navigationTitle(strings.records)
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button(strings.done) {
-                                selectedRecord.wrappedValue = nil
-                            }
-                        }
+        navigationDestination(
+            isPresented: Binding(
+                get: { selectedRecord.wrappedValue != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        selectedRecord.wrappedValue = nil
                     }
+                }
+            )
+        ) {
+            if let record = selectedRecord.wrappedValue {
+                CommunityQuestionDetailView(
+                    question: record.asQuestionBrowseQuestion(author: author),
+                    contentSource: .record(isPublic: record.isPublic)
+                )
             }
         }
         #else
@@ -276,43 +439,82 @@ private extension View {
 struct StudyRecordDetailView: View {
     @EnvironmentObject private var appState: AppState
     var record: StudyRecord
+    var refreshesRecordOnAppear: Bool
+    var onSkip: (() -> Void)?
     @State private var draftAnswer: String
+    @State private var detailRecord: StudyRecord
+    @State private var isShowingOriginal = false
+    @State private var originalAvailable: Bool
     @State private var showsHint = false
+    @State private var answerSubmissionTask: Task<Void, Never>?
+    @State private var answerGradingOwnerID: String?
     #if os(iOS)
     @FocusState private var isAnswerEditorFocused: Bool
     #endif
 
-    init(record: StudyRecord) {
+    init(
+        record: StudyRecord,
+        refreshesRecordOnAppear: Bool = true,
+        onSkip: (() -> Void)? = nil
+    ) {
         self.record = record
+        self.refreshesRecordOnAppear = refreshesRecordOnAppear
+        self.onSkip = onSkip
         _draftAnswer = State(initialValue: record.answer ?? "")
+        _detailRecord = State(initialValue: record)
+        _originalAvailable = State(
+            initialValue: record.localization?.containsTranslation == true ||
+                record.localization?.question.originalAvailable == true
+        )
     }
 
     var body: some View {
         let displayedRecord = latestRecord
+        let isGradingAnswer = appState.isAnswerGradingInProgress(for: displayedRecord)
 
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 RecordDetailHeader(record: displayedRecord, strings: appState.strings, language: appState.settings.appLanguage)
 
+                localizationControl
+
                 VStack(alignment: .leading, spacing: 12) {
                     RecordChatBubble(role: .question) {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(displayedRecord.question.question.breakingLongTokens())
-                                .font(.body)
-                                .foregroundStyle(.white)
-                                .textSelection(.enabled)
+                            HStack(alignment: .top, spacing: 10) {
+                                MarkdownMessageText(markdown: displayedRecord.question.question)
+                                    .font(.body)
+                                    .foregroundStyle(.primary)
+                                    .tint(.accentColor)
+                                    .textSelection(.enabled)
+
+                                if canSkip(displayedRecord), let onSkip {
+                                    Button {
+                                        onSkip()
+                                    } label: {
+                                        Image(systemName: "forward.fill")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(.secondary)
+                                            .frame(width: 30, height: 30)
+                                            .background(Color.secondary.opacity(0.12), in: Circle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel(appState.strings.skipQuestion)
+                                    .accessibilityHint(appState.strings.skipQuestionHelp)
+                                }
+                            }
 
                             hintView(for: displayedRecord)
                         }
                     }
 
-                    if let answer = displayedRecord.answer,
-                       !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                       displayedRecord.gradingResult != nil {
+                    if let answer = submittedAnswer(for: displayedRecord),
+                       displayedRecord.gradingResult != nil || isGradingAnswer {
                         RecordChatBubble(role: .answer) {
-                            Text(answer.breakingLongTokens())
+                            MarkdownMessageText(markdown: answer, fillsWidth: false)
                                 .font(.body)
                                 .foregroundStyle(.white)
+                                .tint(.white)
                                 .textSelection(.enabled)
                         }
                     } else if displayedRecord.gradingResult == nil {
@@ -320,7 +522,7 @@ struct StudyRecordDetailView: View {
                             RecordAnswerInput(
                                 strings: appState.strings,
                                 draftAnswer: $draftAnswer,
-                                isGradingAnswer: appState.isGradingAnswer,
+                                isGradingAnswer: isGradingAnswer,
                                 canSubmitAnswer: canSubmitAnswer,
                                 onSubmit: {
                                     submitAnswer(for: displayedRecord)
@@ -330,6 +532,22 @@ struct StudyRecordDetailView: View {
                             .focused($isAnswerEditorFocused)
                             #endif
                         }
+                    }
+
+                    if isGradingAnswer,
+                       let gradingStatusMessage = appState.gradingPresentationMessage(for: displayedRecord) {
+                        RecordChatBubble(role: .feedback) {
+                            HStack(spacing: 10) {
+                                ProgressView()
+                                    .controlSize(.small)
+
+                                Text(gradingStatusMessage)
+                                    .font(.subheadline.weight(.medium))
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(gradingStatusMessage)
                     }
 
                     if let result = displayedRecord.gradingResult {
@@ -345,10 +563,11 @@ struct StudyRecordDetailView: View {
                                         .lineLimit(1)
                                 }
 
-                                Text(result.feedback.breakingLongTokens())
+                                MarkdownMessageText(markdown: result.feedback)
                                     .font(.body)
                                     .textSelection(.enabled)
-                                Text(result.explanation.breakingLongTokens())
+
+                                MarkdownMessageText(markdown: result.explanation)
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                                     .textSelection(.enabled)
@@ -364,18 +583,111 @@ struct StudyRecordDetailView: View {
         .scrollDismissesKeyboard(.interactively)
         .keyboardDoneToolbar(appState.strings.done)
         #endif
+        .task(id: record.id) {
+            await refreshLocalizedRecord()
+        }
+        .onDisappear {
+            if let answerGradingOwnerID {
+                appState.cancelAnswerGradingPolling(
+                    ownerID: answerGradingOwnerID,
+                    reason: "record-detail-disappeared"
+                )
+                self.answerGradingOwnerID = nil
+            }
+        }
     }
 
     private var latestRecord: StudyRecord {
-        appState.studyRecords.first {
-            $0.id == record.id ||
-                StudyRecordIdentityPolicy.questionsMatch($0.question.question, record.question.question)
-        } ?? record
+        guard !isShowingOriginal,
+              detailRecord.gradingResult == nil,
+              let liveRecord = appState.studyRecords.first(where: {
+                  $0.id == record.id ||
+                      StudyRecordIdentityPolicy.questionsMatch($0.question.question, record.question.question)
+              }),
+              liveRecord.gradingResult != nil else {
+            return detailRecord
+        }
+        return liveRecord
+    }
+
+    @ViewBuilder
+    private var localizationControl: some View {
+        if originalAvailable || isShowingOriginal {
+            HStack(spacing: 6) {
+                if !isShowingOriginal {
+                    Text(appState.strings.translatedIntoLanguage)
+                        .foregroundStyle(.secondary)
+                    Text("·")
+                        .foregroundStyle(.tertiary)
+                }
+                Button(isShowingOriginal ? appState.strings.showTranslation : appState.strings.showOriginal) {
+                    Task { await switchContentView() }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
+            }
+            .font(.caption.weight(.medium))
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func refreshLocalizedRecord() async {
+        if refreshesRecordOnAppear {
+            guard let refreshed = await appState.loadStudyRecordDetail(recordID: record.id) else {
+                return
+            }
+            applyRefreshedRecord(refreshed)
+        }
+
+        guard detailRecord.localization?.containsPendingTranslation == true else {
+            return
+        }
+        for delay in [1, 2, 4] {
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled,
+                  let retried = await appState.loadStudyRecordDetail(recordID: record.id) else {
+                return
+            }
+            applyRefreshedRecord(retried)
+            if retried.localization?.containsPendingTranslation != true {
+                return
+            }
+        }
+    }
+
+    private func applyRefreshedRecord(_ refreshed: StudyRecord) {
+        detailRecord = refreshed
+        originalAvailable = originalAvailable ||
+            refreshed.localization?.containsTranslation == true ||
+            refreshed.localization?.question.originalAvailable == true
+    }
+
+    private func switchContentView() async {
+        let target: LocalizedContentView = isShowingOriginal ? .localized : .original
+        guard let loaded = await appState.loadStudyRecordDetail(recordID: record.id, view: target) else {
+            return
+        }
+        detailRecord = loaded
+        isShowingOriginal = target == .original
+        originalAvailable = true
     }
 
     private var canSubmitAnswer: Bool {
-        !appState.isGradingAnswer &&
+        StudyAnswerPresentationPolicy.shouldShowEditor(for: latestRecord) &&
+            !appState.isAnswerGradingInProgress(for: latestRecord) &&
             !draftAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func canSkip(_ record: StudyRecord) -> Bool {
+        onSkip != nil &&
+            record.gradingResult == nil &&
+            record.gradingRequestID == nil &&
+            !appState.isAnswerGradingInProgress(for: record)
+    }
+
+    private func submittedAnswer(for record: StudyRecord) -> String? {
+        let answer = (record.answer ?? draftAnswer).trimmingCharacters(in: .whitespacesAndNewlines)
+        return answer.isEmpty ? nil : answer
     }
 
     @ViewBuilder
@@ -390,16 +702,16 @@ struct StudyRecordDetailView: View {
                 }
                 .buttonStyle(.borderless)
                 .font(.caption)
-                .foregroundStyle(.white)
-                .tint(.white)
+                .foregroundStyle(.secondary)
+                .tint(.accentColor)
 
                 if showsHint {
-                    Text(hint.breakingLongTokens())
+                    MarkdownMessageText(markdown: hint)
                         .font(.caption)
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(.secondary)
+                        .tint(.accentColor)
                         .textSelection(.enabled)
                         .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .padding(.top, 4)
@@ -407,7 +719,8 @@ struct StudyRecordDetailView: View {
     }
 
     private func submitAnswer(for record: StudyRecord) {
-        guard canSubmitAnswer else {
+        guard canSubmitAnswer,
+              answerSubmissionTask == nil else {
             return
         }
 
@@ -415,8 +728,19 @@ struct StudyRecordDetailView: View {
         isAnswerEditorFocused = false
         #endif
 
-        Task {
-            await appState.gradeRecord(record, answer: draftAnswer)
+        let ownerID = UUID().uuidString
+        answerGradingOwnerID = ownerID
+        answerSubmissionTask = Task {
+            await appState.gradeRecord(
+                record,
+                answer: draftAnswer,
+                pollingOwnerID: ownerID
+            )
+            answerSubmissionTask = nil
+            guard answerGradingOwnerID == ownerID else {
+                return
+            }
+            answerGradingOwnerID = nil
         }
     }
 
@@ -502,11 +826,11 @@ private enum RecordChatBubbleRole {
     var fill: Color {
         switch self {
         case .question:
-            Color.green.opacity(0.92)
+            ConversationBubblePalette.incomingBackground
         case .answer:
-            Color.accentColor.opacity(0.92)
+            Color.green.opacity(0.92)
         case .feedback:
-            Color.secondary.opacity(0.06)
+            ConversationBubblePalette.incomingBackground
         case .input:
             Color.clear
         }
@@ -514,8 +838,8 @@ private enum RecordChatBubbleRole {
 
     var border: Color {
         switch self {
-        case .feedback:
-            Color.secondary.opacity(0.12)
+        case .question, .feedback:
+            ConversationBubblePalette.incomingBorder
         default:
             Color.clear
         }
@@ -536,12 +860,13 @@ private struct RecordChatBubble<Content: View>: View {
                 content()
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else if role == .answer {
-                content()
-                    .padding(.vertical, 11)
-                    .padding(.horizontal, 12)
-                    .frame(minWidth: 44, maxWidth: 280, alignment: .trailing)
-                    .background(role.fill)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                CompactMessageLayout {
+                    content()
+                        .padding(.vertical, 11)
+                        .padding(.horizontal, 12)
+                        .background(role.fill)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
             } else {
                 content()
                     .padding(.vertical, 11)
@@ -902,13 +1227,20 @@ private extension TopicLevelRange {
 
 private struct StatsOverviewSection: View {
     var topics: [TopicStat]
+    var studyGrowth: BackendStudyGrowth?
     var activity: BackendStatsActivity?
     var isActivityLoading: Bool
     var selectedYear: Int
     var strings: AppStrings
 
     var body: some View {
-        let achievements = StatsAchievementSnapshot(activity: activity, topics: topics, selectedYear: selectedYear, strings: strings)
+        let achievements = StatsAchievementSnapshot(
+            activity: activity,
+            topics: topics,
+            studyGrowth: studyGrowth,
+            selectedYear: selectedYear,
+            strings: strings
+        )
 
         VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .top, spacing: 0) {
@@ -922,7 +1254,7 @@ private struct StatsOverviewSection: View {
                     .frame(height: 58)
 
                 StatsAchievementCard(
-                    title: strings.topicGrowth,
+                    title: strings.studyGrowth,
                     value: achievements.growthValue,
                     caption: achievements.growthCaption
                 )
@@ -985,6 +1317,8 @@ private struct StatsAchievementCard: View {
                 .font(.system(size: 30, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .lineLimit(1)
+                .minimumScaleFactor(0.65)
+                .allowsTightening(true)
 
             Text(caption)
                 .font(.caption2.weight(.medium))
@@ -1005,7 +1339,13 @@ private struct StatsAchievementSnapshot {
     var monthValue: String
     var monthCaption: String
 
-    init(activity: BackendStatsActivity?, topics: [TopicStat], selectedYear: Int, strings: AppStrings) {
+    init(
+        activity: BackendStatsActivity?,
+        topics: [TopicStat],
+        studyGrowth: BackendStudyGrowth?,
+        selectedYear: Int,
+        strings: AppStrings
+    ) {
         let currentYear = Calendar.current.component(.year, from: Date())
         let isCurrentYear = selectedYear == currentYear
         let streakDays = isCurrentYear ? (activity?.streakDays ?? 0) : Self.longestStreak(from: activity)
@@ -1014,8 +1354,14 @@ private struct StatsAchievementSnapshot {
             ? (streakDays > 0 ? strings.streakKeepGoing : strings.streakStartToday)
             : strings.longestStreak
 
-        if let growth = Self.bestGrowth(from: topics) {
-            growthValue = growth.delta >= 0 ? "+\(Self.levelFormatter.string(from: NSNumber(value: growth.delta)) ?? "0")" : Self.levelFormatter.string(from: NSNumber(value: growth.delta)) ?? "0"
+        if let growth = studyGrowth?.roots
+            .filter({ $0.growth != nil })
+            .max(by: { ($0.growth ?? 0) < ($1.growth ?? 0) }),
+           let delta = growth.growth {
+            growthValue = Self.signed(delta)
+            growthCaption = growth.topic
+        } else if let growth = Self.bestGrowth(from: topics) {
+            growthValue = Self.signed(growth.delta)
             growthCaption = growth.topic
         } else if let topTopic = topics.max(by: { $0.count < $1.count }) {
             growthValue = "\(strings.level) \(Self.levelFormatter.string(from: NSNumber(value: topTopic.levelRange.centerLevel)) ?? "\(topTopic.levelRange.level.level)")"
@@ -1061,6 +1407,11 @@ private struct StatsAchievementSnapshot {
             .max { $0.delta < $1.delta }
     }
 
+    private static func signed(_ value: Double) -> String {
+        let formatted = levelFormatter.string(from: NSNumber(value: value)) ?? "0"
+        return value > 0 ? "+\(formatted)" : formatted
+    }
+
     private static func currentMonthActiveDays(from activity: BackendStatsActivity?) -> Int {
         guard let activity else {
             return 0
@@ -1083,16 +1434,13 @@ private struct StatsAchievementSnapshot {
 
         let calendar = Calendar.current
         let now = Date()
-        var counts: [String: Int] = [:]
-        activity.days
+        let topics = activity.days
             .filter {
                 calendar.component(.year, from: $0.date) == calendar.component(.year, from: now)
                     && calendar.component(.month, from: $0.date) == calendar.component(.month, from: now)
             }
             .flatMap(\.topics)
-            .forEach { counts[$0, default: 0] += 1 }
-
-        return counts.max { $0.value < $1.value }?.key
+        return StatsTopicFocusPolicy.topTopic(from: topics)
     }
 
     private static func yearAnswerCount(from activity: BackendStatsActivity?) -> Int {
@@ -1108,12 +1456,7 @@ private struct StatsAchievementSnapshot {
             return nil
         }
 
-        var counts: [String: Int] = [:]
-        activity.days
-            .flatMap(\.topics)
-            .forEach { counts[$0, default: 0] += 1 }
-
-        return counts.max { $0.value < $1.value }?.key
+        return StatsTopicFocusPolicy.topTopic(from: activity.days.flatMap(\.topics))
     }
 
     private static func longestStreak(from activity: BackendStatsActivity?) -> Int {
@@ -1381,6 +1724,2090 @@ private struct ActivityWeek: Identifiable {
         calendar.timeZone = .current
         calendar.firstWeekday = 2
         return calendar
+    }
+}
+
+private struct StudyGrowthPeriodPicker: View {
+    @Binding var selection: StudyGrowthPeriod
+    var strings: AppStrings
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(StudyGrowthPeriod.allCases) { period in
+                Button {
+                    selection = period
+                } label: {
+                    Text(period.title(strings: strings))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(selection == period ? Color.white : Color.primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 9)
+                        .background(
+                            selection == period
+                                ? Color.accentColor
+                                : Color.secondary.opacity(0.11),
+                            in: Capsule(style: .continuous)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+private struct StudyGrowthHelpView: View {
+    var strings: AppStrings
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    growthHelpRow(
+                        number: "1",
+                        title: strings.growthHelpAbilityTitle,
+                        body: strings.growthHelpAbilityBody
+                    )
+                    growthHelpRow(
+                        number: "2",
+                        title: strings.growthHelpComparisonTitle,
+                        body: strings.growthHelpComparisonBody
+                    )
+                    growthHelpRow(
+                        number: "3",
+                        title: strings.growthHelpTreeTitle,
+                        body: strings.growthHelpTreeBody
+                    )
+                    growthHelpRow(
+                        number: "4",
+                        title: strings.growthHelpSummaryTitle,
+                        body: strings.growthHelpSummaryBody
+                    )
+                }
+            }
+            .navigationTitle(strings.growthCalculationHelp)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(strings.done) {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+
+    private func growthHelpRow(number: String, title: String, body: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(number)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 26, height: 26)
+                .background(Color.accentColor.opacity(0.12), in: Circle())
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(body)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 5)
+    }
+}
+
+private struct StudyGrowthRootSection: View {
+    var growth: BackendStudyGrowth
+    var strings: AppStrings
+
+    var body: some View {
+        if growth.roots.isEmpty {
+            ContentUnavailableView(
+                strings.noGrowthRecords,
+                systemImage: "chart.line.uptrend.xyaxis",
+                description: Text(strings.noGrowthRecordsDescription)
+            )
+            .frame(maxWidth: .infinity, minHeight: 210)
+        } else {
+            VStack(spacing: 0) {
+                HStack {
+                    Spacer()
+
+                    HStack(spacing: 12) {
+                        Label(strings.previousAbility, systemImage: "circle")
+                        Label(strings.currentAbility, systemImage: "circle.fill")
+                    }
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 8)
+
+                ForEach(Array(growth.roots.enumerated()), id: \.element.id) { index, root in
+                    NavigationLink {
+                        StudyGrowthDetailView(
+                            growth: growth,
+                            rootStudyID: root.studyId,
+                            strings: strings
+                        )
+                    } label: {
+                        StudyGrowthOverviewRow(root: root, strings: strings)
+                    }
+                    .buttonStyle(.plain)
+
+                    if index < growth.roots.count - 1 {
+                        Divider()
+                            .padding(.leading, 16)
+                    }
+                }
+            }
+            .background(Color(.secondarySystemBackground))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.08), lineWidth: 1)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+    }
+}
+
+private struct StudyGrowthOverviewRow: View {
+    var root: BackendStudyGrowthRoot
+    var strings: AppStrings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(root.topic)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+
+                Text(strings.treeSummary)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Color.accentColor.opacity(0.11), in: Capsule())
+
+                Spacer(minLength: 8)
+
+                StudyGrowthDeltaLabel(growth: root.growth, strings: strings)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.tertiary)
+            }
+
+            StudyGrowthRangeTrack(
+                previous: root.previousLevel,
+                current: root.currentLevel,
+                growth: root.growth
+            )
+            .frame(height: 28)
+
+            HStack {
+                Text(strings.growthPositionSummary(
+                    previous: StudyGrowthFormat.level(root.previousLevel),
+                    current: StudyGrowthFormat.level(root.currentLevel)
+                ))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Text(strings.measuredTopics(root.measuredTopicCount, total: root.totalTopicCount))
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct StudyGrowthRangeTrack: View {
+    var previous: Double?
+    var current: Double?
+    var growth: Double?
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = max(proxy.size.width - 12, 1)
+            let midY = proxy.size.height / 2
+            let previousX = xPosition(previous, width: width)
+            let currentX = xPosition(current, width: width)
+            let color = StudyGrowthFormat.color(growth)
+
+            Capsule()
+                .fill(Color.secondary.opacity(0.14))
+                .frame(height: 4)
+                .position(x: proxy.size.width / 2, y: midY)
+
+            if let previousX, let currentX {
+                Path { path in
+                    path.move(to: CGPoint(x: previousX + 6, y: midY))
+                    path.addLine(to: CGPoint(x: currentX + 6, y: midY))
+                }
+                .stroke(color, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+
+                Circle()
+                    .fill(Color(.secondarySystemBackground))
+                    .stroke(Color.secondary, lineWidth: 2)
+                    .frame(width: 11, height: 11)
+                    .position(x: previousX + 6, y: midY)
+
+                Circle()
+                    .fill(color)
+                    .frame(width: 13, height: 13)
+                    .position(x: currentX + 6, y: midY)
+            } else if let currentX {
+                Circle()
+                    .fill(Color.secondary)
+                    .frame(width: 13, height: 13)
+                    .position(x: currentX + 6, y: midY)
+            }
+
+            Text("1")
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .foregroundStyle(.tertiary)
+                .position(x: 6, y: proxy.size.height - 2)
+
+            Text("10")
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .foregroundStyle(.tertiary)
+                .position(x: proxy.size.width - 7, y: proxy.size.height - 2)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func xPosition(_ value: Double?, width: CGFloat) -> CGFloat? {
+        guard let value else {
+            return nil
+        }
+        return width * CGFloat((min(max(value, 1), 10) - 1) / 9)
+    }
+}
+
+private struct StudyGrowthDetailView: View {
+    var growth: BackendStudyGrowth
+    var rootStudyID: Int
+    var strings: AppStrings
+
+    private var root: BackendStudyGrowthRoot? {
+        growth.roots.first { $0.studyId == rootStudyID }
+    }
+
+    private var rootNode: BackendStudyGrowthNode? {
+        growth.nodes.first { $0.studyId == rootStudyID }
+    }
+
+    private var nodes: [BackendStudyGrowthNode] {
+        growth.nodes.filter { $0.rootStudyId == rootStudyID }
+    }
+
+    private var orderedNodes: [BackendStudyGrowthNode] {
+        let children = Dictionary(grouping: nodes.filter { $0.parentStudyId != nil }) {
+            $0.parentStudyId ?? -1
+        }
+        var result: [BackendStudyGrowthNode] = []
+        var visited = Set<Int>()
+
+        func append(_ node: BackendStudyGrowthNode) {
+            guard visited.insert(node.studyId).inserted else {
+                return
+            }
+            result.append(node)
+            for child in (children[node.studyId] ?? []).sorted(by: nodeOrdering) {
+                append(child)
+            }
+        }
+
+        if let rootNode {
+            append(rootNode)
+        }
+        for node in nodes.sorted(by: nodeOrdering) where !visited.contains(node.studyId) {
+            append(node)
+        }
+        return result
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let root, let rootNode {
+                StudyGrowthTreeCard(
+                    root: root,
+                    rootNode: rootNode,
+                    orderedNodes: orderedNodes,
+                    strings: strings
+                )
+                .frame(maxHeight: .infinity)
+            } else {
+                ContentUnavailableView(
+                    strings.noGrowthRecords,
+                    systemImage: "point.3.connected.trianglepath.dotted",
+                    description: Text(strings.noGrowthRecordsDescription)
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .navigationTitle(root?.topic ?? strings.growthDetails)
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+    }
+
+    private func nodeOrdering(
+        _ lhs: BackendStudyGrowthNode,
+        _ rhs: BackendStudyGrowthNode
+    ) -> Bool {
+        if lhs.sortOrder != rhs.sortOrder {
+            return lhs.sortOrder < rhs.sortOrder
+        }
+        return lhs.studyId < rhs.studyId
+    }
+}
+
+private struct StudyGrowthTreeItem: Identifiable {
+    var node: BackendStudyGrowthNode
+    var localDepth: Int
+    var continuingAncestorDepths: Set<Int>
+    var isLastSibling: Bool
+
+    var id: Int { node.studyId }
+}
+
+private struct StudyGrowthTreeCard: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var zoomMultiplier: CGFloat = 1
+    @State private var zoomStartMultiplier: CGFloat = 1
+    @State private var isZoomGestureActive = false
+
+    var root: BackendStudyGrowthRoot
+    var rootNode: BackendStudyGrowthNode
+    var orderedNodes: [BackendStudyGrowthNode]
+    var strings: AppStrings
+
+    private var nodesByID: [Int: BackendStudyGrowthNode] {
+        Dictionary(uniqueKeysWithValues: orderedNodes.map { ($0.studyId, $0) })
+    }
+
+    private var snapshot: StudyTreeLayoutSnapshot? {
+        guard let rootRoom = appState.backendStudyRoom(id: root.studyId) else {
+            return nil
+        }
+        return StudyTreeLayoutSnapshot(
+            root: rootRoom,
+            rooms: appState.backendStudyRooms
+        )
+    }
+
+    private var nodeOffsets: [Int: CGSize] {
+        appState.loadStudyTreeNodeOffsets(rootStudyID: root.studyId)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            summary
+
+            Divider()
+                .padding(.leading, 18)
+
+            if let snapshot {
+                treeCanvas(snapshot)
+            } else {
+                ContentUnavailableView(
+                    strings.noGrowthRecords,
+                    systemImage: "point.3.connected.trianglepath.dotted"
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .background(Color(.secondarySystemBackground))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.secondary.opacity(0.08), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var summary: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(strings.studyStatusTree)
+                        .font(.headline)
+                    Text(strings.studyStatusTreeDescription)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 8)
+            }
+
+            HStack(spacing: 8) {
+                StudyGrowthSummaryMetric(
+                    value: "\(root.answerCount)",
+                    label: strings.totalLearningShort
+                )
+                StudyGrowthSummaryMetric(
+                    value: "\(root.totalTopicCount)",
+                    label: strings.totalTopicsShort
+                )
+                StudyGrowthSummaryMetric(
+                    value: "\(root.measuredTopicCount)",
+                    label: strings.measuredTopicsShort
+                )
+            }
+        }
+        .padding(18)
+    }
+
+    private func treeCanvas(_ snapshot: StudyTreeLayoutSnapshot) -> some View {
+        GeometryReader { geometry in
+            let canvasLayout = StudyTreeCanvasPolicy.expandedLayout(
+                baseCenters: snapshot.centerByRoomID,
+                nodeOffsets: nodeOffsets,
+                baseCanvasSize: snapshot.size,
+                nodeSize: StudyTreeLayoutSnapshot.nodeSize
+            )
+            let fittedScale = StudyTreeViewportPolicy.fittedZoomScale(
+                canvasSize: canvasLayout.size,
+                viewportSize: geometry.size
+            )
+            let zoomScale = min(
+                max(
+                    fittedScale * zoomMultiplier,
+                    StudyTreeViewportPolicy.minimumZoomScale
+                ),
+                StudyTreeViewportPolicy.maximumZoomScale
+            )
+            let scaledCanvasSize = CGSize(
+                width: canvasLayout.size.width * zoomScale,
+                height: canvasLayout.size.height * zoomScale
+            )
+
+            ZStack {
+                ScrollView([.horizontal, .vertical]) {
+                    ZStack(alignment: .topLeading) {
+                        Canvas { context, _ in
+                            for edge in snapshot.edges {
+                                let parent = renderedCenter(
+                                    edge.parent,
+                                    roomID: edge.parentID,
+                                    canvasLayout: canvasLayout
+                                )
+                                let child = renderedCenter(
+                                    edge.child,
+                                    roomID: edge.childID,
+                                    canvasLayout: canvasLayout
+                                )
+                                guard let edgeGeometry = StudyTreeEdgePolicy.directionalGeometry(
+                                    parent: parent,
+                                    child: child,
+                                    nodeRadius: StudyTreeLayoutSnapshot.nodeSize.width / 2 + 4
+                                ) else {
+                                    continue
+                                }
+
+                                StudyTreeConnector.draw(
+                                    edgeGeometry,
+                                    in: &context
+                                )
+                            }
+                        }
+
+                        ForEach(snapshot.placements) { placement in
+                            if let node = nodesByID[placement.id] {
+                                NavigationLink {
+                                    StudyGrowthNodeDetailView(node: node, strings: strings)
+                                } label: {
+                                    StudyGrowthScoreTreeNode(
+                                        topic: node.topic,
+                                        currentLevel: node.currentLevel,
+                                        growth: node.growth,
+                                        strings: strings
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .position(
+                                    renderedCenter(
+                                        placement.center,
+                                        roomID: placement.id,
+                                        canvasLayout: canvasLayout
+                                    )
+                                )
+                            }
+                        }
+                    }
+                    .frame(width: canvasLayout.size.width, height: canvasLayout.size.height)
+                    .scaleEffect(zoomScale, anchor: .topLeading)
+                    .frame(
+                        width: scaledCanvasSize.width,
+                        height: scaledCanvasSize.height,
+                        alignment: .topLeading
+                    )
+                    .frame(
+                        width: max(geometry.size.width, scaledCanvasSize.width),
+                        height: max(geometry.size.height, scaledCanvasSize.height),
+                        alignment: .center
+                    )
+                }
+                .simultaneousGesture(zoomGesture)
+            }
+        }
+    }
+
+    private var zoomGesture: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                if !isZoomGestureActive {
+                    isZoomGestureActive = true
+                    zoomStartMultiplier = zoomMultiplier
+                }
+                zoomMultiplier = min(
+                    max(zoomStartMultiplier * value.magnification, 0.6),
+                    3
+                )
+            }
+            .onEnded { _ in
+                isZoomGestureActive = false
+                zoomStartMultiplier = zoomMultiplier
+            }
+    }
+
+    private func renderedCenter(
+        _ center: CGPoint,
+        roomID: Int,
+        canvasLayout: StudyTreeCanvasLayout
+    ) -> CGPoint {
+        let offset = StudyTreeCanvasPolicy.sanitizedOffset(nodeOffsets[roomID] ?? .zero)
+        return CGPoint(
+            x: center.x + offset.width + canvasLayout.translation.width,
+            y: center.y + offset.height + canvasLayout.translation.height
+        )
+    }
+
+}
+
+private struct StudyGrowthScoreTreeNode: View {
+    var topic: String
+    var currentLevel: Double?
+    var growth: Double?
+    var strings: AppStrings
+
+    private var nodeColor: Color {
+        guard currentLevel != nil else {
+            return .secondary.opacity(0.65)
+        }
+        if let growth, growth < -0.15 {
+            return .orange
+        }
+        return .accentColor
+    }
+
+    private var fillFraction: CGFloat {
+        guard let currentLevel else {
+            return 0
+        }
+        return CGFloat(min(max(currentLevel / 10, 0), 1))
+    }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(topic)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(StudyGrowthFormat.level(currentLevel))
+                    .font(.system(size: 19, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                Text("/10")
+                    .font(.system(size: 8, weight: .semibold, design: .rounded))
+            }
+            .foregroundStyle(nodeColor)
+
+            Text(growth.map(StudyGrowthFormat.delta) ?? strings.measuringGrowth)
+                .font(.caption2.weight(.bold))
+                .monospacedDigit()
+                .foregroundStyle(StudyGrowthFormat.color(growth))
+        }
+        .padding(11)
+        .frame(
+            width: StudyTreeLayoutSnapshot.nodeSize.width,
+            height: StudyTreeLayoutSnapshot.nodeSize.height
+        )
+        .background {
+            Circle()
+                .fill(Color(.secondarySystemBackground))
+        }
+        .overlay {
+            Circle()
+                .strokeBorder(Color.secondary.opacity(0.22), lineWidth: 2.5)
+        }
+        .overlay {
+            Circle()
+                .trim(from: 0, to: fillFraction)
+                .stroke(
+                    nodeColor,
+                    style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+                .padding(1.5)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(topic), \(strings.currentAbility) \(StudyGrowthFormat.level(currentLevel)), "
+                + "\(StudyGrowthFormat.delta(growth))"
+        )
+    }
+}
+
+private struct StudyGrowthTreeNodeRow: View {
+    var item: StudyGrowthTreeItem
+    var currentLevel: Double?
+    var growth: Double?
+    var answerCount: Int
+    var measuredTopicCount: Int
+    var totalTopicCount: Int
+    var isRoot: Bool
+    var strings: AppStrings
+
+    private var scoreColor: Color {
+        guard currentLevel != nil else {
+            return .secondary
+        }
+        if let growth, growth < -0.15 {
+            return .orange
+        }
+        return .accentColor
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            StudyGrowthTreeConnector(
+                item: item,
+                isMeasured: currentLevel != nil,
+                needsReview: growth.map { $0 < -0.15 } ?? false
+            )
+            .frame(
+                width: CGFloat(min(item.localDepth, 6) + 1) * 16,
+                height: 70
+            )
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Text(item.node.topic)
+                        .font(.subheadline.weight(isRoot ? .bold : .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+
+                    if isRoot {
+                        Text(strings.comprehensive)
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Color.accentColor)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.accentColor.opacity(0.11), in: Capsule())
+                    }
+                }
+
+                Text(
+                    "\(strings.growthAnswerCount(answerCount)) · "
+                        + strings.measuredTopics(measuredTopicCount, total: totalTopicCount)
+                )
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+
+            Spacer(minLength: 6)
+
+            VStack(alignment: .trailing, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text(StudyGrowthFormat.level(currentLevel))
+                        .font(.system(size: isRoot ? 23 : 19, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                    Text("/10")
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+                .foregroundStyle(scoreColor)
+
+                StudyGrowthDeltaLabel(growth: growth, strings: strings)
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.trailing, 14)
+        .frame(minHeight: 70)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(item.node.topic), \(isRoot ? strings.comprehensive : ""), "
+                + "\(strings.currentAbility) \(StudyGrowthFormat.level(currentLevel)), "
+                + "\(StudyGrowthFormat.delta(growth))"
+        )
+    }
+}
+
+private struct StudyGrowthTreeConnector: View {
+    var item: StudyGrowthTreeItem
+    var isMeasured: Bool
+    var needsReview: Bool
+
+    private let maximumVisibleDepth = 6
+    private let columnWidth: CGFloat = 16
+
+    private var visibleDepth: Int {
+        min(item.localDepth, maximumVisibleDepth)
+    }
+
+    private var nodeColor: Color {
+        if !isMeasured {
+            return .secondary.opacity(0.55)
+        }
+        return needsReview ? .orange : .accentColor
+    }
+
+    var body: some View {
+        Canvas { context, size in
+            let middleY = size.height / 2
+            let lineColor = Color.secondary.opacity(0.23)
+
+            for depth in item.continuingAncestorDepths where depth < visibleDepth {
+                let x = CGFloat(min(depth, maximumVisibleDepth)) * columnWidth + columnWidth / 2
+                var path = Path()
+                path.move(to: CGPoint(x: x, y: 0))
+                path.addLine(to: CGPoint(x: x, y: size.height))
+                context.stroke(path, with: .color(lineColor), lineWidth: 1)
+            }
+
+            let nodeX = CGFloat(visibleDepth) * columnWidth + columnWidth / 2
+            if visibleDepth > 0 {
+                let parentX = CGFloat(visibleDepth - 1) * columnWidth + columnWidth / 2
+                var branch = Path()
+                branch.move(to: CGPoint(x: parentX, y: 0))
+                branch.addLine(
+                    to: CGPoint(
+                        x: parentX,
+                        y: item.isLastSibling ? middleY : size.height
+                    )
+                )
+                branch.move(to: CGPoint(x: parentX, y: middleY))
+                branch.addLine(to: CGPoint(x: nodeX, y: middleY))
+                context.stroke(branch, with: .color(lineColor), lineWidth: 1)
+            }
+
+            let nodeSize: CGFloat = item.localDepth == 0 ? 10 : 8
+            context.fill(
+                Path(
+                    ellipseIn: CGRect(
+                        x: nodeX - nodeSize / 2,
+                        y: middleY - nodeSize / 2,
+                        width: nodeSize,
+                        height: nodeSize
+                    )
+                ),
+                with: .color(nodeColor)
+            )
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct StudyGrowthSummaryCard: View {
+    var root: BackendStudyGrowthRoot
+    var strings: AppStrings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(root.topic)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+
+                    Text(strings.studyGrowthSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 8)
+
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(StudyGrowthFormat.level(root.currentLevel))
+                        .font(.system(size: 29, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+
+                    StudyGrowthDeltaLabel(growth: root.growth, strings: strings)
+                }
+            }
+
+            StudyGrowthSparkline(values: root.trend)
+                .frame(height: 48)
+
+            HStack(spacing: 8) {
+                StudyGrowthSummaryMetric(
+                    value: "\(root.answerCount)",
+                    label: strings.totalLearningShort
+                )
+                StudyGrowthSummaryMetric(
+                    value: "\(root.totalTopicCount)",
+                    label: strings.totalTopicsShort
+                )
+                StudyGrowthSummaryMetric(
+                    value: "\(root.measuredTopicCount)",
+                    label: strings.measuredTopicsShort
+                )
+            }
+        }
+        .padding(18)
+        .background(Color(.secondarySystemBackground))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.secondary.opacity(0.08), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct StudyGrowthSummaryMetric: View {
+    var value: String
+    var label: String
+
+    var body: some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.subheadline.weight(.bold))
+                .monospacedDigit()
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(Color.secondary.opacity(0.09), in: RoundedRectangle(cornerRadius: 11))
+    }
+}
+
+private struct StudyGrowthMapItem: Identifiable {
+    var node: BackendStudyGrowthNode
+    var localDepth: Int
+    var start: CGFloat
+    var width: CGFloat
+
+    var id: Int { node.studyId }
+}
+
+private struct StudyGrowthHierarchyMapCard: View {
+    var nodes: [BackendStudyGrowthNode]
+    var rootNode: BackendStudyGrowthNode
+    var strings: AppStrings
+
+    @State private var focusedStudyID: Int?
+
+    private let rowHeight: CGFloat = 44
+    private let rowSpacing: CGFloat = 5
+    private let depthRailWidth: CGFloat = 28
+
+    private var nodesByID: [Int: BackendStudyGrowthNode] {
+        Dictionary(uniqueKeysWithValues: nodes.map { ($0.studyId, $0) })
+    }
+
+    private var childrenByID: [Int: [BackendStudyGrowthNode]] {
+        Dictionary(grouping: nodes.filter { $0.parentStudyId != nil }) {
+            $0.parentStudyId ?? -1
+        }
+        .mapValues {
+            $0.sorted {
+                if $0.sortOrder != $1.sortOrder {
+                    return $0.sortOrder < $1.sortOrder
+                }
+                return $0.studyId < $1.studyId
+            }
+        }
+    }
+
+    private var focusNode: BackendStudyGrowthNode {
+        if let focusedStudyID, let node = nodesByID[focusedStudyID] {
+            return node
+        }
+        return rootNode
+    }
+
+    private var parentNode: BackendStudyGrowthNode? {
+        focusNode.parentStudyId.flatMap { nodesByID[$0] }
+    }
+
+    private var mapItems: [StudyGrowthMapItem] {
+        var result: [StudyGrowthMapItem] = []
+        var weightCache: [Int: CGFloat] = [:]
+        let mapChildrenByID = childrenByID
+
+        appendMapItem(
+            focusNode,
+            localDepth: 0,
+            start: 0,
+            width: 1,
+            path: [],
+            childrenByID: mapChildrenByID,
+            result: &result,
+            weightCache: &weightCache
+        )
+        return result
+    }
+
+    private func leafWeight(
+        _ node: BackendStudyGrowthNode,
+        path: Set<Int>,
+        childrenByID: [Int: [BackendStudyGrowthNode]],
+        weightCache: inout [Int: CGFloat]
+    ) -> CGFloat {
+        if let cached = weightCache[node.studyId] {
+            return cached
+        }
+        guard !path.contains(node.studyId) else {
+            return 1
+        }
+        let children = childrenByID[node.studyId] ?? []
+        guard !children.isEmpty else {
+            weightCache[node.studyId] = 1
+            return 1
+        }
+        let nextPath = path.union([node.studyId])
+        var childWeight = CGFloat.zero
+        for child in children {
+            childWeight += leafWeight(
+                child,
+                path: nextPath,
+                childrenByID: childrenByID,
+                weightCache: &weightCache
+            )
+        }
+        let weight = max(childWeight, 1)
+        weightCache[node.studyId] = weight
+        return weight
+    }
+
+    private func appendMapItem(
+        _ node: BackendStudyGrowthNode,
+        localDepth: Int,
+        start: CGFloat,
+        width: CGFloat,
+        path: Set<Int>,
+        childrenByID: [Int: [BackendStudyGrowthNode]],
+        result: inout [StudyGrowthMapItem],
+        weightCache: inout [Int: CGFloat]
+    ) {
+        guard !path.contains(node.studyId) else {
+            return
+        }
+        result.append(
+            StudyGrowthMapItem(
+                node: node,
+                localDepth: localDepth,
+                start: start,
+                width: width
+            )
+        )
+
+        let children = childrenByID[node.studyId] ?? []
+        guard !children.isEmpty else {
+            return
+        }
+        let nextPath = path.union([node.studyId])
+        var totalWeight = CGFloat.zero
+        for child in children {
+            totalWeight += leafWeight(
+                child,
+                path: nextPath,
+                childrenByID: childrenByID,
+                weightCache: &weightCache
+            )
+        }
+        totalWeight = max(totalWeight, 1)
+
+        var nextStart = start
+        for child in children {
+            let childWeight = leafWeight(
+                child,
+                path: nextPath,
+                childrenByID: childrenByID,
+                weightCache: &weightCache
+            )
+            let childWidth = width * childWeight / totalWeight
+            appendMapItem(
+                child,
+                localDepth: localDepth + 1,
+                start: nextStart,
+                width: childWidth,
+                path: nextPath,
+                childrenByID: childrenByID,
+                result: &result,
+                weightCache: &weightCache
+            )
+            nextStart += childWidth
+        }
+    }
+
+    private var visibleDepthCount: Int {
+        (mapItems.map(\.localDepth).max() ?? 0) + 1
+    }
+
+    private var mapHeight: CGFloat {
+        CGFloat(visibleDepthCount) * rowHeight
+            + CGFloat(max(visibleDepthCount - 1, 0)) * rowSpacing
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(strings.studyMap)
+                        .font(.headline)
+                    Text(focusNode.topic)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                NavigationLink {
+                    StudyGrowthNodeDetailView(node: focusNode, strings: strings)
+                } label: {
+                    Label(strings.details, systemImage: "arrow.up.right")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.borderless)
+            }
+
+            if let parentNode {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        focusedStudyID = parentNode.studyId
+                    }
+                } label: {
+                    Label(strings.moveToParentTopic, systemImage: "chevron.left")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            }
+
+            GeometryReader { proxy in
+                let mapWidth = max(proxy.size.width - depthRailWidth, 1)
+
+                ZStack(alignment: .topLeading) {
+                    ForEach(0..<visibleDepthCount, id: \.self) { depth in
+                        Text("\(focusNode.depth + depth + 1)")
+                            .font(.caption2.weight(.bold).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: depthRailWidth - 4, height: rowHeight)
+                            .offset(y: CGFloat(depth) * (rowHeight + rowSpacing))
+                            .accessibilityHidden(true)
+                    }
+
+                    ForEach(mapItems) { item in
+                        let itemWidth = max(mapWidth * item.width - 4, 2)
+
+                        Button {
+                            guard focusedStudyID != item.node.studyId else {
+                                return
+                            }
+                            withAnimation(.easeInOut(duration: 0.22)) {
+                                focusedStudyID = item.node.studyId
+                            }
+                        } label: {
+                            StudyGrowthMapNode(
+                                node: item.node,
+                                availableWidth: itemWidth,
+                                strings: strings
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .frame(width: itemWidth, height: rowHeight)
+                        .offset(
+                            x: depthRailWidth + mapWidth * item.start + 2,
+                            y: CGFloat(item.localDepth) * (rowHeight + rowSpacing)
+                        )
+                    }
+                }
+                .id(focusNode.studyId)
+                .transition(.opacity)
+            }
+            .frame(height: mapHeight)
+            .clipped()
+
+            HStack(spacing: 12) {
+                StudyGrowthMapLegend(color: .accentColor, title: strings.ability)
+                StudyGrowthMapLegend(color: .orange, title: strings.needsReview)
+                StudyGrowthMapLegend(color: .secondary.opacity(0.45), title: strings.notMeasured)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(18)
+        .background(Color(.secondarySystemBackground))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.secondary.opacity(0.08), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+private struct StudyGrowthMapNode: View {
+    var node: BackendStudyGrowthNode
+    var availableWidth: CGFloat
+    var strings: AppStrings
+
+    private var levelOpacity: Double {
+        guard let level = node.currentLevel else {
+            return 0.12
+        }
+        return 0.17 + min(max((level - 1) / 9, 0), 1) * 0.46
+    }
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(
+                    node.currentLevel == nil
+                        ? Color.secondary.opacity(0.12)
+                        : Color.accentColor.opacity(levelOpacity)
+                )
+
+            if availableWidth >= 48 {
+                Text(node.topic)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .padding(.horizontal, availableWidth >= 72 ? 10 : 6)
+            }
+
+            if let growth = node.growth, growth < -0.15 {
+                Rectangle()
+                    .fill(Color.orange)
+                    .frame(height: 3)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.primary.opacity(0.05), lineWidth: 1)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "\(node.topic), \(strings.currentAbility) \(StudyGrowthFormat.level(node.currentLevel)), \(StudyGrowthFormat.delta(node.growth))"
+        )
+        .accessibilityHint(strings.studyMapFocusHint)
+    }
+}
+
+private struct StudyGrowthMapLegend: View {
+    var color: Color
+    var title: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+            Text(title)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+    }
+}
+
+private struct StudyGrowthAttentionCard: View {
+    var nodes: [BackendStudyGrowthNode]
+    var strings: AppStrings
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(strings.attentionStudies)
+                    .font(.headline)
+                Text(strings.attentionStudiesDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+
+            Divider()
+                .padding(.leading, 14)
+
+            ForEach(Array(nodes.enumerated()), id: \.element.studyId) { index, node in
+                if index > 0 {
+                    Divider()
+                        .padding(.leading, 42)
+                }
+
+                NavigationLink {
+                    StudyGrowthNodeDetailView(node: node, strings: strings)
+                } label: {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(node.topic)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            Text(attentionReason(node))
+                                .font(.caption)
+                                .foregroundStyle(attentionColor(node))
+                        }
+
+                        Spacer(minLength: 8)
+
+                        Text(StudyGrowthFormat.level(node.currentLevel))
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.primary)
+                            .monospacedDigit()
+
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 62)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .background(
+            Color(.secondarySystemBackground),
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.primary.opacity(0.04), lineWidth: 1)
+        }
+    }
+
+    private func attentionReason(_ node: BackendStudyGrowthNode) -> String {
+        if let growth = node.growth, growth < -0.15 {
+            return strings.needsReview
+        }
+        if node.currentLevel == nil {
+            return strings.notMeasured
+        }
+        if node.answerCount < 6 {
+            return strings.needsMoreAnswers(node.answerCount)
+        }
+        return strings.partialMeasurement
+    }
+
+    private func attentionColor(_ node: BackendStudyGrowthNode) -> Color {
+        if let growth = node.growth, growth < -0.15 {
+            return .orange
+        }
+        return .secondary
+    }
+}
+
+private struct StudyGrowthFlatNodeRow: View {
+    var node: BackendStudyGrowthNode
+    var strings: AppStrings
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Color.clear
+                .frame(width: CGFloat(min(node.depth, 5)) * 14)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(node.topic)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+
+                Text("\(strings.growthAnswerCount(node.answerCount)) · \(strings.measuredTopics(node.measuredTopicCount, total: node.totalTopicCount))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(StudyGrowthFormat.level(node.currentLevel))
+                    .font(.subheadline.weight(.bold))
+                    .monospacedDigit()
+                StudyGrowthDeltaLabel(growth: node.growth, strings: strings)
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 14)
+        .frame(minHeight: 70)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct StudyGrowthNodeDetailView: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var records: [StudyRecord] = []
+    @State private var totalRecordCount = 0
+    @State private var isLoadingRecords = false
+    @State private var didLoadRecords = false
+    @State private var recordsLoadFailed = false
+    @State private var selectedRecord: StudyRecord?
+
+    var node: BackendStudyGrowthNode
+    var strings: AppStrings
+
+    private static let pageSize = 30
+
+    private var canLoadMoreRecords: Bool {
+        records.count < totalRecordCount
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 18) {
+                HStack(spacing: 12) {
+                    metric(strings.previousAbility, StudyGrowthFormat.level(node.previousLevel))
+                    metric(strings.currentAbility, StudyGrowthFormat.level(node.currentLevel))
+                    metric(strings.growthChange, StudyGrowthFormat.delta(node.growth))
+                }
+
+                StudyGrowthTimelineChart(
+                    points: node.trendPoints ?? [],
+                    fallbackValues: node.trend,
+                    latestAt: node.latestAt,
+                    strings: strings
+                )
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Label(
+                        strings.measuredTopics(node.measuredTopicCount, total: node.totalTopicCount),
+                        systemImage: "point.3.connected.trianglepath.dotted"
+                    )
+                    Label(strings.growthAnswerCount(node.answerCount), systemImage: "checkmark.circle")
+                    if let latestAt = node.latestAt {
+                        Label {
+                            Text(strings.lastMeasuredAt(latestAt))
+                        } icon: {
+                            Image(systemName: "clock")
+                        }
+                    }
+                    if let growth = node.growth, growth < -0.15 {
+                        Label(strings.needsReview, systemImage: "arrow.counterclockwise")
+                            .foregroundStyle(.orange)
+                    }
+                }
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    Color(.secondarySystemBackground),
+                    in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                )
+
+                topicRecordsSection
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+        }
+        .navigationTitle(node.topic)
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .questionBrowseRecordPresentation(
+            selectedRecord: $selectedRecord,
+            strings: strings,
+            author: appState.communityProfile
+        )
+        .task(id: node.studyId) {
+            await loadRecords(reset: true)
+        }
+    }
+
+    @ViewBuilder
+    private var topicRecordsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(strings.topicLearningRecords)
+                    .font(.title3.weight(.bold))
+
+                Spacer()
+
+                if didLoadRecords {
+                    Text(strings.topicRecordCount(records.count, total: totalRecordCount))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+
+            if isLoadingRecords && records.isEmpty {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(strings.loadingTopicRecords)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 80)
+            } else if recordsLoadFailed && records.isEmpty {
+                ContentUnavailableView {
+                    Label(strings.topicRecordsLoadFailed, systemImage: "arrow.clockwise")
+                } description: {
+                    Text(strings.topicRecordsLoadFailedDescription)
+                } actions: {
+                    Button(strings.retry) {
+                        Task {
+                            await loadRecords(reset: true)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 180)
+            } else if records.isEmpty {
+                ContentUnavailableView(
+                    strings.noTopicRecords,
+                    systemImage: "clock.arrow.circlepath",
+                    description: Text(strings.noTopicRecordsDescription)
+                )
+                .frame(maxWidth: .infinity, minHeight: 180)
+            } else {
+                ForEach(records) { record in
+                    Button {
+                        selectedRecord = record
+                    } label: {
+                        HistoryRow(
+                            record: record,
+                            strings: strings,
+                            isSelected: false
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .onAppear {
+                        loadNextPageIfNeeded(record)
+                    }
+                }
+
+                if isLoadingRecords && canLoadMoreRecords {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                } else if recordsLoadFailed {
+                    Button(strings.retry) {
+                        Task {
+                            await loadRecords(reset: false)
+                        }
+                    }
+                    .font(.caption.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                }
+            }
+        }
+    }
+
+    private func metric(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: 25, weight: .bold, design: .rounded))
+                .monospacedDigit()
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Color(.secondarySystemBackground),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
+    }
+
+    private func loadNextPageIfNeeded(_ record: StudyRecord) {
+        guard record.id == records.last?.id,
+              canLoadMoreRecords,
+              !isLoadingRecords else {
+            return
+        }
+        Task {
+            await loadRecords(reset: false)
+        }
+    }
+
+    @MainActor
+    private func loadRecords(reset: Bool) async {
+        guard !isLoadingRecords else {
+            return
+        }
+        if reset {
+            records = []
+            totalRecordCount = 0
+            didLoadRecords = false
+        } else {
+            guard canLoadMoreRecords else {
+                return
+            }
+        }
+
+        isLoadingRecords = true
+        recordsLoadFailed = false
+        defer {
+            isLoadingRecords = false
+            didLoadRecords = true
+        }
+
+        do {
+            let page = try await appState.fetchBackendRecords(
+                studyID: node.studyId,
+                limit: Self.pageSize,
+                offset: reset ? 0 : records.count
+            )
+            var seenIDs = reset ? Set<String>() : Set(records.map(\.id))
+            let newRecords = page.records.filter { seenIDs.insert($0.id).inserted }
+            records = reset ? newRecords : records + newRecords
+            totalRecordCount = max(page.totalCount, records.count)
+        } catch {
+            recordsLoadFailed = true
+        }
+    }
+}
+
+private struct StudyGrowthDeltaLabel: View {
+    var growth: Double?
+    var strings: AppStrings
+
+    var body: some View {
+        Text(growth.map(StudyGrowthFormat.delta) ?? strings.measuringGrowth)
+            .font(.caption2.weight(.bold))
+            .monospacedDigit()
+            .foregroundStyle(StudyGrowthFormat.color(growth))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(StudyGrowthFormat.color(growth).opacity(0.10), in: Capsule())
+    }
+}
+
+private struct StudyGrowthSparkline: View {
+    var values: [Double]
+
+    var body: some View {
+        GeometryReader { proxy in
+            if values.count < 2 {
+                Capsule()
+                    .fill(Color.secondary.opacity(0.14))
+                    .frame(height: 3)
+                    .frame(maxHeight: .infinity, alignment: .center)
+            } else {
+                Path { path in
+                    for (index, value) in values.enumerated() {
+                        let x = proxy.size.width * CGFloat(index) / CGFloat(values.count - 1)
+                        let normalized = (min(max(value, 1), 10) - 1) / 9
+                        let y = proxy.size.height * CGFloat(1 - normalized)
+                        if index == 0 {
+                            path.move(to: CGPoint(x: x, y: y))
+                        } else {
+                            path.addLine(to: CGPoint(x: x, y: y))
+                        }
+                    }
+                }
+                .stroke(
+                    Color.accentColor,
+                    style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round)
+                )
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct StudyGrowthTimelineChart: View {
+    struct Point: Identifiable {
+        var index: Int
+        var measuredAt: Date?
+        var level: Double
+
+        var id: Int { index }
+    }
+
+    var points: [BackendStudyGrowthTrendPoint]
+    var fallbackValues: [Double]
+    var latestAt: Date?
+    var strings: AppStrings
+
+    private var displayPoints: [Point] {
+        if !points.isEmpty {
+            return points
+                .sorted { $0.measuredAt < $1.measuredAt }
+                .enumerated()
+                .map { index, point in
+                    Point(index: index, measuredAt: point.measuredAt, level: point.level)
+                }
+        }
+        return fallbackValues.enumerated().map { index, value in
+            Point(
+                index: index,
+                measuredAt: index == fallbackValues.indices.last ? latestAt : nil,
+                level: value
+            )
+        }
+    }
+
+    private var firstMeasuredAt: Date? {
+        displayPoints.compactMap(\.measuredAt).first
+    }
+
+    private var lastMeasuredAt: Date? {
+        displayPoints.compactMap(\.measuredAt).last ?? latestAt
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(strings.abilityTrend)
+                    .font(.headline)
+                Spacer(minLength: 8)
+                if let lastMeasuredAt {
+                    Text(strings.lastMeasuredAt(lastMeasuredAt))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if displayPoints.count < 2 {
+                ContentUnavailableView(
+                    strings.notEnoughTrendData,
+                    systemImage: "chart.line.uptrend.xyaxis",
+                    description: Text(strings.notEnoughTrendDataDescription)
+                )
+                .frame(maxWidth: .infinity, minHeight: 110)
+            } else {
+                GeometryReader { proxy in
+                    let chartFrame = CGRect(
+                        x: 30,
+                        y: 6,
+                        width: max(proxy.size.width - 38, 1),
+                        height: max(proxy.size.height - 34, 1)
+                    )
+                    let positioned = positionedPoints(in: chartFrame)
+
+                    ZStack(alignment: .topLeading) {
+                        Path { path in
+                            path.move(to: CGPoint(x: chartFrame.minX, y: chartFrame.minY))
+                            path.addLine(to: CGPoint(x: chartFrame.maxX, y: chartFrame.minY))
+                            path.move(to: CGPoint(x: chartFrame.minX, y: chartFrame.maxY))
+                            path.addLine(to: CGPoint(x: chartFrame.maxX, y: chartFrame.maxY))
+                        }
+                        .stroke(Color.secondary.opacity(0.16), style: StrokeStyle(lineWidth: 1, dash: [3, 4]))
+
+                        Path { path in
+                            for (index, point) in positioned.enumerated() {
+                                if index == 0 {
+                                    path.move(to: point)
+                                } else {
+                                    path.addLine(to: point)
+                                }
+                            }
+                        }
+                        .stroke(
+                            Color.accentColor,
+                            style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round)
+                        )
+
+                        ForEach(Array(positioned.enumerated()), id: \.offset) { _, point in
+                            Circle()
+                                .fill(Color.accentColor)
+                                .frame(width: 7, height: 7)
+                                .position(point)
+                        }
+
+                        Text("10")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .position(x: 12, y: chartFrame.minY + 4)
+                        Text("1")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .position(x: 12, y: chartFrame.maxY - 4)
+
+                        if let firstMeasuredAt {
+                            Text(Self.axisDateFormatter.string(from: firstMeasuredAt))
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .position(x: chartFrame.minX + 28, y: chartFrame.maxY + 19)
+                        }
+                        if let lastMeasuredAt {
+                            Text(Self.axisDateFormatter.string(from: lastMeasuredAt))
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .position(x: chartFrame.maxX - 28, y: chartFrame.maxY + 19)
+                        }
+                    }
+                }
+                .frame(height: 146)
+            }
+        }
+        .padding(16)
+        .background(
+            Color(.secondarySystemBackground),
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+        .accessibilityElement(children: .combine)
+    }
+
+    private func positionedPoints(in frame: CGRect) -> [CGPoint] {
+        let dated = displayPoints.compactMap(\.measuredAt)
+        let firstDate = dated.first
+        let lastDate = dated.last
+        let duration = firstDate.flatMap { start in
+            lastDate.map { max($0.timeIntervalSince(start), 1) }
+        }
+
+        return displayPoints.enumerated().map { index, point in
+            let xProgress: Double
+            if let measuredAt = point.measuredAt,
+               let firstDate,
+               let duration {
+                xProgress = measuredAt.timeIntervalSince(firstDate) / duration
+            } else {
+                xProgress = Double(index) / Double(max(displayPoints.count - 1, 1))
+            }
+            let levelProgress = (min(max(point.level, 1), 10) - 1) / 9
+            return CGPoint(
+                x: frame.minX + frame.width * CGFloat(min(max(xProgress, 0), 1)),
+                y: frame.maxY - frame.height * CGFloat(levelProgress)
+            )
+        }
+    }
+
+    private static let axisDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("M/d HH:mm")
+        return formatter
+    }()
+}
+
+private enum StudyGrowthFormat {
+    static func level(_ value: Double?) -> String {
+        guard let value else {
+            return "–"
+        }
+        return value.formatted(.number.precision(.fractionLength(1)))
+    }
+
+    static func delta(_ value: Double?) -> String {
+        guard let value else {
+            return "–"
+        }
+        let formatted = abs(value).formatted(.number.precision(.fractionLength(1)))
+        if value > 0.05 {
+            return "+\(formatted)"
+        }
+        if value < -0.05 {
+            return "-\(formatted)"
+        }
+        return "0.0"
+    }
+
+    static func color(_ value: Double?) -> Color {
+        guard let value else {
+            return .secondary
+        }
+        if value > 0.05 {
+            return .accentColor
+        }
+        if value < -0.15 {
+            return .orange
+        }
+        return .secondary
+    }
+}
+
+private enum LegacyStudyGrowthProjection {
+    static func make(
+        rooms: [BackendStudyRoom],
+        records: [StudyRecord],
+        startAt: Date,
+        endAt: Date
+    ) -> BackendStudyGrowth? {
+        guard !rooms.isEmpty else {
+            return nil
+        }
+
+        let roomsByID = Dictionary(uniqueKeysWithValues: rooms.map { ($0.id, $0) })
+        let childrenByParent = Dictionary(grouping: rooms.filter { $0.parentStudyId != nil }) {
+            $0.parentStudyId ?? -1
+        }
+        let filteredRecords = records.filter { record in
+            let date = record.answeredAt ?? record.question.createdAt
+            return date >= startAt && date < endAt
+        }
+        let recordsByStudy = Dictionary(grouping: filteredRecords.compactMap { record -> (Int, StudyRecord)? in
+            guard let studyID = record.studyID else {
+                return nil
+            }
+            return (studyID, record)
+        }, by: \.0).mapValues { pairs in
+            pairs.map(\.1)
+        }
+        var subtreeMemo: [Int: Set<Int>] = [:]
+
+        func subtreeIDs(_ studyID: Int, visiting: Set<Int> = []) -> Set<Int> {
+            if let cached = subtreeMemo[studyID] {
+                return cached
+            }
+            guard !visiting.contains(studyID) else {
+                return [studyID]
+            }
+            var result: Set<Int> = [studyID]
+            for child in childrenByParent[studyID] ?? [] {
+                result.formUnion(subtreeIDs(child.id, visiting: visiting.union([studyID])))
+            }
+            subtreeMemo[studyID] = result
+            return result
+        }
+
+        func rootID(_ room: BackendStudyRoom) -> Int {
+            var current = room
+            var visited = Set<Int>()
+            while let parentID = current.parentStudyId,
+                  let parent = roomsByID[parentID],
+                  visited.insert(current.id).inserted {
+                current = parent
+            }
+            return current.id
+        }
+
+        func depth(_ room: BackendStudyRoom) -> Int {
+            var current = room
+            var value = 0
+            var visited = Set<Int>()
+            while let parentID = current.parentStudyId,
+                  let parent = roomsByID[parentID],
+                  visited.insert(current.id).inserted {
+                current = parent
+                value += 1
+            }
+            return value
+        }
+
+        func metrics(_ room: BackendStudyRoom) -> LegacyGrowthMetrics {
+            let subtree = subtreeIDs(room.id)
+            let recordsForSubtree: [StudyRecord] = subtree.flatMap { studyID in
+                recordsByStudy[studyID] ?? []
+            }
+            let gradedRecords = recordsForSubtree.filter { record in
+                record.gradingResult != nil && record.answeredAt != nil
+            }
+            let subtreeRecords = gradedRecords.sorted { lhs, rhs in
+                let lhsDate = lhs.answeredAt ?? lhs.question.createdAt
+                let rhsDate = rhs.answeredAt ?? rhs.question.createdAt
+                return lhsDate < rhsDate
+            }
+            let measuredCount = subtree.reduce(into: 0) { count, studyID in
+                if (recordsByStudy[studyID] ?? []).count >= 6 {
+                    count += 1
+                }
+            }
+            return LegacyGrowthMetrics(
+                records: subtreeRecords,
+                measuredTopicCount: measuredCount,
+                totalTopicCount: subtree.count
+            )
+        }
+
+        func average(_ values: [Double]) -> Double? {
+            guard !values.isEmpty else {
+                return nil
+            }
+            return values.reduce(0, +) / Double(values.count)
+        }
+
+        func profile(_ room: BackendStudyRoom) -> BackendStudyGrowthProfile {
+            let subtree = subtreeIDs(room.id)
+            let generated = records.filter {
+                guard let studyID = $0.studyID, subtree.contains(studyID) else {
+                    return false
+                }
+                return $0.question.createdAt >= startAt && $0.question.createdAt < endAt
+            }
+            let answered = records.filter {
+                guard let studyID = $0.studyID,
+                      subtree.contains(studyID),
+                      $0.gradingResult != nil,
+                      let answeredAt = $0.answeredAt else {
+                    return false
+                }
+                return answeredAt >= startAt && answeredAt < endAt
+            }
+            let rootDepth = depth(room)
+            let deepestTreeLevel = subtree
+                .compactMap { roomsByID[$0] }
+                .map(depth)
+                .max()
+                .map { $0 - rootDepth + 1 } ?? 1
+            let deepestAnsweredLevel = answered
+                .compactMap(\.studyID)
+                .compactMap { roomsByID[$0] }
+                .map(depth)
+                .max()
+                .map { $0 - rootDepth + 1 }
+
+            return BackendStudyGrowthProfile(
+                achievement: average(
+                    answered.compactMap(\.gradingResult?.score).map(Double.init)
+                ).map { $0 / 100 },
+                challenge: average(
+                    answered.map { Double($0.difficulty.level) }
+                ).map { $0 / 10 },
+                completion: generated.isEmpty
+                    ? nil
+                    : Double(generated.filter { $0.gradingResult != nil && $0.answeredAt != nil }.count)
+                        / Double(generated.count),
+                breadth: answered.isEmpty
+                    ? nil
+                    : Double(Set(answered.compactMap(\.studyID)).count) / Double(max(subtree.count, 1)),
+                depth: deepestAnsweredLevel.map { Double($0) / Double(max(deepestTreeLevel, 1)) }
+            )
+        }
+
+        let nodeResponses = rooms.map { room -> BackendStudyGrowthNode in
+            let value = metrics(room)
+            return BackendStudyGrowthNode(
+                studyId: room.id,
+                parentStudyId: room.parentStudyId.flatMap { roomsByID[$0]?.id },
+                rootStudyId: rootID(room),
+                topic: room.topic,
+                sortOrder: room.sortOrder,
+                depth: depth(room),
+                childCount: childrenByParent[room.id]?.count ?? 0,
+                activeForQuestions: room.activeForQuestions,
+                currentLevel: value.currentLevel,
+                previousLevel: value.previousLevel,
+                growth: value.growth,
+                answerCount: value.records.count,
+                measuredTopicCount: value.measuredTopicCount,
+                totalTopicCount: value.totalTopicCount,
+                latestAt: value.records.last.map { $0.answeredAt ?? $0.question.createdAt },
+                trend: value.trend
+            )
+        }
+        let nodesByID = Dictionary(uniqueKeysWithValues: nodeResponses.map { ($0.studyId, $0) })
+        let rootResponses = rooms
+            .filter { $0.parentStudyId == nil || roomsByID[$0.parentStudyId ?? -1] == nil }
+            .sorted {
+                if $0.sortOrder != $1.sortOrder {
+                    return $0.sortOrder < $1.sortOrder
+                }
+                return $0.id < $1.id
+            }
+            .compactMap { room -> BackendStudyGrowthRoot? in
+                guard let node = nodesByID[room.id] else {
+                    return nil
+                }
+                return BackendStudyGrowthRoot(
+                    studyId: node.studyId,
+                    topic: node.topic,
+                    activeForQuestions: node.activeForQuestions,
+                    currentLevel: node.currentLevel,
+                    previousLevel: node.previousLevel,
+                    growth: node.growth,
+                    answerCount: node.answerCount,
+                    measuredTopicCount: node.measuredTopicCount,
+                    totalTopicCount: node.totalTopicCount,
+                    trend: node.trend,
+                    profile: profile(room)
+                )
+            }
+        return BackendStudyGrowth(
+            roots: rootResponses,
+            nodes: nodeResponses,
+            startAt: startAt,
+            endAt: endAt,
+            generatedAt: Date()
+        )
+    }
+
+    private struct LegacyGrowthMetrics {
+        var records: [StudyRecord]
+        var measuredTopicCount: Int
+        var totalTopicCount: Int
+
+        var currentLevel: Double? {
+            averageLevel(Array(records.suffix(min(records.count, 5))))
+        }
+
+        var previousLevel: Double? {
+            guard let currentLevel, let growth else {
+                return nil
+            }
+            return currentLevel - growth
+        }
+
+        var growth: Double? {
+            guard records.count >= 6 else {
+                return nil
+            }
+            let windowSize = min(5, records.count / 2)
+            let previous = Array(records.dropLast(windowSize).suffix(windowSize))
+            let recent = Array(records.suffix(windowSize))
+            guard let previousLevel = averageLevel(previous),
+                  let recentLevel = averageLevel(recent) else {
+                return nil
+            }
+            return recentLevel - previousLevel
+        }
+
+        var trend: [Double] {
+            guard !records.isEmpty else {
+                return []
+            }
+            let chunkSize = max(1, Int(ceil(Double(records.count) / 6)))
+            return stride(from: 0, to: records.count, by: chunkSize).compactMap { start in
+                let end = min(start + chunkSize, records.count)
+                return averageLevel(Array(records[start..<end]))
+            }
+        }
+
+        private func averageLevel(_ values: [StudyRecord]) -> Double? {
+            guard !values.isEmpty else {
+                return nil
+            }
+            return values.map { record in
+                let score = min(max(record.gradingResult?.score ?? 0, 0), 100)
+                return min(
+                    max(
+                        Double(record.difficulty.level) + (Double(score) - 50) / 30,
+                        1
+                    ),
+                    10
+                )
+            }.reduce(0, +) / Double(values.count)
+        }
     }
 }
 
@@ -1865,7 +4292,7 @@ private struct ScoreRecordRow: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
 
-                Text(record.question.question)
+                Text(MarkdownContent.plainText(record.question.question))
                     .lineLimit(1)
             }
 

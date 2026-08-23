@@ -87,6 +87,7 @@ class ReadinessCheckerTest {
         val connection = mock(ReactiveRedisConnection::class.java)
         `when`(redis.reactiveConnection).thenReturn(connection)
         `when`(connection.ping()).thenReturn(Mono.just("PONG"))
+        `when`(connection.closeLater()).thenReturn(Mono.empty())
         return redis
     }
 }

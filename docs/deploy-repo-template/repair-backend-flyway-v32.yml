@@ -1,0 +1,122 @@
+name: Repair BuddyStudy Backend Flyway V32
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type repair-v32 to repair only the failed V32 migration."
+        required: true
+        type: string
+
+concurrency:
+  group: repair-backend-flyway-v32
+  cancel-in-progress: false
+
+jobs:
+  repair_backend_flyway_v32:
+    name: Repair backend Flyway V32
+    runs-on: [self-hosted, Linux, ARM64, ec2]
+    timeout-minutes: 10
+
+    steps:
+      - name: Validate confirmation
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          if [ "${CONFIRMATION}" != "repair-v32" ]; then
+            echo "Confirmation must be exactly: repair-v32" >&2
+            exit 1
+          fi
+
+      - name: Repair failed V32 metadata and partial constraints
+        env:
+          MYSQL_SECRET_ID: buddystudy/prod/mysql
+        run: |
+          set -euo pipefail
+
+          MYSQL_SECRET_JSON="$(
+            aws secretsmanager get-secret-value \
+              --region ap-northeast-2 \
+              --secret-id "${MYSQL_SECRET_ID}" \
+              --query SecretString \
+              --output text
+          )"
+          MYSQL_DATABASE="$(SECRET_JSON="${MYSQL_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["dbname"])')"
+          MYSQL_USER="$(SECRET_JSON="${MYSQL_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["username"])')"
+          MYSQL_PASSWORD="$(SECRET_JSON="${MYSQL_SECRET_JSON}" python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["password"])')"
+
+          mysql_query() {
+            docker exec \
+              -e MYSQL_PWD="${MYSQL_PASSWORD}" \
+              buddystudy-db \
+              mysql --batch --skip-column-names \
+              -h 127.0.0.1 \
+              -u "${MYSQL_USER}" \
+              "${MYSQL_DATABASE}" \
+              -e "$1"
+          }
+
+          FAILED_V32="$(mysql_query "select count(*) from flyway_schema_history where version = '32' and success = 0")"
+          OTHER_FAILURES="$(mysql_query "select count(*) from flyway_schema_history where success = 0 and coalesce(version, '') <> '32'")"
+          SUCCESSFUL_V32="$(mysql_query "select count(*) from flyway_schema_history where version = '32' and success = 1")"
+
+          if [ "${OTHER_FAILURES}" != "0" ]; then
+            echo "Refusing repair because another Flyway migration is failed." >&2
+            exit 1
+          fi
+          if [ "${SUCCESSFUL_V32}" != "0" ]; then
+            echo "V32 is already successful; no repair is allowed." >&2
+            exit 1
+          fi
+          if [ "${FAILED_V32}" = "0" ]; then
+            echo "No failed V32 row exists; nothing to repair."
+            exit 0
+          fi
+
+          while read -r table_name constraint_name; do
+            constraint_count="$(
+              mysql_query "
+                select count(*)
+                from information_schema.table_constraints
+                where constraint_schema = database()
+                  and table_name = '${table_name}'
+                  and constraint_name = '${constraint_name}'
+                  and constraint_type = 'CHECK'
+              "
+            )"
+            if [ "${constraint_count}" = "1" ]; then
+              mysql_query "alter table \`${table_name}\` drop check \`${constraint_name}\`"
+              echo "Dropped partial constraint ${table_name}.${constraint_name}."
+            fi
+          done <<'CONSTRAINTS'
+          users chk_users_provider
+          users chk_users_status
+          users chk_users_avatar_mode
+          users chk_users_app_language
+          user_memberships chk_user_memberships_status
+          devices chk_devices_platform
+          devices chk_devices_apns_environment
+          devices chk_devices_language
+          avatar_categories chk_avatar_categories_slot
+          avatar_items chk_avatar_items_slot
+          user_avatar_items chk_user_avatar_items_granted_source
+          feedbacks chk_feedbacks_status
+          app_notifications chk_app_notifications_type
+          app_notifications chk_app_notifications_thread_type
+          questions chk_questions_status
+          questions chk_questions_source
+          questions chk_questions_grading_verdict
+          questions chk_questions_grading_status
+          question_push_outbox chk_question_push_outbox_language
+          question_push_outbox chk_question_push_outbox_status
+          study_question_jobs chk_study_question_jobs_status
+          CONSTRAINTS
+
+          mysql_query "delete from flyway_schema_history where version = '32' and success = 0"
+          REMAINING_FAILED="$(mysql_query "select count(*) from flyway_schema_history where success = 0")"
+          if [ "${REMAINING_FAILED}" != "0" ]; then
+            echo "Flyway still contains failed migration rows after repair." >&2
+            exit 1
+          fi
+          echo "Failed V32 metadata and partial constraints were repaired."

@@ -44,4 +44,12 @@ struct CurrentStudySessionUseCase {
     func hasExplicitRunningPreference() -> Bool {
         repository.hasExplicitRunningPreference()
     }
+
+    func loadPendingQuestionGenerationProcess() -> PendingQuestionGenerationProcess? {
+        repository.loadPendingQuestionGenerationProcess()
+    }
+
+    func savePendingQuestionGenerationProcess(_ process: PendingQuestionGenerationProcess?) {
+        repository.savePendingQuestionGenerationProcess(process)
+    }
 }

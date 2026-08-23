@@ -7,7 +7,7 @@ import {
   paginateAuditEntries,
   parseMonitoringAccessLog,
   summarizeAuditEntries,
-} from "../public/audit-model.js";
+} from "../src/lib/auditModel.js";
 
 const entries = [
   { method: "GET", path: "/system.html", status: 200, clientIp: "10.0.0.1", requestId: "a", user: "admin" },

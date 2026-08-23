@@ -1,10 +1,34 @@
 package com.buddystudy.backend.study.application.model
 
 import com.buddystudy.backend.common.application.model.PageResponse
+import com.buddystudy.study.domain.entity.AnswerGradingStatus
+import com.buddystudy.study.domain.entity.QuestionStatus
 import java.time.Instant
 
 data class QuestionItemResponse(val question: String, val expectedAnswerHint: String? = null, val createdAt: Instant)
-data class GradingResultResponse(val score: Int, val isCorrect: Boolean, val feedback: String, val explanation: String)
+data class GradingCriterionResponse(
+    val criterionId: String,
+    val satisfied: Boolean,
+    val evidence: List<String> = emptyList(),
+    val missing: List<String> = emptyList(),
+    val reason: String = "",
+)
+
+data class GradingResultResponse(
+    val score: Int,
+    val isCorrect: Boolean,
+    val feedback: String,
+    val explanation: String,
+    val verdict: String? = null,
+    val confidence: Double? = null,
+    val criteria: List<GradingCriterionResponse> = emptyList(),
+    val contradictions: List<String> = emptyList(),
+    val misconceptions: List<String> = emptyList(),
+    val unsupportedClaims: List<String> = emptyList(),
+    val auditReason: String? = null,
+    val policyVersion: String? = null,
+    val model: String? = null,
+)
 
 data class StudyRecordResponse(
     val id: String,
@@ -19,6 +43,13 @@ data class StudyRecordResponse(
     val commentCount: Int = 0,
     val viewCount: Int = 0,
     val studyId: Long? = null,
+    val gradingRequestId: String? = null,
+    val correlationId: String? = gradingRequestId,
+    val gradingStatus: AnswerGradingStatus? = null,
+    val gradingError: String? = null,
+    val gradingLastEventId: Long? = null,
+    val questionStatus: QuestionStatus = QuestionStatus.UNGRADED,
+    val localization: RecordLocalizationResponse? = null,
 )
 
 data class RecordsPageResponse(
@@ -45,6 +76,7 @@ data class StudyRoomResponse(
     val lastSentAt: Instant?,
     val lastError: String?,
     val pendingQuestion: StudyRecordResponse?,
+    val latestQuestion: StudyRecordResponse? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
 )
@@ -52,6 +84,10 @@ data class StudyRoomResponse(
 data class StudyTopicSuggestionsResponse(
     val parentStudyId: Long,
     val suggestions: List<String>,
+    val source: String = "CATALOG",
+    val depth: Int = 1,
+    val maxDepth: Int = 5,
+    val childLimit: Int = 10,
 )
 
 data class StudyPageResponse(
