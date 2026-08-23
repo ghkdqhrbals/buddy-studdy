@@ -222,6 +222,21 @@ class NativeAdvertisementPersistenceAdapterTest {
         assertThat(query).doesNotContain("viewed_at >= :since")
     }
 
+    @Test
+    fun `latest user advertisement activity returns null when no history exists`(): Unit = runBlocking {
+        assertThat(adapter.latestUserSelectionAt(campaignId = 7, userId = 12)).isNull()
+        assertThat(adapter.latestUserViewAt(campaignId = 7, userId = 12)).isNull()
+    }
+
+    @Test
+    fun `latest user advertisement activity returns newest matching timestamps`(): Unit = runBlocking {
+        assertThat(adapter.latestUserSelectionAt(campaignId = 7, userId = 10))
+            .isEqualTo(Instant.parse("2026-08-03T00:00:00Z"))
+        assertThat(adapter.latestUserViewAt(campaignId = 7, userId = 10))
+            .isEqualTo(Instant.parse("2026-08-03T00:05:00Z"))
+        assertThat(adapter.latestUserViewAt(campaignId = 7, userId = 11)).isNull()
+    }
+
     private suspend fun execute(sql: String) {
         database.sql(sql).fetch().rowsUpdated().awaitSingle()
     }

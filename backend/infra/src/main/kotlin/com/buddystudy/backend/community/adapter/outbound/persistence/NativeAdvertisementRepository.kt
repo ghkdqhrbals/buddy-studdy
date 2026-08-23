@@ -13,6 +13,7 @@ import io.r2dbc.spi.Row
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.reactive.awaitSingle
+import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.data.r2dbc.repository.Modifying
 import org.springframework.data.r2dbc.repository.Query
 import org.springframework.data.repository.kotlin.CoroutineCrudRepository
@@ -54,24 +55,6 @@ interface NativeAdvertisementSelectionRepository : CoroutineCrudRepository<Nativ
         """
     )
     suspend fun countUserSelectionsSince(campaignId: Long, userId: Long, since: Instant): Long
-
-    @Query(
-        """
-        select max(selected_at)
-        from native_ad_selection_history
-        where campaign_id = :campaignId and user_id = :userId
-        """
-    )
-    suspend fun latestUserSelectionAt(campaignId: Long, userId: Long): Instant?
-
-    @Query(
-        """
-        select max(viewed_at)
-        from native_ad_selection_history
-        where campaign_id = :campaignId and user_id = :userId
-        """
-    )
-    suspend fun latestUserViewAt(campaignId: Long, userId: Long): Instant?
 
     @Query(
         """
@@ -119,11 +102,37 @@ class NativeAdvertisementPersistenceAdapter(
     override suspend fun countUserSelectionsSince(campaignId: Long, userId: Long, since: Instant) =
         selections.countUserSelectionsSince(campaignId, userId, since)
 
-    override suspend fun latestUserSelectionAt(campaignId: Long, userId: Long) =
-        selections.latestUserSelectionAt(campaignId, userId)
+    override suspend fun latestUserSelectionAt(campaignId: Long, userId: Long): Instant? =
+        database.sql(
+            """
+            select selected_at
+            from native_ad_selection_history
+            where campaign_id = :campaignId and user_id = :userId
+            order by selected_at desc
+            limit 1
+            """.trimIndent(),
+        ).bind("campaignId", campaignId)
+            .bind("userId", userId)
+            .map { row, _ -> row.instant("selected_at") }
+            .one()
+            .awaitSingleOrNull()
 
-    override suspend fun latestUserViewAt(campaignId: Long, userId: Long) =
-        selections.latestUserViewAt(campaignId, userId)
+    override suspend fun latestUserViewAt(campaignId: Long, userId: Long): Instant? =
+        database.sql(
+            """
+            select viewed_at
+            from native_ad_selection_history
+            where campaign_id = :campaignId
+              and user_id = :userId
+              and viewed_at is not null
+            order by viewed_at desc
+            limit 1
+            """.trimIndent(),
+        ).bind("campaignId", campaignId)
+            .bind("userId", userId)
+            .map { row, _ -> row.instant("viewed_at") }
+            .one()
+            .awaitSingleOrNull()
 
     override suspend fun countCampaignSelectionsSince(campaignId: Long, since: Instant) =
         selections.countCampaignSelectionsSince(campaignId, since)
