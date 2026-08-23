@@ -296,7 +296,7 @@ Public community feed
 -> the backend chooses a bounded position after the first two question rows and before the page tail, then persists native_ad_selection_history
 -> the response contains one final ordered items[] list with type PUBLIC_QUESTION or ADVERTISEMENT; questions[] remains a compatibility field for older clients
 -> ADVERTISEMENT carries selectionId, campaignId, provider name, localized advertising label/title/body/full affiliate disclosure, optional Coupang CDN image, and a validated BuddyStudy deep link or HTTPS Coupang destination
--> the iOS advertisement row mirrors the public-question card hierarchy, uses the provider as the topic meta, adds a trailing thumbnail only after a valid HTTPS image succeeds, and collapses to a full-width text row when the image is absent or fails
+-> the iOS advertisement row mirrors the public-question card hierarchy, uses the provider as the topic meta, renders the normalized full affiliate disclosure in a compact neutral notice band immediately below that meta and before promoted content, adds a trailing thumbnail only after a valid HTTPS image succeeds, and collapses to a full-width text row when the image is absent or fails
 -> iOS renders items[] unchanged, routes buddystudy:// through AppRoute, and opens validated HTTPS destinations externally; it performs no ranking or placement
 -> tapping an advertisement calls POST /api/v1/native-ad-selections/{selectionId}/view immediately before destination routing
 -> keeping at least 50% of an advertisement row visible for one second calls POST /api/v1/native-ad-selections/{selectionId}/impression; ownership checks plus `coalesce(impression_at, at)` make repeated viewport reports idempotent

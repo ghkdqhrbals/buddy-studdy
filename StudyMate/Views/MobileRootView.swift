@@ -9502,16 +9502,25 @@ private struct MobileNativeAdvertisementRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             advertisementTopMeta
-            advertisementMainContent
 
             if let disclosure = affiliateDisclosure {
                 Text(disclosure)
                     .font(.caption)
                     .foregroundStyle(Color.secondary)
+                    .multilineTextAlignment(.leading)
+                    .lineSpacing(2)
                     .lineLimit(nil)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        Color(.secondarySystemBackground),
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    )
             }
+
+            advertisementMainContent
         }
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -9600,9 +9609,17 @@ private struct MobileNativeAdvertisementRow: View {
     private var affiliateDisclosure: String? {
         if let value = advertisement.affiliateDisclosure?.trimmingCharacters(in: .whitespacesAndNewlines),
            !value.isEmpty {
-            return value
+            return normalizedDisclosure(value)
         }
-        return isCoupangAdvertisement ? strings.advertisementAffiliateDisclosure : nil
+        return isCoupangAdvertisement
+            ? normalizedDisclosure(strings.advertisementAffiliateDisclosure)
+            : nil
+    }
+
+    private func normalizedDisclosure(_ value: String) -> String {
+        value
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
     }
 
     private var providerName: String {
