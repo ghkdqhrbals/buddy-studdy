@@ -4150,6 +4150,16 @@ struct AppStrings {
     }
     var feedbackSubmit: String { text("보내기", "Send") }
     var feedbackSubmitted: String { text("피드백을 보냈습니다.", "Feedback sent.") }
+    var advertisementProviderCoupang: String { text("쿠팡", "Coupang", "Coupang") }
+    var advertisementNotInterested: String { text("관심 없음", "Not interested", "興味なし") }
+    var advertisementHidden: String { text("이 광고를 더 이상 보여주지 않습니다.", "You won't see this advertisement again.", "この広告は今後表示されません。") }
+    var advertisementAffiliateDisclosure: String {
+        text(
+            "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.",
+            "This content contains Coupang Partners affiliate links, and we may receive a commission from qualifying purchases.",
+            "このコンテンツはCoupang Partnersの活動の一環として、購入により一定額の手数料を受け取る場合があります。"
+        )
+    }
     var tipMe: String { text("응원하기", "Tip Me") }
     var supportDeveloper: String { text("개발자 응원", "Support developer") }
     var explanation: String { text("해설", "Explanation") }

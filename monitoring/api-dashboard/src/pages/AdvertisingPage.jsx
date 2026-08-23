@@ -32,6 +32,10 @@ const DEFAULT_FORM = {
   bodyKo: null,
   bodyEn: null,
   bodyJa: null,
+  imageUrl: "",
+  affiliateDisclosureKo: "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.",
+  affiliateDisclosureEn: "This content contains Coupang Partners affiliate links, and we may receive a commission from qualifying purchases.",
+  affiliateDisclosureJa: "このコンテンツはCoupang Partnersの活動の一環として、購入により一定額の手数料を受け取る場合があります。",
   destinationUrl: "",
   basePriority: 1,
   authenticatedRelevance: 1,
@@ -105,9 +109,26 @@ function validate(form) {
       const validAppRoute = url.protocol === "buddystudy:" && supportedAppRoutes.has(url.hostname.toLowerCase());
       if (!validCoupang && !validAppRoute) {
         errors.push("Destination must be an HTTPS Coupang URL or a supported BuddyStudy deep link.");
+      } else if (validCoupang) {
+        if (!form.imageUrl?.trim()) errors.push("A Coupang product image URL is required.");
+        if ([form.affiliateDisclosureKo, form.affiliateDisclosureEn, form.affiliateDisclosureJa]
+          .some((value) => !value?.trim())) {
+          errors.push("Affiliate disclosure is required in every language.");
+        }
       }
     } catch {
       errors.push("Destination URL is not valid.");
+    }
+  }
+  if (form.imageUrl?.trim()) {
+    try {
+      const image = new URL(form.imageUrl.trim());
+      const host = image.hostname.toLowerCase();
+      if (image.protocol !== "https:" || (host !== "coupangcdn.com" && !host.endsWith(".coupangcdn.com"))) {
+        errors.push("Product image must use an HTTPS coupangcdn.com URL.");
+      }
+    } catch {
+      errors.push("Product image URL is not valid.");
     }
   }
   if ([form.titleKo, form.titleEn, form.titleJa].some((value) => !value.trim())) {
@@ -244,9 +265,13 @@ function CampaignEditor({ campaign, onClose, onSaved }) {
           ...form,
           campaignKey: form.campaignKey.trim(),
           destinationUrl: form.destinationUrl.trim(),
+          imageUrl: form.imageUrl?.trim() || null,
           bodyKo: form.bodyKo?.trim() || null,
           bodyEn: form.bodyEn?.trim() || null,
           bodyJa: form.bodyJa?.trim() || null,
+          affiliateDisclosureKo: form.affiliateDisclosureKo?.trim() || null,
+          affiliateDisclosureEn: form.affiliateDisclosureEn?.trim() || null,
+          affiliateDisclosureJa: form.affiliateDisclosureJa?.trim() || null,
         }),
       },
     ),
@@ -303,6 +328,21 @@ function CampaignEditor({ campaign, onClose, onSaved }) {
               />
               <small>The app receives this URL with the ranked advertisement and opens it on tap.</small>
             </label>
+            <label className="field advertising-wide-field">
+              <span>Coupang product image URL</span>
+              <input
+                value={form.imageUrl || ""}
+                placeholder="https://thumbnail.coupangcdn.com/..."
+                onChange={(event) => update("imageUrl", event.target.value)}
+              />
+              <small>Use the HTTPS coupangcdn.com image URL supplied with the product creative.</small>
+            </label>
+            {form.imageUrl ? (
+              <div className="advertising-image-preview">
+                <img src={form.imageUrl} alt="Coupang campaign preview" />
+                <span>The iOS feed shows this image beside the advertisement copy.</span>
+              </div>
+            ) : null}
             <label className="advertising-toggle">
               <input type="checkbox" checked={form.active} onChange={(event) => update("active", event.target.checked)} />
               <span><strong>Campaign active</strong><small>Eligible for server ranking and feed delivery</small></span>
@@ -329,8 +369,17 @@ function CampaignEditor({ campaign, onClose, onSaved }) {
                   <textarea rows={3} value={form[`body${suffix}`] || ""} onChange={(event) => update(`body${suffix}`, event.target.value || null)} />
                 </label>
                 <label className="field">
-                  <span>Disclosure</span>
+                  <span>Advertising label</span>
                   <input value={form[`disclosure${suffix}`]} onChange={(event) => update(`disclosure${suffix}`, event.target.value)} />
+                </label>
+                <label className="field">
+                  <span>Affiliate disclosure</span>
+                  <textarea
+                    rows={4}
+                    value={form[`affiliateDisclosure${suffix}`] || ""}
+                    onChange={(event) => update(`affiliateDisclosure${suffix}`, event.target.value || null)}
+                  />
+                  <small>Always shown in full on the advertisement card.</small>
                 </label>
               </fieldset>
             ))}
@@ -439,9 +488,12 @@ function AdvertisingWorkspace() {
       key: "campaign",
       label: "Campaign",
       render: (row) => (
-        <div className="primary-cell advertising-campaign-cell">
-          <strong>{row.titleKo || row.titleEn || row.campaignKey}</strong>
-          <span>{row.campaignKey}</span>
+        <div className="advertising-campaign-summary">
+          {row.imageUrl ? <img src={row.imageUrl} alt="" /> : <div className="advertising-image-placeholder">AD</div>}
+          <div className="primary-cell advertising-campaign-cell">
+            <strong>{row.titleKo || row.titleEn || row.campaignKey}</strong>
+            <span>{row.campaignKey}</span>
+          </div>
         </div>
       ),
     },

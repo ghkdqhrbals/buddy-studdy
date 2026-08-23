@@ -68,9 +68,12 @@ data class CommunityFeedItemResponse(
 data class NativeAdvertisementResponse(
     val selectionId: String,
     val campaignId: String,
+    val providerName: String,
     val disclosureLabel: String,
     val title: String,
     val body: String?,
+    val imageUrl: String?,
+    val affiliateDisclosure: String?,
     val deepLink: String,
 )
 data class CommunityLikeResponse(val questionId: String, val likeCount: Int, val isLikedByMe: Boolean)

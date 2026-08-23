@@ -12,6 +12,7 @@ struct CommunityFeedStateStore {
     private var pageSize = 0
     private var hiddenQuestionIDs = Set<String>()
     private var hiddenAuthorIDs = Set<Int>()
+    private var hiddenAdvertisementCampaignIDs = Set<String>()
 
     mutating func reset() {
         questions = []
@@ -23,6 +24,7 @@ struct CommunityFeedStateStore {
         pageSize = 0
         hiddenQuestionIDs = []
         hiddenAuthorIDs = []
+        hiddenAdvertisementCampaignIDs = []
     }
 
     mutating func beginLoading() -> UUID {
@@ -59,8 +61,8 @@ struct CommunityFeedStateStore {
             switch item {
             case .publicQuestion(let question):
                 return visibleQuestionIDs.contains(question.id)
-            case .advertisement:
-                return true
+            case .advertisement(let advertisement):
+                return !hiddenAdvertisementCampaignIDs.contains(advertisement.campaignID)
             }
         }
         if reset {
@@ -139,6 +141,20 @@ struct CommunityFeedStateStore {
 
     mutating func clearHiddenAuthors() {
         hiddenAuthorIDs.removeAll()
+    }
+
+    mutating func hideAdvertisement(campaignID: String) {
+        hiddenAdvertisementCampaignIDs.insert(campaignID)
+        items.removeAll { item in
+            if case .advertisement(let advertisement) = item {
+                return advertisement.campaignID == campaignID
+            }
+            return false
+        }
+    }
+
+    mutating func clearHiddenAdvertisements() {
+        hiddenAdvertisementCampaignIDs.removeAll()
     }
 
     func isAuthorHidden(_ userID: Int?) -> Bool {

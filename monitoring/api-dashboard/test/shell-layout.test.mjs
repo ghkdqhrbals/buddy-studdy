@@ -67,6 +67,9 @@ test("advertising administration manages Coupang campaigns and explains server r
   assert.match(page, /\/native-ad-campaigns\/\$\{campaign\.id\}\/users\?/);
   assert.match(page, /method:\s*campaign \? "PUT" : "POST"/);
   assert.match(page, /Coupang destination URL/);
+  assert.match(page, /Coupang product image URL/);
+  assert.match(page, /Affiliate disclosure/);
+  assert.match(page, /Always shown in full/);
   assert.match(page, /link\.coupang\.com/);
   assert.match(page, /Advertising campaigns/);
   assert.match(page, /How the server ranks advertisements/);

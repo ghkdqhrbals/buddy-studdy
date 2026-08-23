@@ -69,10 +69,13 @@ final class ArchitecturePolicyTests: XCTestCase {
                   "advertisement": {
                     "selectionId": "selection-1",
                     "campaignId": "feedback-credit",
+                    "providerName": "쿠팡",
                     "disclosureLabel": "(광고)",
                     "title": "의견을 남겨주세요",
                     "body": "더 나은 공부 경험을 함께 만들어요",
-                    "deepLink": "buddystudy://feedback"
+                    "imageUrl": "https://thumbnail6.coupangcdn.com/example.jpg",
+                    "affiliateDisclosure": "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.",
+                    "deepLink": "https://link.coupang.com/a/example"
                   }
                 }
               ],
@@ -88,11 +91,10 @@ final class ArchitecturePolicyTests: XCTestCase {
             return XCTFail("Expected an advertisement item.")
         }
         XCTAssertEqual(advertisement.selectionID, "selection-1")
-        XCTAssertEqual(advertisement.deepLink, "buddystudy://feedback")
-        XCTAssertEqual(
-            AppRoute(url: try XCTUnwrap(URL(string: advertisement.deepLink))),
-            .feedback
-        )
+        XCTAssertEqual(advertisement.providerName, "쿠팡")
+        XCTAssertEqual(advertisement.imageURL, "https://thumbnail6.coupangcdn.com/example.jpg")
+        XCTAssertTrue(advertisement.affiliateDisclosure?.contains("쿠팡 파트너스") == true)
+        XCTAssertEqual(advertisement.deepLink, "https://link.coupang.com/a/example")
     }
 
     func testCommunityAdvertisementOpeningSupportsValidatedExternalDestinations() throws {

@@ -577,6 +577,45 @@ final class CommunityQuestionActionPolicyTests: XCTestCase {
 
 @MainActor
 final class CommunityFeedBlockingTests: XCTestCase {
+    func testNotInterestedAdvertisementStaysHiddenAcrossFeedRefresh() throws {
+        let data = Data(
+            """
+            {
+              "questions": [],
+              "items": [{
+                "type": "ADVERTISEMENT",
+                "advertisement": {
+                  "selectionId": "selection-1",
+                  "campaignId": "coupang-lamp",
+                  "providerName": "쿠팡",
+                  "disclosureLabel": "(광고)",
+                  "title": "집중 조명",
+                  "imageUrl": "https://thumbnail6.coupangcdn.com/example.jpg",
+                  "affiliateDisclosure": "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.",
+                  "deepLink": "https://link.coupang.com/a/example"
+                }
+              }],
+              "totalCount": 0,
+              "limit": 20,
+              "offset": 0
+            }
+            """.utf8
+        )
+        let response = try JSONDecoder().decode(CommunityQuestionsResponse.self, from: data)
+        var state = CommunityFeedStateStore()
+
+        state.applyPage(response, offset: 0, reset: true)
+        state.hideAdvertisement(campaignID: "coupang-lamp")
+        state.applyPage(response, offset: 0, reset: true)
+
+        XCTAssertTrue(state.items.isEmpty)
+
+        state.clearHiddenAdvertisements()
+        state.applyPage(response, offset: 0, reset: true)
+
+        XCTAssertEqual(state.items.count, 1)
+    }
+
     func testHiddenAuthorIsRemovedAndCannotReturnFromAnotherPage() {
         let blockedAuthor = CommunityUserProfile(
             id: 42,

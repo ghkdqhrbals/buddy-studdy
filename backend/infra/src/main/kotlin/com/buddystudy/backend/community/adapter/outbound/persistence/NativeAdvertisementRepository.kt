@@ -148,6 +148,34 @@ class NativeAdvertisementPersistenceAdapter(
         selections.markView(selectionId, userId, deviceId, at)
     }
 
+    override suspend fun findSuppressedCampaignIds(userId: Long): Set<Long> =
+        database.sql(
+            """
+            select campaign_id
+            from native_ad_campaign_suppressions
+            where user_id = :userId
+            """.trimIndent(),
+        ).bind("userId", userId)
+            .map { row, _ -> row.long("campaign_id") }
+            .all()
+            .collectList()
+            .awaitSingle()
+            .toSet()
+
+    override suspend fun suppressCampaign(campaignId: Long, userId: Long, at: Instant) {
+        database.sql(
+            """
+            insert ignore into native_ad_campaign_suppressions (campaign_id, user_id, created_at)
+            values (:campaignId, :userId, :createdAt)
+            """.trimIndent(),
+        ).bind("campaignId", campaignId)
+            .bind("userId", userId)
+            .bind("createdAt", at)
+            .fetch()
+            .rowsUpdated()
+            .awaitSingle()
+    }
+
     override suspend fun countCampaigns(filter: AdminNativeAdvertisementCampaignFilter): Long {
         val where = campaignFilterWhere(filter)
         return database.sql("select count(*) as total_count from native_ad_campaigns c $where")
@@ -350,6 +378,10 @@ private fun Row.toNativeAdvertisementCampaign() = NativeAdvertisementCampaignEnt
     bodyKo = get("body_ko", String::class.java),
     bodyEn = get("body_en", String::class.java),
     bodyJa = get("body_ja", String::class.java),
+    imageUrl = get("image_url", String::class.java),
+    affiliateDisclosureKo = get("affiliate_disclosure_ko", String::class.java),
+    affiliateDisclosureEn = get("affiliate_disclosure_en", String::class.java),
+    affiliateDisclosureJa = get("affiliate_disclosure_ja", String::class.java),
     deepLink = string("deep_link"),
     basePriority = decimal("base_priority"),
     authenticatedRelevance = decimal("authenticated_relevance"),

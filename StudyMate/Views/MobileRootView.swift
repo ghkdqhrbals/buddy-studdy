@@ -2096,14 +2096,49 @@ private struct MobileHomeView: View {
         case .publicQuestion(let question):
             communityQuestionRow(question)
         case .advertisement(let advertisement):
-            Button {
-                openCommunityAdvertisement(advertisement)
-            } label: {
-                MobileNativeAdvertisementRow(advertisement: advertisement)
+            HStack(alignment: .top, spacing: 2) {
+                Button {
+                    openCommunityAdvertisement(advertisement)
+                } label: {
+                    MobileNativeAdvertisementRow(advertisement: advertisement, strings: strings)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Menu {
+                    Button {
+                        Task {
+                            await appState.suppressNativeAdvertisement(
+                                selectionID: advertisement.selectionID,
+                                campaignID: advertisement.campaignID
+                            )
+                        }
+                    } label: {
+                        Label(strings.advertisementNotInterested, systemImage: "eye.slash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
             }
-            .buttonStyle(.plain)
-            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 10))
             .listRowBackground(Color.clear)
+            .contextMenu {
+                Button {
+                    Task {
+                        await appState.suppressNativeAdvertisement(
+                            selectionID: advertisement.selectionID,
+                            campaignID: advertisement.campaignID
+                        )
+                    }
+                } label: {
+                    Label(strings.advertisementNotInterested, systemImage: "eye.slash")
+                }
+            }
         }
     }
 
@@ -9453,43 +9488,112 @@ private struct MobileHomeCategoryRow: View {
 
 private struct MobileNativeAdvertisementRow: View {
     var advertisement: CommunityNativeAdvertisement
+    var strings: AppStrings
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 7) {
-                Text("BuddyStudy")
-                Spacer(minLength: 0)
-            }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .top, spacing: 12) {
+                advertisementImage
 
-            (Text(advertisement.disclosureLabel)
-                .foregroundColor(.secondary)
-                + Text(" \(advertisement.title)")
-                .foregroundColor(.primary))
-                .font(.body.weight(.medium))
-                .lineLimit(2)
-                .truncationMode(.tail)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 7) {
+                        Text(providerName)
+                            .fontWeight(.semibold)
+                        Text(advertisement.disclosureLabel)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.12), in: Capsule())
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
-            if let body = advertisement.body,
-               !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                HStack(spacing: 5) {
-                    Image(systemName: "arrow.up.right")
-                    Text(body)
-                        .lineLimit(1)
+                    Text(advertisement.title)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
                         .truncationMode(.tail)
 
-                    Spacer(minLength: 0)
+                    if let body = advertisement.body,
+                       !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(body)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+                    }
                 }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            }
+
+            if let disclosure = affiliateDisclosure {
+                Text(disclosure)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private var advertisementImage: some View {
+        if let value = advertisement.imageURL,
+           let url = URL(string: value) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                case .empty:
+                    ProgressView().controlSize(.small)
+                case .failure:
+                    advertisementImagePlaceholder
+                @unknown default:
+                    advertisementImagePlaceholder
+                }
+            }
+            .frame(width: 92, height: 92)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        } else {
+            advertisementImagePlaceholder
+                .frame(width: 92, height: 92)
+        }
+    }
+
+    private var advertisementImagePlaceholder: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color(.secondarySystemBackground))
+            .overlay {
+                Image(systemName: "cart")
+                    .font(.title3)
+                    .foregroundStyle(.tertiary)
+            }
+    }
+
+    private var affiliateDisclosure: String? {
+        if let value = advertisement.affiliateDisclosure?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !value.isEmpty {
+            return value
+        }
+        return isCoupangAdvertisement ? strings.advertisementAffiliateDisclosure : nil
+    }
+
+    private var providerName: String {
+        if let value = advertisement.providerName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !value.isEmpty {
+            return value
+        }
+        return isCoupangAdvertisement ? strings.advertisementProviderCoupang : "BuddyStudy"
+    }
+
+    private var isCoupangAdvertisement: Bool {
+        guard let url = URL(string: advertisement.deepLink),
+              url.scheme?.caseInsensitiveCompare("https") == .orderedSame else {
+            return false
+        }
+        return ["coupang.com", "www.coupang.com", "link.coupang.com"]
+            .contains(url.host?.lowercased() ?? "")
     }
 }
 

@@ -289,18 +289,19 @@ Public community feed
 -> READY question/answer/AI snapshots are projected into question_search by language
 -> comment translations remain isolated in question_comment_localizations
 -> only READY translation snapshots are exposed for the requested language
--> on the first unfiltered page, the backend reads active native_ad_campaigns and applies audience, schedule, daily-cap, minimum-gap, and post-view cooldown gates
+-> on the first unfiltered page, the backend reads active native_ad_campaigns, removes campaigns found in the current user's native_ad_campaign_suppressions, and applies audience, schedule, daily-cap, minimum-gap, and post-view cooldown gates
 -> eligible campaigns are ranked by priority, authenticated/anonymous relevance, Bayesian-smoothed 30-day destination-open rate, freshness, and exploration bonus
 -> 85% of selections use the top-ranked campaign; 15% explore one of the remaining top-three candidates
 -> the backend chooses a bounded position after the first two question rows and before the page tail, then persists native_ad_selection_history
 -> the response contains one final ordered items[] list with type PUBLIC_QUESTION or ADVERTISEMENT; questions[] remains a compatibility field for older clients
--> ADVERTISEMENT carries selectionId, campaignId, localized disclosure/title/body, and a validated BuddyStudy deep link or HTTPS Coupang destination
+-> ADVERTISEMENT carries selectionId, campaignId, provider name, localized advertising label/title/body/full affiliate disclosure, optional Coupang CDN image, and a validated BuddyStudy deep link or HTTPS Coupang destination
 -> iOS renders items[] unchanged, routes buddystudy:// through AppRoute, and opens validated HTTPS destinations externally; it performs no ranking or placement
 -> tapping an advertisement calls POST /api/v1/native-ad-selections/{selectionId}/view immediately before destination routing
+-> choosing Not interested removes the campaign immediately in iOS and calls POST /api/v1/native-ad-selections/{selectionId}/not-interested; the backend validates selection ownership and idempotently persists a user-scoped permanent ranking exclusion
 -> the request validates selection ownership and appends one stable native-ad-view-{selectionId} Outbox event
 -> community.native-ad.view.v1 delivers NATIVE_AD_VIEWED at least once; the Inbox consumer idempotently records viewed_at
 -> server-side selection/view history is the sole ranking evidence and is safe across reinstallations and multiple devices
--> GET/POST/PUT /api/v1/admin/native-ad-campaigns is the authenticated operator source of truth for localized copy, Coupang URL, schedule, audience, ranking weights, fatigue limits, and feed-position bounds; GET accepts optional query, ACTIVE/PAUSED/SCHEDULED/ENDED status, exact audience, limit, and offset filters whose count and page share one evaluation instant
+-> GET/POST/PUT /api/v1/admin/native-ad-campaigns is the authenticated operator source of truth for localized copy, mandatory full affiliate disclosures, Coupang CDN image, Coupang URL, schedule, audience, ranking weights, fatigue limits, and feed-position bounds; GET accepts optional query, ACTIVE/PAUSED/SCHEDULED/ENDED status, exact audience, limit, and offset filters whose count and page share one evaluation instant
 -> the admin campaign response exposes the exact ranking coefficients plus 30-day feed-delivery selections, destination-open events, and open rate so the operator UI does not duplicate ranking constants or overstate them as verified impressions
 -> GET /api/v1/admin/native-ad-campaigns/{campaignId}/users groups selection history by user with query, OPENED/NOT_OPENED, limit, and offset controls
 -> the per-user response reports selection/open counts, first/latest selection, latest open, and distinct-device count; anonymous and withdrawn identities are redacted and raw device identifiers never leave the backend

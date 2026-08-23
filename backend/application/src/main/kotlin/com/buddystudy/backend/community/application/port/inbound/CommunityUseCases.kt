@@ -56,4 +56,8 @@ interface CommunityUseCase {
         principal: Principal,
         selectionId: String,
     )
+    suspend fun suppressNativeAdvertisement(
+        principal: Principal,
+        selectionId: String,
+    )
 }

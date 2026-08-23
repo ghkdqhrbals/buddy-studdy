@@ -575,6 +575,11 @@ protocol RemotePushBackendClientProtocol {
         selectionID: String
     ) async throws
 
+    func suppressNativeAdvertisement(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws
+
     func setCommunityQuestionLike(
         registration: RemotePushRegistration,
         questionID: String,
@@ -661,6 +666,13 @@ protocol RemotePushBackendClientProtocol {
 }
 
 extension RemotePushBackendClientProtocol {
+    func suppressNativeAdvertisement(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws {
+        throw RemotePushBackendError.invalidResponse
+    }
+
     func fetchBillingStatus(
         registration: RemotePushRegistration
     ) async throws -> BackendBillingStatus {
@@ -1986,6 +1998,18 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var request = authenticatedRequest(
             registration: registration,
             url: endpoint("api", "v1", "native-ad-selections", selectionID, "view")
+        )
+        request.httpMethod = "POST"
+        _ = try await perform(request)
+    }
+
+    func suppressNativeAdvertisement(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "native-ad-selections", selectionID, "not-interested")
         )
         request.httpMethod = "POST"
         _ = try await perform(request)
@@ -3656,9 +3680,12 @@ enum CommunityFeedItem: Decodable, Equatable, Identifiable {
 struct CommunityNativeAdvertisement: Decodable, Equatable, Identifiable {
     var selectionID: String
     var campaignID: String
+    var providerName: String? = nil
     var disclosureLabel: String
     var title: String
     var body: String?
+    var imageURL: String? = nil
+    var affiliateDisclosure: String? = nil
     var deepLink: String
 
     var id: String { selectionID }
@@ -3666,9 +3693,12 @@ struct CommunityNativeAdvertisement: Decodable, Equatable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case selectionID = "selectionId"
         case campaignID = "campaignId"
+        case providerName
         case disclosureLabel
         case title
         case body
+        case imageURL = "imageUrl"
+        case affiliateDisclosure
         case deepLink
     }
 }

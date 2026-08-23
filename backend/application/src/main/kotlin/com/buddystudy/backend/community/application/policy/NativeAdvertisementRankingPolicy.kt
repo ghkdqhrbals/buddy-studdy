@@ -54,6 +54,31 @@ object NativeAdvertisementDeepLinkPolicy {
             else -> false
         }
     }.getOrDefault(false)
+
+    fun isCoupang(value: String): Boolean = runCatching {
+        val uri = URI(value)
+        uri.scheme?.lowercase() == "https" &&
+            uri.host?.lowercase() in supportedCoupangHosts &&
+            uri.userInfo == null &&
+            uri.fragment == null &&
+            uri.port in setOf(-1, 443) &&
+            !uri.path.isNullOrBlank()
+    }.getOrDefault(false)
+
+    fun providerName(value: String): String = if (isCoupang(value)) "쿠팡" else "BuddyStudy"
+}
+
+object NativeAdvertisementImagePolicy {
+    fun isSupported(value: String): Boolean = runCatching {
+        val uri = URI(value)
+        val host = uri.host?.lowercase().orEmpty()
+        uri.scheme?.lowercase() == "https" &&
+            (host == "coupangcdn.com" || host.endsWith(".coupangcdn.com")) &&
+            uri.userInfo == null &&
+            uri.fragment == null &&
+            uri.port in setOf(-1, 443) &&
+            !uri.path.isNullOrBlank()
+    }.getOrDefault(false)
 }
 
 object NativeAdvertisementRankingPolicy {

@@ -4518,6 +4518,7 @@ final class AppState: ObservableObject {
         communityCommentsCache.removeAll()
         var nextFeedState = communityFeedState
         nextFeedState.clearHiddenAuthors()
+        nextFeedState.clearHiddenAdvertisements()
         communityFeedState = nextFeedState
         let revenueCatAppAccountToken = billingCatalog?.appAccountToken
         billingCatalog = nil
@@ -5148,6 +5149,25 @@ final class AppState: ObservableObject {
             log(
                 .warning,
                 "광고 조회 이벤트 전송 실패: \(appErrorHandlingUseCase.diagnosticDescription(for: error))"
+            )
+        }
+    }
+
+    func suppressNativeAdvertisement(selectionID: String, campaignID: String) async {
+        communityFeedState.hideAdvertisement(campaignID: campaignID)
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "native-ad-not-interested") else {
+            return
+        }
+        do {
+            try await communityUseCase.suppressNativeAdvertisement(
+                registration: registration,
+                selectionID: selectionID
+            )
+            statusMessage = strings.advertisementHidden
+        } catch {
+            log(
+                .warning,
+                "광고 관심 없음 저장 실패: \(appErrorHandlingUseCase.diagnosticDescription(for: error))"
             )
         }
     }

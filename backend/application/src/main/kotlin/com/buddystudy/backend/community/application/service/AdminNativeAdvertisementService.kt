@@ -11,6 +11,7 @@ import com.buddystudy.backend.community.application.model.AdminNativeAdvertiseme
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserPage
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserSummary
 import com.buddystudy.backend.community.application.policy.NativeAdvertisementDeepLinkPolicy
+import com.buddystudy.backend.community.application.policy.NativeAdvertisementImagePolicy
 import com.buddystudy.backend.community.application.policy.NativeAdvertisementRankingPolicy
 import com.buddystudy.backend.community.application.port.inbound.AdminNativeAdvertisementUseCase
 import com.buddystudy.backend.community.application.port.outbound.AdminNativeAdvertisementPort
@@ -130,6 +131,10 @@ class AdminNativeAdvertisementService(
             bodyKo = command.bodyKo.cleanOptional(),
             bodyEn = command.bodyEn.cleanOptional(),
             bodyJa = command.bodyJa.cleanOptional(),
+            imageUrl = command.imageUrl.cleanOptional(),
+            affiliateDisclosureKo = command.affiliateDisclosureKo.cleanOptional(),
+            affiliateDisclosureEn = command.affiliateDisclosureEn.cleanOptional(),
+            affiliateDisclosureJa = command.affiliateDisclosureJa.cleanOptional(),
             destinationUrl = command.destinationUrl.trim(),
         )
         val required = listOf(
@@ -146,6 +151,12 @@ class AdminNativeAdvertisementService(
             listOf(normalized.disclosureKo, normalized.disclosureEn, normalized.disclosureJa).all { it.length <= 32 } &&
             listOf(normalized.titleKo, normalized.titleEn, normalized.titleJa).all { it.length <= 255 } &&
             listOfNotNull(normalized.bodyKo, normalized.bodyEn, normalized.bodyJa).all { it.length <= 500 } &&
+            listOfNotNull(
+                normalized.affiliateDisclosureKo,
+                normalized.affiliateDisclosureEn,
+                normalized.affiliateDisclosureJa,
+            ).all { it.length <= 500 } &&
+            (normalized.imageUrl?.length ?: 0) <= 1024 &&
             normalized.destinationUrl.length <= 512
         val validNumbers = normalized.basePriority.inRange() &&
             normalized.authenticatedRelevance.inRange() &&
@@ -157,18 +168,31 @@ class AdminNativeAdvertisementService(
             normalized.earliestPosition in 0..99 &&
             normalized.latestPosition in normalized.earliestPosition..99
         val validWindow = normalized.endsAt?.let { end -> normalized.startsAt?.let { end.isAfter(it) } ?: true } != false
+        val coupangRequiredCreative = if (NativeAdvertisementDeepLinkPolicy.isCoupang(normalized.destinationUrl)) {
+            normalized.imageUrl != null &&
+                listOf(
+                    normalized.affiliateDisclosureKo,
+                    normalized.affiliateDisclosureEn,
+                    normalized.affiliateDisclosureJa,
+                ).none { it.isNullOrBlank() }
+        } else {
+            true
+        }
+        val validImage = normalized.imageUrl?.let(NativeAdvertisementImagePolicy::isSupported) != false
         if (
             required.any(String::isBlank) ||
             !CAMPAIGN_KEY.matches(normalized.campaignKey) ||
             !validLengths ||
             !validNumbers ||
             !validWindow ||
+            !coupangRequiredCreative ||
+            !validImage ||
             !NativeAdvertisementDeepLinkPolicy.isSupported(normalized.destinationUrl)
         ) {
             throw ApiException(
                 HttpStatus.UNPROCESSABLE_ENTITY,
                 ApiErrorCode.VALIDATION_ERROR,
-                "Advertisement campaign is invalid. Use a supported BuddyStudy deep link or HTTPS Coupang URL.",
+                "Advertisement campaign is invalid. Coupang ads require a Coupang CDN image and affiliate disclosure in every language.",
             )
         }
         return normalized
@@ -233,6 +257,10 @@ private fun AdminNativeAdvertisementCampaignCommand.toEntity(createdAt: Instant,
         bodyKo = bodyKo,
         bodyEn = bodyEn,
         bodyJa = bodyJa,
+        imageUrl = imageUrl,
+        affiliateDisclosureKo = affiliateDisclosureKo,
+        affiliateDisclosureEn = affiliateDisclosureEn,
+        affiliateDisclosureJa = affiliateDisclosureJa,
         deepLink = destinationUrl,
         basePriority = basePriority,
         authenticatedRelevance = authenticatedRelevance,
@@ -263,6 +291,10 @@ private fun AdminNativeAdvertisementCampaignCommand.applyTo(entity: NativeAdvert
     entity.bodyKo = bodyKo
     entity.bodyEn = bodyEn
     entity.bodyJa = bodyJa
+    entity.imageUrl = imageUrl
+    entity.affiliateDisclosureKo = affiliateDisclosureKo
+    entity.affiliateDisclosureEn = affiliateDisclosureEn
+    entity.affiliateDisclosureJa = affiliateDisclosureJa
     entity.deepLink = destinationUrl
     entity.basePriority = basePriority
     entity.authenticatedRelevance = authenticatedRelevance
@@ -293,6 +325,10 @@ private fun NativeAdvertisementCampaignEntity.toSummary(selections: Long, views:
         bodyKo = bodyKo,
         bodyEn = bodyEn,
         bodyJa = bodyJa,
+        imageUrl = imageUrl,
+        affiliateDisclosureKo = affiliateDisclosureKo,
+        affiliateDisclosureEn = affiliateDisclosureEn,
+        affiliateDisclosureJa = affiliateDisclosureJa,
         destinationUrl = deepLink,
         basePriority = basePriority,
         authenticatedRelevance = authenticatedRelevance,

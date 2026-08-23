@@ -54,6 +54,7 @@ import com.buddystudy.backend.community.application.port.inbound.ReportQuestionC
 import com.buddystudy.backend.community.application.port.inbound.SubmitFeedbackCommand
 import com.buddystudy.backend.community.application.policy.NativeAdvertisementCandidate
 import com.buddystudy.backend.community.application.policy.NativeAdvertisementRankingPolicy
+import com.buddystudy.backend.community.application.policy.NativeAdvertisementDeepLinkPolicy
 import com.buddystudy.backend.profile.application.model.UserProfileResponse
 import com.buddystudy.backend.profile.application.model.toProfile
 import com.buddystudy.backend.community.application.model.toResponse
@@ -70,6 +71,13 @@ import java.math.BigDecimal
 import java.util.concurrent.ThreadLocalRandom
 import java.util.UUID
 import com.buddystudy.community.domain.entity.NativeAdvertisementSelectionEntity
+
+private data class LocalizedNativeAdvertisement(
+    val disclosureLabel: String,
+    val title: String,
+    val body: String?,
+    val affiliateDisclosure: String?,
+)
 
 @Service
 class CommunityService(
@@ -182,7 +190,10 @@ class CommunityService(
         questionCount: Int,
     ): Pair<Int, NativeAdvertisementResponse>? {
         val now = Instant.now()
-        val campaigns = nativeAdvertisements.findEligibleCampaigns(NativeAdvertisementRankingPolicy.placement, now)
+        val suppressedCampaignIds = nativeAdvertisements.findSuppressedCampaignIds(principal.userId)
+        val campaigns = nativeAdvertisements
+            .findEligibleCampaigns(NativeAdvertisementRankingPolicy.placement, now)
+            .filterNot { it.id in suppressedCampaignIds }
         if (campaigns.isEmpty()) {
             return null
         }
@@ -237,16 +248,34 @@ class CommunityService(
         language: String,
     ): NativeAdvertisementResponse {
         val localized = when (language) {
-            "ko" -> Triple(campaign.disclosureKo, campaign.titleKo, campaign.bodyKo)
-            "ja" -> Triple(campaign.disclosureJa, campaign.titleJa, campaign.bodyJa)
-            else -> Triple(campaign.disclosureEn, campaign.titleEn, campaign.bodyEn)
+            "ko" -> LocalizedNativeAdvertisement(
+                campaign.disclosureKo,
+                campaign.titleKo,
+                campaign.bodyKo,
+                campaign.affiliateDisclosureKo,
+            )
+            "ja" -> LocalizedNativeAdvertisement(
+                campaign.disclosureJa,
+                campaign.titleJa,
+                campaign.bodyJa,
+                campaign.affiliateDisclosureJa,
+            )
+            else -> LocalizedNativeAdvertisement(
+                campaign.disclosureEn,
+                campaign.titleEn,
+                campaign.bodyEn,
+                campaign.affiliateDisclosureEn,
+            )
         }
         return NativeAdvertisementResponse(
             selectionId = selectionId,
             campaignId = campaign.campaignKey,
-            disclosureLabel = localized.first,
-            title = localized.second,
-            body = localized.third,
+            providerName = NativeAdvertisementDeepLinkPolicy.providerName(campaign.deepLink),
+            disclosureLabel = localized.disclosureLabel,
+            title = localized.title,
+            body = localized.body,
+            imageUrl = campaign.imageUrl,
+            affiliateDisclosure = localized.affiliateDisclosure,
             deepLink = campaign.deepLink,
         )
     }
@@ -270,6 +299,30 @@ class CommunityService(
                 occurredAt = now,
             )
         )
+    }
+
+    @Transactional
+    override suspend fun suppressNativeAdvertisement(
+        principal: Principal,
+        selectionId: String,
+    ) {
+        val selection = ownedNativeAdvertisementSelection(principal, selectionId)
+        nativeAdvertisements.suppressCampaign(
+            campaignId = selection.campaignId,
+            userId = principal.userId,
+            at = Instant.now(),
+        )
+    }
+
+    private suspend fun ownedNativeAdvertisementSelection(
+        principal: Principal,
+        selectionId: String,
+    ): NativeAdvertisementSelectionEntity {
+        val selection = nativeAdvertisements.findSelection(selectionId)
+        if (selection == null || selection.userId != principal.userId || selection.deviceId != principal.deviceId) {
+            throw ApiException(HttpStatus.NOT_FOUND, ApiErrorCode.RECORD_NOT_FOUND, "Advertisement selection not found.")
+        }
+        return selection
     }
 
     override suspend fun getPublicQuestion(

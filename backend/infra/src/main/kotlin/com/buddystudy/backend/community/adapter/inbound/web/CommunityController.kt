@@ -171,6 +171,14 @@ class CommunityController(
         @PathVariable selectionId: String,
         authentication: Authentication,
     ) = community.recordNativeAdvertisementView(selectionId, authentication)
+
+    @Operation(summary = "Hide a native advertisement", description = "Permanently excludes the selected campaign from ranking for the authenticated user.")
+    @PostMapping("/native-ad-selections/{selectionId}/not-interested")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    suspend fun suppressNativeAdvertisement(
+        @PathVariable selectionId: String,
+        authentication: Authentication,
+    ) = community.suppressNativeAdvertisement(selectionId, authentication)
 }
 
 @RestController
@@ -226,6 +234,10 @@ interface CommunityWebPort {
     suspend fun setUserBlocked(userId: Long, blocked: Boolean, authentication: Authentication): UserBlockResponse
     suspend fun submitFeedback(body: SubmitFeedbackRequest, deviceId: String?, authentication: Authentication?): FeedbackResponse
     suspend fun recordNativeAdvertisementView(
+        selectionId: String,
+        authentication: Authentication,
+    )
+    suspend fun suppressNativeAdvertisement(
         selectionId: String,
         authentication: Authentication,
     )
@@ -297,6 +309,14 @@ class CommunityWebAdapter(
         selectionId: String,
         authentication: Authentication,
     ) = community.recordNativeAdvertisementView(
+        authentication.principalOrThrow(),
+        selectionId,
+    )
+
+    override suspend fun suppressNativeAdvertisement(
+        selectionId: String,
+        authentication: Authentication,
+    ) = community.suppressNativeAdvertisement(
         authentication.principalOrThrow(),
         selectionId,
     )

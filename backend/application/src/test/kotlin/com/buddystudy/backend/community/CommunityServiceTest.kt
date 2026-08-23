@@ -103,7 +103,11 @@ class CommunityServiceTest {
             titleKo = "의견을 남겨주세요",
             titleEn = "Share feedback",
             titleJa = "ご意見をください",
-            deepLink = "buddystudy://feedback",
+            imageUrl = "https://thumbnail6.coupangcdn.com/example.jpg",
+            affiliateDisclosureKo = "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.",
+            affiliateDisclosureEn = "Affiliate disclosure",
+            affiliateDisclosureJa = "広告開示",
+            deepLink = "https://link.coupang.com/a/example",
             minimumSecondsBetweenSelections = 0,
         )
 
@@ -112,7 +116,10 @@ class CommunityServiceTest {
         assertThat(response.items).hasSize(5)
         assertThat(response.items.count { it.type.name == "ADVERTISEMENT" }).isEqualTo(1)
         val advertisement = response.items.single { it.advertisement != null }.advertisement!!
-        assertThat(advertisement.deepLink).isEqualTo("buddystudy://feedback")
+        assertThat(advertisement.deepLink).isEqualTo("https://link.coupang.com/a/example")
+        assertThat(advertisement.providerName).isEqualTo("쿠팡")
+        assertThat(advertisement.imageUrl).contains("coupangcdn.com")
+        assertThat(advertisement.affiliateDisclosure).contains("쿠팡 파트너스")
         assertThat(advertisement.selectionId).isNotBlank()
         assertThat(response.questions).hasSize(4)
         assertThat(nativeAdvertisements.selections).hasSize(1)
@@ -151,6 +158,30 @@ class CommunityServiceTest {
         }.isInstanceOf(ApiException::class.java)
 
         assertThat(nativeAdvertisementViews.events).isEmpty()
+    }
+
+    @Test
+    fun `not interested permanently removes the campaign from user ranking`(): Unit = runBlocking {
+        users.rows += UserEntity(id = 10, providerId = "author", displayName = "Author")
+        (100L..103L).forEach { questions.rows += publicQuestion(it, 10, "Topic $it") }
+        nativeAdvertisements.campaigns += NativeAdvertisementCampaignEntity(
+            id = 1,
+            campaignKey = "coupang-lamp",
+            titleKo = "집중 조명",
+            titleEn = "Focus lamp",
+            titleJa = "集中ライト",
+            deepLink = "https://link.coupang.com/a/example",
+            minimumSecondsBetweenSelections = 0,
+        )
+
+        val first = service.getPublicQuestions(principal, query = null, language = "ko", limit = 20, offset = 0)
+        val advertisement = first.items.single { it.advertisement != null }.advertisement!!
+
+        service.suppressNativeAdvertisement(principal, advertisement.selectionId)
+        val refreshed = service.getPublicQuestions(principal, query = null, language = "ko", limit = 20, offset = 0)
+
+        assertThat(nativeAdvertisements.suppressedCampaignIds(principal.userId)).containsExactly(1L)
+        assertThat(refreshed.items).noneMatch { it.advertisement != null }
     }
 
     @Test
@@ -619,6 +650,7 @@ class CommunityServiceTest {
     private class FakeNativeAdvertisementPort : NativeAdvertisementPort {
         val campaigns = mutableListOf<NativeAdvertisementCampaignEntity>()
         val selections = mutableListOf<NativeAdvertisementSelectionEntity>()
+        private val suppressions = mutableSetOf<Pair<Long, Long>>()
 
         override suspend fun findEligibleCampaigns(placement: String, now: Instant) =
             campaigns.filter { it.placement == placement && it.active }
@@ -636,6 +668,14 @@ class CommunityServiceTest {
             selections.firstOrNull { it.selectionId == selectionId && it.userId == userId && it.deviceId == deviceId }
                 ?.let { if (it.viewedAt == null) it.viewedAt = at }
         }
+        override suspend fun findSuppressedCampaignIds(userId: Long): Set<Long> = suppressedCampaignIds(userId)
+        override suspend fun suppressCampaign(campaignId: Long, userId: Long, at: Instant) {
+            suppressions += userId to campaignId
+        }
+        fun suppressedCampaignIds(userId: Long): Set<Long> = suppressions
+            .filter { it.first == userId }
+            .map { it.second }
+            .toSet()
     }
 
     private class FakeNativeAdvertisementViewPublisher : NativeAdvertisementViewPublishPort {

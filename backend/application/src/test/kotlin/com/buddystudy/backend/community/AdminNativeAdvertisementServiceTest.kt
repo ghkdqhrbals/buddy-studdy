@@ -27,6 +27,8 @@ class AdminNativeAdvertisementServiceTest {
 
         assertThat(created.campaignKey).isEqualTo("coupang-desk-lamp")
         assertThat(created.destinationUrl).startsWith("https://link.coupang.com/")
+        assertThat(created.imageUrl).startsWith("https://thumbnail6.coupangcdn.com/")
+        assertThat(created.affiliateDisclosureKo).contains("쿠팡 파트너스")
         assertThat(port.saved.single().placement).isEqualTo("COMMUNITY_FEED")
     }
 
@@ -102,6 +104,18 @@ class AdminNativeAdvertisementServiceTest {
 
         assertThatThrownBy {
             runBlocking { service.create(command(destinationUrl = "https://example.com/product")) }
+        }.isInstanceOf(ApiException::class.java)
+    }
+
+    @Test
+    fun `Coupang campaign requires product image and localized affiliate disclosures`() {
+        val service = AdminNativeAdvertisementService(FakeAdminNativeAdvertisementPort())
+
+        assertThatThrownBy {
+            runBlocking { service.create(command().copy(imageUrl = null)) }
+        }.isInstanceOf(ApiException::class.java)
+        assertThatThrownBy {
+            runBlocking { service.create(command().copy(affiliateDisclosureJa = null)) }
         }.isInstanceOf(ApiException::class.java)
     }
 
@@ -257,6 +271,10 @@ private fun command(
     bodyKo = "학습 공간을 정돈해 보세요",
     bodyEn = "Improve your study space",
     bodyJa = "学習スペースを整えましょう",
+    imageUrl = "https://thumbnail6.coupangcdn.com/example.jpg",
+    affiliateDisclosureKo = "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.",
+    affiliateDisclosureEn = "This content contains Coupang Partners affiliate links, and we may receive a commission from qualifying purchases.",
+    affiliateDisclosureJa = "このコンテンツはCoupang Partnersの活動の一環として、購入により一定額の手数料を受け取る場合があります。",
     destinationUrl = destinationUrl,
     basePriority = BigDecimal.ONE,
     authenticatedRelevance = BigDecimal.ONE,
@@ -285,6 +303,10 @@ private fun AdminNativeAdvertisementCampaignCommand.toEntity(id: Long) = NativeA
     bodyKo = bodyKo,
     bodyEn = bodyEn,
     bodyJa = bodyJa,
+    imageUrl = imageUrl,
+    affiliateDisclosureKo = affiliateDisclosureKo,
+    affiliateDisclosureEn = affiliateDisclosureEn,
+    affiliateDisclosureJa = affiliateDisclosureJa,
     deepLink = destinationUrl,
     basePriority = basePriority,
     authenticatedRelevance = authenticatedRelevance,

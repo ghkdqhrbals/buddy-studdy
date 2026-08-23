@@ -982,6 +982,12 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .advertising-editor .field small,
 .advertising-toggle small { color: var(--muted); font-size: 10px; line-height: 1.4; }
 .advertising-wide-field { grid-column: 1 / -1; }
+.advertising-image-preview { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 11px; }
+.advertising-image-preview img { width: 96px; height: 96px; border-radius: 12px; border: 1px solid var(--border); object-fit: cover; background: #f4f6f8; }
+.advertising-campaign-summary { display: flex; align-items: center; gap: 10px; }
+.advertising-campaign-summary > img,
+.advertising-image-placeholder { width: 42px; height: 42px; flex: 0 0 42px; border-radius: 9px; border: 1px solid var(--border); object-fit: cover; background: #f4f6f8; }
+.advertising-image-placeholder { display: grid; place-items: center; color: var(--muted); font-size: 10px; font-weight: 800; }
 .advertising-toggle {
   display: flex;
   grid-column: 1 / -1;

@@ -61,6 +61,8 @@ interface NativeAdvertisementPort {
     suspend fun saveSelection(entity: NativeAdvertisementSelectionEntity): NativeAdvertisementSelectionEntity
     suspend fun findSelection(selectionId: String): NativeAdvertisementSelectionEntity?
     suspend fun markView(selectionId: String, userId: Long, deviceId: String, at: Instant)
+    suspend fun findSuppressedCampaignIds(userId: Long): Set<Long>
+    suspend fun suppressCampaign(campaignId: Long, userId: Long, at: Instant)
 }
 
 interface AdminNativeAdvertisementPort {

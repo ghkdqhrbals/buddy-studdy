@@ -182,6 +182,16 @@ struct CommunityUseCase {
         )
     }
 
+    func suppressNativeAdvertisement(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws {
+        try await repository.suppressNativeAdvertisement(
+            registration: registration,
+            selectionID: selectionID
+        )
+    }
+
     func setQuestionLike(
         registration: RemotePushRegistration,
         questionID: String,

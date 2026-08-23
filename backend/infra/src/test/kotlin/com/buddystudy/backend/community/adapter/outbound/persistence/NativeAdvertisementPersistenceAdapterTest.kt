@@ -29,6 +29,7 @@ class NativeAdvertisementPersistenceAdapterTest {
     @BeforeEach
     fun setUp() {
         runBlocking {
+            execute("drop table if exists native_ad_campaign_suppressions")
             execute("drop table if exists native_ad_selection_history")
             execute("drop table if exists native_ad_campaigns")
             execute("drop table if exists users")
@@ -58,6 +59,10 @@ class NativeAdvertisementPersistenceAdapterTest {
                     body_ko varchar(500) null,
                     body_en varchar(500) null,
                     body_ja varchar(500) null,
+                    image_url varchar(1024) null,
+                    affiliate_disclosure_ko varchar(500) null,
+                    affiliate_disclosure_en varchar(500) null,
+                    affiliate_disclosure_ja varchar(500) null,
                     deep_link varchar(512) not null default 'buddystudy://feedback',
                     base_priority decimal(8,4) not null default 1,
                     authenticated_relevance decimal(8,4) not null default 1,
@@ -73,6 +78,17 @@ class NativeAdvertisementPersistenceAdapterTest {
                     ends_at timestamp null,
                     created_at timestamp not null,
                     updated_at timestamp not null
+                )
+                """.trimIndent(),
+            )
+            execute(
+                """
+                create table native_ad_campaign_suppressions (
+                    id bigint auto_increment primary key,
+                    campaign_id bigint not null,
+                    user_id bigint not null,
+                    created_at timestamp not null,
+                    unique (user_id, campaign_id)
                 )
                 """.trimIndent(),
             )
@@ -235,6 +251,20 @@ class NativeAdvertisementPersistenceAdapterTest {
         assertThat(adapter.latestUserViewAt(campaignId = 7, userId = 10))
             .isEqualTo(Instant.parse("2026-08-03T00:05:00Z"))
         assertThat(adapter.latestUserViewAt(campaignId = 7, userId = 11)).isNull()
+    }
+
+    @Test
+    fun `campaign suppression is user scoped and idempotent`(): Unit = runBlocking {
+        val now = Instant.parse("2026-08-10T00:00:00Z")
+
+        adapter.suppressCampaign(campaignId = 7, userId = 10, at = now)
+        adapter.suppressCampaign(campaignId = 7, userId = 10, at = now.plusSeconds(1))
+        adapter.suppressCampaign(campaignId = 1, userId = 10, at = now)
+        adapter.suppressCampaign(campaignId = 7, userId = 11, at = now)
+
+        assertThat(adapter.findSuppressedCampaignIds(10)).containsExactlyInAnyOrder(1L, 7L)
+        assertThat(adapter.findSuppressedCampaignIds(11)).containsExactly(7L)
+        assertThat(adapter.findSuppressedCampaignIds(12)).isEmpty()
     }
 
     private suspend fun execute(sql: String) {
