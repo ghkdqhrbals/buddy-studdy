@@ -2120,10 +2120,12 @@ private struct MobileHomeView: View {
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.body.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 36, height: 36)
+                        .foregroundStyle(Color.secondary)
+                        .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(strings.more)
             }
             .background {
                 MobileNativeAdvertisementImpressionReporter {
@@ -9505,7 +9507,7 @@ private struct MobileNativeAdvertisementRow: View {
             if let disclosure = affiliateDisclosure {
                 Text(disclosure)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.secondary)
                     .lineLimit(nil)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -9513,6 +9515,7 @@ private struct MobileNativeAdvertisementRow: View {
         }
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .foregroundStyle(Color.primary)
         .contentShape(Rectangle())
     }
 
@@ -9528,7 +9531,7 @@ private struct MobileNativeAdvertisementRow: View {
             Spacer(minLength: 0)
         }
         .font(.caption.weight(.semibold))
-        .foregroundStyle(.secondary)
+        .foregroundStyle(Color.secondary)
         .lineLimit(1)
     }
 
@@ -9568,7 +9571,7 @@ private struct MobileNativeAdvertisementRow: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(advertisement.title)
                 .font(.body.weight(.medium))
-                .foregroundStyle(.primary)
+                .foregroundStyle(Color.primary)
                 .lineLimit(2)
                 .truncationMode(.tail)
 
@@ -9576,7 +9579,7 @@ private struct MobileNativeAdvertisementRow: View {
                !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text(body)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.secondary)
                     .lineLimit(2)
                     .truncationMode(.tail)
             }
