@@ -8,6 +8,8 @@ import com.buddystudy.backend.common.adapter.outbound.persistence.indexedBindMar
 import io.r2dbc.spi.Connection
 import io.r2dbc.spi.ConnectionFactory
 import io.r2dbc.spi.Row
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.reactive.awaitSingle
 import kotlinx.coroutines.reactive.awaitFirstOrNull
 import kotlinx.coroutines.reactor.awaitSingleOrNull
@@ -86,8 +88,20 @@ class ScheduledJobRunPersistenceAdapter(
             countSpec = countSpec.bind("runId", runId)
             rowsSpec = rowsSpec.bind("runId", runId)
         }
-        val total = countSpec.map { row, _ -> row.get("total", java.lang.Long::class.java)!!.toLong() }.one().awaitSingle()
-        val rows = rowsSpec.map { row, _ -> row.toRun() }.all().collectList().awaitSingle()
+        val (total, rows) = coroutineScope {
+            val totalDeferred = async {
+                countSpec.map { row, _ -> row.get("total", java.lang.Long::class.java)!!.toLong() }
+                    .one()
+                    .awaitSingle()
+            }
+            val rowsDeferred = async {
+                rowsSpec.map { row, _ -> row.toRun() }
+                    .all()
+                    .collectList()
+                    .awaitSingle()
+            }
+            totalDeferred.await() to rowsDeferred.await()
+        }
         return ScheduledJobRunPageResponse(rows, total, limit, offset)
     }
 

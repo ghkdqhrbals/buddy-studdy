@@ -56,6 +56,25 @@ class FlywaySchemaIntegrationTest : MySqlIntegrationTestSupport() {
     @Autowired lateinit var externalApiHistory: ExternalApiHistoryPort
 
     @Test
+    fun `scheduler run history has a global newest-first index`(): Unit = runBlocking {
+        val columns = databaseClient.sql(
+            """
+            select column_name
+            from information_schema.statistics
+            where table_schema = database()
+              and table_name = 'scheduled_job_runs'
+              and index_name = 'idx_scheduled_job_runs_started_id'
+            order by seq_in_index
+            """.trimIndent(),
+        ).map { row, _ -> row.get("column_name", String::class.java)!! }
+            .all()
+            .collectList()
+            .awaitSingle()
+
+        assertThat(columns).containsExactly("started_at", "id")
+    }
+
+    @Test
     fun `external API history keeps complete request and response columns`(): Unit = runBlocking {
         val columns = databaseClient.sql(
             """

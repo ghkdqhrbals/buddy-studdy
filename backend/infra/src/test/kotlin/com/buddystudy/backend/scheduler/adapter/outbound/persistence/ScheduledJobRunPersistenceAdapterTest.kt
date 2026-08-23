@@ -51,6 +51,12 @@ class ScheduledJobRunPersistenceAdapterTest {
             on scheduled_job_runs (job_name, status, started_at desc, id desc)
             """.trimIndent(),
         )
+        execute(
+            """
+            create index if not exists idx_scheduled_job_runs_started_id
+            on scheduled_job_runs (started_at desc, id desc)
+            """.trimIndent(),
+        )
         execute("delete from scheduled_job_runs")
         execute("delete from scheduled_jobs")
     }
@@ -66,6 +72,32 @@ class ScheduledJobRunPersistenceAdapterTest {
         assertThat(finished.summary).isEqualTo("rows=9")
         assertThat(page.runs).containsExactly(finished)
         assertThat(page.totalCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `pages all job runs in deterministic newest first order`(): Unit = runBlocking {
+        val first = adapter.finish(
+            adapter.start("event-outbox-dispatch", JobTriggerType.SCHEDULED, null, "system").id,
+            JobRunStatus.SUCCESS,
+            "first",
+            null,
+            10,
+        )
+        val second = adapter.finish(
+            adapter.start("question-schedule", JobTriggerType.SCHEDULED, null, "system").id,
+            JobRunStatus.SUCCESS,
+            "second",
+            null,
+            11,
+        )
+        val sharedStartedAt = Instant.parse("2026-08-23T00:00:00Z")
+        setStartedAt(first.id, sharedStartedAt)
+        setStartedAt(second.id, sharedStartedAt)
+
+        val page = adapter.findRuns(jobName = null, runId = null, limit = 1, offset = 0)
+
+        assertThat(page.runs.map { it.id }).containsExactly(second.id)
+        assertThat(page.totalCount).isEqualTo(2)
     }
 
     @Test
