@@ -33,6 +33,32 @@ class NativeAdvertisementRankingPolicyTest {
     }
 
     @Test
+    fun `ranking penalizes campaigns users frequently mark not interested`() {
+        val accepted = candidate(
+            campaign(1, "accepted"),
+            campaignSelections = 100,
+            campaignViews = 20,
+            campaignSuppressions = 1,
+        )
+        val rejected = candidate(
+            campaign(2, "rejected"),
+            campaignSelections = 100,
+            campaignViews = 20,
+            campaignSuppressions = 30,
+        )
+
+        val ranked = NativeAdvertisementRankingPolicy.rank(
+            candidates = listOf(rejected, accepted),
+            authenticated = true,
+            feedItemCount = 20,
+            now = now,
+        )
+
+        assertThat(ranked.map { it.candidate.campaign.campaignKey })
+            .containsExactly("accepted", "rejected")
+    }
+
+    @Test
     fun `selection exploits top result and explores only bounded top three`() {
         val ranked = NativeAdvertisementRankingPolicy.rank(
             candidates = listOf(
@@ -97,12 +123,16 @@ class NativeAdvertisementRankingPolicyTest {
     private fun candidate(
         campaign: NativeAdvertisementCampaignEntity,
         userSelectionsToday: Long = 0,
+        campaignSelections: Long = 0,
+        campaignViews: Long = 0,
+        campaignSuppressions: Long = 0,
     ) = NativeAdvertisementCandidate(
         campaign = campaign,
         userSelectionsToday = userSelectionsToday,
         latestUserSelectionAt = null,
         latestUserViewAt = null,
-        campaignSelections = 0,
-        campaignViews = 0,
+        campaignSelections = campaignSelections,
+        campaignViews = campaignViews,
+        campaignSuppressions = campaignSuppressions,
     )
 }

@@ -7,6 +7,7 @@ import com.buddystudy.backend.community.application.model.AdminNativeAdvertiseme
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserPage
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserSummary
 import com.buddystudy.backend.community.application.port.outbound.AdminNativeAdvertisementPort
+import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementCampaignPerformance
 import com.buddystudy.backend.community.application.service.AdminNativeAdvertisementService
 import com.buddystudy.community.domain.entity.NativeAdvertisementAudience
 import com.buddystudy.community.domain.entity.NativeAdvertisementCampaignEntity
@@ -38,6 +39,7 @@ class AdminNativeAdvertisementServiceTest {
             saved += command().toEntity(id = 4)
             selections = 20
             views = 5
+            suppressions = 4
         }
         val service = AdminNativeAdvertisementService(port)
 
@@ -50,9 +52,11 @@ class AdminNativeAdvertisementServiceTest {
         )
 
         assertThat(page.campaigns.single().performanceViewRate).isEqualTo(0.25)
+        assertThat(page.campaigns.single().performanceSuppressionRate).isEqualTo(0.2)
         assertThat(page.rankingPolicy.exploitationPercent).isEqualTo(85)
         assertThat(page.rankingPolicy.explorationPercent).isEqualTo(15)
         assertThat(page.rankingPolicy.basePriorityWeight).isEqualTo(40.0)
+        assertThat(page.rankingPolicy.notInterestedPenaltyWeight).isEqualTo(40.0)
     }
 
     @Test
@@ -208,6 +212,7 @@ class AdminNativeAdvertisementServiceTest {
         val saved = mutableListOf<NativeAdvertisementCampaignEntity>()
         var selections = 0L
         var views = 0L
+        var suppressions = 0L
         val userRows = mutableListOf<AdminNativeAdvertisementUserSummary>()
         var lastUserRequest: UserRequest? = null
         var countFilter: AdminNativeAdvertisementCampaignFilter? = null
@@ -233,8 +238,12 @@ class AdminNativeAdvertisementServiceTest {
             saved += entity
             return entity
         }
-        override suspend fun countSelectionsSince(campaignId: Long, since: Instant) = selections
-        override suspend fun countViewsSince(campaignId: Long, since: Instant) = views
+        override suspend fun findCampaignPerformance(
+            campaignIds: Collection<Long>,
+            since: Instant,
+        ): Map<Long, NativeAdvertisementCampaignPerformance> = campaignIds.associateWith { campaignId ->
+            NativeAdvertisementCampaignPerformance(campaignId, selections, views, suppressions)
+        }
         override suspend fun campaignUsers(
             campaignId: Long,
             query: String?,

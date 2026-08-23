@@ -84,6 +84,8 @@ data class AdminNativeAdvertisementCampaignSummary(
     val performanceSelections: Long,
     val performanceViews: Long,
     val performanceViewRate: Double,
+    val performanceSuppressions: Long,
+    val performanceSuppressionRate: Double,
     val createdAt: Instant,
     val updatedAt: Instant,
 )
@@ -99,6 +101,7 @@ data class AdminNativeAdvertisementRankingPolicySummary(
     val explorationWeight: Double,
     val freshnessWeight: Double,
     val dailySelectionPenalty: Double,
+    val notInterestedPenaltyWeight: Double = 0.0,
 )
 
 data class AdminNativeAdvertisementCampaignPage(

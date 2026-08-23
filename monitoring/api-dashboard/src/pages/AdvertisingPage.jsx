@@ -447,9 +447,9 @@ function RankingPolicy({ policy }) {
       <div className="advertising-policy-body">
         <p>First, campaigns that do not match the schedule, audience, frequency cap, cooldown, destination, or feed size are removed.</p>
         <code>
-          score = priority×{policy.basePriorityWeight} + relevance×{policy.relevanceWeight} + smoothed open rate×{policy.smoothedViewRateWeight} + exploration×{policy.explorationWeight} + freshness×{policy.freshnessWeight} − today deliveries×{policy.dailySelectionPenalty}
+          score = priority×{policy.basePriorityWeight} + relevance×{policy.relevanceWeight} + smoothed open rate×{policy.smoothedViewRateWeight} + exploration×{policy.explorationWeight} + freshness×{policy.freshnessWeight} − today deliveries×{policy.dailySelectionPenalty} − smoothed not-interested rate×{policy.notInterestedPenaltyWeight}
         </code>
-        <p>The highest score normally wins. {policy.explorationPercent}% of requests test ranks 2–{policy.selectionPoolSize} so new or less-exposed campaigns can collect evidence.</p>
+        <p>The highest score normally wins. Ads that people mark as not interested lose score for everyone, while that exact campaign is permanently removed for the person who hid it. {policy.explorationPercent}% of requests test ranks 2–{policy.selectionPoolSize} so new or less-exposed campaigns can collect evidence.</p>
       </div>
     </section>
   );
@@ -482,6 +482,7 @@ function AdvertisingWorkspace() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const deliveries = campaigns.reduce((sum, campaign) => sum + Number(campaign.performanceSelections || 0), 0);
   const opens = campaigns.reduce((sum, campaign) => sum + Number(campaign.performanceViews || 0), 0);
+  const suppressions = campaigns.reduce((sum, campaign) => sum + Number(campaign.performanceSuppressions || 0), 0);
 
   const columns = useMemo(() => [
     {
@@ -505,6 +506,7 @@ function AdvertisingWorkspace() {
     { key: "deliveries", label: "30d deliveries", render: (row) => Number(row.performanceSelections || 0).toLocaleString() },
     { key: "opens", label: "30d opens", render: (row) => Number(row.performanceViews || 0).toLocaleString() },
     { key: "rate", label: "Open rate", render: (row) => percentage(row.performanceViewRate) },
+    { key: "not-interested", label: "Not interested", render: (row) => `${Number(row.performanceSuppressions || 0).toLocaleString()} · ${percentage(row.performanceSuppressionRate)}` },
     { key: "schedule", label: "Schedule", render: campaignSchedule },
   ], []);
 
@@ -531,6 +533,7 @@ function AdvertisingWorkspace() {
         <div><span>Active on page</span><strong>{campaigns.filter((item) => campaignStatus(item) === "ACTIVE").length}</strong></div>
         <div><span>30d deliveries on page</span><strong>{deliveries.toLocaleString()}</strong></div>
         <div><span>30d open rate on page</span><strong>{percentage(deliveries ? opens / deliveries : 0)}</strong></div>
+        <div><span>30d not interested on page</span><strong>{suppressions.toLocaleString()}</strong></div>
       </div>
 
       <section className="workspace-section advertising-list">

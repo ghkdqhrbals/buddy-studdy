@@ -10,7 +10,6 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.mock
-import org.springframework.data.r2dbc.repository.Query
 import org.springframework.r2dbc.core.DatabaseClient
 import java.time.Instant
 
@@ -227,30 +226,33 @@ class NativeAdvertisementPersistenceAdapterTest {
     }
 
     @Test
-    fun `campaign performance opens use the same selected cohort as deliveries`() {
-        val query = NativeAdvertisementSelectionRepository::class.java.methods
-            .single { it.name == "countCampaignViewsSince" }
-            .getAnnotation(Query::class.java)
-            .value
+    fun `ranking signals load campaign and user activity in batches`(): Unit = runBlocking {
+        adapter.suppressCampaign(
+            campaignId = 7,
+            userId = 12,
+            at = Instant.parse("2026-08-04T00:00:00Z"),
+        )
 
-        assertThat(query).contains("selected_at >= :since")
-        assertThat(query).contains("viewed_at is not null")
-        assertThat(query).doesNotContain("viewed_at >= :since")
-    }
+        val performance = adapter.findCampaignPerformance(
+            campaignIds = listOf(1, 7),
+            since = Instant.parse("2026-08-01T15:00:00Z"),
+        )
+        val userSignals = adapter.findUserRankingSignals(
+            campaignIds = listOf(1, 7),
+            userId = 10,
+            today = Instant.parse("2026-08-02T15:00:00Z"),
+        )
 
-    @Test
-    fun `latest user advertisement activity returns null when no history exists`(): Unit = runBlocking {
-        assertThat(adapter.latestUserSelectionAt(campaignId = 7, userId = 12)).isNull()
-        assertThat(adapter.latestUserViewAt(campaignId = 7, userId = 12)).isNull()
-    }
-
-    @Test
-    fun `latest user advertisement activity returns newest matching timestamps`(): Unit = runBlocking {
-        assertThat(adapter.latestUserSelectionAt(campaignId = 7, userId = 10))
+        assertThat(performance.getValue(7).selections).isEqualTo(3)
+        assertThat(performance.getValue(7).opens).isEqualTo(1)
+        assertThat(performance.getValue(7).suppressions).isEqualTo(1)
+        assertThat(performance.getValue(1).selections).isZero()
+        assertThat(userSignals.getValue(7).selectionsToday).isEqualTo(1)
+        assertThat(userSignals.getValue(7).latestSelectionAt)
             .isEqualTo(Instant.parse("2026-08-03T00:00:00Z"))
-        assertThat(adapter.latestUserViewAt(campaignId = 7, userId = 10))
+        assertThat(userSignals.getValue(7).latestOpenAt)
             .isEqualTo(Instant.parse("2026-08-03T00:05:00Z"))
-        assertThat(adapter.latestUserViewAt(campaignId = 7, userId = 11)).isNull()
+        assertThat(userSignals).doesNotContainKey(1)
     }
 
     @Test

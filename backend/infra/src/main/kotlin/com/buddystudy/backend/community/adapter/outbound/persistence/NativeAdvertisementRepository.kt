@@ -6,6 +6,8 @@ import com.buddystudy.backend.community.application.model.AdminNativeAdvertiseme
 import com.buddystudy.backend.community.application.model.AdminNativeAdvertisementUserSummary
 import com.buddystudy.backend.community.application.port.outbound.AdminNativeAdvertisementPort
 import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementPort
+import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementCampaignPerformance
+import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementUserRankingSignals
 import com.buddystudy.community.domain.entity.NativeAdvertisementAudience
 import com.buddystudy.community.domain.entity.NativeAdvertisementCampaignEntity
 import com.buddystudy.community.domain.entity.NativeAdvertisementSelectionEntity
@@ -99,46 +101,93 @@ class NativeAdvertisementPersistenceAdapter(
     override suspend fun findEligibleCampaigns(placement: String, now: Instant) =
         campaigns.findEligible(placement, now).toList()
 
-    override suspend fun countUserSelectionsSince(campaignId: Long, userId: Long, since: Instant) =
-        selections.countUserSelectionsSince(campaignId, userId, since)
-
-    override suspend fun latestUserSelectionAt(campaignId: Long, userId: Long): Instant? =
-        database.sql(
+    override suspend fun findUserRankingSignals(
+        campaignIds: Collection<Long>,
+        userId: Long,
+        today: Instant,
+    ): Map<Long, NativeAdvertisementUserRankingSignals> {
+        if (campaignIds.isEmpty()) return emptyMap()
+        return database.sql(
             """
-            select selected_at
+            select campaign_id,
+                   sum(case when selected_at >= :today then 1 else 0 end) as selections_today,
+                   max(selected_at) as latest_selection_at,
+                   max(viewed_at) as latest_open_at
             from native_ad_selection_history
-            where campaign_id = :campaignId and user_id = :userId
-            order by selected_at desc
-            limit 1
-            """.trimIndent(),
-        ).bind("campaignId", campaignId)
-            .bind("userId", userId)
-            .map { row, _ -> row.instant("selected_at") }
-            .one()
-            .awaitSingleOrNull()
-
-    override suspend fun latestUserViewAt(campaignId: Long, userId: Long): Instant? =
-        database.sql(
-            """
-            select viewed_at
-            from native_ad_selection_history
-            where campaign_id = :campaignId
+            where campaign_id in (:campaignIds)
               and user_id = :userId
-              and viewed_at is not null
-            order by viewed_at desc
-            limit 1
+            group by campaign_id
             """.trimIndent(),
-        ).bind("campaignId", campaignId)
+        ).bind("campaignIds", campaignIds.toList())
             .bind("userId", userId)
-            .map { row, _ -> row.instant("viewed_at") }
-            .one()
-            .awaitSingleOrNull()
+            .bind("today", today)
+            .map { row, _ ->
+                NativeAdvertisementUserRankingSignals(
+                    campaignId = row.long("campaign_id"),
+                    selectionsToday = row.long("selections_today"),
+                    latestSelectionAt = row.nullableInstant("latest_selection_at"),
+                    latestOpenAt = row.nullableInstant("latest_open_at"),
+                )
+            }
+            .all()
+            .collectList()
+            .awaitSingle()
+            .associateBy { it.campaignId }
+    }
 
-    override suspend fun countCampaignSelectionsSince(campaignId: Long, since: Instant) =
-        selections.countCampaignSelectionsSince(campaignId, since)
-
-    override suspend fun countCampaignViewsSince(campaignId: Long, since: Instant) =
-        selections.countCampaignViewsSince(campaignId, since)
+    override suspend fun findCampaignPerformance(
+        campaignIds: Collection<Long>,
+        since: Instant,
+    ): Map<Long, NativeAdvertisementCampaignPerformance> {
+        if (campaignIds.isEmpty()) return emptyMap()
+        val ids = campaignIds.distinct()
+        val history = database.sql(
+            """
+            select campaign_id,
+                   count(*) as selection_count,
+                   sum(case when viewed_at is not null then 1 else 0 end) as open_count
+            from native_ad_selection_history
+            where campaign_id in (:campaignIds)
+              and selected_at >= :since
+            group by campaign_id
+            """.trimIndent(),
+        ).bind("campaignIds", ids)
+            .bind("since", since)
+            .map { row, _ ->
+                row.long("campaign_id") to CampaignHistoryCounts(
+                    selections = row.long("selection_count"),
+                    opens = row.long("open_count"),
+                )
+            }
+            .all()
+            .collectList()
+            .awaitSingle()
+            .toMap()
+        val suppressions = database.sql(
+            """
+            select campaign_id, count(*) as suppression_count
+            from native_ad_campaign_suppressions
+            where campaign_id in (:campaignIds)
+              and created_at >= :since
+            group by campaign_id
+            """.trimIndent(),
+        ).bind("campaignIds", ids)
+            .bind("since", since)
+            .map { row, _ -> row.long("campaign_id") to row.long("suppression_count") }
+            .all()
+            .collectList()
+            .awaitSingle()
+            .toMap()
+        return ids.associateWith { campaignId ->
+            val counts = history[campaignId] ?: CampaignHistoryCounts()
+            NativeAdvertisementCampaignPerformance(
+                campaignId = campaignId,
+                selections = counts.selections,
+                opens = counts.opens,
+                suppressions = suppressions[campaignId] ?: 0,
+            )
+        }
+    }
 
     override suspend fun saveSelection(entity: NativeAdvertisementSelectionEntity) = selections.save(entity)
 
@@ -214,12 +263,6 @@ class NativeAdvertisementPersistenceAdapter(
 
     override suspend fun saveCampaign(entity: NativeAdvertisementCampaignEntity) = campaigns.save(entity)
 
-    override suspend fun countSelectionsSince(campaignId: Long, since: Instant) =
-        selections.countCampaignSelectionsSince(campaignId, since)
-
-    override suspend fun countViewsSince(campaignId: Long, since: Instant) =
-        selections.countCampaignViewsSince(campaignId, since)
-
     override suspend fun campaignUsers(
         campaignId: Long,
         query: String?,
@@ -287,6 +330,11 @@ class NativeAdvertisementPersistenceAdapter(
         return AdminNativeAdvertisementUserPage(users, total, limit, offset)
     }
 }
+
+private data class CampaignHistoryCounts(
+    val selections: Long = 0,
+    val opens: Long = 0,
+)
 
 private fun campaignFilterWhere(filter: AdminNativeAdvertisementCampaignFilter): String = buildString {
     append("where 1 = 1")

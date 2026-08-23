@@ -610,10 +610,15 @@ final class CommunityFeedBlockingTests: XCTestCase {
 
         XCTAssertTrue(state.items.isEmpty)
 
-        state.clearHiddenAdvertisements()
-        state.applyPage(response, offset: 0, reset: true)
+        state.restoreAdvertisement(campaignID: "coupang-lamp")
 
         XCTAssertEqual(state.items.count, 1)
+
+        state.hideAdvertisement(campaignID: "coupang-lamp")
+        state.confirmHiddenAdvertisement(campaignID: "coupang-lamp")
+        state.restoreAdvertisement(campaignID: "coupang-lamp")
+
+        XCTAssertTrue(state.items.isEmpty)
     }
 
     func testHiddenAuthorIsRemovedAndCannotReturnFromAnotherPage() {

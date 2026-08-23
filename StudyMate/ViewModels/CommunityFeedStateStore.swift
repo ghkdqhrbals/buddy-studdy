@@ -13,6 +13,7 @@ struct CommunityFeedStateStore {
     private var hiddenQuestionIDs = Set<String>()
     private var hiddenAuthorIDs = Set<Int>()
     private var hiddenAdvertisementCampaignIDs = Set<String>()
+    private var pendingHiddenAdvertisements: [String: (index: Int, item: CommunityFeedItem)] = [:]
 
     mutating func reset() {
         questions = []
@@ -25,6 +26,7 @@ struct CommunityFeedStateStore {
         hiddenQuestionIDs = []
         hiddenAuthorIDs = []
         hiddenAdvertisementCampaignIDs = []
+        pendingHiddenAdvertisements = [:]
     }
 
     mutating func beginLoading() -> UUID {
@@ -144,6 +146,15 @@ struct CommunityFeedStateStore {
     }
 
     mutating func hideAdvertisement(campaignID: String) {
+        if pendingHiddenAdvertisements[campaignID] == nil,
+           let index = items.firstIndex(where: { item in
+               if case .advertisement(let advertisement) = item {
+                   return advertisement.campaignID == campaignID
+               }
+               return false
+           }) {
+            pendingHiddenAdvertisements[campaignID] = (index, items[index])
+        }
         hiddenAdvertisementCampaignIDs.insert(campaignID)
         items.removeAll { item in
             if case .advertisement(let advertisement) = item {
@@ -153,8 +164,22 @@ struct CommunityFeedStateStore {
         }
     }
 
+    mutating func confirmHiddenAdvertisement(campaignID: String) {
+        pendingHiddenAdvertisements.removeValue(forKey: campaignID)
+    }
+
+    mutating func restoreAdvertisement(campaignID: String) {
+        hiddenAdvertisementCampaignIDs.remove(campaignID)
+        guard let pending = pendingHiddenAdvertisements.removeValue(forKey: campaignID),
+              !items.contains(where: { $0.id == pending.item.id }) else {
+            return
+        }
+        items.insert(pending.item, at: min(pending.index, items.count))
+    }
+
     mutating func clearHiddenAdvertisements() {
         hiddenAdvertisementCampaignIDs.removeAll()
+        pendingHiddenAdvertisements.removeAll()
     }
 
     func isAuthorHidden(_ userID: Int?) -> Bool {

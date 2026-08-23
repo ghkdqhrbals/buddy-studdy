@@ -15,6 +15,7 @@ import com.buddystudy.backend.community.application.policy.NativeAdvertisementIm
 import com.buddystudy.backend.community.application.policy.NativeAdvertisementRankingPolicy
 import com.buddystudy.backend.community.application.port.inbound.AdminNativeAdvertisementUseCase
 import com.buddystudy.backend.community.application.port.outbound.AdminNativeAdvertisementPort
+import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementCampaignPerformance
 import com.buddystudy.community.domain.entity.NativeAdvertisementAudience
 import com.buddystudy.community.domain.entity.NativeAdvertisementCampaignEntity
 import org.springframework.http.HttpStatus
@@ -46,10 +47,19 @@ class AdminNativeAdvertisementService(
             evaluatedAt = now,
         )
         val since = NativeAdvertisementRankingPolicy.performanceWindowStart(now)
-        val campaigns = advertisements.findCampaigns(filter, safeLimit, safeOffset).map { campaign ->
+        val campaignEntities = advertisements.findCampaigns(filter, safeLimit, safeOffset)
+        val performance = advertisements.findCampaignPerformance(campaignEntities.map { it.id }, since)
+        val campaigns = campaignEntities.map { campaign ->
+            val signals = performance[campaign.id] ?: NativeAdvertisementCampaignPerformance(
+                campaignId = campaign.id,
+                selections = 0,
+                opens = 0,
+                suppressions = 0,
+            )
             campaign.toSummary(
-                selections = advertisements.countSelectionsSince(campaign.id, since),
-                views = advertisements.countViewsSince(campaign.id, since),
+                selections = signals.selections,
+                views = signals.opens,
+                suppressions = signals.suppressions,
             )
         }
         return AdminNativeAdvertisementCampaignPage(
@@ -69,7 +79,7 @@ class AdminNativeAdvertisementService(
         }
         val now = Instant.now()
         val created = advertisements.saveCampaign(normalized.toEntity(createdAt = now, updatedAt = now))
-        return created.toSummary(0, 0)
+        return created.toSummary(0, 0, 0)
     }
 
     @Transactional
@@ -88,10 +98,9 @@ class AdminNativeAdvertisementService(
         existing.updatedAt = Instant.now()
         val updated = advertisements.saveCampaign(existing)
         val since = NativeAdvertisementRankingPolicy.performanceWindowStart(Instant.now())
-        return updated.toSummary(
-            advertisements.countSelectionsSince(id, since),
-            advertisements.countViewsSince(id, since),
-        )
+        val signals = advertisements.findCampaignPerformance(listOf(id), since)[id]
+            ?: NativeAdvertisementCampaignPerformance(id, 0, 0, 0)
+        return updated.toSummary(signals.selections, signals.opens, signals.suppressions)
     }
 
     @Transactional(readOnly = true)
@@ -209,6 +218,7 @@ class AdminNativeAdvertisementService(
         explorationWeight = NativeAdvertisementRankingPolicy.explorationWeight,
         freshnessWeight = NativeAdvertisementRankingPolicy.freshnessWeight,
         dailySelectionPenalty = NativeAdvertisementRankingPolicy.dailySelectionPenalty,
+        notInterestedPenaltyWeight = NativeAdvertisementRankingPolicy.notInterestedPenaltyWeight,
     )
 
     private companion object {
@@ -310,7 +320,11 @@ private fun AdminNativeAdvertisementCampaignCommand.applyTo(entity: NativeAdvert
     entity.endsAt = endsAt
 }
 
-private fun NativeAdvertisementCampaignEntity.toSummary(selections: Long, views: Long) =
+private fun NativeAdvertisementCampaignEntity.toSummary(
+    selections: Long,
+    views: Long,
+    suppressions: Long,
+) =
     AdminNativeAdvertisementCampaignSummary(
         id = id,
         campaignKey = campaignKey,
@@ -345,6 +359,12 @@ private fun NativeAdvertisementCampaignEntity.toSummary(selections: Long, views:
         performanceSelections = selections,
         performanceViews = views,
         performanceViewRate = if (selections > 0) views.toDouble() / selections else 0.0,
+        performanceSuppressions = suppressions,
+        performanceSuppressionRate = if (selections > 0) {
+            suppressions.coerceIn(0, selections).toDouble() / selections
+        } else {
+            0.0
+        },
         createdAt = createdAt,
         updatedAt = updatedAt,
     )

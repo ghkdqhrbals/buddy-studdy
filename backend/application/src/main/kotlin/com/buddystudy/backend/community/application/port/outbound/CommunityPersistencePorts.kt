@@ -13,6 +13,20 @@ import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import java.time.Instant
 
+data class NativeAdvertisementUserRankingSignals(
+    val campaignId: Long,
+    val selectionsToday: Long,
+    val latestSelectionAt: Instant?,
+    val latestOpenAt: Instant?,
+)
+
+data class NativeAdvertisementCampaignPerformance(
+    val campaignId: Long,
+    val selections: Long,
+    val opens: Long,
+    val suppressions: Long,
+)
+
 interface QuestionLikePort {
     suspend fun save(entity: QuestionLikeEntity): QuestionLikeEntity
     suspend fun existsByQuestionIdAndUserId(questionId: Long, userId: Long): Boolean
@@ -53,11 +67,15 @@ interface FeedbackPort {
 
 interface NativeAdvertisementPort {
     suspend fun findEligibleCampaigns(placement: String, now: Instant): List<NativeAdvertisementCampaignEntity>
-    suspend fun countUserSelectionsSince(campaignId: Long, userId: Long, since: Instant): Long
-    suspend fun latestUserSelectionAt(campaignId: Long, userId: Long): Instant?
-    suspend fun latestUserViewAt(campaignId: Long, userId: Long): Instant?
-    suspend fun countCampaignSelectionsSince(campaignId: Long, since: Instant): Long
-    suspend fun countCampaignViewsSince(campaignId: Long, since: Instant): Long
+    suspend fun findUserRankingSignals(
+        campaignIds: Collection<Long>,
+        userId: Long,
+        today: Instant,
+    ): Map<Long, NativeAdvertisementUserRankingSignals>
+    suspend fun findCampaignPerformance(
+        campaignIds: Collection<Long>,
+        since: Instant,
+    ): Map<Long, NativeAdvertisementCampaignPerformance>
     suspend fun saveSelection(entity: NativeAdvertisementSelectionEntity): NativeAdvertisementSelectionEntity
     suspend fun findSelection(selectionId: String): NativeAdvertisementSelectionEntity?
     suspend fun markView(selectionId: String, userId: Long, deviceId: String, at: Instant)
@@ -75,8 +93,10 @@ interface AdminNativeAdvertisementPort {
     suspend fun findCampaign(id: Long): NativeAdvertisementCampaignEntity?
     suspend fun findCampaignByKey(campaignKey: String): NativeAdvertisementCampaignEntity?
     suspend fun saveCampaign(entity: NativeAdvertisementCampaignEntity): NativeAdvertisementCampaignEntity
-    suspend fun countSelectionsSince(campaignId: Long, since: Instant): Long
-    suspend fun countViewsSince(campaignId: Long, since: Instant): Long
+    suspend fun findCampaignPerformance(
+        campaignIds: Collection<Long>,
+        since: Instant,
+    ): Map<Long, NativeAdvertisementCampaignPerformance>
     suspend fun campaignUsers(
         campaignId: Long,
         query: String?,

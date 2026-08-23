@@ -15,6 +15,7 @@ data class NativeAdvertisementCandidate(
     val latestUserViewAt: Instant?,
     val campaignSelections: Long,
     val campaignViews: Long,
+    val campaignSuppressions: Long,
 )
 
 data class RankedNativeAdvertisement(
@@ -92,6 +93,8 @@ object NativeAdvertisementRankingPolicy {
     const val explorationWeight = 8.0
     const val freshnessWeight = 8.0
     const val dailySelectionPenalty = 12.0
+    const val notInterestedPenaltyWeight = 40.0
+    const val notInterestedPriorSelections = 20.0
 
     fun rank(
         candidates: List<NativeAdvertisementCandidate>,
@@ -110,6 +113,9 @@ object NativeAdvertisementRankingPolicy {
             val views = candidate.campaignViews.coerceIn(0, selections)
             val smoothedViewRate = (views + 1.0) / (selections + 10.0)
             val explorationBonus = sqrt(ln(totalSelections + 2.0) / (selections + 1.0))
+            val suppressions = candidate.campaignSuppressions.coerceIn(0, selections)
+            val smoothedNotInterestedRate = (suppressions + 1.0) /
+                (selections + notInterestedPriorSelections)
             val freshness = candidate.latestUserSelectionAt?.let {
                 (Duration.between(it, now).seconds.toDouble() / Duration.ofDays(7).seconds)
                     .coerceIn(0.0, 1.0)
@@ -124,7 +130,8 @@ object NativeAdvertisementRankingPolicy {
                 smoothedViewRate * viewRateWeight +
                 explorationBonus * explorationWeight +
                 freshness * freshnessWeight -
-                candidate.userSelectionsToday * dailySelectionPenalty
+                candidate.userSelectionsToday * dailySelectionPenalty -
+                smoothedNotInterestedRate * notInterestedPenaltyWeight
             RankedNativeAdvertisement(candidate, score)
         }.sortedWith(
             compareByDescending<RankedNativeAdvertisement> { it.score }

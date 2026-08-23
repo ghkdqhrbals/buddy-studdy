@@ -18,6 +18,8 @@ import com.buddystudy.backend.notification.application.port.inbound.PublishNotif
 import com.buddystudy.backend.community.application.port.outbound.ReportPort
 import com.buddystudy.backend.community.application.port.outbound.UserBlockPort
 import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementPort
+import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementCampaignPerformance
+import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementUserRankingSignals
 import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementViewPublishPort
 import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
@@ -199,14 +201,34 @@ class CommunityService(
         }
         val today = now.truncatedTo(ChronoUnit.DAYS)
         val performanceWindow = NativeAdvertisementRankingPolicy.performanceWindowStart(now)
+        val campaignIds = campaigns.map { it.id }
+        val userSignals = nativeAdvertisements.findUserRankingSignals(
+            campaignIds = campaignIds,
+            userId = principal.userId,
+            today = today,
+        )
+        val campaignPerformance = nativeAdvertisements.findCampaignPerformance(campaignIds, performanceWindow)
         val candidates = campaigns.map { campaign ->
+            val user = userSignals[campaign.id] ?: NativeAdvertisementUserRankingSignals(
+                campaignId = campaign.id,
+                selectionsToday = 0,
+                latestSelectionAt = null,
+                latestOpenAt = null,
+            )
+            val performance = campaignPerformance[campaign.id] ?: NativeAdvertisementCampaignPerformance(
+                campaignId = campaign.id,
+                selections = 0,
+                opens = 0,
+                suppressions = 0,
+            )
             NativeAdvertisementCandidate(
                 campaign = campaign,
-                userSelectionsToday = nativeAdvertisements.countUserSelectionsSince(campaign.id, principal.userId, today),
-                latestUserSelectionAt = nativeAdvertisements.latestUserSelectionAt(campaign.id, principal.userId),
-                latestUserViewAt = nativeAdvertisements.latestUserViewAt(campaign.id, principal.userId),
-                campaignSelections = nativeAdvertisements.countCampaignSelectionsSince(campaign.id, performanceWindow),
-                campaignViews = nativeAdvertisements.countCampaignViewsSince(campaign.id, performanceWindow),
+                userSelectionsToday = user.selectionsToday,
+                latestUserSelectionAt = user.latestSelectionAt,
+                latestUserViewAt = user.latestOpenAt,
+                campaignSelections = performance.selections,
+                campaignViews = performance.opens,
+                campaignSuppressions = performance.suppressions,
             )
         }
         val entropy = ThreadLocalRandom.current().nextLong()

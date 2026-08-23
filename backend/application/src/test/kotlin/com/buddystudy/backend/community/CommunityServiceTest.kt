@@ -18,6 +18,8 @@ import com.buddystudy.backend.community.application.port.outbound.QuestionLikePo
 import com.buddystudy.backend.community.application.port.outbound.ReportPort
 import com.buddystudy.backend.community.application.port.outbound.UserBlockPort
 import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementPort
+import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementCampaignPerformance
+import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementUserRankingSignals
 import com.buddystudy.backend.community.application.port.outbound.NativeAdvertisementViewPublishPort
 import com.buddystudy.backend.community.application.model.NativeAdvertisementViewedEvent
 import com.buddystudy.backend.community.application.service.CommunityService
@@ -654,11 +656,15 @@ class CommunityServiceTest {
 
         override suspend fun findEligibleCampaigns(placement: String, now: Instant) =
             campaigns.filter { it.placement == placement && it.active }
-        override suspend fun countUserSelectionsSince(campaignId: Long, userId: Long, since: Instant) = 0L
-        override suspend fun latestUserSelectionAt(campaignId: Long, userId: Long): Instant? = null
-        override suspend fun latestUserViewAt(campaignId: Long, userId: Long): Instant? = null
-        override suspend fun countCampaignSelectionsSince(campaignId: Long, since: Instant) = 0L
-        override suspend fun countCampaignViewsSince(campaignId: Long, since: Instant) = 0L
+        override suspend fun findUserRankingSignals(
+            campaignIds: Collection<Long>,
+            userId: Long,
+            today: Instant,
+        ): Map<Long, NativeAdvertisementUserRankingSignals> = emptyMap()
+        override suspend fun findCampaignPerformance(
+            campaignIds: Collection<Long>,
+            since: Instant,
+        ): Map<Long, NativeAdvertisementCampaignPerformance> = emptyMap()
         override suspend fun saveSelection(entity: NativeAdvertisementSelectionEntity): NativeAdvertisementSelectionEntity {
             selections += entity
             return entity

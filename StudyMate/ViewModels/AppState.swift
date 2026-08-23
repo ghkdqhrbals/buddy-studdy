@@ -5156,6 +5156,7 @@ final class AppState: ObservableObject {
     func suppressNativeAdvertisement(selectionID: String, campaignID: String) async {
         communityFeedState.hideAdvertisement(campaignID: campaignID)
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "native-ad-not-interested") else {
+            communityFeedState.restoreAdvertisement(campaignID: campaignID)
             return
         }
         do {
@@ -5163,8 +5164,10 @@ final class AppState: ObservableObject {
                 registration: registration,
                 selectionID: selectionID
             )
+            communityFeedState.confirmHiddenAdvertisement(campaignID: campaignID)
             statusMessage = strings.advertisementHidden
         } catch {
+            communityFeedState.restoreAdvertisement(campaignID: campaignID)
             log(
                 .warning,
                 "광고 관심 없음 저장 실패: \(appErrorHandlingUseCase.diagnosticDescription(for: error))"

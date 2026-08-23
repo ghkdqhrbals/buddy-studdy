@@ -69,6 +69,8 @@ test("advertising administration manages Coupang campaigns and explains server r
   assert.match(page, /Coupang destination URL/);
   assert.match(page, /Coupang product image URL/);
   assert.match(page, /Affiliate disclosure/);
+  assert.match(page, /smoothed not-interested rate/);
+  assert.match(page, /30d not interested on page/);
   assert.match(page, /Always shown in full/);
   assert.match(page, /link\.coupang\.com/);
   assert.match(page, /Advertising campaigns/);
