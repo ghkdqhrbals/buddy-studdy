@@ -358,6 +358,8 @@ jobs:
             "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
           grep -Fq '*Trace / Request ID* `%s`' \
             "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
+          grep -Fq '#error (C0BRMLFMH9V)' \
+            "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"
           if grep -Eq '\{\{[^}]*([^$]|^)\$(blocks|fallback|errorClass|traceID|occurredAt|logsURL|status|message)([^A-Za-z0-9_]|$)' \
             "${monitoring_root}/grafana/provisioning/alerting/backend-errors.yml"; then
             echo "Grafana contact-point Go template variables must escape provisioning interpolation with double dollars." >&2

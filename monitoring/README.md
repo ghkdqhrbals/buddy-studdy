@@ -108,6 +108,10 @@ still delete obsolete high-volume runs to reclaim their artifact storage.
     the captured `requestId`, while background links use the original timestamp
     and logger; both ranges start at the event time instead of a moving
     `now-15m` window.
+  - `GRAFANA_SLACK_WEBHOOK_URL` is the `BuddyStudy Grafana` Incoming Webhook
+    installed specifically to Slack `#error` (`C0BRMLFMH9V`). Slack app
+    webhooks do not allow a payload to override their channel, so routing is
+    controlled by this dedicated channel-bound secret.
   - Legacy custom-dashboard paths redirect to
     `https://monitoring.lowfidev.cloud` so old bookmarks cannot send Loki
     requests to Grafana.

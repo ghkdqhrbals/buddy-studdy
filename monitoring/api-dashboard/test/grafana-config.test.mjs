@@ -379,7 +379,13 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
     /GRAFANA_SLACK_WEBHOOK_URL: \$\{GRAFANA_SLACK_WEBHOOK_URL:-\$\{SLACK_WEBHOOK_URL:-\}\}/,
   );
   assert.doesNotMatch(alert, /type: slack/);
+  assert.match(alert, /#error \(C0BRMLFMH9V\)/);
   assert.match(alert, /url: \$GRAFANA_SLACK_WEBHOOK_URL/);
+  assert.doesNotMatch(
+    alert,
+    /coll\.Dict[^\n]*"channel"/,
+    "Slack app webhooks ignore payload channel overrides; routing belongs to the bound webhook",
+  );
   assert.match(alert, /payload:/);
   assert.match(alert, /coll\.Dict "text" \$\$fallback "blocks" \$\$blocks \| data\.ToJSON/);
   assert.match(alert, /<%s\|Grafana 로그 보기>/);
@@ -469,6 +475,7 @@ test("backend errors are one labeled Loki event and alert Slack", async () => {
   assert.match(monitoringDeploy, /--name buddystudy-incident-receiver/);
   assert.match(monitoringDeploy, /--security-opt no-new-privileges/);
   assert.match(monitoringDeploy, /<%s\|Grafana 로그 보기>/);
+  assert.match(monitoringDeploy, /#error \(C0BRMLFMH9V\)/);
   assert.match(
     monitoringDeploy,
     /coll\.Dict "text" \$\$fallback "blocks" \$\$blocks \| data\.ToJSON/,

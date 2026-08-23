@@ -8,6 +8,8 @@ contactPoints:
         type: webhook
         disableResolveMessage: false
         settings:
+          # Slack app Incoming Webhooks are channel-bound. This secret must be
+          # the BuddyStudy Grafana webhook installed to #error (C0BRMLFMH9V).
           url: $GRAFANA_SLACK_WEBHOOK_URL
           httpMethod: POST
           maxAlerts: '10'

@@ -665,8 +665,9 @@ scheduled check is disabled in production to avoid periodic KV writes.
 
 Slack uses separate app webhooks for separate sender identities:
 
-- `GRAFANA_SLACK_WEBHOOK_URL` belongs to the Grafana Slack app, whose app name
-  and icon are configured as Grafana.
+- `GRAFANA_SLACK_WEBHOOK_URL` belongs to the `BuddyStudy Grafana` Slack app and
+  must be the Incoming Webhook installed to `#error` (`C0BRMLFMH9V`). Slack
+  app webhooks are channel-bound and ignore payload channel overrides.
 - `DEPLOY_SLACK_WEBHOOK_URL` belongs to the BuddyStudy Deploy Slack app, whose
   app name and icon are configured for deployments.
 - `SLACK_WEBHOOK_URL` remains a temporary fallback for both workflows while the

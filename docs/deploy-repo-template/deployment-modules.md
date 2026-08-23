@@ -495,6 +495,10 @@ deployment.
   millisecond-precision timestamp and logger. Both links carry an absolute Loki
   range from two minutes before to two minutes after the event, so reopening a
   Slack notification does not move the search window to the current time.
+  The webhook secret belongs to the `BuddyStudy Grafana` Slack app and is
+  installed specifically to `#error` (`C0BRMLFMH9V`). Slack app Incoming
+  Webhooks cannot change channels from the JSON payload, so do not add a
+  misleading `channel` field or reuse the deployment notification webhook.
   The parser accepts both the application and worker-thread brackets in Spring
   log prefixes and excludes entries unless the timestamp plus request ID or
   logger were extracted. A malformed log line therefore cannot collapse into
