@@ -53,11 +53,13 @@ class AdminNativeAdvertisementService(
             val signals = performance[campaign.id] ?: NativeAdvertisementCampaignPerformance(
                 campaignId = campaign.id,
                 selections = 0,
+                impressions = 0,
                 opens = 0,
                 suppressions = 0,
             )
             campaign.toSummary(
                 selections = signals.selections,
+                impressions = signals.impressions,
                 views = signals.opens,
                 suppressions = signals.suppressions,
             )
@@ -79,7 +81,7 @@ class AdminNativeAdvertisementService(
         }
         val now = Instant.now()
         val created = advertisements.saveCampaign(normalized.toEntity(createdAt = now, updatedAt = now))
-        return created.toSummary(0, 0, 0)
+        return created.toSummary(0, 0, 0, 0)
     }
 
     @Transactional
@@ -100,7 +102,7 @@ class AdminNativeAdvertisementService(
         val since = NativeAdvertisementRankingPolicy.performanceWindowStart(Instant.now())
         val signals = advertisements.findCampaignPerformance(listOf(id), since)[id]
             ?: NativeAdvertisementCampaignPerformance(id, 0, 0, 0)
-        return updated.toSummary(signals.selections, signals.opens, signals.suppressions)
+        return updated.toSummary(signals.selections, signals.impressions, signals.opens, signals.suppressions)
     }
 
     @Transactional(readOnly = true)
@@ -322,6 +324,7 @@ private fun AdminNativeAdvertisementCampaignCommand.applyTo(entity: NativeAdvert
 
 private fun NativeAdvertisementCampaignEntity.toSummary(
     selections: Long,
+    impressions: Long,
     views: Long,
     suppressions: Long,
 ) =
@@ -357,8 +360,15 @@ private fun NativeAdvertisementCampaignEntity.toSummary(
         startsAt = startsAt,
         endsAt = endsAt,
         performanceSelections = selections,
+        performanceImpressions = impressions,
+        performanceImpressionRate = if (selections > 0) impressions.toDouble() / selections else 0.0,
         performanceViews = views,
         performanceViewRate = if (selections > 0) views.toDouble() / selections else 0.0,
+        performanceViewableOpenRate = if (impressions > 0) {
+            views.coerceAtMost(impressions).toDouble() / impressions
+        } else {
+            0.0
+        },
         performanceSuppressions = suppressions,
         performanceSuppressionRate = if (selections > 0) {
             suppressions.coerceIn(0, selections).toDouble() / selections

@@ -110,6 +110,24 @@ final class ArchitecturePolicyTests: XCTestCase {
         XCTAssertTrue(source.contains("openURL(url)"))
     }
 
+    func testCommunityAdvertisementSeparatesViewportImpressionFromDestinationOpen() throws {
+        let root = try repositoryRoot()
+        let viewSource = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Views/MobileRootView.swift"),
+            encoding: .utf8
+        )
+        let clientSource = try String(
+            contentsOf: root.appendingPathComponent("StudyMate/Services/RemotePushBackendClient.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(viewSource.contains("visibleRatio(frame) >= 0.5"))
+        XCTAssertTrue(viewSource.contains("Task.sleep(for: .seconds(1))"))
+        XCTAssertTrue(viewSource.contains("recordNativeAdvertisementImpression"))
+        XCTAssertTrue(clientSource.contains("selectionID, \"impression\""))
+        XCTAssertTrue(clientSource.contains("selectionID, \"view\""))
+    }
+
     func testCommunityUserBlockingCopyIsLocalizedInEveryLanguage() {
         let korean = AppStrings(language: .korean)
         let english = AppStrings(language: .english)

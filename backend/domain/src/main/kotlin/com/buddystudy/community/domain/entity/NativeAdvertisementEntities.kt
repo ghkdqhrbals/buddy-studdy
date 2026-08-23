@@ -61,5 +61,6 @@ class NativeAdvertisementSelectionEntity(
     var position: Int = 0,
     var rankScore: BigDecimal = BigDecimal.ZERO,
     var selectedAt: Instant = Instant.now(),
+    var impressionAt: Instant? = null,
     var viewedAt: Instant? = null,
 )

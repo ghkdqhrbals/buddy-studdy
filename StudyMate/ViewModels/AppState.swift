@@ -628,6 +628,7 @@ final class AppState: ObservableObject {
     private var answerGradingPollingID: String?
     private var answerGradingOwnerID: String?
     private var answerSubmissionRecordIDs: Set<String> = []
+    private var recordedAdvertisementImpressionSelectionIDs: Set<String> = []
     private var appControlBoundaryTask: Task<Void, Never>?
     private var appControlPolicy: AppControlRemotePolicy?
     #if os(iOS)
@@ -5149,6 +5150,28 @@ final class AppState: ObservableObject {
             log(
                 .warning,
                 "광고 조회 이벤트 전송 실패: \(appErrorHandlingUseCase.diagnosticDescription(for: error))"
+            )
+        }
+    }
+
+    func recordNativeAdvertisementImpression(selectionID: String) async {
+        guard recordedAdvertisementImpressionSelectionIDs.insert(selectionID).inserted else {
+            return
+        }
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "native-ad-impression") else {
+            recordedAdvertisementImpressionSelectionIDs.remove(selectionID)
+            return
+        }
+        do {
+            try await communityUseCase.recordNativeAdvertisementImpression(
+                registration: registration,
+                selectionID: selectionID
+            )
+        } catch {
+            recordedAdvertisementImpressionSelectionIDs.remove(selectionID)
+            log(
+                .warning,
+                "광고 실제 노출 이벤트 전송 실패: \(appErrorHandlingUseCase.diagnosticDescription(for: error))"
             )
         }
     }

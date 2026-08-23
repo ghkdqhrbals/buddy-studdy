@@ -89,6 +89,11 @@ protocol CommunityRepository {
         selectionID: String
     ) async throws
 
+    func recordNativeAdvertisementImpression(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws
+
     func suppressNativeAdvertisement(
         registration: RemotePushRegistration,
         selectionID: String

@@ -182,6 +182,16 @@ struct RemoteCommunityRepository: CommunityRepository {
         )
     }
 
+    func recordNativeAdvertisementImpression(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws {
+        try await backendClient.recordNativeAdvertisementImpression(
+            registration: registration,
+            selectionID: selectionID
+        )
+    }
+
     func suppressNativeAdvertisement(
         registration: RemotePushRegistration,
         selectionID: String

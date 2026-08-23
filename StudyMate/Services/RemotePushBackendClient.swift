@@ -575,6 +575,11 @@ protocol RemotePushBackendClientProtocol {
         selectionID: String
     ) async throws
 
+    func recordNativeAdvertisementImpression(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws
+
     func suppressNativeAdvertisement(
         registration: RemotePushRegistration,
         selectionID: String
@@ -1998,6 +2003,18 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         var request = authenticatedRequest(
             registration: registration,
             url: endpoint("api", "v1", "native-ad-selections", selectionID, "view")
+        )
+        request.httpMethod = "POST"
+        _ = try await perform(request)
+    }
+
+    func recordNativeAdvertisementImpression(
+        registration: RemotePushRegistration,
+        selectionID: String
+    ) async throws {
+        var request = authenticatedRequest(
+            registration: registration,
+            url: endpoint("api", "v1", "native-ad-selections", selectionID, "impression")
         )
         request.httpMethod = "POST"
         _ = try await perform(request)

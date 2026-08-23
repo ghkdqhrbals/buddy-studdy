@@ -71,6 +71,8 @@ test("advertising administration manages Coupang campaigns and explains server r
   assert.match(page, /Affiliate disclosure/);
   assert.match(page, /smoothed not-interested rate/);
   assert.match(page, /30d not interested on page/);
+  assert.match(page, /30d seen on page/);
+  assert.match(page, /Open after seen/);
   assert.match(page, /Always shown in full/);
   assert.match(page, /link\.coupang\.com/);
   assert.match(page, /Advertising campaigns/);

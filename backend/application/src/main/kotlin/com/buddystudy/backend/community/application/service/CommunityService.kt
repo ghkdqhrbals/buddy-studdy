@@ -218,6 +218,7 @@ class CommunityService(
             val performance = campaignPerformance[campaign.id] ?: NativeAdvertisementCampaignPerformance(
                 campaignId = campaign.id,
                 selections = 0,
+                impressions = 0,
                 opens = 0,
                 suppressions = 0,
             )
@@ -299,6 +300,20 @@ class CommunityService(
             imageUrl = campaign.imageUrl,
             affiliateDisclosure = localized.affiliateDisclosure,
             deepLink = campaign.deepLink,
+        )
+    }
+
+    @Transactional
+    override suspend fun recordNativeAdvertisementImpression(
+        principal: Principal,
+        selectionId: String,
+    ) {
+        ownedNativeAdvertisementSelection(principal, selectionId)
+        nativeAdvertisements.markImpression(
+            selectionId = selectionId,
+            userId = principal.userId,
+            deviceId = principal.deviceId,
+            at = Instant.now(),
         )
     }
 

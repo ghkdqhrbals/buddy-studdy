@@ -38,6 +38,7 @@ class AdminNativeAdvertisementServiceTest {
         val port = FakeAdminNativeAdvertisementPort().apply {
             saved += command().toEntity(id = 4)
             selections = 20
+            impressions = 10
             views = 5
             suppressions = 4
         }
@@ -52,6 +53,8 @@ class AdminNativeAdvertisementServiceTest {
         )
 
         assertThat(page.campaigns.single().performanceViewRate).isEqualTo(0.25)
+        assertThat(page.campaigns.single().performanceImpressionRate).isEqualTo(0.5)
+        assertThat(page.campaigns.single().performanceViewableOpenRate).isEqualTo(0.5)
         assertThat(page.campaigns.single().performanceSuppressionRate).isEqualTo(0.2)
         assertThat(page.rankingPolicy.exploitationPercent).isEqualTo(85)
         assertThat(page.rankingPolicy.explorationPercent).isEqualTo(15)
@@ -211,6 +214,7 @@ class AdminNativeAdvertisementServiceTest {
     private class FakeAdminNativeAdvertisementPort : AdminNativeAdvertisementPort {
         val saved = mutableListOf<NativeAdvertisementCampaignEntity>()
         var selections = 0L
+        var impressions = 0L
         var views = 0L
         var suppressions = 0L
         val userRows = mutableListOf<AdminNativeAdvertisementUserSummary>()
@@ -242,7 +246,13 @@ class AdminNativeAdvertisementServiceTest {
             campaignIds: Collection<Long>,
             since: Instant,
         ): Map<Long, NativeAdvertisementCampaignPerformance> = campaignIds.associateWith { campaignId ->
-            NativeAdvertisementCampaignPerformance(campaignId, selections, views, suppressions)
+            NativeAdvertisementCampaignPerformance(
+                campaignId = campaignId,
+                selections = selections,
+                opens = views,
+                suppressions = suppressions,
+                impressions = impressions,
+            )
         }
         override suspend fun campaignUsers(
             campaignId: Long,

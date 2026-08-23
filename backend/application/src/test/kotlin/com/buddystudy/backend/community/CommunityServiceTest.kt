@@ -147,6 +147,23 @@ class CommunityServiceTest {
     }
 
     @Test
+    fun `visible advertisement records one idempotent impression`(): Unit = runBlocking {
+        nativeAdvertisements.selections += NativeAdvertisementSelectionEntity(
+            selectionId = "selection-1",
+            campaignId = 1,
+            userId = principal.userId,
+            deviceId = principal.deviceId,
+        )
+
+        service.recordNativeAdvertisementImpression(principal, "selection-1")
+        val firstRecordedAt = nativeAdvertisements.selections.single().impressionAt
+        service.recordNativeAdvertisementImpression(principal, "selection-1")
+
+        assertThat(firstRecordedAt).isNotNull
+        assertThat(nativeAdvertisements.selections.single().impressionAt).isEqualTo(firstRecordedAt)
+    }
+
+    @Test
     fun `advertisement view rejects a selection owned by another device`(): Unit = runBlocking {
         nativeAdvertisements.selections += NativeAdvertisementSelectionEntity(
             selectionId = "selection-1",
@@ -670,6 +687,10 @@ class CommunityServiceTest {
             return entity
         }
         override suspend fun findSelection(selectionId: String) = selections.firstOrNull { it.selectionId == selectionId }
+        override suspend fun markImpression(selectionId: String, userId: Long, deviceId: String, at: Instant) {
+            selections.firstOrNull { it.selectionId == selectionId && it.userId == userId && it.deviceId == deviceId }
+                ?.let { if (it.impressionAt == null) it.impressionAt = at }
+        }
         override suspend fun markView(selectionId: String, userId: Long, deviceId: String, at: Instant) {
             selections.firstOrNull { it.selectionId == selectionId && it.userId == userId && it.deviceId == deviceId }
                 ?.let { if (it.viewedAt == null) it.viewedAt = at }

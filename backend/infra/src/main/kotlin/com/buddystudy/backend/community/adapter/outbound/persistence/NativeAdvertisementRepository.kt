@@ -83,6 +83,18 @@ interface NativeAdvertisementSelectionRepository : CoroutineCrudRepository<Nativ
     @Query(
         """
         update native_ad_selection_history
+        set impression_at = coalesce(impression_at, :at)
+        where selection_id = :selectionId
+          and user_id = :userId
+          and device_id = :deviceId
+        """
+    )
+    suspend fun markImpression(selectionId: String, userId: Long, deviceId: String, at: Instant): Long
+
+    @Modifying
+    @Query(
+        """
+        update native_ad_selection_history
         set viewed_at = coalesce(viewed_at, :at)
         where selection_id = :selectionId
           and user_id = :userId
@@ -145,6 +157,7 @@ class NativeAdvertisementPersistenceAdapter(
             """
             select campaign_id,
                    count(*) as selection_count,
+                   sum(case when impression_at is not null then 1 else 0 end) as impression_count,
                    sum(case when viewed_at is not null then 1 else 0 end) as open_count
             from native_ad_selection_history
             where campaign_id in (:campaignIds)
@@ -156,6 +169,7 @@ class NativeAdvertisementPersistenceAdapter(
             .map { row, _ ->
                 row.long("campaign_id") to CampaignHistoryCounts(
                     selections = row.long("selection_count"),
+                    impressions = row.long("impression_count"),
                     opens = row.long("open_count"),
                 )
             }
@@ -183,6 +197,7 @@ class NativeAdvertisementPersistenceAdapter(
             NativeAdvertisementCampaignPerformance(
                 campaignId = campaignId,
                 selections = counts.selections,
+                impressions = counts.impressions,
                 opens = counts.opens,
                 suppressions = suppressions[campaignId] ?: 0,
             )
@@ -192,6 +207,10 @@ class NativeAdvertisementPersistenceAdapter(
     override suspend fun saveSelection(entity: NativeAdvertisementSelectionEntity) = selections.save(entity)
 
     override suspend fun findSelection(selectionId: String) = selections.findBySelectionId(selectionId)
+
+    override suspend fun markImpression(selectionId: String, userId: Long, deviceId: String, at: Instant) {
+        selections.markImpression(selectionId, userId, deviceId, at)
+    }
 
     override suspend fun markView(selectionId: String, userId: Long, deviceId: String, at: Instant) {
         selections.markView(selectionId, userId, deviceId, at)
@@ -306,6 +325,7 @@ class NativeAdvertisementPersistenceAdapter(
                    u.email,
                    u.display_name,
                    count(*) as selection_count,
+                   sum(case when h.impression_at is not null then 1 else 0 end) as impression_count,
                    sum(case when h.viewed_at is not null then 1 else 0 end) as destination_open_count,
                    count(distinct h.device_id) as distinct_device_count,
                    min(h.selected_at) as first_selected_at,
@@ -333,6 +353,7 @@ class NativeAdvertisementPersistenceAdapter(
 
 private data class CampaignHistoryCounts(
     val selections: Long = 0,
+    val impressions: Long = 0,
     val opens: Long = 0,
 )
 
@@ -396,6 +417,7 @@ private fun DatabaseClient.GenericExecuteSpec.bindUserSearch(
 
 private fun Row.toAdminNativeAdvertisementUser(): AdminNativeAdvertisementUserSummary {
     val selections = long("selection_count")
+    val impressions = long("impression_count").coerceIn(0, selections)
     val opens = long("destination_open_count").coerceIn(0, selections)
     return AdminNativeAdvertisementUserSummary(
         userId = long("user_id"),
@@ -403,8 +425,11 @@ private fun Row.toAdminNativeAdvertisementUser(): AdminNativeAdvertisementUserSu
         email = get("email", String::class.java),
         displayName = get("display_name", String::class.java),
         selectionCount = selections,
+        impressionCount = impressions,
+        impressionRate = if (selections > 0) impressions.toDouble() / selections else 0.0,
         destinationOpenCount = opens,
         openRate = if (selections > 0) opens.toDouble() / selections else 0.0,
+        viewableOpenRate = if (impressions > 0) opens.coerceAtMost(impressions).toDouble() / impressions else 0.0,
         distinctDeviceCount = long("distinct_device_count"),
         firstSelectedAt = instant("first_selected_at"),
         lastSelectedAt = instant("last_selected_at"),

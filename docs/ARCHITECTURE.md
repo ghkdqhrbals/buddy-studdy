@@ -298,6 +298,7 @@ Public community feed
 -> ADVERTISEMENT carries selectionId, campaignId, provider name, localized advertising label/title/body/full affiliate disclosure, optional Coupang CDN image, and a validated BuddyStudy deep link or HTTPS Coupang destination
 -> iOS renders items[] unchanged, routes buddystudy:// through AppRoute, and opens validated HTTPS destinations externally; it performs no ranking or placement
 -> tapping an advertisement calls POST /api/v1/native-ad-selections/{selectionId}/view immediately before destination routing
+-> keeping at least 50% of an advertisement row visible for one second calls POST /api/v1/native-ad-selections/{selectionId}/impression; ownership checks plus `coalesce(impression_at, at)` make repeated viewport reports idempotent
 -> choosing Not interested removes the campaign immediately in iOS and calls POST /api/v1/native-ad-selections/{selectionId}/not-interested; the backend validates selection ownership and idempotently persists a user-scoped permanent ranking exclusion; iOS restores the exact removed row when authentication or persistence fails
 -> the request validates selection ownership and appends one stable native-ad-view-{selectionId} Outbox event
 -> community.native-ad.view.v1 delivers NATIVE_AD_VIEWED at least once; the Inbox consumer idempotently records viewed_at

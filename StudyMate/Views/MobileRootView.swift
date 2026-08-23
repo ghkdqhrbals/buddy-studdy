@@ -2125,6 +2125,13 @@ private struct MobileHomeView: View {
                         .contentShape(Rectangle())
                 }
             }
+            .background {
+                MobileNativeAdvertisementImpressionReporter {
+                    await appState.recordNativeAdvertisementImpression(
+                        selectionID: advertisement.selectionID
+                    )
+                }
+            }
             .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 10))
             .listRowBackground(Color.clear)
             .contextMenu {
@@ -9594,6 +9601,61 @@ private struct MobileNativeAdvertisementRow: View {
         }
         return ["coupang.com", "www.coupang.com", "link.coupang.com"]
             .contains(url.host?.lowercased() ?? "")
+    }
+}
+
+private struct MobileNativeAdvertisementImpressionReporter: View {
+    var onImpression: @MainActor () async -> Void
+
+    @State private var pendingReport: Task<Void, Never>?
+    @State private var hasReported = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            let frame = proxy.frame(in: .global)
+            Color.clear
+                .onAppear {
+                    updateVisibility(frame)
+                }
+                .onChange(of: frame) { _, newFrame in
+                    updateVisibility(newFrame)
+                }
+                .onDisappear {
+                    pendingReport?.cancel()
+                    pendingReport = nil
+                }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    @MainActor
+    private func updateVisibility(_ frame: CGRect) {
+        guard !hasReported else { return }
+        guard visibleRatio(frame) >= 0.5 else {
+            pendingReport?.cancel()
+            pendingReport = nil
+            return
+        }
+        guard pendingReport == nil else { return }
+        pendingReport = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                hasReported = true
+                pendingReport = nil
+                await onImpression()
+            } catch {
+                pendingReport = nil
+            }
+        }
+    }
+
+    private func visibleRatio(_ frame: CGRect) -> CGFloat {
+        guard frame.width > 0, frame.height > 0 else { return 0 }
+        let visibleFrame = frame.intersection(UIScreen.main.bounds)
+        guard !visibleFrame.isNull, !visibleFrame.isEmpty else { return 0 }
+        return (visibleFrame.width * visibleFrame.height) / (frame.width * frame.height)
     }
 }
 

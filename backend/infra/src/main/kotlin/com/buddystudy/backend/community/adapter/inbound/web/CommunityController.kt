@@ -172,6 +172,14 @@ class CommunityController(
         authentication: Authentication,
     ) = community.recordNativeAdvertisementView(selectionId, authentication)
 
+    @Operation(summary = "Record native-ad impression", description = "Idempotently records that at least half of a server-selected advertisement stayed visible for one second.")
+    @PostMapping("/native-ad-selections/{selectionId}/impression")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    suspend fun recordNativeAdvertisementImpression(
+        @PathVariable selectionId: String,
+        authentication: Authentication,
+    ) = community.recordNativeAdvertisementImpression(selectionId, authentication)
+
     @Operation(summary = "Hide a native advertisement", description = "Permanently excludes the selected campaign from ranking for the authenticated user.")
     @PostMapping("/native-ad-selections/{selectionId}/not-interested")
     @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -234,6 +242,10 @@ interface CommunityWebPort {
     suspend fun setUserBlocked(userId: Long, blocked: Boolean, authentication: Authentication): UserBlockResponse
     suspend fun submitFeedback(body: SubmitFeedbackRequest, deviceId: String?, authentication: Authentication?): FeedbackResponse
     suspend fun recordNativeAdvertisementView(
+        selectionId: String,
+        authentication: Authentication,
+    )
+    suspend fun recordNativeAdvertisementImpression(
         selectionId: String,
         authentication: Authentication,
     )
@@ -309,6 +321,14 @@ class CommunityWebAdapter(
         selectionId: String,
         authentication: Authentication,
     ) = community.recordNativeAdvertisementView(
+        authentication.principalOrThrow(),
+        selectionId,
+    )
+
+    override suspend fun recordNativeAdvertisementImpression(
+        selectionId: String,
+        authentication: Authentication,
+    ) = community.recordNativeAdvertisementImpression(
         authentication.principalOrThrow(),
         selectionId,
     )

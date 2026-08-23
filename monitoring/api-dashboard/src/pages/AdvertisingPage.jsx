@@ -201,8 +201,9 @@ function CampaignAudienceActivity({ campaign }) {
       ),
     },
     { key: "deliveries", label: "Deliveries", render: (row) => Number(row.selectionCount || 0).toLocaleString() },
+    { key: "impressions", label: "Seen", render: (row) => Number(row.impressionCount || 0).toLocaleString() },
     { key: "opens", label: "Opens", render: (row) => Number(row.destinationOpenCount || 0).toLocaleString() },
-    { key: "rate", label: "Open rate", render: (row) => percentage(row.openRate) },
+    { key: "rate", label: "Open after seen", render: (row) => percentage(row.viewableOpenRate) },
     { key: "devices", label: "Devices", render: (row) => Number(row.distinctDeviceCount || 0).toLocaleString() },
     { key: "latest", label: "Latest delivery", render: (row) => formatDateTime(row.lastSelectedAt) },
     { key: "opened", label: "Latest open", render: (row) => row.lastViewedAt ? formatDateTime(row.lastViewedAt) : "—" },
@@ -211,7 +212,7 @@ function CampaignAudienceActivity({ campaign }) {
   return (
     <section className="drawer-section advertising-audience-section">
       <h3>Audience activity</h3>
-      <p className="section-description">Feed deliveries and destination opens for this campaign. Anonymous device identifiers stay hidden.</p>
+      <p className="section-description">Deliveries, ads actually seen for at least one second, and destination opens. Anonymous device identifiers stay hidden.</p>
       <div className="advertising-audience-toolbar">
         <SearchField
           value={queryDraft}
@@ -481,6 +482,7 @@ function AdvertisingWorkspace() {
   const page = Math.floor(offset / PAGE_SIZE) + 1;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const deliveries = campaigns.reduce((sum, campaign) => sum + Number(campaign.performanceSelections || 0), 0);
+  const impressions = campaigns.reduce((sum, campaign) => sum + Number(campaign.performanceImpressions || 0), 0);
   const opens = campaigns.reduce((sum, campaign) => sum + Number(campaign.performanceViews || 0), 0);
   const suppressions = campaigns.reduce((sum, campaign) => sum + Number(campaign.performanceSuppressions || 0), 0);
 
@@ -504,8 +506,9 @@ function AdvertisingWorkspace() {
     } },
     { key: "audience", label: "Audience" },
     { key: "deliveries", label: "30d deliveries", render: (row) => Number(row.performanceSelections || 0).toLocaleString() },
+    { key: "impressions", label: "30d seen", render: (row) => Number(row.performanceImpressions || 0).toLocaleString() },
     { key: "opens", label: "30d opens", render: (row) => Number(row.performanceViews || 0).toLocaleString() },
-    { key: "rate", label: "Open rate", render: (row) => percentage(row.performanceViewRate) },
+    { key: "rate", label: "Open after seen", render: (row) => percentage(row.performanceViewableOpenRate) },
     { key: "not-interested", label: "Not interested", render: (row) => `${Number(row.performanceSuppressions || 0).toLocaleString()} · ${percentage(row.performanceSuppressionRate)}` },
     { key: "schedule", label: "Schedule", render: campaignSchedule },
   ], []);
@@ -532,7 +535,8 @@ function AdvertisingWorkspace() {
         <div><span>Campaigns</span><strong>{total.toLocaleString()}</strong></div>
         <div><span>Active on page</span><strong>{campaigns.filter((item) => campaignStatus(item) === "ACTIVE").length}</strong></div>
         <div><span>30d deliveries on page</span><strong>{deliveries.toLocaleString()}</strong></div>
-        <div><span>30d open rate on page</span><strong>{percentage(deliveries ? opens / deliveries : 0)}</strong></div>
+        <div><span>30d seen on page</span><strong>{impressions.toLocaleString()}</strong></div>
+        <div><span>30d open after seen</span><strong>{percentage(impressions ? Math.min(opens, impressions) / impressions : 0)}</strong></div>
         <div><span>30d not interested on page</span><strong>{suppressions.toLocaleString()}</strong></div>
       </div>
 

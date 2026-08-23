@@ -99,6 +99,7 @@ class NativeAdvertisementPersistenceAdapterTest {
                     user_id bigint not null,
                     device_id varchar(255) not null,
                     selected_at timestamp not null,
+                    impression_at timestamp null,
                     viewed_at timestamp null
                 )
                 """.trimIndent(),
@@ -136,13 +137,13 @@ class NativeAdvertisementPersistenceAdapterTest {
             execute(
                 """
                 insert into native_ad_selection_history
-                    (campaign_id, user_id, device_id, selected_at, viewed_at)
+                    (campaign_id, user_id, device_id, selected_at, impression_at, viewed_at)
                 values
-                    (7, 10, 'device-a', timestamp '2026-08-01 00:00:00', timestamp '2026-08-01 00:05:00'),
-                    (7, 10, 'device-a', timestamp '2026-08-02 00:00:00', null),
-                    (7, 10, 'device-b', timestamp '2026-08-03 00:00:00', timestamp '2026-08-03 00:05:00'),
-                    (7, 11, 'anonymous-device', timestamp '2026-08-04 00:00:00', null),
-                    (8, 12, 'other-device', timestamp '2026-08-05 00:00:00', timestamp '2026-08-05 00:05:00')
+                    (7, 10, 'device-a', timestamp '2026-08-01 00:00:00', timestamp '2026-08-01 00:00:01', timestamp '2026-08-01 00:05:00'),
+                    (7, 10, 'device-a', timestamp '2026-08-02 00:00:00', timestamp '2026-08-02 00:00:01', null),
+                    (7, 10, 'device-b', timestamp '2026-08-03 00:00:00', null, timestamp '2026-08-03 00:05:00'),
+                    (7, 11, 'anonymous-device', timestamp '2026-08-04 00:00:00', null, null),
+                    (8, 12, 'other-device', timestamp '2026-08-05 00:00:00', timestamp '2026-08-05 00:00:01', timestamp '2026-08-05 00:05:00')
                 """.trimIndent(),
             )
         }
@@ -204,7 +205,10 @@ class NativeAdvertisementPersistenceAdapterTest {
         assertThat(page.totalCount).isEqualTo(2)
         val users = page.users.associateBy { it.userId }
         assertThat(users.getValue(10).selectionCount).isEqualTo(3)
+        assertThat(users.getValue(10).impressionCount).isEqualTo(2)
+        assertThat(users.getValue(10).impressionRate).isEqualTo(2.0 / 3.0)
         assertThat(users.getValue(10).destinationOpenCount).isEqualTo(2)
+        assertThat(users.getValue(10).viewableOpenRate).isEqualTo(1.0)
         assertThat(users.getValue(10).openRate).isEqualTo(2.0 / 3.0)
         assertThat(users.getValue(10).distinctDeviceCount).isEqualTo(2)
         assertThat(users.getValue(10).firstSelectedAt).isEqualTo(Instant.parse("2026-08-01T00:00:00Z"))
