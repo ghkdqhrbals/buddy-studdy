@@ -404,6 +404,19 @@ GET /api/v1/public/questions?topic=SwiftUI&limit=20&offset=0
 
 This endpoint is public and must not require `Authorization`.
 
+Liked public questions:
+
+```http
+GET /api/v1/public/questions/liked?query=SwiftUI&tl=ko&view=localized&limit=20&offset=0
+Authorization: Bearer <accessToken>
+```
+
+This endpoint returns only the authenticated user's still-public, graded liked
+questions, ordered by the time they were liked. It excludes blocked authors and
+never inserts native advertisements. `limit` is clamped to `1...100`, `offset`
+is clamped to zero or greater, and `tl` takes precedence over the deprecated
+`language` alias.
+
 Patch request:
 
 ```json

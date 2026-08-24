@@ -197,3 +197,131 @@ struct CommunityFeedStateStore {
         return currentCount < totalCount
     }
 }
+
+@MainActor
+struct LikedQuestionsStateStore {
+    var questions: [CommunityQuestion] = []
+    var totalCount = 0
+    var offset = 0
+    var isLoading = false
+    var errorMessage: String?
+    var requestID = UUID()
+    var query = ""
+    var hasLoadedInitialPage = false
+
+    mutating func reset() {
+        questions = []
+        totalCount = 0
+        offset = 0
+        isLoading = false
+        errorMessage = nil
+        requestID = UUID()
+        query = ""
+        hasLoadedInitialPage = false
+    }
+
+    mutating func beginLoading(query: String) -> UUID {
+        let nextRequestID = UUID()
+        requestID = nextRequestID
+        self.query = query
+        isLoading = true
+        errorMessage = nil
+        return nextRequestID
+    }
+
+    func isCurrentRequest(_ candidate: UUID) -> Bool {
+        requestID == candidate
+    }
+
+    mutating func finishLoading(_ candidate: UUID) {
+        guard isCurrentRequest(candidate) else { return }
+        isLoading = false
+    }
+
+    mutating func applyPage(_ response: CommunityQuestionsResponse, offset normalizedOffset: Int, reset: Bool) {
+        let page = response.questions.filter { $0.status.caseInsensitiveCompare("graded") == .orderedSame }
+        if reset {
+            questions = page
+            hasLoadedInitialPage = true
+        } else {
+            let existingIDs = Set(questions.map(\.id))
+            questions.append(contentsOf: page.filter { !existingIDs.contains($0.id) })
+        }
+        totalCount = max(0, response.totalCount)
+        offset = normalizedOffset + response.questions.count
+    }
+
+    mutating func applyError(_ message: String, reset: Bool, preserveExisting: Bool) {
+        errorMessage = message
+        if reset {
+            hasLoadedInitialPage = true
+            if !preserveExisting {
+                questions = []
+                totalCount = 0
+                offset = 0
+            }
+        }
+    }
+
+    mutating func updateQuestion(id: String, isLiked: Bool, likeCount: Int) {
+        guard let index = questions.firstIndex(where: { $0.id == id }) else { return }
+        questions[index].isLikedByMe = isLiked
+        questions[index].likeCount = max(0, likeCount)
+    }
+
+    mutating func upsertLikedQuestion(_ question: CommunityQuestion, includeIfMissing: Bool) {
+        if let index = questions.firstIndex(where: { $0.id == question.id }) {
+            questions[index] = question
+            return
+        }
+        guard includeIfMissing else { return }
+        requestID = UUID()
+        isLoading = false
+        questions.insert(question, at: 0)
+        totalCount += 1
+        offset += 1
+    }
+
+    mutating func removeQuestion(id: String) {
+        // A late page response must not reinsert a question after unlike succeeds.
+        requestID = UUID()
+        isLoading = false
+        guard questions.contains(where: { $0.id == id }) else { return }
+        questions.removeAll { $0.id == id }
+        totalCount = max(0, totalCount - 1)
+        offset = max(0, offset - 1)
+    }
+
+    func canLoadMore() -> Bool {
+        offset < totalCount
+    }
+}
+
+@MainActor
+struct CommunityQuestionLikeRequestStore {
+    private var requestIDsByQuestionID: [String: UUID] = [:]
+
+    mutating func begin(questionID: String) -> UUID? {
+        guard requestIDsByQuestionID[questionID] == nil else { return nil }
+        let requestID = UUID()
+        requestIDsByQuestionID[questionID] = requestID
+        return requestID
+    }
+
+    func isCurrent(questionID: String, requestID: UUID) -> Bool {
+        requestIDsByQuestionID[questionID] == requestID
+    }
+
+    func contains(questionID: String) -> Bool {
+        requestIDsByQuestionID[questionID] != nil
+    }
+
+    mutating func finish(questionID: String, requestID: UUID) {
+        guard isCurrent(questionID: questionID, requestID: requestID) else { return }
+        requestIDsByQuestionID.removeValue(forKey: questionID)
+    }
+
+    mutating func reset() {
+        requestIDsByQuestionID.removeAll()
+    }
+}

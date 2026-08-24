@@ -484,6 +484,13 @@ final class StudyMateTests: XCTestCase {
             excludeDeviceID: nil,
             language: .korean
         )
+        _ = try await useCase.fetchLikedPublicQuestions(
+            registration: backendClient.registration,
+            query: nil,
+            limit: 20,
+            offset: 0,
+            language: .korean
+        )
         _ = try await useCase.loginWithGoogle(
             registration: backendClient.registration,
             idToken: "id-token"
@@ -542,6 +549,7 @@ final class StudyMateTests: XCTestCase {
         try await useCase.logout(registration: backendClient.registration)
 
         XCTAssertEqual(backendClient.fetchPublicQuestionsRequests.count, 1)
+        XCTAssertEqual(backendClient.fetchLikedPublicQuestionsRequests.count, 1)
         XCTAssertEqual(backendClient.googleLoginIDTokens, ["id-token"])
         XCTAssertEqual(backendClient.emailVerificationRequests, ["user@example.com"])
         XCTAssertEqual(backendClient.emailLoginRequests.map(\.email), ["user@example.com"])
@@ -5040,6 +5048,7 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         excludeDeviceID: String?,
         language: AppLanguage
     )] = []
+    var fetchLikedPublicQuestionsRequests: [(query: String?, limit: Int, offset: Int, language: AppLanguage)] = []
     var fetchPublicQuestionIDs: [String] = []
     var googleLoginIDTokens: [String] = []
     var emailVerificationRequests: [String] = []
@@ -5427,10 +5436,28 @@ private final class FakeRemotePushBackendClient: RemotePushBackendClientProtocol
         )
     }
 
+    func fetchLikedPublicQuestions(
+        registration: RemotePushRegistration,
+        query: String?,
+        limit: Int,
+        offset: Int,
+        language: AppLanguage,
+        view: LocalizedContentView
+    ) async throws -> CommunityQuestionsResponse {
+        fetchLikedPublicQuestionsRequests.append((query: query, limit: limit, offset: offset, language: language))
+        return CommunityQuestionsResponse(
+            questions: [],
+            totalCount: 0,
+            limit: limit,
+            offset: offset
+        )
+    }
+
     func fetchPublicQuestion(
         registration: RemotePushRegistration,
         questionID: String,
-        language: AppLanguage
+        language: AppLanguage,
+        view: LocalizedContentView
     ) async throws -> CommunityQuestion {
         fetchPublicQuestionIDs.append(questionID)
         CommunityQuestion(

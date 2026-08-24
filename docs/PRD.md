@@ -79,6 +79,13 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 24. The compact My Studies outline keeps the card, row geometry, and dividers fixed while newly selected branch contents settle in with a subtle direction-aware stagger; it does not blink or overlay old and new rows. Long-pressing every study card presents Edit, View Full Tree, and Delete actions; View Full Tree is not duplicated as an inline list row and remains available for childless roots so the user can enter the tree and add the first child topic. Roots without children omit only the empty child-topic section. After entering any study topic, the trailing toolbar keeps New Question and a separate More menu visible; More provides only Edit Study and View Full Tree for the containing root. Topic deletion remains inside the study editor.
 25. Before the backend study hierarchy is available, My Studies shows an initial loading state. A failed hierarchy request shows a retryable error without exposing persisted descendant topics as independent root-study cards; an ordinary refresh keeps an already loaded hierarchy visible.
 
+### Community
+
+1. Signed-in users can open Liked Questions from Profile and browse every public question they have liked, not only liked items that happen to be present in the currently loaded public feed.
+2. The liked collection is a server-filtered, newest-first 20-item page with search, lazy pagination, retry, and a dedicated empty state. Deleted, private, unanswered, blocked-author, or otherwise non-public questions never appear, and native advertisements are not inserted into this personal collection.
+3. Like state is account-owned backend data and is not duplicated into `SettingsStore`. Signing out, withdrawing the account, or resetting backend identity clears the in-memory liked collection so one account's items cannot appear for another account.
+4. Unliking from question detail updates the public feed and liked collection together and removes the successful unlike from the collection without skipping the next server page. A question accepts only one in-flight like mutation at a time so delayed responses cannot overwrite a newer intent.
+
 ### Records
 
 1. Ungraded records appear first.
@@ -109,6 +116,7 @@ BuddyStudy is a quiet AI tutor for people who use AI heavily but still want to k
 16. Total graded learning records, total topic count, and measured topic count sit above the tree. Question-workflow completion is not presented as a learning-growth statistic. Declining and unmeasured nodes are distinguished within the circular nodes themselves; statistics do not duplicate them in a separate priority list.
 17. Selecting any node in the statistics tree opens its growth detail and a newest-first record list for that exact topic node. Records load in 30-item pages as the user scrolls and open the shared question-browse detail flow.
 18. Re-selecting the Statistics tab within one minute reuses the current snapshot instead of issuing duplicate requests. Growth windows use stable UTC day boundaries, and equal-count topics use a deterministic name tie-break so the `This Month` card cannot change when the underlying records have not changed. Pull-to-refresh always performs an explicit refresh.
+19. Learning-activity, root ability, compact trend, and topic trend graphs use a restrained pixel-game language: square activity cells, a shared ten-tile 1–10 ability track, stepped trend lines, square markers, and a lightweight HUD border. Pixel styling never changes the topic-first calculation, growth colors, or the circular study-tree nodes, and the same data remains available through localized labels and a concise VoiceOver summary.
 
 ### Settings
 

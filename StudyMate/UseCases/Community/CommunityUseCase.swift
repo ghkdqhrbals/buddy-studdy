@@ -26,6 +26,24 @@ struct CommunityUseCase {
         )
     }
 
+    func fetchLikedPublicQuestions(
+        registration: RemotePushRegistration,
+        query: String?,
+        limit: Int,
+        offset: Int,
+        language: AppLanguage,
+        view: LocalizedContentView = .localized
+    ) async throws -> CommunityQuestionsResponse {
+        try await repository.fetchLikedPublicQuestions(
+            registration: registration,
+            query: query,
+            limit: limit,
+            offset: offset,
+            language: language,
+            view: view
+        )
+    }
+
     func fetchPublicQuestion(
         registration: RemotePushRegistration,
         questionID: String,

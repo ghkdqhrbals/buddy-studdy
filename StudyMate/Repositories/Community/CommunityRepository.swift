@@ -11,6 +11,15 @@ protocol CommunityRepository {
         language: AppLanguage
     ) async throws -> CommunityQuestionsResponse
 
+    func fetchLikedPublicQuestions(
+        registration: RemotePushRegistration,
+        query: String?,
+        limit: Int,
+        offset: Int,
+        language: AppLanguage,
+        view: LocalizedContentView
+    ) async throws -> CommunityQuestionsResponse
+
     func fetchPublicQuestion(
         registration: RemotePushRegistration,
         questionID: String,

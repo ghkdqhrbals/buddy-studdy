@@ -74,6 +74,45 @@ enum StatsTopicFocusPolicy {
     }
 }
 
+enum PixelChartLayoutPolicy {
+    static let minimumAbility = 1
+    static let maximumAbility = 10
+
+    static func quantizedAbility(_ value: Double) -> Int {
+        guard value.isFinite else {
+            return minimumAbility
+        }
+        return min(
+            max(
+                Int(value.rounded(.toNearestOrAwayFromZero)),
+                minimumAbility
+            ),
+            maximumAbility
+        )
+    }
+
+    static func normalizedAbility(_ value: Double) -> CGFloat {
+        let quantized = quantizedAbility(value)
+        return CGFloat(quantized - minimumAbility)
+            / CGFloat(maximumAbility - minimumAbility)
+    }
+
+    static func staircasePoints(_ points: [CGPoint]) -> [CGPoint] {
+        guard let first = points.first else {
+            return []
+        }
+
+        var result = [first]
+        result.reserveCapacity(max(1, points.count * 2 - 1))
+        for point in points.dropFirst() {
+            let previous = result[result.count - 1]
+            result.append(CGPoint(x: point.x, y: previous.y))
+            result.append(point)
+        }
+        return result
+    }
+}
+
 struct StatisticsView: View {
     @EnvironmentObject private var appState: AppState
     @State private var selectedRecord: StudyRecord?
@@ -1493,7 +1532,37 @@ private struct StatsYearGrass: View {
     var activity: BackendStatsActivity
     var selectedYear: Int
     var strings: AppStrings
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @State private var selectedDay: BackendStatsActivityDay?
+
+    private var weekdayLabels: [String] {
+        switch strings.language {
+        case .korean:
+            ["월", "화", "수", "목", "금", "토", "일"]
+        case .english:
+            ["M", "T", "W", "T", "F", "S", "S"]
+        case .japanese:
+            ["月", "火", "水", "木", "金", "土", "日"]
+        }
+    }
+
+    private var accessibilityDays: [BackendStatsActivityDay] {
+        activity.days
+            .filter {
+                Self.weekCalendar.component(.year, from: $0.date) == selectedYear
+                    && $0.answerCount > 0
+            }
+            .sorted { $0.date < $1.date }
+    }
+
+    private var accessibilityValue: String {
+        if let selectedDay,
+           Self.weekCalendar.component(.year, from: selectedDay.date) == selectedYear {
+            return displayText(for: selectedDay)
+        }
+        let total = accessibilityDays.reduce(0) { $0 + $1.answerCount }
+        return "\(total) \(strings.answersUnit)"
+    }
 
     var body: some View {
         let weeks = Self.weeks(from: activity.days, selectedYear: selectedYear)
@@ -1504,8 +1573,8 @@ private struct StatsYearGrass: View {
                     VStack(spacing: Self.cellSpacing) {
                         Color.clear
                             .frame(width: Self.weekdayLabelWidth, height: Self.monthLabelHeight)
-                        ForEach(Self.weekdayLabels, id: \.self) { label in
-                            Text(label)
+                        ForEach(weekdayLabels.indices, id: \.self) { index in
+                            Text(weekdayLabels[index])
                                 .font(.system(size: 8, weight: .medium))
                                 .foregroundStyle(.secondary)
                                 .frame(width: Self.weekdayLabelWidth, height: Self.cellSize, alignment: .trailing)
@@ -1531,22 +1600,26 @@ private struct StatsYearGrass: View {
                                     VStack(spacing: Self.cellSpacing) {
                                         ForEach(week.days) { day in
                                             Button {
-                                                withAnimation(.smooth(duration: 0.16)) {
+                                                if accessibilityReduceMotion {
                                                     selectedDay = day
+                                                } else {
+                                                    withAnimation(.smooth(duration: 0.16)) {
+                                                        selectedDay = day
+                                                    }
                                                 }
                                             } label: {
-                                                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                                Rectangle()
                                                     .fill(color(for: day.answerCount))
                                                     .frame(width: Self.cellSize, height: Self.cellSize)
                                                     .overlay {
                                                         if selectedDay?.id == day.id {
-                                                            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                                            Rectangle()
                                                                 .stroke(Color.primary.opacity(0.75), lineWidth: 1)
                                                         }
                                                     }
                                             }
                                             .buttonStyle(.plain)
-                                            .accessibilityLabel(accessibilityText(for: day))
+                                            .accessibilityHidden(true)
                                         }
                                     }
                                     .id(week.id)
@@ -1556,10 +1629,21 @@ private struct StatsYearGrass: View {
                         .padding(.vertical, 2)
                     }
                 }
+                .padding(8)
+                .background(Color.secondary.opacity(0.035))
+                .overlay {
+                    Rectangle()
+                        .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(strings.learningActivity)
+                .accessibilityValue(accessibilityValue)
+                .accessibilityAdjustableAction(adjustSelectedDay)
                 .onAppear {
                     scrollToLatestWeek(proxy, weeks: weeks)
                 }
                 .onChange(of: selectedYear) {
+                    selectedDay = nil
                     scrollToLatestWeek(proxy, weeks: weeks)
                 }
                 .onChange(of: activity.days.count) {
@@ -1582,9 +1666,32 @@ private struct StatsYearGrass: View {
             return
         }
         DispatchQueue.main.async {
-            withAnimation(.smooth(duration: 0.2)) {
+            if accessibilityReduceMotion {
                 proxy.scrollTo(lastID, anchor: .trailing)
+            } else {
+                withAnimation(.smooth(duration: 0.2)) {
+                    proxy.scrollTo(lastID, anchor: .trailing)
+                }
             }
+        }
+    }
+
+    private func adjustSelectedDay(_ direction: AccessibilityAdjustmentDirection) {
+        let days = accessibilityDays
+        guard !days.isEmpty else {
+            return
+        }
+
+        let selectedIndex = selectedDay.flatMap { selectedDay in
+            days.firstIndex(where: { $0.id == selectedDay.id })
+        }
+        switch direction {
+        case .increment:
+            selectedDay = days[min((selectedIndex ?? -1) + 1, days.count - 1)]
+        case .decrement:
+            selectedDay = days[max((selectedIndex ?? days.count) - 1, 0)]
+        @unknown default:
+            break
         }
     }
 
@@ -1612,10 +1719,6 @@ private struct StatsYearGrass: View {
             parts.append(topic)
         }
         return parts.joined(separator: " · ")
-    }
-
-    private func accessibilityText(for day: BackendStatsActivityDay) -> String {
-        "\(Self.dateFormatter.string(from: day.date)), \(day.answerCount) \(strings.answersUnit)"
     }
 
     private static func weeks(from days: [BackendStatsActivityDay], selectedYear: Int) -> [ActivityWeek] {
@@ -1683,7 +1786,6 @@ private struct StatsYearGrass: View {
     private static let cellSpacing: CGFloat = 3
     private static let monthLabelHeight: CGFloat = 12
     private static let weekdayLabelWidth: CGFloat = 18
-    private static let weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"]
     private static var weekCalendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.locale = Locale(identifier: "ko_KR")
@@ -1878,6 +1980,15 @@ private struct StudyGrowthOverviewRow: View {
     var root: BackendStudyGrowthRoot
     var strings: AppStrings
 
+    private var trendValues: [Double] {
+        if let trendPoints = root.trendPoints, !trendPoints.isEmpty {
+            return trendPoints
+                .sorted { $0.measuredAt < $1.measuredAt }
+                .map(\.level)
+        }
+        return root.trend
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -1902,12 +2013,22 @@ private struct StudyGrowthOverviewRow: View {
                     .foregroundStyle(.tertiary)
             }
 
-            StudyGrowthRangeTrack(
-                previous: root.previousLevel,
-                current: root.currentLevel,
-                growth: root.growth
-            )
-            .frame(height: 28)
+            HStack(spacing: 12) {
+                StudyGrowthRangeTrack(
+                    previous: root.previousLevel,
+                    current: root.currentLevel,
+                    growth: root.growth
+                )
+
+                if !trendValues.isEmpty {
+                    StudyGrowthPixelSparkline(
+                        values: trendValues,
+                        color: StudyGrowthFormat.color(root.growth)
+                    )
+                    .frame(width: 76)
+                }
+            }
+            .frame(height: 36)
 
             HStack {
                 Text(strings.growthPositionSummary(
@@ -1936,61 +2057,146 @@ private struct StudyGrowthRangeTrack: View {
     var current: Double?
     var growth: Double?
 
+    private let tileSpacing: CGFloat = 3
+
+    private var previousTile: Int? {
+        previous.map(PixelChartLayoutPolicy.quantizedAbility)
+    }
+
+    private var currentTile: Int? {
+        current.map(PixelChartLayoutPolicy.quantizedAbility)
+    }
+
+    private var changeSpan: ClosedRange<Int>? {
+        guard let previousTile, let currentTile else {
+            return nil
+        }
+        return min(previousTile, currentTile)...max(previousTile, currentTile)
+    }
+
+    private var changeColor: Color {
+        StudyGrowthFormat.color(growth)
+    }
+
     var body: some View {
         GeometryReader { proxy in
-            let width = max(proxy.size.width - 12, 1)
-            let midY = proxy.size.height / 2
-            let previousX = xPosition(previous, width: width)
-            let currentX = xPosition(current, width: width)
-            let color = StudyGrowthFormat.color(growth)
+            let availableTileWidth = max(
+                proxy.size.width - tileSpacing * CGFloat(PixelChartLayoutPolicy.maximumAbility - 1),
+                CGFloat(PixelChartLayoutPolicy.maximumAbility)
+            ) / CGFloat(PixelChartLayoutPolicy.maximumAbility)
+            let tileSide = min(max(floor(availableTileWidth), 7), 18)
+            let meterWidth = tileSide * CGFloat(PixelChartLayoutPolicy.maximumAbility)
+                + tileSpacing * CGFloat(PixelChartLayoutPolicy.maximumAbility - 1)
 
-            Capsule()
-                .fill(Color.secondary.opacity(0.14))
-                .frame(height: 4)
-                .position(x: proxy.size.width / 2, y: midY)
+            VStack(spacing: 3) {
+                HStack(spacing: tileSpacing) {
+                    ForEach(
+                        PixelChartLayoutPolicy.minimumAbility...PixelChartLayoutPolicy.maximumAbility,
+                        id: \.self
+                    ) { ability in
+                        ZStack {
+                            Rectangle()
+                                .fill(
+                                    changeSpan?.contains(ability) == true
+                                        ? changeColor.opacity(0.22)
+                                        : Color.secondary.opacity(0.12)
+                                )
 
-            if let previousX, let currentX {
-                Path { path in
-                    path.move(to: CGPoint(x: previousX + 6, y: midY))
-                    path.addLine(to: CGPoint(x: currentX + 6, y: midY))
+                            if ability == currentTile {
+                                Rectangle()
+                                    .fill(changeColor)
+                                    .padding(2)
+                            }
+
+                            if ability == previousTile {
+                                Rectangle()
+                                    .stroke(Color.secondary, lineWidth: 2)
+                            }
+                        }
+                        .frame(width: tileSide, height: tileSide)
+                    }
                 }
-                .stroke(color, style: StrokeStyle(lineWidth: 5, lineCap: .round))
 
-                Circle()
-                    .fill(Color(.secondarySystemBackground))
-                    .stroke(Color.secondary, lineWidth: 2)
-                    .frame(width: 11, height: 11)
-                    .position(x: previousX + 6, y: midY)
-
-                Circle()
-                    .fill(color)
-                    .frame(width: 13, height: 13)
-                    .position(x: currentX + 6, y: midY)
-            } else if let currentX {
-                Circle()
-                    .fill(Color.secondary)
-                    .frame(width: 13, height: 13)
-                    .position(x: currentX + 6, y: midY)
+                HStack {
+                    Text("1")
+                    Spacer()
+                    Text("10")
+                }
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .foregroundStyle(.tertiary)
+                .frame(width: meterWidth)
             }
-
-            Text("1")
-                .font(.system(size: 9, weight: .medium, design: .rounded))
-                .foregroundStyle(.tertiary)
-                .position(x: 6, y: proxy.size.height - 2)
-
-            Text("10")
-                .font(.system(size: 9, weight: .medium, design: .rounded))
-                .foregroundStyle(.tertiary)
-                .position(x: proxy.size.width - 7, y: proxy.size.height - 2)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
         .accessibilityHidden(true)
     }
+}
 
-    private func xPosition(_ value: Double?, width: CGFloat) -> CGFloat? {
-        guard let value else {
-            return nil
+private struct StudyGrowthPixelSparkline: View {
+    var values: [Double]
+    var color: Color
+
+    var body: some View {
+        Canvas { context, size in
+            let frame = CGRect(
+                x: 3,
+                y: 3,
+                width: max(size.width - 6, 1),
+                height: max(size.height - 6, 1)
+            )
+            var grid = Path()
+            for row in 0..<PixelChartLayoutPolicy.maximumAbility {
+                let progress = CGFloat(row)
+                    / CGFloat(PixelChartLayoutPolicy.maximumAbility - 1)
+                let y = frame.maxY - frame.height * progress
+                grid.move(to: CGPoint(x: frame.minX, y: y))
+                grid.addLine(to: CGPoint(x: frame.maxX, y: y))
+            }
+            context.stroke(
+                grid,
+                with: .color(Color.secondary.opacity(0.10)),
+                lineWidth: 0.5
+            )
+
+            let points = values.enumerated().map { index, value in
+                let xProgress = CGFloat(index) / CGFloat(max(values.count - 1, 1))
+                let yProgress = PixelChartLayoutPolicy.normalizedAbility(value)
+                return CGPoint(
+                    x: frame.minX + frame.width * xProgress,
+                    y: frame.maxY - frame.height * yProgress
+                )
+            }
+            let staircase = PixelChartLayoutPolicy.staircasePoints(points)
+            if let first = staircase.first {
+                var path = Path()
+                path.move(to: first)
+                staircase.dropFirst().forEach { path.addLine(to: $0) }
+                context.stroke(
+                    path,
+                    with: .color(color),
+                    style: StrokeStyle(lineWidth: 2, lineCap: .butt, lineJoin: .miter)
+                )
+            }
+
+            for point in points {
+                var marker = Path()
+                marker.addRect(
+                    CGRect(
+                        x: point.x - 2,
+                        y: point.y - 2,
+                        width: 4,
+                        height: 4
+                    )
+                )
+                context.fill(marker, with: .color(color))
+            }
         }
-        return width * CGFloat((min(max(value, 1), 10) - 1) / 9)
+        .background(Color.secondary.opacity(0.045))
+        .overlay {
+            Rectangle()
+                .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -2533,6 +2739,15 @@ private struct StudyGrowthSummaryCard: View {
     var root: BackendStudyGrowthRoot
     var strings: AppStrings
 
+    private var trendValues: [Double] {
+        if let trendPoints = root.trendPoints, !trendPoints.isEmpty {
+            return trendPoints
+                .sorted { $0.measuredAt < $1.measuredAt }
+                .map(\.level)
+        }
+        return root.trend
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 12) {
@@ -2558,7 +2773,10 @@ private struct StudyGrowthSummaryCard: View {
                 }
             }
 
-            StudyGrowthSparkline(values: root.trend)
+            StudyGrowthPixelSparkline(
+                values: trendValues,
+                color: StudyGrowthFormat.color(root.growth)
+            )
                 .frame(height: 48)
 
             HStack(spacing: 8) {
@@ -3312,39 +3530,6 @@ private struct StudyGrowthDeltaLabel: View {
     }
 }
 
-private struct StudyGrowthSparkline: View {
-    var values: [Double]
-
-    var body: some View {
-        GeometryReader { proxy in
-            if values.count < 2 {
-                Capsule()
-                    .fill(Color.secondary.opacity(0.14))
-                    .frame(height: 3)
-                    .frame(maxHeight: .infinity, alignment: .center)
-            } else {
-                Path { path in
-                    for (index, value) in values.enumerated() {
-                        let x = proxy.size.width * CGFloat(index) / CGFloat(values.count - 1)
-                        let normalized = (min(max(value, 1), 10) - 1) / 9
-                        let y = proxy.size.height * CGFloat(1 - normalized)
-                        if index == 0 {
-                            path.move(to: CGPoint(x: x, y: y))
-                        } else {
-                            path.addLine(to: CGPoint(x: x, y: y))
-                        }
-                    }
-                }
-                .stroke(
-                    Color.accentColor,
-                    style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round)
-                )
-            }
-        }
-        .accessibilityHidden(true)
-    }
-}
-
 private struct StudyGrowthTimelineChart: View {
     struct Point: Identifiable {
         var index: Int
@@ -3416,33 +3601,69 @@ private struct StudyGrowthTimelineChart: View {
                     let positioned = positionedPoints(in: chartFrame)
 
                     ZStack(alignment: .topLeading) {
-                        Path { path in
-                            path.move(to: CGPoint(x: chartFrame.minX, y: chartFrame.minY))
-                            path.addLine(to: CGPoint(x: chartFrame.maxX, y: chartFrame.minY))
-                            path.move(to: CGPoint(x: chartFrame.minX, y: chartFrame.maxY))
-                            path.addLine(to: CGPoint(x: chartFrame.maxX, y: chartFrame.maxY))
-                        }
-                        .stroke(Color.secondary.opacity(0.16), style: StrokeStyle(lineWidth: 1, dash: [3, 4]))
+                        Canvas { context, _ in
+                            var background = Path()
+                            background.addRect(chartFrame)
+                            context.fill(
+                                background,
+                                with: .color(Color.secondary.opacity(0.035))
+                            )
 
-                        Path { path in
-                            for (index, point) in positioned.enumerated() {
-                                if index == 0 {
-                                    path.move(to: point)
-                                } else {
-                                    path.addLine(to: point)
-                                }
+                            var grid = Path()
+                            for row in 0..<PixelChartLayoutPolicy.maximumAbility {
+                                let progress = CGFloat(row)
+                                    / CGFloat(PixelChartLayoutPolicy.maximumAbility - 1)
+                                let y = chartFrame.maxY - chartFrame.height * progress
+                                grid.move(to: CGPoint(x: chartFrame.minX, y: y))
+                                grid.addLine(to: CGPoint(x: chartFrame.maxX, y: y))
                             }
-                        }
-                        .stroke(
-                            Color.accentColor,
-                            style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round)
-                        )
+                            let columnCount = min(max(positioned.count, 2), 6)
+                            for column in 0..<columnCount {
+                                let progress = CGFloat(column) / CGFloat(max(columnCount - 1, 1))
+                                let x = chartFrame.minX + chartFrame.width * progress
+                                grid.move(to: CGPoint(x: x, y: chartFrame.minY))
+                                grid.addLine(to: CGPoint(x: x, y: chartFrame.maxY))
+                            }
+                            context.stroke(
+                                grid,
+                                with: .color(Color.secondary.opacity(0.12)),
+                                lineWidth: 0.5
+                            )
 
-                        ForEach(Array(positioned.enumerated()), id: \.offset) { _, point in
-                            Circle()
-                                .fill(Color.accentColor)
-                                .frame(width: 7, height: 7)
-                                .position(point)
+                            context.stroke(
+                                background,
+                                with: .color(Color.secondary.opacity(0.22)),
+                                lineWidth: 1
+                            )
+
+                            let staircase = PixelChartLayoutPolicy.staircasePoints(positioned)
+                            if let first = staircase.first {
+                                var line = Path()
+                                line.move(to: first)
+                                staircase.dropFirst().forEach { line.addLine(to: $0) }
+                                context.stroke(
+                                    line,
+                                    with: .color(Color.accentColor),
+                                    style: StrokeStyle(
+                                        lineWidth: 3,
+                                        lineCap: .butt,
+                                        lineJoin: .miter
+                                    )
+                                )
+                            }
+
+                            for point in positioned {
+                                var marker = Path()
+                                marker.addRect(
+                                    CGRect(
+                                        x: point.x - 3,
+                                        y: point.y - 3,
+                                        width: 6,
+                                        height: 6
+                                    )
+                                )
+                                context.fill(marker, with: .color(Color.accentColor))
+                            }
                         }
 
                         Text("10")
@@ -3476,7 +3697,9 @@ private struct StudyGrowthTimelineChart: View {
             Color(.secondarySystemBackground),
             in: RoundedRectangle(cornerRadius: 18, style: .continuous)
         )
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(strings.abilityTrend)
+        .accessibilityValue(accessibilityValue)
     }
 
     private func positionedPoints(in frame: CGRect) -> [CGPoint] {
@@ -3496,12 +3719,29 @@ private struct StudyGrowthTimelineChart: View {
             } else {
                 xProgress = Double(index) / Double(max(displayPoints.count - 1, 1))
             }
-            let levelProgress = (min(max(point.level, 1), 10) - 1) / 9
+            let levelProgress = PixelChartLayoutPolicy.normalizedAbility(point.level)
             return CGPoint(
                 x: frame.minX + frame.width * CGFloat(min(max(xProgress, 0), 1)),
-                y: frame.maxY - frame.height * CGFloat(levelProgress)
+                y: frame.maxY - frame.height * levelProgress
             )
         }
+    }
+
+    private var accessibilityValue: String {
+        guard displayPoints.count >= 2,
+              let first = displayPoints.first,
+              let last = displayPoints.last else {
+            return strings.notEnoughTrendDataDescription
+        }
+
+        var parts = [
+            "\(strings.previousAbility) \(StudyGrowthFormat.level(first.level))",
+            "\(strings.currentAbility) \(StudyGrowthFormat.level(last.level))"
+        ]
+        if let lastMeasuredAt {
+            parts.append(strings.lastMeasuredAt(lastMeasuredAt))
+        }
+        return parts.joined(separator: ", ")
     }
 
     private static let axisDateFormatter: DateFormatter = {

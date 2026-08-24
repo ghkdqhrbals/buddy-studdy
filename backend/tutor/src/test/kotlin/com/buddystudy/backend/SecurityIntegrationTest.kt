@@ -69,6 +69,17 @@ class SecurityIntegrationTest : MySqlIntegrationTestSupport() {
     }
 
     @Test
+    fun `liked public questions endpoint requires an access token`(): Unit = runBlocking {
+        val missing = get("/api/v1/public/questions/liked")
+        val invalid = get("/api/v1/public/questions/liked", "not-a-token")
+
+        assertThat(missing.statusCode()).isEqualTo(401)
+        assertThat(missing.body()).contains("AUTH_ACCESS_TOKEN_REQUIRED")
+        assertThat(invalid.statusCode()).isEqualTo(401)
+        assertThat(invalid.body()).contains("AUTH_INVALID_ACCESS_TOKEN")
+    }
+
+    @Test
     fun `mcp endpoint is protected by the api bearer boundary`(): Unit = runBlocking {
         val response = post(
             path = "/api/v1/mcp",

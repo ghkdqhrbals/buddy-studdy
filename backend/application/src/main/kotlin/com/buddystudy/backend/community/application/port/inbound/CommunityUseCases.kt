@@ -27,6 +27,14 @@ interface CommunityUseCase {
         limit: Int,
         offset: Int,
     ): CommunityQuestionsResponse
+    suspend fun getLikedPublicQuestions(
+        principal: Principal,
+        query: String?,
+        language: String,
+        view: String = "localized",
+        limit: Int,
+        offset: Int,
+    ): CommunityQuestionsResponse
     suspend fun getPublicQuestion(
         principal: Principal?,
         id: Long,

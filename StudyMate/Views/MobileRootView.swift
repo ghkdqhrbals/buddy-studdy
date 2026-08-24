@@ -6174,6 +6174,16 @@ private struct MobileProfilePage: View {
                             systemImage: "person.crop.circle"
                         )
                     }
+
+                    NavigationLink {
+                        MobileLikedQuestionsView()
+                    } label: {
+                        profileDestinationLabel(
+                            title: strings.likedQuestions,
+                            subtitle: nil,
+                            systemImage: "heart.fill"
+                        )
+                    }
                 } else {
                     NavigationLink {
                         MobileProfileEditorView()
@@ -6326,6 +6336,117 @@ private struct MobileProfilePage: View {
             }
         }
         .padding(.vertical, 3)
+    }
+}
+
+private struct MobileLikedQuestionsView: View {
+    @EnvironmentObject private var appState: AppState
+    @State private var searchText = ""
+    @State private var selectedQuestion: CommunityQuestion?
+
+    private var strings: AppStrings { appState.strings }
+
+    var body: some View {
+        List {
+            if appState.isLoadingLikedCommunityQuestions,
+               !appState.hasLoadedLikedCommunityQuestions,
+               appState.likedCommunityQuestions.isEmpty {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+                .listRowSeparator(.hidden)
+            } else if let error = appState.likedCommunityQuestionsErrorMessage,
+                      appState.likedCommunityQuestions.isEmpty {
+                ContentUnavailableView {
+                    Label(strings.likedQuestions, systemImage: "heart.slash")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button(strings.retry) { reload() }
+                }
+                .listRowSeparator(.hidden)
+            } else if appState.hasLoadedLikedCommunityQuestions,
+                      appState.likedCommunityQuestions.isEmpty {
+                ContentUnavailableView(
+                    strings.noLikedQuestions,
+                    systemImage: "heart",
+                    description: Text(strings.noLikedQuestionsDescription)
+                )
+                .listRowSeparator(.hidden)
+            } else {
+                if let error = appState.likedCommunityQuestionsErrorMessage {
+                    Section {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(error)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Button(strings.retry) { reload() }
+                        }
+                    }
+                }
+
+                ForEach(appState.likedCommunityQuestions) { question in
+                    Button {
+                        selectedQuestion = question
+                    } label: {
+                        MobileCommunityQuestionRow(question: question, strings: strings)
+                    }
+                    .buttonStyle(.plain)
+                    .onAppear {
+                        appState.shouldLoadNextLikedCommunityQuestion(
+                            after: question.id,
+                            query: searchText
+                        )
+                    }
+                }
+
+                if appState.isLoadingLikedCommunityQuestions,
+                   appState.hasLoadedLikedCommunityQuestions {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                        Spacer()
+                    }
+                    .listRowSeparator(.hidden)
+                }
+            }
+        }
+        .listStyle(.plain)
+        .navigationTitle(strings.likedQuestions)
+        .searchable(text: $searchText, prompt: strings.searchLikedQuestions)
+        .refreshable {
+            await appState.loadLikedCommunityQuestions(
+                query: searchText,
+                reset: true,
+                userInitiated: true,
+                preserveExistingOnFailure: true
+            )
+        }
+        .task(id: searchText) {
+            if appState.hasLoadedLikedCommunityQuestions {
+                try? await Task.sleep(for: .milliseconds(300))
+            }
+            guard !Task.isCancelled else { return }
+            await appState.loadLikedCommunityQuestions(query: searchText, reset: true, userInitiated: true)
+        }
+        .navigationDestination(
+            isPresented: Binding(
+                get: { selectedQuestion != nil },
+                set: { if !$0 { selectedQuestion = nil } }
+            )
+        ) {
+            if let selectedQuestion {
+                CommunityQuestionDetailView(question: selectedQuestion)
+            }
+        }
+    }
+
+    private func reload() {
+        Task {
+            await appState.loadLikedCommunityQuestions(query: searchText, reset: true, userInitiated: true)
+        }
     }
 }
 
@@ -9772,6 +9893,7 @@ struct CommunityQuestionDetailView: View {
     @State private var isShowingOriginal = false
     @State private var isShowingDeleteConfirmation = false
     @State private var isShowingReportConfirmation = false
+    @State private var isLikeRequestPending = false
     @State private var userToBlock: CommunityUserProfile?
     @State private var originalAvailable: Bool
     @FocusState private var isCommentInputFocused: Bool
@@ -9796,6 +9918,10 @@ struct CommunityQuestionDetailView: View {
 
     private var canWriteCommunityReaction: Bool {
         contentSource.showsCommunityInteractions && appState.isCommunitySessionActive
+    }
+
+    private var isLikePending: Bool {
+        isLikeRequestPending || appState.isCommunityQuestionLikeRequestInFlight(questionID: displayQuestion.id)
     }
 
     var body: some View {
@@ -10037,9 +10163,9 @@ struct CommunityQuestionDetailView: View {
                     .font(.subheadline.weight(.semibold))
             }
             .buttonStyle(.plain)
-            .disabled(!canWriteCommunityReaction)
+            .disabled(!canWriteCommunityReaction || isLikePending)
             .foregroundStyle(displayQuestion.isLikedByMe ? .red : .primary)
-            .opacity(canWriteCommunityReaction ? 1 : 0.45)
+            .opacity(canWriteCommunityReaction && !isLikePending ? 1 : 0.45)
             .transaction { transaction in
                 transaction.animation = nil
             }
@@ -10180,7 +10306,7 @@ struct CommunityQuestionDetailView: View {
     }
 
     private func toggleLike() {
-        guard canWriteCommunityReaction else {
+        guard canWriteCommunityReaction, !isLikePending else {
             return
         }
 
@@ -10193,7 +10319,9 @@ struct CommunityQuestionDetailView: View {
             displayQuestion.likeCount = max(0, displayQuestion.likeCount + (next ? 1 : -1))
         }
 
+        isLikeRequestPending = true
         Task {
+            defer { isLikeRequestPending = false }
             if let state = await appState.setCommunityQuestionLike(displayQuestion, isLiked: next) {
                 withTransaction(transaction) {
                     displayQuestion.isLikedByMe = state.isLikedByMe

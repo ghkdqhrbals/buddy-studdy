@@ -60,9 +60,9 @@ import java.util.Optional
 class CommunityServiceTest {
     private val users = FakeUserPort()
     private val userBlocks = FakeUserBlockPort()
-    private val questions = FakeQuestionPort(userBlocks)
-    private val questionStats = FakeQuestionStatsPort()
     private val likes = FakeQuestionLikePort()
+    private val questions = FakeQuestionPort(userBlocks, likes)
+    private val questionStats = FakeQuestionStatsPort()
     private val comments = FakeQuestionCommentPort(userBlocks)
     private val nativeAdvertisements = FakeNativeAdvertisementPort()
     private val nativeAdvertisementViews = FakeNativeAdvertisementViewPublisher()
@@ -125,6 +125,61 @@ class CommunityServiceTest {
         assertThat(advertisement.selectionId).isNotBlank()
         assertThat(response.questions).hasSize(4)
         assertThat(nativeAdvertisements.selections).hasSize(1)
+    }
+
+    @Test
+    fun `liked public questions are searched and paged without advertisements`(): Unit = runBlocking {
+        users.rows += UserEntity(id = 10, providerId = "author", displayName = "Author")
+        val older = publicQuestion(id = 100, userId = 10, topic = "Redis")
+        val newer = publicQuestion(id = 101, userId = 10, topic = "SwiftUI")
+        questions.rows += listOf(older, newer)
+        likes.rows += QuestionLikeEntity(
+            questionId = older.id,
+            userId = principal.userId,
+            createdAt = Instant.parse("2026-06-11T00:00:00Z"),
+        )
+        likes.rows += QuestionLikeEntity(
+            questionId = newer.id,
+            userId = principal.userId,
+            createdAt = Instant.parse("2026-06-12T00:00:00Z"),
+        )
+        nativeAdvertisements.campaigns += NativeAdvertisementCampaignEntity(
+            id = 1,
+            campaignKey = "must-not-appear",
+            titleKo = "광고",
+            titleEn = "Advertisement",
+            titleJa = "広告",
+            deepLink = "https://example.com/ad",
+            minimumSecondsBetweenSelections = 0,
+        )
+
+        val searched = service.getLikedPublicQuestions(
+            principal = principal,
+            query = "  ReDiS  ",
+            language = "EN",
+            limit = 20,
+            offset = 0,
+        )
+        assertThat(questions.lastLikedQuery).isEqualTo("ReDiS")
+        assertThat(questions.lastLikedLanguage).isEqualTo("en")
+        val secondPage = service.getLikedPublicQuestions(
+            principal = principal,
+            query = null,
+            language = "ko",
+            limit = 20,
+            offset = 1,
+        )
+
+        assertThat(searched.questions.map { it.id }).containsExactly(older.id.toString())
+        assertThat(searched.questions.single().isLikedByMe).isTrue()
+        assertThat(searched.totalCount).isEqualTo(1)
+        assertThat(searched.items).allMatch { it.advertisement == null }
+        assertThat(secondPage.questions.map { it.id }).containsExactly(older.id.toString())
+        assertThat(secondPage.totalCount).isEqualTo(2)
+        assertThat(secondPage.offset).isEqualTo(1)
+        assertThat(nativeAdvertisements.selections).isEmpty()
+        assertThat(questions.lastLikedQuery).isNull()
+        assertThat(questions.lastLikedLanguage).isEqualTo("ko")
     }
 
     @Test
@@ -500,8 +555,11 @@ class CommunityServiceTest {
 
     private class FakeQuestionPort(
         private val userBlocks: FakeUserBlockPort,
+        private val likes: FakeQuestionLikePort,
     ) : QuestionPort {
         val rows = mutableListOf<QuestionEntity>()
+        var lastLikedQuery: String? = null
+        var lastLikedLanguage: String? = null
         override suspend fun save(entity: QuestionEntity): QuestionEntity = entity
         override suspend fun findQuestionById(id: Long): QuestionEntity? = null
         override suspend fun findByIdAndUserIdAndDeletedAtIsNull(id: Long, userId: Long): QuestionEntity? = null
@@ -532,6 +590,43 @@ class CommunityServiceTest {
             query: String,
             pageable: Pageable,
         ): Page<QuestionEntity> = publicPage(viewerUserId, pageable, query)
+        override suspend fun findLikedPublicAnsweredVisibleTo(
+            viewerUserId: Long,
+            query: String?,
+            language: String,
+            limit: Int,
+            offset: Int,
+        ): Page<QuestionEntity> {
+            lastLikedQuery = query
+            lastLikedLanguage = language
+            val blockedUserIds = userBlocks.findBlockedUserIds(viewerUserId)
+            val likedAtByQuestionId = likes.rows
+                .filter { it.userId == viewerUserId }
+                .associate { it.questionId to it.createdAt }
+            val normalizedQuery = query?.lowercase()
+            val visible = rows
+                .asSequence()
+                .filter { it.id in likedAtByQuestionId }
+                .filterNot { it.userId in blockedUserIds }
+                .filter { it.publicQuestion && it.deletedAt == null }
+                .filter { it.status == QuestionStatus.GRADED && !it.answer.isNullOrBlank() }
+                .filter { row ->
+                    normalizedQuery == null || listOf(row.topic, row.question, row.answer.orEmpty())
+                        .any { normalizedQuery in it.lowercase() }
+                }
+                .sortedWith(
+                    compareByDescending<QuestionEntity> { likedAtByQuestionId[it.id] }
+                        .thenByDescending { it.id },
+                )
+                .toList()
+            val start = offset.coerceAtMost(visible.size)
+            val end = (start + limit).coerceAtMost(visible.size)
+            return PageImpl(
+                visible.subList(start, end),
+                Pageable.unpaged(),
+                visible.size.toLong(),
+            )
+        }
         override suspend fun findPublicAnsweredById(id: Long): QuestionEntity? = rows.firstOrNull { it.id == id }
         override suspend fun findPublicAnsweredByIds(ids: Collection<Long>): List<QuestionEntity> = rows.filter { it.id in ids }
         override suspend fun softDelete(id: Long, userId: Long, now: Instant): Int = 0

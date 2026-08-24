@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import XCTest
 @testable import StudyMate
 
@@ -760,6 +761,284 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertEqual(state.questions.map(\.status), ["GRADED"])
         XCTAssertEqual(state.totalCount, 1)
         XCTAssertEqual(state.offset, 4)
+    }
+
+    func testLikedQuestionsStateRemovesUnlikeWithoutSkippingShiftedPage() {
+        func question(_ id: String) -> CommunityQuestion {
+            CommunityQuestion(
+                id: id,
+                question: "Question \(id)",
+                answer: "Answer",
+                gradingResult: nil,
+                topic: "Swift",
+                difficultyLevel: 5,
+                status: "GRADED",
+                source: "STUDY",
+                createdAt: Date(),
+                answeredAt: Date(),
+                author: nil,
+                likeCount: 1,
+                isLikedByMe: true
+            )
+        }
+
+        var state = LikedQuestionsStateStore()
+        state.applyPage(
+            CommunityQuestionsResponse(
+                questions: [question("1"), question("2")],
+                totalCount: 3,
+                limit: 20,
+                offset: 0
+            ),
+            offset: 0,
+            reset: true
+        )
+
+        state.removeQuestion(id: "1")
+
+        XCTAssertEqual(state.questions.map(\.id), ["2"])
+        XCTAssertEqual(state.totalCount, 2)
+        XCTAssertEqual(state.offset, 1)
+
+        state.applyPage(
+            CommunityQuestionsResponse(
+                questions: [question("3")],
+                totalCount: 2,
+                limit: 20,
+                offset: 1
+            ),
+            offset: 1,
+            reset: false
+        )
+
+        XCTAssertEqual(state.questions.map(\.id), ["2", "3"])
+        XCTAssertEqual(state.offset, 2)
+        XCTAssertFalse(state.canLoadMore())
+    }
+
+    func testLikeRequestTokenFromOldIdentityCannotClearNewIdentityRequest() throws {
+        var requests = CommunityQuestionLikeRequestStore()
+        let oldRequestID = try XCTUnwrap(requests.begin(questionID: "shared-question"))
+
+        requests.reset()
+        let newRequestID = try XCTUnwrap(requests.begin(questionID: "shared-question"))
+        requests.finish(questionID: "shared-question", requestID: oldRequestID)
+
+        XCTAssertTrue(requests.isCurrent(questionID: "shared-question", requestID: newRequestID))
+        XCTAssertTrue(requests.contains(questionID: "shared-question"))
+    }
+
+    func testLikedQuestionsRequestUsesDedicatedV1URLAndLocalizedQuery() async throws {
+        let client = makeClient { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/v1/public/questions/liked")
+            let items = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let values = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
+            XCTAssertEqual(values["query"], "Swift concurrency")
+            XCTAssertEqual(values["limit"], "100")
+            XCTAssertEqual(values["offset"], "0")
+            XCTAssertEqual(values["tl"], "en")
+            XCTAssertEqual(values["view"], "localized")
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: #"{"questions":[],"totalCount":0,"limit":100,"offset":0}"#
+            )
+        }
+
+        _ = try await client.fetchLikedPublicQuestions(
+            registration: Self.signedInRegistration,
+            query: "  Swift concurrency  ",
+            limit: 120,
+            offset: -10,
+            language: .english,
+            view: .localized
+        )
+    }
+
+    func testLikedQuestionsAppStateLoadsPagesSearchesAndPreservesRowsOnRefreshFailure() async throws {
+        let suiteName = "LikedQuestionsAppStateTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let shouldFail = LockedValue(false)
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        let client = makeClient { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/public/questions/liked")
+            if shouldFail.value {
+                return Self.response(for: request, statusCode: 500, body: #"{"message":"temporary failure"}"#)
+            }
+            let items = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let values = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
+            if values["query"] == "redis" {
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: Self.communityQuestionPageJSON(ids: ["search-1"], totalCount: 1, offset: 0)
+                )
+            }
+            if values["offset"] == "2" {
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: Self.communityQuestionPageJSON(ids: ["liked-3"], totalCount: 3, offset: 2)
+                )
+            }
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: Self.communityQuestionPageJSON(ids: ["liked-1", "liked-2"], totalCount: 3, offset: 0)
+            )
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+
+        XCTAssertFalse(appState.hasLoadedLikedCommunityQuestions)
+        await appState.loadLikedCommunityQuestions(userInitiated: true)
+        XCTAssertEqual(appState.likedCommunityQuestions.map(\.id), ["liked-1", "liked-2"])
+        XCTAssertEqual(appState.likedCommunityQuestionsOffset, 2)
+        XCTAssertTrue(appState.canLoadMoreLikedCommunityQuestions)
+
+        await appState.loadNextLikedCommunityQuestionsPage()
+        XCTAssertEqual(appState.likedCommunityQuestions.map(\.id), ["liked-1", "liked-2", "liked-3"])
+        XCTAssertFalse(appState.canLoadMoreLikedCommunityQuestions)
+
+        await appState.loadLikedCommunityQuestions(query: " redis ", reset: true, userInitiated: true)
+        XCTAssertEqual(appState.likedCommunityQuestions.map(\.id), ["search-1"])
+
+        shouldFail.set(true)
+        await appState.loadLikedCommunityQuestions(
+            query: "redis",
+            reset: true,
+            userInitiated: true,
+            preserveExistingOnFailure: true
+        )
+        XCTAssertEqual(appState.likedCommunityQuestions.map(\.id), ["search-1"])
+        XCTAssertNotNil(appState.likedCommunityQuestionsErrorMessage)
+    }
+
+    func testUnlikeSynchronizesFeedsAndRejectsConcurrentLikeRequest() async throws {
+        let suiteName = "LikedQuestionsUnlikeTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let likeRequestCount = LockedRequestCounter()
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        let client = makeClient { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/v1/public/questions"):
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: Self.communityQuestionPageJSON(ids: ["liked-1"], totalCount: 1, offset: 0)
+                )
+            case ("GET", "/api/v1/public/questions/liked"):
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: Self.communityQuestionPageJSON(ids: ["liked-1"], totalCount: 1, offset: 0)
+                )
+            case ("DELETE", "/api/v1/public/questions/liked-1/like"):
+                likeRequestCount.increment()
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: #"{"questionId":"liked-1","likeCount":0,"isLikedByMe":false}"#
+                )
+            default:
+                return Self.response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        let appState = AppState(settingsStore: store, remotePushBackendClient: client)
+        await appState.loadCommunityQuestions(reset: true, userInitiated: true)
+        await appState.loadLikedCommunityQuestions(reset: true, userInitiated: true)
+        let question = try XCTUnwrap(appState.likedCommunityQuestions.first)
+        QuestionGenerationURLProtocol.responseDelayHandler = { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/api/v1/public/questions/liked"):
+                250_000_000
+            case ("DELETE", "/api/v1/public/questions/liked-1/like"):
+                80_000_000
+            default:
+                0
+            }
+        }
+
+        let staleRefresh = Task { @MainActor in
+            await appState.loadLikedCommunityQuestions(
+                reset: true,
+                userInitiated: true,
+                preserveExistingOnFailure: true
+            )
+        }
+        let didStartRefresh = await waitUntil {
+            appState.isLoadingLikedCommunityQuestions
+        }
+        XCTAssertTrue(didStartRefresh)
+
+        let firstRequest = Task { @MainActor in
+            await appState.setCommunityQuestionLike(question, isLiked: false)
+        }
+        let didStart = await waitUntil {
+            appState.isCommunityQuestionLikeRequestInFlight(questionID: question.id)
+        }
+        XCTAssertTrue(didStart)
+        let concurrentResult = await appState.setCommunityQuestionLike(question, isLiked: false)
+        XCTAssertNil(concurrentResult)
+        let firstResult = await firstRequest.value
+        await staleRefresh.value
+
+        XCTAssertEqual(firstResult?.isLikedByMe, false)
+        XCTAssertEqual(likeRequestCount.value, 1)
+        XCTAssertTrue(appState.likedCommunityQuestions.isEmpty)
+        XCTAssertEqual(appState.likedCommunityQuestionsTotalCount, 0)
+        XCTAssertEqual(appState.likedCommunityQuestionsOffset, 0)
+        XCTAssertEqual(appState.communityQuestions.first?.isLikedByMe, false)
+        XCTAssertEqual(appState.communityQuestions.first?.likeCount, 0)
+        XCTAssertFalse(appState.isCommunityQuestionLikeRequestInFlight(questionID: question.id))
+
+        appState.signOutFromCommunity()
+        XCTAssertTrue(appState.likedCommunityQuestions.isEmpty)
+        XCTAssertFalse(appState.hasLoadedLikedCommunityQuestions)
+    }
+
+    func testBackendUnauthorizedEventClearsTransientLikedQuestionsState() async throws {
+        let suiteName = "LikedQuestionsUnauthorizedTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let databaseURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(suiteName).sqlite")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: databaseURL)
+        }
+        let eventProvider = TestAppNotificationEventProvider()
+        let store = makeNestedStudyStore(defaults: defaults, databaseURL: databaseURL)
+        let client = makeClient { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/public/questions/liked")
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: Self.communityQuestionPageJSON(ids: ["liked-1"], totalCount: 1, offset: 0)
+            )
+        }
+        let appState = AppState(
+            settingsStore: store,
+            remotePushBackendClient: client,
+            appNotificationEventProvider: eventProvider
+        )
+        await appState.loadLikedCommunityQuestions(reset: true, userInitiated: true)
+        XCTAssertEqual(appState.likedCommunityQuestions.map(\.id), ["liked-1"])
+
+        eventProvider.sendBackendUnauthorized()
+
+        XCTAssertTrue(appState.likedCommunityQuestions.isEmpty)
+        XCTAssertFalse(appState.hasLoadedLikedCommunityQuestions)
+        XCTAssertFalse(appState.isCommunitySessionActive)
+        XCTAssertNil(store.loadRemotePushRegistration()?.accessToken)
     }
 
     func testCreateQuestionSendsIdempotencyKeyAndDecodesAcceptedProcess() async throws {
@@ -1598,6 +1877,42 @@ final class QuestionGenerationFlowTests: XCTestCase {
         XCTAssertEqual(
             StatsTopicFocusPolicy.topTopic(from: ["Redis", "Swift", "Swift", "Redis"]),
             "Redis"
+        )
+    }
+
+    func testPixelChartLayoutQuantizesAbilityIntoTenRows() {
+        XCTAssertEqual(PixelChartLayoutPolicy.quantizedAbility(-3), 1)
+        XCTAssertEqual(PixelChartLayoutPolicy.quantizedAbility(1.49), 1)
+        XCTAssertEqual(PixelChartLayoutPolicy.quantizedAbility(1.5), 2)
+        XCTAssertEqual(PixelChartLayoutPolicy.quantizedAbility(6.4), 6)
+        XCTAssertEqual(PixelChartLayoutPolicy.quantizedAbility(6.5), 7)
+        XCTAssertEqual(PixelChartLayoutPolicy.quantizedAbility(12), 10)
+        XCTAssertEqual(PixelChartLayoutPolicy.quantizedAbility(.nan), 1)
+        XCTAssertEqual(PixelChartLayoutPolicy.normalizedAbility(1), 0, accuracy: 0.001)
+        XCTAssertEqual(PixelChartLayoutPolicy.normalizedAbility(10), 1, accuracy: 0.001)
+    }
+
+    func testPixelChartLayoutBuildsHorizontalThenVerticalStairSteps() {
+        let points = [
+            CGPoint(x: 0, y: 9),
+            CGPoint(x: 10, y: 5),
+            CGPoint(x: 20, y: 6)
+        ]
+
+        XCTAssertEqual(
+            PixelChartLayoutPolicy.staircasePoints(points),
+            [
+                CGPoint(x: 0, y: 9),
+                CGPoint(x: 10, y: 9),
+                CGPoint(x: 10, y: 5),
+                CGPoint(x: 20, y: 5),
+                CGPoint(x: 20, y: 6)
+            ]
+        )
+        XCTAssertEqual(PixelChartLayoutPolicy.staircasePoints([]), [])
+        XCTAssertEqual(
+            PixelChartLayoutPolicy.staircasePoints([CGPoint(x: 4, y: 7)]),
+            [CGPoint(x: 4, y: 7)]
         )
     }
 
@@ -2704,6 +3019,42 @@ final class QuestionGenerationFlowTests: XCTestCase {
         return (response, Data(body.utf8))
     }
 
+    private static func communityQuestionPageJSON(
+        ids: [String],
+        totalCount: Int,
+        offset: Int
+    ) -> String {
+        let questions = ids.map { id in
+            """
+            {
+              "id": "\(id)",
+              "question": "Question \(id)",
+              "answer": "Answer",
+              "gradingResult": null,
+              "topic": "Swift",
+              "difficultyLevel": 5,
+              "status": "GRADED",
+              "source": "STUDY",
+              "createdAt": "2026-08-01T00:00:00Z",
+              "answeredAt": "2026-08-01T00:01:00Z",
+              "author": null,
+              "likeCount": 1,
+              "commentCount": 0,
+              "viewCount": 0,
+              "isLikedByMe": true
+            }
+            """
+        }.joined(separator: ",")
+        return """
+        {
+          "questions": [\(questions)],
+          "totalCount": \(totalCount),
+          "limit": 20,
+          "offset": \(offset)
+        }
+        """
+    }
+
     private static func pendingInvoiceResponse(for request: URLRequest) -> (HTTPURLResponse, Data) {
         response(
             for: request,
@@ -2754,6 +3105,28 @@ final class QuestionGenerationFlowTests: XCTestCase {
             data.append(contentsOf: buffer.prefix(count))
         }
         return data
+    }
+}
+
+@MainActor
+private final class TestAppNotificationEventProvider: AppNotificationEventProviding {
+    private var unauthorizedHandler: (() -> Void)?
+
+    func observeAPITrafficLogs(
+        _ handler: @MainActor @escaping (APITrafficLogEntry) -> Void
+    ) -> AnyCancellable {
+        AnyCancellable {}
+    }
+
+    func observeBackendUnauthorized(
+        _ handler: @MainActor @escaping () -> Void
+    ) -> AnyCancellable {
+        unauthorizedHandler = handler
+        return AnyCancellable {}
+    }
+
+    func sendBackendUnauthorized() {
+        unauthorizedHandler?()
     }
 }
 

@@ -3949,6 +3949,23 @@ struct AppStrings {
     var communityQuestionLimit: String { text("최대 20개씩 표시됩니다.", "Showing up to 20 questions at a time.") }
     var communityUnavailable: String { text("다른 사용자 질문 기능을 현재 사용할 수 없습니다.", "Community questions are currently unavailable.") }
     var communityRequestFailed: String { text("다른 사용자 질문을 불러오지 못했습니다.", "Could not load community questions.") }
+    var likedQuestions: String { text("좋아요한 질문", "Liked Questions", "いいねした質問") }
+    var searchLikedQuestions: String { text("좋아요한 질문 검색", "Search Liked Questions", "いいねした質問を検索") }
+    var noLikedQuestions: String { text("좋아요한 질문이 없습니다.", "No liked questions yet.", "いいねした質問はまだありません。") }
+    var noLikedQuestionsDescription: String {
+        text(
+            "질문에서 하트를 누르면 여기에 모아볼 수 있습니다.",
+            "Tap the heart on a question to save it here.",
+            "質問のハートをタップすると、ここに保存できます。"
+        )
+    }
+    var likedQuestionsRequestFailed: String {
+        text(
+            "좋아요한 질문을 불러오지 못했습니다.",
+            "Could not load liked questions.",
+            "いいねした質問を読み込めませんでした。"
+        )
+    }
     var profile: String { text("프로필", "Profile") }
     var avatar: String { text("아바타", "Avatar") }
     var accountSettings: String { text("계정 설정", "Account Settings") }

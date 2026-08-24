@@ -62,7 +62,7 @@ runtime comparison or rollback does not fork application behavior.
   - `Settings/SettingsUseCase.swift` centralizes backend settings, model option, API validation, and schedule sync requests.
   - `Stats/StatsUseCase.swift` centralizes backend topic statistics and activity requests.
   - `StudyRoom/StudyRoomUseCase.swift` centralizes study room backend operations such as study fetch/create/update/delete, quota lookup, and backend question creation.
-  - `Community/CommunityUseCase.swift` centralizes public question, sign-in, profile, like, report, abusive-user blocking, and comment backend operations.
+  - `Community/CommunityUseCase.swift` centralizes public question, paginated liked-question collection, sign-in, profile, like, report, abusive-user blocking, and comment backend operations.
   - `AppState` may still orchestrate state application and recovery, but it should not grow new direct backend action logic when a use-case boundary exists.
 
 - `Services/SettingsStore.swift`
@@ -171,6 +171,7 @@ runtime comparison or rollback does not fork application behavior.
   - Forced and optional updates share the same compact centered card and softly dim the underlying screen. Forced mode uses the stronger dim treatment as a full-screen interaction barrier, hides the dismiss action, marks the card as required, and keeps it present until the installed version reaches the target; optional mode uses a lighter non-intercepting dim, leaves underlying content interactive, and persists dismissal by campaign through `SettingsStore`. Consumer App Store apps cannot silently install their own updates; automatic installation timing remains owned by iOS/App Store settings. Maintenance is a full-screen gate and retains the hidden developer bypass. Malformed, expired, unsupported, or unavailable Remote Config fails open for maintenance and may use only the existing backend app-update API as an update-guidance fallback. There is no monitoring-owned status endpoint or maintenance polling path.
   - App Store CI replaces the tracked placeholder `StudyMate/GoogleService-Info.plist` with the release secret. Local signed device builds must pass `BUDDYSTUDY_FIREBASE_PLIST_PATH=/absolute/path/GoogleService-Info.plist`; the iOS target validates that file and installs it into the built app after resources are copied, without modifying or committing the tracked placeholder.
   - The primary tab bar exposes Home, Records, Statistics, and Notifications. Profile is pushed from Home in the existing navigation stack instead of being presented as a modal. Its top quota summary shows the resolved membership tier and opens Membership Management as a sheet; Settings remains a profile-hub destination so account and app preferences share one predictable entry point.
+  - Signed-in Profile exposes Liked Questions as a dedicated paginated destination. The app keeps this account-scoped list in an independent in-memory state store, reuses the public-question row/detail views, synchronizes successful like changes with the ordinary public feed, and clears the list at every session or backend-identity reset.
   - Avatar editing is a dedicated `Avatar` destination. Logout is the final destructive action in the profile hub, while irreversible membership deletion is isolated under `Settings > Account Settings`.
   - Public-question visibility is persisted through `PATCH /api/v1/profile` as `allowPublicQuestions`; it is independent of protected-page access policy.
   - Developer controls use a local build-distribution gate. Five taps on the Profile version row within two seconds grant access only when `AppDistributionContext` identifies a Debug or TestFlight build. TestFlight records the version/build that accepted the gesture; a different build clears the stale unlock and saved debugging toggle before startup. Debug builds retain the installation-level unlock, while App Store production always rejects and clears hidden developer access. The gesture reveals developer options but never opens the floating panel automatically. While the global maintenance gate is visible, five taps on the maintenance copy bypass only the current in-memory gate when access was already restored for that build; maintenance never grants developer access or changes the published Firebase policy. The floating APP/API debug panel uses a dedicated drag handle and remains inert until `debugPopupAllowed` is granted.
@@ -282,6 +283,7 @@ Profile > Usage appears or a quota-related request fails
 Public community feed
 -> GET /api/v1/public/questions?tl=ko|en|ja&view=localized|original
 -> GET /api/v2/public/questions/search?query=...&tl=ko|en|ja&view=localized|original
+-> authenticated GET /api/v1/public/questions/liked?query=...&tl=ko|en|ja&view=localized|original returns only the viewer's still-public liked questions in bounded pages and never inserts native advertisements
 -> tl (`ko|en|ja`) takes precedence over the deprecated language alias
 -> view defaults to localized; original bypasses translation scheduling
 -> missing translations return the original plus PENDING and enqueue content-translation
@@ -372,6 +374,7 @@ Public community feed
 - Statistics tab re-selection is freshness-gated for one minute while pull-to-refresh bypasses that gate. Rolling growth periods are expressed as exclusive UTC day bounds, and backend plus iOS topic selection use explicit deterministic tie-breaks so identical read-model data produces identical cards.
 - iOS reconstructs a stable pre-order list for the selected root. It lazily renders that full depth-indented list below the radar instead of requiring repeated branch navigation.
 - The iOS root overview maps every study's previous and current estimates onto the same 1–10 axis. The help sheet documents the exact window and weighting rules instead of asking users to infer them from the chart.
+- Active iOS statistics graphs share one pixel-game presentation policy. Root rows use a ten-tile 1–10 meter plus a compact stepped trend, detail trends use a Canvas-rendered stepped line with square markers, and activity uses localized square day cells. The circular study-tree geometry and all score/growth semantics remain unchanged; visual cells are grouped into concise accessibility summaries instead of becoming hundreds of VoiceOver stops.
 
 ## Subscription, Entitlement, And Quota
 

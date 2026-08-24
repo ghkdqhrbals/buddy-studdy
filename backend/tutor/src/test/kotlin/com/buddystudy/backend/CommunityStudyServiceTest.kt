@@ -31,6 +31,7 @@ import com.buddystudy.account.domain.entity.UserProvider
 import com.buddystudy.account.domain.entity.UserStatus
 import com.buddystudy.community.domain.entity.QuestionCommentEntity
 import com.buddystudy.community.domain.entity.QuestionLikeEntity
+import com.buddystudy.community.domain.entity.UserBlockEntity
 import com.buddystudy.study.domain.entity.QuestionEntity
 import com.buddystudy.study.domain.entity.AnswerGradingStatus
 import com.buddystudy.study.domain.entity.QuestionSource
@@ -126,6 +127,65 @@ class CommunityStudyServiceTest : MySqlIntegrationTestSupport() {
 
         assertThat(response.totalCount).isEqualTo(2)
         assertThat(response.questions.map { it.id }).containsExactly(newest.id.toString(), older.id.toString())
+    }
+
+    @Test
+    fun `liked public questions page by like time with an exact visible total`(): Unit = runBlocking {
+        val blockedAuthor = users.save(user("blocked", "Blocked", allowPublic = true))
+        val newestLike = answeredPublicQuestion(author, "Newest liked match", createdAt = now.plusSeconds(1))
+        val middleLike = answeredPublicQuestion(author, "Middle liked", createdAt = now.plusSeconds(3))
+        val oldestLike = answeredPublicQuestion(author, "Oldest liked", createdAt = now.plusSeconds(2))
+        val private = answeredPublicQuestion(author, "Private liked", publicQuestion = false)
+        val deleted = answeredPublicQuestion(author, "Deleted liked", deletedAt = now.plusSeconds(100))
+        val hidden = answeredPublicQuestion(hiddenAuthor, "Hidden-author liked")
+        val blocked = answeredPublicQuestion(blockedAuthor, "Blocked-author liked")
+        val ungradedWithAnswer = pendingPublicQuestion(author, "Ungraded liked").also {
+            it.answer = "Saved but not graded"
+            questions.save(it)
+        }
+        val blankAnswer = answeredPublicQuestion(author, "Blank-answer liked").also {
+            it.answer = "  "
+            questions.save(it)
+        }
+        listOf(
+            newestLike to now.plusSeconds(30),
+            middleLike to now.plusSeconds(20),
+            oldestLike to now.plusSeconds(10),
+            private to now.plusSeconds(40),
+            deleted to now.plusSeconds(50),
+            hidden to now.plusSeconds(60),
+            blocked to now.plusSeconds(70),
+            ungradedWithAnswer to now.plusSeconds(80),
+            blankAnswer to now.plusSeconds(90),
+        ).forEach { (question, likedAt) ->
+            likes.save(QuestionLikeEntity(questionId = question.id, userId = viewer.id, createdAt = likedAt))
+        }
+        val likedBySomeoneElse = answeredPublicQuestion(author, "Someone else's like")
+        likes.save(QuestionLikeEntity(questionId = likedBySomeoneElse.id, userId = author.id, createdAt = now.plusSeconds(100)))
+        userBlocks.save(UserBlockEntity(blockerUserId = viewer.id, blockedUserId = blockedAuthor.id, createdAt = now))
+
+        val page = community.getLikedPublicQuestions(
+            principal = principal,
+            query = null,
+            language = "ko",
+            limit = 20,
+            offset = 2,
+        )
+        val searched = community.getLikedPublicQuestions(
+            principal = principal,
+            query = "  newest liked match  ",
+            language = "ko",
+            view = "original",
+            limit = 20,
+            offset = 0,
+        )
+
+        assertThat(page.totalCount).isEqualTo(3)
+        assertThat(page.questions.map { it.id }).containsExactly(oldestLike.id.toString())
+        assertThat(page.questions.single().isLikedByMe).isTrue()
+        assertThat(page.items).hasSize(1).allMatch { it.question != null && it.advertisement == null }
+        assertThat(searched.totalCount).isEqualTo(1)
+        assertThat(searched.questions.map { it.id }).containsExactly(newestLike.id.toString())
     }
 
     @Test

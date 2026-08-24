@@ -41,6 +41,7 @@ private enum AppStateError: LocalizedError {
 private enum AppErrorMessageTarget: Equatable {
     case none
     case community
+    case likedQuestions
     case notification
 }
 
@@ -417,6 +418,18 @@ final class AppState: ObservableObject {
         }
     }
 
+    var likedCommunityQuestions: [CommunityQuestion] { likedQuestionsState.questions }
+    var likedCommunityQuestionsTotalCount: Int { likedQuestionsState.totalCount }
+    var likedCommunityQuestionsOffset: Int { likedQuestionsState.offset }
+    var isLoadingLikedCommunityQuestions: Bool { likedQuestionsState.isLoading }
+    var likedCommunityQuestionsErrorMessage: String? { likedQuestionsState.errorMessage }
+    var hasLoadedLikedCommunityQuestions: Bool { likedQuestionsState.hasLoadedInitialPage }
+    var canLoadMoreLikedCommunityQuestions: Bool { likedQuestionsState.canLoadMore() }
+
+    func isCommunityQuestionLikeRequestInFlight(questionID: String) -> Bool {
+        communityQuestionLikeRequestState.contains(questionID: questionID)
+    }
+
     var notifications: [BackendAppNotification] {
         get {
             notificationState.notifications
@@ -569,6 +582,8 @@ final class AppState: ObservableObject {
     @Published var hasCloudSyncError = false
     @Published var cloudLastSyncedAt: Date?
     @Published private var communityFeedState = CommunityFeedStateStore()
+    @Published private var likedQuestionsState = LikedQuestionsStateStore()
+    @Published private var communityQuestionLikeRequestState = CommunityQuestionLikeRequestStore()
     @Published private var communityProfileState = CommunityProfileStateStore()
     @Published private(set) var avatarCatalog: AvatarCatalogResponse?
     @Published private(set) var isLoadingAvatarCatalog = false
@@ -1118,6 +1133,10 @@ final class AppState: ObservableObject {
             break
         case .community:
             communityErrorMessage = message
+        case .likedQuestions:
+            var nextState = likedQuestionsState
+            nextState.errorMessage = message
+            likedQuestionsState = nextState
         case .notification:
             updateNotificationState { state in
                 state.applyError(message)
@@ -1131,6 +1150,10 @@ final class AppState: ObservableObject {
             break
         case .community:
             communityErrorMessage = nil
+        case .likedQuestions:
+            var nextState = likedQuestionsState
+            nextState.errorMessage = nil
+            likedQuestionsState = nextState
         case .notification:
             updateNotificationState { state in
                 state.applyError(nil)
@@ -1141,6 +1164,11 @@ final class AppState: ObservableObject {
     @discardableResult
     private func handleCommunityError(_ error: Error, fallback: String? = nil) -> Bool {
         handleAppError(error, fallback: fallback ?? strings.communityRequestFailed, target: .community)
+    }
+
+    @discardableResult
+    private func handleLikedQuestionsError(_ error: Error) -> Bool {
+        handleAppError(error, fallback: strings.likedQuestionsRequestFailed, target: .likedQuestions)
     }
 
     private func clearCommunityErrorForMissingRegistration(reason: String) {
@@ -3847,6 +3875,97 @@ final class AppState: ObservableObject {
         communityFeedState.canLoadMore(currentCount: currentCount)
     }
 
+    func loadLikedCommunityQuestions(
+        query: String? = nil,
+        reset: Bool = true,
+        userInitiated: Bool = false,
+        preserveExistingOnFailure: Bool = false
+    ) async {
+        let normalizedQuery = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if likedQuestionsState.isLoading, !reset {
+            return
+        }
+        if !reset, normalizedQuery != likedQuestionsState.query {
+            return
+        }
+        let normalizedOffset = reset ? 0 : likedQuestionsState.offset
+        if !reset, !likedQuestionsState.canLoadMore() {
+            return
+        }
+
+        var nextState = likedQuestionsState
+        let requestID = nextState.beginLoading(query: normalizedQuery)
+        likedQuestionsState = nextState
+
+        guard let registration = await backendRegistrationForOpenAIRequests(reason: "liked-community-feed") else {
+            var failedState = likedQuestionsState
+            failedState.finishLoading(requestID)
+            if reset {
+                failedState.hasLoadedInitialPage = true
+            }
+            likedQuestionsState = failedState
+            return
+        }
+
+        await actionRunner.run(
+            operation: {
+                try await communityUseCase.fetchLikedPublicQuestions(
+                    registration: registration,
+                    query: normalizedQuery.isEmpty ? nil : normalizedQuery,
+                    limit: Self.communityQuestionPageSize,
+                    offset: normalizedOffset,
+                    language: settings.appLanguage,
+                    view: .localized
+                )
+            },
+            onSuccess: { response in
+                guard likedQuestionsState.isCurrentRequest(requestID) else { return }
+                var loadedState = likedQuestionsState
+                loadedState.applyPage(response, offset: normalizedOffset, reset: reset)
+                likedQuestionsState = loadedState
+            },
+            onFailure: { error in
+                guard likedQuestionsState.isCurrentRequest(requestID) else { return }
+                let handled = handleLikedQuestionsError(error)
+                guard likedQuestionsState.isCurrentRequest(requestID) else { return }
+                var failedState = likedQuestionsState
+                if handled {
+                    if reset {
+                        failedState.hasLoadedInitialPage = true
+                        if !preserveExistingOnFailure {
+                            failedState.questions = []
+                            failedState.totalCount = 0
+                            failedState.offset = 0
+                        }
+                    }
+                } else {
+                    let message = failedState.errorMessage ?? strings.likedQuestionsRequestFailed
+                    failedState.applyError(message, reset: reset, preserveExisting: preserveExistingOnFailure)
+                    if !userInitiated {
+                        failedState.errorMessage = nil
+                    }
+                }
+                likedQuestionsState = failedState
+                log(.warning, "좋아요한 질문 로드 실패: \(appErrorHandlingUseCase.diagnosticDescription(for: error))")
+            },
+            onCompletion: {
+                var completedState = likedQuestionsState
+                completedState.finishLoading(requestID)
+                likedQuestionsState = completedState
+            }
+        )
+    }
+
+    func loadNextLikedCommunityQuestionsPage(query: String? = nil) async {
+        guard likedQuestionsState.canLoadMore() else { return }
+        await loadLikedCommunityQuestions(query: query, reset: false, userInitiated: true, preserveExistingOnFailure: true)
+    }
+
+    func shouldLoadNextLikedCommunityQuestion(after questionID: String, query: String? = nil) {
+        guard likedCommunityQuestions.last?.id == questionID else { return }
+        Task { await loadNextLikedCommunityQuestionsPage(query: query) }
+    }
+
     private func applyBackendRecordsPage(
         _ recordsPage: BackendRecordsPage,
         pendingRecords: [StudyRecord] = [],
@@ -4517,6 +4636,7 @@ final class AppState: ObservableObject {
         activeTerms = []
         notificationPreferences = []
         communityCommentsCache.removeAll()
+        resetLikedQuestionsTransientState()
         var nextFeedState = communityFeedState
         nextFeedState.clearHiddenAuthors()
         nextFeedState.clearHiddenAdvertisements()
@@ -4541,6 +4661,15 @@ final class AppState: ObservableObject {
         backendAccessState = .signedOut
         communityProfileCacheUseCase.saveSignedOutProfile(avatarSymbolName: profileAvatarSymbolName)
         logAuthTrace("community_session_reset_end", reason: "resetCommunitySignInState", deduplicate: false)
+    }
+
+    private func resetLikedQuestionsTransientState() {
+        var nextLikedState = likedQuestionsState
+        nextLikedState.reset()
+        likedQuestionsState = nextLikedState
+        var nextLikeRequestState = communityQuestionLikeRequestState
+        nextLikeRequestState.reset()
+        communityQuestionLikeRequestState = nextLikeRequestState
     }
 
     private func setCommunitySessionSignedIn(_ isSignedIn: Bool) {
@@ -5203,13 +5332,39 @@ final class AppState: ObservableObject {
             return nil
         }
 
+        var requestState = communityQuestionLikeRequestState
+        guard let likeRequestID = requestState.begin(questionID: question.id) else {
+            return nil
+        }
+        communityQuestionLikeRequestState = requestState
+        let sessionGeneration = communitySessionState.generation
+        defer {
+            var completedRequestState = communityQuestionLikeRequestState
+            completedRequestState.finish(questionID: question.id, requestID: likeRequestID)
+            communityQuestionLikeRequestState = completedRequestState
+        }
+
         guard let registration = await backendRegistrationForOpenAIRequests(reason: "community-like") else {
             clearCommunityErrorForMissingRegistration(reason: "community-like")
             return nil
         }
+        guard isCurrentCommunitySession(sessionGeneration),
+              communityQuestionLikeRequestState.isCurrent(questionID: question.id, requestID: likeRequestID) else {
+            return nil
+        }
 
-        let previous = communityQuestions.first(where: { $0.id == question.id })
-        updateCommunityQuestionLike(id: question.id, isLiked: isLiked, likeCount: max(0, question.likeCount + (isLiked ? 1 : -1)))
+        let previousFeedQuestion = communityQuestions.first(where: { $0.id == question.id })
+        let previousLikedQuestion = likedQuestionsState.questions.first(where: { $0.id == question.id })
+        let optimisticCount: Int
+        if question.isLikedByMe == isLiked {
+            optimisticCount = question.likeCount
+        } else {
+            optimisticCount = max(0, question.likeCount + (isLiked ? 1 : -1))
+        }
+        updateCommunityQuestionLike(id: question.id, isLiked: isLiked, likeCount: optimisticCount)
+        var optimisticLikedState = likedQuestionsState
+        optimisticLikedState.updateQuestion(id: question.id, isLiked: isLiked, likeCount: optimisticCount)
+        likedQuestionsState = optimisticLikedState
 
         return await actionRunner.run(
             operation: {
@@ -5220,16 +5375,52 @@ final class AppState: ObservableObject {
                 )
             },
             onSuccess: { state in
+                guard isCurrentCommunitySession(sessionGeneration),
+                      communityQuestionLikeRequestState.isCurrent(questionID: question.id, requestID: likeRequestID) else {
+                    return
+                }
                 updateCommunityQuestionLike(id: question.id, isLiked: state.isLikedByMe, likeCount: state.likeCount)
+                var syncedQuestion = previousFeedQuestion ?? previousLikedQuestion ?? question
+                syncedQuestion.isLikedByMe = state.isLikedByMe
+                syncedQuestion.likeCount = state.likeCount
+                var syncedLikedState = likedQuestionsState
+                if state.isLikedByMe {
+                    syncedLikedState.upsertLikedQuestion(
+                        syncedQuestion,
+                        includeIfMissing: syncedLikedState.hasLoadedInitialPage && syncedLikedState.query.isEmpty
+                    )
+                } else {
+                    syncedLikedState.removeQuestion(id: question.id)
+                }
+                likedQuestionsState = syncedLikedState
             },
             onFailure: { error in
-                if let previous {
-                    updateCommunityQuestionLike(id: question.id, isLiked: previous.isLikedByMe, likeCount: previous.likeCount)
+                guard isCurrentCommunitySession(sessionGeneration),
+                      communityQuestionLikeRequestState.isCurrent(questionID: question.id, requestID: likeRequestID) else {
+                    return
+                }
+                if let previousFeedQuestion {
+                    updateCommunityQuestionLike(
+                        id: question.id,
+                        isLiked: previousFeedQuestion.isLikedByMe,
+                        likeCount: previousFeedQuestion.likeCount
+                    )
+                }
+                if let previousLikedQuestion {
+                    var restoredLikedState = likedQuestionsState
+                    restoredLikedState.upsertLikedQuestion(previousLikedQuestion, includeIfMissing: false)
+                    likedQuestionsState = restoredLikedState
                 }
                 handleCommunityError(error)
                 log(.warning, "공개 질문 좋아요 처리 실패: \(error.localizedDescription)")
             }
-        )
+        ).flatMap { state in
+            guard isCurrentCommunitySession(sessionGeneration),
+                  communityQuestionLikeRequestState.isCurrent(questionID: question.id, requestID: likeRequestID) else {
+                return nil
+            }
+            return state
+        }
     }
 
     func cachedCommunityQuestionComments(questionID: String) -> CommunityCommentsResponse? {
@@ -10512,6 +10703,10 @@ final class AppState: ObservableObject {
     private func clearStoredBackendAccessToken() {
         logAuthTrace("backend_access_token_clear_start", reason: "clearStoredBackendAccessToken", deduplicate: false)
         cancelAllAnswerGradingPolling(reason: "backend-access-token-cleared")
+        resetLikedQuestionsTransientState()
+        backendAccessState = .signedOut
+        setCommunitySessionSignedIn(false)
+        communityProfile = nil
         guard var registration = storedBackendIdentityUseCase.loadRegistration(),
               registration.accessToken != nil || registration.accessTokenExpiresAt != nil else {
             logAuthTrace("backend_access_token_clear_skipped", reason: "clearStoredBackendAccessToken", deduplicate: false)
@@ -10521,9 +10716,6 @@ final class AppState: ObservableObject {
         registration.accessToken = nil
         registration.accessTokenExpiresAt = nil
         storedBackendIdentityUseCase.saveRegistration(registration)
-        backendAccessState = .signedOut
-        setCommunitySessionSignedIn(false)
-        communityProfile = nil
         logAuthTrace("backend_access_token_clear_end", reason: "clearStoredBackendAccessToken", deduplicate: false)
         log(.warning, "백엔드 401 응답으로 저장된 access token을 삭제했습니다. deviceID=\(registration.deviceID)")
     }

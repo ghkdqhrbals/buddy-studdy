@@ -160,6 +160,13 @@ interface QuestionPort {
     } else {
         error("The question persistence adapter must implement blocked-author visibility filtering.")
     }
+    suspend fun findLikedPublicAnsweredVisibleTo(
+        viewerUserId: Long,
+        query: String?,
+        language: String,
+        limit: Int,
+        offset: Int,
+    ): Page<QuestionEntity> = error("The question persistence adapter must implement liked public-question paging.")
     suspend fun findPublicAnsweredById(id: Long): QuestionEntity?
     suspend fun findPublicAnsweredByIdAndLanguage(id: Long, language: String): QuestionEntity? =
         findPublicAnsweredById(id)

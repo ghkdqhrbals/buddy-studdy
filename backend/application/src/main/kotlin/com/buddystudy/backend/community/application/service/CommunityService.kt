@@ -144,6 +144,34 @@ class CommunityService(
         )
     }
 
+    @Transactional(readOnly = true)
+    override suspend fun getLikedPublicQuestions(
+        principal: Principal,
+        query: String?,
+        language: String,
+        view: String,
+        limit: Int,
+        offset: Int,
+    ): CommunityQuestionsResponse {
+        val normalizedLanguage = QuestionLanguage.normalize(language)
+        val page = questions.findLikedPublicAnsweredVisibleTo(
+            viewerUserId = principal.userId,
+            query = query?.trim()?.takeIf(String::isNotEmpty),
+            language = normalizedLanguage,
+            limit = limit,
+            offset = offset,
+        )
+        val context = communityContext(page.content, principal)
+        val viewMode = translationViewMode(view)
+        val rows = page.content.map { community(it, context, normalizedLanguage, viewMode) }
+        return CommunityQuestionsResponse(
+            questions = rows,
+            totalCount = page.totalElements,
+            limit = limit,
+            offset = offset,
+        )
+    }
+
     private suspend fun publicQuestionsFromOrigin(
         principal: Principal?,
         query: String?,

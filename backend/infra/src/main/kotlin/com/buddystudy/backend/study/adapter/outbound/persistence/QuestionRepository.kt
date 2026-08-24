@@ -412,6 +412,75 @@ class QuestionRepository(
         viewerUserId = viewerUserId,
     )
 
+    override suspend fun findLikedPublicAnsweredVisibleTo(
+        viewerUserId: Long,
+        query: String?,
+        language: String,
+        limit: Int,
+        offset: Int,
+    ): Page<QuestionEntity> {
+        val normalizedQuery = query?.trim()?.takeIf(String::isNotEmpty)
+        val searchJoin = if (normalizedQuery == null) "" else {
+            "join question_search qs on qs.question_id = q.id and qs.language = :language"
+        }
+        val searchCondition = if (normalizedQuery == null) {
+            "true"
+        } else {
+            """
+            (
+                lower(coalesce(qs.topic, '')) like :pattern
+                or lower(coalesce(qs.question, '')) like :pattern
+                or lower(coalesce(qs.answer, '')) like :pattern
+                or lower(coalesce(qs.feedback, '')) like :pattern
+                or lower(coalesce(qs.explanation, '')) like :pattern
+                or lower(u.display_name) like :pattern
+            )
+            """.trimIndent()
+        }
+        val baseSql =
+            """
+            from question_likes ql
+            join questions q on q.id = ql.question_id
+            join users u on u.id = q.user_id
+            $searchJoin
+            where ql.user_id = :viewerUserId
+              and q.is_public = true
+              and q.deleted_at is null
+              and $PUBLIC_ANSWER_CONDITION
+              and u.allow_public_questions = true
+              and $searchCondition
+              $BLOCKED_AUTHOR_EXCLUSION
+            """.trimIndent()
+        var idsSpec = template.databaseClient.sql(
+            """
+            select q.id $baseSql
+            order by ql.created_at desc, ql.id desc
+            limit :limit offset :offset
+            """.trimIndent(),
+        )
+            .bind("viewerUserId", viewerUserId)
+            .bind("limit", limit)
+            .bind("offset", offset)
+        var countSpec = template.databaseClient.sql("select count(*) as total $baseSql")
+            .bind("viewerUserId", viewerUserId)
+        if (normalizedQuery != null) {
+            val pattern = "%${normalizedQuery.lowercase()}%"
+            val normalizedLanguage = QuestionLanguage.normalize(language)
+            idsSpec = idsSpec.bind("language", normalizedLanguage).bind("pattern", pattern)
+            countSpec = countSpec.bind("language", normalizedLanguage).bind("pattern", pattern)
+        }
+        val ids = idsSpec
+            .map { row, _ -> row.get("id", java.lang.Long::class.java)!!.toLong() }
+            .all()
+            .collectList()
+            .awaitSingle()
+        val total = countSpec
+            .map { row, _ -> row.get("total", java.lang.Long::class.java)!!.toLong() }
+            .one()
+            .awaitSingle()
+        return PageImpl(findOrdered(ids), ExactOffsetPageable(limit, offset.toLong()), total)
+    }
+
     override suspend fun findPublicAnsweredById(id: Long): QuestionEntity? =
         publicIds("q.id = :value", id, 1, 0).firstOrNull()?.let { findQuestionById(it) }
 
@@ -734,4 +803,24 @@ class QuestionRepository(
             "ADJUDICATING",
         )
     }
+}
+
+private data class ExactOffsetPageable(
+    private val limit: Int,
+    private val exactOffset: Long,
+) : Pageable {
+    init {
+        require(limit > 0) { "Page limit must be positive." }
+        require(exactOffset >= 0) { "Page offset must not be negative." }
+    }
+
+    override fun getPageNumber(): Int = (exactOffset / limit).toInt()
+    override fun getPageSize(): Int = limit
+    override fun getOffset(): Long = exactOffset
+    override fun getSort(): Sort = Sort.unsorted()
+    override fun next(): Pageable = copy(exactOffset = exactOffset + limit)
+    override fun previousOrFirst(): Pageable = copy(exactOffset = maxOf(0, exactOffset - limit))
+    override fun first(): Pageable = copy(exactOffset = 0)
+    override fun withPage(pageNumber: Int): Pageable = copy(exactOffset = pageNumber.toLong() * limit)
+    override fun hasPrevious(): Boolean = exactOffset > 0
 }

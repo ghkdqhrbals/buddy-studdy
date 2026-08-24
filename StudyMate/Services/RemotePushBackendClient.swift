@@ -499,6 +499,15 @@ protocol RemotePushBackendClientProtocol {
         language: AppLanguage
     ) async throws -> CommunityQuestionsResponse
 
+    func fetchLikedPublicQuestions(
+        registration: RemotePushRegistration,
+        query: String?,
+        limit: Int,
+        offset: Int,
+        language: AppLanguage,
+        view: LocalizedContentView
+    ) async throws -> CommunityQuestionsResponse
+
     func fetchPublicQuestion(
         registration: RemotePushRegistration,
         questionID: String,
@@ -1732,6 +1741,39 @@ final class RemotePushBackendClient: RemotePushBackendClientProtocol {
         if let excludeDeviceID,
            !excludeDeviceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             queryItems.append(URLQueryItem(name: "excludeDeviceId", value: excludeDeviceID))
+        }
+        components?.queryItems = queryItems
+        guard let url = components?.url else {
+            throw RemotePushBackendError.invalidResponse
+        }
+
+        var request = authenticatedRequest(registration: registration, url: url)
+        request.httpMethod = "GET"
+        let data = try await perform(request)
+        return try decoder.decode(CommunityQuestionsResponse.self, from: data)
+    }
+
+    func fetchLikedPublicQuestions(
+        registration: RemotePushRegistration,
+        query: String? = nil,
+        limit: Int = 20,
+        offset: Int = 0,
+        language: AppLanguage = .korean,
+        view: LocalizedContentView = .localized
+    ) async throws -> CommunityQuestionsResponse {
+        let normalizedQuery = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var components = URLComponents(
+            url: endpoint("api", "v1", "public", "questions", "liked"),
+            resolvingAgainstBaseURL: false
+        )
+        var queryItems = [
+            URLQueryItem(name: "limit", value: "\(max(1, min(limit, 100)))"),
+            URLQueryItem(name: "offset", value: "\(max(0, offset))"),
+            URLQueryItem(name: "tl", value: language.backendCode),
+            URLQueryItem(name: "view", value: view.rawValue)
+        ]
+        if !normalizedQuery.isEmpty {
+            queryItems.append(URLQueryItem(name: "query", value: normalizedQuery))
         }
         components?.queryItems = queryItems
         guard let url = components?.url else {

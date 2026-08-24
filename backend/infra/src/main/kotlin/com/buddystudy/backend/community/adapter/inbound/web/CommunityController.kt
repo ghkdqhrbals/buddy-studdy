@@ -65,6 +65,35 @@ class CommunityController(
         authentication: Authentication?,
     ) = community.getPublicQuestions(query ?: topic, targetLanguage(tl, language), view, limit, offset, authentication)
 
+    @Operation(
+        summary = "List liked public questions",
+        description = "Returns only public graded questions liked by the authenticated user. Results are ordered by the time they were liked and never contain advertisements.",
+    )
+    @ApiResponses(ApiResponse(responseCode = "200", description = "Liked public questions returned."))
+    @GetMapping("/public/questions/liked")
+    @RequirePermission(Permissions.PUBLIC_QUESTION_LIKE)
+    suspend fun getLikedPublicQuestions(
+        @Parameter(description = "Optional localized public-question search query.", example = "Swift")
+        @RequestParam(required = false) query: String?,
+        @Parameter(description = "Maximum number of items to return. Server clamps this to 1..100.", example = "20")
+        @RequestParam(defaultValue = "20") limit: Int,
+        @Parameter(description = "Zero-based pagination offset.", example = "0")
+        @RequestParam(defaultValue = "0") offset: Int,
+        @Parameter(description = "Target language for translated content and search. Supports ko, en, and ja.", example = "ko")
+        @RequestParam(required = false) tl: String?,
+        @Parameter(description = "Deprecated target-language alias kept for older clients.", example = "ko", deprecated = true)
+        @RequestParam(required = false) language: String?,
+        @RequestParam(defaultValue = "localized") view: String,
+        authentication: Authentication,
+    ) = community.getLikedPublicQuestions(
+        query,
+        targetLanguage(tl, language),
+        view,
+        limit,
+        offset,
+        authentication,
+    )
+
     @Operation(summary = "Fetch one public question", description = "Returns a single public completed question with author, answer, feedback, explanation, and current reaction statistics. Viewing may publish a view event for delayed aggregation.")
     @GetMapping("/public/questions/{id}")
     suspend fun getPublicQuestion(
@@ -225,6 +254,7 @@ internal fun targetLanguage(tl: String?, legacyLanguage: String?): String =
 interface CommunityWebPort {
     suspend fun getPublicQuestions(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication?): Any
     suspend fun getPublicQuestionsV2(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication?): Any
+    suspend fun getLikedPublicQuestions(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication): Any
     suspend fun getPublicQuestion(id: Long, language: String, view: String, authentication: Authentication?): Any
     suspend fun likePublicQuestion(id: Long, authentication: Authentication): Any
     suspend fun unlikePublicQuestion(id: Long, authentication: Authentication): Any
@@ -264,6 +294,22 @@ class CommunityWebAdapter(
 
     override suspend fun getPublicQuestionsV2(query: String?, language: String, view: String, limit: Int, offset: Int, authentication: Authentication?) =
         community.getPublicQuestionsV2(authentication.optionalPrincipal(), query, language, view, safeLimit(limit, 100), max(0, offset))
+
+    override suspend fun getLikedPublicQuestions(
+        query: String?,
+        language: String,
+        view: String,
+        limit: Int,
+        offset: Int,
+        authentication: Authentication,
+    ) = community.getLikedPublicQuestions(
+        authentication.principalOrThrow(),
+        query,
+        language,
+        view,
+        safeLimit(limit, 100),
+        max(0, offset),
+    )
 
     override suspend fun getPublicQuestion(id: Long, language: String, view: String, authentication: Authentication?) =
         community.getPublicQuestion(authentication.optionalPrincipal(), id, language, view)

@@ -83,6 +83,12 @@ class SecurityConfig {
             .authorizeExchange { exchanges ->
                 exchanges.matchers(ServerWebExchangeMatchers.pathMatchers("/health", "/health/**")).permitAll()
                 exchanges.matchers(ServerWebExchangeMatchers.pathMatchers("/actuator/**")).permitAll()
+                exchanges.matchers(
+                    ServerWebExchangeMatchers.pathMatchers(
+                        HttpMethod.GET,
+                        AuthenticatedPublicRoutes.LIKED_QUESTIONS,
+                    ),
+                ).authenticated()
                 AnonymousRoutes.routes.forEach { route ->
                     val matcher = if (route.method == null) {
                         ServerWebExchangeMatchers.pathMatchers(route.pattern)
@@ -220,7 +226,7 @@ private object AnonymousRoutes {
     )
 
     fun matches(request: ServerHttpRequest): Boolean =
-        routes.any { it.matches(request) }
+        !AuthenticatedPublicRoutes.matches(request) && routes.any { it.matches(request) }
 
     data class Route(val method: HttpMethod?, val pattern: String) {
         fun matches(request: ServerHttpRequest): Boolean =
@@ -234,6 +240,13 @@ private object AnonymousRoutes {
             return path == pattern
         }
     }
+}
+
+private object AuthenticatedPublicRoutes {
+    const val LIKED_QUESTIONS = "/api/v1/public/questions/liked"
+
+    fun matches(request: ServerHttpRequest): Boolean =
+        request.method == HttpMethod.GET && request.path.value() == LIKED_QUESTIONS
 }
 
 private fun logIgnoredAuthenticationFailure(
